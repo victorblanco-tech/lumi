@@ -1,0 +1,15 @@
+{
+  "protocolVersion": 1,
+  "messageType": "error",
+  "messageId": "error-0001",
+  "sequence": 44,
+  "correlationId": "cmd-0001",
+  "sentAt": "2026-08-02T18:00:03Z",
+  "payload": {
+    "kind": "revisionConflict",
+    "code": "planRevisionMismatch",
+    "message": "The plan changed before the command was applied.",
+    "retryable": true,
+    "actualPlanRevision": 4
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "protocolVersion": 1,
+  "messageType": "command",
+  "messageId": "cmd-0001",
+  "sequence": 1,
+  "correlationId": "interaction-0001",
+  "sentAt": "2026-08-02T18:00:00Z",
+  "payload": {
+    "kind": "selectTheme",
+    "trackLoadInstanceId": "deck-b-load-0042",
+    "themeId": "neon-pulse",
+    "expectedPlanRevision": 3
+  }
+}

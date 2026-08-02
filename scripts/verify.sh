@@ -17,10 +17,16 @@ fi
 cd "$repository_root"
 
 python3 -m json.tool apps/macos/Lumi/Resources/Localizable.xcstrings >/dev/null
+python3 -m json.tool contracts/protocol/v1/manifest.json >/dev/null
+python3 -m json.tool contracts/protocol/v1/envelope.schema.json >/dev/null
+for protocol_fixture in contracts/protocol/v1/fixtures/*.json; do
+  python3 -m json.tool "$protocol_fixture" >/dev/null
+done
 cargo fmt --all -- --check
 cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 cargo build --workspace --all-features
+swift test --package-path apps/macos/Packages/LumiProtocol
 
 xcodebuild \
   -project apps/macos/Lumi.xcodeproj \

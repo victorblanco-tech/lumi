@@ -1,0 +1,15 @@
+{
+  "protocolVersion": 1,
+  "messageType": "snapshot",
+  "messageId": "snapshot-0001",
+  "sequence": 42,
+  "correlationId": "cmd-get-snapshot-0001",
+  "sentAt": "2026-08-02T18:00:01Z",
+  "payload": {
+    "kind": "stateSnapshot",
+    "stateRevision": 7,
+    "operationState": "armed",
+    "activeDeckId": "deck-a",
+    "nextDeckId": "deck-b"
+  }
+}
