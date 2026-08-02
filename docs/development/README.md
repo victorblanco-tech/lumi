@@ -69,6 +69,9 @@ Repository ownership, dependency direction, and naming rules are documented in
 The app-scoped Rust process, loopback authentication, and shutdown behavior are
 documented in [`local-engine-session.md`](local-engine-session.md).
 
+Semantic presentation tokens, reusable components, global appearance, and key
+notation are documented in [`design-system.md`](design-system.md).
+
 ## Troubleshooting
 
 - `xcodebuild` points at Command Line Tools: rerun `xcode-select --switch`.

@@ -27,6 +27,7 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 cargo build --workspace --all-features
 swift test --package-path apps/macos/Packages/LumiProtocol
+swift test --package-path apps/macos/Packages/LumiDesignSystem
 LUMI_ENGINE_TEST_EXECUTABLE="$repository_root/target/debug/lumi-engine" \
   swift test --package-path apps/macos/Packages/LumiEngineClient
 
