@@ -13,4 +13,8 @@ De drie functionele architectuurplaten staan in
 De GitHub-, versie- en distributiestrategie staat in
 [`docs/release`](docs/release/README.md).
 
+Het bouwfase- en werktrackingbeleid, inclusief de rolverdeling tussen Buzz en
+GitHub, staat in
+[`docs/planning/build-and-tracking-plan.md`](docs/planning/build-and-tracking-plan.md).
+
 > Status: architectuur- en refinementfase. Er is nog geen implementatie.
