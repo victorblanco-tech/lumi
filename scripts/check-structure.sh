@@ -14,6 +14,7 @@ required_paths=(
   "apps/macos/Lumi"
   "apps/macos/Packages/LumiProtocol"
   "apps/macos/Packages/LumiEngineClient"
+  "apps/macos/Packages/LumiDesignSystem"
   "contracts"
   "fixtures"
   "docs"
@@ -40,6 +41,12 @@ done
 
 if grep -Eq 'tokio|serde|tracing' "$repository_root/engine/crates/lumi-domain/Cargo.toml"; then
   echo "ERROR: lumi-domain may not depend on runtime, wire, or observability crates." >&2
+  exit 1
+fi
+
+if grep -REq '\.font\(\.[A-Za-z]|Color\.(red|green|orange|blue|purple|pink)' \
+  "$repository_root/apps/macos/Lumi/App"; then
+  echo "ERROR: app feature views must use LumiDesignSystem typography and color tokens." >&2
   exit 1
 fi
 

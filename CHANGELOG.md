@@ -16,6 +16,8 @@ Lumi gebruikt [Semantic Versioning](https://semver.org/).
   begrensde decoding, commandidempotentie en sequence-gapdetectie.
 - App-scoped Rust-engine met geauthenticeerde loopbackverbinding, native
   process supervision en zichtbare healthstatus in de macOS-app.
+- Native Lumi Design System met semantische tokens, herbruikbare componenten,
+  persistente dark/light/system-appearance en Camelot/Classic-keynotatie.
 
 ### Changed
 

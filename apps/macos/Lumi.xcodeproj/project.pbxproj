@@ -12,6 +12,7 @@
 		100000000000000000000003 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000003 /* Localizable.xcstrings */; };
 		100000000000000000000004 /* EngineStatusModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000007 /* EngineStatusModel.swift */; };
 		100000000000000000000005 /* LumiEngineClient in Frameworks */ = {isa = PBXBuildFile; productRef = 900000000000000000000001 /* LumiEngineClient */; };
+		100000000000000000000006 /* LumiDesignSystem in Frameworks */ = {isa = PBXBuildFile; productRef = 900000000000000000000002 /* LumiDesignSystem */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -30,6 +31,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				100000000000000000000005 /* LumiEngineClient in Frameworks */,
+				100000000000000000000006 /* LumiDesignSystem in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -116,6 +118,7 @@
 			name = Lumi;
 			packageProductDependencies = (
 				900000000000000000000001 /* LumiEngineClient */,
+				900000000000000000000002 /* LumiDesignSystem */,
 			);
 			productName = Lumi;
 			productReference = 200000000000000000000005 /* Lumi.app */;
@@ -148,6 +151,7 @@
 			minimizedProjectReferenceProxies = 1;
 			packageReferences = (
 				800000000000000000000001 /* XCLocalSwiftPackageReference "Packages/LumiEngineClient" */,
+				800000000000000000000002 /* XCLocalSwiftPackageReference "Packages/LumiDesignSystem" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 400000000000000000000006 /* Products */;
@@ -275,6 +279,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/LumiEngineClient;
 		};
+		800000000000000000000002 /* XCLocalSwiftPackageReference "Packages/LumiDesignSystem" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/LumiDesignSystem;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -282,6 +290,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 800000000000000000000001 /* XCLocalSwiftPackageReference "Packages/LumiEngineClient" */;
 			productName = LumiEngineClient;
+		};
+		900000000000000000000002 /* LumiDesignSystem */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 800000000000000000000002 /* XCLocalSwiftPackageReference "Packages/LumiDesignSystem" */;
+			productName = LumiDesignSystem;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};
