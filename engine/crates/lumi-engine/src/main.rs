@@ -1,13 +1,16 @@
-//! Lumi's local engine process.
+//! Lumi engine executable entry point.
 
 #![forbid(unsafe_code)]
 
-use lumi_domain::OperationState;
+use std::process::ExitCode;
 
-fn main() {
-    let initial_state = OperationState::default();
-    println!(
-        "lumi-engine {} ready in {initial_state:?}",
-        env!("CARGO_PKG_VERSION")
-    );
+#[tokio::main]
+async fn main() -> ExitCode {
+    match lumi_engine::run().await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("lumi-engine failed: {error}");
+            ExitCode::FAILURE
+        }
+    }
 }

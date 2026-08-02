@@ -13,6 +13,7 @@ required_paths=(
   "apps/macos/Lumi.xcodeproj"
   "apps/macos/Lumi"
   "apps/macos/Packages/LumiProtocol"
+  "apps/macos/Packages/LumiEngineClient"
   "contracts"
   "fixtures"
   "docs"
