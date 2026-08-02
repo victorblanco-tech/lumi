@@ -1,13 +1,16 @@
 use crate::{
-    ClientId, CommandSequence, DeckId, EffectId, EffectSequence, LightingPlan, MonotonicTime,
-    SourceId, SourceSequence, StateRevision, TrackId, TrackLoadId, WorkerId,
+    ClientId, CommandSequence, DeckId, DeckSourceStatus, EffectId, EffectSequence, LightingPlan,
+    MonotonicTime, SourceId, SourceSequence, StateRevision, TrackLoadId, TrackMetadata, WorkerId,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DeckObservation {
+    SourceStatusChanged {
+        status: DeckSourceStatus,
+    },
     TrackLoaded {
         deck_id: DeckId,
-        track_id: TrackId,
+        metadata: TrackMetadata,
         track_load_id: TrackLoadId,
     },
     PlaybackPosition {
@@ -16,6 +19,15 @@ pub enum DeckObservation {
         beat: u32,
     },
     TrackUnloaded {
+        deck_id: DeckId,
+        track_load_id: TrackLoadId,
+    },
+    PhraseChanged {
+        deck_id: DeckId,
+        track_load_id: TrackLoadId,
+        phrase_index: u16,
+    },
+    LeaderChanged {
         deck_id: DeckId,
         track_load_id: TrackLoadId,
     },

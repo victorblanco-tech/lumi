@@ -9,6 +9,9 @@ struct EngineReadyViewState: Equatable {
     let snapshotSequence: UInt64
     let stateRevision: UInt64
     let runtimeCore: EngineRuntimeCoreViewState
+    let deckSource: EngineDeckSourceViewState
+    let leaderDeckID: UInt64
+    let decks: [EngineDeckViewState]
 }
 
 struct EngineRuntimeCoreViewState: Equatable {
@@ -18,6 +21,25 @@ struct EngineRuntimeCoreViewState: Equatable {
     let queueDepth: UInt64
     let processedEvents: UInt64
     let lastDecision: String
+}
+
+struct EngineDeckSourceViewState: Equatable {
+    let providerKind: String
+    let status: String
+}
+
+struct EngineDeckViewState: Equatable, Identifiable {
+    let deckID: UInt64
+    let trackLoadID: UInt64
+    let title: String
+    let artist: String
+    let bpmMilli: UInt64
+    let pitchClass: String
+    let keyMode: String
+    let beat: UInt64
+    let phraseIndex: UInt64?
+
+    var id: UInt64 { deckID }
 }
 
 enum EngineHealthState: Equatable {
@@ -106,7 +128,20 @@ final class EngineStatusModel: ObservableObject {
               let queueCapacity = unsignedInteger(runtimePayload["queueCapacity"]),
               let queueDepth = unsignedInteger(runtimePayload["queueDepth"]),
               let processedEvents = unsignedInteger(runtimePayload["processedEvents"]),
-              case let .string(lastDecision) = runtimePayload["lastDecision"] else {
+              case let .string(lastDecision) = runtimePayload["lastDecision"],
+              case let .object(deckSourcePayload) = snapshot.payload["deckSource"],
+              case let .string(providerKind) = deckSourcePayload["providerKind"],
+              case let .string(deckSourceStatus) = deckSourcePayload["status"],
+              let leaderDeckID = unsignedInteger(snapshot.payload["leaderDeckId"]),
+              case let .array(deckPayloads) = snapshot.payload["decks"] else {
+            throw EngineClientError.invalidInitialSnapshot
+        }
+
+        let decks = try deckPayloads.map(mapDeck)
+        let deckIDs = Set(decks.map(\.deckID))
+        guard decks.count == 2,
+              deckIDs.count == decks.count,
+              deckIDs.contains(leaderDeckID) else {
             throw EngineClientError.invalidInitialSnapshot
         }
 
@@ -123,7 +158,51 @@ final class EngineStatusModel: ObservableObject {
                 queueDepth: queueDepth,
                 processedEvents: processedEvents,
                 lastDecision: lastDecision
-            )
+            ),
+            deckSource: EngineDeckSourceViewState(
+                providerKind: providerKind,
+                status: deckSourceStatus
+            ),
+            leaderDeckID: leaderDeckID,
+            decks: decks
+        )
+    }
+
+    private func mapDeck(_ value: JSONValue) throws -> EngineDeckViewState {
+        guard case let .object(deck) = value,
+              let deckID = unsignedInteger(deck["deckId"]),
+              let trackLoadID = unsignedInteger(deck["trackLoadId"]),
+              let beat = unsignedInteger(deck["beat"]),
+              case let .object(track) = deck["track"],
+              case let .string(title) = track["title"],
+              case let .string(artist) = track["artist"],
+              let bpmMilli = unsignedInteger(track["bpmMilli"]),
+              case let .object(key) = track["key"],
+              case let .string(pitchClass) = key["pitchClass"],
+              case let .string(keyMode) = key["mode"] else {
+            throw EngineClientError.invalidInitialSnapshot
+        }
+
+        let phraseIndex: UInt64?
+        if deck["phraseIndex"] == .null {
+            phraseIndex = nil
+        } else {
+            guard let value = unsignedInteger(deck["phraseIndex"]) else {
+                throw EngineClientError.invalidInitialSnapshot
+            }
+            phraseIndex = value
+        }
+
+        return EngineDeckViewState(
+            deckID: deckID,
+            trackLoadID: trackLoadID,
+            title: title,
+            artist: artist,
+            bpmMilli: bpmMilli,
+            pitchClass: pitchClass,
+            keyMode: keyMode,
+            beat: beat,
+            phraseIndex: phraseIndex
         )
     }
 
