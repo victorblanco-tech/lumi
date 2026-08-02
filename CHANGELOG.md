@@ -14,6 +14,8 @@ Lumi gebruikt [Semantic Versioning](https://semver.org/).
   foundationverificatie voor Epic 1.
 - Transportonafhankelijk protocol v1-contract met gedeelde Rust/Swift-fixtures,
   begrensde decoding, commandidempotentie en sequence-gapdetectie.
+- App-scoped Rust-engine met geauthenticeerde loopbackverbinding, native
+  process supervision en zichtbare healthstatus in de macOS-app.
 
 ### Changed
 

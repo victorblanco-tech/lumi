@@ -27,6 +27,8 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 cargo test --workspace --all-features
 cargo build --workspace --all-features
 swift test --package-path apps/macos/Packages/LumiProtocol
+LUMI_ENGINE_TEST_EXECUTABLE="$repository_root/target/debug/lumi-engine" \
+  swift test --package-path apps/macos/Packages/LumiEngineClient
 
 xcodebuild \
   -project apps/macos/Lumi.xcodeproj \
@@ -39,11 +41,22 @@ xcodebuild \
   build
 
 built_info_plist="build/DerivedData/Build/Products/Debug/Lumi.app/Contents/Info.plist"
+built_engine_helper="build/DerivedData/Build/Products/Debug/Lumi.app/Contents/Helpers/lumi-engine"
 built_product_version="$(/usr/libexec/PlistBuddy -c 'Print :LumiProductVersion' "$built_info_plist")"
 canonical_version="$(tr -d '[:space:]' < VERSION)"
 
 if [[ "$built_product_version" != "$canonical_version" ]]; then
   echo "ERROR: built app version '$built_product_version' differs from VERSION '$canonical_version'." >&2
+  exit 1
+fi
+
+if [[ ! -x "$built_engine_helper" ]]; then
+  echo "ERROR: the built app does not contain an executable Lumi engine helper." >&2
+  exit 1
+fi
+
+if ! file "$built_engine_helper" | grep -q 'arm64'; then
+  echo "ERROR: the built Lumi engine helper is not Apple Silicon arm64." >&2
   exit 1
 fi
 

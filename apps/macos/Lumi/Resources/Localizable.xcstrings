@@ -11,6 +11,76 @@
         }
       }
     },
+    "engine.action.retry" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Retry"
+          }
+        }
+      }
+    },
+    "engine.status.connecting" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Connecting to local engine"
+          }
+        }
+      }
+    },
+    "engine.status.disconnected" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Local engine disconnected"
+          }
+        }
+      }
+    },
+    "engine.status.failed" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Local engine unavailable"
+          }
+        }
+      }
+    },
+    "engine.status.ready" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Local engine ready"
+          }
+        }
+      }
+    },
+    "engine.status.starting" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Starting local engine"
+          }
+        }
+      }
+    },
+    "engine.status.stopped" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Local engine stopped"
+          }
+        }
+      }
+    },
     "foundation.status.ready" : {
       "localizations" : {
         "en" : {

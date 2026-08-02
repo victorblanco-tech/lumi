@@ -7,6 +7,13 @@ license.workspace = true
 
 [dependencies]
 lumi-domain = { path = "../lumi-domain" }
+lumi-protocol = { path = "../lumi-protocol" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+subtle = "2"
+thiserror = "2"
+time = { version = "0.3", features = ["formatting"] }
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "time"] }
 
 [lints]
 workspace = true

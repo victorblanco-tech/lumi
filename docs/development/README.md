@@ -51,11 +51,23 @@ Run all local foundation checks and builds with:
 ./scripts/verify.sh
 ```
 
+After a successful build, launch the exact unsigned development app with:
+
+```bash
+open build/DerivedData/Build/Products/Debug/Lumi.app
+```
+
+The status becomes **Local engine ready** only after the app starts the bundled
+Rust helper, authenticates over loopback, and receives its initial snapshot.
+
 Generated Xcode build data is written below the ignored root `build/`
 directory rather than mixed with source files.
 
 Repository ownership, dependency direction, and naming rules are documented in
 [`repository-structure.md`](repository-structure.md).
+
+The app-scoped Rust process, loopback authentication, and shutdown behavior are
+documented in [`local-engine-session.md`](local-engine-session.md).
 
 ## Troubleshooting
 
