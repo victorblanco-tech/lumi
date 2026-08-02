@@ -389,14 +389,28 @@ repositories ondersteunt:
 
 ## 15. GitHub-inrichting
 
+### Huidige repositorystatus (2026-08-02)
+
+- `dev` is aangemaakt en ingesteld als default branch;
+- squash merge en merge commits zijn actief, rebase merge is uitgeschakeld;
+- head branches worden na een merge automatisch verwijderd;
+- de bronbranchguard voor PR's naar `main` en alle release-labels zijn actief;
+- remote branch protection voor de private repository is nog niet actief, omdat
+  GitHub dit op het huidige Free-plan weigert. Hiervoor is GitHub Pro nodig of
+  moet de repository publiek worden gemaakt.
+
+Tot branch protection beschikbaar is, blijft "nooit direct naar `main` pushen"
+een procesregel. De Actions-guard controleert PR's, maar kan een directe push
+niet blokkeren.
+
 ### Direct activeren na de initiële repositorycommit
 
 - `dev` aanmaken en als default branch instellen;
 - squash merge en merge commits toestaan;
 - rebase merge uitschakelen;
 - merged branches automatisch verwijderen;
-- `main`: PR vereist, geen force-push of deletion;
-- `dev`: geen force-push of deletion;
+- `main`: PR vereist, geen force-push of deletion (wacht op GitHub Pro);
+- `dev`: geen force-push of deletion (wacht op GitHub Pro);
 - guard-workflow voor toegestane bronbranches richting `main`;
 - PR-template en release-notescategorieën toevoegen.
 
