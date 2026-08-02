@@ -72,6 +72,9 @@ documented in [`local-engine-session.md`](local-engine-session.md).
 Semantic presentation tokens, reusable components, global appearance, and key
 notation are documented in [`design-system.md`](design-system.md).
 
+Pure domain ownership, reducer behavior, ordering, revisions, and bounded
+ingress are documented in [`domain-runtime.md`](domain-runtime.md).
+
 ## Troubleshooting
 
 - `xcodebuild` points at Command Line Tools: rerun `xcode-select --switch`.

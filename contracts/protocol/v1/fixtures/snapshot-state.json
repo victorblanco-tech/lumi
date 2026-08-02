@@ -10,6 +10,14 @@
     "stateRevision": 7,
     "operationState": "armed",
     "activeDeckId": "deck-a",
-    "nextDeckId": "deck-b"
+    "nextDeckId": "deck-b",
+    "runtimeCore": {
+      "model": "singleWriterReducer",
+      "health": "ready",
+      "queueCapacity": 256,
+      "queueDepth": 0,
+      "processedEvents": 7,
+      "lastDecision": "planAccepted"
+    }
   }
 }

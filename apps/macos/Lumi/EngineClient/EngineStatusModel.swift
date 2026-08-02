@@ -7,6 +7,17 @@ struct EngineReadyViewState: Equatable {
     let engineVersion: String
     let protocolVersion: Int
     let snapshotSequence: UInt64
+    let stateRevision: UInt64
+    let runtimeCore: EngineRuntimeCoreViewState
+}
+
+struct EngineRuntimeCoreViewState: Equatable {
+    let model: String
+    let health: String
+    let queueCapacity: UInt64
+    let queueDepth: UInt64
+    let processedEvents: UInt64
+    let lastDecision: String
 }
 
 enum EngineHealthState: Equatable {
@@ -87,7 +98,15 @@ final class EngineStatusModel: ObservableObject {
     ) throws -> EngineReadyViewState {
         guard snapshot.messageType == .snapshot,
               snapshot.payload["kind"] == .string("stateSnapshot"),
-              case let .string(engineVersion) = snapshot.payload["engineVersion"] else {
+              case let .string(engineVersion) = snapshot.payload["engineVersion"],
+              let stateRevision = unsignedInteger(snapshot.payload["stateRevision"]),
+              case let .object(runtimePayload) = snapshot.payload["runtimeCore"],
+              case let .string(runtimeModel) = runtimePayload["model"],
+              case let .string(runtimeHealth) = runtimePayload["health"],
+              let queueCapacity = unsignedInteger(runtimePayload["queueCapacity"]),
+              let queueDepth = unsignedInteger(runtimePayload["queueDepth"]),
+              let processedEvents = unsignedInteger(runtimePayload["processedEvents"]),
+              case let .string(lastDecision) = runtimePayload["lastDecision"] else {
             throw EngineClientError.invalidInitialSnapshot
         }
 
@@ -95,8 +114,28 @@ final class EngineStatusModel: ObservableObject {
             endpoint: "\(endpoint.host):\(endpoint.port)",
             engineVersion: engineVersion,
             protocolVersion: endpoint.protocolVersion,
-            snapshotSequence: snapshot.sequence
+            snapshotSequence: snapshot.sequence,
+            stateRevision: stateRevision,
+            runtimeCore: EngineRuntimeCoreViewState(
+                model: runtimeModel,
+                health: runtimeHealth,
+                queueCapacity: queueCapacity,
+                queueDepth: queueDepth,
+                processedEvents: processedEvents,
+                lastDecision: lastDecision
+            )
         )
+    }
+
+    private func unsignedInteger(_ value: JSONValue?) -> UInt64? {
+        guard case let .number(number) = value,
+              number.isFinite,
+              number >= 0,
+              number.rounded(.towardZero) == number,
+              number <= Double(UInt64.max) else {
+            return nil
+        }
+        return UInt64(number)
     }
 
     private func startMonitoring() {

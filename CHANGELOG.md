@@ -18,11 +18,15 @@ Lumi gebruikt [Semantic Versioning](https://semver.org/).
   process supervision en zichtbare healthstatus in de macOS-app.
 - Native Lumi Design System met semantische tokens, herbruikbare componenten,
   persistente dark/light/system-appearance en Camelot/Classic-keynotatie.
+- Deterministische domeinkern met sterke runtime-identiteiten, plan- en
+  track-loadrevisions, monotone ordering, single-writer reducer en begrensde
+  eventingress met expliciet veilig overloadgedrag.
 
 ### Changed
 
 - De ontwikkelbranch gebruikt een expliciete SemVer pre-releaseversie, gestart
   op `0.0.1-dev`.
+- De volgende functionele bouwstap gebruikt ontwikkelversie `0.0.2-dev`.
 
 ### Fixed
 

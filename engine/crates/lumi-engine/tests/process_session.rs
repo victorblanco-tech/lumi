@@ -6,6 +6,7 @@ use std::time::{Duration, Instant};
 
 use lumi_engine::StartupReady;
 use lumi_protocol::{MessageDecoder, MessageType, PROTOCOL_VERSION};
+use serde_json::Value;
 
 const TEST_SESSION_TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef";
 
@@ -73,6 +74,31 @@ fn real_engine_process_serves_authenticated_snapshot_on_loopback() {
 
     assert_eq!(snapshot.message_type, MessageType::Snapshot);
     assert_eq!(snapshot.sequence, 1);
+    assert_eq!(snapshot.payload.get("stateRevision"), Some(&Value::from(1)));
+    assert_eq!(
+        snapshot
+            .payload
+            .get("runtimeCore")
+            .and_then(Value::as_object)
+            .and_then(|runtime| runtime.get("model")),
+        Some(&Value::String("singleWriterReducer".to_owned()))
+    );
+    assert_eq!(
+        snapshot
+            .payload
+            .get("runtimeCore")
+            .and_then(Value::as_object)
+            .and_then(|runtime| runtime.get("health")),
+        Some(&Value::String("ready".to_owned()))
+    );
+    assert_eq!(
+        snapshot
+            .payload
+            .get("runtimeCore")
+            .and_then(Value::as_object)
+            .and_then(|runtime| runtime.get("processedEvents")),
+        Some(&Value::from(1))
+    );
     drop(connection);
 
     let deadline = Instant::now() + Duration::from_secs(2);
