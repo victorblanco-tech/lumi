@@ -523,17 +523,18 @@ meerdere PR's worden gesplitst zonder een tweede productepic te maken.
 
 ## 8. Bouwomgeving en prerequisites
 
-De environmentaudit op **2026-08-02** toont:
+De na installatie herhaalde environmentaudit op **2026-08-02** toont:
 
 ```text
 Machine:       Apple Silicon arm64
 macOS:         26.5.2
-Swift CLI:     6.2.4
-Xcode:         volledige Xcode niet actief; alleen Command Line Tools
-Rust/Cargo:    niet geïnstalleerd
+Swift:         6.3.3
+Xcode:         26.6 (build 17F113), volledig actief
+Rust/Cargo:    1.97.1 via rustup, rustfmt en Clippy beschikbaar
+iOS runtime:   26.5 simulator beschikbaar
 ```
 
-E1-00 levert daarom vóór productcode:
+E1-00 borgt vóór verdere productcode:
 
 - volledige Xcode-installatie en selectie met `xcode-select`;
 - acceptatie van de Xcode-license en een werkende `xcodebuild -version`;
@@ -542,9 +543,11 @@ E1-00 levert daarom vóór productcode:
 - environmentcheck die Xcode, Swift, Rust, Cargo en architectuur valideert;
 - een korte bootstrapinstructie zonder machinegebonden absolute paden.
 
-De eerste appdeploymenttarget wordt **macOS 15.0** op Apple Silicon. De exacte
-Xcode buildversie wordt na installatie in E1-00 vastgelegd en door CI
-afgedwongen. Windows en Intel Macs zijn geen Epic 1-buildtargets.
+De eerste appdeploymenttarget is **macOS 15.0** op Apple Silicon. De lokale
+environmentcheck rapporteert de exacte gevalideerde Xcode-build; CI bouwt op de
+officiële Apple Silicon `macos-26` runner zodat patchupdates van de stabiele
+toolchain niet onnodig worden geblokkeerd. Windows en Intel Macs zijn geen Epic
+1-buildtargets.
 
 ## 9. Verificatiestrategie
 
