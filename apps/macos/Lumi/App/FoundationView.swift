@@ -8,9 +8,6 @@ struct FoundationView: View {
 
     @State private var selectedPhrase = 0
 
-    private let liveKey = MusicalKey(pitchClass: .a, mode: .minor)
-    private let nextKey = MusicalKey(pitchClass: .c, mode: .major)
-
     private var productVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "LumiProductVersion") as? String
             ?? "unknown"
@@ -26,7 +23,8 @@ struct FoundationView: View {
                     preferencesPanel
                     enginePanel
                     runtimePanel
-                    sampleWorkspace
+                    deckSourceWorkspace
+                    planPreview
                 }
                 .padding(LumiSpacing.xLarge)
             }
@@ -93,34 +91,47 @@ struct FoundationView: View {
         }
     }
 
-    private var sampleWorkspace: some View {
+    private var deckSourceWorkspace: some View {
         VStack(alignment: .leading, spacing: LumiSpacing.large) {
             HStack {
-                Text("design.preview.workspace")
+                Text("deck.source.workspace")
                     .font(LumiTypography.sectionTitle)
-                StatusBadge("design.preview.sampleData", state: .empty)
+                if case let .ready(engine) = engineStatus.state {
+                    Text(verbatim: engine.deckSource.providerKind.capitalized)
+                        .font(LumiTypography.metadata)
+                        .foregroundStyle(LumiColor.textSecondary)
+                }
+                StatusBadge(deckSourceBadge.label, state: deckSourceBadge.state)
                 Spacer()
             }
 
-            HStack(alignment: .top, spacing: LumiSpacing.large) {
-                DeckCard(
-                    deckLabel: "design.preview.liveDeck",
-                    title: "Afterglow",
-                    artist: "Lumi Demo",
-                    bpm: "126.0",
-                    musicalKey: keyFormatter.string(from: liveKey),
-                    stateLabel: "design.state.ready",
-                    state: .ready
-                )
-                DeckCard(
-                    deckLabel: "design.preview.nextDeck",
-                    title: "Midnight Circuit",
-                    artist: "Lumi Demo",
-                    bpm: "128.0",
-                    musicalKey: keyFormatter.string(from: nextKey),
-                    stateLabel: "design.state.loading",
-                    state: .loading
-                )
+            if case let .ready(engine) = engineStatus.state {
+                HStack(alignment: .top, spacing: LumiSpacing.large) {
+                    ForEach(orderedDecks(from: engine)) { deck in
+                        deckCard(
+                            deck,
+                            isLeader: deck.deckID == engine.leaderDeckID
+                        )
+                    }
+                }
+            } else {
+                LumiPanel {
+                    Text("deck.source.waiting")
+                        .font(LumiTypography.body)
+                        .foregroundStyle(LumiColor.textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
+            }
+        }
+    }
+
+    private var planPreview: some View {
+        VStack(alignment: .leading, spacing: LumiSpacing.large) {
+            HStack {
+                Text("design.preview.planWorkspace")
+                    .font(LumiTypography.sectionTitle)
+                StatusBadge("design.preview.sampleData", state: .empty)
+                Spacer()
             }
 
             HStack(alignment: .top, spacing: LumiSpacing.large) {
@@ -220,6 +231,66 @@ struct FoundationView: View {
 
     private var keyFormatter: KeyNotationFormatter {
         KeyNotationFormatter(notation: preferences.keyNotation)
+    }
+
+    private var deckSourceBadge: (label: LocalizedStringKey, state: LumiComponentState) {
+        guard case let .ready(engine) = engineStatus.state else {
+            return ("design.state.loading", .loading)
+        }
+        return engine.deckSource.status == "ready"
+            ? ("design.state.ready", .ready)
+            : ("design.state.degraded", .degraded)
+    }
+
+    private func orderedDecks(from engine: EngineReadyViewState) -> [EngineDeckViewState] {
+        engine.decks.sorted { left, right in
+            if left.deckID == engine.leaderDeckID { return true }
+            if right.deckID == engine.leaderDeckID { return false }
+            return left.deckID < right.deckID
+        }
+    }
+
+    private func deckCard(_ deck: EngineDeckViewState, isLeader: Bool) -> some View {
+        DeckCard(
+            deckLabel: isLeader ? "design.preview.liveDeck" : "design.preview.nextDeck",
+            title: deck.title,
+            artist: deck.artist,
+            bpm: String(
+                format: "%.1f",
+                locale: Locale(identifier: "en_US_POSIX"),
+                Double(deck.bpmMilli) / 1_000
+            ),
+            musicalKey: musicalKey(for: deck),
+            stateLabel: "design.state.ready",
+            state: .ready
+        )
+        .frame(maxWidth: .infinity)
+    }
+
+    private func musicalKey(for deck: EngineDeckViewState) -> String {
+        guard let pitchClass = pitchClass(named: deck.pitchClass),
+              let mode = KeyMode(rawValue: deck.keyMode) else {
+            return "—"
+        }
+        return keyFormatter.string(from: MusicalKey(pitchClass: pitchClass, mode: mode))
+    }
+
+    private func pitchClass(named value: String) -> PitchClass? {
+        switch value {
+        case "c": .c
+        case "cSharp": .cSharp
+        case "d": .d
+        case "dSharp": .dSharp
+        case "e": .e
+        case "f": .f
+        case "fSharp": .fSharp
+        case "g": .g
+        case "gSharp": .gSharp
+        case "a": .a
+        case "aSharp": .aSharp
+        case "b": .b
+        default: nil
+        }
     }
 
     private var enginePresentation: EngineProviderPresentation {

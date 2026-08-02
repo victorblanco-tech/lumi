@@ -1,13 +1,15 @@
 [workspace]
 members = [
+    "engine/crates/lumi-deck-source",
     "engine/crates/lumi-domain",
     "engine/crates/lumi-engine",
     "engine/crates/lumi-protocol",
+    "engine/crates/lumi-simulator",
 ]
 resolver = "3"
 
 [workspace.package]
-version = "0.0.2-dev"
+version = "0.0.3-dev"
 edition = "2024"
 rust-version = "1.97.1"
 license = "UNLICENSED"

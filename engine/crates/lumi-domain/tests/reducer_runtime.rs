@@ -1,10 +1,11 @@
 use lumi_domain::{
     ClientId, CommandSequence, CueId, DecisionReason, DeckId, DeckObservation, DomainEvent,
     DomainEventKind, Effect, EffectId, EffectResult, EffectResultEnvelope, EffectSequence,
-    IngressError, IngressOutcome, LightingCue, LightingPlan, MonotonicTime, ObservationEnvelope,
-    OperationCommand, OperationState, PlanId, PlanRevision, ReducerError, RuntimeHealth, SceneId,
-    SemanticLightingAction, SerializedRuntime, SourceId, SourceSequence, StateRevision, TrackId,
-    TrackLoadId, UserCommandEnvelope, WorkerId,
+    IngressError, IngressOutcome, KeyMode, LightingCue, LightingPlan, MonotonicTime, MusicalKey,
+    ObservationEnvelope, OperationCommand, OperationState, PhraseKind, PitchClass, PlanId,
+    PlanRevision, ReducerError, RuntimeHealth, SceneId, SemanticLightingAction, SerializedRuntime,
+    SourceId, SourceSequence, StateRevision, TrackId, TrackLoadId, TrackMetadata, TrackPhrase,
+    UserCommandEnvelope, WorkerId,
 };
 
 #[test]
@@ -260,10 +261,26 @@ fn track_loaded(sequence: u64, load: u64, track: u64, at: u64) -> DomainEvent {
         observed_at: MonotonicTime::new(at),
         observation: DeckObservation::TrackLoaded {
             deck_id: DeckId::new(1),
-            track_id: TrackId::new(track),
+            metadata: track_metadata(track),
             track_load_id: TrackLoadId::new(load),
         },
     })
+}
+
+fn track_metadata(track: u64) -> TrackMetadata {
+    let result = TrackMetadata::try_new(
+        TrackId::new(track),
+        format!("Track {track}"),
+        "Lumi Test".to_owned(),
+        128_000,
+        MusicalKey::new(PitchClass::A, KeyMode::Minor),
+        128,
+        vec![TrackPhrase::new(0, 0, 128, PhraseKind::Intro)],
+    );
+    match result {
+        Ok(metadata) => metadata,
+        Err(error) => panic!("test metadata must be valid: {error}"),
+    }
 }
 
 fn position(sequence: u64, load: u64, beat: u32, at: u64) -> DomainEvent {

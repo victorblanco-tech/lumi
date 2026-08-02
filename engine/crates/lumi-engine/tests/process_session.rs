@@ -74,7 +74,7 @@ fn real_engine_process_serves_authenticated_snapshot_on_loopback() {
 
     assert_eq!(snapshot.message_type, MessageType::Snapshot);
     assert_eq!(snapshot.sequence, 1);
-    assert_eq!(snapshot.payload.get("stateRevision"), Some(&Value::from(1)));
+    assert_eq!(snapshot.payload.get("stateRevision"), Some(&Value::from(7)));
     assert_eq!(
         snapshot
             .payload
@@ -97,7 +97,29 @@ fn real_engine_process_serves_authenticated_snapshot_on_loopback() {
             .get("runtimeCore")
             .and_then(Value::as_object)
             .and_then(|runtime| runtime.get("processedEvents")),
-        Some(&Value::from(1))
+        Some(&Value::from(7))
+    );
+    assert_eq!(
+        snapshot
+            .payload
+            .get("deckSource")
+            .and_then(Value::as_object)
+            .and_then(|source| source.get("providerKind")),
+        Some(&Value::String("simulator".to_owned()))
+    );
+    assert_eq!(snapshot.payload.get("leaderDeckId"), Some(&Value::from(1)));
+    let Some(decks) = snapshot.payload.get("decks").and_then(Value::as_array) else {
+        let _ = child.kill();
+        panic!("snapshot must contain decks");
+    };
+    assert_eq!(decks.len(), 2);
+    assert_eq!(
+        decks[0].get("track").and_then(|track| track.get("title")),
+        Some(&Value::String("Aurora Signal".to_owned()))
+    );
+    assert_eq!(
+        decks[1].get("track").and_then(|track| track.get("title")),
+        Some(&Value::String("Neon Horizon".to_owned()))
     );
     drop(connection);
 

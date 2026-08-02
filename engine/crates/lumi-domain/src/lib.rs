@@ -13,6 +13,7 @@ mod reducer;
 mod runtime;
 mod state;
 mod time;
+mod track;
 
 pub use event::{
     DeckObservation, DomainEvent, DomainEventKind, EffectResult, EffectResultEnvelope,
@@ -30,3 +31,7 @@ pub use reducer::{
 pub use runtime::{ProcessResult, SerializedRuntime, SerializedRuntimeError};
 pub use state::{DeckState, OperationState, RuntimeHealth, RuntimeState};
 pub use time::MonotonicTime;
+pub use track::{
+    DeckSourceStatus, KeyMode, MusicalKey, PhraseKind, PitchClass, TrackMetadata, TrackPhrase,
+    TrackValidationError,
+};

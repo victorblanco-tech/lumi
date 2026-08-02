@@ -171,12 +171,32 @@
         }
       }
     },
-    "design.preview.workspace" : {
+    "deck.source.waiting" : {
       "localizations" : {
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Live Workspace Components"
+            "value" : "Waiting for the deck source…"
+          }
+        }
+      }
+    },
+    "deck.source.workspace" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Live Deck Source"
+          }
+        }
+      }
+    },
+    "design.preview.planWorkspace" : {
+      "localizations" : {
+        "en" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Upcoming Plan Preview"
           }
         }
       }

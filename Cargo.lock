@@ -27,15 +27,24 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 
 [[package]]
+name = "lumi-deck-source"
+version = "0.0.3-dev"
+dependencies = [
+ "lumi-domain",
+]
+
+[[package]]
 name = "lumi-domain"
-version = "0.0.2-dev"
+version = "0.0.3-dev"
 
 [[package]]
 name = "lumi-engine"
-version = "0.0.2-dev"
+version = "0.0.3-dev"
 dependencies = [
+ "lumi-deck-source",
  "lumi-domain",
  "lumi-protocol",
+ "lumi-simulator",
  "serde",
  "serde_json",
  "subtle",
@@ -46,8 +55,18 @@ dependencies = [
 
 [[package]]
 name = "lumi-protocol"
-version = "0.0.2-dev"
+version = "0.0.3-dev"
 dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "lumi-simulator"
+version = "0.0.3-dev"
+dependencies = [
+ "lumi-deck-source",
+ "lumi-domain",
  "serde",
  "serde_json",
 ]

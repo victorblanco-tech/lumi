@@ -9,15 +9,61 @@
     "kind": "stateSnapshot",
     "stateRevision": 7,
     "operationState": "armed",
-    "activeDeckId": "deck-a",
-    "nextDeckId": "deck-b",
+    "engineVersion": "0.0.3-dev",
     "runtimeCore": {
       "model": "singleWriterReducer",
       "health": "ready",
       "queueCapacity": 256,
       "queueDepth": 0,
       "processedEvents": 7,
-      "lastDecision": "planAccepted"
-    }
+      "lastDecision": "phraseChanged"
+    },
+    "deckSource": {
+      "providerKind": "simulator",
+      "status": "ready"
+    },
+    "leaderDeckId": 1,
+    "decks": [
+      {
+        "deckId": 1,
+        "trackLoadId": 1001,
+        "beat": 0,
+        "phraseIndex": 0,
+        "track": {
+          "id": 101,
+          "title": "Aurora Signal",
+          "artist": "Lumi Lab",
+          "bpmMilli": 124000,
+          "key": { "pitchClass": "a", "mode": "minor" },
+          "durationBeats": 128,
+          "phrases": [
+            { "index": 0, "startBeat": 0, "endBeat": 32, "kind": "intro" },
+            { "index": 1, "startBeat": 32, "endBeat": 64, "kind": "verse" },
+            { "index": 2, "startBeat": 64, "endBeat": 96, "kind": "build" },
+            { "index": 3, "startBeat": 96, "endBeat": 128, "kind": "drop" }
+          ]
+        }
+      },
+      {
+        "deckId": 2,
+        "trackLoadId": 2001,
+        "beat": 0,
+        "phraseIndex": null,
+        "track": {
+          "id": 202,
+          "title": "Neon Horizon",
+          "artist": "Lumi Lab",
+          "bpmMilli": 128000,
+          "key": { "pitchClass": "c", "mode": "major" },
+          "durationBeats": 128,
+          "phrases": [
+            { "index": 0, "startBeat": 0, "endBeat": 32, "kind": "intro" },
+            { "index": 1, "startBeat": 32, "endBeat": 64, "kind": "breakdown" },
+            { "index": 2, "startBeat": 64, "endBeat": 96, "kind": "build" },
+            { "index": 3, "startBeat": 96, "endBeat": 128, "kind": "drop" }
+          ]
+        }
+      }
+    ]
   }
 }

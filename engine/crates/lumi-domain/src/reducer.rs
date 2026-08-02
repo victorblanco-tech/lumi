@@ -9,8 +9,11 @@ use crate::{
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DecisionReason {
     RuntimeInitialized,
+    SourceStatusAccepted,
     TrackLoadAccepted,
     PositionAdvanced,
+    PhraseChanged,
+    LeaderChanged,
     TrackUnloaded,
     StaleObservationIgnored,
     ObservationTimeRegressed,
@@ -166,26 +169,35 @@ fn reduce_observation(
         .source_times
         .insert(event.source_id, event.observed_at);
 
-    let decision = match event.observation {
+    let decision = match &event.observation {
+        DeckObservation::SourceStatusChanged { status } => {
+            state.source_statuses.insert(event.source_id, *status);
+            DecisionReason::SourceStatusAccepted
+        }
         DeckObservation::TrackLoaded {
             deck_id,
-            track_id,
+            metadata,
             track_load_id,
         } => {
-            state.load_track(deck_id, track_id, track_load_id, event.observed_at);
+            state.load_track(
+                *deck_id,
+                metadata.clone(),
+                *track_load_id,
+                event.observed_at,
+            );
             DecisionReason::TrackLoadAccepted
         }
         DeckObservation::PlaybackPosition {
             deck_id,
             track_load_id,
             beat,
-        } => match state.decks.get_mut(&deck_id) {
-            Some(deck) if deck.track_load_id() != track_load_id => {
+        } => match state.decks.get_mut(deck_id) {
+            Some(deck) if deck.track_load_id() != *track_load_id => {
                 DecisionReason::TrackLoadMismatch
             }
-            Some(deck) if beat < deck.beat() => DecisionReason::PositionRegressed,
+            Some(deck) if *beat < deck.beat() => DecisionReason::PositionRegressed,
             Some(deck) => {
-                deck.beat = beat;
+                deck.beat = *beat;
                 deck.last_observed_at = event.observed_at;
                 DecisionReason::PositionAdvanced
             }
@@ -194,11 +206,39 @@ fn reduce_observation(
         DeckObservation::TrackUnloaded {
             deck_id,
             track_load_id,
-        } => match state.decks.get(&deck_id) {
-            Some(deck) if deck.track_load_id() == track_load_id => {
-                state.decks.remove(&deck_id);
-                state.plans.remove(&deck_id);
+        } => match state.decks.get(deck_id) {
+            Some(deck) if deck.track_load_id() == *track_load_id => {
+                state.decks.remove(deck_id);
+                state.plans.remove(deck_id);
+                if state.leader_deck == Some(*deck_id) {
+                    state.leader_deck = None;
+                }
                 DecisionReason::TrackUnloaded
+            }
+            _ => DecisionReason::TrackLoadMismatch,
+        },
+        DeckObservation::PhraseChanged {
+            deck_id,
+            track_load_id,
+            phrase_index,
+        } => match state.decks.get_mut(deck_id) {
+            Some(deck)
+                if deck.track_load_id() == *track_load_id
+                    && deck.metadata().phrase(*phrase_index).is_some() =>
+            {
+                deck.phrase_index = Some(*phrase_index);
+                deck.last_observed_at = event.observed_at;
+                DecisionReason::PhraseChanged
+            }
+            _ => DecisionReason::TrackLoadMismatch,
+        },
+        DeckObservation::LeaderChanged {
+            deck_id,
+            track_load_id,
+        } => match state.decks.get(deck_id) {
+            Some(deck) if deck.track_load_id() == *track_load_id => {
+                state.leader_deck = Some(*deck_id);
+                DecisionReason::LeaderChanged
             }
             _ => DecisionReason::TrackLoadMismatch,
         },
@@ -206,9 +246,12 @@ fn reduce_observation(
 
     let state_changed = matches!(
         decision,
-        DecisionReason::TrackLoadAccepted
+        DecisionReason::SourceStatusAccepted
+            | DecisionReason::TrackLoadAccepted
             | DecisionReason::PositionAdvanced
             | DecisionReason::TrackUnloaded
+            | DecisionReason::PhraseChanged
+            | DecisionReason::LeaderChanged
     );
     (decision, Vec::new(), state_changed)
 }

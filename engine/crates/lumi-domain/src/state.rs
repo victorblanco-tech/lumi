@@ -1,8 +1,9 @@
 use std::collections::{BTreeMap, VecDeque};
 
 use crate::{
-    ClientId, CommandSequence, DecisionReason, DeckId, Diagnostic, EffectSequence, LightingPlan,
-    MonotonicTime, SourceId, SourceSequence, StateRevision, TrackId, TrackLoadId, WorkerId,
+    ClientId, CommandSequence, DecisionReason, DeckId, DeckSourceStatus, Diagnostic,
+    EffectSequence, LightingPlan, MonotonicTime, SourceId, SourceSequence, StateRevision, TrackId,
+    TrackLoadId, TrackMetadata, WorkerId,
 };
 
 const MAXIMUM_DIAGNOSTICS: usize = 64;
@@ -33,16 +34,22 @@ pub enum RuntimeHealth {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DeckState {
-    track_id: TrackId,
+    metadata: TrackMetadata,
     track_load_id: TrackLoadId,
     pub(crate) beat: u32,
+    pub(crate) phrase_index: Option<u16>,
     pub(crate) last_observed_at: MonotonicTime,
 }
 
 impl DeckState {
     #[must_use]
     pub const fn track_id(&self) -> TrackId {
-        self.track_id
+        self.metadata.id()
+    }
+
+    #[must_use]
+    pub const fn metadata(&self) -> &TrackMetadata {
+        &self.metadata
     }
 
     #[must_use]
@@ -53,6 +60,11 @@ impl DeckState {
     #[must_use]
     pub const fn beat(&self) -> u32 {
         self.beat
+    }
+
+    #[must_use]
+    pub const fn phrase_index(&self) -> Option<u16> {
+        self.phrase_index
     }
 
     #[must_use]
@@ -68,6 +80,8 @@ pub struct RuntimeState {
     pub(crate) health: RuntimeHealth,
     pub(crate) decks: BTreeMap<DeckId, DeckState>,
     pub(crate) plans: BTreeMap<DeckId, LightingPlan>,
+    pub(crate) source_statuses: BTreeMap<SourceId, DeckSourceStatus>,
+    pub(crate) leader_deck: Option<DeckId>,
     pub(crate) source_sequences: BTreeMap<SourceId, SourceSequence>,
     pub(crate) source_times: BTreeMap<SourceId, MonotonicTime>,
     pub(crate) command_sequences: BTreeMap<ClientId, CommandSequence>,
@@ -85,6 +99,8 @@ impl Default for RuntimeState {
             health: RuntimeHealth::Starting,
             decks: BTreeMap::new(),
             plans: BTreeMap::new(),
+            source_statuses: BTreeMap::new(),
+            leader_deck: None,
             source_sequences: BTreeMap::new(),
             source_times: BTreeMap::new(),
             command_sequences: BTreeMap::new(),
@@ -122,6 +138,26 @@ impl RuntimeState {
         self.plans.get(&deck_id)
     }
 
+    pub fn decks(&self) -> impl Iterator<Item = (DeckId, &DeckState)> {
+        self.decks.iter().map(|(id, deck)| (*id, deck))
+    }
+
+    #[must_use]
+    pub fn source_status(&self, source_id: SourceId) -> Option<DeckSourceStatus> {
+        self.source_statuses.get(&source_id).copied()
+    }
+
+    pub fn source_statuses(&self) -> impl Iterator<Item = (SourceId, DeckSourceStatus)> + '_ {
+        self.source_statuses
+            .iter()
+            .map(|(source_id, status)| (*source_id, *status))
+    }
+
+    #[must_use]
+    pub const fn leader_deck(&self) -> Option<DeckId> {
+        self.leader_deck
+    }
+
     #[must_use]
     pub const fn processed_events(&self) -> u64 {
         self.processed_events
@@ -139,16 +175,17 @@ impl RuntimeState {
     pub(crate) fn load_track(
         &mut self,
         deck_id: DeckId,
-        track_id: TrackId,
+        metadata: TrackMetadata,
         track_load_id: TrackLoadId,
         observed_at: MonotonicTime,
     ) {
         self.decks.insert(
             deck_id,
             DeckState {
-                track_id,
+                metadata,
                 track_load_id,
                 beat: 0,
+                phrase_index: None,
                 last_observed_at: observed_at,
             },
         );

@@ -27,3 +27,11 @@ State snapshots may include `runtimeCore`, a presentation-safe summary of the
 serialized reducer model, health, bounded ingress, processed-event count, and
 last structured decision reason. It exposes evidence without leaking Rust
 domain types into clients.
+
+The optional `deckSource`, `leaderDeckId`, and `decks` fields expose normalized
+provider-neutral observations. `providerKind` identifies the adapter for
+diagnostics only; clients derive Live and Next from `leaderDeckId` and never
+branch on simulator, Beat Link, or future Pro DJ Link implementation types.
+Track metadata uses integer milli-BPM, canonical pitch class and mode, and
+contiguous beat-based phrases so snapshots remain deterministic across Rust and
+Swift.

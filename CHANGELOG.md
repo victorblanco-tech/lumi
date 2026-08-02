@@ -21,12 +21,17 @@ Lumi gebruikt [Semantic Versioning](https://semver.org/).
 - Deterministische domeinkern met sterke runtime-identiteiten, plan- en
   track-loadrevisions, monotone ordering, single-writer reducer en begrensde
   eventingress met expliciet veilig overloadgedrag.
+- Provider-neutrale deck-sourcepoort en deterministische tweedecksimulator met
+  canonieke track-, beat- en phrasefixtures, versnelde klok en golden transcript.
+- De macOS-app toont Live en Next vanuit de echte enginesnapshot, inclusief
+  BPM en configureerbare Camelot-/klassieke keynotatie.
 
 ### Changed
 
 - De ontwikkelbranch gebruikt een expliciete SemVer pre-releaseversie, gestart
   op `0.0.1-dev`.
 - De volgende functionele bouwstap gebruikt ontwikkelversie `0.0.2-dev`.
+- De simulator vertical slice gebruikt ontwikkelversie `0.0.3-dev`.
 
 ### Fixed
 

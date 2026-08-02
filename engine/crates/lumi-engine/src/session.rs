@@ -3,11 +3,13 @@ use std::io::{self, Write as _};
 use std::net::Ipv4Addr;
 use std::time::Duration;
 
+use lumi_deck_source::DeckSourceProvider as _;
 use lumi_domain::{
-    DecisionReason, DomainEvent, MonotonicTime, OperationState, RuntimeHealth, SerializedRuntime,
-    SerializedRuntimeError,
+    DecisionReason, DeckSourceStatus, DomainEvent, KeyMode, MonotonicTime, OperationState,
+    PhraseKind, PitchClass, RuntimeHealth, SerializedRuntime, SerializedRuntimeError,
 };
 use lumi_protocol::{MessageEnvelope, MessageType, PROTOCOL_VERSION};
+use lumi_simulator::{ManualClock, SimulatorDeckSourceProvider, SimulatorError};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use subtle::ConstantTimeEq as _;
@@ -81,7 +83,7 @@ fn write_startup_record(port: u16) -> Result<(), EngineError> {
 async fn serve_authenticated_client(
     stream: TcpStream,
     expected_token: &str,
-    runtime: &SerializedRuntime,
+    runtime: &EngineRuntime,
 ) -> Result<(), EngineError> {
     let (mut reader, mut writer) = stream.into_split();
     let authentication_bytes = timeout(
@@ -133,19 +135,45 @@ fn tokens_match(expected: &str, received: &str) -> bool {
     expected.len() == received.len() && bool::from(expected.as_bytes().ct_eq(received.as_bytes()))
 }
 
-fn initialized_runtime() -> Result<SerializedRuntime, SerializedRuntimeError> {
-    let mut runtime = SerializedRuntime::try_new(EVENT_QUEUE_CAPACITY)?;
-    runtime.submit(DomainEvent::RuntimeStarted {
-        at: MonotonicTime::new(0),
-    })?;
-    if runtime.process_next()?.is_none() {
-        return Err(SerializedRuntimeError::StartupEventMissing);
-    }
-    Ok(runtime)
+struct EngineRuntime {
+    state: SerializedRuntime,
+    deck_source: SimulatorDeckSourceProvider<ManualClock>,
 }
 
-fn initial_snapshot(runtime: &SerializedRuntime) -> Result<MessageEnvelope, EngineError> {
-    let state = runtime.state();
+fn initialized_runtime() -> Result<EngineRuntime, EngineError> {
+    let mut runtime =
+        SerializedRuntime::try_new(EVENT_QUEUE_CAPACITY).map_err(SerializedRuntimeError::from)?;
+    runtime
+        .submit(DomainEvent::RuntimeStarted {
+            at: MonotonicTime::new(0),
+        })
+        .map_err(SerializedRuntimeError::from)?;
+    if runtime
+        .process_next()
+        .map_err(SerializedRuntimeError::from)?
+        .is_none()
+    {
+        return Err(SerializedRuntimeError::StartupEventMissing.into());
+    }
+    let mut deck_source = SimulatorDeckSourceProvider::demo(ManualClock::new(0))?;
+    for event in deck_source.drain_events()? {
+        runtime
+            .submit(event)
+            .map_err(SerializedRuntimeError::from)?;
+    }
+    while runtime
+        .process_next()
+        .map_err(SerializedRuntimeError::from)?
+        .is_some()
+    {}
+    Ok(EngineRuntime {
+        state: runtime,
+        deck_source,
+    })
+}
+
+fn initial_snapshot(runtime: &EngineRuntime) -> Result<MessageEnvelope, EngineError> {
+    let state = runtime.state.state();
     let mut payload = Map::new();
     payload.insert("kind".to_owned(), Value::String("stateSnapshot".to_owned()));
     payload.insert("stateRevision".to_owned(), json!(state.revision().value()));
@@ -162,12 +190,57 @@ fn initial_snapshot(runtime: &SerializedRuntime) -> Result<MessageEnvelope, Engi
         json!({
             "model": "singleWriterReducer",
             "health": runtime_health_name(state.health()),
-            "queueCapacity": runtime.queue_capacity(),
-            "queueDepth": runtime.queue_depth(),
+            "queueCapacity": runtime.state.queue_capacity(),
+            "queueDepth": runtime.state.queue_depth(),
             "processedEvents": state.processed_events(),
             "lastDecision": state.last_decision().map(decision_reason_name),
         }),
     );
+    payload.insert(
+        "deckSource".to_owned(),
+        json!({
+            "providerKind": runtime.deck_source.provider_kind(),
+            "status": state
+                .source_statuses()
+                .next()
+                .map(|(_, status)| deck_source_status_name(status))
+                .unwrap_or("starting"),
+        }),
+    );
+    payload.insert(
+        "leaderDeckId".to_owned(),
+        json!(state.leader_deck().map(|deck_id| deck_id.value())),
+    );
+    let decks = state
+        .decks()
+        .map(|(deck_id, deck)| {
+            let metadata = deck.metadata();
+            json!({
+                "deckId": deck_id.value(),
+                "trackLoadId": deck.track_load_id().value(),
+                "beat": deck.beat(),
+                "phraseIndex": deck.phrase_index(),
+                "track": {
+                    "id": metadata.id().value(),
+                    "title": metadata.title(),
+                    "artist": metadata.artist(),
+                    "bpmMilli": metadata.bpm_milli(),
+                    "key": {
+                        "pitchClass": pitch_class_name(metadata.musical_key().pitch_class()),
+                        "mode": key_mode_name(metadata.musical_key().mode()),
+                    },
+                    "durationBeats": metadata.duration_beats(),
+                    "phrases": metadata.phrases().iter().map(|phrase| json!({
+                        "index": phrase.index(),
+                        "startBeat": phrase.start_beat(),
+                        "endBeat": phrase.end_beat(),
+                        "kind": phrase_kind_name(phrase.kind()),
+                    })).collect::<Vec<_>>(),
+                },
+            })
+        })
+        .collect::<Vec<_>>();
+    payload.insert("decks".to_owned(), Value::Array(decks));
 
     Ok(MessageEnvelope {
         protocol_version: PROTOCOL_VERSION,
@@ -178,6 +251,50 @@ fn initial_snapshot(runtime: &SerializedRuntime) -> Result<MessageEnvelope, Engi
         sent_at: OffsetDateTime::now_utc().format(&Rfc3339)?,
         payload,
     })
+}
+
+const fn deck_source_status_name(status: DeckSourceStatus) -> &'static str {
+    match status {
+        DeckSourceStatus::Starting => "starting",
+        DeckSourceStatus::Ready => "ready",
+        DeckSourceStatus::Degraded => "degraded",
+        DeckSourceStatus::Disconnected => "disconnected",
+    }
+}
+
+const fn pitch_class_name(pitch_class: PitchClass) -> &'static str {
+    match pitch_class {
+        PitchClass::C => "c",
+        PitchClass::CSharp => "cSharp",
+        PitchClass::D => "d",
+        PitchClass::DSharp => "dSharp",
+        PitchClass::E => "e",
+        PitchClass::F => "f",
+        PitchClass::FSharp => "fSharp",
+        PitchClass::G => "g",
+        PitchClass::GSharp => "gSharp",
+        PitchClass::A => "a",
+        PitchClass::ASharp => "aSharp",
+        PitchClass::B => "b",
+    }
+}
+
+const fn key_mode_name(mode: KeyMode) -> &'static str {
+    match mode {
+        KeyMode::Major => "major",
+        KeyMode::Minor => "minor",
+    }
+}
+
+const fn phrase_kind_name(kind: PhraseKind) -> &'static str {
+    match kind {
+        PhraseKind::Intro => "intro",
+        PhraseKind::Verse => "verse",
+        PhraseKind::Build => "build",
+        PhraseKind::Drop => "drop",
+        PhraseKind::Breakdown => "breakdown",
+        PhraseKind::Outro => "outro",
+    }
 }
 
 const fn operation_state_name(state: OperationState) -> &'static str {
@@ -200,8 +317,11 @@ const fn runtime_health_name(health: RuntimeHealth) -> &'static str {
 const fn decision_reason_name(reason: DecisionReason) -> &'static str {
     match reason {
         DecisionReason::RuntimeInitialized => "runtimeInitialized",
+        DecisionReason::SourceStatusAccepted => "sourceStatusAccepted",
         DecisionReason::TrackLoadAccepted => "trackLoadAccepted",
         DecisionReason::PositionAdvanced => "positionAdvanced",
+        DecisionReason::PhraseChanged => "phraseChanged",
+        DecisionReason::LeaderChanged => "leaderChanged",
         DecisionReason::TrackUnloaded => "trackUnloaded",
         DecisionReason::StaleObservationIgnored => "staleObservationIgnored",
         DecisionReason::ObservationTimeRegressed => "observationTimeRegressed",
@@ -244,4 +364,6 @@ pub enum EngineError {
     TimeFormat(#[from] time::error::Format),
     #[error("domain runtime initialization failed: {0}")]
     DomainRuntime(#[from] SerializedRuntimeError),
+    #[error("simulator initialization failed: {0}")]
+    Simulator(#[from] SimulatorError),
 }

@@ -25,6 +25,12 @@ Wire contracts and fixtures are boundary artifacts, not dumping grounds for
 cross-language business logic. Provider-specific deck and lighting types stay
 behind their adapters.
 
+`lumi-deck-source` owns the application-facing deck observation port.
+`lumi-simulator` is one adapter for that port and maps a license-safe fixture
+into domain events. Future Beat Link or direct Pro DJ Link adapters implement
+the same port; neither the domain nor the client wire model imports their
+provider-specific types.
+
 ## Naming
 
 Rust crates and modules use specific domain or capability names in idiomatic

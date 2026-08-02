@@ -75,6 +75,10 @@ notation are documented in [`design-system.md`](design-system.md).
 Pure domain ownership, reducer behavior, ordering, revisions, and bounded
 ingress are documented in [`domain-runtime.md`](domain-runtime.md).
 
+The deterministic two-deck source, controllable clock, fixture, and adapter
+boundary are documented in
+[`simulator-deck-source.md`](simulator-deck-source.md).
+
 ## Troubleshooting
 
 - `xcodebuild` points at Command Line Tools: rerun `xcode-select --switch`.
