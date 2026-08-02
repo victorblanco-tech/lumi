@@ -1,5 +1,6 @@
-import SwiftUI
+import AppKit
 import LumiDesignSystem
+import SwiftUI
 
 @main
 struct LumiApp: App {
@@ -12,11 +13,30 @@ struct LumiApp: App {
                 engineStatus: engineStatus,
                 preferences: preferences
             )
-                .preferredColorScheme(preferences.appearance.colorScheme)
+                .onAppear {
+                    MacApplicationAppearance.apply(preferences.appearance)
+                }
+                .onChange(of: preferences.appearance) { _, appearance in
+                    MacApplicationAppearance.apply(appearance)
+                }
                 .task {
                     await engineStatus.start()
                 }
         }
         .defaultSize(width: 1_100, height: 760)
+    }
+}
+
+@MainActor
+private enum MacApplicationAppearance {
+    static func apply(_ preference: AppearancePreference) {
+        NSApplication.shared.appearance = switch preference {
+        case .dark:
+            NSAppearance(named: .darkAqua)
+        case .light:
+            NSAppearance(named: .aqua)
+        case .system:
+            nil
+        }
     }
 }

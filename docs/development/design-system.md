@@ -16,6 +16,9 @@ management dependency.
   `KeyNotationFormatter` creates Camelot or Classic display strings.
 - `LumiPreferences` owns persisted appearance and key-notation choices. First
   launch defaults to Dark and Camelot; Light and System remain supported.
+- The macOS app applies appearance through `NSApplication.appearance`. Setting
+  System clears the override so AppKit updates background and foreground
+  semantics together and continues following the macOS setting.
 - Components use native controls, keyboard semantics, accessibility labels, and
   San Francisco system typography.
 

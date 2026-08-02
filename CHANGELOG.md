@@ -23,3 +23,8 @@ Lumi gebruikt [Semantic Versioning](https://semver.org/).
 
 - De ontwikkelbranch gebruikt een expliciete SemVer pre-releaseversie, gestart
   op `0.0.1-dev`.
+
+### Fixed
+
+- Wisselen van Light naar System volgt macOS nu zonder donkere content met
+  onleesbare light-mode voorgrondkleuren achter te laten.
