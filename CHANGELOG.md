@@ -10,6 +10,8 @@ Lumi gebruikt [Semantic Versioning](https://semver.org/).
 ### Added
 
 - Initiële functionele en technische architectuurbaseline.
+- Eerste Rust-workspace, native macOS-target en reproduceerbare
+  foundationverificatie voor Epic 1.
 
 ### Changed
 

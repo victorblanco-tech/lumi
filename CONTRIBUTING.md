@@ -32,6 +32,19 @@ ci: voeg releasevalidatie toe
 chore: onderhoud dependencies
 ```
 
+## Lokale verificatie
+
+Voer voor iedere pull request de volledige foundationcheck uit:
+
+```bash
+./scripts/verify.sh
+```
+
+Deze controleert de toolchains en versieconsistentie, formatteert niets
+stilzwijgend en bouwt/test zowel de Rust-workspace als de unsigned native
+macOS-app. Meer informatie staat in
+[`docs/development/README.md`](docs/development/README.md).
+
 Breaking changes krijgen `!` of een `BREAKING CHANGE:`-footer:
 
 ```text

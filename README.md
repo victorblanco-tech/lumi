@@ -20,4 +20,11 @@ GitHub, staat in
 Het bouwplan voor de eerste verticale productmilestone staat in
 [`docs/planning/epic-01-first-visible-lighting-plan.md`](docs/planning/epic-01-first-visible-lighting-plan.md).
 
-> Status: architectuur- en refinementfase. Er is nog geen implementatie.
+> Status: Epic 1-foundationbouw is gestart op de ontwikkelbranch.
+
+## Development
+
+Epic 1 foundation development is active. The repository contains the initial
+Rust workspace and native macOS target. Environment setup and the single local
+verification command are documented in
+[`docs/development/README.md`](docs/development/README.md).
