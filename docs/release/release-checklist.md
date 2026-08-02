@@ -8,7 +8,8 @@ Gebruik deze checklist voor iedere productie- of hotfixrelease.
 - [ ] Scope bevroren
 - [ ] `dev` groen en up-to-date
 - [ ] Releasebranch vanaf juiste commit gemaakt
-- [ ] `VERSION`, Cargo- en Xcodeversies gelijk
+- [ ] `VERSION` bevat de gekozen releaseversie zonder `-dev`
+- [ ] `VERSION`, Cargo- en numerieke Xcode-marketingversies consistent
 - [ ] `CHANGELOG.md` bijgewerkt
 - [ ] Configuratie-/protocolmigraties beschreven
 - [ ] Bekende beperkingen beschreven
@@ -45,6 +46,7 @@ Gebruik deze checklist voor iedere productie- of hotfixrelease.
 - [ ] iOS naar App Review gestuurd
 - [ ] Phased release ingesteld voor iOS-update
 - [ ] `main` teruggesynchroniseerd naar `dev`
+- [ ] `VERSION` op `dev` verhoogd naar de volgende versie met `-dev`
 - [ ] Releasebranch verwijderd
 - [ ] Installatie-/upgradepad gemonitord
 - [ ] Rollbackartefact en patchprocedure beschikbaar

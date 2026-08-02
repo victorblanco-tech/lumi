@@ -10,3 +10,8 @@ Lumi gebruikt [Semantic Versioning](https://semver.org/).
 ### Added
 
 - Initiële functionele en technische architectuurbaseline.
+
+### Changed
+
+- De ontwikkelbranch gebruikt een expliciete SemVer pre-releaseversie, gestart
+  op `0.0.1-dev`.

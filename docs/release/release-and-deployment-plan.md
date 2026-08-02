@@ -122,19 +122,39 @@ Tijdens de pre-1.0-fase:
 
 ### 5.1 Initiële versie
 
-De repository start op `0.0.0`: er is nog geen uitvoerbaar product uitgebracht.
-De eerste bruikbare simulator-MVP wordt naar verwachting `0.1.0`.
+De ontwikkelbranch start op `0.0.1-dev`. De suffix maakt direct zichtbaar dat
+dit geen productieversie is. Als deze ontwikkelcyclus wordt uitgebracht, wordt
+de suffix verwijderd en ontstaat release `0.0.1`.
+
+Na iedere productieversie krijgt `dev` meteen de eerstvolgende geplande versie
+met `-dev`, bijvoorbeeld:
+
+```text
+dev:   0.0.1-dev
+main:  0.0.1
+dev:   0.0.2-dev
+rc:    0.0.2-rc.1
+main:  0.0.2
+```
+
+Een grotere functionele MVP-stap mag bewust naar `0.1.0-dev` worden verhoogd.
 
 ### 5.2 Canonieke versie
 
-Het rootbestand `VERSION` is de canonieke marketingversie. Een releasevalidatie
-controleert later automatisch dat deze gelijk is aan:
+Het rootbestand `VERSION` is de canonieke bronversie. Op `dev` is dit een geldige
+SemVer pre-release zoals `0.0.1-dev`; op een productiecommit op `main` staat
+uitsluitend `MAJOR.MINOR.PATCH`. Een releasevalidatie controleert later
+automatisch dat deze gelijk is aan:
 
 - de Rust workspace/packageversie;
 - macOS `MARKETING_VERSION` / `CFBundleShortVersionString`;
 - iOS `MARKETING_VERSION` / `CFBundleShortVersionString`;
 - documentatie- en protocolversieverwijzingen waar van toepassing;
-- de Git-tag zonder `v`-prefix.
+- de Git-tag zonder `v`-prefix, uitsluitend bij productiebuilds.
+
+Omdat Apple voor `CFBundleShortVersionString` alleen numerieke componenten
+gebruikt, wordt daar de suffix weggelaten. De ontwikkelstatus blijft zichtbaar
+in de appnaam/buildmetadata en het monotone `CFBundleVersion`.
 
 ### 5.3 Buildnummers
 
@@ -142,8 +162,9 @@ Buildnummers zijn monotonisch en veranderen bij iedere CI-build:
 
 - Apple `CFBundleVersion`: afgeleid van de CI-run plus retry-attempt;
 - artefactnaam: versie, channel, korte commit-SHA en buildnummer;
-- GitHub developmentbuild: `0.1.0-dev.<run>+<sha>` als display-/artefactversie;
-- release candidate: `0.1.0-rc.<n>` in GitHub/artefactnamen, met Apple-compatible
+- GitHub developmentbuild: de versie uit `VERSION`, aangevuld met buildnummer en
+  korte commit-SHA in de artefactnaam;
+- release candidate: `0.0.2-rc.<n>` in GitHub/artefactnamen, met Apple-compatible
   numerieke marketing- en buildversies in de appbundle.
 
 Een buildnummer is nooit een vervanging voor de productversie.
@@ -238,7 +259,7 @@ bestaan. De beoogde checks zijn:
 Maak `release/vX.Y.Z` vanaf `dev` en wijzig uitsluitend releasegerelateerde
 zaken:
 
-- `VERSION`;
+- `VERSION`: verwijder `-dev` of vervang dit eerst door `-rc.<n>`;
 - Cargo- en Xcodeversies;
 - changelog;
 - migratie-/compatibiliteitsnotities;
@@ -277,7 +298,8 @@ Start bewust de releaseworkflow op de mergecommit:
 ### Stap 6 – Terugsynchroniseren
 
 Merge `main` terug naar `dev` zodat release- en taghistorie gemeenschappelijk
-blijven. Verwijder de releasebranch na succesvolle synchronisatie.
+blijven. Verhoog daarna `VERSION` op `dev` naar de volgende geplande versie met
+`-dev`. Verwijder de releasebranch na succesvolle synchronisatie.
 
 ## 10. macOS deployment
 
