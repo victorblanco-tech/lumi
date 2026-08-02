@@ -90,11 +90,15 @@ verouderde schijnbacklog.
 
 - engineering foundation en domeincontracten;
 - reproduceerbare Rust- en Swift-builds;
+- minimale native macOS-app met het gedeelde Lumi-designsysteem;
 - fixtures en simulator clock;
-- volledige track-load naar TrackLightingPlan naar MIDI dry-run vertical slice;
+- volledige dual-deck demo naar vooraf zichtbaar en aanpasbaar
+  `TrackLightingPlan` naar dry-run-output;
 - deterministische golden end-to-endtests.
 
-Exit: de kleinste volledige Lumi-keten werkt zonder DJ-hardware en draait in CI.
+Exit: de kleinste volledige Lumi-keten is zichtbaar en bedienbaar zonder
+DJ-hardware en draait in CI. De technische uitwerking staat in
+[Epic 1 – First Visible Lighting Plan](epic-01-first-visible-lighting-plan.md).
 
 ### Fase 2 – Deck intelligence en planning (`0.2.0`)
 

@@ -17,4 +17,7 @@ Het bouwfase- en werktrackingbeleid, inclusief de rolverdeling tussen Buzz en
 GitHub, staat in
 [`docs/planning/build-and-tracking-plan.md`](docs/planning/build-and-tracking-plan.md).
 
+Het bouwplan voor de eerste verticale productmilestone staat in
+[`docs/planning/epic-01-first-visible-lighting-plan.md`](docs/planning/epic-01-first-visible-lighting-plan.md).
+
 > Status: architectuur- en refinementfase. Er is nog geen implementatie.
