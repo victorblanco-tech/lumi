@@ -306,6 +306,94 @@ Crates mogen tijdens implementatie worden samengevoegd als een grens nog geen
 zelfstandige dependencyrichting oplevert. Domein, protocol, provider en UI
 blijven wel logisch gescheiden; er worden geen lege architectuurcrates gemaakt.
 
+### 5.1 Codebase- en dependencyregels
+
+De repository is een monorepo, maar geen gemengde codepool. Iedere top-levelmap
+heeft één verantwoordelijkheid en iedere programmeertaal blijft binnen zijn
+eigen build- en conventiegrenzen.
+
+De verplichte dependencyrichting is:
+
+```text
+macOS views -> feature state -> engine client -> wire DTOs
+
+provider adapters -> application engine -> planner/domain
+transport adapters -> protocol DTOs
+```
+
+Omgekeerde imports zijn niet toegestaan. In het bijzonder:
+
+- `lumi-domain` kent geen Tokio, transport, JSON, Swift, UI of providertypes;
+- wire DTO's zijn niet hetzelfde type als interne domeinmodellen;
+- views spreken niet rechtstreeks met sockets, processen of persistence;
+- providers muteren geen centrale state en publiceren alleen contractevents;
+- de planner kent geen simulator-, MIDI-, SoundSwitch- of UI-details;
+- platformframeworks blijven in de Apple-app of concrete platformadapter;
+- gedeelde code ontstaat pas na aantoonbaar hergebruik en niet vooruitlopend
+  daarop.
+
+Mappen met onduidelijke eigenaarschap zoals `Utils`, `Common`, `Shared`,
+`Helpers` en `Misc` zijn niet toegestaan. Een generieke functie blijft bij het
+domein of de feature die haar betekenis bezit. Als hergebruik een echte nieuwe
+module rechtvaardigt, krijgt die module een concrete naam en expliciete API.
+
+Code, type- en functienamen, protocolvelden, comments en API-documentatie zijn
+Engels. Product- en beslisdocumentatie mag Nederlands blijven. Rust volgt
+idiomatisch `snake_case`; Swift volgt de Swift API Design Guidelines en
+`lowerCamelCase`. Uniformiteit betekent consistente taalconventies, niet één
+kunstmatige namingstijl over verschillende talen.
+
+### 5.2 Vastgezette stack voor Epic 1
+
+Rust:
+
+- Rust 2024 edition met een gepinde recente stable toolchain;
+- Tokio uitsluitend voor asynchrone I/O, timers en process-edgework;
+- Serde voor wire- en fixtureserialisatie;
+- tracing voor gestructureerde observability;
+- typed errors; geen `unwrap`, `expect` of `panic!` in normale productieflows;
+- `rustfmt` en strenge Clippychecks in CI;
+- `unsafe` is standaard verboden en vereist een afzonderlijke review en
+  gedocumenteerde safety-invariants.
+
+Apple/Swift:
+
+- Swift 6 language mode met strict concurrency;
+- SwiftUI, Observation, Foundation, Network.framework en OSLog;
+- `@MainActor` voor UI-state en actors voor process-/transportownership;
+- geen force unwraps of stil genegeerde errors in productiecode;
+- één repositorybrede `swift-format`-configuratie;
+- compilerwarnings worden in CI als fouten behandeld;
+- geen extern UI-, routing- of state-managementframework in Epic 1.
+
+Dependencies worden centraal beheerd via het Rust-workspacemanifest,
+`Cargo.lock`, Swift Package Manager/Xcode en vastgelegde buildsettings. Een
+nieuwe frameworkdependency vereist een concrete usecase, onderhoudscheck,
+licentiecheck en onderbouwing waarom standaardbibliotheek of bestaand framework
+niet volstaat. Een nieuwe fundamentele runtime- of UI-frameworkkeuze vereist een
+ADR.
+
+### 5.3 Toekomstbestendigheid en actualiteitsbeleid
+
+- productbuilds gebruiken de nieuwste gevalideerde stabiele toolchain, nooit
+  impliciet een beta;
+- dependencyupdates komen in afzonderlijke, testbare PR's;
+- minimaal ieder kwartaal worden Rust crates en Apple packages gecontroleerd;
+- minimaal jaarlijks worden deploymenttargets, Xcode/Swift en Apple SDK's
+  herbeoordeeld;
+- deprecated API's worden niet nieuw geïntroduceerd zonder vastgelegde reden en
+  migratiepad;
+- provider- en transportcontracten schermen externe of platformspecifieke
+  technologie af;
+- een dynamisch pluginsysteem of cross-platform UI-framework wordt pas gebouwd
+  na een concrete productusecase;
+- CI bewaakt format, lint, tests, lockfiles en waar praktisch de toegestane
+  dependencyrichting.
+
+De stack voor Epic 1 is daarmee bewust modern maar conservatief: recente stable
+Rust en Swift, actief onderhouden kernlibraries en native Apple-frameworks,
+zonder experimentele betatechniek in het kritieke pad.
+
 ## 6. Bouwvolgorde: vijf demoable increments
 
 ### Increment 1 – App-to-engine walking skeleton
