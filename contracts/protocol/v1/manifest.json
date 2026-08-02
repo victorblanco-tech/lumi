@@ -1,0 +1,40 @@
+{
+  "protocolVersion": 1,
+  "encoding": "utf-8",
+  "framing": "newline-delimited-json",
+  "maxMessageBytes": 65536,
+  "unknownFields": "ignore",
+  "commandKinds": [
+    "getSnapshot",
+    "loadDemoSession",
+    "setOperationState",
+    "setSimulationSpeed",
+    "advanceToNextTrack",
+    "selectTheme",
+    "selectScene",
+    "setCueLock",
+    "regeneratePlan",
+    "resetDemoSession"
+  ],
+  "eventKinds": [
+    "engineReady",
+    "stateSnapshot",
+    "stateChanged",
+    "deckSourceStatusChanged",
+    "deckStateChanged",
+    "planCreated",
+    "planRevised",
+    "planActivated",
+    "phraseChanged",
+    "outputEffectRecorded",
+    "operationStateChanged",
+    "diagnosticRaised"
+  ],
+  "canonicalFixtures": [
+    "command-select-theme.json",
+    "snapshot-state.json",
+    "event-state-changed.json",
+    "error-revision-conflict.json",
+    "event-forward-compatible.json"
+  ]
+}

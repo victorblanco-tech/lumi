@@ -2,6 +2,7 @@
 members = [
     "engine/crates/lumi-domain",
     "engine/crates/lumi-engine",
+    "engine/crates/lumi-protocol",
 ]
 resolver = "3"
 

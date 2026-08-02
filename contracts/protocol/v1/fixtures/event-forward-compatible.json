@@ -1,0 +1,17 @@
+{
+  "protocolVersion": 1,
+  "messageType": "event",
+  "messageId": "event-0045",
+  "sequence": 45,
+  "correlationId": "interaction-0001",
+  "sentAt": "2026-08-02T18:00:04Z",
+  "futureEnvelopeHint": "safe-to-ignore",
+  "payload": {
+    "kind": "diagnosticRaised",
+    "severity": "info",
+    "message": "Forward-compatible fixture",
+    "futureOptionalDetail": {
+      "source": "protocol-v1-contract-test"
+    }
+  }
+}

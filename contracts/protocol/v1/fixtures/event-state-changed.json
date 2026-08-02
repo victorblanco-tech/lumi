@@ -1,0 +1,13 @@
+{
+  "protocolVersion": 1,
+  "messageType": "event",
+  "messageId": "event-0043",
+  "sequence": 43,
+  "correlationId": "cmd-0001",
+  "sentAt": "2026-08-02T18:00:02Z",
+  "payload": {
+    "kind": "stateChanged",
+    "stateRevision": 8,
+    "reason": "themeSelected"
+  }
+}
