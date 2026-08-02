@@ -3,7 +3,10 @@ use std::io::{self, Write as _};
 use std::net::Ipv4Addr;
 use std::time::Duration;
 
-use lumi_domain::OperationState;
+use lumi_domain::{
+    DecisionReason, DomainEvent, MonotonicTime, OperationState, RuntimeHealth, SerializedRuntime,
+    SerializedRuntimeError,
+};
 use lumi_protocol::{MessageEnvelope, MessageType, PROTOCOL_VERSION};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -23,6 +26,7 @@ const MAXIMUM_SESSION_TOKEN_BYTES: usize = 256;
 const MAXIMUM_AUTHENTICATION_BYTES: usize = 512;
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(10);
 const AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(5);
+const EVENT_QUEUE_CAPACITY: usize = 256;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -35,6 +39,7 @@ pub async fn run() -> Result<(), EngineError> {
     let session_token =
         env::var(SESSION_TOKEN_ENVIRONMENT_KEY).map_err(|_| EngineError::MissingSessionToken)?;
     validate_session_token(&session_token)?;
+    let runtime = initialized_runtime()?;
 
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
     let endpoint = listener.local_addr()?;
@@ -48,7 +53,7 @@ pub async fn run() -> Result<(), EngineError> {
         return Err(EngineError::NonLoopbackPeer);
     }
 
-    serve_authenticated_client(stream, &session_token).await
+    serve_authenticated_client(stream, &session_token, &runtime).await
 }
 
 fn validate_session_token(session_token: &str) -> Result<(), EngineError> {
@@ -76,6 +81,7 @@ fn write_startup_record(port: u16) -> Result<(), EngineError> {
 async fn serve_authenticated_client(
     stream: TcpStream,
     expected_token: &str,
+    runtime: &SerializedRuntime,
 ) -> Result<(), EngineError> {
     let (mut reader, mut writer) = stream.into_split();
     let authentication_bytes = timeout(
@@ -91,7 +97,7 @@ async fn serve_authenticated_client(
         return Err(EngineError::AuthenticationRejected);
     }
 
-    let mut encoded_snapshot = serde_json::to_vec(&initial_snapshot()?)?;
+    let mut encoded_snapshot = serde_json::to_vec(&initial_snapshot(runtime)?)?;
     encoded_snapshot.push(b'\n');
     writer.write_all(&encoded_snapshot).await?;
     writer.flush().await?;
@@ -127,17 +133,40 @@ fn tokens_match(expected: &str, received: &str) -> bool {
     expected.len() == received.len() && bool::from(expected.as_bytes().ct_eq(received.as_bytes()))
 }
 
-fn initial_snapshot() -> Result<MessageEnvelope, EngineError> {
+fn initialized_runtime() -> Result<SerializedRuntime, SerializedRuntimeError> {
+    let mut runtime = SerializedRuntime::try_new(EVENT_QUEUE_CAPACITY)?;
+    runtime.submit(DomainEvent::RuntimeStarted {
+        at: MonotonicTime::new(0),
+    })?;
+    if runtime.process_next()?.is_none() {
+        return Err(SerializedRuntimeError::StartupEventMissing);
+    }
+    Ok(runtime)
+}
+
+fn initial_snapshot(runtime: &SerializedRuntime) -> Result<MessageEnvelope, EngineError> {
+    let state = runtime.state();
     let mut payload = Map::new();
     payload.insert("kind".to_owned(), Value::String("stateSnapshot".to_owned()));
-    payload.insert("stateRevision".to_owned(), json!(0));
+    payload.insert("stateRevision".to_owned(), json!(state.revision().value()));
     payload.insert(
         "operationState".to_owned(),
-        Value::String(format!("{:?}", OperationState::default()).to_lowercase()),
+        Value::String(operation_state_name(state.operation()).to_owned()),
     );
     payload.insert(
         "engineVersion".to_owned(),
         Value::String(env!("CARGO_PKG_VERSION").to_owned()),
+    );
+    payload.insert(
+        "runtimeCore".to_owned(),
+        json!({
+            "model": "singleWriterReducer",
+            "health": runtime_health_name(state.health()),
+            "queueCapacity": runtime.queue_capacity(),
+            "queueDepth": runtime.queue_depth(),
+            "processedEvents": state.processed_events(),
+            "lastDecision": state.last_decision().map(decision_reason_name),
+        }),
     );
 
     Ok(MessageEnvelope {
@@ -149,6 +178,44 @@ fn initial_snapshot() -> Result<MessageEnvelope, EngineError> {
         sent_at: OffsetDateTime::now_utc().format(&Rfc3339)?,
         payload,
     })
+}
+
+const fn operation_state_name(state: OperationState) -> &'static str {
+    match state {
+        OperationState::Off => "off",
+        OperationState::Armed => "armed",
+        OperationState::Live => "live",
+        OperationState::Paused => "paused",
+    }
+}
+
+const fn runtime_health_name(health: RuntimeHealth) -> &'static str {
+    match health {
+        RuntimeHealth::Starting => "starting",
+        RuntimeHealth::Ready => "ready",
+        RuntimeHealth::Degraded => "degraded",
+    }
+}
+
+const fn decision_reason_name(reason: DecisionReason) -> &'static str {
+    match reason {
+        DecisionReason::RuntimeInitialized => "runtimeInitialized",
+        DecisionReason::TrackLoadAccepted => "trackLoadAccepted",
+        DecisionReason::PositionAdvanced => "positionAdvanced",
+        DecisionReason::TrackUnloaded => "trackUnloaded",
+        DecisionReason::StaleObservationIgnored => "staleObservationIgnored",
+        DecisionReason::ObservationTimeRegressed => "observationTimeRegressed",
+        DecisionReason::TrackLoadMismatch => "trackLoadMismatch",
+        DecisionReason::PositionRegressed => "positionRegressed",
+        DecisionReason::DuplicateCommandIgnored => "duplicateCommandIgnored",
+        DecisionReason::OperationTransitionAccepted => "operationTransitionAccepted",
+        DecisionReason::DuplicateEffectIgnored => "duplicateEffectIgnored",
+        DecisionReason::PlanAccepted => "planAccepted",
+        DecisionReason::StalePlanIgnored => "stalePlanIgnored",
+        DecisionReason::PlanTrackLoadMismatch => "planTrackLoadMismatch",
+        DecisionReason::OutputGateConfirmedClosed => "outputGateConfirmedClosed",
+        DecisionReason::QueueSaturated => "queueSaturated",
+    }
 }
 
 #[derive(Debug, Error)]
@@ -175,4 +242,6 @@ pub enum EngineError {
     Json(#[from] serde_json::Error),
     #[error("timestamp formatting failed: {0}")]
     TimeFormat(#[from] time::error::Format),
+    #[error("domain runtime initialization failed: {0}")]
+    DomainRuntime(#[from] SerializedRuntimeError),
 }

@@ -28,11 +28,11 @@ checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 
 [[package]]
 name = "lumi-domain"
-version = "0.0.1-dev"
+version = "0.0.2-dev"
 
 [[package]]
 name = "lumi-engine"
-version = "0.0.1-dev"
+version = "0.0.2-dev"
 dependencies = [
  "lumi-domain",
  "lumi-protocol",
@@ -46,7 +46,7 @@ dependencies = [
 
 [[package]]
 name = "lumi-protocol"
-version = "0.0.1-dev"
+version = "0.0.2-dev"
 dependencies = [
  "serde",
  "serde_json",

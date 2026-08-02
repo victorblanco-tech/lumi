@@ -1,3 +1,4 @@
+import Foundation
 import LumiDesignSystem
 import SwiftUI
 
@@ -24,6 +25,7 @@ struct FoundationView: View {
                     appHeader
                     preferencesPanel
                     enginePanel
+                    runtimePanel
                     sampleWorkspace
                 }
                 .padding(LumiSpacing.xLarge)
@@ -76,6 +78,17 @@ struct FoundationView: View {
                 detail: enginePresentation.detail,
                 stateLabel: enginePresentation.label,
                 state: enginePresentation.state
+            )
+        }
+    }
+
+    private var runtimePanel: some View {
+        LumiPanel {
+            ProviderStatus(
+                name: "runtime.provider.name",
+                detail: runtimePresentation.detail,
+                stateLabel: runtimePresentation.label,
+                state: runtimePresentation.state
             )
         }
     }
@@ -248,6 +261,32 @@ struct FoundationView: View {
                 state: .error
             )
         }
+    }
+
+    private var runtimePresentation: EngineProviderPresentation {
+        guard case let .ready(engine) = engineStatus.state else {
+            return EngineProviderPresentation(
+                detail: String(localized: "runtime.detail.waiting"),
+                label: "design.state.loading",
+                state: .loading
+            )
+        }
+
+        let runtime = engine.runtimeCore
+        let format = String(localized: "runtime.detail.ready")
+        let detail = String.localizedStringWithFormat(
+            format,
+            runtime.processedEvents,
+            runtime.queueDepth,
+            runtime.queueCapacity,
+            engine.stateRevision,
+            runtime.lastDecision
+        )
+        return EngineProviderPresentation(
+            detail: detail,
+            label: "runtime.status.serialized",
+            state: runtime.health == "ready" ? .ready : .degraded
+        )
     }
 
     private func preferencePicker<Value: Hashable>(

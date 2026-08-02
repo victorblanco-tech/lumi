@@ -22,3 +22,8 @@ incremental state again.
 
 Wire DTOs are mapped into Rust domain and Swift presentation types. They are
 never the authoritative runtime state.
+
+State snapshots may include `runtimeCore`, a presentation-safe summary of the
+serialized reducer model, health, bounded ingress, processed-event count, and
+last structured decision reason. It exposes evidence without leaking Rust
+domain types into clients.
