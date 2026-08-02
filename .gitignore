@@ -1,0 +1,20 @@
+# macOS
+.DS_Store
+
+# Rust
+/target/
+
+# Xcode / Swift
+DerivedData/
+*.xcuserstate
+xcuserdata/
+.build/
+
+# Local configuration and secrets
+.env
+.env.*
+!.env.example
+
+# Editor and temporary files
+*.swp
+*.tmp

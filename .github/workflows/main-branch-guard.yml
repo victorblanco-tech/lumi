@@ -1,0 +1,28 @@
+name: Main branch guard
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  allowed-source:
+    name: Allowed release source
+    runs-on: ubuntu-latest
+    steps:
+      - name: Validate source branch
+        env:
+          HEAD_REF: ${{ github.head_ref }}
+        run: |
+          case "$HEAD_REF" in
+            dev|hotfix/*)
+              echo "Allowed source branch: $HEAD_REF"
+              ;;
+            *)
+              echo "Pull requests to main must come from dev or hotfix/*."
+              exit 1
+              ;;
+          esac
