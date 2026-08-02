@@ -16,6 +16,8 @@ Decision Records (ADR's) die de belangrijkste besluiten vastleggen.
 - [ADR-0007: Hardware-onafhankelijke MIDI-co-existentie](adr/0007-hardware-onafhankelijke-midi-coexistentie.md)
 - [ADR-0008: Operationele toestanden](adr/0008-operationele-toestanden.md)
 - [ADR-0009: Dev/main en gecontroleerde SemVer-releases](adr/0009-dev-main-en-semver-releases.md)
+- [ADR-0010: Provider-onafhankelijke deck-sources](adr/0010-provider-onafhankelijke-deck-sources.md)
+- [ADR-0011: Provider-onafhankelijke MIDI-output](adr/0011-provider-onafhankelijke-midi-output.md)
 
 Release- en deploymentmanagement staat in [`docs/release`](../release/README.md).
 

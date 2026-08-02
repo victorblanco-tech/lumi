@@ -92,11 +92,13 @@ flowchart TB
   subgraph engine["lumi-engine – Rust LaunchAgent"]
     API["Versiegebonden Control API<br/>commands, snapshots, events"]
 
-    subgraph inputs["Source adapters"]
+    subgraph inputs["Deck source providers"]
       SIM["Simulator"]
-      META["Rekordbox metadata"]
-      LIVE["Beat Link Trigger / PRO DJ LINK"]
+      REPLAY["Replay"]
+      LIVE["DeckSourceProvider<br/>Beat Link eerst; native/anders later"]
     end
+
+    META["Rekordbox library-import"]
 
     QUEUE[("Begrensde eventqueue")]
     REDUCER[["Single-writer reducer<br/>centrale runtime-state"]]
@@ -118,10 +120,13 @@ flowchart TB
       SCENE["Self-contained ApplyScene<br/>bank → delay → Autoloop"]
     end
 
-    PROFILE["SoundSwitch-outputprofiel<br/>semantische actie → MIDI"]
+    OUTPUT["LightingOutputProvider<br/>SoundSwitch MIDI eerst"]
+    PROFILE["Targetprofiel<br/>semantische actie → MIDI"]
+    TRANSPORT["MidiTransportProvider<br/>CoreMIDI eerst"]
     LOGS[("Config, revisions,<br/>sessies en logs")]
 
     SIM --> QUEUE
+    REPLAY --> QUEUE
     META --> QUEUE
     LIVE --> QUEUE
     API -->|"user commands"| QUEUE
@@ -136,8 +141,10 @@ flowchart TB
     REDUCER --> GATE
     GATE --> BOUNDARY
     BOUNDARY --> SCENE
-    SCENE --> PROFILE
-    PROFILE -->|"effectresultaat"| QUEUE
+    SCENE --> OUTPUT
+    OUTPUT --> PROFILE
+    PROFILE --> TRANSPORT
+    TRANSPORT -->|"effectresultaat"| QUEUE
     REDUCER <--> LOGS
     PLANS <--> LOGS
     REDUCER -->|"state + plan events"| API
@@ -147,12 +154,14 @@ flowchart TB
 
   MACAPP <-->|"lokale IPC"| API
   IOSAPP <-->|"Bonjour + pairing + TLS op LAN"| API
-  PROFILE -->|"virtuele MIDI-poort"| SS
+  TRANSPORT -->|"virtuele MIDI-poort"| SS
 ```
 
 De Planning Engine doet het creatieve werk vooraf. De Execution Engine voert in
 `LIVE` alleen een reeds gevalideerde cue uit. UI's, source-adapters en
-outputworkers muteren nooit rechtstreeks de centrale state.
+outputproviders muteren nooit rechtstreeks de centrale state. Beat Link en
+SoundSwitch zijn de eerste providerimplementaties en geen dependencies van de
+corecontracten.
 
 ## Plaat 3 – De Lumi-usecase: het ontbrekende stuk
 

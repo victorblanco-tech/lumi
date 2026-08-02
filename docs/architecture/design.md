@@ -54,9 +54,9 @@ functionele gat staan in [Functionele architectuurplaten](visual-overview.md).
                                                 |
                     +---------------------------+--------------------------+
                     |                           |                          |
-              Source adapters            Planning & execution       MIDI output
+           Deck source providers         Planning & execution    Lighting output provider
                     |                           |                          |
-     Simulator / metadata / BLT       Lighting Plans en state       SoundSwitch
+       Simulator / Beat Link          Lighting Plans en state    SoundSwitch via MIDI
                                                                            ^
                                                                            |
                                                         fysieke MIDI-controller
@@ -70,14 +70,14 @@ functionele gat staan in [Functionele architectuurplaten](visual-overview.md).
 `lumi-engine` is een zelfstandige Rust-binary zonder gebruikersinterface. De
 engine bevat:
 
-- source-adapters;
+- provider-onafhankelijke deck-sourcepoort en adapters;
 - trackmatching en metadatareferenties;
 - lighting-leaderselectie;
 - Planning Engine;
 - Execution Engine;
 - centrale runtime-state;
 - configuratievalidatie;
-- MIDI-output;
+- provider-onafhankelijke lighting-outputpoort en MIDI-transport;
 - lokale API/IPC;
 - gestructureerde logging en diagnostiek.
 
@@ -115,7 +115,7 @@ Verlies van de iPhone-verbinding heeft geen invloed op planning of uitvoering.
 
 ### 5.1 Planning
 
-Zodra een nieuwe track op een deck wordt geladen, publiceert de source-adapter
+Zodra een nieuwe track op een deck wordt geladen, publiceert de deck-sourceprovider
 een `TrackLoaded`-event met een unieke `trackLoadInstanceId`. Laden staat los van
 lighting-leader- of tempo-masterstatus.
 
@@ -269,7 +269,7 @@ De outputlevenscyclus staat los van planstatus en themeregels:
 
 Een ontbrekend MIDI-device blokkeert `Start`, maar niet `Arm` of de simulator.
 
-## 8. MIDI en SoundSwitch
+## 8. Provider-onafhankelijke output, MIDI en SoundSwitch
 
 ### 8.1 Semantische output
 
@@ -282,9 +282,13 @@ ENABLE_STATIC_LOOK(id)
 DISABLE_STATIC_LOOK(id)
 ```
 
-Een SoundSwitch-outputprofiel vertaalt deze acties naar MIDI-messages. De
-capaciteiten van het actieve targetprofiel bepalen onder andere het aantal
-banks, slots en ondersteunde Static Look-acties.
+De core levert deze acties via een stabiele `LightingOutputProvider`-poort. De
+eerste implementatie is een SoundSwitch-MIDI-provider. Een configureerbaar
+SoundSwitch-outputprofiel vertaalt de acties naar MIDI-messages; een
+afzonderlijke `MidiTransportProvider` verzendt deze via CoreMIDI. De capaciteiten
+van de actieve provider en het targetprofiel bepalen onder andere het aantal
+banks, slots en ondersteunde Static Look-acties. Planning, state en UI kennen
+geen CoreMIDI- of SoundSwitch-specifieke types.
 
 ### 8.2 Co-existentie met fysieke controllers
 
@@ -422,8 +426,9 @@ offline en lokaal, ook wanneer installatie en updates via Apple lopen.
 De volgende onderwerpen zijn bewust nog geen bewezen capabilities:
 
 1. exacte Rekordbox-phrase- en kleurimportstrategie;
-2. live deck-, load-, beat-, on-air- en masterevents via Beat Link Trigger of
-   PRO DJ LINK;
+2. live deck-, load-, beat-, on-air- en masterevents via de eerste
+   `BeatLinkDeckSourceProvider` en later eventueel een native PRO DJ LINK- of
+   andere provider;
 3. stabiele trackidentiteit tussen metadata-export, USB en live deck;
 4. SoundSwitch MIDI-bank-, Autoloop- en Static Look-mappings;
 5. betrouwbare bank-switchdelay en quantisatie;
@@ -431,7 +436,7 @@ De volgende onderwerpen zijn bewust nog geen bewezen capabilities:
 7. gedrag wanneer Control One en Lumi gelijktijdig SoundSwitch bedienen;
 8. lokale Bonjour-, pairing- en reconnectflow in een druk booth-netwerk;
 9. App Store Review-flow met ingebouwde demomodus;
-10. exacte Windows-service- en MIDI-adapters in een latere fase.
+10. exacte Windows-service- en MIDI-transportproviders in een latere fase.
 
 ## 15. Niet in dit document
 

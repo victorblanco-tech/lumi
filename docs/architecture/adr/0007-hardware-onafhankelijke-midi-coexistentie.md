@@ -25,6 +25,9 @@ zijn onafhankelijke MIDI-besturingsbronnen voor SoundSwitch.
 - `Pause` voorkomt dat Lumi op volgende phrasegrenzen terugneemt.
 - Optionele lifecycle-MIDI-input is generiek gemapt en geen deviceprofiel.
 
+De provider- en transportgrens voor Lumi's eigen output is afzonderlijk
+vastgelegd in [ADR-0011](0011-provider-onafhankelijke-midi-output.md).
+
 ## Consequenties
 
 - Control One, APC, Launchpad en andere controllers kunnen naast Lumi bestaan.

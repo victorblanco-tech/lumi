@@ -61,7 +61,7 @@ Het projectboard is:
 - `Phase`: bouwfase uit dit plan;
 - `Priority`: P0 Critical, P1 High, P2 Normal, P3 Later;
 - `Effort`: relatieve omvang 1, 2, 3, 5 of 8;
-- `Component`: Product, Engine, Simulator, PRO DJ LINK, Planner,
+- `Component`: Product, Engine, Simulator, Deck sources, Planner,
   MIDI & SoundSwitch, macOS, iPhone of Delivery;
 - `Work type`: Epic, Feature, Task, Bug of Research.
 
@@ -98,7 +98,8 @@ Exit: de kleinste volledige Lumi-keten werkt zonder DJ-hardware en draait in CI.
 
 ### Fase 2 – Deck intelligence en planning (`0.2.0`)
 
-- PRO DJ LINK source adapter;
+- provider-onafhankelijk deck-sourcecontract met Beat Link als eerste live
+  provider;
 - dual-deck en master state;
 - detectie en planning van de volgende geladen track;
 - phrase/loop/themeplanning;
