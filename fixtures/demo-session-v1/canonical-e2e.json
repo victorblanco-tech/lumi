@@ -13,7 +13,7 @@
         "sceneId": 1,
         "sceneName": "Soft Motion",
         "themeId": 2,
-        "themeName": "Electric Bloom"
+        "themeName": "Deep Ocean"
       },
       "commandId": 1,
       "phraseIndex": 0,
@@ -30,7 +30,7 @@
         "sceneId": 9,
         "sceneName": "Deep Space",
         "themeId": 2,
-        "themeName": "Electric Bloom"
+        "themeName": "Deep Ocean"
       },
       "commandId": 2,
       "phraseIndex": 1,
@@ -47,7 +47,7 @@
         "sceneId": 6,
         "sceneName": "Velocity Build",
         "themeId": 2,
-        "themeName": "Electric Bloom"
+        "themeName": "Deep Ocean"
       },
       "commandId": 3,
       "phraseIndex": 2,
@@ -64,7 +64,7 @@
         "sceneId": 7,
         "sceneName": "Full Energy",
         "themeId": 2,
-        "themeName": "Electric Bloom"
+        "themeName": "Deep Ocean"
       },
       "commandId": 4,
       "phraseIndex": 3,
@@ -85,7 +85,7 @@
         "sceneId": 9,
         "sceneName": "Deep Space",
         "themeId": 2,
-        "themeName": "Electric Bloom"
+        "themeName": "Deep Ocean"
       },
       "locked": true,
       "origin": "user",

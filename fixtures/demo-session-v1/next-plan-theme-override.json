@@ -4,14 +4,14 @@
   "trackId": 202,
   "trackDurationBeats": 128,
   "trackLoadId": 2001,
-  "revision": 1,
+  "revision": 2,
   "configurationRevision": 1,
   "seed": 13664634368846806414,
   "status": "ready",
   "themeDecision": {
-    "themeId": 1,
-    "themeName": "Electric Bloom",
-    "reason": "defaultTheme"
+    "themeId": 4,
+    "themeName": "Ultraviolet",
+    "reason": "planInstanceUserChoice"
   },
   "cues": [
     {
@@ -19,7 +19,7 @@
       "phraseIndex": 0,
       "startBeat": 0,
       "endBeat": 32,
-      "origin": "automatic",
+      "origin": "user",
       "locked": false,
       "reason": {
         "kind": "phraseCategoryMatched",
@@ -28,8 +28,8 @@
       },
       "action": {
         "kind": "applyLook",
-        "themeId": 1,
-        "themeName": "Electric Bloom",
+        "themeId": 4,
+        "themeName": "Ultraviolet",
         "sceneId": 1,
         "sceneName": "Soft Motion",
         "category": "ambient",
@@ -42,7 +42,7 @@
       "phraseIndex": 1,
       "startBeat": 32,
       "endBeat": 64,
-      "origin": "automatic",
+      "origin": "user",
       "locked": false,
       "reason": {
         "kind": "phraseCategoryMatched",
@@ -51,8 +51,8 @@
       },
       "action": {
         "kind": "applyLook",
-        "themeId": 1,
-        "themeName": "Electric Bloom",
+        "themeId": 4,
+        "themeName": "Ultraviolet",
         "sceneId": 10,
         "sceneName": "Slow Wave",
         "category": "break",
@@ -65,7 +65,7 @@
       "phraseIndex": 2,
       "startBeat": 64,
       "endBeat": 96,
-      "origin": "automatic",
+      "origin": "user",
       "locked": false,
       "reason": {
         "kind": "phraseCategoryMatched",
@@ -74,8 +74,8 @@
       },
       "action": {
         "kind": "applyLook",
-        "themeId": 1,
-        "themeName": "Electric Bloom",
+        "themeId": 4,
+        "themeName": "Ultraviolet",
         "sceneId": 6,
         "sceneName": "Velocity Build",
         "category": "build",
@@ -88,7 +88,7 @@
       "phraseIndex": 3,
       "startBeat": 96,
       "endBeat": 128,
-      "origin": "automatic",
+      "origin": "user",
       "locked": false,
       "reason": {
         "kind": "phraseCategoryMatched",
@@ -97,8 +97,8 @@
       },
       "action": {
         "kind": "applyLook",
-        "themeId": 1,
-        "themeName": "Electric Bloom",
+        "themeId": 4,
+        "themeName": "Ultraviolet",
         "sceneId": 7,
         "sceneName": "Full Energy",
         "category": "impact",

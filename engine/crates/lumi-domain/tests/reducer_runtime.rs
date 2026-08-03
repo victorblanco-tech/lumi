@@ -2,11 +2,11 @@ use lumi_domain::{
     ClientId, CommandSequence, CueId, CueOrigin, CueReason, DecisionReason, DeckId,
     DeckObservation, DomainEvent, DomainEventKind, Effect, EffectId, EffectResult,
     EffectResultEnvelope, EffectSequence, IngressError, IngressOutcome, KeyMode, LightingCue,
-    LightingPlan, MonotonicTime, MusicalKey, ObservationEnvelope, OperationCommand, OperationState,
-    PhraseKind, PitchClass, PlanConfigurationRevision, PlanId, PlanRevision, PlanStatus,
-    ReducerError, RuntimeHealth, SceneCategory, SemanticLightingAction, SerializedRuntime,
-    SourceId, SourceSequence, StateRevision, TrackId, TrackLoadId, TrackMetadata, TrackPhrase,
-    UserCommandEnvelope, WorkerId,
+    LightingLook, LightingPlan, LoopSelection, MonotonicTime, MusicalKey, ObservationEnvelope,
+    OperationCommand, OperationState, PhraseKind, PitchClass, PlanConfigurationRevision, PlanId,
+    PlanRevision, PlanStatus, ReducerError, RuntimeHealth, SceneCategory, SemanticLightingAction,
+    SerializedRuntime, SourceId, SourceSequence, StateRevision, ThemeId, TrackId, TrackLoadId,
+    TrackMetadata, TrackPhrase, UserCommandEnvelope, WorkerId,
 };
 
 #[test]
@@ -318,6 +318,17 @@ fn plan_result(sequence: u64, plan: LightingPlan) -> DomainEvent {
 }
 
 fn plan(revision: PlanRevision, track_load_id: TrackLoadId) -> LightingPlan {
+    let look = match LightingLook::try_new(
+        ThemeId::new(1),
+        "Test Theme".to_owned(),
+        lumi_domain::SceneId::new(1),
+        "Test Scene".to_owned(),
+        SceneCategory::Ambient,
+        LoopSelection::new(1, 1),
+    ) {
+        Ok(look) => look,
+        Err(error) => panic!("test look must be valid: {error}"),
+    };
     let result = LightingPlan::try_new(
         PlanId::new(1),
         DeckId::new(1),
@@ -333,7 +344,7 @@ fn plan(revision: PlanRevision, track_load_id: TrackLoadId) -> LightingPlan {
             0,
             0,
             128,
-            SemanticLightingAction::HoldCurrentLook,
+            SemanticLightingAction::ApplyLook(look),
             CueOrigin::Automatic,
             CueReason::PhraseCategoryMatched {
                 phrase_kind: PhraseKind::Intro,

@@ -4,8 +4,8 @@ use std::fmt;
 use lumi_domain::{
     CueId, CueOrigin, CueReason, DeckId, LightingCue, LightingLook, LightingPlan, LoopSelection,
     PhraseKind, PlanConfigurationRevision, PlanId, PlanRevision, PlanStatus, PlanValidationError,
-    SceneCategory, SceneId, SemanticLightingAction, ThemeId, TrackId, TrackLoadId, TrackMetadata,
-    TrackPhrase,
+    SceneCategory, SceneId, SemanticLightingAction, ThemeDecision, ThemeId, ThemeSelectionReason,
+    TrackColor, TrackId, TrackLoadId, TrackMetadata, TrackPhrase,
 };
 
 const FNV_OFFSET_BASIS: u64 = 0xcbf2_9ce4_8422_2325;
@@ -15,6 +15,7 @@ const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 pub struct PlannerTrack {
     id: TrackId,
     duration_beats: u32,
+    color: Option<TrackColor>,
     phrases: Option<Vec<TrackPhrase>>,
 }
 
@@ -24,6 +25,7 @@ impl PlannerTrack {
         Self {
             id: metadata.id(),
             duration_beats: metadata.duration_beats(),
+            color: metadata.color(),
             phrases: Some(metadata.phrases().to_vec()),
         }
     }
@@ -33,6 +35,7 @@ impl PlannerTrack {
         Self {
             id,
             duration_beats,
+            color: None,
             phrases: None,
         }
     }
@@ -42,6 +45,22 @@ impl PlannerTrack {
         Self {
             id,
             duration_beats,
+            color: None,
+            phrases: Some(phrases),
+        }
+    }
+
+    #[must_use]
+    pub fn with_analysis_and_color(
+        id: TrackId,
+        duration_beats: u32,
+        color: TrackColor,
+        phrases: Vec<TrackPhrase>,
+    ) -> Self {
+        Self {
+            id,
+            duration_beats,
+            color: Some(color),
             phrases: Some(phrases),
         }
     }
@@ -60,6 +79,51 @@ struct ThemeDefinition {
     name: &'static str,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ThemeColorRuleMode {
+    Force,
+    Prefer,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct WeightedThemeCandidate {
+    pub theme_id: ThemeId,
+    pub weight: u16,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ThemeColorRule {
+    pub color: TrackColor,
+    pub mode: ThemeColorRuleMode,
+    pub candidates: Vec<WeightedThemeCandidate>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct ThemeSelectionContext {
+    recent_theme_ids: Vec<ThemeId>,
+}
+
+impl ThemeSelectionContext {
+    #[must_use]
+    pub fn new(recent_theme_ids: Vec<ThemeId>) -> Self {
+        Self {
+            recent_theme_ids: recent_theme_ids
+                .into_iter()
+                .rev()
+                .take(8)
+                .collect::<Vec<_>>()
+                .into_iter()
+                .rev()
+                .collect(),
+        }
+    }
+
+    #[must_use]
+    pub fn recent_theme_ids(&self) -> &[ThemeId] {
+        &self.recent_theme_ids
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct SceneDefinition {
     id: SceneId,
@@ -73,6 +137,9 @@ pub struct PlanningConfiguration {
     revision: PlanConfigurationRevision,
     themes: Vec<ThemeDefinition>,
     scenes: Vec<SceneDefinition>,
+    global_theme_lock: Option<ThemeId>,
+    color_rules: Vec<ThemeColorRule>,
+    default_theme_id: ThemeId,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -103,11 +170,19 @@ impl PlanningConfiguration {
             themes: vec![
                 ThemeDefinition {
                     id: ThemeId::new(1),
-                    name: "Midnight Drive",
+                    name: "Electric Bloom",
                 },
                 ThemeDefinition {
                     id: ThemeId::new(2),
-                    name: "Electric Bloom",
+                    name: "Deep Ocean",
+                },
+                ThemeDefinition {
+                    id: ThemeId::new(3),
+                    name: "Solar Flare",
+                },
+                ThemeDefinition {
+                    id: ThemeId::new(4),
+                    name: "Ultraviolet",
                 },
             ],
             scenes: vec![
@@ -122,12 +197,50 @@ impl PlanningConfiguration {
                 scene(9, "Deep Space", SceneCategory::Break, 5, 1),
                 scene(10, "Slow Wave", SceneCategory::Break, 5, 2),
             ],
+            global_theme_lock: None,
+            color_rules: vec![
+                ThemeColorRule {
+                    color: TrackColor::new(187, 72, 126),
+                    mode: ThemeColorRuleMode::Force,
+                    candidates: vec![WeightedThemeCandidate {
+                        theme_id: ThemeId::new(4),
+                        weight: 1,
+                    }],
+                },
+                ThemeColorRule {
+                    color: TrackColor::new(72, 112, 205),
+                    mode: ThemeColorRuleMode::Prefer,
+                    candidates: vec![WeightedThemeCandidate {
+                        theme_id: ThemeId::new(2),
+                        weight: 1,
+                    }],
+                },
+            ],
+            default_theme_id: ThemeId::new(1),
         }
     }
 
     #[must_use]
     pub const fn revision(&self) -> PlanConfigurationRevision {
         self.revision
+    }
+
+    #[must_use]
+    pub fn with_global_theme_lock(mut self, theme_id: Option<ThemeId>) -> Self {
+        self.global_theme_lock = theme_id;
+        self
+    }
+
+    #[must_use]
+    pub fn with_color_rules(mut self, rules: Vec<ThemeColorRule>) -> Self {
+        self.color_rules = rules;
+        self
+    }
+
+    #[must_use]
+    pub fn with_default_theme(mut self, theme_id: ThemeId) -> Self {
+        self.default_theme_id = theme_id;
+        self
     }
 }
 
@@ -188,24 +301,42 @@ impl<C: ChoiceSource> DeterministicPlanner<C> {
     }
 
     pub fn generate(&self, input: &PlanningInput) -> Result<LightingPlan, PlannerError> {
+        self.generate_with_context(input, &ThemeSelectionContext::default())
+    }
+
+    pub fn generate_with_context(
+        &self,
+        input: &PlanningInput,
+        context: &ThemeSelectionContext,
+    ) -> Result<LightingPlan, PlannerError> {
         if input.track.duration_beats == 0 {
             return Err(PlannerError::EmptyTrackDuration);
         }
         let seed = stable_seed(input.track.id, self.configuration.revision);
         let plan_id = PlanId::new(nonzero(mix(seed ^ input.track_load_id.value())));
-        let cues = match input.track.phrases.as_deref() {
+        let (theme_decision, cues) = match input.track.phrases.as_deref() {
             Some(phrases) if analysis_is_complete(phrases, input.track.duration_beats) => {
-                self.plan_analyzed_phrases(seed, plan_id, phrases)?
+                let decision = self.select_initial_theme(&input.track, seed, context)?;
+                let theme = self
+                    .theme(decision.theme_id())
+                    .ok_or(PlannerError::UnknownConfiguredTheme(decision.theme_id()))?;
+                (
+                    Some(decision),
+                    self.plan_analyzed_phrases(seed, plan_id, phrases, theme)?,
+                )
             }
-            _ => vec![LightingCue::new(
-                CueId::new(nonzero(mix(plan_id.value()))),
-                0,
-                0,
-                input.track.duration_beats,
-                SemanticLightingAction::HoldCurrentLook,
-                CueOrigin::Fallback,
-                CueReason::MissingPhraseAnalysis,
-            )],
+            _ => (
+                None,
+                vec![LightingCue::new(
+                    CueId::new(nonzero(mix(plan_id.value()))),
+                    0,
+                    0,
+                    input.track.duration_beats,
+                    SemanticLightingAction::HoldCurrentLook,
+                    CueOrigin::Fallback,
+                    CueReason::MissingPhraseAnalysis,
+                )],
+            ),
         };
         let status = if cues.iter().any(|cue| cue.origin() == CueOrigin::Fallback) {
             PlanStatus::Fallback
@@ -213,7 +344,7 @@ impl<C: ChoiceSource> DeterministicPlanner<C> {
             PlanStatus::Ready
         };
 
-        LightingPlan::try_new(
+        LightingPlan::try_new_with_theme_decision(
             plan_id,
             input.deck_id,
             input.track.id,
@@ -223,6 +354,7 @@ impl<C: ChoiceSource> DeterministicPlanner<C> {
             self.configuration.revision,
             seed,
             status,
+            theme_decision,
             cues,
         )
         .map_err(PlannerError::InvalidPlan)
@@ -266,42 +398,45 @@ impl<C: ChoiceSource> DeterministicPlanner<C> {
             .iter()
             .find(|candidate| candidate.id == theme_id)
             .ok_or(PlanMutationError::UnknownTheme(theme_id))?;
-        let mut changed = false;
+        let changed = current.theme_decision().is_none_or(|decision| {
+            decision.theme_id() != theme.id
+                || decision.reason() != ThemeSelectionReason::PlanInstanceUserChoice
+        });
         let cues = current
             .cues()
             .iter()
-            .map(|cue| {
-                if cue.locked() {
-                    return Ok(cue.clone());
+            .map(|cue| match cue.action() {
+                SemanticLightingAction::ApplyLook(look) => {
+                    let revised = LightingLook::try_new(
+                        theme.id,
+                        theme.name.to_owned(),
+                        look.scene_id(),
+                        look.scene_name().to_owned(),
+                        look.category(),
+                        look.loop_selection(),
+                    )?;
+                    Ok(cue.revised(
+                        SemanticLightingAction::ApplyLook(revised),
+                        CueOrigin::User,
+                        cue.locked(),
+                    ))
                 }
-                match cue.action() {
-                    SemanticLightingAction::ApplyLook(look) => {
-                        changed |= look.theme_id() != theme.id;
-                        let revised = LightingLook::try_new(
-                            theme.id,
-                            theme.name.to_owned(),
-                            look.scene_id(),
-                            look.scene_name().to_owned(),
-                            look.category(),
-                            look.loop_selection(),
-                        )?;
-                        Ok(cue.revised(
-                            SemanticLightingAction::ApplyLook(revised),
-                            CueOrigin::User,
-                            false,
-                        ))
-                    }
-                    SemanticLightingAction::HoldCurrentLook => {
-                        Err(PlanMutationError::FallbackPlanNotEditable)
-                    }
+                SemanticLightingAction::HoldCurrentLook => {
+                    Err(PlanMutationError::FallbackPlanNotEditable)
                 }
             })
             .collect::<Result<Vec<_>, PlanMutationError>>()?;
         if !changed {
             return Err(PlanMutationError::NoChange);
         }
+        let decision = ThemeDecision::try_new(
+            theme.id,
+            theme.name.to_owned(),
+            ThemeSelectionReason::PlanInstanceUserChoice,
+            None,
+        )?;
         current
-            .revised(cues)
+            .revised_with_theme_decision(cues, Some(decision))
             .map_err(PlanMutationError::InvalidPlan)
     }
 
@@ -389,6 +524,16 @@ impl<C: ChoiceSource> DeterministicPlanner<C> {
             return Err(PlanMutationError::TrackLoadMismatch);
         }
         let generated = self.generate(input)?;
+        let generated = if current.theme_decision().is_some_and(|decision| {
+            decision.reason() == ThemeSelectionReason::PlanInstanceUserChoice
+        }) {
+            let decision = current
+                .theme_decision()
+                .ok_or(PlanMutationError::FallbackPlanNotEditable)?;
+            self.retheme_generated(generated, decision.theme_id())?
+        } else {
+            generated
+        };
         let cues = generated
             .cues()
             .iter()
@@ -411,7 +556,7 @@ impl<C: ChoiceSource> DeterministicPlanner<C> {
             })
             .collect::<Vec<_>>();
         current
-            .revised(cues)
+            .revised_with_theme_decision(cues, generated.theme_decision().cloned())
             .map_err(PlanMutationError::InvalidPlan)
     }
 
@@ -420,12 +565,8 @@ impl<C: ChoiceSource> DeterministicPlanner<C> {
         seed: u64,
         plan_id: PlanId,
         phrases: &[TrackPhrase],
+        theme: &ThemeDefinition,
     ) -> Result<Vec<LightingCue>, PlannerError> {
-        let theme_index = self
-            .choice_source
-            .choose(seed, 0, self.configuration.themes.len())
-            .ok_or(PlannerError::EmptyThemeCatalog)?;
-        let theme = &self.configuration.themes[theme_index];
         phrases
             .iter()
             .map(|phrase| {
@@ -467,6 +608,185 @@ impl<C: ChoiceSource> DeterministicPlanner<C> {
             })
             .collect()
     }
+
+    fn select_initial_theme(
+        &self,
+        track: &PlannerTrack,
+        seed: u64,
+        context: &ThemeSelectionContext,
+    ) -> Result<ThemeDecision, PlannerError> {
+        if let Some(theme_id) = self.configuration.global_theme_lock {
+            return self.decision(theme_id, ThemeSelectionReason::GlobalLock, None);
+        }
+        if let Some(color) = track.color {
+            for mode in [ThemeColorRuleMode::Force, ThemeColorRuleMode::Prefer] {
+                if let Some(rule) = self
+                    .configuration
+                    .color_rules
+                    .iter()
+                    .find(|rule| rule.color == color && rule.mode == mode)
+                {
+                    let candidates = if mode == ThemeColorRuleMode::Prefer {
+                        without_recent(&rule.candidates, context.recent_theme_ids())
+                    } else {
+                        rule.candidates.clone()
+                    };
+                    let candidates = if candidates.is_empty() {
+                        rule.candidates.clone()
+                    } else {
+                        candidates
+                    };
+                    let theme_id =
+                        self.weighted_choice(seed, u64::from(color.rgb_u32()), &candidates)?;
+                    let reason = if mode == ThemeColorRuleMode::Force {
+                        ThemeSelectionReason::ColorForce
+                    } else {
+                        ThemeSelectionReason::ColorPrefer
+                    };
+                    return self.decision(theme_id, reason, Some(color.rgb_u32()));
+                }
+            }
+        }
+        if !context.recent_theme_ids().is_empty() {
+            let recent = context
+                .recent_theme_ids()
+                .iter()
+                .rev()
+                .take(2)
+                .copied()
+                .collect::<Vec<_>>();
+            let candidates = self
+                .configuration
+                .themes
+                .iter()
+                .filter(|theme| !recent.contains(&theme.id))
+                .collect::<Vec<_>>();
+            if let Some(index) = self
+                .choice_source
+                .choose(seed, 0x0054_4845_4d45, candidates.len())
+            {
+                return self.decision(candidates[index].id, ThemeSelectionReason::Rotation, None);
+            }
+        }
+        self.decision(
+            self.configuration.default_theme_id,
+            ThemeSelectionReason::DefaultTheme,
+            None,
+        )
+    }
+
+    fn weighted_choice(
+        &self,
+        seed: u64,
+        decision: u64,
+        candidates: &[WeightedThemeCandidate],
+    ) -> Result<ThemeId, PlannerError> {
+        let total = candidates
+            .iter()
+            .try_fold(0_usize, |total, candidate| {
+                total.checked_add(usize::from(candidate.weight))
+            })
+            .ok_or(PlannerError::InvalidThemeRule)?;
+        let selected = self
+            .choice_source
+            .choose(seed, decision, total)
+            .ok_or(PlannerError::InvalidThemeRule)?;
+        let mut cursor = selected;
+        for candidate in candidates {
+            let weight = usize::from(candidate.weight);
+            if weight == 0 {
+                continue;
+            }
+            if cursor < weight {
+                return Ok(candidate.theme_id);
+            }
+            cursor -= weight;
+        }
+        Err(PlannerError::InvalidThemeRule)
+    }
+
+    fn decision(
+        &self,
+        theme_id: ThemeId,
+        reason: ThemeSelectionReason,
+        matched_color: Option<u32>,
+    ) -> Result<ThemeDecision, PlannerError> {
+        let theme = self
+            .theme(theme_id)
+            .ok_or(PlannerError::UnknownConfiguredTheme(theme_id))?;
+        ThemeDecision::try_new(theme.id, theme.name.to_owned(), reason, matched_color)
+            .map_err(PlannerError::InvalidPlan)
+    }
+
+    fn theme(&self, theme_id: ThemeId) -> Option<&ThemeDefinition> {
+        self.configuration
+            .themes
+            .iter()
+            .find(|theme| theme.id == theme_id)
+    }
+
+    fn retheme_generated(
+        &self,
+        generated: LightingPlan,
+        theme_id: ThemeId,
+    ) -> Result<LightingPlan, PlanMutationError> {
+        let theme = self
+            .theme(theme_id)
+            .ok_or(PlanMutationError::UnknownTheme(theme_id))?;
+        let cues = generated
+            .cues()
+            .iter()
+            .map(|cue| match cue.action() {
+                SemanticLightingAction::ApplyLook(look) => Ok(cue.revised(
+                    SemanticLightingAction::ApplyLook(LightingLook::try_new(
+                        theme.id,
+                        theme.name.to_owned(),
+                        look.scene_id(),
+                        look.scene_name().to_owned(),
+                        look.category(),
+                        look.loop_selection(),
+                    )?),
+                    cue.origin(),
+                    cue.locked(),
+                )),
+                SemanticLightingAction::HoldCurrentLook => {
+                    Err(PlanMutationError::FallbackPlanNotEditable)
+                }
+            })
+            .collect::<Result<Vec<_>, PlanMutationError>>()?;
+        let decision = ThemeDecision::try_new(
+            theme.id,
+            theme.name.to_owned(),
+            ThemeSelectionReason::PlanInstanceUserChoice,
+            None,
+        )?;
+        LightingPlan::try_new_with_theme_decision(
+            generated.id(),
+            generated.deck_id(),
+            generated.track_id(),
+            generated.track_duration_beats(),
+            generated.track_load_id(),
+            generated.revision(),
+            generated.configuration_revision(),
+            generated.seed(),
+            generated.status(),
+            Some(decision),
+            cues,
+        )
+        .map_err(PlanMutationError::InvalidPlan)
+    }
+}
+
+fn without_recent(
+    candidates: &[WeightedThemeCandidate],
+    recent: &[ThemeId],
+) -> Vec<WeightedThemeCandidate> {
+    let recent = recent.iter().rev().take(2).copied().collect::<Vec<_>>();
+    candidates
+        .iter()
+        .copied()
+        .filter(|candidate| !recent.contains(&candidate.theme_id))
+        .collect()
 }
 
 fn ensure_ready(plan: &LightingPlan) -> Result<(), PlanMutationError> {
@@ -542,6 +862,8 @@ const fn nonzero(value: u64) -> u64 {
 pub enum PlannerError {
     EmptyTrackDuration,
     EmptyThemeCatalog,
+    InvalidThemeRule,
+    UnknownConfiguredTheme(ThemeId),
     MissingSceneCategory(SceneCategory),
     InvalidPlan(PlanValidationError),
 }
@@ -551,6 +873,14 @@ impl fmt::Display for PlannerError {
         match self {
             Self::EmptyTrackDuration => formatter.write_str("track duration must be non-zero"),
             Self::EmptyThemeCatalog => formatter.write_str("planner theme catalog is empty"),
+            Self::InvalidThemeRule => {
+                formatter.write_str("a Theme rule has no positive weighted candidate")
+            }
+            Self::UnknownConfiguredTheme(theme_id) => write!(
+                formatter,
+                "Theme {} is referenced by configuration but not defined",
+                theme_id.value()
+            ),
             Self::MissingSceneCategory(category) => {
                 write!(formatter, "planner has no scene for category {category:?}")
             }

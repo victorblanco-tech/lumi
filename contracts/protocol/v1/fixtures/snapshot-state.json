@@ -38,6 +38,7 @@
           "title": "Aurora Signal",
           "artist": "Lumi Lab",
           "bpmMilli": 124000,
+          "colorRgb": 12273790,
           "key": { "pitchClass": "a", "mode": "minor" },
           "durationBeats": 128,
           "phrases": [
@@ -58,6 +59,7 @@
           "title": "Neon Horizon",
           "artist": "Lumi Lab",
           "bpmMilli": 128000,
+          "colorRgb": 4747469,
           "key": { "pitchClass": "c", "mode": "major" },
           "durationBeats": 128,
           "phrases": [
@@ -71,8 +73,10 @@
     ],
     "planningOptions": {
       "themes": [
-        { "id": 1, "name": "Midnight Drive" },
-        { "id": 2, "name": "Electric Bloom" }
+        { "id": 1, "name": "Electric Bloom" },
+        { "id": 2, "name": "Deep Ocean" },
+        { "id": 3, "name": "Solar Flare" },
+        { "id": 4, "name": "Ultraviolet" }
       ],
       "scenes": [
         { "id": 1, "name": "Soft Motion", "category": "ambient", "loopBank": 1, "loopSlot": 1 },
@@ -114,6 +118,12 @@
       "configurationRevision": 1,
       "seed": "13664634368846806414",
       "status": "ready",
+      "themeDecision": {
+        "themeId": 2,
+        "themeName": "Deep Ocean",
+        "reason": "colorPrefer",
+        "matchedColorRgb": 4747469
+      },
       "cues": [
         {
           "phraseIndex": 0,
@@ -122,7 +132,7 @@
           "origin": "automatic",
           "locked": false,
           "reason": { "kind": "phraseCategoryMatched", "phraseKind": "intro", "category": "ambient" },
-          "action": { "kind": "applyLook", "themeId": 2, "themeName": "Electric Bloom", "sceneId": 1, "sceneName": "Soft Motion", "category": "ambient", "loopBank": 1, "loopSlot": 1 }
+          "action": { "kind": "applyLook", "themeId": 2, "themeName": "Deep Ocean", "sceneId": 1, "sceneName": "Soft Motion", "category": "ambient", "loopBank": 1, "loopSlot": 1 }
         },
         {
           "phraseIndex": 1,
@@ -131,7 +141,7 @@
           "origin": "automatic",
           "locked": false,
           "reason": { "kind": "phraseCategoryMatched", "phraseKind": "breakdown", "category": "break" },
-          "action": { "kind": "applyLook", "themeId": 2, "themeName": "Electric Bloom", "sceneId": 10, "sceneName": "Slow Wave", "category": "break", "loopBank": 5, "loopSlot": 2 }
+          "action": { "kind": "applyLook", "themeId": 2, "themeName": "Deep Ocean", "sceneId": 10, "sceneName": "Slow Wave", "category": "break", "loopBank": 5, "loopSlot": 2 }
         },
         {
           "phraseIndex": 2,
@@ -140,7 +150,7 @@
           "origin": "automatic",
           "locked": false,
           "reason": { "kind": "phraseCategoryMatched", "phraseKind": "build", "category": "build" },
-          "action": { "kind": "applyLook", "themeId": 2, "themeName": "Electric Bloom", "sceneId": 6, "sceneName": "Velocity Build", "category": "build", "loopBank": 3, "loopSlot": 2 }
+          "action": { "kind": "applyLook", "themeId": 2, "themeName": "Deep Ocean", "sceneId": 6, "sceneName": "Velocity Build", "category": "build", "loopBank": 3, "loopSlot": 2 }
         },
         {
           "phraseIndex": 3,
@@ -149,7 +159,7 @@
           "origin": "automatic",
           "locked": false,
           "reason": { "kind": "phraseCategoryMatched", "phraseKind": "drop", "category": "impact" },
-          "action": { "kind": "applyLook", "themeId": 2, "themeName": "Electric Bloom", "sceneId": 7, "sceneName": "Full Energy", "category": "impact", "loopBank": 4, "loopSlot": 1 }
+          "action": { "kind": "applyLook", "themeId": 2, "themeName": "Deep Ocean", "sceneId": 7, "sceneName": "Full Energy", "category": "impact", "loopBank": 4, "loopSlot": 1 }
         }
       ]
     }

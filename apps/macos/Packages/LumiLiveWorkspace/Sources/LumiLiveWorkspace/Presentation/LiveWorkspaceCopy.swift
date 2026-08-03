@@ -25,6 +25,7 @@ struct LiveWorkspaceCopy {
     let phrasePlan = localized("workspace.phrasePlan")
     let inspector = localized("workspace.inspector")
     let theme = localized("workspace.theme")
+    let themeSource = localized("workspace.themeSource")
     let scene = localized("workspace.scene")
     let reason = localized("workspace.reason")
     let origin = localized("workspace.origin")
@@ -68,6 +69,10 @@ struct LiveWorkspaceCopy {
 
     func category(_ category: String) -> String {
         Self.localized("category.\(category)")
+    }
+
+    func themeReason(_ reason: String) -> String {
+        Self.localized("themeReason.\(reason)")
     }
 
     private static func localized(_ key: String) -> String {

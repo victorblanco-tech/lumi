@@ -14,6 +14,63 @@ pub enum PlanStatus {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ThemeSelectionReason {
+    GlobalLock,
+    PlanInstanceUserChoice,
+    ColorForce,
+    ColorPrefer,
+    Rotation,
+    DefaultTheme,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ThemeDecision {
+    theme_id: ThemeId,
+    theme_name: String,
+    reason: ThemeSelectionReason,
+    matched_color: Option<u32>,
+}
+
+impl ThemeDecision {
+    pub fn try_new(
+        theme_id: ThemeId,
+        theme_name: String,
+        reason: ThemeSelectionReason,
+        matched_color: Option<u32>,
+    ) -> Result<Self, PlanValidationError> {
+        if theme_name.trim().is_empty() {
+            return Err(PlanValidationError::EmptyThemeName);
+        }
+        Ok(Self {
+            theme_id,
+            theme_name,
+            reason,
+            matched_color,
+        })
+    }
+
+    #[must_use]
+    pub const fn theme_id(&self) -> ThemeId {
+        self.theme_id
+    }
+
+    #[must_use]
+    pub fn theme_name(&self) -> &str {
+        &self.theme_name
+    }
+
+    #[must_use]
+    pub const fn reason(&self) -> ThemeSelectionReason {
+        self.reason
+    }
+
+    #[must_use]
+    pub const fn matched_color(&self) -> Option<u32> {
+        self.matched_color
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SceneCategory {
     Ambient,
     Groove,
@@ -234,6 +291,7 @@ pub struct LightingPlan {
     configuration_revision: PlanConfigurationRevision,
     seed: u64,
     status: PlanStatus,
+    theme_decision: Option<ThemeDecision>,
     cues: Vec<LightingCue>,
 }
 
@@ -249,6 +307,45 @@ impl LightingPlan {
         configuration_revision: PlanConfigurationRevision,
         seed: u64,
         status: PlanStatus,
+        cues: Vec<LightingCue>,
+    ) -> Result<Self, PlanValidationError> {
+        let theme_decision = cues.iter().find_map(|cue| match cue.action() {
+            SemanticLightingAction::ApplyLook(look) => ThemeDecision::try_new(
+                look.theme_id(),
+                look.theme_name().to_owned(),
+                ThemeSelectionReason::DefaultTheme,
+                None,
+            )
+            .ok(),
+            SemanticLightingAction::HoldCurrentLook => None,
+        });
+        Self::try_new_with_theme_decision(
+            id,
+            deck_id,
+            track_id,
+            track_duration_beats,
+            track_load_id,
+            revision,
+            configuration_revision,
+            seed,
+            status,
+            theme_decision,
+            cues,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_new_with_theme_decision(
+        id: PlanId,
+        deck_id: DeckId,
+        track_id: TrackId,
+        track_duration_beats: u32,
+        track_load_id: TrackLoadId,
+        revision: PlanRevision,
+        configuration_revision: PlanConfigurationRevision,
+        seed: u64,
+        status: PlanStatus,
+        theme_decision: Option<ThemeDecision>,
         cues: Vec<LightingCue>,
     ) -> Result<Self, PlanValidationError> {
         if revision.value() == 0 {
@@ -287,6 +384,24 @@ impl LightingPlan {
             }
             _ => {}
         }
+        match (status, theme_decision.as_ref()) {
+            (PlanStatus::Ready, None) => return Err(PlanValidationError::MissingThemeDecision),
+            (PlanStatus::Fallback, Some(_)) => {
+                return Err(PlanValidationError::ThemeDecisionInFallbackPlan);
+            }
+            _ => {}
+        }
+        if let Some(decision) = theme_decision.as_ref()
+            && cues.iter().any(|cue| match cue.action() {
+                SemanticLightingAction::ApplyLook(look) => {
+                    look.theme_id() != decision.theme_id()
+                        || look.theme_name() != decision.theme_name()
+                }
+                SemanticLightingAction::HoldCurrentLook => true,
+            })
+        {
+            return Err(PlanValidationError::InconsistentThemeDecision);
+        }
         if previous_end != track_duration_beats {
             return Err(PlanValidationError::IncompleteCueCoverage);
         }
@@ -301,6 +416,7 @@ impl LightingPlan {
             configuration_revision,
             seed,
             status,
+            theme_decision,
             cues,
         })
     }
@@ -351,16 +467,29 @@ impl LightingPlan {
     }
 
     #[must_use]
+    pub const fn theme_decision(&self) -> Option<&ThemeDecision> {
+        self.theme_decision.as_ref()
+    }
+
+    #[must_use]
     pub fn cues(&self) -> &[LightingCue] {
         &self.cues
     }
 
     pub fn revised(&self, cues: Vec<LightingCue>) -> Result<Self, PlanValidationError> {
+        self.revised_with_theme_decision(cues, self.theme_decision.clone())
+    }
+
+    pub fn revised_with_theme_decision(
+        &self,
+        cues: Vec<LightingCue>,
+        theme_decision: Option<ThemeDecision>,
+    ) -> Result<Self, PlanValidationError> {
         let revision = self
             .revision
             .checked_next()
             .ok_or(PlanValidationError::RevisionOverflow)?;
-        Self::try_new(
+        Self::try_new_with_theme_decision(
             self.id,
             self.deck_id,
             self.track_id,
@@ -370,6 +499,7 @@ impl LightingPlan {
             self.configuration_revision,
             self.seed,
             self.status,
+            theme_decision,
             cues,
         )
     }
@@ -389,6 +519,9 @@ pub enum PlanValidationError {
     IncompleteCueCoverage,
     FallbackCueInReadyPlan,
     FallbackPlanWithoutFallbackCue,
+    MissingThemeDecision,
+    ThemeDecisionInFallbackPlan,
+    InconsistentThemeDecision,
     RevisionOverflow,
 }
 
@@ -420,6 +553,15 @@ impl fmt::Display for PlanValidationError {
             }
             Self::FallbackPlanWithoutFallbackCue => {
                 formatter.write_str("a fallback plan must contain a fallback cue")
+            }
+            Self::MissingThemeDecision => {
+                formatter.write_str("a ready plan must contain a Theme decision")
+            }
+            Self::ThemeDecisionInFallbackPlan => {
+                formatter.write_str("a fallback plan may not contain a Theme decision")
+            }
+            Self::InconsistentThemeDecision => {
+                formatter.write_str("every concrete cue must match the plan Theme decision")
             }
             Self::RevisionOverflow => formatter.write_str("plan revision overflow"),
         }

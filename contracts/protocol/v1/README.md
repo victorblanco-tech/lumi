@@ -32,15 +32,19 @@ The optional `deckSource`, `leaderDeckId`, and `decks` fields expose normalized
 provider-neutral observations. `providerKind` identifies the adapter for
 diagnostics only; clients derive Live and Next from `leaderDeckId` and never
 branch on simulator, Beat Link, or future Pro DJ Link implementation types.
-Track metadata uses integer milli-BPM, canonical pitch class and mode, and
-contiguous beat-based phrases so snapshots remain deterministic across Rust and
-Swift.
+Track metadata uses integer milli-BPM, canonical pitch class and mode,
+normalized 24-bit sRGB `colorRgb`, and contiguous beat-based phrases so
+snapshots remain deterministic across Rust and Swift. Provider indexes or color
+labels never cross the adapter boundary.
 
 `nextPlan` contains the authoritative precomputed plan for the non-leader deck.
 Each cue has a contiguous phrase and beat range, origin, lock state,
-machine-readable reason, and semantic action. `planningOptions` supplies the
-engine-owned theme and scene catalog used to render controls; clients never run
-planner rules. A plan is either `ready` or an explicit `fallback`.
+machine-readable reason, and semantic action. A ready plan also carries one
+`themeDecision` with its selected logical Theme, precedence reason, and optional
+matched normalized track color. Every concrete cue must match that decision.
+`planningOptions` supplies the engine-owned Theme and scene catalog used to
+render controls; clients never run planner rules. A plan is either `ready` or
+an explicit `fallback`.
 
 Plan mutations carry `planId`, `trackLoadId`, and `expectedPlanRevision`.
 Accepted `selectTheme`, `selectScene`, `setCueLock`, and `regeneratePlan`
@@ -49,6 +53,11 @@ revision exactly once. A revision conflict returns a typed error; the client
 requests a fresh snapshot before accepting another edit. Plan IDs and seeds are
 encoded as decimal strings because protocol v1 clients must not lose 64-bit
 integer precision through a JSON floating-point representation.
+
+`selectTheme` records a plan-instance user choice and re-resolves the complete
+plan without writing a Theme to library track data. Once a leader change copies
+the prepared revision into `activePlan`, later preview mutations cannot affect
+that active copy or output until a future explicit safe-boundary workflow.
 
 `activePlan` identifies the exact immutable plan revision used for the leader.
 `outputProvider` reports provider-neutral diagnostics, while bounded

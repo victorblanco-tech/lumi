@@ -186,12 +186,33 @@ fn loop_templates_resolve_after_theme_selection_without_storing_a_theme()
 -> Result<(), Box<dyn std::error::Error>> {
     let catalog = fixture()?;
     let role = PhraseRoleId::try_new("breakdown-1")?;
+    let automatic = PhraseLoopStrategy::Auto;
+    let automatic_entries = (1..=4)
+        .map(|theme| {
+            catalog
+                .resolve_loop_strategy(ThemeId::new(theme), &role, &automatic, catalog.revision())
+                .map(|resolution| {
+                    assert_eq!(resolution.reason(), &AutoloopResolutionReason::Automatic);
+                    resolution.entry_id().as_str().to_owned()
+                })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    assert_eq!(
+        automatic_entries
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        4
+    );
     let fixed = PhraseLoopStrategy::FixedVariant(VariantId::try_new("variant-1")?);
     let fixed_entries = (1..=4)
         .map(|theme| {
             catalog
                 .resolve_loop_strategy(ThemeId::new(theme), &role, &fixed, catalog.revision())
-                .map(|resolution| resolution.entry_id().as_str().to_owned())
+                .map(|resolution| {
+                    assert_eq!(resolution.variant_id().as_str(), "variant-1");
+                    resolution.entry_id().as_str().to_owned()
+                })
         })
         .collect::<Result<Vec<_>, _>>()?;
     assert_eq!(

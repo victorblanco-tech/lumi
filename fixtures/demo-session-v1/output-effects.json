@@ -19,7 +19,7 @@
     "action": {
       "kind": "applyLook",
       "themeId": 2,
-      "themeName": "Electric Bloom",
+      "themeName": "Deep Ocean",
       "sceneId": 1,
       "sceneName": "Soft Motion",
       "category": "ambient",
@@ -47,7 +47,7 @@
     "action": {
       "kind": "applyLook",
       "themeId": 2,
-      "themeName": "Electric Bloom",
+      "themeName": "Deep Ocean",
       "sceneId": 10,
       "sceneName": "Slow Wave",
       "category": "break",
@@ -75,7 +75,7 @@
     "action": {
       "kind": "applyLook",
       "themeId": 2,
-      "themeName": "Electric Bloom",
+      "themeName": "Deep Ocean",
       "sceneId": 6,
       "sceneName": "Velocity Build",
       "category": "build",
@@ -103,7 +103,7 @@
     "action": {
       "kind": "applyLook",
       "themeId": 2,
-      "themeName": "Electric Bloom",
+      "themeName": "Deep Ocean",
       "sceneId": 7,
       "sceneName": "Full Energy",
       "category": "impact",

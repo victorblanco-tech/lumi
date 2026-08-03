@@ -397,6 +397,12 @@ public struct LiveWorkspaceView: View {
                     Text(verbatim: "Revision \(plan.revision) · Config \(plan.configurationRevision)")
                         .font(LumiTypography.technical)
                         .foregroundStyle(LumiColor.textSecondary)
+                    if let decision = plan.themeDecision {
+                        Text(verbatim: "\(decision.themeName) · \(copy.themeReason(decision.reason))")
+                            .font(LumiTypography.technical)
+                            .foregroundStyle(LumiColor.textSecondary)
+                            .accessibilityIdentifier("lumi.plan.themeDecision")
+                    }
                 }
                 StatusBadge(key(planConditionLabel), state: planComponentState)
                 Spacer()
@@ -468,6 +474,13 @@ public struct LiveWorkspaceView: View {
                             onSelect: { selectTheme($0, plan: plan) }
                         )
                         .accessibilityIdentifier("lumi.plan.theme")
+                    }
+                    if let decision = plan.themeDecision {
+                        InspectorField(key(copy.themeSource)) {
+                            Text(verbatim: themeDecisionSummary(decision))
+                                .font(LumiTypography.body)
+                                .accessibilityIdentifier("lumi.plan.themeReason")
+                        }
                     }
                     InspectorField(key(copy.scene)) {
                         PlanSelectionControl(
@@ -762,6 +775,17 @@ public struct LiveWorkspaceView: View {
         case let .applyLook(_, themeName, _, _, _, _, _): themeName
         case .holdCurrentLook: copy.unavailable
         }
+    }
+
+    private func themeDecisionSummary(_ decision: ThemeDecisionSnapshot) -> String {
+        let reason = copy.themeReason(decision.reason)
+        guard let color = decision.matchedColorRGB else { return reason }
+        return String(
+            format: "%@ · #%06llX",
+            locale: Locale(identifier: "en_US_POSIX"),
+            reason,
+            color
+        )
     }
 
     private func sceneName(_ cue: PlanCueSnapshot) -> String {

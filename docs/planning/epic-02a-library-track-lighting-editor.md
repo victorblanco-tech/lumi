@@ -1,6 +1,6 @@
 # Epic 2A – Music Library and Track Lighting Editor
 
-Status: **In build – E2A-08 complete; next E2A-09 late-bound Theme selection**
+Status: **In build – E2A-09 complete; next E2A-10 source reconciliation**
 
 Doelmilestone: **0.2.0 – Deck Intelligence**
 

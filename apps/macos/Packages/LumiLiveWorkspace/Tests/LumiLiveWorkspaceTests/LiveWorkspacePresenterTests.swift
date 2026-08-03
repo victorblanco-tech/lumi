@@ -25,7 +25,11 @@ struct LiveWorkspacePresenterTests {
         #expect(state.content?.plan?.cues.count == 4)
         #expect(state.content?.plan?.planID == "14113485664261432828")
         #expect(state.content?.plan?.cues.allSatisfy { !$0.locked } == true)
-        #expect(state.content?.planningOptions.themes.count == 2)
+        #expect(state.content?.planningOptions.themes.count == 4)
+        #expect(state.content?.nextDeck.colorRGB == 4_747_469)
+        #expect(state.content?.plan?.themeDecision?.themeName == "Deep Ocean")
+        #expect(state.content?.plan?.themeDecision?.reason == "colorPrefer")
+        #expect(state.content?.plan?.themeDecision?.matchedColorRGB == 4_747_469)
         #expect(state.content?.planningOptions.scenes.count == 10)
         #expect(state.content?.operationState == "armed")
         #expect(state.content?.simulation.speed == 1)
@@ -82,6 +86,38 @@ struct LiveWorkspacePresenterTests {
             return
         }
         plan["deckId"] = .number(1)
+        payload["nextPlan"] = .object(plan)
+        let invalid = MessageEnvelope(
+            protocolVersion: recorded.protocolVersion,
+            messageType: recorded.messageType,
+            messageId: recorded.messageId,
+            sequence: recorded.sequence,
+            correlationId: recorded.correlationId,
+            sentAt: recorded.sentAt,
+            payload: payload
+        )
+
+        #expect(throws: EngineSnapshotDecodingError.invalidSnapshot) {
+            try EngineSnapshotDecoder().decode(
+                invalid,
+                endpointDescription: "127.0.0.1:52841",
+                protocolVersion: 1
+            )
+        }
+    }
+
+    @Test("Decoder rejects a Theme decision that does not match every resolved cue")
+    func decoderRejectsInconsistentThemeDecision() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case var .object(plan) = payload["nextPlan"],
+              case var .object(decision) = plan["themeDecision"] else {
+            Issue.record("Recorded fixture has no Theme decision")
+            return
+        }
+        decision["themeId"] = .number(4)
+        decision["themeName"] = .string("Ultraviolet")
+        plan["themeDecision"] = .object(decision)
         payload["nextPlan"] = .object(plan)
         let invalid = MessageEnvelope(
             protocolVersion: recorded.protocolVersion,

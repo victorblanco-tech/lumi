@@ -153,6 +153,12 @@ public struct EngineSnapshotDecoder: Sendable {
         }
 
         let cues = try cuePayloads.map(decodePlanCue)
+        let themeDecision: ThemeDecisionSnapshot?
+        if plan["themeDecision"] == .null {
+            themeDecision = nil
+        } else {
+            themeDecision = try decodeThemeDecision(plan["themeDecision"])
+        }
         guard !cues.isEmpty,
               cues.enumerated().allSatisfy({ offset, cue in
                   cue.phraseIndex == UInt64(offset)
@@ -170,6 +176,20 @@ public struct EngineSnapshotDecoder: Sendable {
         guard previousEnd == trackDurationBeats else {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
+        guard (status == "ready") == (themeDecision != nil) else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        if let themeDecision {
+            guard cues.allSatisfy({ cue in
+                if case let .applyLook(themeID, themeName, _, _, _, _, _) = cue.action {
+                    return themeID == themeDecision.themeID
+                        && themeName == themeDecision.themeName
+                }
+                return false
+            }) else {
+                throw EngineSnapshotDecodingError.invalidSnapshot
+            }
+        }
 
         return PlanSnapshot(
             planID: planID,
@@ -179,7 +199,41 @@ public struct EngineSnapshotDecoder: Sendable {
             revision: revision,
             configurationRevision: configurationRevision,
             status: status,
+            themeDecision: themeDecision,
             cues: cues
+        )
+    }
+
+    private func decodeThemeDecision(_ value: JSONValue?) throws -> ThemeDecisionSnapshot {
+        guard case let .object(decision) = value,
+              let themeID = unsignedInteger(decision["themeId"]),
+              case let .string(themeName) = decision["themeName"],
+              !themeName.isEmpty,
+              case let .string(reason) = decision["reason"],
+              [
+                  "globalLock", "planInstanceUserChoice", "colorForce", "colorPrefer",
+                  "rotation", "defaultTheme"
+              ].contains(reason) else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        let matchedColorRGB: UInt64?
+        if decision["matchedColorRgb"] == .null {
+            matchedColorRGB = nil
+        } else {
+            guard let value = unsignedInteger(decision["matchedColorRgb"]),
+                  value <= 0x00FF_FFFF else {
+                throw EngineSnapshotDecodingError.invalidSnapshot
+            }
+            matchedColorRGB = value
+        }
+        guard ["colorForce", "colorPrefer"].contains(reason) == (matchedColorRGB != nil) else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        return ThemeDecisionSnapshot(
+            themeID: themeID,
+            themeName: themeName,
+            reason: reason,
+            matchedColorRGB: matchedColorRGB
         )
     }
 
@@ -307,6 +361,8 @@ public struct EngineSnapshotDecoder: Sendable {
               case let .string(title) = track["title"],
               case let .string(artist) = track["artist"],
               let bpmMilli = unsignedInteger(track["bpmMilli"]),
+              let colorRGB = unsignedInteger(track["colorRgb"]),
+              colorRGB <= 0x00FF_FFFF,
               case let .object(key) = track["key"],
               case let .string(pitchClass) = key["pitchClass"],
               case let .string(keyMode) = key["mode"] else {
@@ -329,6 +385,7 @@ public struct EngineSnapshotDecoder: Sendable {
             title: title,
             artist: artist,
             bpmMilli: bpmMilli,
+            colorRGB: colorRGB,
             pitchClass: pitchClass,
             keyMode: keyMode,
             beat: beat,

@@ -3,6 +3,52 @@ use std::fmt;
 
 use crate::TrackId;
 
+/// Canonical normalized sRGB color supplied by a deck or library adapter.
+/// Provider-specific color indexes and labels must be translated before this
+/// value enters the Lumi domain.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TrackColor {
+    red: u8,
+    green: u8,
+    blue: u8,
+}
+
+impl TrackColor {
+    #[must_use]
+    pub const fn new(red: u8, green: u8, blue: u8) -> Self {
+        Self { red, green, blue }
+    }
+
+    #[must_use]
+    pub const fn red(self) -> u8 {
+        self.red
+    }
+
+    #[must_use]
+    pub const fn green(self) -> u8 {
+        self.green
+    }
+
+    #[must_use]
+    pub const fn blue(self) -> u8 {
+        self.blue
+    }
+
+    #[must_use]
+    pub const fn rgb_u32(self) -> u32 {
+        (self.red as u32) << 16 | (self.green as u32) << 8 | self.blue as u32
+    }
+
+    #[must_use]
+    pub const fn from_rgb_u32(value: u32) -> Self {
+        Self {
+            red: ((value >> 16) & 0xff) as u8,
+            green: ((value >> 8) & 0xff) as u8,
+            blue: (value & 0xff) as u8,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DeckSourceStatus {
     Starting,
@@ -113,6 +159,7 @@ pub struct TrackMetadata {
     artist: String,
     bpm_milli: u32,
     musical_key: MusicalKey,
+    color: Option<TrackColor>,
     duration_beats: u32,
     phrases: Vec<TrackPhrase>,
 }
@@ -124,6 +171,29 @@ impl TrackMetadata {
         artist: String,
         bpm_milli: u32,
         musical_key: MusicalKey,
+        duration_beats: u32,
+        phrases: Vec<TrackPhrase>,
+    ) -> Result<Self, TrackValidationError> {
+        Self::try_new_with_color(
+            id,
+            title,
+            artist,
+            bpm_milli,
+            musical_key,
+            None,
+            duration_beats,
+            phrases,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn try_new_with_color(
+        id: TrackId,
+        title: String,
+        artist: String,
+        bpm_milli: u32,
+        musical_key: MusicalKey,
+        color: Option<TrackColor>,
         duration_beats: u32,
         phrases: Vec<TrackPhrase>,
     ) -> Result<Self, TrackValidationError> {
@@ -166,6 +236,7 @@ impl TrackMetadata {
             artist,
             bpm_milli,
             musical_key,
+            color,
             duration_beats,
             phrases,
         })
@@ -194,6 +265,11 @@ impl TrackMetadata {
     #[must_use]
     pub const fn musical_key(&self) -> MusicalKey {
         self.musical_key
+    }
+
+    #[must_use]
+    pub const fn color(&self) -> Option<TrackColor> {
+        self.color
     }
 
     #[must_use]
