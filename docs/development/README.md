@@ -54,8 +54,13 @@ Run all local foundation checks and builds with:
 After a successful build, launch the exact unsigned development app with:
 
 ```bash
-open build/DerivedData/Build/Products/Debug/Lumi.app
+open -n /Users/victor/Engineering/Repo/Lumi/build/DerivedData/Build/Products/Debug/Lumi.app
 ```
+
+Quit any older Lumi debug instance first. The repository and Xcode debug builds
+share one bundle identifier, so running both at once makes it ambiguous which
+binary macOS activates. The absolute `open -n` command above is the canonical
+hands-on test path for every story.
 
 The status becomes **Local engine ready** only after the app starts the bundled
 Rust helper, authenticates over loopback, and receives its initial snapshot.

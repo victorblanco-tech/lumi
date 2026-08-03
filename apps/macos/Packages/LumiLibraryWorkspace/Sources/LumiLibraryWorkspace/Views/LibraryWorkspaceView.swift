@@ -140,7 +140,7 @@ public struct LibraryWorkspaceView: View {
             } label: {
                 navigationLabel(
                     localized("library.collection"),
-                    count: state.page.total,
+                    count: state.collectionTotal,
                     systemImage: "music.note.list",
                     selected: state.query.playlistID == nil
                 )
@@ -253,7 +253,7 @@ public struct LibraryWorkspaceView: View {
             if !state.query.search.isEmpty {
                 Button(localized("library.clearSearch")) {
                     search = ""
-                    submitQuery(offset: 0)
+                    submitQuery(search: "", offset: 0)
                 }
                 .buttonStyle(.borderless)
             }
@@ -494,10 +494,10 @@ public struct LibraryWorkspaceView: View {
         onQuery(LibraryQueryRequest(search: search, playlistID: id, offset: 0))
     }
 
-    private func submitQuery(offset: UInt32) {
+    private func submitQuery(search querySearch: String? = nil, offset: UInt32) {
         onQuery(
             LibraryQueryRequest(
-                search: search,
+                search: querySearch ?? search,
                 playlistID: state.query.playlistID,
                 offset: offset,
                 limit: state.query.limit

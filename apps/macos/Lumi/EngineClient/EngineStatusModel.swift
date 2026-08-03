@@ -25,6 +25,7 @@ final class EngineStatusModel: ObservableObject {
     private var monitoringTask: Task<Void, Never>?
     private var playbackTask: Task<Void, Never>?
     private var isExchangingCommand = false
+    private var pendingInteractiveExchanges = 0
     private var latestSnapshot: EngineSnapshot?
     private var endpointDescription: String?
     private var protocolVersion: Int?
@@ -92,12 +93,11 @@ final class EngineStatusModel: ObservableObject {
 
     func queryLibrary(_ request: LibraryQueryRequest) async {
         guard lifecycle == .ready,
-              !isExchangingCommand,
               let endpointDescription,
-              let protocolVersion else {
+              let protocolVersion,
+              await acquireInteractiveExchange() else {
             return
         }
-        isExchangingCommand = true
         defer { isExchangingCommand = false }
         do {
             let envelope = try await supervisor.send(
@@ -130,13 +130,12 @@ final class EngineStatusModel: ObservableObject {
 
     func mutatePlan(_ request: PlanMutationRequest) async {
         guard lifecycle == .ready,
-              !isExchangingCommand,
-              let current = latestSnapshot,
               let endpointDescription,
-              let protocolVersion else {
+              let protocolVersion,
+              await acquireInteractiveExchange(),
+              let current = latestSnapshot else {
             return
         }
-        isExchangingCommand = true
         defer { isExchangingCommand = false }
 
         workspaceState = LiveWorkspacePresenter.ready(
@@ -205,13 +204,12 @@ final class EngineStatusModel: ObservableObject {
 
     func runSessionCommand(_ request: SessionCommandRequest) async {
         guard lifecycle == .ready,
-              !isExchangingCommand,
-              let current = latestSnapshot,
               let endpointDescription,
-              let protocolVersion else {
+              let protocolVersion,
+              await acquireInteractiveExchange(),
+              let current = latestSnapshot else {
             return
         }
-        isExchangingCommand = true
         defer { isExchangingCommand = false }
         workspaceState = LiveWorkspacePresenter.ready(
             current,
@@ -348,6 +346,7 @@ final class EngineStatusModel: ObservableObject {
     private func tickSimulation() async {
         guard lifecycle == .ready,
               !isExchangingCommand,
+              pendingInteractiveExchanges == 0,
               let current = latestSnapshot,
               !current.simulation.paused,
               let endpointDescription,
@@ -386,6 +385,24 @@ final class EngineStatusModel: ObservableObject {
         } catch {
             // The process monitor owns disconnect presentation; a later tick can recover.
         }
+    }
+
+    private func acquireInteractiveExchange() async -> Bool {
+        pendingInteractiveExchanges += 1
+        defer { pendingInteractiveExchanges -= 1 }
+
+        while isExchangingCommand {
+            do {
+                try await Task.sleep(for: .milliseconds(5))
+            } catch {
+                return false
+            }
+            guard lifecycle == .ready else { return false }
+        }
+
+        guard lifecycle == .ready else { return false }
+        isExchangingCommand = true
+        return true
     }
 
     private func engineExecutable() throws -> URL {

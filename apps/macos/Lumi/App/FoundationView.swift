@@ -53,14 +53,14 @@ struct FoundationView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(LumiColor.canvas)
-        .frame(minWidth: 900, minHeight: 620)
+        .frame(minWidth: 1_180, minHeight: 620)
         .accessibilityIdentifier("lumi.app.shell")
     }
 
     private var appNavigation: some View {
         VStack(alignment: .leading, spacing: LumiSpacing.xLarge) {
             VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-                Text("Lumi")
+                Text(verbatim: "Lumi")
                     .font(LumiTypography.screenTitle)
                     .foregroundStyle(LumiColor.textPrimary)
                 Text(productVersion)

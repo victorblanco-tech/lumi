@@ -18,6 +18,7 @@ public enum LibraryWorkspaceFixtures {
             rawPhrases: true,
             localAudio: true
         ),
+        collectionTotal: 3,
         playlists: [
             LibraryPlaylist(
                 id: 1,
@@ -125,6 +126,7 @@ public enum LibraryWorkspaceFixtures {
             providerKind: ready.providerKind,
             source: ready.source,
             capabilities: ready.capabilities,
+            collectionTotal: ready.collectionTotal,
             playlists: ready.playlists,
             query: ready.query,
             page: LibraryPage(

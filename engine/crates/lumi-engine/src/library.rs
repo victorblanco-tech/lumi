@@ -52,6 +52,14 @@ impl LibraryWorker {
         let request = TrackPageRequest::try_new(self.offset, self.limit)?;
         let query = LibraryTrackQuery::try_new(self.search.clone(), self.playlist_id, request)?;
         let page = self.repository.query_tracks(&query)?;
+        let collection_total = self
+            .repository
+            .query_tracks(&LibraryTrackQuery::try_new(
+                "",
+                None,
+                TrackPageRequest::try_new(0, 1)?,
+            )?)?
+            .total();
         let playlist_page = self
             .repository
             .page_playlists(TrackPageRequest::try_new(0, 200)?)?;
@@ -76,6 +84,7 @@ impl LibraryWorker {
                 "rawPhrases": true,
                 "localAudio": true,
             },
+            "collectionTotal": collection_total,
             "query": {
                 "search": self.search,
                 "playlistId": self.playlist_id.map(|id| id.value()),
@@ -152,4 +161,22 @@ pub enum LibraryWorkerError {
     Persistence(#[from] SqliteLibraryError),
     #[error("library query is invalid: {0}")]
     Query(#[from] lumi_library::TrackPageRequestError),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::LibraryWorker;
+
+    #[test]
+    fn collection_total_is_independent_from_the_active_playlist()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut worker = LibraryWorker::demo()?;
+        worker.query(String::new(), Some(2), 0, 50);
+
+        let snapshot = worker.snapshot_json()?;
+
+        assert_eq!(snapshot["collectionTotal"], 3);
+        assert_eq!(snapshot["page"]["total"], 2);
+        Ok(())
+    }
 }
