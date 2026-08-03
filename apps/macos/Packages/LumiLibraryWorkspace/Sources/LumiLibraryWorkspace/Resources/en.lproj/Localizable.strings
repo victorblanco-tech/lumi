@@ -80,6 +80,17 @@
 "editor.createSelection" = "Create phrase from selection";
 "editor.origin" = "Origin";
 "editor.loopStrategy" = "Loop strategy";
+"editor.loopAutomatic" = "Reset Auto";
+"editor.lockVariant" = "Lock Variant";
+"editor.themeOverrides" = "Theme overrides";
+"editor.themeAutomatic" = "Automatic";
+"editor.automaticSelection" = "Automatic variant selection after Theme choice";
+"editor.variantUnavailable" = "Variant unavailable";
+"editor.strategyLocked" = "Locked";
+"editor.strategyAutomatic" = "Auto";
+"editor.strategyIncomplete" = "Incomplete";
+"editor.strategyStale" = "Stale";
+"editor.strategyIssues" = "coverage issues";
 "editor.revisionReason" = "Revision reason";
 "editor.planIsolation" = "Offline library edits never mutate an already-active Live plan.";
 "editor.sourceBaseline" = "Source baseline";

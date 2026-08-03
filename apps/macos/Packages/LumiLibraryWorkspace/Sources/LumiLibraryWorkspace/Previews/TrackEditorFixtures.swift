@@ -41,7 +41,25 @@ public enum TrackEditorFixtures {
             beats: beats,
             waveform: waveform,
             phrases: [
-                TrackEditorPhrase(id: 0, startBeat: 0, endBeat: 16, roleID: "intro-outro", role: "Intro / Outro", origin: "sourceImport"),
+                TrackEditorPhrase(
+                    id: 0,
+                    startBeat: 0,
+                    endBeat: 16,
+                    roleID: "intro-outro",
+                    role: "Intro / Outro",
+                    origin: "sourceImport",
+                    loopStrategy: TrackEditorLoopStrategy(
+                        kind: "fixedVariant",
+                        locked: true,
+                        provenance: "userSelection",
+                        rowRoleID: "intro-outro",
+                        fixedVariantID: "variant-1",
+                        themeOverrides: [],
+                        validatedCatalogRevision: 3,
+                        status: "ready",
+                        issues: []
+                    )
+                ),
                 TrackEditorPhrase(id: 1, startBeat: 16, endBeat: 32, roleID: "breakdown-1", role: "Breakdown 1", origin: "sourceImport"),
                 TrackEditorPhrase(id: 2, startBeat: 32, endBeat: 48, roleID: "buildup-1", role: "Buildup 1", origin: "sourceImport"),
                 TrackEditorPhrase(id: 3, startBeat: 48, endBeat: 64, roleID: "drop", role: "Drop", origin: "sourceImport")

@@ -24,6 +24,7 @@ pub enum TimelineRevisionReason {
     AbsorbPrevious,
     AbsorbNext,
     ChangeRole,
+    ChangeLoopStrategy,
     Undo,
     Redo,
     RestoreRevision,
@@ -378,6 +379,10 @@ pub enum TimelineEditCommand {
         phrase_index: u16,
         role_id: PhraseRoleId,
     },
+    SetLoopStrategy {
+        phrase_index: u16,
+        strategy: PhraseLoopStrategy,
+    },
 }
 
 impl TimelineEditCommand {
@@ -389,7 +394,8 @@ impl TimelineEditCommand {
             | Self::MergePrevious { .. }
             | Self::MergeNext { .. }
             | Self::MoveBoundary { .. }
-            | Self::Delete { .. } => None,
+            | Self::Delete { .. }
+            | Self::SetLoopStrategy { .. } => None,
         }
     }
 }
@@ -411,6 +417,7 @@ impl TimelineEditCommand {
                 ..
             } => TimelineRevisionReason::AbsorbNext,
             Self::ChangeRole { .. } => TimelineRevisionReason::ChangeRole,
+            Self::SetLoopStrategy { .. } => TimelineRevisionReason::ChangeLoopStrategy,
         }
     }
 }
@@ -567,8 +574,20 @@ fn apply_edit(
             if phrase.role_id == role_id {
                 return Err(TimelineEditError::NoChange);
             }
-            phrases[index] = PhraseInstance::new(0, phrase.start_bar, phrase.end_bar, role_id)
-                .with_loop_strategy(phrase.loop_strategy);
+            phrases[index] = PhraseInstance::new(0, phrase.start_bar, phrase.end_bar, role_id);
+        }
+        TimelineEditCommand::SetLoopStrategy {
+            phrase_index,
+            strategy,
+        } => {
+            let index = phrase_index_index(phrase_index, phrases.len())?;
+            let phrase = phrases[index].clone();
+            if phrase.loop_strategy == strategy {
+                return Err(TimelineEditError::NoChange);
+            }
+            phrases[index] =
+                PhraseInstance::new(0, phrase.start_bar, phrase.end_bar, phrase.role_id)
+                    .with_loop_strategy(strategy);
         }
     }
     reindex(phrases)

@@ -5,8 +5,8 @@ use lumi_domain::{
     OperationCommand, PlanId, PlanRevision, SceneId, StateRevision, ThemeId, TrackLoadId,
 };
 use lumi_library::{
-    AutoloopVariantMove, PhraseAbsorption, PhraseRoleId, PhraseRoleMove, TimelineEditCommand,
-    VariantId,
+    AutoloopVariantMove, PhraseAbsorption, PhraseLoopStrategy, PhraseRoleId, PhraseRoleMove,
+    ThemeSpecificVariant, TimelineEditCommand, VariantId,
 };
 use lumi_protocol::{MessageEnvelope, MessageType};
 use lumi_simulator::SimulationSpeed;
@@ -38,6 +38,13 @@ pub enum SessionCommand {
         track_id: u64,
         expected_revision: u64,
         command: TimelineEditCommand,
+    },
+    SetLibraryPhraseLoopStrategy {
+        track_id: u64,
+        expected_timeline_revision: u64,
+        expected_catalog_revision: u64,
+        phrase_index: u16,
+        strategy: PhraseLoopStrategy,
     },
     UndoLibraryTimeline {
         track_id: u64,
@@ -122,6 +129,7 @@ impl SessionCommand {
             | Self::OpenLibraryTrackEditor { .. }
             | Self::CloseLibraryTrackEditor
             | Self::EditLibraryTimeline { .. }
+            | Self::SetLibraryPhraseLoopStrategy { .. }
             | Self::UndoLibraryTimeline { .. }
             | Self::RedoLibraryTimeline { .. }
             | Self::RestoreLibraryTimelineRevision { .. }
@@ -164,6 +172,19 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
             track_id: positive_unsigned(&envelope.payload, "trackId")?,
             expected_revision: positive_unsigned(&envelope.payload, "expectedTimelineRevision")?,
             command: timeline_edit(&envelope.payload)?,
+        }),
+        "setLibraryPhraseLoopStrategy" => Ok(SessionCommand::SetLibraryPhraseLoopStrategy {
+            track_id: positive_unsigned(&envelope.payload, "trackId")?,
+            expected_timeline_revision: positive_unsigned(
+                &envelope.payload,
+                "expectedTimelineRevision",
+            )?,
+            expected_catalog_revision: positive_unsigned(
+                &envelope.payload,
+                "expectedAutoloopCatalogRevision",
+            )?,
+            phrase_index: phrase_index_value(&envelope.payload)?,
+            strategy: phrase_loop_strategy(&envelope.payload)?,
         }),
         "undoLibraryTimeline" => Ok(SessionCommand::UndoLibraryTimeline {
             track_id: positive_unsigned(&envelope.payload, "trackId")?,
@@ -355,6 +376,33 @@ fn timeline_edit(
             role_id: phrase_role_id(payload)?,
         }),
         _ => Err(CommandDecodeError::InvalidField("operation")),
+    }
+}
+
+fn phrase_loop_strategy(
+    payload: &serde_json::Map<String, Value>,
+) -> Result<PhraseLoopStrategy, CommandDecodeError> {
+    match string(payload, "strategy")? {
+        "auto" => Ok(PhraseLoopStrategy::Auto),
+        "fixedVariant" => Ok(PhraseLoopStrategy::FixedVariant(variant_id(payload)?)),
+        "themeSpecificExact" => {
+            let values = payload
+                .get("themeOverrides")
+                .and_then(Value::as_array)
+                .ok_or(CommandDecodeError::InvalidField("themeOverrides"))?;
+            let mut overrides = Vec::with_capacity(values.len());
+            for value in values {
+                let object = value
+                    .as_object()
+                    .ok_or(CommandDecodeError::InvalidField("themeOverrides"))?;
+                overrides.push(ThemeSpecificVariant::new(
+                    ThemeId::new(positive_unsigned(object, "themeId")?),
+                    variant_id(object)?,
+                ));
+            }
+            Ok(PhraseLoopStrategy::ThemeSpecificExact(overrides))
+        }
+        _ => Err(CommandDecodeError::InvalidField("strategy")),
     }
 }
 

@@ -69,6 +69,44 @@ public enum EngineTimelineEdit: Equatable, Sendable {
     }
 }
 
+public struct EngineThemeVariantOverride: Equatable, Sendable {
+    public let themeID: UInt64
+    public let variantID: String
+
+    public init(themeID: UInt64, variantID: String) {
+        self.themeID = themeID
+        self.variantID = variantID
+    }
+}
+
+public enum EnginePhraseLoopStrategy: Equatable, Sendable {
+    case automatic
+    case fixedVariant(String)
+    case themeSpecificExact([EngineThemeVariantOverride])
+
+    fileprivate var payload: [String: JSONValue] {
+        switch self {
+        case .automatic:
+            ["strategy": .string("auto")]
+        case let .fixedVariant(variantID):
+            [
+                "strategy": .string("fixedVariant"),
+                "variantId": .string(variantID)
+            ]
+        case let .themeSpecificExact(overrides):
+            [
+                "strategy": .string("themeSpecificExact"),
+                "themeOverrides": .array(overrides.map { value in
+                    .object([
+                        "themeId": .number(Double(value.themeID)),
+                        "variantId": .string(value.variantID)
+                    ])
+                })
+            ]
+        }
+    }
+}
+
 public enum EnginePhraseRoleMutation: Equatable, Sendable {
     case add(displayName: String)
     case rename(roleID: String, displayName: String)
@@ -186,6 +224,13 @@ public enum EngineCommand: Equatable, Sendable {
         expectedTimelineRevision: UInt64,
         edit: EngineTimelineEdit
     )
+    case setLibraryPhraseLoopStrategy(
+        trackID: UInt64,
+        phraseIndex: UInt16,
+        expectedTimelineRevision: UInt64,
+        expectedAutoloopCatalogRevision: UInt64,
+        strategy: EnginePhraseLoopStrategy
+    )
     case undoLibraryTimeline(trackID: UInt64, expectedTimelineRevision: UInt64)
     case redoLibraryTimeline(trackID: UInt64, expectedTimelineRevision: UInt64)
     case restoreLibraryTimelineRevision(
@@ -244,6 +289,20 @@ public enum EngineCommand: Equatable, Sendable {
             payload["kind"] = .string("editLibraryTimeline")
             payload["trackId"] = .number(Double(trackID))
             payload["expectedTimelineRevision"] = .number(Double(expectedRevision))
+            return payload
+        case let .setLibraryPhraseLoopStrategy(
+            trackID,
+            phraseIndex,
+            expectedTimelineRevision,
+            expectedCatalogRevision,
+            strategy
+        ):
+            var payload = strategy.payload
+            payload["kind"] = .string("setLibraryPhraseLoopStrategy")
+            payload["trackId"] = .number(Double(trackID))
+            payload["phraseIndex"] = .number(Double(phraseIndex))
+            payload["expectedTimelineRevision"] = .number(Double(expectedTimelineRevision))
+            payload["expectedAutoloopCatalogRevision"] = .number(Double(expectedCatalogRevision))
             return payload
         case let .undoLibraryTimeline(trackID, expectedRevision):
             return timelinePayload(

@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use lumi_domain::ThemeId;
 
-use crate::{AutoloopEntryId, PhraseRoleCatalog, PhraseRoleId, VariantId};
+use crate::{AutoloopEntryId, PhraseLoopStrategy, PhraseRoleCatalog, PhraseRoleId, VariantId};
 
 pub const AUTOLOOP_CATALOG_DEFAULTS_VERSION: u16 = 1;
 
@@ -211,6 +211,7 @@ impl MissingAutoloopCell {
 pub enum AutoloopResolutionReason {
     Automatic,
     ExactVariant,
+    ThemeSpecificExact,
     SameRoleFallback { requested_variant_id: VariantId },
 }
 
@@ -455,6 +456,82 @@ impl AutoloopCatalog {
         Ok(self.resolution(fallback, reason))
     }
 
+    pub fn validate_loop_strategy(
+        &self,
+        role_id: &PhraseRoleId,
+        strategy: &PhraseLoopStrategy,
+    ) -> Result<(), AutoloopCatalogError> {
+        match strategy {
+            PhraseLoopStrategy::Auto => {}
+            PhraseLoopStrategy::FixedVariant(variant_id) => {
+                self.require_active_role_variant(role_id, variant_id)?;
+            }
+            PhraseLoopStrategy::ThemeSpecificExact(overrides) => {
+                for override_value in overrides {
+                    if !self
+                        .themes
+                        .iter()
+                        .any(|theme| theme.id() == override_value.theme_id())
+                    {
+                        return Err(AutoloopCatalogError::UnknownTheme);
+                    }
+                    self.require_active_role_variant(role_id, override_value.variant_id())?;
+                    if self
+                        .cell(
+                            override_value.theme_id(),
+                            role_id,
+                            override_value.variant_id(),
+                        )
+                        .is_none()
+                    {
+                        return Err(AutoloopCatalogError::MissingExactCell);
+                    }
+                }
+            }
+        }
+        Ok(())
+    }
+
+    pub fn resolve_loop_strategy(
+        &self,
+        theme_id: ThemeId,
+        role_id: &PhraseRoleId,
+        strategy: &PhraseLoopStrategy,
+        expected_revision: u64,
+    ) -> Result<AutoloopResolution, AutoloopCatalogError> {
+        if expected_revision != self.revision {
+            return Err(AutoloopCatalogError::RevisionConflict {
+                expected: expected_revision,
+                actual: self.revision,
+            });
+        }
+        if !self.themes.iter().any(|theme| theme.id() == theme_id) {
+            return Err(AutoloopCatalogError::UnknownTheme);
+        }
+        match strategy {
+            PhraseLoopStrategy::Auto => self.resolve(theme_id, role_id, None, expected_revision),
+            PhraseLoopStrategy::FixedVariant(variant_id) => self.resolve_exact_strategy(
+                theme_id,
+                role_id,
+                variant_id,
+                AutoloopResolutionReason::ExactVariant,
+            ),
+            PhraseLoopStrategy::ThemeSpecificExact(overrides) => {
+                let Some(override_value) =
+                    overrides.iter().find(|value| value.theme_id() == theme_id)
+                else {
+                    return self.resolve(theme_id, role_id, None, expected_revision);
+                };
+                self.resolve_exact_strategy(
+                    theme_id,
+                    role_id,
+                    override_value.variant_id(),
+                    AutoloopResolutionReason::ThemeSpecificExact,
+                )
+            }
+        }
+    }
+
     pub fn rename_theme(
         &self,
         theme_id: ThemeId,
@@ -668,6 +745,33 @@ impl AutoloopCatalog {
         })
     }
 
+    fn require_active_role_variant(
+        &self,
+        role_id: &PhraseRoleId,
+        variant_id: &VariantId,
+    ) -> Result<&AutoloopVariant, AutoloopCatalogError> {
+        self.variants
+            .iter()
+            .find(|variant| {
+                variant.role_id() == role_id && variant.id() == variant_id && !variant.is_archived()
+            })
+            .ok_or(AutoloopCatalogError::IncompatibleVariant)
+    }
+
+    fn resolve_exact_strategy(
+        &self,
+        theme_id: ThemeId,
+        role_id: &PhraseRoleId,
+        variant_id: &VariantId,
+        reason: AutoloopResolutionReason,
+    ) -> Result<AutoloopResolution, AutoloopCatalogError> {
+        self.require_active_role_variant(role_id, variant_id)?;
+        let cell = self
+            .cell(theme_id, role_id, variant_id)
+            .ok_or(AutoloopCatalogError::MissingExactCell)?;
+        Ok(self.resolution(cell, reason))
+    }
+
     fn resolution(
         &self,
         cell: &AutoloopMatrixCell,
@@ -851,8 +955,10 @@ pub enum AutoloopCatalogError {
     DuplicateEntryId,
     UnknownTheme,
     UnknownVariant,
+    IncompatibleVariant,
     UnknownPhraseRole,
     MissingRoleCoverage,
+    MissingExactCell,
     NoActiveVariantsForRole,
     NoChange,
     IdentifierOverflow,

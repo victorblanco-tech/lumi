@@ -526,6 +526,22 @@ fn apply_command(
                 .edit_timeline(track_id, expected_revision, command)?;
             return Ok(());
         }
+        SessionCommand::SetLibraryPhraseLoopStrategy {
+            track_id,
+            expected_timeline_revision,
+            expected_catalog_revision,
+            phrase_index,
+            strategy,
+        } => {
+            runtime.library_worker.set_phrase_loop_strategy(
+                track_id,
+                expected_timeline_revision,
+                expected_catalog_revision,
+                phrase_index,
+                strategy,
+            )?;
+            return Ok(());
+        }
         SessionCommand::UndoLibraryTimeline {
             track_id,
             expected_revision,
@@ -677,6 +693,7 @@ fn apply_command(
         | SessionCommand::OpenLibraryTrackEditor { .. }
         | SessionCommand::CloseLibraryTrackEditor
         | SessionCommand::EditLibraryTimeline { .. }
+        | SessionCommand::SetLibraryPhraseLoopStrategy { .. }
         | SessionCommand::UndoLibraryTimeline { .. }
         | SessionCommand::RedoLibraryTimeline { .. }
         | SessionCommand::RestoreLibraryTimelineRevision { .. }

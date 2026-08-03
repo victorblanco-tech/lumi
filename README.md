@@ -24,8 +24,9 @@ Het gerefineerde ontwerp en storyplan voor de volgende verticale milestone staat
 in [`docs/planning/epic-02a-library-track-lighting-editor.md`](docs/planning/epic-02a-library-track-lighting-editor.md).
 
 > Status: Epic 1 is geïntegreerd als lokale `0.1.0-dev` release candidate; Epic
-> 2A heeft nu de provider-neutrale Library en eerste Track Lighting Editor
-> waveform/audio-preview in actieve bouw.
+> 2A heeft nu de provider-neutrale Library, versioned Track Lighting Editor,
+> configureerbare Phrase Roles, vier-Theme Autoloop-matrix en duurzame
+> per-phrase loopstrategieën in actieve bouw.
 
 ## Development
 

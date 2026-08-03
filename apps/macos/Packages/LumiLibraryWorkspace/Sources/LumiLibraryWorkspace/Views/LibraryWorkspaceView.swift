@@ -86,6 +86,7 @@ public struct LibraryWorkspaceView: View {
         .sheet(item: $editorAnalysis, onDismiss: onCloseEditor) { analysis in
             TrackLightingEditorView(
                 analysis: analysis,
+                autoloopCatalog: state.autoloopCatalog,
                 keyNotation: keyNotation,
                 feedback: timelineFeedback,
                 onTimelineEdit: onTimelineEdit,

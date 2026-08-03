@@ -30,7 +30,8 @@ client receives the typed `timelineRevisionMismatch` response with
 | Merge previous/next | Absorbs the chosen neighbour while retaining the selected phrase's role and strategy |
 | Move boundary | Resizes exactly two adjacent phrases without allowing either to become empty |
 | Delete/absorb | Requires an explicit previous or next target and cannot create a gap |
-| Change role | Changes only the selected phrase and rejects a no-op |
+| Change role | Changes the selected phrase, resets its loop strategy to `AUTO`, and rejects a no-op |
+| Change loop strategy | Stores a validated logical `AUTO`, fixed-Variant, or exact Theme override choice without selecting a Theme |
 | Undo/redo | Appends a restore revision and moves a persistently reconstructed history cursor |
 | Restore revision | Copies an immutable historical state into a new head; history is never rewritten |
 

@@ -26,6 +26,74 @@ public struct TrackEditorWaveformPoint: Equatable, Sendable {
     }
 }
 
+public struct TrackEditorThemeVariantOverride: Equatable, Sendable {
+    public let themeID: UInt64
+    public let variantID: String
+
+    public init(themeID: UInt64, variantID: String) {
+        self.themeID = themeID
+        self.variantID = variantID
+    }
+}
+
+public struct TrackEditorLoopStrategyIssue: Equatable, Sendable {
+    public let reason: String
+    public let themeID: UInt64
+    public let variantID: String?
+
+    public init(reason: String, themeID: UInt64, variantID: String?) {
+        self.reason = reason
+        self.themeID = themeID
+        self.variantID = variantID
+    }
+}
+
+public struct TrackEditorLoopStrategy: Equatable, Sendable {
+    public static let automatic = Self(
+        kind: "auto",
+        locked: false,
+        provenance: "automaticDefault",
+        rowRoleID: "",
+        fixedVariantID: nil,
+        themeOverrides: [],
+        validatedCatalogRevision: 1,
+        status: "ready",
+        issues: []
+    )
+
+    public let kind: String
+    public let locked: Bool
+    public let provenance: String
+    public let rowRoleID: String
+    public let fixedVariantID: String?
+    public let themeOverrides: [TrackEditorThemeVariantOverride]
+    public let validatedCatalogRevision: UInt64
+    public let status: String
+    public let issues: [TrackEditorLoopStrategyIssue]
+
+    public init(
+        kind: String,
+        locked: Bool,
+        provenance: String,
+        rowRoleID: String,
+        fixedVariantID: String?,
+        themeOverrides: [TrackEditorThemeVariantOverride],
+        validatedCatalogRevision: UInt64,
+        status: String,
+        issues: [TrackEditorLoopStrategyIssue]
+    ) {
+        self.kind = kind
+        self.locked = locked
+        self.provenance = provenance
+        self.rowRoleID = rowRoleID
+        self.fixedVariantID = fixedVariantID
+        self.themeOverrides = themeOverrides
+        self.validatedCatalogRevision = validatedCatalogRevision
+        self.status = status
+        self.issues = issues
+    }
+}
+
 public struct TrackEditorPhrase: Identifiable, Equatable, Sendable {
     public let id: UInt64
     public let startBeat: UInt32
@@ -33,7 +101,7 @@ public struct TrackEditorPhrase: Identifiable, Equatable, Sendable {
     public let roleID: String
     public let role: String
     public let origin: String
-    public let loopStrategy: String
+    public let loopStrategy: TrackEditorLoopStrategy
 
     public init(
         id: UInt64,
@@ -42,7 +110,7 @@ public struct TrackEditorPhrase: Identifiable, Equatable, Sendable {
         roleID: String,
         role: String,
         origin: String,
-        loopStrategy: String = "auto"
+        loopStrategy: TrackEditorLoopStrategy = .automatic
     ) {
         self.id = id
         self.startBeat = startBeat
@@ -141,6 +209,13 @@ public enum TrackTimelineEditRequest: Equatable, Sendable {
     case deleteAbsorbPrevious(phraseIndex: UInt16)
     case deleteAbsorbNext(phraseIndex: UInt16)
     case changeRole(phraseIndex: UInt16, roleID: String)
+    case setLoopStrategy(phraseIndex: UInt16, strategy: TrackLoopStrategyRequest)
+}
+
+public enum TrackLoopStrategyRequest: Equatable, Sendable {
+    case automatic
+    case fixedVariant(String)
+    case themeSpecificExact([TrackEditorThemeVariantOverride])
 }
 
 public enum TrackTimelineHistoryRequest: Equatable, Sendable {

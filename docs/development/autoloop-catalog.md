@@ -25,6 +25,12 @@ of the same role and reports that reason explicitly. If the role has no usable
 coverage, resolution fails. Passing an older revision fails before a cached
 choice can be reused.
 
+Automatic resolution may use the documented same-role fallback. An explicit
+per-phrase fixed Variant or exact Theme override is stricter: it retains the
+chosen row and fails closed when that exact cell is missing. The complete
+strategy semantics are documented in
+[`phrase-loop-strategies.md`](phrase-loop-strategies.md).
+
 ## Provider boundary
 
 This catalog contains no SoundSwitch, MIDI, bank, slot, or device addressing.

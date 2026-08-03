@@ -77,6 +77,10 @@ fn every_edit_preserves_contiguous_complete_bar_coverage_and_history()
             phrase_index: 2,
             role_id: role("synth")?,
         },
+        TimelineEditCommand::SetLoopStrategy {
+            phrase_index: 0,
+            strategy: PhraseLoopStrategy::FixedVariant(VariantId::try_new("variant-1")?),
+        },
     ];
 
     for command in commands {
@@ -87,6 +91,39 @@ fn every_edit_preserves_contiguous_complete_bar_coverage_and_history()
         assert_eq!(edited.parent_revision(), Some(original.revision()));
         assert_eq!(edited.origin(), TimelineRevisionOrigin::UserEdit);
     }
+    Ok(())
+}
+
+#[test]
+fn strategy_edits_are_revisioned_and_role_changes_reset_to_auto()
+-> Result<(), Box<dyn std::error::Error>> {
+    let fixed = timeline()?.edit(TimelineEditCommand::SetLoopStrategy {
+        phrase_index: 0,
+        strategy: PhraseLoopStrategy::FixedVariant(VariantId::try_new("variant-1")?),
+    })?;
+    assert_eq!(fixed.reason(), TimelineRevisionReason::ChangeLoopStrategy);
+    assert!(matches!(
+        fixed.phrases()[0].loop_strategy(),
+        PhraseLoopStrategy::FixedVariant(variant) if variant.as_str() == "variant-1"
+    ));
+
+    let automatic = fixed.edit(TimelineEditCommand::SetLoopStrategy {
+        phrase_index: 0,
+        strategy: PhraseLoopStrategy::Auto,
+    })?;
+    assert_eq!(
+        automatic.phrases()[0].loop_strategy(),
+        &PhraseLoopStrategy::Auto
+    );
+
+    let changed_role = timeline()?.edit(TimelineEditCommand::ChangeRole {
+        phrase_index: 1,
+        role_id: role("synth")?,
+    })?;
+    assert_eq!(
+        changed_role.phrases()[1].loop_strategy(),
+        &PhraseLoopStrategy::Auto
+    );
     Ok(())
 }
 

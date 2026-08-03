@@ -405,16 +405,17 @@ public struct LibrarySnapshotDecoder: Sendable {
             guard case let .object(phrase) = value else {
                 throw LibrarySnapshotError.invalidObject
             }
+            let roleID = try string(phrase, "roleId")
             return TrackEditorPhrase(
                 id: try unsigned(phrase, "id"),
                 startBeat: try UInt32(exactly: unsigned(phrase, "startBeat"))
                     .required(.invalidNumber("phrase.startBeat")),
                 endBeat: try UInt32(exactly: unsigned(phrase, "endBeat"))
                     .required(.invalidNumber("phrase.endBeat")),
-                roleID: try string(phrase, "roleId"),
+                roleID: roleID,
                 role: try string(phrase, "role"),
                 origin: try string(phrase, "origin"),
-                loopStrategy: try string(phrase, "loopStrategy")
+                loopStrategy: try decodeLoopStrategy(phrase, roleID: roleID)
             )
         }
         var phraseIDs = Set<UInt64>()
@@ -522,6 +523,79 @@ public struct LibrarySnapshotDecoder: Sendable {
                 canRedo: try boolean(timeline, "canRedo"),
                 revisions: decodedRevisions
             )
+        )
+    }
+
+    private func decodeLoopStrategy(
+        _ phrase: [String: JSONValue],
+        roleID: String
+    ) throws -> TrackEditorLoopStrategy {
+        let value = try object(phrase, "loopStrategy")
+        let kind = try string(value, "kind")
+        let locked = try boolean(value, "locked")
+        let provenance = try string(value, "provenance")
+        let rowRoleID = try string(value, "rowRoleId")
+        let fixedVariantID = optionalString(value, "fixedVariantId")
+        let overrideValues = try array(value, "themeOverrides")
+        guard overrideValues.count <= 4 else {
+            throw LibrarySnapshotError.invalidPhraseTimeline
+        }
+        let overrides = try overrideValues.map { item -> TrackEditorThemeVariantOverride in
+            guard case let .object(overrideValue) = item else {
+                throw LibrarySnapshotError.invalidObject
+            }
+            return TrackEditorThemeVariantOverride(
+                themeID: try unsigned(overrideValue, "themeId"),
+                variantID: try string(overrideValue, "variantId")
+            )
+        }
+        let issueValues = try array(value, "issues")
+        guard issueValues.count <= 4 else {
+            throw LibrarySnapshotError.invalidPhraseTimeline
+        }
+        let issues = try issueValues.map { item -> TrackEditorLoopStrategyIssue in
+            guard case let .object(issue) = item else {
+                throw LibrarySnapshotError.invalidObject
+            }
+            return TrackEditorLoopStrategyIssue(
+                reason: try string(issue, "reason"),
+                themeID: try unsigned(issue, "themeId"),
+                variantID: optionalString(issue, "variantId")
+            )
+        }
+        let validatedCatalogRevision = try unsigned(value, "validatedCatalogRevision")
+        let status = try string(value, "status")
+        let overridesAreOrdered = overrides.enumerated().allSatisfy { index, item in
+            item.themeID > 0 && (index == 0 || overrides[index - 1].themeID < item.themeID)
+        }
+        let validShape = switch kind {
+        case "auto":
+            !locked && provenance == "automaticDefault" && fixedVariantID == nil && overrides.isEmpty
+        case "fixedVariant":
+            locked && provenance == "userSelection" && fixedVariantID != nil && overrides.isEmpty
+        case "themeSpecificExact":
+            locked && provenance == "userSelection" && fixedVariantID == nil && !overrides.isEmpty
+        default:
+            false
+        }
+        guard rowRoleID == roleID,
+              validatedCatalogRevision > 0,
+              overridesAreOrdered,
+              validShape,
+              ["ready", "incomplete", "stale"].contains(status),
+              (status == "ready") == issues.isEmpty else {
+            throw LibrarySnapshotError.invalidPhraseTimeline
+        }
+        return TrackEditorLoopStrategy(
+            kind: kind,
+            locked: locked,
+            provenance: provenance,
+            rowRoleID: rowRoleID,
+            fixedVariantID: fixedVariantID,
+            themeOverrides: overrides,
+            validatedCatalogRevision: validatedCatalogRevision,
+            status: status,
+            issues: issues
         )
     }
 
