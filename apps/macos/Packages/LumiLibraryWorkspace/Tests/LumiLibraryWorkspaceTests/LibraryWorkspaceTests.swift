@@ -124,6 +124,60 @@ struct LibraryWorkspaceTests {
         }
     }
 
+    @Test("Autoloop catalog decodes four Theme columns and flexible role variants")
+    func decodesAutoloopCatalog() throws {
+        let state = try LibrarySnapshotDecoder().decode(
+            envelope(trackValues: [trackValue()], autoloopCatalog: autoloopCatalogValue())
+        )
+        let catalog = try #require(state.autoloopCatalog)
+        #expect(catalog.revision == 7)
+        #expect(catalog.themes.map(\.name) == ["Electric Bloom", "Deep Ocean", "Solar Flare", "Ultraviolet"])
+        #expect(catalog.roles.first?.id == "synth")
+        #expect(catalog.roles.first?.variants.count == 2)
+        #expect(catalog.roles.first?.variants[1].cells.last?.isMissing == true)
+        #expect(catalog.preflight.missingCellCount == 1)
+        #expect(catalog.preflight.missingRoleCount == 1)
+        #expect(catalog.preflight.missingRoleIDs == ["vocal"])
+        #expect(!catalog.hardCodedPhysicalCapacity)
+    }
+
+    @Test("Autoloop catalog rejects any projection that conflates Theme targets with a variable count")
+    func rejectsNonFourThemeCatalog() {
+        var catalog = autoloopCatalogValue()
+        guard case var .object(object) = catalog,
+              case var .array(themes) = object["themes"] else {
+            Issue.record("Autoloop fixture must contain Themes")
+            return
+        }
+        themes.removeLast()
+        object["themes"] = .array(themes)
+        catalog = .object(object)
+        #expect(throws: LibrarySnapshotError.invalidAutoloopCatalog) {
+            try LibrarySnapshotDecoder().decode(
+                envelope(trackValues: [trackValue()], autoloopCatalog: catalog)
+            )
+        }
+    }
+
+    @Test("Autoloop preflight cannot claim ready while coverage is incomplete")
+    func rejectsContradictoryAutoloopPreflight() {
+        var catalog = autoloopCatalogValue()
+        guard case var .object(object) = catalog,
+              case var .object(preflight) = object["preflight"] else {
+            Issue.record("Autoloop fixture must contain preflight")
+            return
+        }
+        preflight["status"] = .string("ready")
+        object["preflight"] = .object(preflight)
+        catalog = .object(object)
+
+        #expect(throws: LibrarySnapshotError.invalidAutoloopCatalog) {
+            try LibrarySnapshotDecoder().decode(
+                envelope(trackValues: [trackValue()], autoloopCatalog: catalog)
+            )
+        }
+    }
+
     @Test("Track editor analysis uses one bounded beat coordinate system")
     func decodesTrackEditorAnalysis() throws {
         let state = try LibrarySnapshotDecoder().decode(
@@ -338,7 +392,8 @@ private func replacingAudioURI(
 private func envelope(
     trackValues: [JSONValue],
     editorValue: JSONValue = .null,
-    phraseRoleSettings: JSONValue = .null
+    phraseRoleSettings: JSONValue = .null,
+    autoloopCatalog: JSONValue = .null
 ) -> MessageEnvelope {
     MessageEnvelope(
         protocolVersion: 1,
@@ -386,10 +441,87 @@ private func envelope(
                     "tracks": .array(trackValues)
                 ]),
                 "editor": editorValue,
-                "phraseRoleSettings": phraseRoleSettings
+                "phraseRoleSettings": phraseRoleSettings,
+                "autoloopCatalog": autoloopCatalog
             ])
         ]
     )
+}
+
+private func autoloopCatalogValue() -> JSONValue {
+    let themes: [JSONValue] = ["Electric Bloom", "Deep Ocean", "Solar Flare", "Ultraviolet"]
+        .enumerated()
+        .map { index, name in
+            .object([
+                "id": .number(Double(index + 1)),
+                "name": .string(name),
+                "sortOrder": .number(Double(index + 1))
+            ])
+        }
+    func cells(_ variant: String, missingLast: Bool) -> [JSONValue] {
+        (1...4).map { theme in
+            let missing = missingLast && theme == 4
+            return .object([
+                "themeId": .number(Double(theme)),
+                "entryId": missing ? .null : .string("theme-\(theme)--synth--\(variant)"),
+                "name": missing ? .null : .string("Theme \(theme) Synth \(variant)"),
+                "status": .string(missing ? "missing" : "ready")
+            ])
+        }
+    }
+    return .object([
+        "revision": .number(7),
+        "defaultsVersion": .number(1),
+        "themes": .array(themes),
+        "roles": .array([
+            .object([
+                "id": .string("synth"),
+                "name": .string("Synth"),
+                "archived": .boolean(false),
+                "variants": .array([
+                    .object([
+                        "id": .string("variant-1"),
+                        "name": .string("Variant 1"),
+                        "sortOrder": .number(1),
+                        "archived": .boolean(false),
+                        "cells": .array(cells("variant-1", missingLast: false))
+                    ]),
+                    .object([
+                        "id": .string("variant-2"),
+                        "name": .string("Variant 2"),
+                        "sortOrder": .number(2),
+                        "archived": .boolean(false),
+                        "cells": .array(cells("variant-2", missingLast: true))
+                    ])
+                ])
+            ]),
+            .object([
+                "id": .string("vocal"),
+                "name": .string("Vocal"),
+                "archived": .boolean(false),
+                "variants": .array([])
+            ])
+        ]),
+        "preflight": .object([
+            "status": .string("incomplete"),
+            "missingCellCount": .number(1),
+            "missingCells": .array([
+                .object([
+                    "themeId": .number(4),
+                    "roleId": .string("synth"),
+                    "variantId": .string("variant-2")
+                ])
+            ]),
+            "hasMoreMissingCells": .boolean(false),
+            "missingRoleCount": .number(1),
+            "missingRoleIds": .array([.string("vocal")]),
+            "hasMoreMissingRoles": .boolean(false)
+        ]),
+        "targetCapabilities": .object([
+            "validationOwner": .string("targetAdapter"),
+            "hardCodedPhysicalCapacity": .boolean(false)
+        ])
+    ])
 }
 
 private func editorValue() -> JSONValue {

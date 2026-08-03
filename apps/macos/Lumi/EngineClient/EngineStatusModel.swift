@@ -10,6 +10,7 @@ final class EngineStatusModel: ObservableObject {
     @Published private(set) var libraryState = LibraryWorkspaceState.importing()
     @Published private(set) var timelineEditFeedback: String?
     @Published private(set) var phraseRoleFeedback: String?
+    @Published private(set) var autoloopCatalogFeedback: String?
 
     private enum Lifecycle: Equatable {
         case stopped
@@ -43,6 +44,7 @@ final class EngineStatusModel: ObservableObject {
         libraryState = .importing()
         timelineEditFeedback = nil
         phraseRoleFeedback = nil
+        autoloopCatalogFeedback = nil
 
         do {
             let executable = try engineExecutable()
@@ -112,6 +114,7 @@ final class EngineStatusModel: ObservableObject {
         workspaceState = LiveWorkspacePresenter.stopped()
         libraryState = .importing()
         phraseRoleFeedback = nil
+        autoloopCatalogFeedback = nil
     }
 
     func queryLibrary(_ request: LibraryQueryRequest) async {
@@ -244,6 +247,79 @@ final class EngineStatusModel: ObservableObject {
         } catch {
             phraseRoleFeedback = (error as? LocalizedError)?.errorDescription
                 ?? "The phrase-role change could not be saved."
+        }
+    }
+
+    func mutateAutoloopCatalog(_ request: AutoloopCatalogMutationRequest) async {
+        guard let catalog = libraryState.autoloopCatalog,
+              lifecycle == .ready,
+              let endpointDescription,
+              let protocolVersion,
+              await acquireInteractiveExchange() else {
+            return
+        }
+        defer { isExchangingCommand = false }
+        do {
+            let envelope = try await supervisor.send(
+                .mutateAutoloopCatalog(
+                    expectedAutoloopCatalogRevision: catalog.revision,
+                    mutation: engineAutoloopCatalogMutation(request)
+                )
+            )
+            if let failure = EngineCommandFailure(envelope) {
+                if failure.code == "autoloopCatalogRevisionMismatch" {
+                    let refreshed = try await supervisor.getSnapshot()
+                    libraryState = try libraryDecoder.decode(refreshed)
+                    autoloopCatalogFeedback = "Autoloop catalog changed elsewhere. Lumi refreshed the latest revision."
+                } else {
+                    autoloopCatalogFeedback = failure.message
+                }
+                return
+            }
+            let snapshot = try snapshotDecoder.decode(
+                envelope,
+                endpointDescription: endpointDescription,
+                protocolVersion: protocolVersion
+            )
+            latestSnapshot = snapshot
+            workspaceState = LiveWorkspacePresenter.ready(snapshot)
+            libraryState = try libraryDecoder.decode(envelope)
+            if let revision = libraryState.autoloopCatalog?.revision {
+                autoloopCatalogFeedback = "Autoloop catalog saved. Revision \(revision)."
+            } else {
+                autoloopCatalogFeedback = "Autoloop catalog saved."
+            }
+        } catch {
+            autoloopCatalogFeedback = (error as? LocalizedError)?.errorDescription
+                ?? "The Autoloop catalog change could not be saved."
+        }
+    }
+
+    private func engineAutoloopCatalogMutation(
+        _ request: AutoloopCatalogMutationRequest
+    ) -> EngineAutoloopCatalogMutation {
+        switch request {
+        case let .renameTheme(themeID, displayName):
+            .renameTheme(themeID: themeID, displayName: displayName)
+        case let .addVariant(roleID, displayName):
+            .addVariant(roleID: roleID, displayName: displayName)
+        case let .renameVariant(roleID, variantID, displayName):
+            .renameVariant(roleID: roleID, variantID: variantID, displayName: displayName)
+        case let .moveVariantEarlier(roleID, variantID):
+            .moveVariantEarlier(roleID: roleID, variantID: variantID)
+        case let .moveVariantLater(roleID, variantID):
+            .moveVariantLater(roleID: roleID, variantID: variantID)
+        case let .archiveVariant(roleID, variantID):
+            .archiveVariant(roleID: roleID, variantID: variantID)
+        case let .restoreVariant(roleID, variantID):
+            .restoreVariant(roleID: roleID, variantID: variantID)
+        case let .setCell(themeID, roleID, variantID, displayName):
+            .setCell(
+                themeID: themeID,
+                roleID: roleID,
+                variantID: variantID,
+                displayName: displayName
+            )
         }
     }
 

@@ -4,12 +4,15 @@ use std::fmt;
 use lumi_domain::{
     OperationCommand, PlanId, PlanRevision, SceneId, StateRevision, ThemeId, TrackLoadId,
 };
-use lumi_library::{PhraseAbsorption, PhraseRoleId, PhraseRoleMove, TimelineEditCommand};
+use lumi_library::{
+    AutoloopVariantMove, PhraseAbsorption, PhraseRoleId, PhraseRoleMove, TimelineEditCommand,
+    VariantId,
+};
 use lumi_protocol::{MessageEnvelope, MessageType};
 use lumi_simulator::SimulationSpeed;
 use serde_json::Value;
 
-use crate::library::PhraseRoleCatalogMutation;
+use crate::library::{AutoloopCatalogMutation, PhraseRoleCatalogMutation};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PlanCommandContext {
@@ -52,6 +55,10 @@ pub enum SessionCommand {
     MutatePhraseRoleCatalog {
         expected_revision: u64,
         mutation: PhraseRoleCatalogMutation,
+    },
+    MutateAutoloopCatalog {
+        expected_revision: u64,
+        mutation: AutoloopCatalogMutation,
     },
     LoadDemoSession {
         expected_revision: StateRevision,
@@ -119,6 +126,7 @@ impl SessionCommand {
             | Self::RedoLibraryTimeline { .. }
             | Self::RestoreLibraryTimelineRevision { .. }
             | Self::MutatePhraseRoleCatalog { .. }
+            | Self::MutateAutoloopCatalog { .. }
             | Self::LoadDemoSession { .. }
             | Self::SetOperationState { .. }
             | Self::SetSimulationSpeed { .. }
@@ -174,6 +182,13 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
             expected_revision: positive_unsigned(&envelope.payload, "expectedPhraseRoleRevision")?,
             mutation: phrase_role_mutation(&envelope.payload)?,
         }),
+        "mutateAutoloopCatalog" => Ok(SessionCommand::MutateAutoloopCatalog {
+            expected_revision: positive_unsigned(
+                &envelope.payload,
+                "expectedAutoloopCatalogRevision",
+            )?,
+            mutation: autoloop_catalog_mutation(&envelope.payload)?,
+        }),
         "loadDemoSession" => Ok(SessionCommand::LoadDemoSession {
             expected_revision: state_revision(envelope)?,
         }),
@@ -217,6 +232,53 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
             expected_revision: state_revision(envelope)?,
         }),
         _ => Err(CommandDecodeError::UnsupportedKind),
+    }
+}
+
+fn autoloop_catalog_mutation(
+    payload: &serde_json::Map<String, Value>,
+) -> Result<AutoloopCatalogMutation, CommandDecodeError> {
+    match string(payload, "operation")? {
+        "renameTheme" => Ok(AutoloopCatalogMutation::RenameTheme {
+            theme_id: ThemeId::new(positive_unsigned(payload, "themeId")?),
+            display_name: string(payload, "displayName")?.to_owned(),
+        }),
+        "addVariant" => Ok(AutoloopCatalogMutation::AddVariant {
+            role_id: phrase_role_id(payload)?,
+            display_name: string(payload, "displayName")?.to_owned(),
+        }),
+        "renameVariant" => Ok(AutoloopCatalogMutation::RenameVariant {
+            role_id: phrase_role_id(payload)?,
+            variant_id: variant_id(payload)?,
+            display_name: string(payload, "displayName")?.to_owned(),
+        }),
+        "moveVariantEarlier" => Ok(AutoloopCatalogMutation::MoveVariant {
+            role_id: phrase_role_id(payload)?,
+            variant_id: variant_id(payload)?,
+            direction: AutoloopVariantMove::Earlier,
+        }),
+        "moveVariantLater" => Ok(AutoloopCatalogMutation::MoveVariant {
+            role_id: phrase_role_id(payload)?,
+            variant_id: variant_id(payload)?,
+            direction: AutoloopVariantMove::Later,
+        }),
+        "archiveVariant" => Ok(AutoloopCatalogMutation::SetVariantArchived {
+            role_id: phrase_role_id(payload)?,
+            variant_id: variant_id(payload)?,
+            archived: true,
+        }),
+        "restoreVariant" => Ok(AutoloopCatalogMutation::SetVariantArchived {
+            role_id: phrase_role_id(payload)?,
+            variant_id: variant_id(payload)?,
+            archived: false,
+        }),
+        "setCell" => Ok(AutoloopCatalogMutation::SetCell {
+            theme_id: ThemeId::new(positive_unsigned(payload, "themeId")?),
+            role_id: phrase_role_id(payload)?,
+            variant_id: variant_id(payload)?,
+            display_name: optional_string(payload, "displayName").map(str::to_owned),
+        }),
+        _ => Err(CommandDecodeError::InvalidField("operation")),
     }
 }
 
@@ -301,6 +363,11 @@ fn phrase_role_id(
 ) -> Result<PhraseRoleId, CommandDecodeError> {
     PhraseRoleId::try_new(string(payload, "roleId")?)
         .map_err(|_| CommandDecodeError::InvalidField("roleId"))
+}
+
+fn variant_id(payload: &serde_json::Map<String, Value>) -> Result<VariantId, CommandDecodeError> {
+    VariantId::try_new(string(payload, "variantId")?)
+        .map_err(|_| CommandDecodeError::InvalidField("variantId"))
 }
 
 fn phrase_index_value(payload: &serde_json::Map<String, Value>) -> Result<u16, CommandDecodeError> {

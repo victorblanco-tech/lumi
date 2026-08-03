@@ -65,11 +65,16 @@ struct FoundationView: View {
                 case .settings:
                     PhraseRoleSettingsView(
                         settings: engineStatus.libraryState.phraseRoleSettings,
+                        autoloopCatalog: engineStatus.libraryState.autoloopCatalog,
                         appearance: $preferences.appearance,
                         keyNotation: $preferences.keyNotation,
                         feedback: engineStatus.phraseRoleFeedback,
+                        autoloopFeedback: engineStatus.autoloopCatalogFeedback,
                         onMutation: { request in
                             Task { await engineStatus.mutatePhraseRoles(request) }
+                        },
+                        onAutoloopMutation: { request in
+                            Task { await engineStatus.mutateAutoloopCatalog(request) }
                         }
                     )
                 }

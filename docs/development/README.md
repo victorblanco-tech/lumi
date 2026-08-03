@@ -116,6 +116,10 @@ Stable phrase-role identities, reversible archiving, usage diagnostics, and
 future-only provider mappings are documented in
 [`phrase-role-management.md`](phrase-role-management.md).
 
+The provider-neutral four-Theme, Phrase Role, and Variant matrix, strict
+same-role fallback, preflight coverage, and target-adapter boundary are
+documented in [`autoloop-catalog.md`](autoloop-catalog.md).
+
 The authoritative Live/Next presentation boundary, explicit degraded states,
 accessibility identifiers, and locked-session PNG workflow are documented in
 [`live-workspace.md`](live-workspace.md).

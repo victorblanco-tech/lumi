@@ -64,6 +64,12 @@ reject_product_dependency \
   'lumi-(engine|simulator|planner|protocol|deck-source|lighting-output|output-dry-run|library-source|library-demo)' \
   "the SQLite library adapter may depend inward on the canonical model only."
 
+if grep -Eiq 'soundswitch|midi|bank(_id|number)?|slot(_id|number)?' \
+  "$repository_root/engine/crates/lumi-library/src/autoloop_catalog.rs"; then
+  echo "ERROR: the logical Autoloop catalog may not contain provider or physical-address concepts." >&2
+  exit 1
+fi
+
 reject_dependency \
   "apps/macos/Packages/LumiDesignSystem/Package.swift" \
   'Lumi(LiveWorkspace|EngineClient|Protocol)' \

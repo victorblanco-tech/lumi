@@ -3,9 +3,9 @@ use std::error::Error;
 use lumi_domain::{MusicalKey, TrackId};
 
 use crate::{
-    BeatGrid, ImportedLibraryBaseline, LumiPhraseTimeline, PhraseRoleCatalog, PhraseRoleUsage,
-    PlaylistId, RawPhraseObservation, SourcePlaylistId, SourceRevision, SourceTrackId,
-    TimelineRevision, TimelineRevisionOrigin, TrackColor, WaveformPoint,
+    AutoloopCatalog, BeatGrid, ImportedLibraryBaseline, LumiPhraseTimeline, PhraseRoleCatalog,
+    PhraseRoleUsage, PlaylistId, RawPhraseObservation, SourcePlaylistId, SourceRevision,
+    SourceTrackId, TimelineRevision, TimelineRevisionOrigin, TrackColor, WaveformPoint,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -477,6 +477,14 @@ pub trait LibraryRepository {
         expected_revision: u64,
     ) -> Result<(), Self::Error>;
     fn phrase_role_usages(&self) -> Result<Vec<PhraseRoleUsage>, Self::Error>;
+    fn autoloop_catalog(&self) -> Result<AutoloopCatalog, Self::Error>;
+    fn initialize_autoloop_catalog(&mut self, catalog: &AutoloopCatalog)
+    -> Result<(), Self::Error>;
+    fn replace_autoloop_catalog(
+        &mut self,
+        catalog: &AutoloopCatalog,
+        expected_revision: u64,
+    ) -> Result<(), Self::Error>;
     fn append_timeline_revision(
         &mut self,
         timeline: &LumiPhraseTimeline,

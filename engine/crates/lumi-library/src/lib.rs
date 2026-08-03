@@ -5,20 +5,26 @@
 
 #![forbid(unsafe_code)]
 
+mod autoloop_catalog;
 mod baseline;
 mod identifiers;
 mod phrase_roles;
 mod repository;
 mod timeline;
 
+pub use autoloop_catalog::{
+    AUTOLOOP_CATALOG_DEFAULTS_VERSION, AutoloopCatalog, AutoloopCatalogError, AutoloopMatrixCell,
+    AutoloopResolution, AutoloopResolutionReason, AutoloopTheme, AutoloopVariant,
+    AutoloopVariantMove, MissingAutoloopCell,
+};
 pub use baseline::{
     BeatGrid, BeatGridValidationError, BeatMarker, ImportedLibraryBaseline, ImportedPlaylist,
     ImportedTrackAnalysis, LibraryBaselineValidationError, RawPhraseObservation, TrackColor,
     TrackValidationError, WaveformPoint,
 };
 pub use identifiers::{
-    LibrarySourceId, PhraseRoleId, PlaylistId, SourcePlaylistId, SourceRevision, SourceTrackId,
-    TextIdentifierError, TimelineRevision, VariantId,
+    AutoloopEntryId, LibrarySourceId, PhraseRoleId, PlaylistId, SourcePlaylistId, SourceRevision,
+    SourceTrackId, TextIdentifierError, TimelineRevision, VariantId,
 };
 pub use phrase_roles::{
     PHRASE_ROLE_DEFAULTS_VERSION, PhraseRole, PhraseRoleCatalog, PhraseRoleCatalogError,

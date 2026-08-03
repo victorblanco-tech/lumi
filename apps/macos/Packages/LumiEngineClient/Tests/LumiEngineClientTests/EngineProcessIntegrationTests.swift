@@ -20,7 +20,8 @@ func decodesCommandFailure() {
             "actualPlanRevision": .number(4),
             "actualStateRevision": .number(11),
             "actualTimelineRevision": .number(7),
-            "actualPhraseRoleRevision": .number(3)
+            "actualPhraseRoleRevision": .number(3),
+            "actualAutoloopCatalogRevision": .number(9)
         ]
     )
 
@@ -30,6 +31,7 @@ func decodesCommandFailure() {
     #expect(failure?.actualStateRevision == 11)
     #expect(failure?.actualTimelineRevision == 7)
     #expect(failure?.actualPhraseRoleRevision == 3)
+    #expect(failure?.actualAutoloopCatalogRevision == 9)
     #expect(failure?.retryable == true)
 }
 
@@ -59,6 +61,9 @@ func launchesRealEngine() async throws {
         #expect(librarySourceName(snapshot) == "Lumi Demo Library")
         #expect(phraseRoleRevision(snapshot) == 1)
         #expect(phraseRoleName(snapshot, roleID: "synth") == "Synth")
+        #expect(autoloopCatalogRevision(snapshot) == 1)
+        #expect(autoloopThemeNames(snapshot).count == 4)
+        #expect(autoloopVariantCount(snapshot, roleID: "synth") == 2)
 
         let renamedRole = try await supervisor.send(
             .mutatePhraseRoleCatalog(
@@ -93,6 +98,37 @@ func launchesRealEngine() async throws {
             messageID: "swift-map-source-phrase"
         )
         #expect(phraseRoleRevision(snapshot) == 3)
+
+        let renamedTheme = try await supervisor.send(
+            .mutateAutoloopCatalog(
+                expectedAutoloopCatalogRevision: 1,
+                mutation: .renameTheme(themeID: 1, displayName: "Electric Garden")
+            ),
+            messageID: "swift-rename-autoloop-theme"
+        )
+        #expect(autoloopCatalogRevision(renamedTheme) == 2)
+        #expect(autoloopThemeNames(renamedTheme).first == "Electric Garden")
+
+        snapshot = try await supervisor.send(
+            .mutateAutoloopCatalog(
+                expectedAutoloopCatalogRevision: 2,
+                mutation: .addVariant(roleID: "synth", displayName: "Variant 3")
+            ),
+            messageID: "swift-add-autoloop-variant"
+        )
+        #expect(autoloopCatalogRevision(snapshot) == 3)
+        #expect(autoloopVariantCount(snapshot, roleID: "synth") == 3)
+        #expect(autoloopMissingCellCount(snapshot) == 4)
+
+        let staleAutoloop = try await supervisor.send(
+            .mutateAutoloopCatalog(
+                expectedAutoloopCatalogRevision: 1,
+                mutation: .renameTheme(themeID: 2, displayName: "Stale Theme")
+            ),
+            messageID: "swift-stale-autoloop-catalog"
+        )
+        #expect(EngineCommandFailure(staleAutoloop)?.code == "autoloopCatalogRevisionMismatch")
+        #expect(EngineCommandFailure(staleAutoloop)?.actualAutoloopCatalogRevision == 3)
 
         let searchedLibrary = try await supervisor.send(
             .queryLibrary(search: "Northern", playlistID: nil, offset: 0, limit: 50),
@@ -164,6 +200,10 @@ func launchesRealEngine() async throws {
         snapshot = try await supervisor.connect(to: restartedEndpoint)
         #expect(phraseRoleRevision(snapshot) == 3)
         #expect(phraseRoleName(snapshot, roleID: "synth") == "Lead Synth")
+        #expect(autoloopCatalogRevision(snapshot) == 3)
+        #expect(autoloopThemeNames(snapshot).first == "Electric Garden")
+        #expect(autoloopVariantCount(snapshot, roleID: "synth") == 3)
+        #expect(autoloopMissingCellCount(snapshot) == 4)
         let reopenedEditor = try await supervisor.send(
             .openLibraryTrackEditor(trackID: requiredFirstLibraryTrackID(snapshot)),
             messageID: "swift-reopen-library-editor"
@@ -335,6 +375,47 @@ private func phraseRoleName(_ envelope: MessageEnvelope, roleID: String) -> Stri
         return name
     }
     return nil
+}
+
+private func autoloopCatalog(_ envelope: MessageEnvelope) -> [String: JSONValue]? {
+    guard case let .object(library) = envelope.payload["library"],
+          case let .object(catalog) = library["autoloopCatalog"] else { return nil }
+    return catalog
+}
+
+private func autoloopCatalogRevision(_ envelope: MessageEnvelope) -> UInt64? {
+    guard let catalog = autoloopCatalog(envelope),
+          case let .number(revision) = catalog["revision"] else { return nil }
+    return UInt64(revision)
+}
+
+private func autoloopThemeNames(_ envelope: MessageEnvelope) -> [String] {
+    guard let catalog = autoloopCatalog(envelope),
+          case let .array(themes) = catalog["themes"] else { return [] }
+    return themes.compactMap { value in
+        guard case let .object(theme) = value,
+              case let .string(name) = theme["name"] else { return nil }
+        return name
+    }
+}
+
+private func autoloopVariantCount(_ envelope: MessageEnvelope, roleID: String) -> Int? {
+    guard let catalog = autoloopCatalog(envelope),
+          case let .array(roles) = catalog["roles"] else { return nil }
+    for value in roles {
+        guard case let .object(role) = value,
+              role["id"] == .string(roleID),
+              case let .array(variants) = role["variants"] else { continue }
+        return variants.count
+    }
+    return nil
+}
+
+private func autoloopMissingCellCount(_ envelope: MessageEnvelope) -> UInt64? {
+    guard let catalog = autoloopCatalog(envelope),
+          case let .object(preflight) = catalog["preflight"],
+          case let .number(count) = preflight["missingCellCount"] else { return nil }
+    return UInt64(count)
 }
 
 private func requiredFirstLibraryTrackID(_ envelope: MessageEnvelope) -> UInt64 {

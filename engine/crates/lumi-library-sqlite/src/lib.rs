@@ -7,21 +7,25 @@ use std::path::Path;
 
 use lumi_domain::{KeyMode, MusicalKey, PitchClass, ThemeId, TrackId};
 use lumi_library::{
-    BeatGrid, BeatMarker, ImportResult, ImportedLibraryBaseline, ImportedTrackAnalysis,
-    LibraryRepository, LibraryTrackQuery, LumiPhraseTimeline, PhraseInstance, PhraseLoopStrategy,
-    PhraseRole, PhraseRoleCatalog, PhraseRoleCatalogError, PhraseRoleId, PhraseRoleTrackUsage,
-    PhraseRoleUsage, PlaylistId, PlaylistPage, PlaylistSummary, RawPhraseObservation,
-    SourcePhraseMapping, SourcePlaylistId, SourceRevision, SourceTrackId, StoredTrack,
-    TextIdentifierError, ThemeSpecificVariant, TimelineRevision, TimelineRevisionOrigin,
-    TimelineRevisionPage, TimelineRevisionReason, TimelineRevisionSummary, TrackColor, TrackPage,
-    TrackPageRequest, TrackSummary, VariantId, WaveformPoint, normalize_source_label,
+    AutoloopCatalog, AutoloopCatalogError, AutoloopEntryId, AutoloopMatrixCell, AutoloopTheme,
+    AutoloopVariant, BeatGrid, BeatMarker, ImportResult, ImportedLibraryBaseline,
+    ImportedTrackAnalysis, LibraryRepository, LibraryTrackQuery, LumiPhraseTimeline,
+    PhraseInstance, PhraseLoopStrategy, PhraseRole, PhraseRoleCatalog, PhraseRoleCatalogError,
+    PhraseRoleId, PhraseRoleTrackUsage, PhraseRoleUsage, PlaylistId, PlaylistPage, PlaylistSummary,
+    RawPhraseObservation, SourcePhraseMapping, SourcePlaylistId, SourceRevision, SourceTrackId,
+    StoredTrack, TextIdentifierError, ThemeSpecificVariant, TimelineRevision,
+    TimelineRevisionOrigin, TimelineRevisionPage, TimelineRevisionReason, TimelineRevisionSummary,
+    TrackColor, TrackPage, TrackPageRequest, TrackSummary, VariantId, WaveformPoint,
+    normalize_source_label,
 };
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 use thiserror::Error;
 
-const SCHEMA_VERSION: u32 = 3;
+const SCHEMA_VERSION: u32 = 4;
 const DEFAULTS_VERSION_KEY: &str = "phrase-role-defaults-version";
 const CATALOG_REVISION_KEY: &str = "phrase-role-catalog-revision";
+const AUTOLOOP_DEFAULTS_VERSION_KEY: &str = "autoloop-catalog-defaults-version";
+const AUTOLOOP_CATALOG_REVISION_KEY: &str = "autoloop-catalog-revision";
 
 pub struct SqliteLibraryRepository {
     connection: Connection,
@@ -138,13 +142,39 @@ impl SqliteLibraryRepository {
                 );
                 INSERT INTO library_settings(key, value)
                     VALUES ('phrase-role-defaults-version', 0),
-                           ('phrase-role-catalog-revision', 0);
+                           ('phrase-role-catalog-revision', 0),
+                           ('autoloop-catalog-defaults-version', 0),
+                           ('autoloop-catalog-revision', 0);
                 CREATE TABLE source_phrase_mappings (
                     provider_kind TEXT NOT NULL,
                     normalized_label TEXT NOT NULL,
                     raw_label TEXT NOT NULL,
                     role_id TEXT NOT NULL REFERENCES phrase_roles(role_id),
                     PRIMARY KEY(provider_kind, normalized_label)
+                );
+                CREATE TABLE autoloop_themes (
+                    theme_id INTEGER PRIMARY KEY,
+                    display_name TEXT NOT NULL,
+                    sort_order INTEGER NOT NULL UNIQUE
+                );
+                CREATE TABLE autoloop_variants (
+                    role_id TEXT NOT NULL REFERENCES phrase_roles(role_id),
+                    variant_id TEXT NOT NULL,
+                    display_name TEXT NOT NULL,
+                    sort_order INTEGER NOT NULL,
+                    archived INTEGER NOT NULL,
+                    PRIMARY KEY(role_id, variant_id),
+                    UNIQUE(role_id, sort_order)
+                );
+                CREATE TABLE autoloop_matrix_cells (
+                    theme_id INTEGER NOT NULL REFERENCES autoloop_themes(theme_id),
+                    role_id TEXT NOT NULL,
+                    variant_id TEXT NOT NULL,
+                    entry_id TEXT NOT NULL UNIQUE,
+                    display_name TEXT NOT NULL,
+                    PRIMARY KEY(theme_id, role_id, variant_id),
+                    FOREIGN KEY(role_id, variant_id)
+                        REFERENCES autoloop_variants(role_id, variant_id)
                 );
                 CREATE TABLE timeline_revisions (
                     track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
@@ -175,7 +205,7 @@ impl SqliteLibraryRepository {
                     FOREIGN KEY(track_id, revision)
                         REFERENCES timeline_revisions(track_id, revision)
                 );
-                PRAGMA user_version = 3;
+                PRAGMA user_version = 4;
                 COMMIT;
                 ",
             )?;
@@ -221,6 +251,43 @@ impl SqliteLibraryRepository {
                     PRIMARY KEY(provider_kind, normalized_label)
                 );
                 PRAGMA user_version = 3;
+                COMMIT;
+                ",
+            )?;
+            current = 3;
+        }
+        if current == 3 {
+            self.connection.execute_batch(
+                "
+                BEGIN IMMEDIATE;
+                INSERT INTO library_settings(key, value)
+                    VALUES ('autoloop-catalog-defaults-version', 0),
+                           ('autoloop-catalog-revision', 0);
+                CREATE TABLE autoloop_themes (
+                    theme_id INTEGER PRIMARY KEY,
+                    display_name TEXT NOT NULL,
+                    sort_order INTEGER NOT NULL UNIQUE
+                );
+                CREATE TABLE autoloop_variants (
+                    role_id TEXT NOT NULL REFERENCES phrase_roles(role_id),
+                    variant_id TEXT NOT NULL,
+                    display_name TEXT NOT NULL,
+                    sort_order INTEGER NOT NULL,
+                    archived INTEGER NOT NULL,
+                    PRIMARY KEY(role_id, variant_id),
+                    UNIQUE(role_id, sort_order)
+                );
+                CREATE TABLE autoloop_matrix_cells (
+                    theme_id INTEGER NOT NULL REFERENCES autoloop_themes(theme_id),
+                    role_id TEXT NOT NULL,
+                    variant_id TEXT NOT NULL,
+                    entry_id TEXT NOT NULL UNIQUE,
+                    display_name TEXT NOT NULL,
+                    PRIMARY KEY(theme_id, role_id, variant_id),
+                    FOREIGN KEY(role_id, variant_id)
+                        REFERENCES autoloop_variants(role_id, variant_id)
+                );
+                PRAGMA user_version = 4;
                 COMMIT;
                 ",
             )?;
@@ -936,6 +1003,153 @@ impl LibraryRepository for SqliteLibraryRepository {
             .collect())
     }
 
+    fn autoloop_catalog(&self) -> Result<AutoloopCatalog, Self::Error> {
+        let revision = setting_u64(&self.connection, AUTOLOOP_CATALOG_REVISION_KEY)?;
+        let defaults_version = u16::try_from(setting_u64(
+            &self.connection,
+            AUTOLOOP_DEFAULTS_VERSION_KEY,
+        )?)
+        .map_err(|_| SqliteLibraryError::ArithmeticOverflow)?;
+        let mut theme_statement = self.connection.prepare(
+            "SELECT theme_id, display_name, sort_order
+             FROM autoloop_themes ORDER BY sort_order, theme_id",
+        )?;
+        let themes = theme_statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            })?
+            .map(|row| {
+                let (theme_id, display_name, sort_order) = row?;
+                Ok(AutoloopTheme::try_new(
+                    ThemeId::new(from_positive_i64(theme_id, "Autoloop Theme ID")?),
+                    display_name,
+                    to_u16(sort_order, "Autoloop Theme sort order")?,
+                )?)
+            })
+            .collect::<Result<Vec<_>, SqliteLibraryError>>()?;
+        let mut variant_statement = self.connection.prepare(
+            "SELECT role_id, variant_id, display_name, sort_order, archived
+             FROM autoloop_variants ORDER BY role_id, sort_order, variant_id",
+        )?;
+        let variants = variant_statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, bool>(4)?,
+                ))
+            })?
+            .map(|row| {
+                let (role_id, variant_id, display_name, sort_order, archived) = row?;
+                Ok(AutoloopVariant::try_new(
+                    PhraseRoleId::try_new(role_id)?,
+                    VariantId::try_new(variant_id)?,
+                    display_name,
+                    to_u16(sort_order, "Autoloop Variant sort order")?,
+                    archived,
+                )?)
+            })
+            .collect::<Result<Vec<_>, SqliteLibraryError>>()?;
+        let mut cell_statement = self.connection.prepare(
+            "SELECT theme_id, role_id, variant_id, entry_id, display_name
+             FROM autoloop_matrix_cells ORDER BY theme_id, role_id, variant_id",
+        )?;
+        let cells = cell_statement
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, String>(3)?,
+                    row.get::<_, String>(4)?,
+                ))
+            })?
+            .map(|row| {
+                let (theme_id, role_id, variant_id, entry_id, display_name) = row?;
+                Ok(AutoloopMatrixCell::try_new(
+                    ThemeId::new(from_positive_i64(theme_id, "Autoloop cell Theme ID")?),
+                    PhraseRoleId::try_new(role_id)?,
+                    VariantId::try_new(variant_id)?,
+                    AutoloopEntryId::try_new(entry_id)?,
+                    display_name,
+                )?)
+            })
+            .collect::<Result<Vec<_>, SqliteLibraryError>>()?;
+        Ok(AutoloopCatalog::try_new(
+            revision,
+            defaults_version,
+            themes,
+            variants,
+            cells,
+        )?)
+    }
+
+    fn initialize_autoloop_catalog(
+        &mut self,
+        catalog: &AutoloopCatalog,
+    ) -> Result<(), Self::Error> {
+        let transaction = self.connection.transaction()?;
+        let current_defaults = setting_u64(&transaction, AUTOLOOP_DEFAULTS_VERSION_KEY)?;
+        if current_defaults != 0 {
+            return Ok(());
+        }
+        if catalog.revision() != 1 || catalog.defaults_version() == 0 {
+            return Err(SqliteLibraryError::InvalidAutoloopCatalog(
+                AutoloopCatalogError::InvalidRevision,
+            ));
+        }
+        replace_autoloop_rows(&transaction, catalog)?;
+        set_setting(
+            &transaction,
+            AUTOLOOP_DEFAULTS_VERSION_KEY,
+            u64::from(catalog.defaults_version()),
+        )?;
+        set_setting(
+            &transaction,
+            AUTOLOOP_CATALOG_REVISION_KEY,
+            catalog.revision(),
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn replace_autoloop_catalog(
+        &mut self,
+        catalog: &AutoloopCatalog,
+        expected_revision: u64,
+    ) -> Result<(), Self::Error> {
+        let transaction = self.connection.transaction()?;
+        let actual_revision = setting_u64(&transaction, AUTOLOOP_CATALOG_REVISION_KEY)?;
+        if actual_revision != expected_revision {
+            return Err(SqliteLibraryError::AutoloopCatalogRevisionConflict {
+                expected: expected_revision,
+                actual: actual_revision,
+            });
+        }
+        let required = expected_revision
+            .checked_add(1)
+            .ok_or(SqliteLibraryError::ArithmeticOverflow)?;
+        if catalog.revision() != required {
+            return Err(SqliteLibraryError::InvalidAutoloopCatalog(
+                AutoloopCatalogError::InvalidRevision,
+            ));
+        }
+        replace_autoloop_rows(&transaction, catalog)?;
+        set_setting(
+            &transaction,
+            AUTOLOOP_CATALOG_REVISION_KEY,
+            catalog.revision(),
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn append_timeline_revision(
         &mut self,
         timeline: &LumiPhraseTimeline,
@@ -1165,6 +1379,61 @@ fn replace_mapping_rows(
     Ok(())
 }
 
+fn replace_autoloop_rows(
+    transaction: &Transaction<'_>,
+    catalog: &AutoloopCatalog,
+) -> Result<(), SqliteLibraryError> {
+    transaction.execute("DELETE FROM autoloop_matrix_cells", [])?;
+    transaction.execute("DELETE FROM autoloop_variants", [])?;
+    transaction.execute("DELETE FROM autoloop_themes", [])?;
+    {
+        let mut statement = transaction.prepare(
+            "INSERT INTO autoloop_themes(theme_id, display_name, sort_order)
+             VALUES (?1, ?2, ?3)",
+        )?;
+        for theme in catalog.themes() {
+            statement.execute(params![
+                to_i64(theme.id().value())?,
+                theme.display_name(),
+                i64::from(theme.sort_order()),
+            ])?;
+        }
+    }
+    {
+        let mut statement = transaction.prepare(
+            "INSERT INTO autoloop_variants
+             (role_id, variant_id, display_name, sort_order, archived)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+        )?;
+        for variant in catalog.variants() {
+            statement.execute(params![
+                variant.role_id().as_str(),
+                variant.id().as_str(),
+                variant.display_name(),
+                i64::from(variant.sort_order()),
+                variant.is_archived(),
+            ])?;
+        }
+    }
+    {
+        let mut statement = transaction.prepare(
+            "INSERT INTO autoloop_matrix_cells
+             (theme_id, role_id, variant_id, entry_id, display_name)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+        )?;
+        for cell in catalog.cells() {
+            statement.execute(params![
+                to_i64(cell.theme_id().value())?,
+                cell.role_id().as_str(),
+                cell.variant_id().as_str(),
+                cell.entry_id().as_str(),
+                cell.display_name(),
+            ])?;
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Error)]
 pub enum SqliteLibraryError {
     #[error("SQLite library error: {0}")]
@@ -1181,6 +1450,8 @@ pub enum SqliteLibraryError {
     InvalidTimeline(#[from] lumi_library::TimelineValidationError),
     #[error("invalid persisted phrase-role catalog: {0}")]
     InvalidPhraseRoleCatalog(#[from] PhraseRoleCatalogError),
+    #[error("invalid persisted Autoloop catalog: {0}")]
+    InvalidAutoloopCatalog(#[from] AutoloopCatalogError),
     #[error("corrupt library data: {0}")]
     CorruptData(String),
     #[error("library arithmetic overflow")]
@@ -1199,6 +1470,8 @@ pub enum SqliteLibraryError {
     },
     #[error("phrase-role catalog changed; expected revision {expected}, actual {actual}")]
     PhraseRoleCatalogRevisionConflict { expected: u64, actual: u64 },
+    #[error("Autoloop catalog changed; expected revision {expected}, actual {actual}")]
+    AutoloopCatalogRevisionConflict { expected: u64, actual: u64 },
 }
 
 #[allow(clippy::too_many_arguments)]

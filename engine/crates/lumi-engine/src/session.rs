@@ -565,6 +565,15 @@ fn apply_command(
                 .mutate_phrase_role_catalog(expected_revision, mutation)?;
             return Ok(());
         }
+        SessionCommand::MutateAutoloopCatalog {
+            expected_revision,
+            mutation,
+        } => {
+            runtime
+                .library_worker
+                .mutate_autoloop_catalog(expected_revision, mutation)?;
+            return Ok(());
+        }
         SessionCommand::LoadDemoSession { expected_revision }
         | SessionCommand::ResetDemoSession { expected_revision } => {
             validate_state_revision(runtime, expected_revision)?;
@@ -672,6 +681,7 @@ fn apply_command(
         | SessionCommand::RedoLibraryTimeline { .. }
         | SessionCommand::RestoreLibraryTimelineRevision { .. }
         | SessionCommand::MutatePhraseRoleCatalog { .. }
+        | SessionCommand::MutateAutoloopCatalog { .. }
         | SessionCommand::LoadDemoSession { .. }
         | SessionCommand::SetOperationState { .. }
         | SessionCommand::SetSimulationSpeed { .. }
@@ -860,6 +870,24 @@ fn application_error_envelope(
                 .insert("actualPhraseRoleRevision".to_owned(), json!(actual));
             envelope
         }),
+        CommandApplicationError::Library(LibraryWorkerError::AutoloopCatalogRevisionConflict {
+            actual,
+            ..
+        }) => error_envelope(
+            sequence,
+            correlation_id,
+            "revisionConflict",
+            "autoloopCatalogRevisionMismatch",
+            "The Autoloop catalog changed before the edit was applied.",
+            true,
+            None,
+        )
+        .map(|mut envelope| {
+            envelope
+                .payload
+                .insert("actualAutoloopCatalogRevision".to_owned(), json!(actual));
+            envelope
+        }),
         CommandApplicationError::Library(
             library_error @ (LibraryWorkerError::TimelineEdit(_)
             | LibraryWorkerError::NothingToUndo
@@ -867,6 +895,7 @@ fn application_error_envelope(
             | LibraryWorkerError::UnknownTimelineRevision(_)
             | LibraryWorkerError::EditorTrackMismatch
             | LibraryWorkerError::PhraseRoleCatalog(_)
+            | LibraryWorkerError::AutoloopCatalog(_)
             | LibraryWorkerError::UnknownPhraseRole
             | LibraryWorkerError::ArchivedPhraseRole),
         ) => error_envelope(
@@ -876,10 +905,15 @@ fn application_error_envelope(
             if matches!(
                 &library_error,
                 LibraryWorkerError::PhraseRoleCatalog(_)
+                    | LibraryWorkerError::AutoloopCatalog(_)
                     | LibraryWorkerError::UnknownPhraseRole
                     | LibraryWorkerError::ArchivedPhraseRole
             ) {
-                "phraseRoleChangeRejected"
+                if matches!(&library_error, LibraryWorkerError::AutoloopCatalog(_)) {
+                    "autoloopCatalogChangeRejected"
+                } else {
+                    "phraseRoleChangeRejected"
+                }
             } else {
                 "timelineEditRejected"
             },
