@@ -1,6 +1,6 @@
 use lumi_domain::{
-    DeckId, KeyMode, MusicalKey, PhraseKind, PitchClass, SourceId, TrackId, TrackLoadId,
-    TrackMetadata, TrackPhrase,
+    DeckId, KeyMode, MusicalKey, PhraseKind, PitchClass, SourceId, TrackColor, TrackId,
+    TrackLoadId, TrackMetadata, TrackPhrase,
 };
 use serde::Deserialize;
 
@@ -31,6 +31,7 @@ struct TrackFixture {
     artist: String,
     bpm_milli: u32,
     key: KeyFixture,
+    color_rgb: u32,
     duration_beats: u32,
     phrases: Vec<PhraseFixture>,
 }
@@ -93,7 +94,12 @@ pub(crate) fn parse(input: &str) -> Result<ParsedFixture, SimulatorError> {
                 ))
             })
             .collect::<Result<Vec<_>, SimulatorError>>()?;
-        let metadata = TrackMetadata::try_new(
+        if deck.track.color_rgb > 0x00ff_ffff {
+            return Err(SimulatorError::InvalidFixture(
+                "track color must be a normalized 24-bit sRGB value".to_owned(),
+            ));
+        }
+        let metadata = TrackMetadata::try_new_with_color(
             TrackId::new(deck.track.id),
             deck.track.title,
             deck.track.artist,
@@ -102,6 +108,7 @@ pub(crate) fn parse(input: &str) -> Result<ParsedFixture, SimulatorError> {
                 pitch_class(&deck.track.key.pitch_class)?,
                 key_mode(&deck.track.key.mode)?,
             ),
+            Some(TrackColor::from_rgb_u32(deck.track.color_rgb)),
             deck.track.duration_beats,
             phrases,
         )

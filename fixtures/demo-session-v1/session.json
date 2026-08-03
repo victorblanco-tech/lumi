@@ -12,6 +12,7 @@
         "artist": "Lumi Lab",
         "bpmMilli": 124000,
         "key": { "pitchClass": "a", "mode": "minor" },
+        "colorRgb": 12273790,
         "durationBeats": 128,
         "phrases": [
           { "index": 0, "startBeat": 0, "endBeat": 32, "kind": "intro" },
@@ -30,6 +31,7 @@
         "artist": "Lumi Lab",
         "bpmMilli": 128000,
         "key": { "pitchClass": "c", "mode": "major" },
+        "colorRgb": 4747469,
         "durationBeats": 128,
         "phrases": [
           { "index": 0, "startBeat": 0, "endBeat": 32, "kind": "intro" },

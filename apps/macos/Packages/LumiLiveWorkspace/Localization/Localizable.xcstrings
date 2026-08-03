@@ -25,6 +25,7 @@
     "workspace.phrasePlan" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Precomputed Phrase Plan" } } } },
     "workspace.inspector" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Inspector" } } } },
     "workspace.theme" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Theme" } } } },
+    "workspace.themeSource" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Theme source" } } } },
     "workspace.scene" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Scene" } } } },
     "workspace.reason" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Reason" } } } },
     "workspace.origin" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Source" } } } },
@@ -71,7 +72,13 @@
     "category.break" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "break" } } } },
     "category.build" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "build" } } } },
     "category.groove" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "groove" } } } },
-    "category.impact" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "impact" } } } }
+    "category.impact" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "impact" } } } },
+    "themeReason.globalLock" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Global Theme lock" } } } },
+    "themeReason.planInstanceUserChoice" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Plan override" } } } },
+    "themeReason.colorForce" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Track color force rule" } } } },
+    "themeReason.colorPrefer" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Track color preference" } } } },
+    "themeReason.rotation" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "No-repeat rotation" } } } },
+    "themeReason.defaultTheme" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Default Theme" } } } }
   },
   "version" : "1.0"
 }

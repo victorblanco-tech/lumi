@@ -2,10 +2,12 @@ use std::time::{Duration, Instant};
 
 use lumi_domain::{
     CueOrigin, CueReason, DeckId, PhraseKind, PlanRevision, PlanStatus, SceneId,
-    SemanticLightingAction, ThemeId, TrackId, TrackLoadId, TrackPhrase,
+    SemanticLightingAction, ThemeId, ThemeSelectionReason, TrackColor, TrackId, TrackLoadId,
+    TrackPhrase,
 };
 use lumi_planner::{
     ChoiceSource, DeterministicPlanner, PlannerTrack, PlanningConfiguration, PlanningInput,
+    ThemeColorRule, ThemeColorRuleMode, ThemeSelectionContext, WeightedThemeCandidate,
     canonical_plan,
 };
 
@@ -74,7 +76,7 @@ fn choice_source_is_injected_and_does_not_use_wall_clock_time() {
         panic!("an analyzed phrase must apply a look");
     };
 
-    assert_eq!(look.theme_name(), "Midnight Drive");
+    assert_eq!(look.theme_name(), "Electric Bloom");
     assert_eq!(look.scene_name(), "Soft Motion");
 }
 
@@ -108,6 +110,17 @@ fn demo_next_track_matches_the_reviewed_golden_plan() {
     let plan = generate(&DeterministicPlanner::epic_one(), &demo_input());
     let actual = encode(&plan);
     let expected = include_bytes!("../../../../fixtures/demo-session-v1/next-plan.json");
+    assert_eq!(actual, expected);
+}
+
+#[test]
+fn theme_override_matches_the_reviewed_golden_plan_diff() {
+    let planner = DeterministicPlanner::epic_one();
+    let original = generate(&planner, &demo_input());
+    let overridden = mutate(planner.select_theme(&original, ThemeId::new(4)));
+    let actual = encode(&overridden);
+    let expected =
+        include_bytes!("../../../../fixtures/demo-session-v1/next-plan-theme-override.json");
     assert_eq!(actual, expected);
 }
 
@@ -163,12 +176,156 @@ fn regeneration_rebases_valid_locks_and_replaces_unlocked_edits() {
     assert!(!regenerated.cues()[0].locked());
 }
 
+#[test]
+fn theme_precedence_is_global_then_user_then_force_prefer_rotation_and_default() {
+    let color = TrackColor::new(72, 112, 205);
+    let rules = vec![ThemeColorRule {
+        color,
+        mode: ThemeColorRuleMode::Force,
+        candidates: vec![WeightedThemeCandidate {
+            theme_id: ThemeId::new(4),
+            weight: 1,
+        }],
+    }];
+    let locked = DeterministicPlanner::new(
+        PlanningConfiguration::epic_one()
+            .with_color_rules(rules.clone())
+            .with_global_theme_lock(Some(ThemeId::new(3))),
+        StableFirstChoice,
+    );
+    let input = colored_input(color);
+    let locked_plan = generate(&locked, &input);
+    let Some(locked_decision) = locked_plan.theme_decision() else {
+        panic!("ready plan must contain a Theme decision");
+    };
+    assert_eq!(locked_decision.theme_id(), ThemeId::new(3));
+    assert_eq!(locked_decision.reason(), ThemeSelectionReason::GlobalLock);
+
+    let forced = DeterministicPlanner::new(
+        PlanningConfiguration::epic_one().with_color_rules(rules),
+        StableFirstChoice,
+    );
+    let forced_plan = generate(&forced, &input);
+    assert_eq!(
+        forced_plan.theme_decision().map(|value| value.reason()),
+        Some(ThemeSelectionReason::ColorForce)
+    );
+    let user_plan = mutate(forced.select_theme(&forced_plan, ThemeId::new(2)));
+    let Some(user_decision) = user_plan.theme_decision() else {
+        panic!("user override must contain a Theme decision");
+    };
+    assert_eq!(user_decision.theme_id(), ThemeId::new(2));
+    assert_eq!(
+        user_decision.reason(),
+        ThemeSelectionReason::PlanInstanceUserChoice
+    );
+
+    let default_plan = generate(&DeterministicPlanner::epic_one(), &demo_input());
+    assert_eq!(
+        default_plan.theme_decision().map(|value| value.reason()),
+        Some(ThemeSelectionReason::DefaultTheme)
+    );
+    let rotated = generate_with_context(
+        &DeterministicPlanner::epic_one(),
+        &demo_input(),
+        &ThemeSelectionContext::new(vec![ThemeId::new(1)]),
+    );
+    assert_eq!(
+        rotated.theme_decision().map(|value| value.reason()),
+        Some(ThemeSelectionReason::Rotation)
+    );
+    assert_ne!(
+        rotated.theme_decision().map(|value| value.theme_id()),
+        Some(ThemeId::new(1))
+    );
+}
+
+#[test]
+fn weighted_preference_and_no_repeat_are_deterministic() {
+    let color = TrackColor::new(35, 168, 190);
+    let planner = DeterministicPlanner::new(
+        PlanningConfiguration::epic_one().with_color_rules(vec![ThemeColorRule {
+            color,
+            mode: ThemeColorRuleMode::Prefer,
+            candidates: vec![
+                WeightedThemeCandidate {
+                    theme_id: ThemeId::new(2),
+                    weight: 3,
+                },
+                WeightedThemeCandidate {
+                    theme_id: ThemeId::new(3),
+                    weight: 1,
+                },
+            ],
+        }]),
+        StableFirstChoice,
+    );
+    let input = colored_input(color);
+    let context = ThemeSelectionContext::new(vec![ThemeId::new(2)]);
+    let first = generate_with_context(&planner, &input, &context);
+    let second = generate_with_context(&planner, &input, &context);
+    assert_eq!(first, second);
+    let Some(decision) = first.theme_decision() else {
+        panic!("preferred plan must contain a Theme decision");
+    };
+    assert_eq!(decision.theme_id(), ThemeId::new(3));
+    assert_eq!(decision.reason(), ThemeSelectionReason::ColorPrefer);
+    assert_eq!(decision.matched_color(), Some(color.rgb_u32()));
+}
+
+#[test]
+fn plan_instance_theme_switch_rethemes_locked_and_unlocked_cues_in_one_revision() {
+    let planner = DeterministicPlanner::epic_one();
+    let original = generate(&planner, &demo_input());
+    let locked = mutate(planner.set_cue_lock(&original, 1, true));
+    let switched = mutate(planner.select_theme(&locked, ThemeId::new(4)));
+
+    assert_eq!(switched.revision(), PlanRevision::new(3));
+    assert!(switched.cues()[1].locked());
+    assert!(switched.cues().iter().all(|cue| match cue.action() {
+        SemanticLightingAction::ApplyLook(look) => look.theme_id() == ThemeId::new(4),
+        SemanticLightingAction::HoldCurrentLook => false,
+    }));
+    assert_eq!(
+        switched.theme_decision().map(|value| value.reason()),
+        Some(ThemeSelectionReason::PlanInstanceUserChoice)
+    );
+}
+
 #[derive(Clone, Copy)]
 struct FirstChoice;
 
 impl ChoiceSource for FirstChoice {
     fn choose(&self, _seed: u64, _decision: u64, candidate_count: usize) -> Option<usize> {
         (candidate_count > 0).then_some(0)
+    }
+}
+
+#[derive(Clone, Copy)]
+struct StableFirstChoice;
+
+impl ChoiceSource for StableFirstChoice {
+    fn choose(&self, _seed: u64, _decision: u64, candidate_count: usize) -> Option<usize> {
+        (candidate_count > 0).then_some(0)
+    }
+}
+
+fn colored_input(color: TrackColor) -> PlanningInput {
+    let base = demo_input();
+    PlanningInput {
+        deck_id: base.deck_id,
+        track_load_id: base.track_load_id,
+        track: PlannerTrack::with_analysis_and_color(
+            TrackId::new(202),
+            128,
+            color,
+            vec![
+                TrackPhrase::new(0, 0, 32, PhraseKind::Intro),
+                TrackPhrase::new(1, 32, 64, PhraseKind::Breakdown),
+                TrackPhrase::new(2, 64, 96, PhraseKind::Build),
+                TrackPhrase::new(3, 96, 128, PhraseKind::Drop),
+            ],
+        ),
     }
 }
 
@@ -207,6 +364,17 @@ fn generate<C: ChoiceSource>(
     match planner.generate(input) {
         Ok(plan) => plan,
         Err(error) => panic!("test plan must generate: {error}"),
+    }
+}
+
+fn generate_with_context<C: ChoiceSource>(
+    planner: &DeterministicPlanner<C>,
+    input: &PlanningInput,
+    context: &ThemeSelectionContext,
+) -> lumi_domain::LightingPlan {
+    match planner.generate_with_context(input, context) {
+        Ok(plan) => plan,
+        Err(error) => panic!("test plan must generate with context: {error}"),
     }
 }
 

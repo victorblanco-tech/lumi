@@ -31,6 +31,7 @@ public enum LiveWorkspaceFixtures {
                 title: "Aurora Signal",
                 artist: "Lumi Lab",
                 bpmMilli: 124_000,
+                colorRGB: 12_273_790,
                 pitchClass: "a",
                 keyMode: "minor",
                 beat: 24,
@@ -42,6 +43,7 @@ public enum LiveWorkspaceFixtures {
                 title: "Neon Horizon",
                 artist: "Lumi Lab",
                 bpmMilli: 128_000,
+                colorRGB: 4_747_469,
                 pitchClass: "c",
                 keyMode: "major",
                 beat: 0,
@@ -56,6 +58,12 @@ public enum LiveWorkspaceFixtures {
             revision: 1,
             configurationRevision: 1,
             status: "ready",
+            themeDecision: ThemeDecisionSnapshot(
+                themeID: 2,
+                themeName: "Deep Ocean",
+                reason: "colorPrefer",
+                matchedColorRGB: 4_747_469
+            ),
             cues: [
                 cue(0, 0, 32, "intro", "ambient", 1, "Soft Motion", 1, 1),
                 cue(1, 32, 64, "breakdown", "break", 10, "Slow Wave", 5, 2),
@@ -115,7 +123,7 @@ public enum LiveWorkspaceFixtures {
                 reason: cue.reason,
                 action: .applyLook(
                     themeID: 2,
-                    themeName: "Electric Bloom",
+                    themeName: "Deep Ocean",
                     sceneID: 9,
                     sceneName: "Deep Space",
                     category: "break",
@@ -132,6 +140,12 @@ public enum LiveWorkspaceFixtures {
             revision: 3,
             configurationRevision: 1,
             status: "ready",
+            themeDecision: ThemeDecisionSnapshot(
+                themeID: 2,
+                themeName: "Deep Ocean",
+                reason: "planInstanceUserChoice",
+                matchedColorRGB: nil
+            ),
             cues: editedCues
         )
         return EngineSnapshot(
@@ -239,7 +253,7 @@ public enum LiveWorkspaceFixtures {
             reason: .phraseCategoryMatched(phraseKind: phrase, category: category),
             action: .applyLook(
                 themeID: 2,
-                themeName: "Electric Bloom",
+                themeName: "Deep Ocean",
                 sceneID: sceneID,
                 sceneName: scene,
                 category: category,
@@ -251,8 +265,10 @@ public enum LiveWorkspaceFixtures {
 
     private static let planningOptions = PlanningOptionsSnapshot(
         themes: [
-            ThemeOptionSnapshot(id: 1, name: "Midnight Drive"),
-            ThemeOptionSnapshot(id: 2, name: "Electric Bloom")
+            ThemeOptionSnapshot(id: 1, name: "Electric Bloom"),
+            ThemeOptionSnapshot(id: 2, name: "Deep Ocean"),
+            ThemeOptionSnapshot(id: 3, name: "Solar Flare"),
+            ThemeOptionSnapshot(id: 4, name: "Ultraviolet")
         ],
         scenes: [
             SceneOptionSnapshot(id: 1, name: "Soft Motion", category: "ambient", loopBank: 1, loopSlot: 1),

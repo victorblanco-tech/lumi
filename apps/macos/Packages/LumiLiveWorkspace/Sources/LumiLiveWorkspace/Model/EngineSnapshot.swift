@@ -146,6 +146,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
     public let title: String
     public let artist: String
     public let bpmMilli: UInt64
+    public let colorRGB: UInt64?
     public let pitchClass: String
     public let keyMode: String
     public let beat: UInt64
@@ -159,6 +160,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
         title: String,
         artist: String,
         bpmMilli: UInt64,
+        colorRGB: UInt64? = nil,
         pitchClass: String,
         keyMode: String,
         beat: UInt64,
@@ -169,6 +171,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
         self.title = title
         self.artist = artist
         self.bpmMilli = bpmMilli
+        self.colorRGB = colorRGB
         self.pitchClass = pitchClass
         self.keyMode = keyMode
         self.beat = beat
@@ -184,6 +187,7 @@ public struct PlanSnapshot: Equatable, Sendable {
     public let revision: UInt64
     public let configurationRevision: UInt64
     public let status: String
+    public let themeDecision: ThemeDecisionSnapshot?
     public let cues: [PlanCueSnapshot]
 
     public init(
@@ -194,6 +198,7 @@ public struct PlanSnapshot: Equatable, Sendable {
         revision: UInt64,
         configurationRevision: UInt64,
         status: String,
+        themeDecision: ThemeDecisionSnapshot? = nil,
         cues: [PlanCueSnapshot]
     ) {
         self.planID = planID
@@ -203,7 +208,27 @@ public struct PlanSnapshot: Equatable, Sendable {
         self.revision = revision
         self.configurationRevision = configurationRevision
         self.status = status
+        self.themeDecision = themeDecision
         self.cues = cues
+    }
+}
+
+public struct ThemeDecisionSnapshot: Equatable, Sendable {
+    public let themeID: UInt64
+    public let themeName: String
+    public let reason: String
+    public let matchedColorRGB: UInt64?
+
+    public init(
+        themeID: UInt64,
+        themeName: String,
+        reason: String,
+        matchedColorRGB: UInt64?
+    ) {
+        self.themeID = themeID
+        self.themeName = themeName
+        self.reason = reason
+        self.matchedColorRGB = matchedColorRGB
     }
 }
 

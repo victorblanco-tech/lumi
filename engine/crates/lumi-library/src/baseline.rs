@@ -3,51 +3,9 @@ use std::error::Error;
 use std::fmt;
 
 use lumi_domain::MusicalKey;
+pub use lumi_domain::TrackColor;
 
 use crate::{LibrarySourceId, SourcePlaylistId, SourceRevision, SourceTrackId};
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct TrackColor {
-    red: u8,
-    green: u8,
-    blue: u8,
-}
-
-impl TrackColor {
-    #[must_use]
-    pub const fn new(red: u8, green: u8, blue: u8) -> Self {
-        Self { red, green, blue }
-    }
-
-    #[must_use]
-    pub const fn red(self) -> u8 {
-        self.red
-    }
-
-    #[must_use]
-    pub const fn green(self) -> u8 {
-        self.green
-    }
-
-    #[must_use]
-    pub const fn blue(self) -> u8 {
-        self.blue
-    }
-
-    #[must_use]
-    pub const fn rgb_u32(self) -> u32 {
-        (self.red as u32) << 16 | (self.green as u32) << 8 | self.blue as u32
-    }
-
-    #[must_use]
-    pub const fn from_rgb_u32(value: u32) -> Self {
-        Self {
-            red: ((value >> 16) & 0xff) as u8,
-            green: ((value >> 8) & 0xff) as u8,
-            blue: (value & 0xff) as u8,
-        }
-    }
-}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct BeatMarker {

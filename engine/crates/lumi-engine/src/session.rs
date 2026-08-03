@@ -17,7 +17,7 @@ use lumi_lighting_output::LightingOutputProvider as _;
 use lumi_output_dry_run::{DryRunLightingOutputProvider, DryRunOutputError};
 use lumi_planner::{
     DeterministicPlanner, PlanMutationError, PlannerError, PlannerTrack, PlanningInput,
-    PlanningOptions, StableChoiceSource,
+    PlanningOptions, StableChoiceSource, ThemeSelectionContext,
 };
 use lumi_protocol::{
     CommandDisposition, CommandIdCache, InvalidCacheCapacity, MAX_MESSAGE_BYTES, MessageDecoder,
@@ -267,6 +267,7 @@ fn process_pending_source_events(runtime: &mut EngineRuntime) -> Result<(), Engi
 struct PlanningWorker {
     planner: DeterministicPlanner<StableChoiceSource>,
     effect_sequence: u64,
+    recent_theme_ids: Vec<lumi_domain::ThemeId>,
 }
 
 impl PlanningWorker {
@@ -274,6 +275,7 @@ impl PlanningWorker {
         Self {
             planner: DeterministicPlanner::epic_one(),
             effect_sequence: 0,
+            recent_theme_ids: Vec::new(),
         }
     }
 
@@ -306,7 +308,14 @@ impl PlanningWorker {
                 .effect_sequence
                 .checked_add(1)
                 .ok_or(EngineError::PlanningEffectSequenceOverflow)?;
-            let plan = self.planner.generate(&input)?;
+            let context = ThemeSelectionContext::new(self.recent_theme_ids.clone());
+            let plan = self.planner.generate_with_context(&input, &context)?;
+            if let Some(decision) = plan.theme_decision() {
+                self.recent_theme_ids.push(decision.theme_id());
+                if self.recent_theme_ids.len() > 8 {
+                    self.recent_theme_ids.remove(0);
+                }
+            }
             process_domain_event(
                 runtime,
                 output_worker,
@@ -1085,6 +1094,7 @@ fn snapshot_envelope(
                     "title": metadata.title(),
                     "artist": metadata.artist(),
                     "bpmMilli": metadata.bpm_milli(),
+                    "colorRgb": metadata.color().map(lumi_domain::TrackColor::rgb_u32),
                     "key": {
                         "pitchClass": pitch_class_name(metadata.musical_key().pitch_class()),
                         "mode": key_mode_name(metadata.musical_key().mode()),
@@ -1199,6 +1209,12 @@ fn plan_json(plan: &LightingPlan) -> Value {
         "configurationRevision": plan.configuration_revision().value(),
         "seed": plan.seed().to_string(),
         "status": plan_status_name(plan.status()),
+        "themeDecision": plan.theme_decision().map(|decision| json!({
+            "themeId": decision.theme_id().value(),
+            "themeName": decision.theme_name(),
+            "reason": theme_selection_reason_name(decision.reason()),
+            "matchedColorRgb": decision.matched_color(),
+        })),
         "cues": plan.cues().iter().map(|cue| json!({
             "phraseIndex": cue.phrase_index(),
             "startBeat": cue.start_beat(),
@@ -1209,6 +1225,17 @@ fn plan_json(plan: &LightingPlan) -> Value {
             "action": action_json(cue.action()),
         })).collect::<Vec<_>>(),
     })
+}
+
+const fn theme_selection_reason_name(reason: lumi_domain::ThemeSelectionReason) -> &'static str {
+    match reason {
+        lumi_domain::ThemeSelectionReason::GlobalLock => "globalLock",
+        lumi_domain::ThemeSelectionReason::PlanInstanceUserChoice => "planInstanceUserChoice",
+        lumi_domain::ThemeSelectionReason::ColorForce => "colorForce",
+        lumi_domain::ThemeSelectionReason::ColorPrefer => "colorPrefer",
+        lumi_domain::ThemeSelectionReason::Rotation => "rotation",
+        lumi_domain::ThemeSelectionReason::DefaultTheme => "defaultTheme",
+    }
 }
 
 fn planning_options_json(options: &PlanningOptions) -> Value {
@@ -1585,6 +1612,58 @@ mod tests {
         }
         assert_eq!(runtime.output_worker.provider.records().count(), 0);
         assert_eq!(runtime.state.state().operation(), OperationState::Paused);
+    }
+
+    #[test]
+    fn activation_freezes_theme_and_later_preview_changes_do_not_mutate_live_output() {
+        let mut runtime = match initialized_runtime() {
+            Ok(runtime) => runtime,
+            Err(error) => panic!("test engine must initialize: {error}"),
+        };
+        apply_simulation_control(&mut runtime, SimulationControl::AdvanceLeader);
+        let active_before = match runtime.state.state().active_plan().cloned() {
+            Some(plan) => plan,
+            None => panic!("leader change must freeze an active plan"),
+        };
+        let stored_before = match runtime
+            .state
+            .state()
+            .plan(lumi_domain::DeckId::new(2))
+            .cloned()
+        {
+            Some(plan) => plan,
+            None => panic!("stored plan must remain available"),
+        };
+        let changed = match runtime
+            .planning_worker
+            .planner
+            .select_theme(&stored_before, lumi_domain::ThemeId::new(4))
+        {
+            Ok(plan) => plan,
+            Err(error) => panic!("preview Theme must change: {error}"),
+        };
+        if let Err(error) = runtime
+            .planning_worker
+            .accept_revised_plan(&mut runtime.state, changed)
+        {
+            panic!("revised preview plan must be accepted: {error}");
+        }
+
+        let active_after = match runtime.state.state().active_plan() {
+            Some(plan) => plan,
+            None => panic!("active plan must remain frozen"),
+        };
+        let stored_after = match runtime.state.state().plan(lumi_domain::DeckId::new(2)) {
+            Some(plan) => plan,
+            None => panic!("stored plan must remain available"),
+        };
+        assert_eq!(active_after, &active_before);
+        assert_eq!(active_after.revision(), PlanRevision::new(1));
+        assert_eq!(stored_after.revision(), PlanRevision::new(2));
+        assert_ne!(
+            active_after.theme_decision().map(|value| value.theme_id()),
+            stored_after.theme_decision().map(|value| value.theme_id())
+        );
     }
 
     #[test]

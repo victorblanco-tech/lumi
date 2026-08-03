@@ -22,6 +22,7 @@
 "workspace.phrasePlan" = "Precomputed Phrase Plan";
 "workspace.inspector" = "Inspector";
 "workspace.theme" = "Theme";
+"workspace.themeSource" = "Theme source";
 "workspace.scene" = "Scene";
 "workspace.reason" = "Reason";
 "workspace.origin" = "Source";
@@ -69,3 +70,9 @@
 "category.build" = "build";
 "category.groove" = "groove";
 "category.impact" = "impact";
+"themeReason.globalLock" = "Global Theme lock";
+"themeReason.planInstanceUserChoice" = "Plan override";
+"themeReason.colorForce" = "Track color force rule";
+"themeReason.colorPrefer" = "Track color preference";
+"themeReason.rotation" = "No-repeat rotation";
+"themeReason.defaultTheme" = "Default Theme";

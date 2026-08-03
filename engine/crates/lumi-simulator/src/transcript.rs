@@ -1,5 +1,6 @@
 use lumi_domain::{
-    DeckObservation, DeckSourceStatus, DomainEvent, KeyMode, PhraseKind, PitchClass, TrackMetadata,
+    DeckObservation, DeckSourceStatus, DomainEvent, KeyMode, PhraseKind, PitchClass, TrackColor,
+    TrackMetadata,
 };
 use serde::Serialize;
 
@@ -35,6 +36,7 @@ struct RecordedTrack {
     bpm_milli: u32,
     pitch_class: &'static str,
     key_mode: &'static str,
+    color_rgb: Option<u32>,
     duration_beats: u32,
     phrases: Vec<RecordedPhrase>,
 }
@@ -135,6 +137,7 @@ fn record_track(metadata: &TrackMetadata) -> RecordedTrack {
         bpm_milli: metadata.bpm_milli(),
         pitch_class: pitch_class_name(metadata.musical_key().pitch_class()),
         key_mode: key_mode_name(metadata.musical_key().mode()),
+        color_rgb: metadata.color().map(TrackColor::rgb_u32),
         duration_beats: metadata.duration_beats(),
         phrases: metadata
             .phrases()

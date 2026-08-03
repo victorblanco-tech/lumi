@@ -31,7 +31,8 @@ pub use output::{
 };
 pub use plan::{
     CueOrigin, CueReason, LightingCue, LightingLook, LightingPlan, LoopSelection, PlanStatus,
-    PlanValidationError, SceneCategory, SemanticLightingAction,
+    PlanValidationError, SceneCategory, SemanticLightingAction, ThemeDecision,
+    ThemeSelectionReason,
 };
 pub use queue::{BoundedEventQueue, IngressError, IngressOutcome, InvalidQueueCapacity};
 pub use reducer::{
@@ -42,6 +43,6 @@ pub use state::{DeckState, OperationState, RuntimeHealth, RuntimeState};
 pub use time::MonotonicTime;
 pub use timeline::{TimelineEntry, TimelineResult, TimelineSource};
 pub use track::{
-    DeckSourceStatus, KeyMode, MusicalKey, PhraseKind, PitchClass, TrackMetadata, TrackPhrase,
-    TrackValidationError,
+    DeckSourceStatus, KeyMode, MusicalKey, PhraseKind, PitchClass, TrackColor, TrackMetadata,
+    TrackPhrase, TrackValidationError,
 };

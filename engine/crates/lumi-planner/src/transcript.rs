@@ -3,7 +3,7 @@ use std::fmt;
 
 use lumi_domain::{
     CueOrigin, CueReason, LightingPlan, PhraseKind, PlanStatus, SceneCategory,
-    SemanticLightingAction,
+    SemanticLightingAction, ThemeSelectionReason,
 };
 use serde::Serialize;
 
@@ -19,7 +19,19 @@ struct CanonicalPlan<'a> {
     configuration_revision: u64,
     seed: u64,
     status: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    theme_decision: Option<CanonicalThemeDecision<'a>>,
     cues: Vec<CanonicalCue<'a>>,
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct CanonicalThemeDecision<'a> {
+    theme_id: u64,
+    theme_name: &'a str,
+    reason: &'static str,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    matched_color_rgb: Option<u32>,
 }
 
 #[derive(Serialize)]
@@ -79,6 +91,14 @@ pub fn canonical_plan(plan: &LightingPlan) -> Result<Vec<u8>, CanonicalPlanError
         configuration_revision: plan.configuration_revision().value(),
         seed: plan.seed(),
         status: plan_status_name(plan.status()),
+        theme_decision: plan
+            .theme_decision()
+            .map(|decision| CanonicalThemeDecision {
+                theme_id: decision.theme_id().value(),
+                theme_name: decision.theme_name(),
+                reason: theme_reason_name(decision.reason()),
+                matched_color_rgb: decision.matched_color(),
+            }),
         cues: plan
             .cues()
             .iter()
@@ -97,6 +117,17 @@ pub fn canonical_plan(plan: &LightingPlan) -> Result<Vec<u8>, CanonicalPlanError
     let mut bytes = serde_json::to_vec_pretty(&value).map_err(CanonicalPlanError)?;
     bytes.push(b'\n');
     Ok(bytes)
+}
+
+const fn theme_reason_name(reason: ThemeSelectionReason) -> &'static str {
+    match reason {
+        ThemeSelectionReason::GlobalLock => "globalLock",
+        ThemeSelectionReason::PlanInstanceUserChoice => "planInstanceUserChoice",
+        ThemeSelectionReason::ColorForce => "colorForce",
+        ThemeSelectionReason::ColorPrefer => "colorPrefer",
+        ThemeSelectionReason::Rotation => "rotation",
+        ThemeSelectionReason::DefaultTheme => "defaultTheme",
+    }
 }
 
 const fn canonical_reason(reason: CueReason) -> CanonicalReason {

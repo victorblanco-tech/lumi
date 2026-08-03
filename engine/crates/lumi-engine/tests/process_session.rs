@@ -133,6 +133,18 @@ fn real_engine_process_serves_authenticated_snapshot_on_loopback() {
     assert_eq!(next_plan.get("revision"), Some(&Value::from(1)));
     assert_eq!(
         next_plan
+            .get("themeDecision")
+            .and_then(|decision| decision.get("themeId")),
+        Some(&Value::from(2))
+    );
+    assert_eq!(
+        next_plan
+            .get("themeDecision")
+            .and_then(|decision| decision.get("reason")),
+        Some(&Value::String("colorPrefer".to_owned()))
+    );
+    assert_eq!(
+        next_plan
             .get("cues")
             .and_then(Value::as_array)
             .map(Vec::len),
@@ -156,6 +168,14 @@ fn real_engine_process_serves_authenticated_snapshot_on_loopback() {
     );
     let themed = exchange(&mut connection, &theme_command);
     assert_eq!(plan_revision(&themed), 2);
+    assert_eq!(
+        themed
+            .payload
+            .get("nextPlan")
+            .and_then(|plan| plan.get("themeDecision"))
+            .and_then(|decision| decision.get("reason")),
+        Some(&Value::String("planInstanceUserChoice".to_owned()))
+    );
     assert!(plan_cues(&themed).iter().all(|cue| {
         cue.get("action").and_then(|action| action.get("themeId")) == Some(&Value::from(1))
     }));
@@ -214,7 +234,7 @@ fn real_engine_process_serves_authenticated_snapshot_on_loopback() {
         regenerated_cues[0]
             .get("action")
             .and_then(|action| action.get("themeId")),
-        Some(&Value::from(2))
+        Some(&Value::from(1))
     );
 
     let conflict = exchange(

@@ -198,6 +198,7 @@ func launchesRealEngine() async throws {
             libraryDatabaseURL: databaseURL
         )
         snapshot = try await supervisor.connect(to: restartedEndpoint)
+        let libraryTitlesBeforeThemeOverride = libraryTrackTitles(snapshot)
         #expect(phraseRoleRevision(snapshot) == 3)
         #expect(phraseRoleName(snapshot, roleID: "synth") == "Lead Synth")
         #expect(autoloopCatalogRevision(snapshot) == 3)
@@ -269,6 +270,11 @@ func launchesRealEngine() async throws {
         )
         #expect(EngineCommandFailure(unknownEditor)?.kind == "commandFailed")
 
+        #expect(planThemeName(snapshot) == "Deep Ocean")
+        #expect(planThemeReason(snapshot) == "colorPrefer")
+        #expect(planMatchedColorRGB(snapshot) == 4_747_469)
+        #expect(planCueThemeIDs(snapshot) == [2])
+
         guard case let .object(plan) = snapshot.payload["nextPlan"],
               case let .string(planID) = plan["planId"] else {
             Issue.record("Initial snapshot must contain a plan ID")
@@ -283,6 +289,12 @@ func launchesRealEngine() async throws {
         let command = EngineCommand.selectTheme(context: context, themeID: 1)
         let revised = try await supervisor.send(command, messageID: "swift-theme-1")
         #expect(planRevision(revised) == 2)
+        #expect(planThemeName(revised) == "Electric Bloom")
+        #expect(planThemeReason(revised) == "planInstanceUserChoice")
+        #expect(planMatchedColorRGB(revised) == nil)
+        #expect(planCueThemeIDs(revised) == [1])
+        #expect(libraryTrackTitles(revised) == libraryTitlesBeforeThemeOverride)
+        #expect(libraryEditorIsClosed(revised))
 
         let duplicate = try await supervisor.send(command, messageID: "swift-theme-1")
         #expect(planRevision(duplicate) == 2)
@@ -589,6 +601,43 @@ private func planRevision(_ envelope: MessageEnvelope) -> UInt64? {
         return nil
     }
     return UInt64(revision)
+}
+
+private func planThemeDecision(_ envelope: MessageEnvelope) -> [String: JSONValue]? {
+    guard case let .object(plan) = envelope.payload["nextPlan"],
+          case let .object(decision) = plan["themeDecision"] else {
+        return nil
+    }
+    return decision
+}
+
+private func planThemeName(_ envelope: MessageEnvelope) -> String? {
+    guard let decision = planThemeDecision(envelope),
+          case let .string(name) = decision["themeName"] else { return nil }
+    return name
+}
+
+private func planThemeReason(_ envelope: MessageEnvelope) -> String? {
+    guard let decision = planThemeDecision(envelope),
+          case let .string(reason) = decision["reason"] else { return nil }
+    return reason
+}
+
+private func planMatchedColorRGB(_ envelope: MessageEnvelope) -> UInt64? {
+    guard let decision = planThemeDecision(envelope),
+          case let .number(color) = decision["matchedColorRgb"] else { return nil }
+    return UInt64(color)
+}
+
+private func planCueThemeIDs(_ envelope: MessageEnvelope) -> Set<UInt64> {
+    guard case let .object(plan) = envelope.payload["nextPlan"],
+          case let .array(cues) = plan["cues"] else { return [] }
+    return Set(cues.compactMap { cueValue in
+        guard case let .object(cue) = cueValue,
+              case let .object(action) = cue["action"],
+              case let .number(themeID) = action["themeId"] else { return nil }
+        return UInt64(themeID)
+    })
 }
 
 @Test("A missing engine executable fails safely")
