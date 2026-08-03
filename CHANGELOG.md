@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.1.0-dev
+
+- Epic 1 is als reproduceerbare, volledig lokale vertical slice gehard met een
+  canoniek end-to-endscenario en golden release-evidence.
+- De releasegate valideert locked Rust dependencies, warnings-as-errors voor
+  Rust en Swift, een release-performancecheck en dependencyrichting.
+- Faulttests dekken malformed input, queue overload, stale revisions en
+  proces-/transportverlies zonder ongecontroleerde lighting output.
+
 ## 0.0.8-dev
 
 - De demo-simulator is volledig vanuit de macOS-app te bedienen: laden,

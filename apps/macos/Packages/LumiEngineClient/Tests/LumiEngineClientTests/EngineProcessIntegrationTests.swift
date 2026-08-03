@@ -114,6 +114,15 @@ func launchesRealEngine() async throws {
         #expect(outputRecordCount(played) == 4)
         #expect(timelineContainsSimulatedOutput(played))
 
+        let staleState = try await supervisor.send(
+            .setOperationState("armed", expectedStateRevision: 0)
+        )
+        #expect(EngineCommandFailure(staleState)?.code == "stateRevisionMismatch")
+        #expect(
+            EngineCommandFailure(staleState)?.actualStateRevision
+                == requiredStateRevision(played)
+        )
+
         let reset = try await supervisor.send(
             .resetDemoSession(
                 expectedStateRevision: requiredStateRevision(played)
@@ -125,6 +134,9 @@ func launchesRealEngine() async throws {
         #expect(await supervisor.isRunning())
         await supervisor.stop()
         #expect(await !supervisor.isRunning())
+        await #expect(throws: EngineClientError.connectionClosed) {
+            try await supervisor.getSnapshot()
+        }
     } catch {
         await supervisor.stop()
         throw error

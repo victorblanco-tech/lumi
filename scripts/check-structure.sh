@@ -27,7 +27,11 @@ required_paths=(
   "fixtures/demo-session-v1/initial-transcript.ndjson"
   "fixtures/demo-session-v1/next-plan.json"
   "fixtures/demo-session-v1/output-effects.json"
+  "fixtures/demo-session-v1/canonical-e2e.json"
   "docs/development/demo-control.md"
+  "docs/release/0.1.0-demo-and-limitations.md"
+  "docs/release/0.1.0-epic-1-evidence.md"
+  "scripts/check-architecture.sh"
   "docs"
   "scripts"
 )
