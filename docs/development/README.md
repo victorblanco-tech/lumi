@@ -125,6 +125,10 @@ Theme override strategies, including stale validation and reset behavior, are
 documented in
 [`phrase-loop-strategies.md`](phrase-loop-strategies.md).
 
+Versioned source comparison, metadata-safe refreshes, bar-aligned rebase,
+explicit merge conflicts, and transactional recovery are documented in
+[`source-reconciliation.md`](source-reconciliation.md).
+
 The authoritative Live/Next presentation boundary, explicit degraded states,
 accessibility identifiers, and locked-session PNG workflow are documented in
 [`live-workspace.md`](live-workspace.md).

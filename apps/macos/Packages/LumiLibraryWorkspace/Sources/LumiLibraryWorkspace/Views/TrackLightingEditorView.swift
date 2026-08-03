@@ -9,6 +9,7 @@ public struct TrackLightingEditorView: View {
     private let rendersInteractiveControls: Bool
     private let onTimelineEdit: @MainActor (TrackTimelineEditRequest) -> Void
     private let onTimelineHistory: @MainActor (TrackTimelineHistoryRequest) -> Void
+    private let onSourceReconcile: @MainActor (TrackSourceReconcileRequest) -> Void
     @StateObject private var audio: TrackAudioPreviewController
     @State private var viewport: TrackEditorViewport
     @State private var selectedPhraseID: UInt64?
@@ -16,6 +17,7 @@ public struct TrackLightingEditorView: View {
     @State private var selectionStartBar: UInt32
     @State private var selectionEndBar: UInt32
     @State private var selectionAnchorBar: UInt32?
+    @State private var conflictSides: [UInt16: TrackSourceConflictSide]
     @Environment(\.dismiss) private var dismiss
 
     private let background = Color(red: 0.025, green: 0.032, blue: 0.045)
@@ -31,7 +33,8 @@ public struct TrackLightingEditorView: View {
         feedback: String? = nil,
         rendersInteractiveControls: Bool = true,
         onTimelineEdit: @escaping @MainActor (TrackTimelineEditRequest) -> Void = { _ in },
-        onTimelineHistory: @escaping @MainActor (TrackTimelineHistoryRequest) -> Void = { _ in }
+        onTimelineHistory: @escaping @MainActor (TrackTimelineHistoryRequest) -> Void = { _ in },
+        onSourceReconcile: @escaping @MainActor (TrackSourceReconcileRequest) -> Void = { _ in }
     ) {
         self.analysis = analysis
         self.autoloopCatalog = autoloopCatalog
@@ -40,6 +43,7 @@ public struct TrackLightingEditorView: View {
         self.rendersInteractiveControls = rendersInteractiveControls
         self.onTimelineEdit = onTimelineEdit
         self.onTimelineHistory = onTimelineHistory
+        self.onSourceReconcile = onSourceReconcile
         _audio = StateObject(wrappedValue: TrackAudioPreviewController(analysis: analysis))
         _viewport = State(
             initialValue: TrackEditorViewport(
@@ -58,6 +62,12 @@ public struct TrackLightingEditorView: View {
         _selectionEndBar = State(
             initialValue: firstEnd / UInt32(max(1, analysis.beatsPerBar))
         )
+        _conflictSides = State(
+            initialValue: Dictionary(
+                uniqueKeysWithValues: (analysis.sourceReconciliation?.conflicts ?? [])
+                    .map { ($0.phraseIndex, TrackSourceConflictSide.lumi) }
+            )
+        )
     }
 
     public var body: some View {
@@ -66,6 +76,7 @@ public struct TrackLightingEditorView: View {
             Divider().overlay(Color.white.opacity(0.12))
             transport
             editToolbar
+            sourceReconciliationPanel
             HStack(spacing: 12) {
                 VStack(spacing: 10) {
                     editorCanvas
@@ -103,6 +114,10 @@ public struct TrackLightingEditorView: View {
         }
         .onChange(of: analysis) { previous, current in
             adoptTimelineUpdate(previous: previous, current: current)
+            conflictSides = Dictionary(
+                uniqueKeysWithValues: (current.sourceReconciliation?.conflicts ?? [])
+                    .map { ($0.phraseIndex, conflictSides[$0.phraseIndex] ?? .lumi) }
+            )
         }
         .onDisappear { audio.shutdown() }
     }
@@ -128,6 +143,118 @@ public struct TrackLightingEditorView: View {
         .padding(.horizontal, 20)
         .padding(.vertical, 15)
         .background(panel)
+    }
+
+    @ViewBuilder
+    private var sourceReconciliationPanel: some View {
+        if let refresh = analysis.sourceReconciliation {
+            VStack(alignment: .leading, spacing: 9) {
+                HStack(spacing: 10) {
+                    Label(editorCopy("editor.sourceChanges"), systemImage: "arrow.triangle.2.circlepath")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundStyle(accent)
+                    Text("\(refresh.fromRevision) → \(refresh.toRevision)")
+                        .font(.system(size: 10, weight: .medium, design: .monospaced))
+                        .foregroundStyle(secondary)
+                    ForEach(refresh.changes, id: \.self) { change in
+                        Text(readableSourceChange(change))
+                            .font(.system(size: 9, weight: .bold))
+                            .padding(.horizontal, 7)
+                            .padding(.vertical, 3)
+                            .background(accent.opacity(0.14))
+                            .clipShape(Capsule())
+                    }
+                    Spacer()
+                    Button(editorCopy("editor.keepLumi")) { onSourceReconcile(.keepLumi) }
+                    Button(editorCopy("editor.rebase")) { onSourceReconcile(.rebase) }
+                        .disabled(refresh.metadataOnly)
+                    Button(editorCopy("editor.replaceSource")) { onSourceReconcile(.replaceWithSource) }
+                        .tint(Color.orange)
+                }
+                if !refresh.conflicts.isEmpty {
+                    HStack(spacing: 8) {
+                        Text(editorCopy("editor.mergeEachConflict"))
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(secondary)
+                        ScrollView(.horizontal, showsIndicators: false) {
+                            HStack(spacing: 6) {
+                                ForEach(refresh.conflicts) { conflict in
+                                    Menu {
+                                        Button("Lumi") {
+                                            conflictSides[conflict.phraseIndex] = .lumi
+                                        }
+                                        Button("Source") {
+                                            conflictSides[conflict.phraseIndex] = .source
+                                        }
+                                    } label: {
+                                        Text(
+                                            "P\(conflict.phraseIndex + 1) · "
+                                                + (conflictSides[conflict.phraseIndex] == .source
+                                                    ? "Source" : "Lumi")
+                                        )
+                                        .font(.system(size: 9, weight: .semibold))
+                                        .padding(.horizontal, 7)
+                                        .frame(height: 24)
+                                        .background(Color.white.opacity(0.08))
+                                        .clipShape(RoundedRectangle(cornerRadius: 5))
+                                    }
+                                    .fixedSize()
+                                }
+                            }
+                        }
+                        Button(editorCopy("editor.applyMerge")) {
+                            onSourceReconcile(
+                                .merge(refresh.conflicts.map { conflict in
+                                    TrackSourceConflictChoice(
+                                        phraseIndex: conflict.phraseIndex,
+                                        side: conflictSides[conflict.phraseIndex] ?? .lumi
+                                    )
+                                })
+                            )
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .tint(accent)
+                    }
+                }
+                if !refresh.rebaseAmbiguities.isEmpty {
+                    Label(
+                        String(
+                            format: editorCopy("editor.rebaseRounding"),
+                            UInt64(refresh.rebaseAmbiguities.count)
+                        ),
+                        systemImage: "exclamationmark.triangle.fill"
+                    )
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundStyle(Color.orange)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
+            .background(accent.opacity(0.07))
+            .accessibilityIdentifier("lumi.trackEditor.sourceReconciliation")
+        } else {
+            HStack {
+                Label(editorCopy("editor.sourceIndependent"), systemImage: "shield.checkered")
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(secondary)
+                Spacer()
+                Button(editorCopy("editor.compareSource")) {
+                    onSourceReconcile(.previewDemoChanges)
+                }
+                .accessibilityIdentifier("lumi.trackEditor.compareSource")
+            }
+            .padding(.horizontal, 20)
+            .frame(height: 38)
+            .background(panel.opacity(0.7))
+        }
+    }
+
+    private func readableSourceChange(_ value: String) -> String {
+        switch value {
+        case "beatGrid": "Beat grid"
+        case "rawPhrases": "Raw phrases"
+        default: value.capitalized
+        }
     }
 
     private var transport: some View {

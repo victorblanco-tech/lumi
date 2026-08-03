@@ -219,6 +219,51 @@ final class EngineStatusModel: ObservableObject {
         await exchangeTimelineCommand(command, success: success)
     }
 
+    func reconcileLibrarySource(_ request: TrackSourceReconcileRequest) async {
+        guard let editor = libraryState.editor else { return }
+        let command: EngineCommand
+        let success: String
+        switch request {
+        case .previewDemoChanges:
+            command = .previewDemoSourceRefresh
+            success = "Source changes compared. Nothing was written."
+        case .keepLumi:
+            command = .reconcileLibrarySource(
+                trackID: editor.track.id,
+                expectedTimelineRevision: editor.timeline.revision,
+                strategy: .keepLumi
+            )
+            success = "Source refreshed; Lumi phrases kept."
+        case .rebase:
+            command = .reconcileLibrarySource(
+                trackID: editor.track.id,
+                expectedTimelineRevision: editor.timeline.revision,
+                strategy: .rebase
+            )
+            success = "Lumi phrases rebased to complete bars."
+        case let .merge(choices):
+            command = .reconcileLibrarySource(
+                trackID: editor.track.id,
+                expectedTimelineRevision: editor.timeline.revision,
+                strategy: .merge(choices.map { choice in
+                    EngineSourceConflictChoice(
+                        phraseIndex: choice.phraseIndex,
+                        side: choice.side.rawValue
+                    )
+                })
+            )
+            success = "Source conflicts merged as a new revision."
+        case .replaceWithSource:
+            command = .reconcileLibrarySource(
+                trackID: editor.track.id,
+                expectedTimelineRevision: editor.timeline.revision,
+                strategy: .replaceWithSource
+            )
+            success = "Source phrases adopted; the previous Lumi revision remains recoverable."
+        }
+        await exchangeTimelineCommand(command, success: success)
+    }
+
     func mutatePhraseRoles(_ request: PhraseRoleMutationRequest) async {
         guard let settings = libraryState.phraseRoleSettings,
               lifecycle == .ready,

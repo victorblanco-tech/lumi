@@ -5,8 +5,9 @@ use lumi_domain::{
     OperationCommand, PlanId, PlanRevision, SceneId, StateRevision, ThemeId, TrackLoadId,
 };
 use lumi_library::{
-    AutoloopVariantMove, PhraseAbsorption, PhraseLoopStrategy, PhraseRoleId, PhraseRoleMove,
-    ThemeSpecificVariant, TimelineEditCommand, VariantId,
+    AutoloopVariantMove, PhraseAbsorption, PhraseConflictChoice, PhraseLoopStrategy, PhraseRoleId,
+    PhraseRoleMove, ReconcileSide, ReconcileStrategy, ThemeSpecificVariant, TimelineEditCommand,
+    VariantId,
 };
 use lumi_protocol::{MessageEnvelope, MessageType};
 use lumi_simulator::SimulationSpeed;
@@ -34,6 +35,12 @@ pub enum SessionCommand {
         track_id: u64,
     },
     CloseLibraryTrackEditor,
+    PreviewDemoSourceRefresh,
+    ReconcileLibrarySource {
+        track_id: u64,
+        expected_revision: u64,
+        strategy: ReconcileStrategy,
+    },
     EditLibraryTimeline {
         track_id: u64,
         expected_revision: u64,
@@ -128,6 +135,8 @@ impl SessionCommand {
             | Self::QueryLibrary { .. }
             | Self::OpenLibraryTrackEditor { .. }
             | Self::CloseLibraryTrackEditor
+            | Self::PreviewDemoSourceRefresh
+            | Self::ReconcileLibrarySource { .. }
             | Self::EditLibraryTimeline { .. }
             | Self::SetLibraryPhraseLoopStrategy { .. }
             | Self::UndoLibraryTimeline { .. }
@@ -168,6 +177,12 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
             track_id: positive_unsigned(&envelope.payload, "trackId")?,
         }),
         "closeLibraryTrackEditor" => Ok(SessionCommand::CloseLibraryTrackEditor),
+        "previewDemoSourceRefresh" => Ok(SessionCommand::PreviewDemoSourceRefresh),
+        "reconcileLibrarySource" => Ok(SessionCommand::ReconcileLibrarySource {
+            track_id: positive_unsigned(&envelope.payload, "trackId")?,
+            expected_revision: positive_unsigned(&envelope.payload, "expectedTimelineRevision")?,
+            strategy: reconcile_strategy(&envelope.payload)?,
+        }),
         "editLibraryTimeline" => Ok(SessionCommand::EditLibraryTimeline {
             track_id: positive_unsigned(&envelope.payload, "trackId")?,
             expected_revision: positive_unsigned(&envelope.payload, "expectedTimelineRevision")?,
@@ -253,6 +268,43 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
             expected_revision: state_revision(envelope)?,
         }),
         _ => Err(CommandDecodeError::UnsupportedKind),
+    }
+}
+
+fn reconcile_strategy(
+    payload: &serde_json::Map<String, Value>,
+) -> Result<ReconcileStrategy, CommandDecodeError> {
+    match string(payload, "strategy")? {
+        "keepLumi" => Ok(ReconcileStrategy::KeepLumi),
+        "rebase" => Ok(ReconcileStrategy::Rebase),
+        "replaceWithSource" => Ok(ReconcileStrategy::ReplaceWithSource),
+        "merge" => {
+            let values = payload
+                .get("choices")
+                .and_then(Value::as_array)
+                .ok_or(CommandDecodeError::InvalidField("choices"))?;
+            if values.len() > 10_000 {
+                return Err(CommandDecodeError::InvalidField("choices"));
+            }
+            let choices = values
+                .iter()
+                .map(|value| {
+                    let object = value
+                        .as_object()
+                        .ok_or(CommandDecodeError::InvalidField("choices"))?;
+                    let phrase_index = u16::try_from(unsigned(object, "phraseIndex")?)
+                        .map_err(|_| CommandDecodeError::InvalidField("phraseIndex"))?;
+                    let side = match string(object, "side")? {
+                        "lumi" => ReconcileSide::Lumi,
+                        "source" => ReconcileSide::Source,
+                        _ => return Err(CommandDecodeError::InvalidField("side")),
+                    };
+                    Ok(PhraseConflictChoice { phrase_index, side })
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(ReconcileStrategy::Merge(choices))
+        }
+        _ => Err(CommandDecodeError::InvalidField("strategy")),
     }
 }
 

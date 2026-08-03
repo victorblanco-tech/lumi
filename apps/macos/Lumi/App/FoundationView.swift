@@ -60,6 +60,9 @@ struct FoundationView: View {
                         onTimelineHistory: { request in
                             Task { await engineStatus.mutateLibraryTimelineHistory(request) }
                         },
+                        onSourceReconcile: { request in
+                            Task { await engineStatus.reconcileLibrarySource(request) }
+                        },
                         timelineFeedback: engineStatus.timelineEditFeedback
                     )
                 case .settings:

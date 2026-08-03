@@ -1,6 +1,6 @@
 # Epic 2A – Music Library and Track Lighting Editor
 
-Status: **In build – E2A-09 complete; next E2A-10 source reconciliation**
+Status: **In build – E2A-10 complete; next E2A-11 imported-track simulation**
 
 Doelmilestone: **0.2.0 – Deck Intelligence**
 
@@ -215,6 +215,11 @@ library te muteren.
 
 Detecteert gewijzigde metadata, beatgrids en phrases en biedt Keep, Rebase,
 Merge, Replace en revision recovery.
+
+Status: **complete**. De deterministische V1/V2 demo-baselines, onafhankelijke
+change classification, metadata-safe refresh, bar-aligned Rebase,
+per-conflict Merge, recoverable Replace, atomaire SQLite-transactie,
+golden previewfixture en native editorflow zijn gebouwd en geverifieerd.
 
 ### E2A-11 – Run imported tracks through the simulator
 

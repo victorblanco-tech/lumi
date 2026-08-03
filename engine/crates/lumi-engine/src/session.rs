@@ -525,6 +525,22 @@ fn apply_command(
             runtime.library_worker.close_editor();
             return Ok(());
         }
+        SessionCommand::PreviewDemoSourceRefresh => {
+            runtime.library_worker.preview_demo_source_refresh()?;
+            return Ok(());
+        }
+        SessionCommand::ReconcileLibrarySource {
+            track_id,
+            expected_revision,
+            strategy,
+        } => {
+            runtime.library_worker.reconcile_source_refresh(
+                track_id,
+                expected_revision,
+                strategy,
+            )?;
+            return Ok(());
+        }
         SessionCommand::EditLibraryTimeline {
             track_id,
             expected_revision,
@@ -701,6 +717,8 @@ fn apply_command(
         | SessionCommand::QueryLibrary { .. }
         | SessionCommand::OpenLibraryTrackEditor { .. }
         | SessionCommand::CloseLibraryTrackEditor
+        | SessionCommand::PreviewDemoSourceRefresh
+        | SessionCommand::ReconcileLibrarySource { .. }
         | SessionCommand::EditLibraryTimeline { .. }
         | SessionCommand::SetLibraryPhraseLoopStrategy { .. }
         | SessionCommand::UndoLibraryTimeline { .. }

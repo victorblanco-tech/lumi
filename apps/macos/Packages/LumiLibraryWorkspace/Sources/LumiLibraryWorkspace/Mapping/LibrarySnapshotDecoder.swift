@@ -522,7 +522,81 @@ public struct LibrarySnapshotDecoder: Sendable {
                 canUndo: try boolean(timeline, "canUndo"),
                 canRedo: try boolean(timeline, "canRedo"),
                 revisions: decodedRevisions
+            ),
+            sourceReconciliation: try decodeSourceReconciliation(editor["sourceReconciliation"])
+        )
+    }
+
+    private func decodeSourceReconciliation(
+        _ value: JSONValue?
+    ) throws -> TrackSourceReconciliation? {
+        guard let value, value != .null else { return nil }
+        guard case let .object(object) = value else {
+            throw LibrarySnapshotError.invalidObject
+        }
+        let changes = try array(object, "changes").map { value -> String in
+            guard case let .string(change) = value else {
+                throw LibrarySnapshotError.invalidObject
+            }
+            return change
+        }
+        let ambiguityValues = try array(object, "rebaseAmbiguities")
+        let ambiguities = try ambiguityValues.map { value -> UInt16 in
+            guard case let .number(number) = value,
+                  number.rounded() == number,
+                  let unsigned = UInt64(exactly: number),
+                  let result = UInt16(exactly: unsigned) else {
+                throw LibrarySnapshotError.invalidNumber("rebaseAmbiguities")
+            }
+            return result
+        }
+        let conflicts = try array(object, "conflicts").map { value -> TrackSourceConflict in
+            guard case let .object(conflict) = value else {
+                throw LibrarySnapshotError.invalidObject
+            }
+            return TrackSourceConflict(
+                phraseIndex: try UInt16(exactly: unsigned(conflict, "phraseIndex"))
+                    .required(.invalidNumber("phraseIndex")),
+                lumi: try decodeSourcePhraseVersion(conflict["lumi"]),
+                source: try decodeSourcePhraseVersion(conflict["source"])
             )
+        }
+        guard changes.count <= 4,
+              conflicts.count <= 10_000,
+              ambiguities.count <= 10_000,
+              Set(conflicts.map(\.phraseIndex)).count == conflicts.count else {
+            throw LibrarySnapshotError.unboundedEditor
+        }
+        return TrackSourceReconciliation(
+            fromRevision: try string(object, "fromRevision"),
+            toRevision: try string(object, "toRevision"),
+            sourceLibraryRevision: try string(object, "sourceLibraryRevision"),
+            changes: changes,
+            metadataOnly: try boolean(object, "metadataOnly"),
+            requiresTimelineDecision: try boolean(object, "requiresTimelineDecision"),
+            sourceTotalBars: try UInt32(exactly: unsigned(object, "sourceTotalBars"))
+                .required(.invalidNumber("sourceTotalBars")),
+            rebaseAmbiguities: ambiguities,
+            conflicts: conflicts
+        )
+    }
+
+    private func decodeSourcePhraseVersion(
+        _ value: JSONValue?
+    ) throws -> TrackSourcePhraseVersion? {
+        guard let value, value != .null else { return nil }
+        guard case let .object(object) = value else {
+            throw LibrarySnapshotError.invalidObject
+        }
+        let start = try UInt32(exactly: unsigned(object, "startBar"))
+            .required(.invalidNumber("startBar"))
+        let end = try UInt32(exactly: unsigned(object, "endBar"))
+            .required(.invalidNumber("endBar"))
+        guard start < end else { throw LibrarySnapshotError.invalidPhraseTimeline }
+        return TrackSourcePhraseVersion(
+            startBar: start,
+            endBar: end,
+            roleID: try string(object, "roleId")
         )
     }
 

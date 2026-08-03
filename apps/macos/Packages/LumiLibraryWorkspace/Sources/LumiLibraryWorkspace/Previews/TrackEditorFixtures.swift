@@ -83,6 +83,44 @@ public enum TrackEditorFixtures {
                     TrackEditorRevision(revision: 2, origin: "userEdit", reason: "changeRole", phraseCount: 4, restoredFrom: nil),
                     TrackEditorRevision(revision: 1, origin: "sourceImport", reason: "initialSourceMapping", phraseCount: 4, restoredFrom: nil)
                 ]
+            ),
+            sourceReconciliation: TrackSourceReconciliation(
+                fromRevision: "horizon-lines-v1",
+                toRevision: "horizon-lines-v2",
+                sourceLibraryRevision: "lumi-demo-library-v2",
+                changes: ["waveform", "rawPhrases"],
+                metadataOnly: false,
+                requiresTimelineDecision: true,
+                sourceTotalBars: 16,
+                rebaseAmbiguities: [1],
+                conflicts: [
+                    TrackSourceConflict(
+                        phraseIndex: 1,
+                        lumi: TrackSourcePhraseVersion(
+                            startBar: 4,
+                            endBar: 8,
+                            roleID: "breakdown-1"
+                        ),
+                        source: TrackSourcePhraseVersion(
+                            startBar: 4,
+                            endBar: 9,
+                            roleID: "breakdown-1"
+                        )
+                    ),
+                    TrackSourceConflict(
+                        phraseIndex: 2,
+                        lumi: TrackSourcePhraseVersion(
+                            startBar: 8,
+                            endBar: 12,
+                            roleID: "buildup-1"
+                        ),
+                        source: TrackSourcePhraseVersion(
+                            startBar: 9,
+                            endBar: 12,
+                            roleID: "buildup-1"
+                        )
+                    )
+                ]
             )
         )
     }()

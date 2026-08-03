@@ -15,6 +15,8 @@ use thiserror::Error;
 
 const DEMO_LIBRARY_FIXTURE: &str =
     include_str!("../../../../fixtures/demo-library-v1/library.json");
+const DEMO_LIBRARY_V2_FIXTURE: &str =
+    include_str!("../../../../fixtures/demo-library-v2/library.json");
 const MILLIS_PER_MINUTE_TIMES_MILLI_BPM: u64 = 60_000_000;
 const DEMO_AUDIO_SAMPLE_RATE_HZ: u32 = 44_100;
 const MAX_AUDIO_SEGMENT_MILLIS: u32 = 30_000;
@@ -25,8 +27,16 @@ pub enum DemoLibrarySize {
     Scaled(u32),
 }
 
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum DemoLibraryRevision {
+    #[default]
+    V1,
+    V2,
+}
+
 pub struct DemoLibrarySourceProvider {
     size: DemoLibrarySize,
+    revision: DemoLibraryRevision,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -63,6 +73,15 @@ impl DemoLibrarySourceProvider {
     pub const fn curated() -> Self {
         Self {
             size: DemoLibrarySize::Curated,
+            revision: DemoLibraryRevision::V1,
+        }
+    }
+
+    #[must_use]
+    pub const fn curated_revision(revision: DemoLibraryRevision) -> Self {
+        Self {
+            size: DemoLibrarySize::Curated,
+            revision,
         }
     }
 
@@ -72,6 +91,7 @@ impl DemoLibrarySourceProvider {
         }
         Ok(Self {
             size: DemoLibrarySize::Scaled(track_count),
+            revision: DemoLibraryRevision::V1,
         })
     }
 
@@ -137,7 +157,11 @@ impl DemoLibrarySourceProvider {
     }
 
     fn curated_baseline(&self) -> Result<ImportedLibraryBaseline, DemoLibraryError> {
-        let fixture: DemoLibraryFixture = serde_json::from_str(DEMO_LIBRARY_FIXTURE)?;
+        let fixture_json = match self.revision {
+            DemoLibraryRevision::V1 => DEMO_LIBRARY_FIXTURE,
+            DemoLibraryRevision::V2 => DEMO_LIBRARY_V2_FIXTURE,
+        };
+        let fixture: DemoLibraryFixture = serde_json::from_str(fixture_json)?;
         if fixture.schema_version != 1 {
             return Err(DemoLibraryError::UnsupportedFixtureVersion(
                 fixture.schema_version,
