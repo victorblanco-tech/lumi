@@ -7,6 +7,7 @@
 
 mod baseline;
 mod identifiers;
+mod phrase_roles;
 mod repository;
 mod timeline;
 
@@ -19,9 +20,14 @@ pub use identifiers::{
     LibrarySourceId, PhraseRoleId, PlaylistId, SourcePlaylistId, SourceRevision, SourceTrackId,
     TextIdentifierError, TimelineRevision, VariantId,
 };
+pub use phrase_roles::{
+    PHRASE_ROLE_DEFAULTS_VERSION, PhraseRole, PhraseRoleCatalog, PhraseRoleCatalogError,
+    PhraseRoleMove, PhraseRoleTrackUsage, PhraseRoleUsage, SourcePhraseMapping,
+    normalize_source_label,
+};
 pub use repository::{
-    ImportResult, LibraryRepository, LibraryTrackQuery, PhraseRole, PlaylistPage, PlaylistSummary,
-    StoredTrack, TimelineRevisionPage, TimelineRevisionSummary, TrackPage, TrackPageRequest,
+    ImportResult, LibraryRepository, LibraryTrackQuery, PlaylistPage, PlaylistSummary, StoredTrack,
+    TimelineRevisionPage, TimelineRevisionSummary, TrackPage, TrackPageRequest,
     TrackPageRequestError, TrackSummary,
 };
 pub use timeline::{

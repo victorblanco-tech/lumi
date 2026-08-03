@@ -1,6 +1,6 @@
 # Epic 2A – Music Library and Track Lighting Editor
 
-Status: **In build – E2A-05 complete; next E2A-06 phrase-role configuration**
+Status: **In build – E2A-06 complete; next E2A-07 Theme/role/variant matrix**
 
 Doelmilestone: **0.2.0 – Deck Intelligence**
 

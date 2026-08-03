@@ -4,7 +4,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use lumi_library::{
     ImportedLibraryBaseline, ImportedTrackAnalysis, LibraryRepository, LibraryTrackQuery,
-    LumiPhraseTimeline, PhraseInstance, PhraseLoopStrategy, PhraseRole, PhraseRoleId,
+    LumiPhraseTimeline, PHRASE_ROLE_DEFAULTS_VERSION, PhraseInstance, PhraseLoopStrategy,
+    PhraseRole, PhraseRoleCatalog, PhraseRoleId, PhraseRoleMove, SourcePhraseMapping,
     SourceRevision, TimelineEditCommand, TimelineRevision, TimelineRevisionOrigin,
     TimelineRevisionReason, TrackPageRequest, VariantId,
 };
@@ -16,7 +17,7 @@ use rusqlite::Connection;
 #[test]
 fn migrates_an_empty_database() -> Result<(), Box<dyn Error>> {
     let repository = SqliteLibraryRepository::in_memory()?;
-    assert_eq!(repository.schema_version()?, 2);
+    assert_eq!(repository.schema_version()?, 3);
     assert_eq!(
         repository
             .page_tracks(TrackPageRequest::try_new(0, 25)?)?
@@ -58,7 +59,7 @@ fn migrates_version_one_timeline_history_without_losing_rows() -> Result<(), Box
     }
 
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 2);
+    assert_eq!(repository.schema_version()?, 3);
     drop(repository);
     let connection = Connection::open(&path)?;
     let reason: String = connection.query_row(
@@ -73,6 +74,36 @@ fn migrates_version_one_timeline_history_without_losing_rows() -> Result<(), Box
     )?;
     assert_eq!(reason, "initial-source-mapping");
     assert_eq!(loop_strategy, "auto");
+    std::fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
+fn migrates_version_two_phrase_roles_into_an_unseeded_catalog() -> Result<(), Box<dyn Error>> {
+    let path = temporary_database_path()?;
+    {
+        let connection = Connection::open(&path)?;
+        connection.execute_batch(
+            "
+            CREATE TABLE phrase_roles (
+                role_id TEXT PRIMARY KEY,
+                display_name TEXT NOT NULL,
+                sort_order INTEGER NOT NULL,
+                archived INTEGER NOT NULL
+            );
+            INSERT INTO phrase_roles VALUES ('synth', 'Synth', 1, 0);
+            PRAGMA user_version = 2;
+            ",
+        )?;
+    }
+
+    let repository = SqliteLibraryRepository::open(&path)?;
+    assert_eq!(repository.schema_version()?, 3);
+    let catalog = repository.phrase_role_catalog()?;
+    assert_eq!(catalog.revision(), 0);
+    assert_eq!(catalog.defaults_version(), 0);
+    assert_eq!(catalog.roles()[0].id().as_str(), "synth");
+    drop(repository);
     std::fs::remove_file(path)?;
     Ok(())
 }
@@ -184,9 +215,14 @@ fn phrase_roles_and_timeline_revisions_survive_a_restart() -> Result<(), Box<dyn
             .page_tracks(TrackPageRequest::try_new(0, 1)?)?
             .tracks()[0]
             .id();
-        let intro = PhraseRole::try_new(PhraseRoleId::try_new("intro")?, "Intro", 10, false)?;
-        let drop = PhraseRole::try_new(PhraseRoleId::try_new("drop")?, "Drop", 20, false)?;
-        repository.save_phrase_roles(&[intro, drop])?;
+        let intro = PhraseRole::try_new(PhraseRoleId::try_new("intro")?, "Intro", 1, false)?;
+        let drop = PhraseRole::try_new(PhraseRoleId::try_new("drop")?, "Drop", 2, false)?;
+        repository.initialize_phrase_role_catalog(&PhraseRoleCatalog::try_new(
+            1,
+            PHRASE_ROLE_DEFAULTS_VERSION,
+            vec![intro, drop],
+            vec![],
+        )?)?;
         let timeline = LumiPhraseTimeline::try_new(
             track_id,
             TimelineRevision::initial(),
@@ -225,8 +261,9 @@ fn phrase_roles_and_timeline_revisions_survive_a_restart() -> Result<(), Box<dyn
                 .total(),
             3
         );
-        let roles = repository.phrase_roles()?;
-        assert_eq!(roles.len(), 2);
+        let catalog = repository.phrase_role_catalog()?;
+        assert_eq!(catalog.roles().len(), 2);
+        assert_eq!(catalog.revision(), 1);
         let timeline = repository
             .timeline_head(track_id)?
             .ok_or("timeline head not found after restart")?;
@@ -261,6 +298,78 @@ fn phrase_roles_and_timeline_revisions_survive_a_restart() -> Result<(), Box<dyn
             })?;
         assert_eq!(stored_baselines, 1);
     }
+    std::fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
+fn phrase_role_catalog_mutation_usage_and_conflict_survive_restart() -> Result<(), Box<dyn Error>> {
+    let path = temporary_database_path()?;
+    let baseline = DemoLibrarySourceProvider::curated().load_baseline()?;
+    let track_id;
+    {
+        let mut repository = SqliteLibraryRepository::open(&path)?;
+        repository.import_baseline(&baseline)?;
+        track_id = repository
+            .page_tracks(TrackPageRequest::try_new(0, 1)?)?
+            .tracks()[0]
+            .id();
+        let initial = PhraseRoleCatalog::try_new(
+            1,
+            PHRASE_ROLE_DEFAULTS_VERSION,
+            vec![
+                PhraseRole::try_new(PhraseRoleId::try_new("bridge")?, "Bridge", 1, false)?,
+                PhraseRole::try_new(PhraseRoleId::try_new("synth")?, "Synth", 2, false)?,
+            ],
+            vec![SourcePhraseMapping::try_new(
+                "rekordbox7",
+                "Verse",
+                PhraseRoleId::try_new("bridge")?,
+            )?],
+        )?;
+        repository.initialize_phrase_role_catalog(&initial)?;
+        repository.append_timeline_revision(
+            &LumiPhraseTimeline::try_new(
+                track_id,
+                TimelineRevision::initial(),
+                SourceRevision::try_new("analysis-v1")?,
+                8,
+                TimelineRevisionOrigin::UserEdit,
+                vec![PhraseInstance::new(
+                    0,
+                    0,
+                    8,
+                    PhraseRoleId::try_new("synth")?,
+                )],
+            )?,
+            None,
+        )?;
+
+        let renamed = initial.rename_role(&PhraseRoleId::try_new("synth")?, "Lead Synth")?;
+        repository.replace_phrase_role_catalog(&renamed, 1)?;
+        let moved = renamed.move_role(&PhraseRoleId::try_new("synth")?, PhraseRoleMove::Earlier)?;
+        repository.replace_phrase_role_catalog(&moved, 2)?;
+        let conflict = repository.replace_phrase_role_catalog(&moved, 2);
+        assert!(matches!(
+            conflict,
+            Err(SqliteLibraryError::PhraseRoleCatalogRevisionConflict {
+                expected: 2,
+                actual: 3,
+            })
+        ));
+    }
+
+    let repository = SqliteLibraryRepository::open(&path)?;
+    let catalog = repository.phrase_role_catalog()?;
+    assert_eq!(catalog.revision(), 3);
+    assert_eq!(catalog.roles()[0].id().as_str(), "synth");
+    assert_eq!(catalog.roles()[0].display_name(), "Lead Synth");
+    let usages = repository.phrase_role_usages()?;
+    assert_eq!(usages.len(), 1);
+    assert_eq!(usages[0].role_id().as_str(), "synth");
+    assert_eq!(usages[0].phrase_count(), 1);
+    assert_eq!(usages[0].tracks()[0].track_id(), track_id);
+    drop(repository);
     std::fs::remove_file(path)?;
     Ok(())
 }

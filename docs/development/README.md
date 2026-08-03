@@ -108,6 +108,14 @@ The fixed-dark CDJ-inspired waveform, shared beat-coordinate system, isolated
 read-only audio preview, controls, and cleanup rules are documented in
 [`track-editor-preview.md`](track-editor-preview.md).
 
+The authoritative, versioned, bar-aligned Lumi phrase timeline and its editing
+and recovery rules are documented in
+[`phrase-timeline-editing.md`](phrase-timeline-editing.md).
+
+Stable phrase-role identities, reversible archiving, usage diagnostics, and
+future-only provider mappings are documented in
+[`phrase-role-management.md`](phrase-role-management.md).
+
 The authoritative Live/Next presentation boundary, explicit degraded states,
 accessibility identifiers, and locked-session PNG workflow are documented in
 [`live-workspace.md`](live-workspace.md).

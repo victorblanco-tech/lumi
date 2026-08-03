@@ -3,9 +3,9 @@ use std::error::Error;
 use lumi_domain::{MusicalKey, TrackId};
 
 use crate::{
-    BeatGrid, ImportedLibraryBaseline, LumiPhraseTimeline, PhraseRoleId, PlaylistId,
-    RawPhraseObservation, SourcePlaylistId, SourceRevision, SourceTrackId, TimelineRevision,
-    TimelineRevisionOrigin, TrackColor, WaveformPoint,
+    BeatGrid, ImportedLibraryBaseline, LumiPhraseTimeline, PhraseRoleCatalog, PhraseRoleUsage,
+    PlaylistId, RawPhraseObservation, SourcePlaylistId, SourceRevision, SourceTrackId,
+    TimelineRevision, TimelineRevisionOrigin, TrackColor, WaveformPoint,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -13,54 +13,6 @@ pub struct ImportResult {
     pub inserted: u32,
     pub updated: u32,
     pub unchanged: u32,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct PhraseRole {
-    id: PhraseRoleId,
-    display_name: String,
-    sort_order: u16,
-    archived: bool,
-}
-
-impl PhraseRole {
-    pub fn try_new(
-        id: PhraseRoleId,
-        display_name: impl Into<String>,
-        sort_order: u16,
-        archived: bool,
-    ) -> Result<Self, TrackPageRequestError> {
-        let display_name = display_name.into();
-        if display_name.trim().is_empty() {
-            return Err(TrackPageRequestError::EmptyDisplayName);
-        }
-        Ok(Self {
-            id,
-            display_name,
-            sort_order,
-            archived,
-        })
-    }
-
-    #[must_use]
-    pub const fn id(&self) -> &PhraseRoleId {
-        &self.id
-    }
-
-    #[must_use]
-    pub fn display_name(&self) -> &str {
-        &self.display_name
-    }
-
-    #[must_use]
-    pub const fn sort_order(&self) -> u16 {
-        self.sort_order
-    }
-
-    #[must_use]
-    pub const fn is_archived(&self) -> bool {
-        self.archived
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -131,7 +83,6 @@ impl TrackPageRequest {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum TrackPageRequestError {
     InvalidLimit(u16),
-    EmptyDisplayName,
     SearchTooLong,
 }
 
@@ -139,7 +90,6 @@ impl std::fmt::Display for TrackPageRequestError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::InvalidLimit(value) => write!(formatter, "page limit {value} is outside 1..=200"),
-            Self::EmptyDisplayName => formatter.write_str("display name may not be empty"),
             Self::SearchTooLong => formatter.write_str("library search exceeds 200 bytes"),
         }
     }
@@ -516,8 +466,17 @@ pub trait LibraryRepository {
         request: TrackPageRequest,
     ) -> Result<TrackPage, Self::Error>;
     fn track(&self, id: TrackId) -> Result<Option<StoredTrack>, Self::Error>;
-    fn save_phrase_roles(&mut self, roles: &[PhraseRole]) -> Result<(), Self::Error>;
-    fn phrase_roles(&self) -> Result<Vec<PhraseRole>, Self::Error>;
+    fn phrase_role_catalog(&self) -> Result<PhraseRoleCatalog, Self::Error>;
+    fn initialize_phrase_role_catalog(
+        &mut self,
+        catalog: &PhraseRoleCatalog,
+    ) -> Result<(), Self::Error>;
+    fn replace_phrase_role_catalog(
+        &mut self,
+        catalog: &PhraseRoleCatalog,
+        expected_revision: u64,
+    ) -> Result<(), Self::Error>;
+    fn phrase_role_usages(&self) -> Result<Vec<PhraseRoleUsage>, Self::Error>;
     fn append_timeline_revision(
         &mut self,
         timeline: &LumiPhraseTimeline,

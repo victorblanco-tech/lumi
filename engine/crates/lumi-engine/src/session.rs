@@ -556,6 +556,15 @@ fn apply_command(
             )?;
             return Ok(());
         }
+        SessionCommand::MutatePhraseRoleCatalog {
+            expected_revision,
+            mutation,
+        } => {
+            runtime
+                .library_worker
+                .mutate_phrase_role_catalog(expected_revision, mutation)?;
+            return Ok(());
+        }
         SessionCommand::LoadDemoSession { expected_revision }
         | SessionCommand::ResetDemoSession { expected_revision } => {
             validate_state_revision(runtime, expected_revision)?;
@@ -662,6 +671,7 @@ fn apply_command(
         | SessionCommand::UndoLibraryTimeline { .. }
         | SessionCommand::RedoLibraryTimeline { .. }
         | SessionCommand::RestoreLibraryTimelineRevision { .. }
+        | SessionCommand::MutatePhraseRoleCatalog { .. }
         | SessionCommand::LoadDemoSession { .. }
         | SessionCommand::SetOperationState { .. }
         | SessionCommand::SetSimulationSpeed { .. }
@@ -834,16 +844,45 @@ fn application_error_envelope(
             envelope
         }),
         CommandApplicationError::Library(
+            LibraryWorkerError::PhraseRoleCatalogRevisionConflict { actual, .. },
+        ) => error_envelope(
+            sequence,
+            correlation_id,
+            "revisionConflict",
+            "phraseRoleRevisionMismatch",
+            "Phrase-role settings changed before the edit was applied.",
+            true,
+            None,
+        )
+        .map(|mut envelope| {
+            envelope
+                .payload
+                .insert("actualPhraseRoleRevision".to_owned(), json!(actual));
+            envelope
+        }),
+        CommandApplicationError::Library(
             library_error @ (LibraryWorkerError::TimelineEdit(_)
             | LibraryWorkerError::NothingToUndo
             | LibraryWorkerError::NothingToRedo
             | LibraryWorkerError::UnknownTimelineRevision(_)
-            | LibraryWorkerError::EditorTrackMismatch),
+            | LibraryWorkerError::EditorTrackMismatch
+            | LibraryWorkerError::PhraseRoleCatalog(_)
+            | LibraryWorkerError::UnknownPhraseRole
+            | LibraryWorkerError::ArchivedPhraseRole),
         ) => error_envelope(
             sequence,
             correlation_id,
             "validationFailed",
-            "timelineEditRejected",
+            if matches!(
+                &library_error,
+                LibraryWorkerError::PhraseRoleCatalog(_)
+                    | LibraryWorkerError::UnknownPhraseRole
+                    | LibraryWorkerError::ArchivedPhraseRole
+            ) {
+                "phraseRoleChangeRejected"
+            } else {
+                "timelineEditRejected"
+            },
             &library_error.to_string(),
             false,
             None,

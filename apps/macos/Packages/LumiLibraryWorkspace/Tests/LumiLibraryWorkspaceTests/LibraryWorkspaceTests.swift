@@ -67,6 +67,61 @@ struct LibraryWorkspaceTests {
         #expect(LibraryWorkspaceLocalization.value("editor.loopPhrase") == "Loop selected phrase")
         #expect(LibraryWorkspaceLocalization.value("editor.createSelection").contains("selection"))
         #expect(LibraryWorkspaceLocalization.value("editor.planIsolation").contains("Live plan"))
+        #expect(LibraryWorkspaceLocalization.value("settings.phraseRoles") == "Phrase Roles")
+        #expect(LibraryWorkspaceLocalization.value("settings.mappingPolicy").contains("never silently rewritten"))
+    }
+
+    @Test("Phrase-role settings decode stable IDs, usage, archive state, and provider mappings")
+    func decodesPhraseRoleSettings() throws {
+        let state = try LibrarySnapshotDecoder().decode(
+            envelope(trackValues: [trackValue()], phraseRoleSettings: phraseRoleSettingsValue())
+        )
+        let settings = try #require(state.phraseRoleSettings)
+        #expect(settings.revision == 4)
+        #expect(settings.roles.map(\.id) == ["intro-outro", "synth"])
+        #expect(settings.roles[1].usage.trackCount == 1)
+        #expect(settings.roles[1].usage.affectedTracks.first?.title == "Northern Pulse")
+        #expect(settings.mappingProfiles.first?.providerKind == "rekordbox7")
+        #expect(settings.mappingProfiles.first?.mappings.first?.rawLabel == "Intro")
+        #expect(settings.mappingProfiles.first?.mappings.first?.roleID == "intro-outro")
+    }
+
+    @Test("Duplicate stable role IDs are rejected before Settings renders")
+    func rejectsDuplicatePhraseRoleIDs() {
+        var settings = phraseRoleSettingsValue()
+        guard case var .object(object) = settings,
+              case let .array(roles) = object["roles"] else {
+            Issue.record("Phrase-role fixture must contain roles")
+            return
+        }
+        object["roles"] = .array([roles[0], roles[0]])
+        settings = .object(object)
+        #expect(throws: LibrarySnapshotError.invalidPhraseRoleSettings) {
+            try LibrarySnapshotDecoder().decode(
+                envelope(trackValues: [trackValue()], phraseRoleSettings: settings)
+            )
+        }
+    }
+
+    @Test("Non-contiguous phrase-role ordering is rejected before Settings renders")
+    func rejectsNonContiguousPhraseRoleOrdering() {
+        var settings = phraseRoleSettingsValue()
+        guard case var .object(object) = settings,
+              case var .array(roles) = object["roles"],
+              case var .object(secondRole) = roles[1] else {
+            Issue.record("Phrase-role fixture must contain two roles")
+            return
+        }
+        secondRole["sortOrder"] = .number(3)
+        roles[1] = .object(secondRole)
+        object["roles"] = .array(roles)
+        settings = .object(object)
+
+        #expect(throws: LibrarySnapshotError.invalidPhraseRoleSettings) {
+            try LibrarySnapshotDecoder().decode(
+                envelope(trackValues: [trackValue()], phraseRoleSettings: settings)
+            )
+        }
     }
 
     @Test("Track editor analysis uses one bounded beat coordinate system")
@@ -84,6 +139,7 @@ struct LibraryWorkspaceTests {
         #expect(editor.phrases.map(\.roleID) == ["intro-outro", "buildup-1"])
         #expect(editor.timeline.revision == 1)
         #expect(editor.timeline.revisions.count == 1)
+        #expect(editor.sourcePhrases.first?.rawLabel == "Intro")
         #expect(!editor.timeline.canUndo)
         #expect(editor.phraseTimeRange(editor.phrases[1]) == 2_000..<4_000)
     }
@@ -274,11 +330,16 @@ private func replacingAudioURI(
         waveform: analysis.waveform,
         phrases: analysis.phrases,
         roles: analysis.roles,
+        sourcePhrases: analysis.sourcePhrases,
         timeline: analysis.timeline
     )
 }
 
-private func envelope(trackValues: [JSONValue], editorValue: JSONValue = .null) -> MessageEnvelope {
+private func envelope(
+    trackValues: [JSONValue],
+    editorValue: JSONValue = .null,
+    phraseRoleSettings: JSONValue = .null
+) -> MessageEnvelope {
     MessageEnvelope(
         protocolVersion: 1,
         messageType: .snapshot,
@@ -324,7 +385,8 @@ private func envelope(trackValues: [JSONValue], editorValue: JSONValue = .null) 
                     "offset": .number(0),
                     "tracks": .array(trackValues)
                 ]),
-                "editor": editorValue
+                "editor": editorValue,
+                "phraseRoleSettings": phraseRoleSettings
             ])
         ]
     )
@@ -378,8 +440,22 @@ private func editorValue() -> JSONValue {
             ])
         ]),
         "roles": .array([
-            .object(["id": .string("intro-outro"), "name": .string("Intro")]),
-            .object(["id": .string("buildup-1"), "name": .string("Build")])
+            .object(["id": .string("intro-outro"), "name": .string("Intro"), "archived": .boolean(false)]),
+            .object(["id": .string("buildup-1"), "name": .string("Build"), "archived": .boolean(false)])
+        ]),
+        "sourcePhrases": .array([
+            .object([
+                "startBeat": .number(0),
+                "endBeat": .number(4),
+                "rawLabel": .string("Intro"),
+                "providerKind": .string("demo")
+            ]),
+            .object([
+                "startBeat": .number(4),
+                "endBeat": .number(8),
+                "rawLabel": .string("Up"),
+                "providerKind": .string("demo")
+            ])
         ]),
         "timeline": .object([
             "revision": .number(1),
@@ -398,6 +474,64 @@ private func editorValue() -> JSONValue {
                 ])
             ])
         ])
+    ])
+}
+
+private func phraseRoleSettingsValue() -> JSONValue {
+    .object([
+        "revision": .number(4),
+        "defaultsVersion": .number(1),
+        "roles": .array([
+            .object([
+                "id": .string("intro-outro"),
+                "name": .string("Intro / Outro"),
+                "sortOrder": .number(1),
+                "archived": .boolean(false),
+                "usage": .object([
+                    "phraseCount": .number(3),
+                    "trackCount": .number(2),
+                    "catalogRowCount": .number(0),
+                    "affectedTracks": .array([]),
+                    "hasMoreAffectedTracks": .boolean(false)
+                ])
+            ]),
+            .object([
+                "id": .string("synth"),
+                "name": .string("Synth"),
+                "sortOrder": .number(2),
+                "archived": .boolean(false),
+                "usage": .object([
+                    "phraseCount": .number(1),
+                    "trackCount": .number(1),
+                    "catalogRowCount": .number(0),
+                    "affectedTracks": .array([
+                        .object([
+                            "trackId": .number(3),
+                            "title": .string("Northern Pulse"),
+                            "phraseCount": .number(1)
+                        ])
+                    ]),
+                    "hasMoreAffectedTracks": .boolean(false)
+                ])
+            ])
+        ]),
+        "mappingProfiles": .array([
+            .object([
+                "providerKind": .string("rekordbox7"),
+                "providerName": .string("Rekordbox 7"),
+                "mappings": .array([
+                    .object([
+                        "rawLabel": .string("Intro"),
+                        "roleId": .string("intro-outro")
+                    ]),
+                    .object([
+                        "rawLabel": .string("Synth"),
+                        "roleId": .string("synth")
+                    ])
+                ])
+            ])
+        ]),
+        "mappingPolicy": .string("futureInitialTimelinesOnly")
     ])
 }
 

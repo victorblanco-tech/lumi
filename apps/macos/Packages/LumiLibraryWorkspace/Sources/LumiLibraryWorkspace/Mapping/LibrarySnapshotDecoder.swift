@@ -58,7 +58,103 @@ public struct LibrarySnapshotDecoder: Sendable {
                     .required(.invalidNumber("page.offset")),
                 tracks: try trackValues.map(decodeTrack)
             ),
-            editor: try decodeEditor(library["editor"])
+            editor: try decodeEditor(library["editor"]),
+            phraseRoleSettings: try decodePhraseRoleSettings(library["phraseRoleSettings"])
+        )
+    }
+
+    private func decodePhraseRoleSettings(_ value: JSONValue?) throws -> PhraseRoleSettingsState? {
+        guard let value, value != .null else { return nil }
+        guard case let .object(settings) = value else {
+            throw LibrarySnapshotError.invalidObject
+        }
+        let roleValues = try array(settings, "roles")
+        let profileValues = try array(settings, "mappingProfiles")
+        guard !roleValues.isEmpty, roleValues.count <= 1_000, profileValues.count <= 100 else {
+            throw LibrarySnapshotError.unboundedPhraseRoleSettings
+        }
+        let roles = try roleValues.map { value -> PhraseRoleDefinition in
+            guard case let .object(role) = value else {
+                throw LibrarySnapshotError.invalidObject
+            }
+            let usage = try object(role, "usage")
+            let affectedTrackValues = try array(usage, "affectedTracks")
+            guard affectedTrackValues.count <= 100 else {
+                throw LibrarySnapshotError.unboundedPhraseRoleSettings
+            }
+            return PhraseRoleDefinition(
+                id: try string(role, "id"),
+                name: try string(role, "name"),
+                sortOrder: try UInt16(exactly: unsigned(role, "sortOrder"))
+                    .required(.invalidNumber("phraseRole.sortOrder")),
+                archived: try boolean(role, "archived"),
+                usage: PhraseRoleUsage(
+                    phraseCount: try unsigned(usage, "phraseCount"),
+                    trackCount: try unsigned(usage, "trackCount"),
+                    catalogRowCount: try unsigned(usage, "catalogRowCount"),
+                    affectedTracks: try affectedTrackValues.map { trackValue in
+                        guard case let .object(track) = trackValue else {
+                            throw LibrarySnapshotError.invalidObject
+                        }
+                        return PhraseRoleAffectedTrack(
+                            trackID: try unsigned(track, "trackId"),
+                            title: try string(track, "title"),
+                            phraseCount: try unsigned(track, "phraseCount")
+                        )
+                    },
+                    hasMoreAffectedTracks: try boolean(usage, "hasMoreAffectedTracks")
+                )
+            )
+        }
+        guard Set(roles.map(\.id)).count == roles.count,
+              Set(roles.map(\.sortOrder)).count == roles.count,
+              roles.sorted(by: { $0.sortOrder < $1.sortOrder }) == roles,
+              roles.enumerated().allSatisfy({ index, role in
+                  role.sortOrder == UInt16(index + 1)
+              }),
+              roles.contains(where: { !$0.archived }) else {
+            throw LibrarySnapshotError.invalidPhraseRoleSettings
+        }
+        let roleIDs = Set(roles.map(\.id))
+        let profiles = try profileValues.map { value -> SourcePhraseMappingProfile in
+            guard case let .object(profile) = value else {
+                throw LibrarySnapshotError.invalidObject
+            }
+            let mappingValues = try array(profile, "mappings")
+            guard mappingValues.count <= 1_000 else {
+                throw LibrarySnapshotError.unboundedPhraseRoleSettings
+            }
+            let mappings = try mappingValues.map { value -> SourcePhraseMapping in
+                guard case let .object(mapping) = value else {
+                    throw LibrarySnapshotError.invalidObject
+                }
+                return SourcePhraseMapping(
+                    rawLabel: try string(mapping, "rawLabel"),
+                    roleID: try string(mapping, "roleId")
+                )
+            }
+            guard Set(mappings.map { $0.rawLabel.lowercased() }).count == mappings.count,
+                  mappings.allSatisfy({ roleIDs.contains($0.roleID) }) else {
+                throw LibrarySnapshotError.invalidPhraseRoleSettings
+            }
+            return SourcePhraseMappingProfile(
+                providerKind: try string(profile, "providerKind"),
+                providerName: try string(profile, "providerName"),
+                mappings: mappings
+            )
+        }
+        guard Set(profiles.map(\.providerKind)).count == profiles.count else {
+            throw LibrarySnapshotError.invalidPhraseRoleSettings
+        }
+        let revision = try unsigned(settings, "revision")
+        guard revision > 0 else { throw LibrarySnapshotError.invalidPhraseRoleSettings }
+        return PhraseRoleSettingsState(
+            revision: revision,
+            defaultsVersion: try UInt16(exactly: unsigned(settings, "defaultsVersion"))
+                .required(.invalidNumber("phraseRole.defaultsVersion")),
+            roles: roles,
+            mappingProfiles: profiles,
+            mappingPolicy: try string(settings, "mappingPolicy")
         )
     }
 
@@ -75,13 +171,20 @@ public struct LibrarySnapshotDecoder: Sendable {
         let waveform = try array(editor, "waveform")
         let phrases = try array(editor, "phrases")
         let roles = try array(editor, "roles")
+        let sourcePhraseValues: [JSONValue]
+        if case let .array(values)? = editor["sourcePhrases"] {
+            sourcePhraseValues = values
+        } else {
+            sourcePhraseValues = []
+        }
         let timeline = try object(editor, "timeline")
         let revisions = try array(timeline, "revisions")
         guard markers.count <= 1_000_000,
               waveform.count <= 100_000,
               phrases.count <= 10_000,
               roles.count <= 1_000,
-              revisions.count <= 200 else {
+              revisions.count <= 200,
+              sourcePhraseValues.count <= 10_000 else {
             throw LibrarySnapshotError.unboundedEditor
         }
         let beatsPerBar = try UInt8(exactly: unsigned(beatGrid, "beatsPerBar"))
@@ -151,7 +254,11 @@ public struct LibrarySnapshotDecoder: Sendable {
             guard case let .object(role) = value else {
                 throw LibrarySnapshotError.invalidObject
             }
-            return TrackEditorRole(id: try string(role, "id"), name: try string(role, "name"))
+            return TrackEditorRole(
+                id: try string(role, "id"),
+                name: try string(role, "name"),
+                archived: optionalBoolean(role, "archived") ?? false
+            )
         }
         guard Set(decodedRoles.map(\.id)).count == decodedRoles.count,
               !decodedRoles.isEmpty,
@@ -205,6 +312,24 @@ public struct LibrarySnapshotDecoder: Sendable {
             },
             phrases: decodedPhrases,
             roles: decodedRoles,
+            sourcePhrases: try sourcePhraseValues.map { value in
+                guard case let .object(phrase) = value else {
+                    throw LibrarySnapshotError.invalidObject
+                }
+                let sourcePhrase = TrackEditorSourcePhrase(
+                    startBeat: try UInt32(exactly: unsigned(phrase, "startBeat"))
+                        .required(.invalidNumber("sourcePhrase.startBeat")),
+                    endBeat: try UInt32(exactly: unsigned(phrase, "endBeat"))
+                        .required(.invalidNumber("sourcePhrase.endBeat")),
+                    rawLabel: try string(phrase, "rawLabel"),
+                    providerKind: try string(phrase, "providerKind")
+                )
+                guard sourcePhrase.startBeat < sourcePhrase.endBeat,
+                      sourcePhrase.endBeat <= UInt32(beats.count) else {
+                    throw LibrarySnapshotError.invalidPhraseTimeline
+                }
+                return sourcePhrase
+            },
             timeline: TrackEditorTimeline(
                 revision: timelineRevision,
                 baselineRevision: try string(timeline, "baselineRevision"),
@@ -305,6 +430,11 @@ public struct LibrarySnapshotDecoder: Sendable {
         return value
     }
 
+    private func optionalBoolean(_ values: [String: JSONValue], _ key: String) -> Bool? {
+        guard case let .boolean(value)? = values[key] else { return nil }
+        return value
+    }
+
     private func strings(_ values: [String: JSONValue], _ key: String) throws -> [String] {
         try array(values, key).map { value in
             guard case let .string(string) = value else {
@@ -329,6 +459,8 @@ public enum LibrarySnapshotError: Error, Equatable {
     case invalidWaveform
     case invalidPhraseTimeline
     case invalidAudioURI
+    case unboundedPhraseRoleSettings
+    case invalidPhraseRoleSettings
 }
 
 private extension Optional {

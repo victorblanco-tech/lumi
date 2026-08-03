@@ -9,6 +9,7 @@ final class EngineStatusModel: ObservableObject {
     @Published private(set) var workspaceState = LiveWorkspacePresenter.stopped()
     @Published private(set) var libraryState = LibraryWorkspaceState.importing()
     @Published private(set) var timelineEditFeedback: String?
+    @Published private(set) var phraseRoleFeedback: String?
 
     private enum Lifecycle: Equatable {
         case stopped
@@ -41,6 +42,7 @@ final class EngineStatusModel: ObservableObject {
         workspaceState = LiveWorkspacePresenter.starting()
         libraryState = .importing()
         timelineEditFeedback = nil
+        phraseRoleFeedback = nil
 
         do {
             let executable = try engineExecutable()
@@ -109,6 +111,7 @@ final class EngineStatusModel: ObservableObject {
         protocolVersion = nil
         workspaceState = LiveWorkspacePresenter.stopped()
         libraryState = .importing()
+        phraseRoleFeedback = nil
     }
 
     func queryLibrary(_ request: LibraryQueryRequest) async {
@@ -197,6 +200,72 @@ final class EngineStatusModel: ObservableObject {
             success = "Revision \(revision) restored as a new revision."
         }
         await exchangeTimelineCommand(command, success: success)
+    }
+
+    func mutatePhraseRoles(_ request: PhraseRoleMutationRequest) async {
+        guard let settings = libraryState.phraseRoleSettings,
+              lifecycle == .ready,
+              let endpointDescription,
+              let protocolVersion,
+              await acquireInteractiveExchange() else {
+            return
+        }
+        defer { isExchangingCommand = false }
+        do {
+            let envelope = try await supervisor.send(
+                .mutatePhraseRoleCatalog(
+                    expectedPhraseRoleRevision: settings.revision,
+                    mutation: enginePhraseRoleMutation(request)
+                )
+            )
+            if let failure = EngineCommandFailure(envelope) {
+                if failure.code == "phraseRoleRevisionMismatch" {
+                    let refreshed = try await supervisor.getSnapshot()
+                    libraryState = try libraryDecoder.decode(refreshed)
+                    phraseRoleFeedback = "Phrase roles changed elsewhere. Lumi refreshed the latest revision."
+                } else {
+                    phraseRoleFeedback = failure.message
+                }
+                return
+            }
+            let snapshot = try snapshotDecoder.decode(
+                envelope,
+                endpointDescription: endpointDescription,
+                protocolVersion: protocolVersion
+            )
+            latestSnapshot = snapshot
+            workspaceState = LiveWorkspacePresenter.ready(snapshot)
+            libraryState = try libraryDecoder.decode(envelope)
+            if let revision = libraryState.phraseRoleSettings?.revision {
+                phraseRoleFeedback = "Phrase-role settings saved. Revision \(revision)."
+            } else {
+                phraseRoleFeedback = "Phrase-role settings saved."
+            }
+        } catch {
+            phraseRoleFeedback = (error as? LocalizedError)?.errorDescription
+                ?? "The phrase-role change could not be saved."
+        }
+    }
+
+    private func enginePhraseRoleMutation(
+        _ request: PhraseRoleMutationRequest
+    ) -> EnginePhraseRoleMutation {
+        switch request {
+        case let .add(displayName):
+            .add(displayName: displayName)
+        case let .rename(roleID, displayName):
+            .rename(roleID: roleID, displayName: displayName)
+        case let .moveEarlier(roleID):
+            .moveEarlier(roleID: roleID)
+        case let .moveLater(roleID):
+            .moveLater(roleID: roleID)
+        case let .archive(roleID):
+            .archive(roleID: roleID)
+        case let .restore(roleID):
+            .restore(roleID: roleID)
+        case let .setSourceMapping(providerKind, rawLabel, roleID):
+            .setSourceMapping(providerKind: providerKind, rawLabel: rawLabel, roleID: roleID)
+        }
     }
 
     private func exchangeTimelineCommand(_ command: EngineCommand, success: String) async {

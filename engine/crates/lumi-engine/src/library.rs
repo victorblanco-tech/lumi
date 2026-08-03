@@ -1,15 +1,22 @@
+use std::collections::BTreeMap;
+
 use lumi_domain::{KeyMode, PitchClass, TrackId};
 use lumi_library::{
     LibraryRepository, LibraryTrackQuery, LumiPhraseTimeline, PhraseInstance, PhraseLoopStrategy,
-    PhraseRole, PhraseRoleId, PlaylistId, SourceRevision, TimelineEditCommand, TimelineEditError,
-    TimelineRevision, TimelineRevisionOrigin, TimelineRevisionReason, TimelineRevisionSummary,
-    TrackPageRequest, TrackSummary,
+    PhraseRole, PhraseRoleCatalogError, PhraseRoleId, PhraseRoleMove, PlaylistId,
+    SourcePhraseMapping, SourceRevision, TimelineEditCommand, TimelineEditError, TimelineRevision,
+    TimelineRevisionOrigin, TimelineRevisionReason, TimelineRevisionSummary, TrackPageRequest,
+    TrackSummary,
 };
 use lumi_library_demo::{DemoLibraryError, DemoLibrarySourceProvider};
 use lumi_library_source::MusicLibrarySourceProvider as _;
 use lumi_library_sqlite::{SqliteLibraryError, SqliteLibraryRepository};
 use serde_json::{Value, json};
 use thiserror::Error;
+
+use crate::phrase_role_defaults::{
+    PhraseRoleDefaultsError, provider_display_name, seeded_phrase_role_catalog,
+};
 
 const DEFAULT_PAGE_LIMIT: u16 = 50;
 const DATABASE_PATH_ENVIRONMENT: &str = "LUMI_LIBRARY_DATABASE_PATH";
@@ -25,6 +32,30 @@ pub struct LibraryWorker {
     offset: u32,
     limit: u16,
     editor_track_id: Option<TrackId>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PhraseRoleCatalogMutation {
+    Add {
+        display_name: String,
+    },
+    Rename {
+        role_id: PhraseRoleId,
+        display_name: String,
+    },
+    Move {
+        role_id: PhraseRoleId,
+        direction: PhraseRoleMove,
+    },
+    SetArchived {
+        role_id: PhraseRoleId,
+        archived: bool,
+    },
+    SetSourceMapping {
+        provider_kind: String,
+        raw_label: String,
+        role_id: PhraseRoleId,
+    },
 }
 
 impl LibraryWorker {
@@ -47,7 +78,7 @@ impl LibraryWorker {
         let provider = DemoLibrarySourceProvider::curated();
         let baseline = provider.load_baseline()?;
         repository.import_baseline(&baseline)?;
-        seed_default_roles(&mut repository)?;
+        seed_default_role_catalog(&mut repository)?;
         let mut worker = Self {
             repository,
             source_id: baseline.source_id().as_str().to_owned(),
@@ -95,6 +126,9 @@ impl LibraryWorker {
     ) -> Result<(), LibraryWorkerError> {
         let track_id = TrackId::new(track_id);
         self.require_open_track(track_id)?;
+        if let Some(role_id) = command.assigned_role_id() {
+            self.require_active_role(role_id)?;
+        }
         let head = self.require_expected_head(track_id, expected_revision)?;
         let edited = head.edit(command)?;
         self.repository
@@ -146,6 +180,68 @@ impl LibraryWorker {
         self.editor_track_id = None;
     }
 
+    pub fn mutate_phrase_role_catalog(
+        &mut self,
+        expected_revision: u64,
+        mutation: PhraseRoleCatalogMutation,
+    ) -> Result<(), LibraryWorkerError> {
+        let catalog = self.repository.phrase_role_catalog()?;
+        if catalog.revision() != expected_revision {
+            return Err(LibraryWorkerError::PhraseRoleCatalogRevisionConflict {
+                expected: expected_revision,
+                actual: catalog.revision(),
+            });
+        }
+        let updated = match mutation {
+            PhraseRoleCatalogMutation::Add { display_name } => catalog.add_role(display_name)?,
+            PhraseRoleCatalogMutation::Rename {
+                role_id,
+                display_name,
+            } => catalog.rename_role(&role_id, display_name)?,
+            PhraseRoleCatalogMutation::Move { role_id, direction } => {
+                catalog.move_role(&role_id, direction)?
+            }
+            PhraseRoleCatalogMutation::SetArchived { role_id, archived } => {
+                catalog.set_archived(&role_id, archived)?
+            }
+            PhraseRoleCatalogMutation::SetSourceMapping {
+                provider_kind,
+                raw_label,
+                role_id,
+            } => {
+                let role = catalog
+                    .roles()
+                    .iter()
+                    .find(|role| role.id() == &role_id)
+                    .ok_or(LibraryWorkerError::UnknownPhraseRole)?;
+                if role.is_archived() {
+                    return Err(LibraryWorkerError::ArchivedPhraseRole);
+                }
+                catalog.upsert_mapping(SourcePhraseMapping::try_new(
+                    provider_kind,
+                    raw_label,
+                    role_id,
+                )?)?
+            }
+        };
+        self.repository
+            .replace_phrase_role_catalog(&updated, expected_revision)?;
+        Ok(())
+    }
+
+    fn require_active_role(&self, role_id: &PhraseRoleId) -> Result<(), LibraryWorkerError> {
+        let catalog = self.repository.phrase_role_catalog()?;
+        let role = catalog
+            .roles()
+            .iter()
+            .find(|role| role.id() == role_id)
+            .ok_or(LibraryWorkerError::UnknownPhraseRole)?;
+        if role.is_archived() {
+            return Err(LibraryWorkerError::ArchivedPhraseRole);
+        }
+        Ok(())
+    }
+
     fn require_open_track(&self, track_id: TrackId) -> Result<(), LibraryWorkerError> {
         if self.editor_track_id != Some(track_id) {
             return Err(LibraryWorkerError::EditorTrackMismatch);
@@ -188,6 +284,7 @@ impl LibraryWorker {
             return Err(LibraryWorkerError::InvalidSourceTimeline);
         }
         let total_bars = total_beats / beats_per_bar;
+        let role_catalog = self.repository.phrase_role_catalog()?;
         let mut phrases = Vec::with_capacity(track.raw_phrases().len());
         for (index, phrase) in track.raw_phrases().iter().enumerate() {
             if !phrase.start_beat().is_multiple_of(beats_per_bar)
@@ -195,11 +292,29 @@ impl LibraryWorker {
             {
                 return Err(LibraryWorkerError::InvalidSourceTimeline);
             }
+            let role_id = role_catalog
+                .resolve(&self.source_kind, phrase.source_label())
+                .cloned()
+                .ok_or_else(|| LibraryWorkerError::UnmappedSourcePhrase {
+                    provider_kind: self.source_kind.clone(),
+                    raw_label: phrase.source_label().to_owned(),
+                })?;
+            if !role_catalog
+                .roles()
+                .iter()
+                .any(|role| role.id() == &role_id && !role.is_archived())
+            {
+                return Err(LibraryWorkerError::ArchivedSourcePhraseMapping {
+                    provider_kind: self.source_kind.clone(),
+                    raw_label: phrase.source_label().to_owned(),
+                    role_id,
+                });
+            }
             phrases.push(PhraseInstance::new(
                 u16::try_from(index).map_err(|_| LibraryWorkerError::InvalidSourceTimeline)?,
                 phrase.start_beat() / beats_per_bar,
                 phrase.end_beat() / beats_per_bar,
-                mapped_role_id(phrase.source_label())?,
+                role_id,
             ));
         }
         let timeline = LumiPhraseTimeline::try_new_with_history(
@@ -326,7 +441,66 @@ impl LibraryWorker {
                 "offset": page.offset(),
                 "tracks": page.tracks().iter().map(track_json).collect::<Vec<_>>(),
             },
+            "phraseRoleSettings": self.phrase_role_settings_json()?,
             "editor": self.editor_json()?,
+        }))
+    }
+
+    fn phrase_role_settings_json(&self) -> Result<Value, LibraryWorkerError> {
+        let catalog = self.repository.phrase_role_catalog()?;
+        let usages = self
+            .repository
+            .phrase_role_usages()?
+            .into_iter()
+            .map(|usage| (usage.role_id().clone(), usage))
+            .collect::<BTreeMap<_, _>>();
+        let mut profiles = BTreeMap::<String, Vec<&SourcePhraseMapping>>::new();
+        for mapping in catalog.mappings() {
+            profiles
+                .entry(mapping.provider_kind().to_owned())
+                .or_default()
+                .push(mapping);
+        }
+        for mappings in profiles.values_mut() {
+            mappings.sort_by(|left, right| {
+                (left.raw_label() == "*")
+                    .cmp(&(right.raw_label() == "*"))
+                    .then_with(|| left.raw_label().cmp(right.raw_label()))
+            });
+        }
+        Ok(json!({
+            "revision": catalog.revision(),
+            "defaultsVersion": catalog.defaults_version(),
+            "roles": catalog.roles().iter().map(|role| {
+                let usage = usages.get(role.id());
+                let affected_tracks = usage.map_or(&[][..], |value| value.tracks());
+                json!({
+                    "id": role.id().as_str(),
+                    "name": role.display_name(),
+                    "sortOrder": role.sort_order(),
+                    "archived": role.is_archived(),
+                    "usage": {
+                        "phraseCount": usage.map_or(0, |value| value.phrase_count()),
+                        "trackCount": affected_tracks.len(),
+                        "catalogRowCount": usage.map_or(0, |value| value.catalog_row_count()),
+                        "affectedTracks": affected_tracks.iter().take(100).map(|track| json!({
+                            "trackId": track.track_id().value(),
+                            "title": track.title(),
+                            "phraseCount": track.phrase_count(),
+                        })).collect::<Vec<_>>(),
+                        "hasMoreAffectedTracks": affected_tracks.len() > 100,
+                    },
+                })
+            }).collect::<Vec<_>>(),
+            "mappingProfiles": profiles.into_iter().map(|(provider_kind, mappings)| json!({
+                "providerKind": provider_kind,
+                "providerName": provider_display_name(&provider_kind),
+                "mappings": mappings.into_iter().map(|mapping| json!({
+                    "rawLabel": mapping.raw_label(),
+                    "roleId": mapping.role_id().as_str(),
+                })).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
+            "mappingPolicy": "futureInitialTimelinesOnly",
         }))
     }
 
@@ -342,7 +516,8 @@ impl LibraryWorker {
             .repository
             .timeline_head(track_id)?
             .ok_or(LibraryWorkerError::MissingTimeline)?;
-        let roles = self.repository.phrase_roles()?;
+        let role_catalog = self.repository.phrase_role_catalog()?;
+        let roles = role_catalog.roles();
         let history = self.rebuild_history(track_id)?;
         let revisions = self
             .repository
@@ -380,16 +555,23 @@ impl LibraryWorker {
                     "restoredFrom": revision.restored_from().map(|value| value.value()),
                 })).collect::<Vec<_>>(),
             },
-            "roles": roles.iter().filter(|role| !role.is_archived()).map(|role| json!({
+            "roles": roles.iter().map(|role| json!({
                 "id": role.id().as_str(),
                 "name": role.display_name(),
+                "archived": role.is_archived(),
+            })).collect::<Vec<_>>(),
+            "sourcePhrases": track.raw_phrases().iter().map(|phrase| json!({
+                "startBeat": phrase.start_beat(),
+                "endBeat": phrase.end_beat(),
+                "rawLabel": phrase.source_label(),
+                "providerKind": self.source_kind,
             })).collect::<Vec<_>>(),
             "phrases": timeline.phrases().iter().map(|phrase| json!({
                 "id": phrase.index(),
                 "startBeat": phrase.start_bar() * beats_per_bar,
                 "endBeat": phrase.end_bar() * beats_per_bar,
                 "roleId": phrase.role_id().as_str(),
-                "role": role_display_name(&roles, phrase.role_id()),
+                "role": role_display_name(roles, phrase.role_id()),
                 "origin": origin_name(timeline.origin()),
                 "loopStrategy": loop_strategy_name(phrase.loop_strategy()),
             })).collect::<Vec<_>>(),
@@ -461,56 +643,16 @@ impl TimelineHistory {
     }
 }
 
-fn seed_default_roles(repository: &mut SqliteLibraryRepository) -> Result<(), LibraryWorkerError> {
-    if !repository.phrase_roles()?.is_empty() {
+fn seed_default_role_catalog(
+    repository: &mut SqliteLibraryRepository,
+) -> Result<(), LibraryWorkerError> {
+    let existing = repository.phrase_role_catalog()?;
+    if existing.defaults_version() >= lumi_library::PHRASE_ROLE_DEFAULTS_VERSION {
         return Ok(());
     }
-    let definitions = [
-        ("intro-outro", "Intro / Outro"),
-        ("bridge", "Bridge"),
-        ("breakdown-1", "Breakdown 1"),
-        ("breakdown-2", "Breakdown 2"),
-        ("breakdown-3", "Breakdown 3"),
-        ("synth", "Synth"),
-        ("pre-drop", "Pre-drop"),
-        ("buildup-1", "Buildup 1"),
-        ("buildup-2", "Buildup 2"),
-        ("buildup-3", "Buildup 3"),
-        ("drop", "Drop"),
-    ];
-    let roles = definitions
-        .iter()
-        .enumerate()
-        .map(|(index, (id, name))| {
-            PhraseRole::try_new(
-                PhraseRoleId::try_new(*id)?,
-                *name,
-                u16::try_from(index + 1).map_err(|_| LibraryWorkerError::HistoryOverflow)?,
-                false,
-            )
-            .map_err(LibraryWorkerError::Query)
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    repository.save_phrase_roles(&roles)?;
+    let seeded = seeded_phrase_role_catalog(&existing)?;
+    repository.initialize_phrase_role_catalog(&seeded)?;
     Ok(())
-}
-
-fn mapped_role_id(source_label: &str) -> Result<PhraseRoleId, LibraryWorkerError> {
-    let role = match source_label.trim().to_ascii_lowercase().as_str() {
-        "intro" | "outro" => "intro-outro",
-        "verse" | "bridge" => "bridge",
-        "breakdown" | "breakdown 1" => "breakdown-1",
-        "breakdown 2" => "breakdown-2",
-        "breakdown 3" => "breakdown-3",
-        "synth" => "synth",
-        "pre-drop" | "predrop" => "pre-drop",
-        "up" | "up 1" | "build" | "buildup" | "buildup 1" => "buildup-1",
-        "up 2" | "buildup 2" => "buildup-2",
-        "up 3" | "buildup 3" => "buildup-3",
-        "chorus" | "drop" => "drop",
-        _ => "bridge",
-    };
-    PhraseRoleId::try_new(role).map_err(LibraryWorkerError::Identifier)
 }
 
 fn role_display_name(roles: &[PhraseRole], id: &PhraseRoleId) -> String {
@@ -612,6 +754,10 @@ pub enum LibraryWorkerError {
     Persistence(#[from] SqliteLibraryError),
     #[error("library query is invalid: {0}")]
     Query(#[from] lumi_library::TrackPageRequestError),
+    #[error("phrase-role defaults failed: {0}")]
+    PhraseRoleDefaults(#[from] PhraseRoleDefaultsError),
+    #[error("phrase-role change was rejected: {0}")]
+    PhraseRoleCatalog(#[from] PhraseRoleCatalogError),
     #[error("invalid library identifier: {0}")]
     Identifier(#[from] lumi_library::TextIdentifierError),
     #[error("timeline edit was rejected: {0}")]
@@ -626,6 +772,25 @@ pub enum LibraryWorkerError {
     MissingTimeline,
     #[error("source phrases cannot form a complete bar-aligned timeline")]
     InvalidSourceTimeline,
+    #[error("source phrase '{raw_label}' has no mapping for provider '{provider_kind}'")]
+    UnmappedSourcePhrase {
+        provider_kind: String,
+        raw_label: String,
+    },
+    #[error(
+        "source phrase '{raw_label}' for provider '{provider_kind}' maps to archived role '{role_id:?}'"
+    )]
+    ArchivedSourcePhraseMapping {
+        provider_kind: String,
+        raw_label: String,
+        role_id: PhraseRoleId,
+    },
+    #[error("phrase role does not exist")]
+    UnknownPhraseRole,
+    #[error("archived phrase roles cannot be assigned to new or edited phrases")]
+    ArchivedPhraseRole,
+    #[error("phrase-role catalog changed; expected revision {expected}, actual {actual}")]
+    PhraseRoleCatalogRevisionConflict { expected: u64, actual: u64 },
     #[error("timeline revision {0} is invalid")]
     InvalidTimelineRevision(u64),
     #[error("timeline revision {0} does not exist")]
@@ -649,9 +814,13 @@ pub enum LibraryWorkerError {
 mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use lumi_library::{PhraseRoleId, TimelineEditCommand};
+    use lumi_library::{
+        LibraryRepository as _, PhraseRoleId, TimelineEditCommand, TrackPageRequest,
+    };
+    use lumi_library_demo::DemoLibrarySourceProvider;
+    use lumi_library_source::MusicLibrarySourceProvider as _;
 
-    use super::LibraryWorker;
+    use super::{LibraryWorker, PhraseRoleCatalogMutation};
 
     #[test]
     fn collection_total_is_independent_from_the_active_playlist()
@@ -663,6 +832,194 @@ mod tests {
 
         assert_eq!(snapshot["collectionTotal"], 3);
         assert_eq!(snapshot["page"]["total"], 2);
+        Ok(())
+    }
+
+    #[test]
+    fn default_phrase_roles_are_seeded_once_and_user_changes_survive_restart()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let path = std::env::temp_dir().join(format!("lumi-engine-roles-{unique}.sqlite"));
+        {
+            let mut worker = LibraryWorker::demo_at(&path)?;
+            let initial = worker.snapshot_json()?;
+            let roles = initial["phraseRoleSettings"]["roles"]
+                .as_array()
+                .ok_or("phrase-role settings are missing")?;
+            assert_eq!(initial["phraseRoleSettings"]["revision"], 1);
+            assert_eq!(roles.len(), 11);
+            assert_eq!(roles[0]["id"], "intro-outro");
+            assert_eq!(roles[5]["id"], "synth");
+
+            worker.mutate_phrase_role_catalog(
+                1,
+                PhraseRoleCatalogMutation::Rename {
+                    role_id: PhraseRoleId::try_new("synth")?,
+                    display_name: "Lead Synth".to_owned(),
+                },
+            )?;
+            worker.mutate_phrase_role_catalog(
+                2,
+                PhraseRoleCatalogMutation::SetArchived {
+                    role_id: PhraseRoleId::try_new("synth")?,
+                    archived: true,
+                },
+            )?;
+        }
+
+        let worker = LibraryWorker::demo_at(&path)?;
+        let restarted = worker.snapshot_json()?;
+        let roles = restarted["phraseRoleSettings"]["roles"]
+            .as_array()
+            .ok_or("phrase-role settings are missing after restart")?;
+        assert_eq!(restarted["phraseRoleSettings"]["revision"], 3);
+        assert_eq!(roles.len(), 11);
+        let synth = roles
+            .iter()
+            .find(|role| role["id"] == "synth")
+            .ok_or("stable Synth role is missing")?;
+        assert_eq!(synth["name"], "Lead Synth");
+        assert_eq!(synth["archived"], true);
+        std::fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn mapping_changes_only_initialize_future_timelines_and_keep_raw_provenance()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut worker = LibraryWorker::demo()?;
+        let original_track_id = worker.snapshot_json()?["page"]["tracks"][0]["id"]
+            .as_u64()
+            .ok_or("demo track ID is missing")?;
+        worker.open_editor(original_track_id)?;
+        let before = worker.snapshot_json()?;
+        assert_eq!(before["editor"]["phrases"][0]["roleId"], "intro-outro");
+        assert_eq!(before["editor"]["sourcePhrases"][0]["rawLabel"], "Intro");
+
+        worker.mutate_phrase_role_catalog(
+            1,
+            PhraseRoleCatalogMutation::SetSourceMapping {
+                provider_kind: "demo".to_owned(),
+                raw_label: "Demo".to_owned(),
+                role_id: PhraseRoleId::try_new("synth")?,
+            },
+        )?;
+        let unchanged = worker.snapshot_json()?;
+        assert_eq!(unchanged["editor"]["timeline"]["revision"], 1);
+        assert_eq!(unchanged["editor"]["phrases"][0]["roleId"], "intro-outro");
+
+        let new_baseline = DemoLibrarySourceProvider::scaled(1)?.load_baseline()?;
+        worker.repository.import_baseline(&new_baseline)?;
+        let new_track = worker
+            .repository
+            .page_tracks(TrackPageRequest::try_new(0, 200)?)?
+            .tracks()
+            .iter()
+            .find(|track| track.source_track_id().as_str() == "scale-00000")
+            .ok_or("new scale track was not imported")?
+            .id();
+        worker.ensure_timeline(new_track)?;
+        let timeline = worker
+            .repository
+            .timeline_head(new_track)?
+            .ok_or("new track timeline was not initialized")?;
+        assert_eq!(timeline.phrases()[0].role_id().as_str(), "synth");
+        Ok(())
+    }
+
+    #[test]
+    fn archived_roles_cannot_receive_mappings_or_initialize_future_timelines()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut worker = LibraryWorker::demo()?;
+        worker.mutate_phrase_role_catalog(
+            1,
+            PhraseRoleCatalogMutation::SetSourceMapping {
+                provider_kind: "demo".to_owned(),
+                raw_label: "Demo".to_owned(),
+                role_id: PhraseRoleId::try_new("synth")?,
+            },
+        )?;
+        worker.mutate_phrase_role_catalog(
+            2,
+            PhraseRoleCatalogMutation::SetArchived {
+                role_id: PhraseRoleId::try_new("synth")?,
+                archived: true,
+            },
+        )?;
+
+        let rejected_mapping = worker.mutate_phrase_role_catalog(
+            3,
+            PhraseRoleCatalogMutation::SetSourceMapping {
+                provider_kind: "demo".to_owned(),
+                raw_label: "Intro".to_owned(),
+                role_id: PhraseRoleId::try_new("synth")?,
+            },
+        );
+        assert!(matches!(
+            rejected_mapping,
+            Err(super::LibraryWorkerError::ArchivedPhraseRole)
+        ));
+
+        let new_baseline = DemoLibrarySourceProvider::scaled(1)?.load_baseline()?;
+        worker.repository.import_baseline(&new_baseline)?;
+        let new_track = worker
+            .repository
+            .page_tracks(TrackPageRequest::try_new(0, 200)?)?
+            .tracks()
+            .iter()
+            .find(|track| track.source_track_id().as_str() == "scale-00000")
+            .ok_or("new scale track was not imported")?
+            .id();
+        let initialization = worker.ensure_timeline(new_track);
+        assert!(matches!(
+            initialization,
+            Err(super::LibraryWorkerError::ArchivedSourcePhraseMapping { .. })
+        ));
+        Ok(())
+    }
+
+    #[test]
+    fn phrase_role_usage_and_synth_assignment_are_exact_and_stale_safe()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut worker = LibraryWorker::demo()?;
+        let track_id = worker.snapshot_json()?["page"]["tracks"][0]["id"]
+            .as_u64()
+            .ok_or("demo track ID is missing")?;
+        worker.open_editor(track_id)?;
+        worker.edit_timeline(
+            track_id,
+            1,
+            TimelineEditCommand::ChangeRole {
+                phrase_index: 0,
+                role_id: PhraseRoleId::try_new("synth")?,
+            },
+        )?;
+        let snapshot = worker.snapshot_json()?;
+        assert_eq!(snapshot["editor"]["phrases"][0]["roleId"], "synth");
+        let synth = snapshot["phraseRoleSettings"]["roles"]
+            .as_array()
+            .and_then(|roles| roles.iter().find(|role| role["id"] == "synth"))
+            .ok_or("Synth usage is missing")?;
+        assert_eq!(synth["usage"]["trackCount"], 1);
+        assert_eq!(synth["usage"]["phraseCount"], 1);
+        assert_eq!(synth["usage"]["catalogRowCount"], 0);
+
+        let stale = worker.mutate_phrase_role_catalog(
+            2,
+            PhraseRoleCatalogMutation::Rename {
+                role_id: PhraseRoleId::try_new("synth")?,
+                display_name: "Lead Synth".to_owned(),
+            },
+        );
+        assert!(matches!(
+            stale,
+            Err(
+                super::LibraryWorkerError::PhraseRoleCatalogRevisionConflict {
+                    expected: 2,
+                    actual: 1,
+                }
+            )
+        ));
         Ok(())
     }
 
