@@ -48,6 +48,11 @@ impl CommandIdCache {
         self.identifiers.insert(owned_identifier);
         CommandDisposition::FirstSeen
     }
+
+    #[must_use]
+    pub fn contains(&self, message_id: &str) -> bool {
+        self.identifiers.contains(message_id)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

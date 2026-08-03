@@ -1,8 +1,8 @@
 use std::time::{Duration, Instant};
 
 use lumi_domain::{
-    CueOrigin, CueReason, DeckId, PhraseKind, PlanStatus, SemanticLightingAction, TrackId,
-    TrackLoadId, TrackPhrase,
+    CueOrigin, CueReason, DeckId, PhraseKind, PlanRevision, PlanStatus, SceneId,
+    SemanticLightingAction, ThemeId, TrackId, TrackLoadId, TrackPhrase,
 };
 use lumi_planner::{
     ChoiceSource, DeterministicPlanner, PlannerTrack, PlanningConfiguration, PlanningInput,
@@ -111,6 +111,58 @@ fn demo_next_track_matches_the_reviewed_golden_plan() {
     assert_eq!(actual, expected);
 }
 
+#[test]
+fn each_accepted_edit_creates_exactly_one_revision() {
+    let planner = DeterministicPlanner::epic_one();
+    let original = generate(&planner, &demo_input());
+    let themed = mutate(planner.select_theme(&original, ThemeId::new(1)));
+    let scene = mutate(planner.select_scene(&themed, 1, SceneId::new(9)));
+    let locked = mutate(planner.set_cue_lock(&scene, 1, true));
+
+    assert_eq!(themed.revision(), PlanRevision::new(2));
+    assert_eq!(scene.revision(), PlanRevision::new(3));
+    assert_eq!(locked.revision(), PlanRevision::new(4));
+    assert_eq!(locked.cues()[1].origin(), CueOrigin::User);
+    assert!(locked.cues()[1].locked());
+}
+
+#[test]
+fn invalid_scene_category_is_actionable_and_does_not_create_a_plan() {
+    let planner = DeterministicPlanner::epic_one();
+    let original = generate(&planner, &demo_input());
+
+    let result = planner.select_scene(&original, 1, SceneId::new(7));
+
+    assert!(matches!(
+        result,
+        Err(lumi_planner::PlanMutationError::SceneCategoryMismatch { .. })
+    ));
+    assert_eq!(original.revision(), PlanRevision::initial());
+}
+
+#[test]
+fn regeneration_rebases_valid_locks_and_replaces_unlocked_edits() {
+    let planner = DeterministicPlanner::epic_one();
+    let original = generate(&planner, &demo_input());
+    let changed = mutate(planner.select_scene(&original, 1, SceneId::new(9)));
+    let locked = mutate(planner.set_cue_lock(&changed, 1, true));
+    let themed = mutate(planner.select_theme(&locked, ThemeId::new(1)));
+    let regenerated = mutate(planner.regenerate(&themed, &demo_input()));
+
+    let SemanticLightingAction::ApplyLook(locked_look) = regenerated.cues()[1].action() else {
+        panic!("locked cue must remain a concrete look");
+    };
+    let SemanticLightingAction::ApplyLook(unlocked_look) = regenerated.cues()[0].action() else {
+        panic!("unlocked cue must remain a concrete look");
+    };
+    assert_eq!(regenerated.revision(), PlanRevision::new(5));
+    assert_eq!(locked_look.scene_name(), "Deep Space");
+    assert_eq!(locked_look.theme_name(), "Electric Bloom");
+    assert!(regenerated.cues()[1].locked());
+    assert_eq!(unlocked_look.theme_name(), "Electric Bloom");
+    assert!(!regenerated.cues()[0].locked());
+}
+
 #[derive(Clone, Copy)]
 struct FirstChoice;
 
@@ -162,5 +214,14 @@ fn encode(plan: &lumi_domain::LightingPlan) -> Vec<u8> {
     match canonical_plan(plan) {
         Ok(bytes) => bytes,
         Err(error) => panic!("test plan must encode: {error}"),
+    }
+}
+
+fn mutate(
+    result: Result<lumi_domain::LightingPlan, lumi_planner::PlanMutationError>,
+) -> lumi_domain::LightingPlan {
+    match result {
+        Ok(plan) => plan,
+        Err(error) => panic!("plan mutation must succeed: {error}"),
     }
 }

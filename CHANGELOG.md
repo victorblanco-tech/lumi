@@ -29,6 +29,8 @@ Lumi gebruikt [Semantic Versioning](https://semver.org/).
   phrasecompatibele scene-catalogus, machineleesbare redenen en veilige fallback.
 - Het echte vooraf berekende Next-plan is in de macOS-app zichtbaar met theme,
   scene, loop, revision en de reden achter iedere automatische keuze.
+- Theme- en scenekeuze, cue-locking en regenerate werken vanuit de inspector via
+  revision-aware commands, inclusief conflict refresh en headless UI-bewijs.
 
 ### Changed
 
@@ -38,6 +40,8 @@ Lumi gebruikt [Semantic Versioning](https://semver.org/).
 - De simulator vertical slice gebruikt ontwikkelversie `0.0.3-dev`.
 - De deterministische planner vertical slice gebruikt ontwikkelversie
   `0.0.4-dev`.
+- De interactieve next-plan vertical slice gebruikt ontwikkelversie
+  `0.0.6-dev`.
 
 ### Fixed
 

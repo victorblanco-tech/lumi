@@ -5,8 +5,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use lumi_engine::StartupReady;
-use lumi_protocol::{MessageDecoder, MessageType, PROTOCOL_VERSION};
-use serde_json::Value;
+use lumi_protocol::{MessageDecoder, MessageEnvelope, MessageType, PROTOCOL_VERSION};
+use serde_json::{Value, json};
 
 const TEST_SESSION_TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef";
 
@@ -138,6 +138,108 @@ fn real_engine_process_serves_authenticated_snapshot_on_loopback() {
             .map(Vec::len),
         Some(4)
     );
+
+    let Some(plan_id) = next_plan.get("planId").and_then(Value::as_str) else {
+        let _ = child.kill();
+        panic!("planId must be a decimal string");
+    };
+    let theme_command = command(
+        "theme-1",
+        1,
+        json!({
+            "kind": "selectTheme",
+            "planId": plan_id,
+            "trackLoadId": 2001,
+            "themeId": 1,
+            "expectedPlanRevision": 1,
+        }),
+    );
+    let themed = exchange(&mut connection, &theme_command);
+    assert_eq!(plan_revision(&themed), 2);
+    assert!(plan_cues(&themed).iter().all(|cue| {
+        cue.get("action").and_then(|action| action.get("themeId")) == Some(&Value::from(1))
+    }));
+
+    let duplicate = exchange(&mut connection, &theme_command);
+    assert_eq!(plan_revision(&duplicate), 2);
+    assert_eq!(
+        duplicate.payload.get("stateRevision"),
+        themed.payload.get("stateRevision")
+    );
+
+    let locked = exchange(
+        &mut connection,
+        &command(
+            "lock-1",
+            2,
+            json!({
+                "kind": "setCueLock",
+                "planId": plan_id,
+                "trackLoadId": 2001,
+                "phraseIndex": 1,
+                "locked": true,
+                "expectedPlanRevision": 2,
+            }),
+        ),
+    );
+    assert_eq!(plan_revision(&locked), 3);
+    assert_eq!(
+        plan_cues(&locked)[1].get("locked"),
+        Some(&Value::Bool(true))
+    );
+
+    let regenerated = exchange(
+        &mut connection,
+        &command(
+            "regenerate-1",
+            3,
+            json!({
+                "kind": "regeneratePlan",
+                "planId": plan_id,
+                "trackLoadId": 2001,
+                "expectedPlanRevision": 3,
+            }),
+        ),
+    );
+    assert_eq!(plan_revision(&regenerated), 4);
+    let regenerated_cues = plan_cues(&regenerated);
+    assert_eq!(regenerated_cues[1].get("locked"), Some(&Value::Bool(true)));
+    assert_eq!(
+        regenerated_cues[1]
+            .get("action")
+            .and_then(|action| action.get("themeId")),
+        Some(&Value::from(1))
+    );
+    assert_eq!(
+        regenerated_cues[0]
+            .get("action")
+            .and_then(|action| action.get("themeId")),
+        Some(&Value::from(2))
+    );
+
+    let conflict = exchange(
+        &mut connection,
+        &command(
+            "stale-theme",
+            4,
+            json!({
+                "kind": "selectTheme",
+                "planId": plan_id,
+                "trackLoadId": 2001,
+                "themeId": 2,
+                "expectedPlanRevision": 1,
+            }),
+        ),
+    );
+    assert_eq!(conflict.message_type, MessageType::Error);
+    assert_eq!(
+        conflict.payload.get("kind"),
+        Some(&Value::String("revisionConflict".to_owned()))
+    );
+    assert_eq!(
+        conflict.payload.get("actualPlanRevision"),
+        Some(&Value::from(4))
+    );
     drop(connection);
 
     let deadline = Instant::now() + Duration::from_secs(2);
@@ -158,4 +260,57 @@ fn real_engine_process_serves_authenticated_snapshot_on_loopback() {
             }
         }
     }
+}
+
+fn command(message_id: &str, sequence: u64, payload: Value) -> Value {
+    json!({
+        "protocolVersion": PROTOCOL_VERSION,
+        "messageType": "command",
+        "messageId": message_id,
+        "sequence": sequence,
+        "correlationId": message_id,
+        "sentAt": "2026-08-03T12:00:00Z",
+        "payload": payload,
+    })
+}
+
+fn exchange(connection: &mut TcpStream, command: &Value) -> MessageEnvelope {
+    if let Err(error) = writeln!(connection, "{command}") {
+        panic!("command must be writable: {error}");
+    }
+    let mut line = String::new();
+    if let Err(error) = BufReader::new(&*connection).read_line(&mut line) {
+        panic!("response must be readable: {error}");
+    }
+    match MessageDecoder::decode(line.as_bytes()) {
+        Ok(response) => response,
+        Err(error) => panic!("response must be a valid envelope: {error}"),
+    }
+}
+
+fn plan_revision(snapshot: &MessageEnvelope) -> u64 {
+    let Some(revision) = snapshot
+        .payload
+        .get("nextPlan")
+        .and_then(Value::as_object)
+        .and_then(|plan| plan.get("revision"))
+        .and_then(Value::as_u64)
+    else {
+        panic!("snapshot must contain a plan revision");
+    };
+    revision
+}
+
+fn plan_cues(snapshot: &MessageEnvelope) -> &[Value] {
+    let Some(cues) = snapshot
+        .payload
+        .get("nextPlan")
+        .and_then(Value::as_object)
+        .and_then(|plan| plan.get("cues"))
+        .and_then(Value::as_array)
+        .map(Vec::as_slice)
+    else {
+        panic!("snapshot must contain plan cues");
+    };
+    cues
 }

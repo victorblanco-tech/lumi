@@ -142,6 +142,7 @@ pub struct LightingCue {
     action: SemanticLightingAction,
     origin: CueOrigin,
     reason: CueReason,
+    locked: bool,
 }
 
 impl LightingCue {
@@ -163,6 +164,7 @@ impl LightingCue {
             action,
             origin,
             reason,
+            locked: false,
         }
     }
 
@@ -199,6 +201,25 @@ impl LightingCue {
     #[must_use]
     pub const fn reason(&self) -> CueReason {
         self.reason
+    }
+
+    #[must_use]
+    pub const fn locked(&self) -> bool {
+        self.locked
+    }
+
+    #[must_use]
+    pub fn revised(&self, action: SemanticLightingAction, origin: CueOrigin, locked: bool) -> Self {
+        Self {
+            id: self.id,
+            phrase_index: self.phrase_index,
+            start_beat: self.start_beat,
+            end_beat: self.end_beat,
+            action,
+            origin,
+            reason: self.reason,
+            locked,
+        }
     }
 }
 
@@ -333,6 +354,25 @@ impl LightingPlan {
     pub fn cues(&self) -> &[LightingCue] {
         &self.cues
     }
+
+    pub fn revised(&self, cues: Vec<LightingCue>) -> Result<Self, PlanValidationError> {
+        let revision = self
+            .revision
+            .checked_next()
+            .ok_or(PlanValidationError::RevisionOverflow)?;
+        Self::try_new(
+            self.id,
+            self.deck_id,
+            self.track_id,
+            self.track_duration_beats,
+            self.track_load_id,
+            revision,
+            self.configuration_revision,
+            self.seed,
+            self.status,
+            cues,
+        )
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -349,6 +389,7 @@ pub enum PlanValidationError {
     IncompleteCueCoverage,
     FallbackCueInReadyPlan,
     FallbackPlanWithoutFallbackCue,
+    RevisionOverflow,
 }
 
 impl fmt::Display for PlanValidationError {
@@ -380,6 +421,7 @@ impl fmt::Display for PlanValidationError {
             Self::FallbackPlanWithoutFallbackCue => {
                 formatter.write_str("a fallback plan must contain a fallback cue")
             }
+            Self::RevisionOverflow => formatter.write_str("plan revision overflow"),
         }
     }
 }

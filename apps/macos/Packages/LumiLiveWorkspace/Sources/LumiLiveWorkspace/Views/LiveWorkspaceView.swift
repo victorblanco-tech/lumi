@@ -6,6 +6,7 @@ public struct LiveWorkspaceView: View {
     private let state: LiveWorkspaceState
     private let productVersion: String
     private let allowsScrolling: Bool
+    private let onPlanMutation: @MainActor (PlanMutationRequest) -> Void
     @Binding private var appearance: AppearancePreference
     @Binding private var keyNotation: KeyNotationPreference
     @State private var selectedPhrase: UInt64 = 0
@@ -17,11 +18,13 @@ public struct LiveWorkspaceView: View {
         productVersion: String,
         appearance: Binding<AppearancePreference>,
         keyNotation: Binding<KeyNotationPreference>,
-        allowsScrolling: Bool = true
+        allowsScrolling: Bool = true,
+        onPlanMutation: @escaping @MainActor (PlanMutationRequest) -> Void = { _ in }
     ) {
         self.state = state
         self.productVersion = productVersion
         self.allowsScrolling = allowsScrolling
+        self.onPlanMutation = onPlanMutation
         _appearance = appearance
         _keyNotation = keyNotation
     }
@@ -82,6 +85,7 @@ public struct LiveWorkspaceView: View {
             if let diagnostic = state.diagnostic {
                 diagnosticBanner(diagnostic)
             }
+            planInteractionBanner
             providerPanel
             deckWorkspace
             planWorkspace
@@ -207,21 +211,28 @@ public struct LiveWorkspaceView: View {
                 }
                 StatusBadge(key(planConditionLabel), state: planComponentState)
                 Spacer()
+                if let plan = state.content?.plan {
+                    Button {
+                        onPlanMutation(.regeneratePlan(context: mutationContext(for: plan)))
+                    } label: {
+                        Label(copy.regenerate, systemImage: "arrow.clockwise")
+                    }
+                    .buttonStyle(.bordered)
+                    .disabled(!canEdit(plan))
+                    .accessibilityIdentifier("lumi.plan.regenerate")
+                }
             }
 
             if let content = state.content, let plan = content.plan {
                 HStack(alignment: .top, spacing: LumiSpacing.large) {
                     phrasePanel(plan: plan, deck: content.nextDeck)
-                    inspectorPanel(plan: plan)
+                    inspectorPanel(plan: plan, options: content.planningOptions)
                         .frame(minWidth: 240, idealWidth: 280, maxWidth: 300)
                 }
             } else {
                 placeholder(copy.waitingPlan, systemImage: "list.bullet.rectangle.portrait")
             }
 
-            Text(verbatim: copy.controlsLater)
-                .font(LumiTypography.caption)
-                .foregroundStyle(LumiColor.textSecondary)
         }
         .accessibilityIdentifier("lumi.next.plan")
     }
@@ -236,7 +247,7 @@ public struct LiveWorkspaceView: View {
                         phrase: phraseTitle(cue),
                         range: timeRange(cue, bpmMilli: deck.bpmMilli),
                         scene: cueSummary(cue),
-                        isLocked: false,
+                        isLocked: cue.locked,
                         isSelected: selectedPhrase == cue.phraseIndex,
                         action: { selectedPhrase = cue.phraseIndex }
                     )
@@ -247,7 +258,10 @@ public struct LiveWorkspaceView: View {
         .frame(maxWidth: .infinity)
     }
 
-    private func inspectorPanel(plan: PlanSnapshot) -> some View {
+    private func inspectorPanel(
+        plan: PlanSnapshot,
+        options: PlanningOptionsSnapshot
+    ) -> some View {
         let cue = selectedCue(in: plan)
         return LumiPanel {
             VStack(alignment: .leading, spacing: LumiSpacing.large) {
@@ -255,14 +269,53 @@ public struct LiveWorkspaceView: View {
                     .font(LumiTypography.sectionTitle)
                 if let cue {
                     InspectorField(key(copy.theme)) {
-                        Text(verbatim: themeName(cue)).font(LumiTypography.body)
+                        PlanSelectionControl(
+                            value: themeName(cue),
+                            selectedID: themeID(cue),
+                            choices: options.themes.map {
+                                PlanSelectionChoice(id: $0.id, name: $0.name)
+                            },
+                            isEnabled: canEdit(plan) && themeID(cue) != nil,
+                            onSelect: { selectTheme($0, plan: plan) }
+                        )
+                        .accessibilityIdentifier("lumi.plan.theme")
                     }
                     InspectorField(key(copy.scene)) {
-                        Text(verbatim: sceneName(cue)).font(LumiTypography.body)
+                        PlanSelectionControl(
+                            value: sceneName(cue),
+                            selectedID: sceneID(cue),
+                            choices: compatibleScenes(for: cue, options: options).map {
+                                PlanSelectionChoice(id: $0.id, name: $0.name)
+                            },
+                            isEnabled: canEdit(plan) && sceneID(cue) != nil,
+                            onSelect: { selectScene($0, cue: cue, plan: plan) }
+                        )
+                        .accessibilityIdentifier("lumi.plan.scene")
+                    }
+                    InspectorField(key(copy.origin)) {
+                        Text(verbatim: cue.origin.capitalized).font(LumiTypography.body)
                     }
                     InspectorField(key(copy.reason)) {
                         Text(verbatim: reasonSummary(cue)).font(LumiTypography.body)
                     }
+                    Button {
+                        onPlanMutation(
+                            .setCueLock(
+                                context: mutationContext(for: plan),
+                                phraseIndex: cue.phraseIndex,
+                                locked: !cue.locked
+                            )
+                        )
+                    } label: {
+                        Label(
+                            cue.locked ? copy.unlockCue : copy.lockCue,
+                            systemImage: cue.locked ? "lock.open" : "lock"
+                        )
+                        .frame(maxWidth: .infinity)
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!canEdit(plan) || themeID(cue) == nil)
+                    .accessibilityIdentifier("lumi.plan.lock")
                 } else {
                     Text(verbatim: copy.waitingPlan)
                         .font(LumiTypography.body)
@@ -383,6 +436,51 @@ public struct LiveWorkspaceView: View {
         .accessibilityIdentifier("lumi.workspace.diagnostic")
     }
 
+    @ViewBuilder
+    private var planInteractionBanner: some View {
+        switch state.planInteraction {
+        case .idle:
+            EmptyView()
+        case .submitting:
+            interactionBanner(
+                copy.savingPlan,
+                systemImage: "arrow.triangle.2.circlepath",
+                color: LumiColor.accent
+            )
+        case let .succeeded(message):
+            interactionBanner(message, systemImage: "checkmark.circle.fill", color: .green)
+        case let .rejected(message):
+            interactionBanner(
+                message,
+                systemImage: "exclamationmark.triangle.fill",
+                color: .orange
+            )
+        }
+    }
+
+    private func interactionBanner(
+        _ message: String,
+        systemImage: String,
+        color: Color
+    ) -> some View {
+        HStack(spacing: LumiSpacing.medium) {
+            Image(systemName: systemImage)
+                .foregroundStyle(color)
+            Text(verbatim: message)
+                .font(LumiTypography.metadata)
+                .foregroundStyle(LumiColor.textPrimary)
+            Spacer()
+        }
+        .padding(LumiSpacing.medium)
+        .background(color.opacity(0.1))
+        .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
+        .overlay {
+            RoundedRectangle(cornerRadius: LumiRadius.control)
+                .stroke(color.opacity(0.35), lineWidth: 1)
+        }
+        .accessibilityIdentifier("lumi.plan.interaction")
+    }
+
     private var keyFormatter: KeyNotationFormatter {
         KeyNotationFormatter(notation: keyNotation)
     }
@@ -441,7 +539,7 @@ public struct LiveWorkspaceView: View {
 
     private func cueSummary(_ cue: PlanCueSnapshot) -> String {
         switch cue.action {
-        case let .applyLook(_, sceneName, _, loopBank, loopSlot):
+        case let .applyLook(_, _, _, sceneName, _, loopBank, loopSlot):
             "\(sceneName) · Loop \(loopBank).\(loopSlot)"
         case .holdCurrentLook:
             copy.hold
@@ -450,14 +548,14 @@ public struct LiveWorkspaceView: View {
 
     private func themeName(_ cue: PlanCueSnapshot) -> String {
         switch cue.action {
-        case let .applyLook(themeName, _, _, _, _): themeName
+        case let .applyLook(_, themeName, _, _, _, _, _): themeName
         case .holdCurrentLook: copy.unavailable
         }
     }
 
     private func sceneName(_ cue: PlanCueSnapshot) -> String {
         switch cue.action {
-        case let .applyLook(_, sceneName, _, _, _): sceneName
+        case let .applyLook(_, _, _, sceneName, _, _, _): sceneName
         case .holdCurrentLook: copy.hold
         }
     }
@@ -469,6 +567,62 @@ public struct LiveWorkspaceView: View {
         case .missingPhraseAnalysis:
             "Phrase analysis unavailable; preserving the current safe look."
         }
+    }
+
+    private func mutationContext(for plan: PlanSnapshot) -> PlanMutationContext {
+        PlanMutationContext(
+            planID: plan.planID,
+            trackLoadID: plan.trackLoadID,
+            expectedPlanRevision: plan.revision
+        )
+    }
+
+    private func canEdit(_ plan: PlanSnapshot) -> Bool {
+        plan.status == "ready" && state.planInteraction != .submitting
+    }
+
+    private func selectTheme(_ themeID: UInt64, plan: PlanSnapshot) {
+        onPlanMutation(
+            .selectTheme(context: mutationContext(for: plan), themeID: themeID)
+        )
+    }
+
+    private func selectScene(
+        _ sceneID: UInt64,
+        cue: PlanCueSnapshot,
+        plan: PlanSnapshot
+    ) {
+        onPlanMutation(
+            .selectScene(
+                context: mutationContext(for: plan),
+                phraseIndex: cue.phraseIndex,
+                sceneID: sceneID
+            )
+        )
+    }
+
+    private func themeID(_ cue: PlanCueSnapshot) -> UInt64? {
+        if case let .applyLook(themeID, _, _, _, _, _, _) = cue.action {
+            return themeID
+        }
+        return nil
+    }
+
+    private func sceneID(_ cue: PlanCueSnapshot) -> UInt64? {
+        if case let .applyLook(_, _, sceneID, _, _, _, _) = cue.action {
+            return sceneID
+        }
+        return nil
+    }
+
+    private func compatibleScenes(
+        for cue: PlanCueSnapshot,
+        options: PlanningOptionsSnapshot
+    ) -> [SceneOptionSnapshot] {
+        guard case let .applyLook(_, _, _, _, category, _, _) = cue.action else {
+            return []
+        }
+        return options.scenes.filter { $0.category == category }
     }
 
     private var conditionLabel: String {
@@ -541,10 +695,76 @@ public struct LiveWorkspaceView: View {
     }
 }
 
+private struct PlanSelectionChoice: Identifiable {
+    let id: UInt64
+    let name: String
+}
+
+private struct PlanSelectionControl: View {
+    let value: String
+    let selectedID: UInt64?
+    let choices: [PlanSelectionChoice]
+    let isEnabled: Bool
+    let onSelect: (UInt64) -> Void
+
+    @State private var isPresented = false
+
+    var body: some View {
+        Button {
+            isPresented.toggle()
+        } label: {
+            HStack(spacing: LumiSpacing.small) {
+                Text(verbatim: value)
+                    .font(LumiTypography.body)
+                    .foregroundStyle(LumiColor.textPrimary)
+                Spacer()
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(LumiTypography.caption)
+                    .foregroundStyle(LumiColor.textSecondary)
+            }
+            .padding(.horizontal, LumiSpacing.medium)
+            .frame(maxWidth: .infinity, minHeight: LumiControlMetric.standardHeight)
+            .background(LumiColor.canvas)
+            .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
+            .overlay {
+                RoundedRectangle(cornerRadius: LumiRadius.control)
+                    .stroke(LumiColor.border, lineWidth: 1)
+            }
+        }
+        .buttonStyle(.plain)
+        .disabled(!isEnabled)
+        .popover(isPresented: $isPresented, arrowEdge: .trailing) {
+            VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+                ForEach(choices) { choice in
+                    Button {
+                        isPresented = false
+                        onSelect(choice.id)
+                    } label: {
+                        HStack {
+                            Text(verbatim: choice.name)
+                            Spacer()
+                            if choice.id == selectedID {
+                                Image(systemName: "checkmark")
+                            }
+                        }
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
+                    .disabled(choice.id == selectedID)
+                    .padding(.horizontal, LumiSpacing.medium)
+                    .frame(minHeight: LumiControlMetric.standardHeight)
+                }
+            }
+            .padding(LumiSpacing.small)
+            .frame(minWidth: 220)
+        }
+    }
+}
+
 #Preview("Ready · Dark") {
     LiveWorkspaceView(
         state: LiveWorkspaceFixtures.ready,
-        productVersion: "0.0.5-dev",
+        productVersion: "0.0.6-dev",
         appearance: .constant(.dark),
         keyNotation: .constant(.camelot)
     )
@@ -555,7 +775,7 @@ public struct LiveWorkspaceView: View {
 #Preview("Fallback · Light") {
     LiveWorkspaceView(
         state: LiveWorkspaceFixtures.fallback,
-        productVersion: "0.0.5-dev",
+        productVersion: "0.0.6-dev",
         appearance: .constant(.light),
         keyNotation: .constant(.classic)
     )

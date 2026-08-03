@@ -37,8 +37,15 @@ contiguous beat-based phrases so snapshots remain deterministic across Rust and
 Swift.
 
 `nextPlan` contains the authoritative precomputed plan for the non-leader deck.
-Each cue has a contiguous phrase and beat range, origin, machine-readable
-reason, and semantic action. A plan is either `ready` or an explicit `fallback`;
-clients display that state but do not run planner rules. The deterministic seed
-is encoded as a decimal string because protocol v1 clients must not lose 64-bit
+Each cue has a contiguous phrase and beat range, origin, lock state,
+machine-readable reason, and semantic action. `planningOptions` supplies the
+engine-owned theme and scene catalog used to render controls; clients never run
+planner rules. A plan is either `ready` or an explicit `fallback`.
+
+Plan mutations carry `planId`, `trackLoadId`, and `expectedPlanRevision`.
+Accepted `selectTheme`, `selectScene`, `setCueLock`, and `regeneratePlan`
+commands each return a complete authoritative snapshot and increment the plan
+revision exactly once. A revision conflict returns a typed error; the client
+requests a fresh snapshot before accepting another edit. Plan IDs and seeds are
+encoded as decimal strings because protocol v1 clients must not lose 64-bit
 integer precision through a JSON floating-point representation.

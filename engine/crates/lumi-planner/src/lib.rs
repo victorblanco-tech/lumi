@@ -6,7 +6,8 @@ mod planner;
 mod transcript;
 
 pub use planner::{
-    ChoiceSource, DeterministicPlanner, PlannerError, PlannerTrack, PlanningConfiguration,
-    PlanningInput, StableChoiceSource,
+    ChoiceSource, DeterministicPlanner, PlanMutationError, PlannerError, PlannerTrack,
+    PlanningConfiguration, PlanningInput, PlanningOptions, SceneOption, StableChoiceSource,
+    ThemeOption,
 };
 pub use transcript::{CanonicalPlanError, canonical_plan};

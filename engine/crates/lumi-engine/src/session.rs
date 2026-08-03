@@ -7,13 +7,17 @@ use lumi_deck_source::DeckSourceProvider as _;
 use lumi_domain::{
     CueOrigin, CueReason, DecisionReason, DeckObservation, DeckSourceStatus, DomainEvent, EffectId,
     EffectResult, EffectResultEnvelope, EffectSequence, KeyMode, LightingPlan, MonotonicTime,
-    OperationState, PhraseKind, PitchClass, PlanStatus, RuntimeHealth, SceneCategory,
+    OperationState, PhraseKind, PitchClass, PlanRevision, PlanStatus, RuntimeHealth, SceneCategory,
     SemanticLightingAction, SerializedRuntime, SerializedRuntimeError, WorkerId,
 };
 use lumi_planner::{
-    DeterministicPlanner, PlannerError, PlannerTrack, PlanningInput, StableChoiceSource,
+    DeterministicPlanner, PlanMutationError, PlannerError, PlannerTrack, PlanningInput,
+    PlanningOptions, StableChoiceSource,
 };
-use lumi_protocol::{MessageEnvelope, MessageType, PROTOCOL_VERSION};
+use lumi_protocol::{
+    CommandDisposition, CommandIdCache, InvalidCacheCapacity, MAX_MESSAGE_BYTES, MessageDecoder,
+    MessageEnvelope, MessageType, PROTOCOL_VERSION,
+};
 use lumi_simulator::{ManualClock, SimulatorDeckSourceProvider, SimulatorError};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -26,6 +30,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::time::timeout;
 
 use crate::StartupReady;
+use crate::commands::{SessionCommand, decode_command};
 
 const SESSION_TOKEN_ENVIRONMENT_KEY: &str = "LUMI_SESSION_TOKEN";
 const MINIMUM_SESSION_TOKEN_BYTES: usize = 32;
@@ -34,6 +39,7 @@ const MAXIMUM_AUTHENTICATION_BYTES: usize = 512;
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(10);
 const AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(5);
 const EVENT_QUEUE_CAPACITY: usize = 256;
+const COMMAND_ID_CACHE_CAPACITY: usize = 256;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -46,7 +52,7 @@ pub async fn run() -> Result<(), EngineError> {
     let session_token =
         env::var(SESSION_TOKEN_ENVIRONMENT_KEY).map_err(|_| EngineError::MissingSessionToken)?;
     validate_session_token(&session_token)?;
-    let runtime = initialized_runtime()?;
+    let mut runtime = initialized_runtime()?;
 
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
     let endpoint = listener.local_addr()?;
@@ -60,7 +66,7 @@ pub async fn run() -> Result<(), EngineError> {
         return Err(EngineError::NonLoopbackPeer);
     }
 
-    serve_authenticated_client(stream, &session_token, &runtime).await
+    serve_authenticated_client(stream, &session_token, &mut runtime).await
 }
 
 fn validate_session_token(session_token: &str) -> Result<(), EngineError> {
@@ -88,7 +94,7 @@ fn write_startup_record(port: u16) -> Result<(), EngineError> {
 async fn serve_authenticated_client(
     stream: TcpStream,
     expected_token: &str,
-    runtime: &EngineRuntime,
+    runtime: &mut EngineRuntime,
 ) -> Result<(), EngineError> {
     let (mut reader, mut writer) = stream.into_split();
     let authentication_bytes = timeout(
@@ -104,19 +110,69 @@ async fn serve_authenticated_client(
         return Err(EngineError::AuthenticationRejected);
     }
 
-    let mut encoded_snapshot = serde_json::to_vec(&initial_snapshot(runtime)?)?;
-    encoded_snapshot.push(b'\n');
-    writer.write_all(&encoded_snapshot).await?;
-    writer.flush().await?;
+    let mut response_sequence = 1_u64;
+    write_envelope(
+        &mut writer,
+        &snapshot_envelope(runtime, response_sequence, "session-bootstrap")?,
+    )
+    .await?;
+    let mut command_ids = CommandIdCache::new(COMMAND_ID_CACHE_CAPACITY)?;
 
-    let mut buffer = [0_u8; 1024];
-    loop {
-        if reader.read(&mut buffer).await? == 0 {
-            break;
-        }
+    while let Some(command_bytes) = read_command_line(&mut reader).await? {
+        response_sequence = response_sequence
+            .checked_add(1)
+            .ok_or(EngineError::ResponseSequenceOverflow)?;
+        let response = match MessageDecoder::decode(&command_bytes) {
+            Ok(envelope) => {
+                handle_command(runtime, &mut command_ids, &envelope, response_sequence)?
+            }
+            Err(error) => error_envelope(
+                response_sequence,
+                "unknown-command",
+                "invalidCommand",
+                "invalidEnvelope",
+                &error.to_string(),
+                false,
+                None,
+            )?,
+        };
+        write_envelope(&mut writer, &response).await?;
     }
 
     Ok(())
+}
+
+async fn write_envelope<W>(writer: &mut W, envelope: &MessageEnvelope) -> Result<(), EngineError>
+where
+    W: tokio::io::AsyncWrite + Unpin,
+{
+    let mut encoded = serde_json::to_vec(envelope)?;
+    encoded.push(b'\n');
+    writer.write_all(&encoded).await?;
+    writer.flush().await?;
+    Ok(())
+}
+
+async fn read_command_line<R>(reader: &mut R) -> Result<Option<Vec<u8>>, EngineError>
+where
+    R: AsyncRead + Unpin,
+{
+    let mut bytes = Vec::with_capacity(256);
+    loop {
+        match reader.read_u8().await {
+            Ok(b'\n') => return Ok(Some(bytes)),
+            Ok(byte) => {
+                bytes.push(byte);
+                if bytes.len() > MAX_MESSAGE_BYTES {
+                    return Err(EngineError::MessageOversized);
+                }
+            }
+            Err(error) if error.kind() == io::ErrorKind::UnexpectedEof && bytes.is_empty() => {
+                return Ok(None);
+            }
+            Err(error) => return Err(EngineError::Io(error)),
+        }
+    }
 }
 
 async fn read_bounded_line<R>(reader: &mut R, maximum: usize) -> Result<Vec<u8>, EngineError>
@@ -143,6 +199,7 @@ fn tokens_match(expected: &str, received: &str) -> bool {
 struct EngineRuntime {
     state: SerializedRuntime,
     deck_source: SimulatorDeckSourceProvider<ManualClock>,
+    planning_worker: PlanningWorker,
 }
 
 fn initialized_runtime() -> Result<EngineRuntime, EngineError> {
@@ -162,6 +219,7 @@ fn initialized_runtime() -> Result<EngineRuntime, EngineError> {
     Ok(EngineRuntime {
         state: runtime,
         deck_source,
+        planning_worker,
     })
 }
 
@@ -220,6 +278,31 @@ impl PlanningWorker {
         }
         Ok(())
     }
+
+    fn options(&self) -> PlanningOptions {
+        self.planner.options()
+    }
+
+    fn accept_revised_plan(
+        &mut self,
+        runtime: &mut SerializedRuntime,
+        plan: LightingPlan,
+    ) -> Result<(), EngineError> {
+        self.effect_sequence = self
+            .effect_sequence
+            .checked_add(1)
+            .ok_or(EngineError::PlanningEffectSequenceOverflow)?;
+        submit_and_process(
+            runtime,
+            DomainEvent::EffectResult(EffectResultEnvelope {
+                effect_id: EffectId::new(self.effect_sequence),
+                worker_id: WorkerId::new(1),
+                sequence: EffectSequence::new(self.effect_sequence),
+                completed_at: MonotonicTime::new(0),
+                result: EffectResult::PlanGenerated(plan),
+            }),
+        )
+    }
 }
 
 fn submit_and_process(
@@ -239,7 +322,225 @@ fn submit_and_process(
     Ok(())
 }
 
-fn initial_snapshot(runtime: &EngineRuntime) -> Result<MessageEnvelope, EngineError> {
+fn handle_command(
+    runtime: &mut EngineRuntime,
+    command_ids: &mut CommandIdCache,
+    envelope: &MessageEnvelope,
+    response_sequence: u64,
+) -> Result<MessageEnvelope, EngineError> {
+    let command = match decode_command(envelope) {
+        Ok(command) => command,
+        Err(error) => {
+            return error_envelope(
+                response_sequence,
+                &envelope.message_id,
+                "invalidCommand",
+                "invalidCommandPayload",
+                &error.to_string(),
+                false,
+                None,
+            );
+        }
+    };
+
+    if command.is_mutating() && command_ids.contains(&envelope.message_id) {
+        return snapshot_envelope(runtime, response_sequence, &envelope.message_id);
+    }
+
+    if let Err(error) = apply_command(runtime, command) {
+        return application_error_envelope(response_sequence, &envelope.message_id, &error);
+    }
+    if command.is_mutating() {
+        debug_assert_eq!(
+            command_ids.observe(&envelope.message_id),
+            CommandDisposition::FirstSeen
+        );
+    }
+    snapshot_envelope(runtime, response_sequence, &envelope.message_id)
+}
+
+fn apply_command(
+    runtime: &mut EngineRuntime,
+    command: SessionCommand,
+) -> Result<(), CommandApplicationError> {
+    if command == SessionCommand::GetSnapshot {
+        return Ok(());
+    }
+    let context = command
+        .context()
+        .ok_or(CommandApplicationError::MissingPlanContext)?;
+    let (current, input) = {
+        let state = runtime.state.state();
+        let Some((deck_id, deck)) = state
+            .decks()
+            .find(|(_, deck)| deck.track_load_id() == context.track_load_id)
+        else {
+            return Err(CommandApplicationError::TrackLoadMismatch);
+        };
+        let Some(current) = state.plan(deck_id) else {
+            return Err(CommandApplicationError::PlanUnavailable);
+        };
+        if current.id() != context.plan_id || current.track_load_id() != context.track_load_id {
+            return Err(CommandApplicationError::TrackLoadMismatch);
+        }
+        if current.revision() != context.expected_revision {
+            return Err(CommandApplicationError::RevisionConflict {
+                expected: context.expected_revision,
+                actual: current.revision(),
+            });
+        }
+        (
+            current.clone(),
+            PlanningInput {
+                deck_id,
+                track_load_id: deck.track_load_id(),
+                track: PlannerTrack::analyzed(deck.metadata()),
+            },
+        )
+    };
+
+    let revised = match command {
+        SessionCommand::GetSnapshot => return Ok(()),
+        SessionCommand::SelectTheme { theme_id, .. } => runtime
+            .planning_worker
+            .planner
+            .select_theme(&current, theme_id)?,
+        SessionCommand::SelectScene {
+            phrase_index,
+            scene_id,
+            ..
+        } => runtime
+            .planning_worker
+            .planner
+            .select_scene(&current, phrase_index, scene_id)?,
+        SessionCommand::SetCueLock {
+            phrase_index,
+            locked,
+            ..
+        } => runtime
+            .planning_worker
+            .planner
+            .set_cue_lock(&current, phrase_index, locked)?,
+        SessionCommand::RegeneratePlan { .. } => runtime
+            .planning_worker
+            .planner
+            .regenerate(&current, &input)?,
+    };
+    runtime
+        .planning_worker
+        .accept_revised_plan(&mut runtime.state, revised)
+        .map_err(CommandApplicationError::Engine)
+}
+
+fn application_error_envelope(
+    sequence: u64,
+    correlation_id: &str,
+    error: &CommandApplicationError,
+) -> Result<MessageEnvelope, EngineError> {
+    match error {
+        CommandApplicationError::RevisionConflict { actual, .. } => error_envelope(
+            sequence,
+            correlation_id,
+            "revisionConflict",
+            "planRevisionMismatch",
+            "The plan changed before the command was applied.",
+            true,
+            Some(*actual),
+        ),
+        CommandApplicationError::TrackLoadMismatch => error_envelope(
+            sequence,
+            correlation_id,
+            "validationFailed",
+            "trackLoadMismatch",
+            "The next track changed before this edit was applied.",
+            false,
+            None,
+        ),
+        CommandApplicationError::PlanUnavailable => error_envelope(
+            sequence,
+            correlation_id,
+            "validationFailed",
+            "planUnavailable",
+            "There is no editable next-track plan.",
+            true,
+            None,
+        ),
+        CommandApplicationError::Mutation(mutation) => error_envelope(
+            sequence,
+            correlation_id,
+            "validationFailed",
+            "planMutationRejected",
+            &mutation.to_string(),
+            false,
+            None,
+        ),
+        CommandApplicationError::MissingPlanContext | CommandApplicationError::Engine(_) => {
+            error_envelope(
+                sequence,
+                correlation_id,
+                "commandFailed",
+                "internalCommandFailure",
+                "The plan edit could not be applied safely.",
+                true,
+                None,
+            )
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
+fn error_envelope(
+    sequence: u64,
+    correlation_id: &str,
+    kind: &str,
+    code: &str,
+    message: &str,
+    retryable: bool,
+    actual_revision: Option<PlanRevision>,
+) -> Result<MessageEnvelope, EngineError> {
+    let mut payload = Map::new();
+    payload.insert("kind".to_owned(), Value::String(kind.to_owned()));
+    payload.insert("code".to_owned(), Value::String(code.to_owned()));
+    payload.insert("message".to_owned(), Value::String(message.to_owned()));
+    payload.insert("retryable".to_owned(), Value::Bool(retryable));
+    if let Some(actual) = actual_revision {
+        payload.insert("actualPlanRevision".to_owned(), json!(actual.value()));
+    }
+    Ok(MessageEnvelope {
+        protocol_version: PROTOCOL_VERSION,
+        message_type: MessageType::Error,
+        message_id: format!("error-{sequence}"),
+        sequence,
+        correlation_id: correlation_id.to_owned(),
+        sent_at: OffsetDateTime::now_utc().format(&Rfc3339)?,
+        payload,
+    })
+}
+
+#[derive(Debug, Error)]
+enum CommandApplicationError {
+    #[error("plan context is missing")]
+    MissingPlanContext,
+    #[error("plan revision conflict: expected {expected:?}, actual {actual:?}")]
+    RevisionConflict {
+        expected: PlanRevision,
+        actual: PlanRevision,
+    },
+    #[error("the track-load instance no longer matches")]
+    TrackLoadMismatch,
+    #[error("the plan is unavailable")]
+    PlanUnavailable,
+    #[error("plan mutation failed: {0}")]
+    Mutation(#[from] PlanMutationError),
+    #[error("engine failed while accepting a plan revision: {0}")]
+    Engine(EngineError),
+}
+
+fn snapshot_envelope(
+    runtime: &EngineRuntime,
+    sequence: u64,
+    correlation_id: &str,
+) -> Result<MessageEnvelope, EngineError> {
     let state = runtime.state.state();
     let mut payload = Map::new();
     payload.insert("kind".to_owned(), Value::String("stateSnapshot".to_owned()));
@@ -308,6 +609,10 @@ fn initial_snapshot(runtime: &EngineRuntime) -> Result<MessageEnvelope, EngineEr
         })
         .collect::<Vec<_>>();
     payload.insert("decks".to_owned(), Value::Array(decks));
+    payload.insert(
+        "planningOptions".to_owned(),
+        planning_options_json(&runtime.planning_worker.options()),
+    );
     let next_plan = state
         .decks()
         .find(|(deck_id, _)| Some(*deck_id) != state.leader_deck())
@@ -319,9 +624,9 @@ fn initial_snapshot(runtime: &EngineRuntime) -> Result<MessageEnvelope, EngineEr
     Ok(MessageEnvelope {
         protocol_version: PROTOCOL_VERSION,
         message_type: MessageType::Snapshot,
-        message_id: "snapshot-initial".to_owned(),
-        sequence: 1,
-        correlation_id: "session-bootstrap".to_owned(),
+        message_id: format!("snapshot-{sequence}"),
+        sequence,
+        correlation_id: correlation_id.to_owned(),
         sent_at: OffsetDateTime::now_utc().format(&Rfc3339)?,
         payload,
     })
@@ -329,6 +634,7 @@ fn initial_snapshot(runtime: &EngineRuntime) -> Result<MessageEnvelope, EngineEr
 
 fn plan_json(plan: &LightingPlan) -> Value {
     json!({
+        "planId": plan.id().value().to_string(),
         "deckId": plan.deck_id().value(),
         "trackId": plan.track_id().value(),
         "trackDurationBeats": plan.track_duration_beats(),
@@ -342,8 +648,25 @@ fn plan_json(plan: &LightingPlan) -> Value {
             "startBeat": cue.start_beat(),
             "endBeat": cue.end_beat(),
             "origin": cue_origin_name(cue.origin()),
+            "locked": cue.locked(),
             "reason": cue_reason_json(cue.reason()),
             "action": action_json(cue.action()),
+        })).collect::<Vec<_>>(),
+    })
+}
+
+fn planning_options_json(options: &PlanningOptions) -> Value {
+    json!({
+        "themes": options.themes.iter().map(|theme| json!({
+            "id": theme.id.value(),
+            "name": theme.name,
+        })).collect::<Vec<_>>(),
+        "scenes": options.scenes.iter().map(|scene| json!({
+            "id": scene.id.value(),
+            "name": scene.name,
+            "category": scene_category_name(scene.category),
+            "loopBank": scene.loop_selection.bank(),
+            "loopSlot": scene.loop_selection.slot(),
         })).collect::<Vec<_>>(),
     })
 }
@@ -504,6 +827,8 @@ pub enum EngineError {
     AuthenticationTimeout,
     #[error("session authentication exceeds the maximum size")]
     AuthenticationOversized,
+    #[error("a protocol message exceeds the maximum size")]
+    MessageOversized,
     #[error("session authentication is malformed")]
     InvalidAuthentication,
     #[error("session authentication was rejected")]
@@ -526,6 +851,10 @@ pub enum EngineError {
     SubmittedEventMissing,
     #[error("the planning worker effect sequence overflowed")]
     PlanningEffectSequenceOverflow,
+    #[error("the response sequence overflowed")]
+    ResponseSequenceOverflow,
+    #[error("the command ID cache could not initialize: {0}")]
+    CommandCache(#[from] InvalidCacheCapacity),
 }
 
 #[cfg(test)]

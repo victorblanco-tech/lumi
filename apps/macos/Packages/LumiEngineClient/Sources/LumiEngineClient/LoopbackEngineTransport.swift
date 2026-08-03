@@ -79,6 +79,17 @@ public actor LoopbackEngineTransport: EngineTransport {
         return envelope
     }
 
+    public func exchange(_ envelope: MessageEnvelope) async throws -> MessageEnvelope {
+        guard let connection else {
+            throw EngineClientError.connectionFailed
+        }
+        var encoded = try JSONEncoder().encode(envelope)
+        encoded.append(0x0A)
+        try await send(encoded, over: connection)
+        let response = try await receiveLine(over: connection)
+        return try ProtocolMessageDecoder.decode(response)
+    }
+
     public func close() async {
         connection?.stateUpdateHandler = nil
         connection?.cancel()

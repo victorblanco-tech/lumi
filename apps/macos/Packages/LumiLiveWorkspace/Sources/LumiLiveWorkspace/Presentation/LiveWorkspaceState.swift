@@ -37,6 +37,7 @@ public struct LiveWorkspaceState: Equatable, Sendable {
     public let source: ProviderPresentation
     public let content: LiveWorkspaceContent?
     public let diagnostic: String?
+    public let planInteraction: PlanInteractionPresentation
 
     public init(
         condition: LiveWorkspaceCondition,
@@ -44,7 +45,8 @@ public struct LiveWorkspaceState: Equatable, Sendable {
         runtime: ProviderPresentation,
         source: ProviderPresentation,
         content: LiveWorkspaceContent?,
-        diagnostic: String? = nil
+        diagnostic: String? = nil,
+        planInteraction: PlanInteractionPresentation = .idle
     ) {
         self.condition = condition
         self.engine = engine
@@ -52,6 +54,7 @@ public struct LiveWorkspaceState: Equatable, Sendable {
         self.source = source
         self.content = content
         self.diagnostic = diagnostic
+        self.planInteraction = planInteraction
     }
 }
 
@@ -61,20 +64,57 @@ public struct LiveWorkspaceContent: Equatable, Sendable {
     public let plan: PlanSnapshot?
     public let sourceName: String
     public let stateRevision: UInt64
+    public let planningOptions: PlanningOptionsSnapshot
 
     public init(
         liveDeck: DeckSnapshot,
         nextDeck: DeckSnapshot,
         plan: PlanSnapshot?,
         sourceName: String,
-        stateRevision: UInt64
+        stateRevision: UInt64,
+        planningOptions: PlanningOptionsSnapshot
     ) {
         self.liveDeck = liveDeck
         self.nextDeck = nextDeck
         self.plan = plan
         self.sourceName = sourceName
         self.stateRevision = stateRevision
+        self.planningOptions = planningOptions
     }
+}
+
+public enum PlanInteractionPresentation: Equatable, Sendable {
+    case idle
+    case submitting
+    case succeeded(String)
+    case rejected(String)
+}
+
+public struct PlanMutationContext: Equatable, Sendable {
+    public let planID: String
+    public let trackLoadID: UInt64
+    public let expectedPlanRevision: UInt64
+
+    public init(planID: String, trackLoadID: UInt64, expectedPlanRevision: UInt64) {
+        self.planID = planID
+        self.trackLoadID = trackLoadID
+        self.expectedPlanRevision = expectedPlanRevision
+    }
+}
+
+public enum PlanMutationRequest: Equatable, Sendable {
+    case selectTheme(context: PlanMutationContext, themeID: UInt64)
+    case selectScene(
+        context: PlanMutationContext,
+        phraseIndex: UInt64,
+        sceneID: UInt64
+    )
+    case setCueLock(
+        context: PlanMutationContext,
+        phraseIndex: UInt64,
+        locked: Bool
+    )
+    case regeneratePlan(context: PlanMutationContext)
 }
 
 public enum LiveWorkspacePresenter {
@@ -102,15 +142,24 @@ public enum LiveWorkspacePresenter {
         )
     }
 
-    public static func ready(_ snapshot: EngineSnapshot) -> LiveWorkspaceState {
-        state(from: snapshot, forceCondition: nil, diagnostic: nil)
+    public static func ready(
+        _ snapshot: EngineSnapshot,
+        planInteraction: PlanInteractionPresentation = .idle
+    ) -> LiveWorkspaceState {
+        state(
+            from: snapshot,
+            forceCondition: nil,
+            diagnostic: nil,
+            planInteraction: planInteraction
+        )
     }
 
     public static func stale(_ snapshot: EngineSnapshot) -> LiveWorkspaceState {
         state(
             from: snapshot,
             forceCondition: .stale,
-            diagnostic: "Showing the last complete snapshot while Lumi reconnects."
+            diagnostic: "Showing the last complete snapshot while Lumi reconnects.",
+            planInteraction: .idle
         )
     }
 
@@ -135,7 +184,8 @@ public enum LiveWorkspacePresenter {
     private static func state(
         from snapshot: EngineSnapshot,
         forceCondition: LiveWorkspaceCondition?,
-        diagnostic: String?
+        diagnostic: String?,
+        planInteraction: PlanInteractionPresentation
     ) -> LiveWorkspaceState {
         let content = content(from: snapshot)
         let derivedCondition: LiveWorkspaceCondition
@@ -167,7 +217,8 @@ public enum LiveWorkspacePresenter {
                 condition: snapshot.deckSource.status == "ready" ? healthyProviderCondition : .degraded
             ),
             content: content,
-            diagnostic: diagnostic ?? defaultDiagnostic(for: derivedCondition)
+            diagnostic: diagnostic ?? defaultDiagnostic(for: derivedCondition),
+            planInteraction: planInteraction
         )
     }
 
@@ -181,7 +232,8 @@ public enum LiveWorkspacePresenter {
             nextDeck: nextDeck,
             plan: snapshot.nextPlan,
             sourceName: snapshot.deckSource.providerKind.capitalized,
-            stateRevision: snapshot.stateRevision
+            stateRevision: snapshot.stateRevision,
+            planningOptions: snapshot.planningOptions
         )
     }
 

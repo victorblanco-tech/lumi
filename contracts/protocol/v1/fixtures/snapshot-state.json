@@ -9,7 +9,7 @@
     "kind": "stateSnapshot",
     "stateRevision": 8,
     "operationState": "armed",
-    "engineVersion": "0.0.4-dev",
+    "engineVersion": "0.0.6-dev",
     "runtimeCore": {
       "model": "singleWriterReducer",
       "health": "ready",
@@ -65,7 +65,26 @@
         }
       }
     ],
+    "planningOptions": {
+      "themes": [
+        { "id": 1, "name": "Midnight Drive" },
+        { "id": 2, "name": "Electric Bloom" }
+      ],
+      "scenes": [
+        { "id": 1, "name": "Soft Motion", "category": "ambient", "loopBank": 1, "loopSlot": 1 },
+        { "id": 2, "name": "Star Wash", "category": "ambient", "loopBank": 1, "loopSlot": 2 },
+        { "id": 3, "name": "Neon Motion", "category": "groove", "loopBank": 2, "loopSlot": 1 },
+        { "id": 4, "name": "Prism Sweep", "category": "groove", "loopBank": 2, "loopSlot": 2 },
+        { "id": 5, "name": "Rising Pulse", "category": "build", "loopBank": 3, "loopSlot": 1 },
+        { "id": 6, "name": "Velocity Build", "category": "build", "loopBank": 3, "loopSlot": 2 },
+        { "id": 7, "name": "Full Energy", "category": "impact", "loopBank": 4, "loopSlot": 1 },
+        { "id": 8, "name": "Color Impact", "category": "impact", "loopBank": 4, "loopSlot": 2 },
+        { "id": 9, "name": "Deep Space", "category": "break", "loopBank": 5, "loopSlot": 1 },
+        { "id": 10, "name": "Slow Wave", "category": "break", "loopBank": 5, "loopSlot": 2 }
+      ]
+    },
     "nextPlan": {
+      "planId": "14113485664261432828",
       "deckId": 2,
       "trackId": 202,
       "trackDurationBeats": 128,
@@ -80,6 +99,7 @@
           "startBeat": 0,
           "endBeat": 32,
           "origin": "automatic",
+          "locked": false,
           "reason": { "kind": "phraseCategoryMatched", "phraseKind": "intro", "category": "ambient" },
           "action": { "kind": "applyLook", "themeId": 2, "themeName": "Electric Bloom", "sceneId": 1, "sceneName": "Soft Motion", "category": "ambient", "loopBank": 1, "loopSlot": 1 }
         },
@@ -88,6 +108,7 @@
           "startBeat": 32,
           "endBeat": 64,
           "origin": "automatic",
+          "locked": false,
           "reason": { "kind": "phraseCategoryMatched", "phraseKind": "breakdown", "category": "break" },
           "action": { "kind": "applyLook", "themeId": 2, "themeName": "Electric Bloom", "sceneId": 10, "sceneName": "Slow Wave", "category": "break", "loopBank": 5, "loopSlot": 2 }
         },
@@ -96,6 +117,7 @@
           "startBeat": 64,
           "endBeat": 96,
           "origin": "automatic",
+          "locked": false,
           "reason": { "kind": "phraseCategoryMatched", "phraseKind": "build", "category": "build" },
           "action": { "kind": "applyLook", "themeId": 2, "themeName": "Electric Bloom", "sceneId": 6, "sceneName": "Velocity Build", "category": "build", "loopBank": 3, "loopSlot": 2 }
         },
@@ -104,6 +126,7 @@
           "startBeat": 96,
           "endBeat": 128,
           "origin": "automatic",
+          "locked": false,
           "reason": { "kind": "phraseCategoryMatched", "phraseKind": "drop", "category": "impact" },
           "action": { "kind": "applyLook", "themeId": 2, "themeName": "Electric Bloom", "sceneId": 7, "sceneName": "Full Energy", "category": "impact", "loopBank": 4, "loopSlot": 1 }
         }

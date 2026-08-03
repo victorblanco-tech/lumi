@@ -75,6 +75,26 @@ pub struct PlanningConfiguration {
     scenes: Vec<SceneDefinition>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ThemeOption {
+    pub id: ThemeId,
+    pub name: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct SceneOption {
+    pub id: SceneId,
+    pub name: String,
+    pub category: SceneCategory,
+    pub loop_selection: LoopSelection,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlanningOptions {
+    pub themes: Vec<ThemeOption>,
+    pub scenes: Vec<SceneOption>,
+}
+
 impl PlanningConfiguration {
     #[must_use]
     pub fn epic_one() -> Self {
@@ -208,6 +228,193 @@ impl<C: ChoiceSource> DeterministicPlanner<C> {
         .map_err(PlannerError::InvalidPlan)
     }
 
+    #[must_use]
+    pub fn options(&self) -> PlanningOptions {
+        PlanningOptions {
+            themes: self
+                .configuration
+                .themes
+                .iter()
+                .map(|theme| ThemeOption {
+                    id: theme.id,
+                    name: theme.name.to_owned(),
+                })
+                .collect(),
+            scenes: self
+                .configuration
+                .scenes
+                .iter()
+                .map(|scene| SceneOption {
+                    id: scene.id,
+                    name: scene.name.to_owned(),
+                    category: scene.category,
+                    loop_selection: scene.loop_selection,
+                })
+                .collect(),
+        }
+    }
+
+    pub fn select_theme(
+        &self,
+        current: &LightingPlan,
+        theme_id: ThemeId,
+    ) -> Result<LightingPlan, PlanMutationError> {
+        ensure_ready(current)?;
+        let theme = self
+            .configuration
+            .themes
+            .iter()
+            .find(|candidate| candidate.id == theme_id)
+            .ok_or(PlanMutationError::UnknownTheme(theme_id))?;
+        let mut changed = false;
+        let cues = current
+            .cues()
+            .iter()
+            .map(|cue| {
+                if cue.locked() {
+                    return Ok(cue.clone());
+                }
+                match cue.action() {
+                    SemanticLightingAction::ApplyLook(look) => {
+                        changed |= look.theme_id() != theme.id;
+                        let revised = LightingLook::try_new(
+                            theme.id,
+                            theme.name.to_owned(),
+                            look.scene_id(),
+                            look.scene_name().to_owned(),
+                            look.category(),
+                            look.loop_selection(),
+                        )?;
+                        Ok(cue.revised(
+                            SemanticLightingAction::ApplyLook(revised),
+                            CueOrigin::User,
+                            false,
+                        ))
+                    }
+                    SemanticLightingAction::HoldCurrentLook => {
+                        Err(PlanMutationError::FallbackPlanNotEditable)
+                    }
+                }
+            })
+            .collect::<Result<Vec<_>, PlanMutationError>>()?;
+        if !changed {
+            return Err(PlanMutationError::NoChange);
+        }
+        current
+            .revised(cues)
+            .map_err(PlanMutationError::InvalidPlan)
+    }
+
+    pub fn select_scene(
+        &self,
+        current: &LightingPlan,
+        phrase_index: u16,
+        scene_id: SceneId,
+    ) -> Result<LightingPlan, PlanMutationError> {
+        ensure_ready(current)?;
+        let selected_scene = self
+            .configuration
+            .scenes
+            .iter()
+            .find(|candidate| candidate.id == scene_id)
+            .ok_or(PlanMutationError::UnknownScene(scene_id))?;
+        let target = current
+            .cues()
+            .get(usize::from(phrase_index))
+            .ok_or(PlanMutationError::UnknownPhrase(phrase_index))?;
+        let expected_category = cue_category(target)?;
+        if selected_scene.category != expected_category {
+            return Err(PlanMutationError::SceneCategoryMismatch {
+                expected: expected_category,
+                actual: selected_scene.category,
+            });
+        }
+        let SemanticLightingAction::ApplyLook(current_look) = target.action() else {
+            return Err(PlanMutationError::FallbackPlanNotEditable);
+        };
+        if current_look.scene_id() == selected_scene.id {
+            return Err(PlanMutationError::NoChange);
+        }
+        let look = LightingLook::try_new(
+            current_look.theme_id(),
+            current_look.theme_name().to_owned(),
+            selected_scene.id,
+            selected_scene.name.to_owned(),
+            selected_scene.category,
+            selected_scene.loop_selection,
+        )?;
+        let mut cues = current.cues().to_vec();
+        cues[usize::from(phrase_index)] = target.revised(
+            SemanticLightingAction::ApplyLook(look),
+            CueOrigin::User,
+            target.locked(),
+        );
+        current
+            .revised(cues)
+            .map_err(PlanMutationError::InvalidPlan)
+    }
+
+    pub fn set_cue_lock(
+        &self,
+        current: &LightingPlan,
+        phrase_index: u16,
+        locked: bool,
+    ) -> Result<LightingPlan, PlanMutationError> {
+        ensure_ready(current)?;
+        let target = current
+            .cues()
+            .get(usize::from(phrase_index))
+            .ok_or(PlanMutationError::UnknownPhrase(phrase_index))?;
+        if target.locked() == locked {
+            return Err(PlanMutationError::NoChange);
+        }
+        let mut cues = current.cues().to_vec();
+        cues[usize::from(phrase_index)] =
+            target.revised(target.action().clone(), CueOrigin::User, locked);
+        current
+            .revised(cues)
+            .map_err(PlanMutationError::InvalidPlan)
+    }
+
+    pub fn regenerate(
+        &self,
+        current: &LightingPlan,
+        input: &PlanningInput,
+    ) -> Result<LightingPlan, PlanMutationError> {
+        ensure_ready(current)?;
+        if current.deck_id() != input.deck_id
+            || current.track_load_id() != input.track_load_id
+            || current.track_id() != input.track.id
+        {
+            return Err(PlanMutationError::TrackLoadMismatch);
+        }
+        let generated = self.generate(input)?;
+        let cues = generated
+            .cues()
+            .iter()
+            .map(|generated_cue| {
+                let Some(locked) = current
+                    .cues()
+                    .get(usize::from(generated_cue.phrase_index()))
+                    .filter(|cue| cue.locked())
+                else {
+                    return generated_cue.clone();
+                };
+                if locked.start_beat() == generated_cue.start_beat()
+                    && locked.end_beat() == generated_cue.end_beat()
+                    && cue_category(locked).ok() == cue_category(generated_cue).ok()
+                {
+                    locked.clone()
+                } else {
+                    generated_cue.clone()
+                }
+            })
+            .collect::<Vec<_>>();
+        current
+            .revised(cues)
+            .map_err(PlanMutationError::InvalidPlan)
+    }
+
     fn plan_analyzed_phrases(
         &self,
         seed: u64,
@@ -259,6 +466,21 @@ impl<C: ChoiceSource> DeterministicPlanner<C> {
                 ))
             })
             .collect()
+    }
+}
+
+fn ensure_ready(plan: &LightingPlan) -> Result<(), PlanMutationError> {
+    if plan.status() == PlanStatus::Ready {
+        Ok(())
+    } else {
+        Err(PlanMutationError::FallbackPlanNotEditable)
+    }
+}
+
+fn cue_category(cue: &LightingCue) -> Result<SceneCategory, PlanMutationError> {
+    match cue.reason() {
+        CueReason::PhraseCategoryMatched { category, .. } => Ok(category),
+        CueReason::MissingPhraseAnalysis => Err(PlanMutationError::FallbackPlanNotEditable),
     }
 }
 
@@ -338,3 +560,56 @@ impl fmt::Display for PlannerError {
 }
 
 impl Error for PlannerError {}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum PlanMutationError {
+    UnknownTheme(ThemeId),
+    UnknownScene(SceneId),
+    UnknownPhrase(u16),
+    SceneCategoryMismatch {
+        expected: SceneCategory,
+        actual: SceneCategory,
+    },
+    FallbackPlanNotEditable,
+    TrackLoadMismatch,
+    NoChange,
+    InvalidPlan(PlanValidationError),
+    Planner(PlannerError),
+}
+
+impl From<PlanValidationError> for PlanMutationError {
+    fn from(error: PlanValidationError) -> Self {
+        Self::InvalidPlan(error)
+    }
+}
+
+impl From<PlannerError> for PlanMutationError {
+    fn from(error: PlannerError) -> Self {
+        Self::Planner(error)
+    }
+}
+
+impl fmt::Display for PlanMutationError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::UnknownTheme(id) => write!(formatter, "theme {} does not exist", id.value()),
+            Self::UnknownScene(id) => write!(formatter, "scene {} does not exist", id.value()),
+            Self::UnknownPhrase(index) => write!(formatter, "phrase {index} does not exist"),
+            Self::SceneCategoryMismatch { expected, actual } => write!(
+                formatter,
+                "scene category {actual:?} is incompatible with required category {expected:?}"
+            ),
+            Self::FallbackPlanNotEditable => {
+                formatter.write_str("a fallback plan cannot be edited")
+            }
+            Self::TrackLoadMismatch => {
+                formatter.write_str("the plan no longer belongs to the loaded track")
+            }
+            Self::NoChange => formatter.write_str("the requested edit does not change the plan"),
+            Self::InvalidPlan(error) => write!(formatter, "the revised plan is invalid: {error}"),
+            Self::Planner(error) => write!(formatter, "regeneration failed: {error}"),
+        }
+    }
+}
+
+impl Error for PlanMutationError {}

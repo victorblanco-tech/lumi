@@ -67,6 +67,20 @@ struct LumiVisualEvidenceCommand {
                 appearance: .light,
                 keyNotation: .camelot,
                 colorScheme: .light
+            ),
+            Variant(
+                name: "edited-locked-dark-camelot",
+                state: LiveWorkspaceFixtures.edited,
+                appearance: .dark,
+                keyNotation: .camelot,
+                colorScheme: .dark
+            ),
+            Variant(
+                name: "revision-conflict-light-classic",
+                state: LiveWorkspaceFixtures.revisionConflict,
+                appearance: .light,
+                keyNotation: .classic,
+                colorScheme: .light
             )
         ]
 
@@ -78,7 +92,7 @@ struct LumiVisualEvidenceCommand {
                 canvas
                 LiveWorkspaceView(
                     state: variant.state,
-                    productVersion: "0.0.5-dev",
+                    productVersion: "0.0.6-dev",
                     appearance: .constant(variant.appearance),
                     keyNotation: .constant(variant.keyNotation),
                     allowsScrolling: false

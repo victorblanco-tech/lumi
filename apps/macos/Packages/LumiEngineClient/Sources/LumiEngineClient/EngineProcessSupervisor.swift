@@ -11,6 +11,7 @@ public actor EngineProcessSupervisor {
     private let transport: any EngineTransport
     private var process: Process?
     private var sessionToken: String?
+    private var commandSequence: UInt64 = 0
 
     public init(transport: any EngineTransport = LoopbackEngineTransport()) {
         self.transport = transport
@@ -66,6 +67,22 @@ public actor EngineProcessSupervisor {
         return snapshot
     }
 
+    public func send(
+        _ command: EnginePlanCommand,
+        messageID: String = "cmd-\(UUID().uuidString)"
+    ) async throws -> MessageEnvelope {
+        try await exchange(payload: command.payload(), messageID: messageID)
+    }
+
+    public func getSnapshot(
+        messageID: String = "cmd-\(UUID().uuidString)"
+    ) async throws -> MessageEnvelope {
+        try await exchange(
+            payload: ["kind": .string("getSnapshot")],
+            messageID: messageID
+        )
+    }
+
     public func isRunning() -> Bool {
         process?.isRunning == true
     }
@@ -78,6 +95,32 @@ public actor EngineProcessSupervisor {
         }
         process = nil
         sessionToken = nil
+        commandSequence = 0
+    }
+
+    private func exchange(
+        payload: [String: JSONValue],
+        messageID: String
+    ) async throws -> MessageEnvelope {
+        guard process?.isRunning == true, sessionToken != nil else {
+            throw EngineClientError.connectionClosed
+        }
+        let increment = commandSequence.addingReportingOverflow(1)
+        guard !increment.overflow else {
+            throw EngineClientError.commandSequenceOverflow
+        }
+        let nextSequence = increment.partialValue
+        commandSequence = nextSequence
+        let envelope = MessageEnvelope(
+            protocolVersion: WireProtocol.version,
+            messageType: .command,
+            messageId: messageID,
+            sequence: nextSequence,
+            correlationId: messageID,
+            sentAt: Date().ISO8601Format(),
+            payload: payload
+        )
+        return try await transport.exchange(envelope)
     }
 
     private func validate(endpoint: EngineEndpoint) throws {

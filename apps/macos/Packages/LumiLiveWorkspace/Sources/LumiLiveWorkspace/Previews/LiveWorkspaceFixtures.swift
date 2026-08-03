@@ -3,7 +3,7 @@ import Foundation
 public enum LiveWorkspaceFixtures {
     public static let readySnapshot = EngineSnapshot(
         endpoint: "127.0.0.1:52841",
-        engineVersion: "0.0.5-dev",
+        engineVersion: "0.0.6-dev",
         protocolVersion: 1,
         snapshotSequence: 42,
         stateRevision: 8,
@@ -42,6 +42,7 @@ public enum LiveWorkspaceFixtures {
             )
         ],
         nextPlan: PlanSnapshot(
+            planID: "14113485664261432828",
             deckID: 2,
             trackLoadID: 2_001,
             trackDurationBeats: 128,
@@ -49,12 +50,13 @@ public enum LiveWorkspaceFixtures {
             configurationRevision: 1,
             status: "ready",
             cues: [
-                cue(0, 0, 32, "intro", "ambient", "Soft Motion", 1, 1),
-                cue(1, 32, 64, "breakdown", "break", "Slow Wave", 5, 2),
-                cue(2, 64, 96, "build", "build", "Velocity Build", 3, 2),
-                cue(3, 96, 128, "drop", "impact", "Full Energy", 4, 1)
+                cue(0, 0, 32, "intro", "ambient", 1, "Soft Motion", 1, 1),
+                cue(1, 32, 64, "breakdown", "break", 10, "Slow Wave", 5, 2),
+                cue(2, 64, 96, "build", "build", 6, "Velocity Build", 3, 2),
+                cue(3, 96, 128, "drop", "impact", 7, "Full Energy", 4, 1)
             ]
-        )
+        ),
+        planningOptions: planningOptions
     )
 
     public static let ready = LiveWorkspacePresenter.ready(readySnapshot)
@@ -65,9 +67,66 @@ public enum LiveWorkspaceFixtures {
         replacingSource(in: readySnapshot, status: "reconnecting")
     )
     public static let fallback = LiveWorkspacePresenter.ready(fallbackSnapshot())
+    public static let edited = LiveWorkspacePresenter.ready(
+        editedSnapshot(),
+        planInteraction: .succeeded("Plan revision 3 saved.")
+    )
+    public static let revisionConflict = LiveWorkspacePresenter.ready(
+        readySnapshot,
+        planInteraction: .rejected(
+            "Plan changed elsewhere. Lumi refreshed the latest revision."
+        )
+    )
+
+    private static func editedSnapshot() -> EngineSnapshot {
+        let editedCues: [PlanCueSnapshot] = readySnapshot.nextPlan?.cues.map { cue in
+            guard cue.phraseIndex == 1 else { return cue }
+            return PlanCueSnapshot(
+                phraseIndex: cue.phraseIndex,
+                startBeat: cue.startBeat,
+                endBeat: cue.endBeat,
+                origin: "user",
+                locked: true,
+                reason: cue.reason,
+                action: .applyLook(
+                    themeID: 2,
+                    themeName: "Electric Bloom",
+                    sceneID: 9,
+                    sceneName: "Deep Space",
+                    category: "break",
+                    loopBank: 5,
+                    loopSlot: 1
+                )
+            )
+        } ?? []
+        let plan = PlanSnapshot(
+            planID: "14113485664261432828",
+            deckID: 2,
+            trackLoadID: 2_001,
+            trackDurationBeats: 128,
+            revision: 3,
+            configurationRevision: 1,
+            status: "ready",
+            cues: editedCues
+        )
+        return EngineSnapshot(
+            endpoint: readySnapshot.endpoint,
+            engineVersion: readySnapshot.engineVersion,
+            protocolVersion: readySnapshot.protocolVersion,
+            snapshotSequence: 44,
+            stateRevision: 10,
+            runtime: readySnapshot.runtime,
+            deckSource: readySnapshot.deckSource,
+            leaderDeckID: readySnapshot.leaderDeckID,
+            decks: readySnapshot.decks,
+            nextPlan: plan,
+            planningOptions: readySnapshot.planningOptions
+        )
+    }
 
     private static func fallbackSnapshot() -> EngineSnapshot {
         let plan = PlanSnapshot(
+            planID: "14113485664261432828",
             deckID: 2,
             trackLoadID: 2_001,
             trackDurationBeats: 128,
@@ -80,6 +139,7 @@ public enum LiveWorkspaceFixtures {
                     startBeat: 0,
                     endBeat: 128,
                     origin: "fallback",
+                    locked: false,
                     reason: .missingPhraseAnalysis,
                     action: .holdCurrentLook
                 )
@@ -95,7 +155,8 @@ public enum LiveWorkspaceFixtures {
             deckSource: readySnapshot.deckSource,
             leaderDeckID: readySnapshot.leaderDeckID,
             decks: readySnapshot.decks,
-            nextPlan: plan
+            nextPlan: plan,
+            planningOptions: readySnapshot.planningOptions
         )
     }
 
@@ -116,7 +177,8 @@ public enum LiveWorkspaceFixtures {
             ),
             leaderDeckID: snapshot.leaderDeckID,
             decks: snapshot.decks,
-            nextPlan: snapshot.nextPlan
+            nextPlan: snapshot.nextPlan,
+            planningOptions: snapshot.planningOptions
         )
     }
 
@@ -126,6 +188,7 @@ public enum LiveWorkspaceFixtures {
         _ end: UInt64,
         _ phrase: String,
         _ category: String,
+        _ sceneID: UInt64,
         _ scene: String,
         _ bank: UInt64,
         _ slot: UInt64
@@ -135,9 +198,12 @@ public enum LiveWorkspaceFixtures {
             startBeat: start,
             endBeat: end,
             origin: "automatic",
+            locked: false,
             reason: .phraseCategoryMatched(phraseKind: phrase, category: category),
             action: .applyLook(
+                themeID: 2,
                 themeName: "Electric Bloom",
+                sceneID: sceneID,
                 sceneName: scene,
                 category: category,
                 loopBank: bank,
@@ -145,4 +211,23 @@ public enum LiveWorkspaceFixtures {
             )
         )
     }
+
+    private static let planningOptions = PlanningOptionsSnapshot(
+        themes: [
+            ThemeOptionSnapshot(id: 1, name: "Midnight Drive"),
+            ThemeOptionSnapshot(id: 2, name: "Electric Bloom")
+        ],
+        scenes: [
+            SceneOptionSnapshot(id: 1, name: "Soft Motion", category: "ambient", loopBank: 1, loopSlot: 1),
+            SceneOptionSnapshot(id: 2, name: "Star Wash", category: "ambient", loopBank: 1, loopSlot: 2),
+            SceneOptionSnapshot(id: 3, name: "Neon Motion", category: "groove", loopBank: 2, loopSlot: 1),
+            SceneOptionSnapshot(id: 4, name: "Prism Sweep", category: "groove", loopBank: 2, loopSlot: 2),
+            SceneOptionSnapshot(id: 5, name: "Rising Pulse", category: "build", loopBank: 3, loopSlot: 1),
+            SceneOptionSnapshot(id: 6, name: "Velocity Build", category: "build", loopBank: 3, loopSlot: 2),
+            SceneOptionSnapshot(id: 7, name: "Full Energy", category: "impact", loopBank: 4, loopSlot: 1),
+            SceneOptionSnapshot(id: 8, name: "Color Impact", category: "impact", loopBank: 4, loopSlot: 2),
+            SceneOptionSnapshot(id: 9, name: "Deep Space", category: "break", loopBank: 5, loopSlot: 1),
+            SceneOptionSnapshot(id: 10, name: "Slow Wave", category: "break", loopBank: 5, loopSlot: 2)
+        ]
+    )
 }

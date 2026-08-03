@@ -22,9 +22,13 @@
 "workspace.theme" = "Theme";
 "workspace.scene" = "Scene";
 "workspace.reason" = "Reason";
+"workspace.origin" = "Source";
+"workspace.regenerate" = "Regenerate";
+"workspace.lockCue" = "Lock cue";
+"workspace.unlockCue" = "Unlock cue";
+"workspace.savingPlan" = "Saving plan change…";
 "workspace.waitingDecks" = "Waiting for authoritative Live and Next deck data…";
 "workspace.waitingPlan" = "Waiting for a generated next-track plan…";
-"workspace.controlsLater" = "Operation controls become active in the next simulator-control milestone.";
 "operation.arm" = "Arm";
 "operation.start" = "Start";
 "operation.pause" = "Pause";
