@@ -24,6 +24,10 @@ pub enum SessionCommand {
         offset: u32,
         limit: u16,
     },
+    OpenLibraryTrackEditor {
+        track_id: u64,
+    },
+    CloseLibraryTrackEditor,
     LoadDemoSession {
         expected_revision: StateRevision,
     },
@@ -70,13 +74,21 @@ pub enum SessionCommand {
 
 impl SessionCommand {
     pub const fn is_mutating(&self) -> bool {
-        !matches!(self, Self::GetSnapshot | Self::QueryLibrary { .. })
+        !matches!(
+            self,
+            Self::GetSnapshot
+                | Self::QueryLibrary { .. }
+                | Self::OpenLibraryTrackEditor { .. }
+                | Self::CloseLibraryTrackEditor
+        )
     }
 
     pub const fn context(&self) -> Option<PlanCommandContext> {
         match self {
             Self::GetSnapshot
             | Self::QueryLibrary { .. }
+            | Self::OpenLibraryTrackEditor { .. }
+            | Self::CloseLibraryTrackEditor
             | Self::LoadDemoSession { .. }
             | Self::SetOperationState { .. }
             | Self::SetSimulationSpeed { .. }
@@ -106,6 +118,10 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
                 .map_err(|_| CommandDecodeError::InvalidField("offset"))?,
             limit: library_limit(optional_unsigned(&envelope.payload, "limit")?.unwrap_or(50))?,
         }),
+        "openLibraryTrackEditor" => Ok(SessionCommand::OpenLibraryTrackEditor {
+            track_id: positive_unsigned(&envelope.payload, "trackId")?,
+        }),
+        "closeLibraryTrackEditor" => Ok(SessionCommand::CloseLibraryTrackEditor),
         "loadDemoSession" => Ok(SessionCommand::LoadDemoSession {
             expected_revision: state_revision(envelope)?,
         }),
@@ -227,6 +243,17 @@ fn unsigned(
         .get(field)
         .and_then(Value::as_u64)
         .ok_or(CommandDecodeError::InvalidField(field))
+}
+
+fn positive_unsigned(
+    payload: &serde_json::Map<String, Value>,
+    field: &'static str,
+) -> Result<u64, CommandDecodeError> {
+    let value = unsigned(payload, field)?;
+    if value == 0 {
+        return Err(CommandDecodeError::InvalidField(field));
+    }
+    Ok(value)
 }
 
 fn boolean(

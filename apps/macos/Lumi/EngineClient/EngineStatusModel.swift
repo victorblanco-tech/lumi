@@ -128,6 +128,45 @@ final class EngineStatusModel: ObservableObject {
         }
     }
 
+    func openLibraryTrackEditor(trackID: UInt64) async {
+        await exchangeLibraryCommand(.openLibraryTrackEditor(trackID: trackID))
+    }
+
+    func closeLibraryTrackEditor() async {
+        guard libraryState.editor != nil else { return }
+        await exchangeLibraryCommand(.closeLibraryTrackEditor)
+    }
+
+    private func exchangeLibraryCommand(_ command: EngineCommand) async {
+        guard lifecycle == .ready,
+              let endpointDescription,
+              let protocolVersion,
+              await acquireInteractiveExchange() else {
+            return
+        }
+        defer { isExchangingCommand = false }
+        do {
+            let envelope = try await supervisor.send(command)
+            if let failure = EngineCommandFailure(envelope) {
+                libraryState = .failed(failure.message)
+                return
+            }
+            let snapshot = try snapshotDecoder.decode(
+                envelope,
+                endpointDescription: endpointDescription,
+                protocolVersion: protocolVersion
+            )
+            latestSnapshot = snapshot
+            workspaceState = LiveWorkspacePresenter.ready(snapshot)
+            libraryState = try libraryDecoder.decode(envelope)
+        } catch {
+            libraryState = .failed(
+                (error as? LocalizedError)?.errorDescription
+                    ?? "The track editor could not be updated."
+            )
+        }
+    }
+
     func mutatePlan(_ request: PlanMutationRequest) async {
         guard lifecycle == .ready,
               let endpointDescription,
@@ -427,6 +466,7 @@ final class EngineStatusModel: ObservableObject {
                 if await !self.supervisor.isRunning() {
                     self.lifecycle = .disconnected
                     self.workspaceState = LiveWorkspacePresenter.disconnected()
+                    self.libraryState = .failed("The local Lumi engine disconnected.")
                     return
                 }
             }

@@ -46,6 +46,12 @@ struct FoundationView: View {
                         keyNotation: $preferences.keyNotation,
                         onQuery: { request in
                             Task { await engineStatus.queryLibrary(request) }
+                        },
+                        onOpenEditor: { trackID in
+                            Task { await engineStatus.openLibraryTrackEditor(trackID: trackID) }
+                        },
+                        onCloseEditor: {
+                            Task { await engineStatus.closeLibraryTrackEditor() }
                         }
                     )
                 }

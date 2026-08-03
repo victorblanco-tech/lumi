@@ -15,6 +15,8 @@ public struct EnginePlanCommandContext: Equatable, Sendable {
 
 public enum EngineCommand: Equatable, Sendable {
     case queryLibrary(search: String, playlistID: UInt64?, offset: UInt32, limit: UInt16)
+    case openLibraryTrackEditor(trackID: UInt64)
+    case closeLibraryTrackEditor
     case loadDemoSession(expectedStateRevision: UInt64)
     case setOperationState(String, expectedStateRevision: UInt64)
     case setSimulationSpeed(UInt64, expectedStateRevision: UInt64)
@@ -46,6 +48,13 @@ public enum EngineCommand: Equatable, Sendable {
             ]
             payload["playlistId"] = playlistID.map { .number(Double($0)) } ?? .null
             return payload
+        case let .openLibraryTrackEditor(trackID):
+            return [
+                "kind": .string("openLibraryTrackEditor"),
+                "trackId": .number(Double(trackID))
+            ]
+        case .closeLibraryTrackEditor:
+            return ["kind": .string("closeLibraryTrackEditor")]
         case let .loadDemoSession(expectedRevision):
             return statePayload("loadDemoSession", expectedRevision: expectedRevision)
         case let .setOperationState(state, expectedRevision):

@@ -27,6 +27,12 @@ Lumi gebruikt [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Een vaste donkere, CDJ-geïnspireerde Track Lighting Editor met maat/beatgrid,
+  gekleurde performance-waveform, gekleurde phrase lane, full-track overview en
+  één gedeeld beatcoördinatenstelsel.
+- Geïsoleerde, read-only lokale audiopreview met play/pause/stop, scrubben,
+  maatnavigatie, volume, selected-phrase-loop, toetsenbordbediening en veilige
+  cleanup zonder showstate of bronbestand te muteren.
 - Een native, gepagineerde Library-workspace met Collection- en playlistnavigatie,
   server-side search, expliciete readiness, metadata/provenance-inspector en een
   deep-link naar de Track Lighting Editor.

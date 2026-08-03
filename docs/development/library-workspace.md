@@ -30,13 +30,15 @@ fixtures prove the non-ready states until a fallible external source exists.
 
 Track selection exposes BPM, global Camelot/Classic key formatting, duration,
 source identity, analysis revision, Lumi timeline revision, color, and readiness.
-The editor action deep-links to the selected track's Track Lighting Editor
-landing view; waveform and audio editing are intentionally delivered by E2A-04.
+The editor action opens the selected track's engine-backed Track Lighting
+Editor analysis. Its waveform and isolated audio behavior are documented in
+[`track-editor-preview.md`](track-editor-preview.md).
 
 ## Verification
 
 The feature package tests authoritative decoding, 200-row wire bounds,
 readiness filtering, English localization, and a 10,000-result/50-row native
 page benchmark. The real Swift client integration test launches the Rust helper
-and performs a server-side Library search. Eight additional deterministic PNGs
-cover dark/light, Camelot/Classic, and all operational states.
+and performs a server-side Library search plus editor open/close. Eight Library
+PNGs cover dark/light, Camelot/Classic, and all operational states; two more
+prove the fixed-dark editor under both host appearances.

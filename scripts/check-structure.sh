@@ -37,6 +37,7 @@ required_paths=(
   "docs/development/demo-control.md"
   "docs/development/music-library-core.md"
   "docs/development/library-workspace.md"
+  "docs/development/track-editor-preview.md"
   "docs/release/0.1.0-demo-and-limitations.md"
   "docs/release/0.1.0-epic-1-evidence.md"
   "scripts/check-architecture.sh"
