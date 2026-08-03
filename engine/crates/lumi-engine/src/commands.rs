@@ -1,0 +1,152 @@
+use std::error::Error;
+use std::fmt;
+
+use lumi_domain::{PlanId, PlanRevision, SceneId, ThemeId, TrackLoadId};
+use lumi_protocol::{MessageEnvelope, MessageType};
+use serde_json::Value;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PlanCommandContext {
+    pub plan_id: PlanId,
+    pub track_load_id: TrackLoadId,
+    pub expected_revision: PlanRevision,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SessionCommand {
+    GetSnapshot,
+    SelectTheme {
+        context: PlanCommandContext,
+        theme_id: ThemeId,
+    },
+    SelectScene {
+        context: PlanCommandContext,
+        phrase_index: u16,
+        scene_id: SceneId,
+    },
+    SetCueLock {
+        context: PlanCommandContext,
+        phrase_index: u16,
+        locked: bool,
+    },
+    RegeneratePlan {
+        context: PlanCommandContext,
+    },
+}
+
+impl SessionCommand {
+    pub const fn is_mutating(self) -> bool {
+        !matches!(self, Self::GetSnapshot)
+    }
+
+    pub const fn context(self) -> Option<PlanCommandContext> {
+        match self {
+            Self::GetSnapshot => None,
+            Self::SelectTheme { context, .. }
+            | Self::SelectScene { context, .. }
+            | Self::SetCueLock { context, .. }
+            | Self::RegeneratePlan { context } => Some(context),
+        }
+    }
+}
+
+pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, CommandDecodeError> {
+    if envelope.message_type != MessageType::Command {
+        return Err(CommandDecodeError::WrongMessageType);
+    }
+    let kind = string(&envelope.payload, "kind")?;
+    match kind {
+        "getSnapshot" => Ok(SessionCommand::GetSnapshot),
+        "selectTheme" => Ok(SessionCommand::SelectTheme {
+            context: context(envelope)?,
+            theme_id: ThemeId::new(unsigned(&envelope.payload, "themeId")?),
+        }),
+        "selectScene" => Ok(SessionCommand::SelectScene {
+            context: context(envelope)?,
+            phrase_index: phrase_index(envelope)?,
+            scene_id: SceneId::new(unsigned(&envelope.payload, "sceneId")?),
+        }),
+        "setCueLock" => Ok(SessionCommand::SetCueLock {
+            context: context(envelope)?,
+            phrase_index: phrase_index(envelope)?,
+            locked: boolean(&envelope.payload, "locked")?,
+        }),
+        "regeneratePlan" => Ok(SessionCommand::RegeneratePlan {
+            context: context(envelope)?,
+        }),
+        _ => Err(CommandDecodeError::UnsupportedKind),
+    }
+}
+
+fn context(envelope: &MessageEnvelope) -> Result<PlanCommandContext, CommandDecodeError> {
+    let plan_id = string(&envelope.payload, "planId")?
+        .parse::<u64>()
+        .map_err(|_| CommandDecodeError::InvalidField("planId"))?;
+    let track_load_id = unsigned(&envelope.payload, "trackLoadId")?;
+    let expected_revision = unsigned(&envelope.payload, "expectedPlanRevision")?;
+    if plan_id == 0 || track_load_id == 0 || expected_revision == 0 {
+        return Err(CommandDecodeError::InvalidPlanContext);
+    }
+    Ok(PlanCommandContext {
+        plan_id: PlanId::new(plan_id),
+        track_load_id: TrackLoadId::new(track_load_id),
+        expected_revision: PlanRevision::new(expected_revision),
+    })
+}
+
+fn phrase_index(envelope: &MessageEnvelope) -> Result<u16, CommandDecodeError> {
+    u16::try_from(unsigned(&envelope.payload, "phraseIndex")?)
+        .map_err(|_| CommandDecodeError::InvalidField("phraseIndex"))
+}
+
+fn string<'a>(
+    payload: &'a serde_json::Map<String, Value>,
+    field: &'static str,
+) -> Result<&'a str, CommandDecodeError> {
+    payload
+        .get(field)
+        .and_then(Value::as_str)
+        .filter(|value| !value.is_empty())
+        .ok_or(CommandDecodeError::InvalidField(field))
+}
+
+fn unsigned(
+    payload: &serde_json::Map<String, Value>,
+    field: &'static str,
+) -> Result<u64, CommandDecodeError> {
+    payload
+        .get(field)
+        .and_then(Value::as_u64)
+        .ok_or(CommandDecodeError::InvalidField(field))
+}
+
+fn boolean(
+    payload: &serde_json::Map<String, Value>,
+    field: &'static str,
+) -> Result<bool, CommandDecodeError> {
+    payload
+        .get(field)
+        .and_then(Value::as_bool)
+        .ok_or(CommandDecodeError::InvalidField(field))
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CommandDecodeError {
+    WrongMessageType,
+    UnsupportedKind,
+    InvalidField(&'static str),
+    InvalidPlanContext,
+}
+
+impl fmt::Display for CommandDecodeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::WrongMessageType => formatter.write_str("a command envelope is required"),
+            Self::UnsupportedKind => formatter.write_str("the command kind is unsupported"),
+            Self::InvalidField(field) => write!(formatter, "command field {field} is invalid"),
+            Self::InvalidPlanContext => formatter.write_str("the plan context is invalid"),
+        }
+    }
+}
+
+impl Error for CommandDecodeError {}

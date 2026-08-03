@@ -16,7 +16,10 @@ struct FoundationView: View {
             state: engineStatus.workspaceState,
             productVersion: productVersion,
             appearance: $preferences.appearance,
-            keyNotation: $preferences.keyNotation
+            keyNotation: $preferences.keyNotation,
+            onPlanMutation: { request in
+                Task { await engineStatus.mutatePlan(request) }
+            }
         )
     }
 }

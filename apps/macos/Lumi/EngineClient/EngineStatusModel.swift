@@ -20,6 +20,9 @@ final class EngineStatusModel: ObservableObject {
     private let snapshotDecoder = EngineSnapshotDecoder()
     private var lifecycle: Lifecycle = .stopped
     private var monitoringTask: Task<Void, Never>?
+    private var latestSnapshot: EngineSnapshot?
+    private var endpointDescription: String?
+    private var protocolVersion: Int?
 
     func start() async {
         guard [.stopped, .disconnected, .failed].contains(lifecycle) else {
@@ -34,6 +37,8 @@ final class EngineStatusModel: ObservableObject {
             let executable = try engineExecutable()
             let endpoint = try await supervisor.launch(engineExecutable: executable)
             let endpointDescription = "\(endpoint.host):\(endpoint.port)"
+            self.endpointDescription = endpointDescription
+            protocolVersion = endpoint.protocolVersion
             lifecycle = .connecting
             workspaceState = LiveWorkspacePresenter.connecting(to: endpointDescription)
 
@@ -44,6 +49,7 @@ final class EngineStatusModel: ObservableObject {
                 protocolVersion: endpoint.protocolVersion
             )
             lifecycle = .ready
+            latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
             startMonitoring()
         } catch {
@@ -65,7 +71,113 @@ final class EngineStatusModel: ObservableObject {
         monitoringTask = nil
         await supervisor.stop()
         lifecycle = .stopped
+        latestSnapshot = nil
+        endpointDescription = nil
+        protocolVersion = nil
         workspaceState = LiveWorkspacePresenter.stopped()
+    }
+
+    func mutatePlan(_ request: PlanMutationRequest) async {
+        guard lifecycle == .ready,
+              let current = latestSnapshot,
+              let endpointDescription,
+              let protocolVersion else {
+            return
+        }
+
+        workspaceState = LiveWorkspacePresenter.ready(
+            current,
+            planInteraction: .submitting
+        )
+
+        do {
+            let envelope = try await supervisor.send(engineCommand(for: request))
+            if let failure = EngineCommandFailure(envelope) {
+                if failure.kind == "revisionConflict" {
+                    try await refreshAfterConflict(
+                        message: "Plan changed elsewhere. Lumi refreshed the latest revision.",
+                        endpointDescription: endpointDescription,
+                        protocolVersion: protocolVersion
+                    )
+                } else {
+                    workspaceState = LiveWorkspacePresenter.ready(
+                        current,
+                        planInteraction: .rejected(failure.message)
+                    )
+                }
+                return
+            }
+
+            let snapshot = try snapshotDecoder.decode(
+                envelope,
+                endpointDescription: endpointDescription,
+                protocolVersion: protocolVersion
+            )
+            latestSnapshot = snapshot
+            workspaceState = LiveWorkspacePresenter.ready(
+                snapshot,
+                planInteraction: .succeeded(
+                    "Plan revision \(snapshot.nextPlan?.revision ?? 0) saved."
+                )
+            )
+        } catch {
+            workspaceState = LiveWorkspacePresenter.ready(
+                latestSnapshot ?? current,
+                planInteraction: .rejected(
+                    (error as? LocalizedError)?.errorDescription
+                        ?? "The plan change could not be saved."
+                )
+            )
+        }
+    }
+
+    private func refreshAfterConflict(
+        message: String,
+        endpointDescription: String,
+        protocolVersion: Int
+    ) async throws {
+        let envelope = try await supervisor.getSnapshot()
+        let snapshot = try snapshotDecoder.decode(
+            envelope,
+            endpointDescription: endpointDescription,
+            protocolVersion: protocolVersion
+        )
+        latestSnapshot = snapshot
+        workspaceState = LiveWorkspacePresenter.ready(
+            snapshot,
+            planInteraction: .rejected(message)
+        )
+    }
+
+    private func engineCommand(for request: PlanMutationRequest) -> EnginePlanCommand {
+        switch request {
+        case let .selectTheme(context, themeID):
+            .selectTheme(context: engineContext(context), themeID: themeID)
+        case let .selectScene(context, phraseIndex, sceneID):
+            .selectScene(
+                context: engineContext(context),
+                phraseIndex: phraseIndex,
+                sceneID: sceneID
+            )
+        case let .setCueLock(context, phraseIndex, locked):
+            .setCueLock(
+                context: engineContext(context),
+                phraseIndex: phraseIndex,
+                locked: locked
+            )
+        case let .regeneratePlan(context):
+            .regeneratePlan(context: engineContext(context))
+        }
+    }
+
+    private func engineContext(
+        _ context: PlanMutationContext
+    ) -> EnginePlanCommandContext {
+        EnginePlanCommandContext(
+            planID: context.planID,
+            trackLoadID: context.trackLoadID,
+            expectedPlanRevision: context.expectedPlanRevision
+        )
     }
 
     private func engineExecutable() throws -> URL {

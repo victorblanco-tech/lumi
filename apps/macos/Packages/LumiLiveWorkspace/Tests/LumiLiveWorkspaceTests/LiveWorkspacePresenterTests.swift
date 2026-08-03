@@ -23,6 +23,21 @@ struct LiveWorkspacePresenterTests {
         #expect(state.content?.nextDeck.title == "Neon Horizon")
         #expect(state.content?.plan?.deckID == state.content?.nextDeck.deckID)
         #expect(state.content?.plan?.cues.count == 4)
+        #expect(state.content?.plan?.planID == "14113485664261432828")
+        #expect(state.content?.plan?.cues.allSatisfy { !$0.locked } == true)
+        #expect(state.content?.planningOptions.themes.count == 2)
+        #expect(state.content?.planningOptions.scenes.count == 10)
+    }
+
+    @Test("Plan interaction feedback retains the authoritative snapshot")
+    func planInteractionRetainsSnapshot() {
+        let state = LiveWorkspacePresenter.ready(
+            LiveWorkspaceFixtures.readySnapshot,
+            planInteraction: .rejected("Revision conflict")
+        )
+
+        #expect(state.planInteraction == .rejected("Revision conflict"))
+        #expect(state.content?.plan?.revision == 1)
     }
 
     @Test("Fallback remains visible with authoritative decks and plan")

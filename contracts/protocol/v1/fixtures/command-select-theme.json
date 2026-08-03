@@ -7,8 +7,9 @@
   "sentAt": "2026-08-02T18:00:00Z",
   "payload": {
     "kind": "selectTheme",
-    "trackLoadInstanceId": "deck-b-load-0042",
-    "themeId": "neon-pulse",
-    "expectedPlanRevision": 3
+    "planId": "14113485664261432828",
+    "trackLoadId": 2001,
+    "themeId": 1,
+    "expectedPlanRevision": 1
   }
 }

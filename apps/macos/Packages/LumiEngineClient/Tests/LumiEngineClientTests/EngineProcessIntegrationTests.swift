@@ -3,6 +3,30 @@ import LumiProtocol
 import Testing
 @testable import LumiEngineClient
 
+@Test("Typed engine command failures preserve revision conflict details")
+func decodesCommandFailure() {
+    let envelope = MessageEnvelope(
+        protocolVersion: 1,
+        messageType: .error,
+        messageId: "error-1",
+        sequence: 2,
+        correlationId: "command-1",
+        sentAt: "2026-08-03T12:00:00Z",
+        payload: [
+            "kind": .string("revisionConflict"),
+            "code": .string("planRevisionMismatch"),
+            "message": .string("The plan changed before the command was applied."),
+            "retryable": .boolean(true),
+            "actualPlanRevision": .number(4)
+        ]
+    )
+
+    let failure = EngineCommandFailure(envelope)
+    #expect(failure?.kind == "revisionConflict")
+    #expect(failure?.actualPlanRevision == 4)
+    #expect(failure?.retryable == true)
+}
+
 @Test("The Swift client launches and authenticates the real Rust engine")
 func launchesRealEngine() async throws {
     let environment = ProcessInfo.processInfo.environment
@@ -22,6 +46,34 @@ func launchesRealEngine() async throws {
         let snapshot = try await supervisor.connect(to: endpoint)
         #expect(snapshot.messageType == .snapshot)
         #expect(snapshot.sequence == 1)
+
+        guard case let .object(plan) = snapshot.payload["nextPlan"],
+              case let .string(planID) = plan["planId"] else {
+            Issue.record("Initial snapshot must contain a plan ID")
+            await supervisor.stop()
+            return
+        }
+        let context = EnginePlanCommandContext(
+            planID: planID,
+            trackLoadID: 2_001,
+            expectedPlanRevision: 1
+        )
+        let command = EnginePlanCommand.selectTheme(context: context, themeID: 1)
+        let revised = try await supervisor.send(command, messageID: "swift-theme-1")
+        #expect(planRevision(revised) == 2)
+
+        let duplicate = try await supervisor.send(command, messageID: "swift-theme-1")
+        #expect(planRevision(duplicate) == 2)
+
+        let conflict = try await supervisor.send(
+            command,
+            messageID: "swift-stale-theme"
+        )
+        #expect(EngineCommandFailure(conflict)?.kind == "revisionConflict")
+        #expect(EngineCommandFailure(conflict)?.actualPlanRevision == 2)
+
+        let refreshed = try await supervisor.getSnapshot()
+        #expect(planRevision(refreshed) == 2)
         #expect(await supervisor.isRunning())
         await supervisor.stop()
         #expect(await !supervisor.isRunning())
@@ -29,6 +81,14 @@ func launchesRealEngine() async throws {
         await supervisor.stop()
         throw error
     }
+}
+
+private func planRevision(_ envelope: MessageEnvelope) -> UInt64? {
+    guard case let .object(plan) = envelope.payload["nextPlan"],
+          case let .number(revision) = plan["revision"] else {
+        return nil
+    }
+    return UInt64(revision)
 }
 
 @Test("A missing engine executable fails safely")

@@ -16,8 +16,11 @@ create plan decisions.
 - `LumiVisualEvidence` renders those fixtures without opening an app window.
 
 The macOS app owns process supervision and supplies the resulting
-`LiveWorkspaceState`. Key notation remains a presentation preference; canonical
-key data is not mutated.
+`LiveWorkspaceState`. Theme, scene, lock, and regenerate controls emit revisioned
+intent to the engine. The view never applies an optimistic shadow plan: it
+renders the returned authoritative snapshot, or refreshes after a revision
+conflict. Key notation remains a presentation preference; canonical key data is
+not mutated.
 
 ## Headless visual evidence
 
@@ -27,13 +30,14 @@ Generate the review matrix with:
 ./scripts/render-visual-evidence.sh
 ```
 
-The command writes six 1280×960 PNGs to the ignored
+The command writes eight 1280×960 PNGs to the ignored
 `build/VisualEvidence/` directory. It uses fixed content, dimensions, locale,
 appearance, and key notation. Rendering therefore works while the login session
 is locked and does not require an active app window.
 
 The full repository verification also renders the matrix and fails unless all
-six non-empty PNGs are produced. Visual review remains necessary for layout,
+eight non-empty PNGs are produced. The matrix includes a successful locked cue
+edit and revision-conflict feedback. Visual review remains necessary for layout,
 contrast, truncation, and semantic state use.
 
 ## Verification coverage

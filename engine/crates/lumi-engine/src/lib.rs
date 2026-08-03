@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+mod commands;
 mod session;
 mod startup;
 

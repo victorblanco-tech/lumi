@@ -11,6 +11,7 @@ public struct EngineSnapshot: Equatable, Sendable {
     public let leaderDeckID: UInt64
     public let decks: [DeckSnapshot]
     public let nextPlan: PlanSnapshot?
+    public let planningOptions: PlanningOptionsSnapshot
 
     public init(
         endpoint: String,
@@ -22,7 +23,8 @@ public struct EngineSnapshot: Equatable, Sendable {
         deckSource: DeckSourceSnapshot,
         leaderDeckID: UInt64,
         decks: [DeckSnapshot],
-        nextPlan: PlanSnapshot?
+        nextPlan: PlanSnapshot?,
+        planningOptions: PlanningOptionsSnapshot
     ) {
         self.endpoint = endpoint
         self.engineVersion = engineVersion
@@ -34,6 +36,7 @@ public struct EngineSnapshot: Equatable, Sendable {
         self.leaderDeckID = leaderDeckID
         self.decks = decks
         self.nextPlan = nextPlan
+        self.planningOptions = planningOptions
     }
 }
 
@@ -109,6 +112,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
 }
 
 public struct PlanSnapshot: Equatable, Sendable {
+    public let planID: String
     public let deckID: UInt64
     public let trackLoadID: UInt64
     public let trackDurationBeats: UInt64
@@ -118,6 +122,7 @@ public struct PlanSnapshot: Equatable, Sendable {
     public let cues: [PlanCueSnapshot]
 
     public init(
+        planID: String,
         deckID: UInt64,
         trackLoadID: UInt64,
         trackDurationBeats: UInt64,
@@ -126,6 +131,7 @@ public struct PlanSnapshot: Equatable, Sendable {
         status: String,
         cues: [PlanCueSnapshot]
     ) {
+        self.planID = planID
         self.deckID = deckID
         self.trackLoadID = trackLoadID
         self.trackDurationBeats = trackDurationBeats
@@ -141,6 +147,7 @@ public struct PlanCueSnapshot: Equatable, Identifiable, Sendable {
     public let startBeat: UInt64
     public let endBeat: UInt64
     public let origin: String
+    public let locked: Bool
     public let reason: PlanReasonSnapshot
     public let action: PlanActionSnapshot
 
@@ -151,6 +158,7 @@ public struct PlanCueSnapshot: Equatable, Identifiable, Sendable {
         startBeat: UInt64,
         endBeat: UInt64,
         origin: String,
+        locked: Bool,
         reason: PlanReasonSnapshot,
         action: PlanActionSnapshot
     ) {
@@ -158,6 +166,7 @@ public struct PlanCueSnapshot: Equatable, Identifiable, Sendable {
         self.startBeat = startBeat
         self.endBeat = endBeat
         self.origin = origin
+        self.locked = locked
         self.reason = reason
         self.action = action
     }
@@ -170,11 +179,55 @@ public enum PlanReasonSnapshot: Equatable, Sendable {
 
 public enum PlanActionSnapshot: Equatable, Sendable {
     case applyLook(
+        themeID: UInt64,
         themeName: String,
+        sceneID: UInt64,
         sceneName: String,
         category: String,
         loopBank: UInt64,
         loopSlot: UInt64
     )
     case holdCurrentLook
+}
+
+public struct PlanningOptionsSnapshot: Equatable, Sendable {
+    public let themes: [ThemeOptionSnapshot]
+    public let scenes: [SceneOptionSnapshot]
+
+    public init(themes: [ThemeOptionSnapshot], scenes: [SceneOptionSnapshot]) {
+        self.themes = themes
+        self.scenes = scenes
+    }
+}
+
+public struct ThemeOptionSnapshot: Equatable, Identifiable, Sendable {
+    public let id: UInt64
+    public let name: String
+
+    public init(id: UInt64, name: String) {
+        self.id = id
+        self.name = name
+    }
+}
+
+public struct SceneOptionSnapshot: Equatable, Identifiable, Sendable {
+    public let id: UInt64
+    public let name: String
+    public let category: String
+    public let loopBank: UInt64
+    public let loopSlot: UInt64
+
+    public init(
+        id: UInt64,
+        name: String,
+        category: String,
+        loopBank: UInt64,
+        loopSlot: UInt64
+    ) {
+        self.id = id
+        self.name = name
+        self.category = category
+        self.loopBank = loopBank
+        self.loopSlot = loopSlot
+    }
 }

@@ -15,6 +15,7 @@
       "startBeat": 0,
       "endBeat": 32,
       "origin": "automatic",
+      "locked": false,
       "reason": {
         "kind": "phraseCategoryMatched",
         "phraseKind": "intro",
@@ -37,6 +38,7 @@
       "startBeat": 32,
       "endBeat": 64,
       "origin": "automatic",
+      "locked": false,
       "reason": {
         "kind": "phraseCategoryMatched",
         "phraseKind": "breakdown",
@@ -59,6 +61,7 @@
       "startBeat": 64,
       "endBeat": 96,
       "origin": "automatic",
+      "locked": false,
       "reason": {
         "kind": "phraseCategoryMatched",
         "phraseKind": "build",
@@ -81,6 +84,7 @@
       "startBeat": 96,
       "endBeat": 128,
       "origin": "automatic",
+      "locked": false,
       "reason": {
         "kind": "phraseCategoryMatched",
         "phraseKind": "drop",

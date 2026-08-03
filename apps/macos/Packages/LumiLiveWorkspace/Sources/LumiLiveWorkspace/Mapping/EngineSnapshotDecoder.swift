@@ -28,7 +28,8 @@ public struct EngineSnapshotDecoder: Sendable {
               case let .string(providerKind) = sourcePayload["providerKind"],
               case let .string(sourceStatus) = sourcePayload["status"],
               let leaderDeckID = unsignedInteger(envelope.payload["leaderDeckId"]),
-              case let .array(deckPayloads) = envelope.payload["decks"] else {
+              case let .array(deckPayloads) = envelope.payload["decks"],
+              case let .object(optionsPayload) = envelope.payload["planningOptions"] else {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
 
@@ -72,12 +73,15 @@ public struct EngineSnapshotDecoder: Sendable {
             ),
             leaderDeckID: leaderDeckID,
             decks: decks,
-            nextPlan: nextPlan
+            nextPlan: nextPlan,
+            planningOptions: try decodePlanningOptions(optionsPayload)
         )
     }
 
     private func decodePlan(_ value: JSONValue?) throws -> PlanSnapshot {
         guard case let .object(plan) = value,
+              case let .string(planID) = plan["planId"],
+              !planID.isEmpty,
               let deckID = unsignedInteger(plan["deckId"]),
               let trackLoadID = unsignedInteger(plan["trackLoadId"]),
               let trackDurationBeats = unsignedInteger(plan["trackDurationBeats"]),
@@ -112,6 +116,7 @@ public struct EngineSnapshotDecoder: Sendable {
         }
 
         return PlanSnapshot(
+            planID: planID,
             deckID: deckID,
             trackLoadID: trackLoadID,
             trackDurationBeats: trackDurationBeats,
@@ -130,6 +135,7 @@ public struct EngineSnapshotDecoder: Sendable {
               endBeat > startBeat,
               case let .string(origin) = cue["origin"],
               ["automatic", "fallback", "user"].contains(origin),
+              case let .boolean(locked) = cue["locked"],
               case let .object(reasonPayload) = cue["reason"],
               case let .object(actionPayload) = cue["action"] else {
             throw EngineSnapshotDecodingError.invalidSnapshot
@@ -139,6 +145,7 @@ public struct EngineSnapshotDecoder: Sendable {
             startBeat: startBeat,
             endBeat: endBeat,
             origin: origin,
+            locked: locked,
             reason: try decodeReason(reasonPayload),
             action: try decodeAction(actionPayload)
         )
@@ -168,7 +175,9 @@ public struct EngineSnapshotDecoder: Sendable {
         }
         switch kind {
         case "applyLook":
-            guard case let .string(themeName) = payload["themeName"],
+            guard let themeID = unsignedInteger(payload["themeId"]),
+                  case let .string(themeName) = payload["themeName"],
+                  let sceneID = unsignedInteger(payload["sceneId"]),
                   case let .string(sceneName) = payload["sceneName"],
                   case let .string(category) = payload["category"],
                   let loopBank = unsignedInteger(payload["loopBank"]),
@@ -176,7 +185,9 @@ public struct EngineSnapshotDecoder: Sendable {
                 throw EngineSnapshotDecodingError.invalidSnapshot
             }
             return .applyLook(
+                themeID: themeID,
                 themeName: themeName,
+                sceneID: sceneID,
                 sceneName: sceneName,
                 category: category,
                 loopBank: loopBank,
@@ -187,6 +198,48 @@ public struct EngineSnapshotDecoder: Sendable {
         default:
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
+    }
+
+    private func decodePlanningOptions(
+        _ payload: [String: JSONValue]
+    ) throws -> PlanningOptionsSnapshot {
+        guard case let .array(themePayloads) = payload["themes"],
+              case let .array(scenePayloads) = payload["scenes"] else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        let themes = try themePayloads.map { value in
+            guard case let .object(theme) = value,
+                  let id = unsignedInteger(theme["id"]),
+                  case let .string(name) = theme["name"],
+                  !name.isEmpty else {
+                throw EngineSnapshotDecodingError.invalidSnapshot
+            }
+            return ThemeOptionSnapshot(id: id, name: name)
+        }
+        let scenes = try scenePayloads.map { value in
+            guard case let .object(scene) = value,
+                  let id = unsignedInteger(scene["id"]),
+                  case let .string(name) = scene["name"],
+                  case let .string(category) = scene["category"],
+                  let loopBank = unsignedInteger(scene["loopBank"]),
+                  let loopSlot = unsignedInteger(scene["loopSlot"]),
+                  !name.isEmpty else {
+                throw EngineSnapshotDecodingError.invalidSnapshot
+            }
+            return SceneOptionSnapshot(
+                id: id,
+                name: name,
+                category: category,
+                loopBank: loopBank,
+                loopSlot: loopSlot
+            )
+        }
+        guard !themes.isEmpty, !scenes.isEmpty,
+              Set(themes.map(\.id)).count == themes.count,
+              Set(scenes.map(\.id)).count == scenes.count else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        return PlanningOptionsSnapshot(themes: themes, scenes: scenes)
     }
 
     private func decodeDeck(_ value: JSONValue) throws -> DeckSnapshot {

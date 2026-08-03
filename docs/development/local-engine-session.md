@@ -16,6 +16,9 @@ a later `SMAppService` lifecycle does not change views or protocol models.
    authentication frame.
 7. The UI becomes ready only after decoding the engine's authoritative protocol
    v1 state snapshot.
+8. One authenticated connection remains open for bounded command/response
+   traffic. Each plan mutation returns either a complete snapshot or a typed
+   validation/revision error correlated to the command ID.
 
 The authentication frame belongs to local transport bootstrap and is not an
 application command. After authentication, all semantic traffic uses the

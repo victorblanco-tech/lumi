@@ -30,6 +30,7 @@ struct CanonicalCue<'a> {
     start_beat: u32,
     end_beat: u32,
     origin: &'static str,
+    locked: bool,
     reason: CanonicalReason,
     action: CanonicalAction<'a>,
 }
@@ -87,6 +88,7 @@ pub fn canonical_plan(plan: &LightingPlan) -> Result<Vec<u8>, CanonicalPlanError
                 start_beat: cue.start_beat(),
                 end_beat: cue.end_beat(),
                 origin: cue_origin_name(cue.origin()),
+                locked: cue.locked(),
                 reason: canonical_reason(cue.reason()),
                 action: canonical_action(cue.action()),
             })
