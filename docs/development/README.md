@@ -79,6 +79,10 @@ The deterministic two-deck source, controllable clock, fixture, and adapter
 boundary are documented in
 [`simulator-deck-source.md`](simulator-deck-source.md).
 
+Deterministic phrase planning, the minimal catalog, fallback behavior, golden
+plan, and performance budget are documented in
+[`deterministic-planner.md`](deterministic-planner.md).
+
 ## Troubleshooting
 
 - `xcodebuild` points at Command Line Tools: rerun `xcode-select --switch`.

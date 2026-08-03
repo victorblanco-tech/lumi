@@ -74,7 +74,7 @@ fn real_engine_process_serves_authenticated_snapshot_on_loopback() {
 
     assert_eq!(snapshot.message_type, MessageType::Snapshot);
     assert_eq!(snapshot.sequence, 1);
-    assert_eq!(snapshot.payload.get("stateRevision"), Some(&Value::from(7)));
+    assert_eq!(snapshot.payload.get("stateRevision"), Some(&Value::from(8)));
     assert_eq!(
         snapshot
             .payload
@@ -97,7 +97,7 @@ fn real_engine_process_serves_authenticated_snapshot_on_loopback() {
             .get("runtimeCore")
             .and_then(Value::as_object)
             .and_then(|runtime| runtime.get("processedEvents")),
-        Some(&Value::from(7))
+        Some(&Value::from(8))
     );
     assert_eq!(
         snapshot
@@ -120,6 +120,23 @@ fn real_engine_process_serves_authenticated_snapshot_on_loopback() {
     assert_eq!(
         decks[1].get("track").and_then(|track| track.get("title")),
         Some(&Value::String("Neon Horizon".to_owned()))
+    );
+    let Some(next_plan) = snapshot.payload.get("nextPlan").and_then(Value::as_object) else {
+        let _ = child.kill();
+        panic!("snapshot must contain the next-track plan");
+    };
+    assert_eq!(next_plan.get("deckId"), Some(&Value::from(2)));
+    assert_eq!(
+        next_plan.get("status"),
+        Some(&Value::String("ready".to_owned()))
+    );
+    assert_eq!(next_plan.get("revision"), Some(&Value::from(1)));
+    assert_eq!(
+        next_plan
+            .get("cues")
+            .and_then(Value::as_array)
+            .map(Vec::len),
+        Some(4)
     );
     drop(connection);
 

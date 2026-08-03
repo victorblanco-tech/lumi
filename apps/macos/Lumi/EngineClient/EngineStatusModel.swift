@@ -12,6 +12,7 @@ struct EngineReadyViewState: Equatable {
     let deckSource: EngineDeckSourceViewState
     let leaderDeckID: UInt64
     let decks: [EngineDeckViewState]
+    let nextPlan: EnginePlanViewState?
 }
 
 struct EngineRuntimeCoreViewState: Equatable {
@@ -40,6 +41,43 @@ struct EngineDeckViewState: Equatable, Identifiable {
     let phraseIndex: UInt64?
 
     var id: UInt64 { deckID }
+}
+
+struct EnginePlanViewState: Equatable {
+    let deckID: UInt64
+    let trackLoadID: UInt64
+    let trackDurationBeats: UInt64
+    let revision: UInt64
+    let configurationRevision: UInt64
+    let status: String
+    let cues: [EnginePlanCueViewState]
+}
+
+struct EnginePlanCueViewState: Equatable, Identifiable {
+    let phraseIndex: UInt64
+    let startBeat: UInt64
+    let endBeat: UInt64
+    let origin: String
+    let reason: EnginePlanReasonViewState
+    let action: EnginePlanActionViewState
+
+    var id: UInt64 { phraseIndex }
+}
+
+enum EnginePlanReasonViewState: Equatable {
+    case phraseCategoryMatched(phraseKind: String, category: String)
+    case missingPhraseAnalysis
+}
+
+enum EnginePlanActionViewState: Equatable {
+    case applyLook(
+        themeName: String,
+        sceneName: String,
+        category: String,
+        loopBank: UInt64,
+        loopSlot: UInt64
+    )
+    case holdCurrentLook
 }
 
 enum EngineHealthState: Equatable {
@@ -144,6 +182,17 @@ final class EngineStatusModel: ObservableObject {
               deckIDs.contains(leaderDeckID) else {
             throw EngineClientError.invalidInitialSnapshot
         }
+        let nextPlan: EnginePlanViewState?
+        if snapshot.payload["nextPlan"] == .null {
+            nextPlan = nil
+        } else {
+            nextPlan = try mapPlan(snapshot.payload["nextPlan"])
+            guard let nextDeck = decks.first(where: { $0.deckID != leaderDeckID }),
+                  nextPlan?.deckID == nextDeck.deckID,
+                  nextPlan?.trackLoadID == nextDeck.trackLoadID else {
+                throw EngineClientError.invalidInitialSnapshot
+            }
+        }
 
         return EngineReadyViewState(
             endpoint: "\(endpoint.host):\(endpoint.port)",
@@ -164,8 +213,123 @@ final class EngineStatusModel: ObservableObject {
                 status: deckSourceStatus
             ),
             leaderDeckID: leaderDeckID,
-            decks: decks
+            decks: decks,
+            nextPlan: nextPlan
         )
+    }
+
+    private func mapPlan(_ value: JSONValue?) throws -> EnginePlanViewState {
+        guard case let .object(plan) = value,
+              let deckID = unsignedInteger(plan["deckId"]),
+              let trackLoadID = unsignedInteger(plan["trackLoadId"]),
+              let trackDurationBeats = unsignedInteger(plan["trackDurationBeats"]),
+              let revision = unsignedInteger(plan["revision"]),
+              let configurationRevision = unsignedInteger(plan["configurationRevision"]),
+              case let .string(status) = plan["status"],
+              ["ready", "fallback"].contains(status),
+              revision > 0,
+              configurationRevision > 0,
+              trackDurationBeats > 0,
+              case let .array(cuePayloads) = plan["cues"] else {
+            throw EngineClientError.invalidInitialSnapshot
+        }
+        let cues = try cuePayloads.map(mapPlanCue)
+        guard !cues.isEmpty,
+              cues.enumerated().allSatisfy({ offset, cue in
+                  cue.phraseIndex == UInt64(offset)
+              }) else {
+            throw EngineClientError.invalidInitialSnapshot
+        }
+        var previousEnd: UInt64 = 0
+        for cue in cues {
+            guard cue.startBeat == previousEnd else {
+                throw EngineClientError.invalidInitialSnapshot
+            }
+            previousEnd = cue.endBeat
+        }
+        guard previousEnd == trackDurationBeats else {
+            throw EngineClientError.invalidInitialSnapshot
+        }
+        return EnginePlanViewState(
+            deckID: deckID,
+            trackLoadID: trackLoadID,
+            trackDurationBeats: trackDurationBeats,
+            revision: revision,
+            configurationRevision: configurationRevision,
+            status: status,
+            cues: cues
+        )
+    }
+
+    private func mapPlanCue(_ value: JSONValue) throws -> EnginePlanCueViewState {
+        guard case let .object(cue) = value,
+              let phraseIndex = unsignedInteger(cue["phraseIndex"]),
+              let startBeat = unsignedInteger(cue["startBeat"]),
+              let endBeat = unsignedInteger(cue["endBeat"]),
+              endBeat > startBeat,
+              case let .string(origin) = cue["origin"],
+              ["automatic", "fallback", "user"].contains(origin),
+              case let .object(reasonPayload) = cue["reason"],
+              case let .object(actionPayload) = cue["action"] else {
+            throw EngineClientError.invalidInitialSnapshot
+        }
+        return EnginePlanCueViewState(
+            phraseIndex: phraseIndex,
+            startBeat: startBeat,
+            endBeat: endBeat,
+            origin: origin,
+            reason: try mapPlanReason(reasonPayload),
+            action: try mapPlanAction(actionPayload)
+        )
+    }
+
+    private func mapPlanReason(
+        _ payload: [String: JSONValue]
+    ) throws -> EnginePlanReasonViewState {
+        guard case let .string(kind) = payload["kind"] else {
+            throw EngineClientError.invalidInitialSnapshot
+        }
+        switch kind {
+        case "phraseCategoryMatched":
+            guard case let .string(phraseKind) = payload["phraseKind"],
+                  case let .string(category) = payload["category"] else {
+                throw EngineClientError.invalidInitialSnapshot
+            }
+            return .phraseCategoryMatched(phraseKind: phraseKind, category: category)
+        case "missingPhraseAnalysis":
+            return .missingPhraseAnalysis
+        default:
+            throw EngineClientError.invalidInitialSnapshot
+        }
+    }
+
+    private func mapPlanAction(
+        _ payload: [String: JSONValue]
+    ) throws -> EnginePlanActionViewState {
+        guard case let .string(kind) = payload["kind"] else {
+            throw EngineClientError.invalidInitialSnapshot
+        }
+        switch kind {
+        case "applyLook":
+            guard case let .string(themeName) = payload["themeName"],
+                  case let .string(sceneName) = payload["sceneName"],
+                  case let .string(category) = payload["category"],
+                  let loopBank = unsignedInteger(payload["loopBank"]),
+                  let loopSlot = unsignedInteger(payload["loopSlot"]) else {
+                throw EngineClientError.invalidInitialSnapshot
+            }
+            return .applyLook(
+                themeName: themeName,
+                sceneName: sceneName,
+                category: category,
+                loopBank: loopBank,
+                loopSlot: loopSlot
+            )
+        case "holdCurrentLook":
+            return .holdCurrentLook
+        default:
+            throw EngineClientError.invalidInitialSnapshot
+        }
     }
 
     private func mapDeck(_ value: JSONValue) throws -> EngineDeckViewState {

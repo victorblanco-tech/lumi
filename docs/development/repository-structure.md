@@ -31,6 +31,11 @@ into domain events. Future Beat Link or direct Pro DJ Link adapters implement
 the same port; neither the domain nor the client wire model imports their
 provider-specific types.
 
+`lumi-planner` owns deterministic creative selection and canonical plan
+evidence. It depends only on `lumi-domain`; it knows no simulator, transport,
+SwiftUI, MIDI, or SoundSwitch types. The engine invokes it synchronously after
+a Next load and feeds its result back through the reducer as an effect result.
+
 ## Naming
 
 Rust crates and modules use specific domain or capability names in idiomatic

@@ -111,26 +111,6 @@
         }
       }
     },
-    "design.preview.phrasePlan" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Next-track Phrase Plan"
-          }
-        }
-      }
-    },
-    "design.preview.sampleData" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Sample data"
-          }
-        }
-      }
-    },
     "design.preview.scene" : {
       "localizations" : {
         "en" : {
@@ -146,7 +126,7 @@
         "en" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Development Workspace"
+            "value" : "Live Planning Workspace"
           }
         }
       }
@@ -157,16 +137,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Theme"
-          }
-        }
-      }
-    },
-    "design.preview.themeValue" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Midnight Drive"
           }
         }
       }
@@ -187,16 +157,6 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Live Deck Source"
-          }
-        }
-      }
-    },
-    "design.preview.planWorkspace" : {
-      "localizations" : {
-        "en" : {
-          "stringUnit" : {
-            "state" : "translated",
-            "value" : "Upcoming Plan Preview"
           }
         }
       }
@@ -351,6 +311,30 @@
         }
       }
     },
+    "phrase.kind.breakdown" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Breakdown" } } } },
+    "phrase.kind.build" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Build" } } } },
+    "phrase.kind.drop" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Drop" } } } },
+    "phrase.kind.fallback" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Fallback" } } } },
+    "phrase.kind.intro" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Intro" } } } },
+    "phrase.kind.outro" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Outro" } } } },
+    "phrase.kind.verse" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Verse" } } } },
+    "planning.cue.hold" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Hold current look" } } } },
+    "planning.cue.look" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "%@ · Loop %llu.%llu" } } } },
+    "planning.inspector.reason" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Reason" } } } },
+    "planning.phrasePlan.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Precomputed Phrase Plan" } } } },
+    "planning.reason.missingAnalysis" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Phrase analysis unavailable; preserving the current safe look." } } } },
+    "planning.reason.phraseMatched" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Matched %@ to the %@ scene category." } } } },
+    "planning.revision.detail" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Revision %llu · Config %llu" } } } },
+    "planning.status.fallback" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Safe fallback" } } } },
+    "planning.status.ready" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Ready before transition" } } } },
+    "planning.status.waiting" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Waiting for a generated next-track plan…" } } } },
+    "planning.value.notAvailable" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Not available" } } } },
+    "planning.workspace.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Next-track Lighting Plan" } } } },
+    "scene.category.ambient" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "ambient" } } } },
+    "scene.category.break" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "break" } } } },
+    "scene.category.build" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "build" } } } },
+    "scene.category.groove" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "groove" } } } },
+    "scene.category.impact" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "impact" } } } },
     "operation.arm" : {
       "localizations" : {
         "en" : {

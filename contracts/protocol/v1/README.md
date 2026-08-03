@@ -35,3 +35,10 @@ branch on simulator, Beat Link, or future Pro DJ Link implementation types.
 Track metadata uses integer milli-BPM, canonical pitch class and mode, and
 contiguous beat-based phrases so snapshots remain deterministic across Rust and
 Swift.
+
+`nextPlan` contains the authoritative precomputed plan for the non-leader deck.
+Each cue has a contiguous phrase and beat range, origin, machine-readable
+reason, and semantic action. A plan is either `ready` or an explicit `fallback`;
+clients display that state but do not run planner rules. The deterministic seed
+is encoded as a decimal string because protocol v1 clients must not lose 64-bit
+integer precision through a JSON floating-point representation.
