@@ -59,7 +59,8 @@ public struct LibrarySnapshotDecoder: Sendable {
                 tracks: try trackValues.map(decodeTrack)
             ),
             editor: try decodeEditor(library["editor"]),
-            phraseRoleSettings: try decodePhraseRoleSettings(library["phraseRoleSettings"])
+            phraseRoleSettings: try decodePhraseRoleSettings(library["phraseRoleSettings"]),
+            autoloopCatalog: try decodeAutoloopCatalog(library["autoloopCatalog"])
         )
     }
 
@@ -155,6 +156,188 @@ public struct LibrarySnapshotDecoder: Sendable {
             roles: roles,
             mappingProfiles: profiles,
             mappingPolicy: try string(settings, "mappingPolicy")
+        )
+    }
+
+    private func decodeAutoloopCatalog(_ value: JSONValue?) throws -> AutoloopCatalogState? {
+        guard let value, value != .null else { return nil }
+        guard case let .object(catalog) = value else {
+            throw LibrarySnapshotError.invalidObject
+        }
+        let themeValues = try array(catalog, "themes")
+        let roleValues = try array(catalog, "roles")
+        guard themeValues.count == 4, roleValues.count <= 1_000 else {
+            throw LibrarySnapshotError.invalidAutoloopCatalog
+        }
+        let themes = try themeValues.map { value -> AutoloopThemeState in
+            guard case let .object(theme) = value else {
+                throw LibrarySnapshotError.invalidObject
+            }
+            return AutoloopThemeState(
+                id: try unsigned(theme, "id"),
+                name: try string(theme, "name"),
+                sortOrder: try UInt16(exactly: unsigned(theme, "sortOrder"))
+                    .required(.invalidNumber("autoloop.theme.sortOrder"))
+            )
+        }
+        guard Set(themes.map(\.id)).count == themes.count,
+              Set(themes.map { $0.name.lowercased() }).count == themes.count,
+              themes.enumerated().allSatisfy({ index, theme in
+                  theme.id > 0 && theme.sortOrder == UInt16(index + 1)
+              }) else {
+            throw LibrarySnapshotError.invalidAutoloopCatalog
+        }
+        let themeIDs = Set(themes.map(\.id))
+        var totalVariantCount = 0
+        let roles = try roleValues.map { value -> AutoloopRoleMatrixState in
+            guard case let .object(role) = value else {
+                throw LibrarySnapshotError.invalidObject
+            }
+            let variantValues = try array(role, "variants")
+            totalVariantCount += variantValues.count
+            guard totalVariantCount <= 10_000 else {
+                throw LibrarySnapshotError.unboundedAutoloopCatalog
+            }
+            let variants = try variantValues.map { value -> AutoloopVariantState in
+                guard case let .object(variant) = value else {
+                    throw LibrarySnapshotError.invalidObject
+                }
+                let cellValues = try array(variant, "cells")
+                guard cellValues.count == themes.count else {
+                    throw LibrarySnapshotError.invalidAutoloopCatalog
+                }
+                let cells = try cellValues.map { value -> AutoloopCellState in
+                    guard case let .object(cell) = value else {
+                        throw LibrarySnapshotError.invalidObject
+                    }
+                    let status = try string(cell, "status")
+                    guard status == "ready" || status == "missing" else {
+                        throw LibrarySnapshotError.invalidAutoloopCatalog
+                    }
+                    let entryID = optionalString(cell, "entryId")
+                    let name = optionalString(cell, "name")
+                    guard (status == "ready" && entryID != nil && name != nil)
+                        || (status == "missing" && entryID == nil && name == nil) else {
+                        throw LibrarySnapshotError.invalidAutoloopCatalog
+                    }
+                    return AutoloopCellState(
+                        themeID: try unsigned(cell, "themeId"),
+                        entryID: entryID,
+                        name: name,
+                        status: status
+                    )
+                }
+                guard Set(cells.map(\.themeID)) == themeIDs else {
+                    throw LibrarySnapshotError.invalidAutoloopCatalog
+                }
+                return AutoloopVariantState(
+                    id: try string(variant, "id"),
+                    name: try string(variant, "name"),
+                    sortOrder: try UInt16(exactly: unsigned(variant, "sortOrder"))
+                        .required(.invalidNumber("autoloop.variant.sortOrder")),
+                    archived: try boolean(variant, "archived"),
+                    cells: cells
+                )
+            }
+            guard Set(variants.map(\.id)).count == variants.count,
+                  variants.enumerated().allSatisfy({ index, variant in
+                      variant.sortOrder == UInt16(index + 1)
+                  }) else {
+                throw LibrarySnapshotError.invalidAutoloopCatalog
+            }
+            return AutoloopRoleMatrixState(
+                id: try string(role, "id"),
+                name: try string(role, "name"),
+                archived: try boolean(role, "archived"),
+                variants: variants
+            )
+        }
+        guard Set(roles.map(\.id)).count == roles.count else {
+            throw LibrarySnapshotError.invalidAutoloopCatalog
+        }
+        let preflightValue = try object(catalog, "preflight")
+        let missingValues = try array(preflightValue, "missingCells")
+        guard missingValues.count <= 200 else {
+            throw LibrarySnapshotError.unboundedAutoloopCatalog
+        }
+        let missing = try missingValues.map { value -> MissingAutoloopCellState in
+            guard case let .object(cell) = value else {
+                throw LibrarySnapshotError.invalidObject
+            }
+            return MissingAutoloopCellState(
+                themeID: try unsigned(cell, "themeId"),
+                roleID: try string(cell, "roleId"),
+                variantID: try string(cell, "variantId")
+            )
+        }
+        let missingCount = try unsigned(preflightValue, "missingCellCount")
+        let missingRoleValues = try array(preflightValue, "missingRoleIds")
+        guard missingRoleValues.count <= 200 else {
+            throw LibrarySnapshotError.unboundedAutoloopCatalog
+        }
+        let missingRoleIDs = try missingRoleValues.map { value -> String in
+            guard case let .string(roleID) = value else {
+                throw LibrarySnapshotError.invalidAutoloopCatalog
+            }
+            return roleID
+        }
+        let missingRoleCount = try unsigned(preflightValue, "missingRoleCount")
+        let hasMoreMissingCells = try boolean(preflightValue, "hasMoreMissingCells")
+        let hasMoreMissingRoles = try boolean(preflightValue, "hasMoreMissingRoles")
+        let preflightStatus = try string(preflightValue, "status")
+        guard missingCount >= UInt64(missing.count),
+              hasMoreMissingCells || missingCount == UInt64(missing.count),
+              missingRoleCount >= UInt64(missingRoleIDs.count),
+              hasMoreMissingRoles || missingRoleCount == UInt64(missingRoleIDs.count),
+              Set(missingRoleIDs).count == missingRoleIDs.count,
+              missingRoleIDs.allSatisfy({ roleID in
+                  roles.contains(where: { $0.id == roleID && !$0.archived && $0.variants.allSatisfy(\.archived) })
+              }),
+              missing.allSatisfy({ cell in
+                  themeIDs.contains(cell.themeID)
+                      && roles.contains(where: { role in
+                          role.id == cell.roleID
+                              && role.variants.contains(where: { variant in
+                                  variant.id == cell.variantID
+                                      && !variant.archived
+                                      && variant.cells.contains(where: {
+                                          $0.themeID == cell.themeID && $0.isMissing
+                                      })
+                              })
+                      })
+              }),
+              ["ready", "incomplete"].contains(preflightStatus),
+              (preflightStatus == "ready") == (missingCount == 0 && missingRoleCount == 0) else {
+            throw LibrarySnapshotError.invalidAutoloopCatalog
+        }
+        let target = try object(catalog, "targetCapabilities")
+        let revision = try unsigned(catalog, "revision")
+        let defaultsVersion = try unsigned(catalog, "defaultsVersion")
+        let targetValidationOwner = try string(target, "validationOwner")
+        let hardCodedPhysicalCapacity = try boolean(target, "hardCodedPhysicalCapacity")
+        guard revision > 0,
+              defaultsVersion > 0,
+              targetValidationOwner == "targetAdapter",
+              !hardCodedPhysicalCapacity else {
+            throw LibrarySnapshotError.invalidAutoloopCatalog
+        }
+        return AutoloopCatalogState(
+            revision: revision,
+            defaultsVersion: try UInt16(exactly: defaultsVersion)
+                .required(.invalidNumber("autoloop.defaultsVersion")),
+            themes: themes,
+            roles: roles,
+            preflight: AutoloopPreflightState(
+                status: preflightStatus,
+                missingCellCount: missingCount,
+                missingCells: missing,
+                hasMoreMissingCells: hasMoreMissingCells,
+                missingRoleCount: missingRoleCount,
+                missingRoleIDs: missingRoleIDs,
+                hasMoreMissingRoles: hasMoreMissingRoles
+            ),
+            targetValidationOwner: targetValidationOwner,
+            hardCodedPhysicalCapacity: hardCodedPhysicalCapacity
         )
     }
 
@@ -435,6 +618,11 @@ public struct LibrarySnapshotDecoder: Sendable {
         return value
     }
 
+    private func optionalString(_ values: [String: JSONValue], _ key: String) -> String? {
+        guard case let .string(value)? = values[key], !value.isEmpty else { return nil }
+        return value
+    }
+
     private func strings(_ values: [String: JSONValue], _ key: String) throws -> [String] {
         try array(values, key).map { value in
             guard case let .string(string) = value else {
@@ -461,6 +649,8 @@ public enum LibrarySnapshotError: Error, Equatable {
     case invalidAudioURI
     case unboundedPhraseRoleSettings
     case invalidPhraseRoleSettings
+    case unboundedAutoloopCatalog
+    case invalidAutoloopCatalog
 }
 
 private extension Optional {

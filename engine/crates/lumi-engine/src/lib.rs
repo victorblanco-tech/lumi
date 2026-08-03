@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+mod autoloop_defaults;
 mod commands;
 mod library;
 mod phrase_role_defaults;

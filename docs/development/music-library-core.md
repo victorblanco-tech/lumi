@@ -26,13 +26,15 @@ prevent two editors from silently overwriting each other.
 
 ## SQLite persistence
 
-Schema version 3 separates:
+Schema version 4 separates:
 
 - source registrations, immutable import-baseline facts, canonical track and
   playlist identities;
 - current imported analysis, beat markers, waveform samples, and raw phrases;
 - a revisioned configurable phrase-role catalog, one-time default seed marker,
   provider-scoped initial source mappings, and archive-safe stable IDs;
+- a provider-neutral four-Theme Autoloop matrix with role-owned variants,
+  logical cells, optimistic revisions, and no physical target addressing;
 - immutable Lumi timeline revisions, edit reason, parent/restore provenance,
   per-phrase loop strategy, and their current heads.
 

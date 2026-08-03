@@ -135,6 +135,7 @@ struct LumiLibraryVisualEvidenceCommand {
             Color(red: 0.055, green: 0.063, blue: 0.078)
             PhraseRoleSettingsView(
                 settings: settings,
+                autoloopCatalog: AutoloopCatalogFixtures.incomplete,
                 appearance: .constant(.dark),
                 keyNotation: .constant(.camelot),
                 rendersInteractiveControls: false
@@ -149,6 +150,7 @@ struct LumiLibraryVisualEvidenceCommand {
             Color(red: 0.965, green: 0.97, blue: 0.98)
             PhraseRoleSettingsView(
                 settings: settings,
+                autoloopCatalog: AutoloopCatalogFixtures.incomplete,
                 appearance: .constant(.light),
                 keyNotation: .constant(.classic),
                 initialSection: .sourceMapping,
@@ -159,6 +161,22 @@ struct LumiLibraryVisualEvidenceCommand {
         .environment(\.locale, Locale(identifier: "en"))
         .frame(width: width, height: height)
         try render(mappingView, named: "phrase-source-mapping-light", to: outputDirectory)
+
+        let autoloopView = ZStack {
+            Color(red: 0.055, green: 0.063, blue: 0.078)
+            PhraseRoleSettingsView(
+                settings: settings,
+                autoloopCatalog: AutoloopCatalogFixtures.incomplete,
+                appearance: .constant(.dark),
+                keyNotation: .constant(.camelot),
+                initialSection: .autoloopMatrix,
+                rendersInteractiveControls: false
+            )
+        }
+        .environment(\.colorScheme, .dark)
+        .environment(\.locale, Locale(identifier: "en"))
+        .frame(width: width, height: height)
+        try render(autoloopView, named: "autoloop-matrix-dark", to: outputDirectory)
     }
 
     @MainActor

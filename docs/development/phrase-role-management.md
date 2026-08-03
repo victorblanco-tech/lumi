@@ -21,10 +21,9 @@ timeline references.
 - every mutation uses an expected catalog revision and stale writes fail with a
   typed `phraseRoleRevisionMismatch` response.
 
-Usage diagnostics count current timeline-head phrases and affected tracks. The
-logical catalog-row count is deliberately zero until E2A-07 introduces the
-Theme/role/variant matrix. The Settings inspector exposes these facts before an
-archive action. There is no hard-delete command.
+Usage diagnostics count current timeline-head phrases, affected tracks, and
+logical Autoloop variants owned by the role. The Settings inspector exposes
+these facts before an archive action. There is no hard-delete command.
 
 ## Provider mappings
 
@@ -43,10 +42,11 @@ silently assigning it.
 
 ## Persistence and process boundary
 
-SQLite schema v3 adds `library_settings` for the one-time defaults marker and
-catalog revision, plus `source_phrase_mappings`. Role and mapping changes are
-written in one optimistic-concurrency transaction. The Rust engine remains the
-single writer; Swift submits typed add, rename, move, archive/restore, and
+Phrase-role management was introduced by SQLite schema v3, which added
+`library_settings` for the one-time defaults marker and catalog revision plus
+`source_phrase_mappings`. The current schema is v4. Role and mapping changes
+are written in one optimistic-concurrency transaction. The Rust engine remains
+the single writer; Swift submits typed add, rename, move, archive/restore, and
 mapping commands and renders only the returned authoritative snapshot.
 
 Verification covers domain invariants, v2→v3 migration, persistence and

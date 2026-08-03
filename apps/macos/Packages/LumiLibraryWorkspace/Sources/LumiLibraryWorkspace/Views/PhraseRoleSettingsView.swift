@@ -5,17 +5,21 @@ public enum PhraseRoleSettingsSection: String, CaseIterable, Identifiable, Senda
     case general
     case phraseRoles
     case sourceMapping
+    case autoloopMatrix
 
     public var id: String { rawValue }
 }
 
 public struct PhraseRoleSettingsView: View {
     private let settings: PhraseRoleSettingsState?
+    private let autoloopCatalog: AutoloopCatalogState?
     @Binding private var appearance: AppearancePreference
     @Binding private var keyNotation: KeyNotationPreference
     private let feedback: String?
+    private let autoloopFeedback: String?
     private let rendersInteractiveControls: Bool
     private let onMutation: @Sendable (PhraseRoleMutationRequest) -> Void
+    private let onAutoloopMutation: @Sendable (AutoloopCatalogMutationRequest) -> Void
 
     @State private var section: PhraseRoleSettingsSection
     @State private var selectedRoleID: String?
@@ -26,19 +30,25 @@ public struct PhraseRoleSettingsView: View {
 
     public init(
         settings: PhraseRoleSettingsState?,
+        autoloopCatalog: AutoloopCatalogState? = nil,
         appearance: Binding<AppearancePreference>,
         keyNotation: Binding<KeyNotationPreference>,
         initialSection: PhraseRoleSettingsSection = .phraseRoles,
         feedback: String? = nil,
+        autoloopFeedback: String? = nil,
         rendersInteractiveControls: Bool = true,
-        onMutation: @escaping @Sendable (PhraseRoleMutationRequest) -> Void = { _ in }
+        onMutation: @escaping @Sendable (PhraseRoleMutationRequest) -> Void = { _ in },
+        onAutoloopMutation: @escaping @Sendable (AutoloopCatalogMutationRequest) -> Void = { _ in }
     ) {
         self.settings = settings
+        self.autoloopCatalog = autoloopCatalog
         _appearance = appearance
         _keyNotation = keyNotation
         self.feedback = feedback
+        self.autoloopFeedback = autoloopFeedback
         self.rendersInteractiveControls = rendersInteractiveControls
         self.onMutation = onMutation
+        self.onAutoloopMutation = onAutoloopMutation
         _section = State(initialValue: initialSection)
         _selectedRoleID = State(initialValue: settings?.roles.first?.id)
         _selectedProviderKind = State(initialValue: settings?.mappingProfiles.first?.providerKind)
@@ -87,7 +97,9 @@ public struct PhraseRoleSettingsView: View {
                     .foregroundStyle(LumiColor.textSecondary)
             }
             Spacer()
-            if let revision = settings?.revision {
+            if let revision = section == .autoloopMatrix
+                ? autoloopCatalog?.revision
+                : settings?.revision {
                 Label("R\(revision)", systemImage: "checkmark.circle.fill")
                     .font(LumiTypography.technical)
                     .foregroundStyle(LumiColor.success)
@@ -103,6 +115,7 @@ public struct PhraseRoleSettingsView: View {
             settingsSectionButton(.general, title: copy("settings.general"), icon: "slider.horizontal.3")
             settingsSectionButton(.phraseRoles, title: copy("settings.phraseRoles"), icon: "text.badge.checkmark")
             settingsSectionButton(.sourceMapping, title: copy("settings.sourceMapping"), icon: "arrow.triangle.branch")
+            settingsSectionButton(.autoloopMatrix, title: copy("settings.autoloopMatrix"), icon: "square.grid.3x3")
             Spacer()
         }
         .padding(LumiSpacing.large)
@@ -139,6 +152,13 @@ public struct PhraseRoleSettingsView: View {
             phraseRoleSettings
         case .sourceMapping:
             sourceMappingSettings
+        case .autoloopMatrix:
+            AutoloopCatalogSettingsView(
+                catalog: autoloopCatalog,
+                feedback: autoloopFeedback,
+                rendersInteractiveControls: rendersInteractiveControls,
+                onMutation: onAutoloopMutation
+            )
         }
     }
 

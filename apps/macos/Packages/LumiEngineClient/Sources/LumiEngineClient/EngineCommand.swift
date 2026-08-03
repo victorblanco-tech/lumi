@@ -111,6 +111,72 @@ public enum EnginePhraseRoleMutation: Equatable, Sendable {
     }
 }
 
+public enum EngineAutoloopCatalogMutation: Equatable, Sendable {
+    case renameTheme(themeID: UInt64, displayName: String)
+    case addVariant(roleID: String, displayName: String)
+    case renameVariant(roleID: String, variantID: String, displayName: String)
+    case moveVariantEarlier(roleID: String, variantID: String)
+    case moveVariantLater(roleID: String, variantID: String)
+    case archiveVariant(roleID: String, variantID: String)
+    case restoreVariant(roleID: String, variantID: String)
+    case setCell(themeID: UInt64, roleID: String, variantID: String, displayName: String?)
+
+    fileprivate var payload: [String: JSONValue] {
+        switch self {
+        case let .renameTheme(themeID, displayName):
+            [
+                "operation": .string("renameTheme"),
+                "themeId": .number(Double(themeID)),
+                "displayName": .string(displayName)
+            ]
+        case let .addVariant(roleID, displayName):
+            [
+                "operation": .string("addVariant"),
+                "roleId": .string(roleID),
+                "displayName": .string(displayName)
+            ]
+        case let .renameVariant(roleID, variantID, displayName):
+            rowPayload(
+                "renameVariant",
+                roleID: roleID,
+                variantID: variantID,
+                additional: ["displayName": .string(displayName)]
+            )
+        case let .moveVariantEarlier(roleID, variantID):
+            rowPayload("moveVariantEarlier", roleID: roleID, variantID: variantID)
+        case let .moveVariantLater(roleID, variantID):
+            rowPayload("moveVariantLater", roleID: roleID, variantID: variantID)
+        case let .archiveVariant(roleID, variantID):
+            rowPayload("archiveVariant", roleID: roleID, variantID: variantID)
+        case let .restoreVariant(roleID, variantID):
+            rowPayload("restoreVariant", roleID: roleID, variantID: variantID)
+        case let .setCell(themeID, roleID, variantID, displayName):
+            rowPayload(
+                "setCell",
+                roleID: roleID,
+                variantID: variantID,
+                additional: [
+                    "themeId": .number(Double(themeID)),
+                    "displayName": displayName.map(JSONValue.string) ?? .null
+                ]
+            )
+        }
+    }
+
+    private func rowPayload(
+        _ operation: String,
+        roleID: String,
+        variantID: String,
+        additional: [String: JSONValue] = [:]
+    ) -> [String: JSONValue] {
+        var payload = additional
+        payload["operation"] = .string(operation)
+        payload["roleId"] = .string(roleID)
+        payload["variantId"] = .string(variantID)
+        return payload
+    }
+}
+
 public enum EngineCommand: Equatable, Sendable {
     case queryLibrary(search: String, playlistID: UInt64?, offset: UInt32, limit: UInt16)
     case openLibraryTrackEditor(trackID: UInt64)
@@ -130,6 +196,10 @@ public enum EngineCommand: Equatable, Sendable {
     case mutatePhraseRoleCatalog(
         expectedPhraseRoleRevision: UInt64,
         mutation: EnginePhraseRoleMutation
+    )
+    case mutateAutoloopCatalog(
+        expectedAutoloopCatalogRevision: UInt64,
+        mutation: EngineAutoloopCatalogMutation
     )
     case loadDemoSession(expectedStateRevision: UInt64)
     case setOperationState(String, expectedStateRevision: UInt64)
@@ -199,6 +269,11 @@ public enum EngineCommand: Equatable, Sendable {
             var payload = mutation.payload
             payload["kind"] = .string("mutatePhraseRoleCatalog")
             payload["expectedPhraseRoleRevision"] = .number(Double(expectedRevision))
+            return payload
+        case let .mutateAutoloopCatalog(expectedRevision, mutation):
+            var payload = mutation.payload
+            payload["kind"] = .string("mutateAutoloopCatalog")
+            payload["expectedAutoloopCatalogRevision"] = .number(Double(expectedRevision))
             return payload
         case let .loadDemoSession(expectedRevision):
             return statePayload("loadDemoSession", expectedRevision: expectedRevision)

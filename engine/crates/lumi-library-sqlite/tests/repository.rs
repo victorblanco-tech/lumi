@@ -2,12 +2,14 @@ use std::error::Error;
 use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use lumi_domain::ThemeId;
 use lumi_library::{
-    ImportedLibraryBaseline, ImportedTrackAnalysis, LibraryRepository, LibraryTrackQuery,
-    LumiPhraseTimeline, PHRASE_ROLE_DEFAULTS_VERSION, PhraseInstance, PhraseLoopStrategy,
-    PhraseRole, PhraseRoleCatalog, PhraseRoleId, PhraseRoleMove, SourcePhraseMapping,
-    SourceRevision, TimelineEditCommand, TimelineRevision, TimelineRevisionOrigin,
-    TimelineRevisionReason, TrackPageRequest, VariantId,
+    AUTOLOOP_CATALOG_DEFAULTS_VERSION, AutoloopCatalog, AutoloopEntryId, AutoloopMatrixCell,
+    AutoloopTheme, AutoloopVariant, ImportedLibraryBaseline, ImportedTrackAnalysis,
+    LibraryRepository, LibraryTrackQuery, LumiPhraseTimeline, PHRASE_ROLE_DEFAULTS_VERSION,
+    PhraseInstance, PhraseLoopStrategy, PhraseRole, PhraseRoleCatalog, PhraseRoleId,
+    PhraseRoleMove, SourcePhraseMapping, SourceRevision, TimelineEditCommand, TimelineRevision,
+    TimelineRevisionOrigin, TimelineRevisionReason, TrackPageRequest, VariantId,
 };
 use lumi_library_demo::DemoLibrarySourceProvider;
 use lumi_library_source::MusicLibrarySourceProvider;
@@ -17,7 +19,7 @@ use rusqlite::Connection;
 #[test]
 fn migrates_an_empty_database() -> Result<(), Box<dyn Error>> {
     let repository = SqliteLibraryRepository::in_memory()?;
-    assert_eq!(repository.schema_version()?, 3);
+    assert_eq!(repository.schema_version()?, 4);
     assert_eq!(
         repository
             .page_tracks(TrackPageRequest::try_new(0, 25)?)?
@@ -59,7 +61,7 @@ fn migrates_version_one_timeline_history_without_losing_rows() -> Result<(), Box
     }
 
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 3);
+    assert_eq!(repository.schema_version()?, 4);
     drop(repository);
     let connection = Connection::open(&path)?;
     let reason: String = connection.query_row(
@@ -98,11 +100,96 @@ fn migrates_version_two_phrase_roles_into_an_unseeded_catalog() -> Result<(), Bo
     }
 
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 3);
+    assert_eq!(repository.schema_version()?, 4);
     let catalog = repository.phrase_role_catalog()?;
     assert_eq!(catalog.revision(), 0);
     assert_eq!(catalog.defaults_version(), 0);
     assert_eq!(catalog.roles()[0].id().as_str(), "synth");
+    drop(repository);
+    std::fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
+fn migrates_version_three_into_an_unseeded_autoloop_catalog() -> Result<(), Box<dyn Error>> {
+    let path = temporary_database_path()?;
+    {
+        let connection = Connection::open(&path)?;
+        connection.execute_batch(
+            "
+            CREATE TABLE phrase_roles (
+                role_id TEXT PRIMARY KEY,
+                display_name TEXT NOT NULL,
+                sort_order INTEGER NOT NULL,
+                archived INTEGER NOT NULL
+            );
+            CREATE TABLE library_settings (
+                key TEXT PRIMARY KEY,
+                value INTEGER NOT NULL
+            );
+            INSERT INTO library_settings(key, value)
+                VALUES ('phrase-role-defaults-version', 1),
+                       ('phrase-role-catalog-revision', 1);
+            CREATE TABLE source_phrase_mappings (
+                provider_kind TEXT NOT NULL,
+                normalized_label TEXT NOT NULL,
+                raw_label TEXT NOT NULL,
+                role_id TEXT NOT NULL REFERENCES phrase_roles(role_id),
+                PRIMARY KEY(provider_kind, normalized_label)
+            );
+            PRAGMA user_version = 3;
+            ",
+        )?;
+    }
+
+    let repository = SqliteLibraryRepository::open(&path)?;
+    assert_eq!(repository.schema_version()?, 4);
+    let catalog = repository.autoloop_catalog()?;
+    assert_eq!(catalog.revision(), 0);
+    assert_eq!(catalog.defaults_version(), 0);
+    assert!(catalog.themes().is_empty());
+    drop(repository);
+    std::fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
+fn autoloop_catalog_mutation_and_conflict_survive_restart() -> Result<(), Box<dyn Error>> {
+    let path = temporary_database_path()?;
+    {
+        let mut repository = SqliteLibraryRepository::open(&path)?;
+        let roles = PhraseRoleCatalog::try_new(
+            1,
+            PHRASE_ROLE_DEFAULTS_VERSION,
+            vec![PhraseRole::try_new(
+                PhraseRoleId::try_new("synth")?,
+                "Synth",
+                1,
+                false,
+            )?],
+            vec![],
+        )?;
+        repository.initialize_phrase_role_catalog(&roles)?;
+        let initial = test_autoloop_catalog()?;
+        repository.initialize_autoloop_catalog(&initial)?;
+        let renamed = initial.rename_theme(ThemeId::new(1), "Electric Garden")?;
+        repository.replace_autoloop_catalog(&renamed, 1)?;
+        let added = renamed.add_variant(PhraseRoleId::try_new("synth")?, "Variant 2")?;
+        repository.replace_autoloop_catalog(&added, 2)?;
+        assert!(matches!(
+            repository.replace_autoloop_catalog(&added, 2),
+            Err(SqliteLibraryError::AutoloopCatalogRevisionConflict {
+                expected: 2,
+                actual: 3,
+            })
+        ));
+    }
+    let repository = SqliteLibraryRepository::open(&path)?;
+    let restarted = repository.autoloop_catalog()?;
+    assert_eq!(restarted.revision(), 3);
+    assert_eq!(restarted.themes()[0].display_name(), "Electric Garden");
+    assert_eq!(restarted.variants().len(), 2);
+    assert_eq!(restarted.cells().len(), 4);
     drop(repository);
     std::fs::remove_file(path)?;
     Ok(())
@@ -500,6 +587,49 @@ fn failed_migration_rolls_back_every_schema_change() -> Result<(), Box<dyn Error
     }
     std::fs::remove_file(path)?;
     Ok(())
+}
+
+fn test_autoloop_catalog() -> Result<AutoloopCatalog, Box<dyn Error>> {
+    let themes = ["Electric Bloom", "Deep Ocean", "Solar Flare", "Ultraviolet"]
+        .into_iter()
+        .enumerate()
+        .map(|(index, name)| {
+            Ok(AutoloopTheme::try_new(
+                ThemeId::new(u64::try_from(index + 1)?),
+                name,
+                u16::try_from(index + 1)?,
+            )?)
+        })
+        .collect::<Result<Vec<_>, Box<dyn Error>>>()?;
+    let variant = AutoloopVariant::try_new(
+        PhraseRoleId::try_new("synth")?,
+        VariantId::try_new("variant-1")?,
+        "Variant 1",
+        1,
+        false,
+    )?;
+    let cells = themes
+        .iter()
+        .map(|theme| {
+            Ok(AutoloopMatrixCell::try_new(
+                theme.id(),
+                variant.role_id().clone(),
+                variant.id().clone(),
+                AutoloopEntryId::try_new(format!(
+                    "theme-{}--synth--variant-1",
+                    theme.id().value()
+                ))?,
+                format!("{} · Synth · Variant 1", theme.display_name()),
+            )?)
+        })
+        .collect::<Result<Vec<_>, Box<dyn Error>>>()?;
+    Ok(AutoloopCatalog::try_new(
+        1,
+        AUTOLOOP_CATALOG_DEFAULTS_VERSION,
+        themes,
+        vec![variant],
+        cells,
+    )?)
 }
 
 fn temporary_database_path() -> Result<PathBuf, Box<dyn Error>> {

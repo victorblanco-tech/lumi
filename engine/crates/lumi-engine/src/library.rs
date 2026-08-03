@@ -1,12 +1,12 @@
 use std::collections::BTreeMap;
 
-use lumi_domain::{KeyMode, PitchClass, TrackId};
+use lumi_domain::{KeyMode, PitchClass, ThemeId, TrackId};
 use lumi_library::{
-    LibraryRepository, LibraryTrackQuery, LumiPhraseTimeline, PhraseInstance, PhraseLoopStrategy,
-    PhraseRole, PhraseRoleCatalogError, PhraseRoleId, PhraseRoleMove, PlaylistId,
-    SourcePhraseMapping, SourceRevision, TimelineEditCommand, TimelineEditError, TimelineRevision,
-    TimelineRevisionOrigin, TimelineRevisionReason, TimelineRevisionSummary, TrackPageRequest,
-    TrackSummary,
+    AutoloopCatalogError, AutoloopVariantMove, LibraryRepository, LibraryTrackQuery,
+    LumiPhraseTimeline, PhraseInstance, PhraseLoopStrategy, PhraseRole, PhraseRoleCatalogError,
+    PhraseRoleId, PhraseRoleMove, PlaylistId, SourcePhraseMapping, SourceRevision,
+    TimelineEditCommand, TimelineEditError, TimelineRevision, TimelineRevisionOrigin,
+    TimelineRevisionReason, TimelineRevisionSummary, TrackPageRequest, TrackSummary, VariantId,
 };
 use lumi_library_demo::{DemoLibraryError, DemoLibrarySourceProvider};
 use lumi_library_source::MusicLibrarySourceProvider as _;
@@ -14,6 +14,7 @@ use lumi_library_sqlite::{SqliteLibraryError, SqliteLibraryRepository};
 use serde_json::{Value, json};
 use thiserror::Error;
 
+use crate::autoloop_defaults::{AutoloopDefaultsError, seeded_autoloop_catalog};
 use crate::phrase_role_defaults::{
     PhraseRoleDefaultsError, provider_display_name, seeded_phrase_role_catalog,
 };
@@ -58,6 +59,39 @@ pub enum PhraseRoleCatalogMutation {
     },
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum AutoloopCatalogMutation {
+    RenameTheme {
+        theme_id: ThemeId,
+        display_name: String,
+    },
+    AddVariant {
+        role_id: PhraseRoleId,
+        display_name: String,
+    },
+    RenameVariant {
+        role_id: PhraseRoleId,
+        variant_id: VariantId,
+        display_name: String,
+    },
+    MoveVariant {
+        role_id: PhraseRoleId,
+        variant_id: VariantId,
+        direction: AutoloopVariantMove,
+    },
+    SetVariantArchived {
+        role_id: PhraseRoleId,
+        variant_id: VariantId,
+        archived: bool,
+    },
+    SetCell {
+        theme_id: ThemeId,
+        role_id: PhraseRoleId,
+        variant_id: VariantId,
+        display_name: Option<String>,
+    },
+}
+
 impl LibraryWorker {
     pub fn demo() -> Result<Self, LibraryWorkerError> {
         let repository = match std::env::var_os(DATABASE_PATH_ENVIRONMENT) {
@@ -79,6 +113,7 @@ impl LibraryWorker {
         let baseline = provider.load_baseline()?;
         repository.import_baseline(&baseline)?;
         seed_default_role_catalog(&mut repository)?;
+        seed_default_autoloop_catalog(&mut repository)?;
         let mut worker = Self {
             repository,
             source_id: baseline.source_id().as_str().to_owned(),
@@ -226,6 +261,59 @@ impl LibraryWorker {
         };
         self.repository
             .replace_phrase_role_catalog(&updated, expected_revision)?;
+        Ok(())
+    }
+
+    pub fn mutate_autoloop_catalog(
+        &mut self,
+        expected_revision: u64,
+        mutation: AutoloopCatalogMutation,
+    ) -> Result<(), LibraryWorkerError> {
+        let catalog = self.repository.autoloop_catalog()?;
+        if catalog.revision() != expected_revision {
+            return Err(LibraryWorkerError::AutoloopCatalogRevisionConflict {
+                expected: expected_revision,
+                actual: catalog.revision(),
+            });
+        }
+        let updated = match mutation {
+            AutoloopCatalogMutation::RenameTheme {
+                theme_id,
+                display_name,
+            } => catalog.rename_theme(theme_id, display_name)?,
+            AutoloopCatalogMutation::AddVariant {
+                role_id,
+                display_name,
+            } => {
+                self.require_active_role(&role_id)?;
+                catalog.add_variant(role_id, display_name)?
+            }
+            AutoloopCatalogMutation::RenameVariant {
+                role_id,
+                variant_id,
+                display_name,
+            } => catalog.rename_variant(&role_id, &variant_id, display_name)?,
+            AutoloopCatalogMutation::MoveVariant {
+                role_id,
+                variant_id,
+                direction,
+            } => catalog.move_variant(&role_id, &variant_id, direction)?,
+            AutoloopCatalogMutation::SetVariantArchived {
+                role_id,
+                variant_id,
+                archived,
+            } => catalog.set_variant_archived(&role_id, &variant_id, archived)?,
+            AutoloopCatalogMutation::SetCell {
+                theme_id,
+                role_id,
+                variant_id,
+                display_name,
+            } => catalog.set_cell(theme_id, &role_id, &variant_id, display_name)?,
+        };
+        let roles = self.repository.phrase_role_catalog()?;
+        updated.validate_roles(&roles)?;
+        self.repository
+            .replace_autoloop_catalog(&updated, expected_revision)?;
         Ok(())
     }
 
@@ -442,6 +530,7 @@ impl LibraryWorker {
                 "tracks": page.tracks().iter().map(track_json).collect::<Vec<_>>(),
             },
             "phraseRoleSettings": self.phrase_role_settings_json()?,
+            "autoloopCatalog": self.autoloop_catalog_json()?,
             "editor": self.editor_json()?,
         }))
     }
@@ -454,6 +543,13 @@ impl LibraryWorker {
             .into_iter()
             .map(|usage| (usage.role_id().clone(), usage))
             .collect::<BTreeMap<_, _>>();
+        let catalog_rows = self.repository.autoloop_catalog()?.variants().iter().fold(
+            BTreeMap::<PhraseRoleId, u64>::new(),
+            |mut rows, variant| {
+                *rows.entry(variant.role_id().clone()).or_default() += 1;
+                rows
+            },
+        );
         let mut profiles = BTreeMap::<String, Vec<&SourcePhraseMapping>>::new();
         for mapping in catalog.mappings() {
             profiles
@@ -482,7 +578,7 @@ impl LibraryWorker {
                     "usage": {
                         "phraseCount": usage.map_or(0, |value| value.phrase_count()),
                         "trackCount": affected_tracks.len(),
-                        "catalogRowCount": usage.map_or(0, |value| value.catalog_row_count()),
+                        "catalogRowCount": catalog_rows.get(role.id()).copied().unwrap_or(0),
                         "affectedTracks": affected_tracks.iter().take(100).map(|track| json!({
                             "trackId": track.track_id().value(),
                             "title": track.title(),
@@ -501,6 +597,75 @@ impl LibraryWorker {
                 })).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
             "mappingPolicy": "futureInitialTimelinesOnly",
+        }))
+    }
+
+    fn autoloop_catalog_json(&self) -> Result<Value, LibraryWorkerError> {
+        let catalog = self.repository.autoloop_catalog()?;
+        let phrase_roles = self.repository.phrase_role_catalog()?;
+        let missing = catalog.missing_cells();
+        let missing_roles = phrase_roles
+            .roles()
+            .iter()
+            .filter(|role| {
+                !role.is_archived()
+                    && !catalog
+                        .variants()
+                        .iter()
+                        .any(|variant| variant.role_id() == role.id() && !variant.is_archived())
+            })
+            .collect::<Vec<_>>();
+        Ok(json!({
+            "revision": catalog.revision(),
+            "defaultsVersion": catalog.defaults_version(),
+            "themes": catalog.themes().iter().map(|theme| json!({
+                "id": theme.id().value(),
+                "name": theme.display_name(),
+                "sortOrder": theme.sort_order(),
+            })).collect::<Vec<_>>(),
+            "roles": phrase_roles.roles().iter().map(|role| json!({
+                "id": role.id().as_str(),
+                "name": role.display_name(),
+                "archived": role.is_archived(),
+                "variants": catalog.variants().iter()
+                    .filter(|variant| variant.role_id() == role.id())
+                    .map(|variant| json!({
+                        "id": variant.id().as_str(),
+                        "name": variant.display_name(),
+                        "sortOrder": variant.sort_order(),
+                        "archived": variant.is_archived(),
+                        "cells": catalog.themes().iter().map(|theme| {
+                            let cell = catalog.cells().iter().find(|cell| {
+                                cell.theme_id() == theme.id()
+                                    && cell.role_id() == role.id()
+                                    && cell.variant_id() == variant.id()
+                            });
+                            json!({
+                                "themeId": theme.id().value(),
+                                "entryId": cell.map(|value| value.entry_id().as_str()),
+                                "name": cell.map(|value| value.display_name()),
+                                "status": if cell.is_some() { "ready" } else { "missing" },
+                            })
+                        }).collect::<Vec<_>>(),
+                    })).collect::<Vec<_>>(),
+            })).collect::<Vec<_>>(),
+            "preflight": {
+                "status": if missing.is_empty() && missing_roles.is_empty() { "ready" } else { "incomplete" },
+                "missingCellCount": missing.len(),
+                "missingCells": missing.iter().take(200).map(|cell| json!({
+                    "themeId": cell.theme_id().value(),
+                    "roleId": cell.role_id().as_str(),
+                    "variantId": cell.variant_id().as_str(),
+                })).collect::<Vec<_>>(),
+                "hasMoreMissingCells": missing.len() > 200,
+                "missingRoleCount": missing_roles.len(),
+                "missingRoleIds": missing_roles.iter().take(200).map(|role| role.id().as_str()).collect::<Vec<_>>(),
+                "hasMoreMissingRoles": missing_roles.len() > 200,
+            },
+            "targetCapabilities": {
+                "validationOwner": "targetAdapter",
+                "hardCodedPhysicalCapacity": false,
+            },
         }))
     }
 
@@ -655,6 +820,20 @@ fn seed_default_role_catalog(
     Ok(())
 }
 
+fn seed_default_autoloop_catalog(
+    repository: &mut SqliteLibraryRepository,
+) -> Result<(), LibraryWorkerError> {
+    let existing = repository.autoloop_catalog()?;
+    if existing.defaults_version() >= lumi_library::AUTOLOOP_CATALOG_DEFAULTS_VERSION {
+        existing.validate_roles(&repository.phrase_role_catalog()?)?;
+        return Ok(());
+    }
+    let phrase_roles = repository.phrase_role_catalog()?;
+    let seeded = seeded_autoloop_catalog(&existing, &phrase_roles)?;
+    repository.initialize_autoloop_catalog(&seeded)?;
+    Ok(())
+}
+
 fn role_display_name(roles: &[PhraseRole], id: &PhraseRoleId) -> String {
     roles
         .iter()
@@ -758,6 +937,10 @@ pub enum LibraryWorkerError {
     PhraseRoleDefaults(#[from] PhraseRoleDefaultsError),
     #[error("phrase-role change was rejected: {0}")]
     PhraseRoleCatalog(#[from] PhraseRoleCatalogError),
+    #[error("Autoloop defaults failed: {0}")]
+    AutoloopDefaults(#[from] AutoloopDefaultsError),
+    #[error("Autoloop catalog change was rejected: {0}")]
+    AutoloopCatalog(#[from] AutoloopCatalogError),
     #[error("invalid library identifier: {0}")]
     Identifier(#[from] lumi_library::TextIdentifierError),
     #[error("timeline edit was rejected: {0}")]
@@ -791,6 +974,8 @@ pub enum LibraryWorkerError {
     ArchivedPhraseRole,
     #[error("phrase-role catalog changed; expected revision {expected}, actual {actual}")]
     PhraseRoleCatalogRevisionConflict { expected: u64, actual: u64 },
+    #[error("Autoloop catalog changed; expected revision {expected}, actual {actual}")]
+    AutoloopCatalogRevisionConflict { expected: u64, actual: u64 },
     #[error("timeline revision {0} is invalid")]
     InvalidTimelineRevision(u64),
     #[error("timeline revision {0} does not exist")]
@@ -814,13 +999,16 @@ pub enum LibraryWorkerError {
 mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
+    use lumi_domain::ThemeId;
     use lumi_library::{
         LibraryRepository as _, PhraseRoleId, TimelineEditCommand, TrackPageRequest,
     };
     use lumi_library_demo::DemoLibrarySourceProvider;
     use lumi_library_source::MusicLibrarySourceProvider as _;
 
-    use super::{LibraryWorker, PhraseRoleCatalogMutation};
+    use super::{
+        AutoloopCatalogMutation, LibraryWorker, LibraryWorkerError, PhraseRoleCatalogMutation,
+    };
 
     #[test]
     fn collection_total_is_independent_from_the_active_playlist()
@@ -1002,7 +1190,7 @@ mod tests {
             .ok_or("Synth usage is missing")?;
         assert_eq!(synth["usage"]["trackCount"], 1);
         assert_eq!(synth["usage"]["phraseCount"], 1);
-        assert_eq!(synth["usage"]["catalogRowCount"], 0);
+        assert_eq!(synth["usage"]["catalogRowCount"], 2);
 
         let stale = worker.mutate_phrase_role_catalog(
             2,
@@ -1020,6 +1208,122 @@ mod tests {
                 }
             )
         ));
+        Ok(())
+    }
+
+    #[test]
+    fn four_theme_autoloop_defaults_and_mutations_survive_restart()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let path = std::env::temp_dir().join(format!("lumi-engine-autoloops-{unique}.sqlite"));
+        {
+            let mut worker = LibraryWorker::demo_at(&path)?;
+            let initial = worker.snapshot_json()?;
+            assert_eq!(initial["autoloopCatalog"]["revision"], 1);
+            assert_eq!(
+                initial["autoloopCatalog"]["themes"]
+                    .as_array()
+                    .map(Vec::len),
+                Some(4)
+            );
+            let synth = initial["autoloopCatalog"]["roles"]
+                .as_array()
+                .and_then(|roles| roles.iter().find(|role| role["id"] == "synth"))
+                .ok_or("Synth matrix row is missing")?;
+            assert_eq!(synth["variants"].as_array().map(Vec::len), Some(2));
+            assert_eq!(initial["autoloopCatalog"]["preflight"]["status"], "ready");
+
+            worker.mutate_autoloop_catalog(
+                1,
+                AutoloopCatalogMutation::RenameTheme {
+                    theme_id: ThemeId::new(1),
+                    display_name: "Electric Garden".to_owned(),
+                },
+            )?;
+            worker.mutate_autoloop_catalog(
+                2,
+                AutoloopCatalogMutation::AddVariant {
+                    role_id: PhraseRoleId::try_new("synth")?,
+                    display_name: "Variant 3".to_owned(),
+                },
+            )?;
+            let incomplete = worker.snapshot_json()?;
+            assert_eq!(
+                incomplete["autoloopCatalog"]["preflight"]["missingCellCount"],
+                4
+            );
+            let stale = worker.mutate_autoloop_catalog(
+                1,
+                AutoloopCatalogMutation::RenameTheme {
+                    theme_id: ThemeId::new(2),
+                    display_name: "Ocean Garden".to_owned(),
+                },
+            );
+            assert!(matches!(
+                stale,
+                Err(LibraryWorkerError::AutoloopCatalogRevisionConflict {
+                    expected: 1,
+                    actual: 3,
+                })
+            ));
+        }
+
+        let worker = LibraryWorker::demo_at(&path)?;
+        let restarted = worker.snapshot_json()?;
+        assert_eq!(restarted["autoloopCatalog"]["revision"], 3);
+        assert_eq!(
+            restarted["autoloopCatalog"]["themes"][0]["name"],
+            "Electric Garden"
+        );
+        assert_eq!(
+            restarted["autoloopCatalog"]["preflight"]["missingCellCount"],
+            4
+        );
+        std::fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn new_phrase_roles_block_preflight_until_they_have_a_variant()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut worker = LibraryWorker::demo()?;
+        worker.mutate_phrase_role_catalog(
+            1,
+            PhraseRoleCatalogMutation::Add {
+                display_name: "Vocal".to_owned(),
+            },
+        )?;
+
+        let uncovered = worker.snapshot_json()?;
+        assert_eq!(
+            uncovered["autoloopCatalog"]["preflight"]["missingRoleCount"],
+            1
+        );
+        assert_eq!(
+            uncovered["autoloopCatalog"]["preflight"]["missingRoleIds"][0],
+            "custom-1"
+        );
+        assert_eq!(
+            uncovered["autoloopCatalog"]["preflight"]["status"],
+            "incomplete"
+        );
+
+        worker.mutate_autoloop_catalog(
+            1,
+            AutoloopCatalogMutation::AddVariant {
+                role_id: PhraseRoleId::try_new("custom-1")?,
+                display_name: "Variant 1".to_owned(),
+            },
+        )?;
+        let covered = worker.snapshot_json()?;
+        assert_eq!(
+            covered["autoloopCatalog"]["preflight"]["missingRoleCount"],
+            0
+        );
+        assert_eq!(
+            covered["autoloopCatalog"]["preflight"]["missingCellCount"],
+            4
+        );
         Ok(())
     }
 

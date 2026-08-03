@@ -184,6 +184,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
     public let page: LibraryPage
     public let editor: TrackEditorAnalysis?
     public let phraseRoleSettings: PhraseRoleSettingsState?
+    public let autoloopCatalog: AutoloopCatalogState?
     public let diagnostic: String?
 
     public init(
@@ -197,6 +198,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
         page: LibraryPage,
         editor: TrackEditorAnalysis? = nil,
         phraseRoleSettings: PhraseRoleSettingsState? = nil,
+        autoloopCatalog: AutoloopCatalogState? = nil,
         diagnostic: String? = nil
     ) {
         self.condition = condition
@@ -209,6 +211,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
         self.page = page
         self.editor = editor
         self.phraseRoleSettings = phraseRoleSettings
+        self.autoloopCatalog = autoloopCatalog
         self.diagnostic = diagnostic
     }
 

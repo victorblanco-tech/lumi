@@ -32,6 +32,7 @@ text_identifier!(SourceTrackId, "source track id");
 text_identifier!(SourceRevision, "source revision");
 text_identifier!(PhraseRoleId, "phrase role id");
 text_identifier!(VariantId, "variant id");
+text_identifier!(AutoloopEntryId, "Autoloop entry id");
 
 #[derive(Clone, Copy, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
 pub struct PlaylistId(u64);
