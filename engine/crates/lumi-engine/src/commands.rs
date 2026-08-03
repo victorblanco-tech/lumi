@@ -4,10 +4,12 @@ use std::fmt;
 use lumi_domain::{
     OperationCommand, PlanId, PlanRevision, SceneId, StateRevision, ThemeId, TrackLoadId,
 };
-use lumi_library::{PhraseAbsorption, PhraseRoleId, TimelineEditCommand};
+use lumi_library::{PhraseAbsorption, PhraseRoleId, PhraseRoleMove, TimelineEditCommand};
 use lumi_protocol::{MessageEnvelope, MessageType};
 use lumi_simulator::SimulationSpeed;
 use serde_json::Value;
+
+use crate::library::PhraseRoleCatalogMutation;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PlanCommandContext {
@@ -46,6 +48,10 @@ pub enum SessionCommand {
         track_id: u64,
         expected_revision: u64,
         target_revision: u64,
+    },
+    MutatePhraseRoleCatalog {
+        expected_revision: u64,
+        mutation: PhraseRoleCatalogMutation,
     },
     LoadDemoSession {
         expected_revision: StateRevision,
@@ -112,6 +118,7 @@ impl SessionCommand {
             | Self::UndoLibraryTimeline { .. }
             | Self::RedoLibraryTimeline { .. }
             | Self::RestoreLibraryTimelineRevision { .. }
+            | Self::MutatePhraseRoleCatalog { .. }
             | Self::LoadDemoSession { .. }
             | Self::SetOperationState { .. }
             | Self::SetSimulationSpeed { .. }
@@ -163,6 +170,10 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
             expected_revision: positive_unsigned(&envelope.payload, "expectedTimelineRevision")?,
             target_revision: positive_unsigned(&envelope.payload, "targetTimelineRevision")?,
         }),
+        "mutatePhraseRoleCatalog" => Ok(SessionCommand::MutatePhraseRoleCatalog {
+            expected_revision: positive_unsigned(&envelope.payload, "expectedPhraseRoleRevision")?,
+            mutation: phrase_role_mutation(&envelope.payload)?,
+        }),
         "loadDemoSession" => Ok(SessionCommand::LoadDemoSession {
             expected_revision: state_revision(envelope)?,
         }),
@@ -206,6 +217,42 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
             expected_revision: state_revision(envelope)?,
         }),
         _ => Err(CommandDecodeError::UnsupportedKind),
+    }
+}
+
+fn phrase_role_mutation(
+    payload: &serde_json::Map<String, Value>,
+) -> Result<PhraseRoleCatalogMutation, CommandDecodeError> {
+    match string(payload, "operation")? {
+        "add" => Ok(PhraseRoleCatalogMutation::Add {
+            display_name: string(payload, "displayName")?.to_owned(),
+        }),
+        "rename" => Ok(PhraseRoleCatalogMutation::Rename {
+            role_id: phrase_role_id(payload)?,
+            display_name: string(payload, "displayName")?.to_owned(),
+        }),
+        "moveEarlier" => Ok(PhraseRoleCatalogMutation::Move {
+            role_id: phrase_role_id(payload)?,
+            direction: PhraseRoleMove::Earlier,
+        }),
+        "moveLater" => Ok(PhraseRoleCatalogMutation::Move {
+            role_id: phrase_role_id(payload)?,
+            direction: PhraseRoleMove::Later,
+        }),
+        "archive" => Ok(PhraseRoleCatalogMutation::SetArchived {
+            role_id: phrase_role_id(payload)?,
+            archived: true,
+        }),
+        "restore" => Ok(PhraseRoleCatalogMutation::SetArchived {
+            role_id: phrase_role_id(payload)?,
+            archived: false,
+        }),
+        "setSourceMapping" => Ok(PhraseRoleCatalogMutation::SetSourceMapping {
+            provider_kind: string(payload, "providerKind")?.to_owned(),
+            raw_label: string(payload, "rawLabel")?.to_owned(),
+            role_id: phrase_role_id(payload)?,
+        }),
+        _ => Err(CommandDecodeError::InvalidField("operation")),
     }
 }
 

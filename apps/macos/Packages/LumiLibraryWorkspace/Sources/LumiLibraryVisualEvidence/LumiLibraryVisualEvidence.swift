@@ -129,6 +129,36 @@ struct LumiLibraryVisualEvidenceCommand {
             .frame(width: width, height: height)
             try render(view, named: variant.name, to: outputDirectory)
         }
+
+        let settings = PhraseRoleSettingsFixtures.ready()
+        let phraseRoleView = ZStack {
+            Color(red: 0.055, green: 0.063, blue: 0.078)
+            PhraseRoleSettingsView(
+                settings: settings,
+                appearance: .constant(.dark),
+                keyNotation: .constant(.camelot),
+                rendersInteractiveControls: false
+            )
+        }
+        .environment(\.colorScheme, .dark)
+        .environment(\.locale, Locale(identifier: "en"))
+        .frame(width: width, height: height)
+        try render(phraseRoleView, named: "phrase-role-settings-dark", to: outputDirectory)
+
+        let mappingView = ZStack {
+            Color(red: 0.965, green: 0.97, blue: 0.98)
+            PhraseRoleSettingsView(
+                settings: settings,
+                appearance: .constant(.light),
+                keyNotation: .constant(.classic),
+                initialSection: .sourceMapping,
+                rendersInteractiveControls: false
+            )
+        }
+        .environment(\.colorScheme, .light)
+        .environment(\.locale, Locale(identifier: "en"))
+        .frame(width: width, height: height)
+        try render(mappingView, named: "phrase-source-mapping-light", to: outputDirectory)
     }
 
     @MainActor

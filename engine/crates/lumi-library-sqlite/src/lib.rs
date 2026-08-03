@@ -2,22 +2,26 @@
 
 #![forbid(unsafe_code)]
 
+use std::collections::BTreeMap;
 use std::path::Path;
 
 use lumi_domain::{KeyMode, MusicalKey, PitchClass, ThemeId, TrackId};
 use lumi_library::{
     BeatGrid, BeatMarker, ImportResult, ImportedLibraryBaseline, ImportedTrackAnalysis,
     LibraryRepository, LibraryTrackQuery, LumiPhraseTimeline, PhraseInstance, PhraseLoopStrategy,
-    PhraseRole, PhraseRoleId, PlaylistId, PlaylistPage, PlaylistSummary, RawPhraseObservation,
-    SourcePlaylistId, SourceRevision, SourceTrackId, StoredTrack, TextIdentifierError,
-    ThemeSpecificVariant, TimelineRevision, TimelineRevisionOrigin, TimelineRevisionPage,
-    TimelineRevisionReason, TimelineRevisionSummary, TrackColor, TrackPage, TrackPageRequest,
-    TrackSummary, VariantId, WaveformPoint,
+    PhraseRole, PhraseRoleCatalog, PhraseRoleCatalogError, PhraseRoleId, PhraseRoleTrackUsage,
+    PhraseRoleUsage, PlaylistId, PlaylistPage, PlaylistSummary, RawPhraseObservation,
+    SourcePhraseMapping, SourcePlaylistId, SourceRevision, SourceTrackId, StoredTrack,
+    TextIdentifierError, ThemeSpecificVariant, TimelineRevision, TimelineRevisionOrigin,
+    TimelineRevisionPage, TimelineRevisionReason, TimelineRevisionSummary, TrackColor, TrackPage,
+    TrackPageRequest, TrackSummary, VariantId, WaveformPoint, normalize_source_label,
 };
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 use thiserror::Error;
 
-const SCHEMA_VERSION: u32 = 2;
+const SCHEMA_VERSION: u32 = 3;
+const DEFAULTS_VERSION_KEY: &str = "phrase-role-defaults-version";
+const CATALOG_REVISION_KEY: &str = "phrase-role-catalog-revision";
 
 pub struct SqliteLibraryRepository {
     connection: Connection,
@@ -40,7 +44,7 @@ impl SqliteLibraryRepository {
     }
 
     fn migrate(&mut self) -> Result<(), SqliteLibraryError> {
-        let current = self.schema_version()?;
+        let mut current = self.schema_version()?;
         if current > SCHEMA_VERSION {
             return Err(SqliteLibraryError::UnsupportedSchema(current));
         }
@@ -128,6 +132,20 @@ impl SqliteLibraryRepository {
                     sort_order INTEGER NOT NULL,
                     archived INTEGER NOT NULL
                 );
+                CREATE TABLE library_settings (
+                    key TEXT PRIMARY KEY,
+                    value INTEGER NOT NULL
+                );
+                INSERT INTO library_settings(key, value)
+                    VALUES ('phrase-role-defaults-version', 0),
+                           ('phrase-role-catalog-revision', 0);
+                CREATE TABLE source_phrase_mappings (
+                    provider_kind TEXT NOT NULL,
+                    normalized_label TEXT NOT NULL,
+                    raw_label TEXT NOT NULL,
+                    role_id TEXT NOT NULL REFERENCES phrase_roles(role_id),
+                    PRIMARY KEY(provider_kind, normalized_label)
+                );
                 CREATE TABLE timeline_revisions (
                     track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
                     revision INTEGER NOT NULL,
@@ -157,7 +175,7 @@ impl SqliteLibraryRepository {
                     FOREIGN KEY(track_id, revision)
                         REFERENCES timeline_revisions(track_id, revision)
                 );
-                PRAGMA user_version = 2;
+                PRAGMA user_version = 3;
                 COMMIT;
                 ",
             )?;
@@ -179,6 +197,30 @@ impl SqliteLibraryRepository {
                        parent_revision = CASE WHEN revision > 1 THEN revision - 1 ELSE NULL END;
                 ALTER TABLE phrase_instances ADD COLUMN loop_strategy TEXT NOT NULL DEFAULT 'auto';
                 PRAGMA user_version = 2;
+                COMMIT;
+                ",
+            )?;
+            current = 2;
+        }
+        if current == 2 {
+            self.connection.execute_batch(
+                "
+                BEGIN IMMEDIATE;
+                CREATE TABLE library_settings (
+                    key TEXT PRIMARY KEY,
+                    value INTEGER NOT NULL
+                );
+                INSERT INTO library_settings(key, value)
+                    VALUES ('phrase-role-defaults-version', 0),
+                           ('phrase-role-catalog-revision', 0);
+                CREATE TABLE source_phrase_mappings (
+                    provider_kind TEXT NOT NULL,
+                    normalized_label TEXT NOT NULL,
+                    raw_label TEXT NOT NULL,
+                    role_id TEXT NOT NULL REFERENCES phrase_roles(role_id),
+                    PRIMARY KEY(provider_kind, normalized_label)
+                );
+                PRAGMA user_version = 3;
                 COMMIT;
                 ",
             )?;
@@ -762,29 +804,10 @@ impl LibraryRepository for SqliteLibraryRepository {
         )))
     }
 
-    fn save_phrase_roles(&mut self, roles: &[PhraseRole]) -> Result<(), Self::Error> {
-        let transaction = self.connection.transaction()?;
-        for role in roles {
-            transaction.execute(
-                "INSERT INTO phrase_roles(role_id, display_name, sort_order, archived)
-                 VALUES (?1, ?2, ?3, ?4)
-                 ON CONFLICT(role_id) DO UPDATE SET
-                   display_name = excluded.display_name,
-                   sort_order = excluded.sort_order,
-                   archived = excluded.archived",
-                params![
-                    role.id().as_str(),
-                    role.display_name(),
-                    i64::from(role.sort_order()),
-                    role.is_archived(),
-                ],
-            )?;
-        }
-        transaction.commit()?;
-        Ok(())
-    }
-
-    fn phrase_roles(&self) -> Result<Vec<PhraseRole>, Self::Error> {
+    fn phrase_role_catalog(&self) -> Result<PhraseRoleCatalog, Self::Error> {
+        let revision = setting_u64(&self.connection, CATALOG_REVISION_KEY)?;
+        let defaults_version = u16::try_from(setting_u64(&self.connection, DEFAULTS_VERSION_KEY)?)
+            .map_err(|_| SqliteLibraryError::ArithmeticOverflow)?;
         let mut statement = self.connection.prepare(
             "SELECT role_id, display_name, sort_order, archived
              FROM phrase_roles ORDER BY sort_order, display_name COLLATE NOCASE, role_id",
@@ -799,7 +822,118 @@ impl LibraryRepository for SqliteLibraryRepository {
                 row.get(3)?,
             )?);
         }
-        Ok(roles)
+        let mut statement = self.connection.prepare(
+            "SELECT provider_kind, raw_label, role_id
+             FROM source_phrase_mappings ORDER BY provider_kind, normalized_label",
+        )?;
+        let mut rows = statement.query([])?;
+        let mut mappings = Vec::new();
+        while let Some(row) = rows.next()? {
+            mappings.push(SourcePhraseMapping::try_new(
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                PhraseRoleId::try_new(row.get::<_, String>(2)?)?,
+            )?);
+        }
+        Ok(PhraseRoleCatalog::try_new(
+            revision,
+            defaults_version,
+            roles,
+            mappings,
+        )?)
+    }
+
+    fn initialize_phrase_role_catalog(
+        &mut self,
+        catalog: &PhraseRoleCatalog,
+    ) -> Result<(), Self::Error> {
+        let transaction = self.connection.transaction()?;
+        let current_defaults = setting_u64(&transaction, DEFAULTS_VERSION_KEY)?;
+        if current_defaults != 0 {
+            return Ok(());
+        }
+        if catalog.revision() != 1 || catalog.defaults_version() == 0 {
+            return Err(SqliteLibraryError::InvalidPhraseRoleCatalog(
+                PhraseRoleCatalogError::InvalidRevision,
+            ));
+        }
+        for role in catalog.roles() {
+            upsert_phrase_role(&transaction, role)?;
+        }
+        replace_mapping_rows(&transaction, catalog.mappings())?;
+        set_setting(
+            &transaction,
+            DEFAULTS_VERSION_KEY,
+            u64::from(catalog.defaults_version()),
+        )?;
+        set_setting(&transaction, CATALOG_REVISION_KEY, catalog.revision())?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn replace_phrase_role_catalog(
+        &mut self,
+        catalog: &PhraseRoleCatalog,
+        expected_revision: u64,
+    ) -> Result<(), Self::Error> {
+        let transaction = self.connection.transaction()?;
+        let actual_revision = setting_u64(&transaction, CATALOG_REVISION_KEY)?;
+        if actual_revision != expected_revision {
+            return Err(SqliteLibraryError::PhraseRoleCatalogRevisionConflict {
+                expected: expected_revision,
+                actual: actual_revision,
+            });
+        }
+        let required = expected_revision
+            .checked_add(1)
+            .ok_or(SqliteLibraryError::ArithmeticOverflow)?;
+        if catalog.revision() != required {
+            return Err(SqliteLibraryError::InvalidPhraseRoleCatalog(
+                PhraseRoleCatalogError::InvalidRevision,
+            ));
+        }
+        for role in catalog.roles() {
+            upsert_phrase_role(&transaction, role)?;
+        }
+        replace_mapping_rows(&transaction, catalog.mappings())?;
+        set_setting(&transaction, CATALOG_REVISION_KEY, catalog.revision())?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn phrase_role_usages(&self) -> Result<Vec<PhraseRoleUsage>, Self::Error> {
+        let mut statement = self.connection.prepare(
+            "SELECT phrase_instances.role_id, tracks.id, tracks.title, COUNT(*)
+             FROM phrase_instances
+             JOIN timeline_heads
+               ON timeline_heads.track_id = phrase_instances.track_id
+              AND timeline_heads.revision = phrase_instances.revision
+             JOIN tracks ON tracks.id = phrase_instances.track_id
+             GROUP BY phrase_instances.role_id, tracks.id, tracks.title
+             ORDER BY phrase_instances.role_id, tracks.title COLLATE NOCASE, tracks.id",
+        )?;
+        let mut rows = statement.query([])?;
+        let mut grouped = BTreeMap::<PhraseRoleId, (u64, Vec<PhraseRoleTrackUsage>)>::new();
+        while let Some(row) = rows.next()? {
+            let role_id = PhraseRoleId::try_new(row.get::<_, String>(0)?)?;
+            let count = from_nonnegative_i64(row.get(3)?, "phrase-role usage")?;
+            let entry = grouped.entry(role_id).or_default();
+            entry.0 = entry
+                .0
+                .checked_add(count)
+                .ok_or(SqliteLibraryError::ArithmeticOverflow)?;
+            entry.1.push(PhraseRoleTrackUsage::new(
+                TrackId::new(from_positive_i64(row.get(1)?, "track id")?),
+                row.get::<_, String>(2)?,
+                count,
+            ));
+        }
+        Ok(grouped
+            .into_iter()
+            .map(|(role_id, (phrase_count, tracks))| {
+                PhraseRoleUsage::new(role_id, phrase_count, tracks, 0)
+            })
+            .collect())
     }
 
     fn append_timeline_revision(
@@ -967,6 +1101,70 @@ impl LibraryRepository for SqliteLibraryRepository {
     }
 }
 
+fn setting_u64(connection: &Connection, key: &str) -> Result<u64, SqliteLibraryError> {
+    let value = connection.query_row(
+        "SELECT value FROM library_settings WHERE key = ?1",
+        [key],
+        |row| row.get::<_, i64>(0),
+    )?;
+    from_nonnegative_i64(value, "library setting")
+}
+
+fn set_setting(
+    transaction: &Transaction<'_>,
+    key: &str,
+    value: u64,
+) -> Result<(), SqliteLibraryError> {
+    transaction.execute(
+        "INSERT INTO library_settings(key, value) VALUES (?1, ?2)
+         ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![key, to_i64(value)?],
+    )?;
+    Ok(())
+}
+
+fn upsert_phrase_role(
+    transaction: &Transaction<'_>,
+    role: &PhraseRole,
+) -> Result<(), SqliteLibraryError> {
+    transaction.execute(
+        "INSERT INTO phrase_roles(role_id, display_name, sort_order, archived)
+         VALUES (?1, ?2, ?3, ?4)
+         ON CONFLICT(role_id) DO UPDATE SET
+           display_name = excluded.display_name,
+           sort_order = excluded.sort_order,
+           archived = excluded.archived",
+        params![
+            role.id().as_str(),
+            role.display_name(),
+            i64::from(role.sort_order()),
+            role.is_archived(),
+        ],
+    )?;
+    Ok(())
+}
+
+fn replace_mapping_rows(
+    transaction: &Transaction<'_>,
+    mappings: &[SourcePhraseMapping],
+) -> Result<(), SqliteLibraryError> {
+    transaction.execute("DELETE FROM source_phrase_mappings", [])?;
+    let mut statement = transaction.prepare(
+        "INSERT INTO source_phrase_mappings
+         (provider_kind, normalized_label, raw_label, role_id)
+         VALUES (?1, ?2, ?3, ?4)",
+    )?;
+    for mapping in mappings {
+        statement.execute(params![
+            mapping.provider_kind(),
+            normalize_source_label(mapping.raw_label()),
+            mapping.raw_label(),
+            mapping.role_id().as_str(),
+        ])?;
+    }
+    Ok(())
+}
+
 #[derive(Debug, Error)]
 pub enum SqliteLibraryError {
     #[error("SQLite library error: {0}")]
@@ -981,8 +1179,8 @@ pub enum SqliteLibraryError {
     InvalidTrack(#[from] lumi_library::TrackValidationError),
     #[error("invalid persisted timeline: {0}")]
     InvalidTimeline(#[from] lumi_library::TimelineValidationError),
-    #[error("invalid persisted phrase role: {0}")]
-    InvalidPhraseRole(#[from] lumi_library::TrackPageRequestError),
+    #[error("invalid persisted phrase-role catalog: {0}")]
+    InvalidPhraseRoleCatalog(#[from] PhraseRoleCatalogError),
     #[error("corrupt library data: {0}")]
     CorruptData(String),
     #[error("library arithmetic overflow")]
@@ -999,6 +1197,8 @@ pub enum SqliteLibraryError {
         required: TimelineRevision,
         received: TimelineRevision,
     },
+    #[error("phrase-role catalog changed; expected revision {expected}, actual {actual}")]
+    PhraseRoleCatalogRevisionConflict { expected: u64, actual: u64 },
 }
 
 #[allow(clippy::too_many_arguments)]

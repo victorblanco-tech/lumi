@@ -8,6 +8,7 @@ public struct EngineCommandFailure: Error, Equatable, Sendable {
     public let actualPlanRevision: UInt64?
     public let actualStateRevision: UInt64?
     public let actualTimelineRevision: UInt64?
+    public let actualPhraseRoleRevision: UInt64?
 
     public init?(_ envelope: MessageEnvelope) {
         guard envelope.messageType == .error,
@@ -44,6 +45,14 @@ public struct EngineCommandFailure: Error, Equatable, Sendable {
             actualTimelineRevision = UInt64(revision)
         } else {
             actualTimelineRevision = nil
+        }
+        if case let .number(revision) = envelope.payload["actualPhraseRoleRevision"],
+           revision >= 0,
+           revision.rounded(.towardZero) == revision,
+           revision <= Double(UInt64.max) {
+            actualPhraseRoleRevision = UInt64(revision)
+        } else {
+            actualPhraseRoleRevision = nil
         }
     }
 }

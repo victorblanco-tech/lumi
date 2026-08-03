@@ -381,6 +381,20 @@ pub enum TimelineEditCommand {
 }
 
 impl TimelineEditCommand {
+    #[must_use]
+    pub const fn assigned_role_id(&self) -> Option<&PhraseRoleId> {
+        match self {
+            Self::Create { role_id, .. } | Self::ChangeRole { role_id, .. } => Some(role_id),
+            Self::Split { .. }
+            | Self::MergePrevious { .. }
+            | Self::MergeNext { .. }
+            | Self::MoveBoundary { .. }
+            | Self::Delete { .. } => None,
+        }
+    }
+}
+
+impl TimelineEditCommand {
     const fn reason(&self) -> TimelineRevisionReason {
         match self {
             Self::Create { .. } => TimelineRevisionReason::CreatePhrase,

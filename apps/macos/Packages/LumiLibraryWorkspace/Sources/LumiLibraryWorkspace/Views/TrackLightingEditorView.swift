@@ -318,8 +318,9 @@ public struct TrackLightingEditorView: View {
                 inspectorLabel(editorCopy("editor.role"))
                 if rendersInteractiveControls {
                     Picker(editorCopy("editor.role"), selection: roleBinding(for: phrase, index: phraseIndex)) {
-                        ForEach(analysis.roles) { role in
-                            Text(role.name).tag(role.id)
+                        ForEach(analysis.roles.filter { !$0.archived || $0.id == phrase.roleID }) { role in
+                            Text(role.archived ? "\(role.name) · \(editorCopy("editor.archived"))" : role.name)
+                                .tag(role.id)
                         }
                     }
                     .labelsHidden()
@@ -388,6 +389,7 @@ public struct TrackLightingEditorView: View {
 
                 Divider().overlay(Color.white.opacity(0.12))
                 inspectorFact(editorCopy("editor.origin"), phrase.origin)
+                inspectorFact(editorCopy("editor.sourceBaseline"), sourceBaseline(for: phrase))
                 inspectorFact(editorCopy("editor.loopStrategy"), phrase.loopStrategy.uppercased())
                 inspectorFact(editorCopy("editor.revisionReason"), readableReason(analysis.timeline.reason))
             } else {
@@ -678,6 +680,13 @@ public struct TrackLightingEditorView: View {
                 onTimelineEdit(.changeRole(phraseIndex: phraseIndex, roleID: roleID))
             }
         )
+    }
+
+    private func sourceBaseline(for phrase: TrackEditorPhrase) -> String {
+        let labels = analysis.sourcePhrases
+            .filter { source in source.startBeat < phrase.endBeat && source.endBeat > phrase.startBeat }
+            .map(\.rawLabel)
+        return labels.isEmpty ? editorCopy("editor.noSourcePhrase") : labels.joined(separator: " · ")
     }
 
     private func inspectorLabel(_ value: String) -> some View {

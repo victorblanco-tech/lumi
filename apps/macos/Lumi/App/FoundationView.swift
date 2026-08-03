@@ -6,6 +6,7 @@ import SwiftUI
 private enum AppDestination: String, CaseIterable, Identifiable {
     case live
     case library
+    case settings
 
     var id: String { rawValue }
 }
@@ -61,6 +62,16 @@ struct FoundationView: View {
                         },
                         timelineFeedback: engineStatus.timelineEditFeedback
                     )
+                case .settings:
+                    PhraseRoleSettingsView(
+                        settings: engineStatus.libraryState.phraseRoleSettings,
+                        appearance: $preferences.appearance,
+                        keyNotation: $preferences.keyNotation,
+                        feedback: engineStatus.phraseRoleFeedback,
+                        onMutation: { request in
+                            Task { await engineStatus.mutatePhraseRoles(request) }
+                        }
+                    )
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -87,24 +98,7 @@ struct FoundationView: View {
                 unavailableNavigation("Integrations", systemImage: "cable.connector")
             }
             Spacer()
-            Menu {
-                Picker("Appearance", selection: $preferences.appearance) {
-                    ForEach(AppearancePreference.allCases) { preference in
-                        Text(preference.titleKey).tag(preference)
-                    }
-                }
-                Picker("Key notation", selection: $preferences.keyNotation) {
-                    ForEach(KeyNotationPreference.allCases) { preference in
-                        Text(preference.titleKey).tag(preference)
-                    }
-                }
-            } label: {
-                Label("Settings", systemImage: "gearshape")
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .frame(height: LumiControlMetric.standardHeight)
-            }
-            .menuStyle(.borderlessButton)
-            .accessibilityIdentifier("lumi.navigation.settings")
+            destinationButton(.settings, title: "Settings", systemImage: "gearshape")
         }
         .padding(LumiSpacing.large)
         .frame(width: 196)

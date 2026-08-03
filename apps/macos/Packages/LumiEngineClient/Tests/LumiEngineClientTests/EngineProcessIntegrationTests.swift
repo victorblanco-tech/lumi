@@ -19,7 +19,8 @@ func decodesCommandFailure() {
             "retryable": .boolean(true),
             "actualPlanRevision": .number(4),
             "actualStateRevision": .number(11),
-            "actualTimelineRevision": .number(7)
+            "actualTimelineRevision": .number(7),
+            "actualPhraseRoleRevision": .number(3)
         ]
     )
 
@@ -28,6 +29,7 @@ func decodesCommandFailure() {
     #expect(failure?.actualPlanRevision == 4)
     #expect(failure?.actualStateRevision == 11)
     #expect(failure?.actualTimelineRevision == 7)
+    #expect(failure?.actualPhraseRoleRevision == 3)
     #expect(failure?.retryable == true)
 }
 
@@ -55,6 +57,42 @@ func launchesRealEngine() async throws {
         #expect(snapshot.sequence == 1)
         #expect(libraryTrackTitles(snapshot).count == 3)
         #expect(librarySourceName(snapshot) == "Lumi Demo Library")
+        #expect(phraseRoleRevision(snapshot) == 1)
+        #expect(phraseRoleName(snapshot, roleID: "synth") == "Synth")
+
+        let renamedRole = try await supervisor.send(
+            .mutatePhraseRoleCatalog(
+                expectedPhraseRoleRevision: 1,
+                mutation: .rename(roleID: "synth", displayName: "Lead Synth")
+            ),
+            messageID: "swift-rename-phrase-role"
+        )
+        #expect(phraseRoleRevision(renamedRole) == 2)
+        #expect(phraseRoleName(renamedRole, roleID: "synth") == "Lead Synth")
+        #expect(stateRevision(renamedRole) == stateRevision(snapshot))
+
+        let staleRole = try await supervisor.send(
+            .mutatePhraseRoleCatalog(
+                expectedPhraseRoleRevision: 1,
+                mutation: .rename(roleID: "synth", displayName: "Stale Name")
+            ),
+            messageID: "swift-stale-phrase-role"
+        )
+        #expect(EngineCommandFailure(staleRole)?.code == "phraseRoleRevisionMismatch")
+        #expect(EngineCommandFailure(staleRole)?.actualPhraseRoleRevision == 2)
+
+        snapshot = try await supervisor.send(
+            .mutatePhraseRoleCatalog(
+                expectedPhraseRoleRevision: 2,
+                mutation: .setSourceMapping(
+                    providerKind: "demo",
+                    rawLabel: "Intro",
+                    roleID: "synth"
+                )
+            ),
+            messageID: "swift-map-source-phrase"
+        )
+        #expect(phraseRoleRevision(snapshot) == 3)
 
         let searchedLibrary = try await supervisor.send(
             .queryLibrary(search: "Northern", playlistID: nil, offset: 0, limit: 50),
@@ -72,6 +110,8 @@ func launchesRealEngine() async throws {
         #expect(libraryEditorAudioURI(openedEditor)?.hasPrefix("lumi-demo://") == true)
         #expect(libraryEditorArrayCount(openedEditor, field: "waveform") ?? 0 > 0)
         #expect(libraryEditorArrayCount(openedEditor, field: "phrases") ?? 0 > 0)
+        #expect(libraryEditorArrayCount(openedEditor, field: "sourcePhrases") ?? 0 > 0)
+        #expect(libraryEditorFirstRoleID(openedEditor) == "intro-outro")
         #expect(libraryEditorBeatCount(openedEditor) ?? 0 > 0)
         #expect(libraryEditorTimelineRevision(openedEditor) == 1)
         let editedTimeline = try await supervisor.send(
@@ -122,6 +162,8 @@ func launchesRealEngine() async throws {
             libraryDatabaseURL: databaseURL
         )
         snapshot = try await supervisor.connect(to: restartedEndpoint)
+        #expect(phraseRoleRevision(snapshot) == 3)
+        #expect(phraseRoleName(snapshot, roleID: "synth") == "Lead Synth")
         let reopenedEditor = try await supervisor.send(
             .openLibraryTrackEditor(trackID: requiredFirstLibraryTrackID(snapshot)),
             messageID: "swift-reopen-library-editor"
@@ -275,6 +317,26 @@ private func librarySourceName(_ envelope: MessageEnvelope) -> String? {
     return name
 }
 
+private func phraseRoleRevision(_ envelope: MessageEnvelope) -> UInt64? {
+    guard case let .object(library) = envelope.payload["library"],
+          case let .object(settings) = library["phraseRoleSettings"],
+          case let .number(revision) = settings["revision"] else { return nil }
+    return UInt64(revision)
+}
+
+private func phraseRoleName(_ envelope: MessageEnvelope, roleID: String) -> String? {
+    guard case let .object(library) = envelope.payload["library"],
+          case let .object(settings) = library["phraseRoleSettings"],
+          case let .array(roles) = settings["roles"] else { return nil }
+    for roleValue in roles {
+        guard case let .object(role) = roleValue,
+              role["id"] == .string(roleID),
+              case let .string(name) = role["name"] else { continue }
+        return name
+    }
+    return nil
+}
+
 private func requiredFirstLibraryTrackID(_ envelope: MessageEnvelope) -> UInt64 {
     guard case let .object(library) = envelope.payload["library"],
           case let .object(page) = library["page"],
@@ -307,6 +369,14 @@ private func libraryEditorArrayCount(_ envelope: MessageEnvelope, field: String)
     guard let editor = libraryEditor(envelope),
           case let .array(values) = editor[field] else { return nil }
     return values.count
+}
+
+private func libraryEditorFirstRoleID(_ envelope: MessageEnvelope) -> String? {
+    guard let editor = libraryEditor(envelope),
+          case let .array(phrases) = editor["phrases"],
+          case let .object(first)? = phrases.first,
+          case let .string(roleID) = first["roleId"] else { return nil }
+    return roleID
 }
 
 private func libraryEditorBeatCount(_ envelope: MessageEnvelope) -> Int? {

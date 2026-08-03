@@ -69,6 +69,48 @@ public enum EngineTimelineEdit: Equatable, Sendable {
     }
 }
 
+public enum EnginePhraseRoleMutation: Equatable, Sendable {
+    case add(displayName: String)
+    case rename(roleID: String, displayName: String)
+    case moveEarlier(roleID: String)
+    case moveLater(roleID: String)
+    case archive(roleID: String)
+    case restore(roleID: String)
+    case setSourceMapping(providerKind: String, rawLabel: String, roleID: String)
+
+    fileprivate var payload: [String: JSONValue] {
+        switch self {
+        case let .add(displayName):
+            ["operation": .string("add"), "displayName": .string(displayName)]
+        case let .rename(roleID, displayName):
+            [
+                "operation": .string("rename"),
+                "roleId": .string(roleID),
+                "displayName": .string(displayName)
+            ]
+        case let .moveEarlier(roleID):
+            rolePayload("moveEarlier", roleID: roleID)
+        case let .moveLater(roleID):
+            rolePayload("moveLater", roleID: roleID)
+        case let .archive(roleID):
+            rolePayload("archive", roleID: roleID)
+        case let .restore(roleID):
+            rolePayload("restore", roleID: roleID)
+        case let .setSourceMapping(providerKind, rawLabel, roleID):
+            [
+                "operation": .string("setSourceMapping"),
+                "providerKind": .string(providerKind),
+                "rawLabel": .string(rawLabel),
+                "roleId": .string(roleID)
+            ]
+        }
+    }
+
+    private func rolePayload(_ operation: String, roleID: String) -> [String: JSONValue] {
+        ["operation": .string(operation), "roleId": .string(roleID)]
+    }
+}
+
 public enum EngineCommand: Equatable, Sendable {
     case queryLibrary(search: String, playlistID: UInt64?, offset: UInt32, limit: UInt16)
     case openLibraryTrackEditor(trackID: UInt64)
@@ -84,6 +126,10 @@ public enum EngineCommand: Equatable, Sendable {
         trackID: UInt64,
         expectedTimelineRevision: UInt64,
         targetTimelineRevision: UInt64
+    )
+    case mutatePhraseRoleCatalog(
+        expectedPhraseRoleRevision: UInt64,
+        mutation: EnginePhraseRoleMutation
     )
     case loadDemoSession(expectedStateRevision: UInt64)
     case setOperationState(String, expectedStateRevision: UInt64)
@@ -148,6 +194,11 @@ public enum EngineCommand: Equatable, Sendable {
                 expectedRevision: expectedRevision
             )
             payload["targetTimelineRevision"] = .number(Double(targetRevision))
+            return payload
+        case let .mutatePhraseRoleCatalog(expectedRevision, mutation):
+            var payload = mutation.payload
+            payload["kind"] = .string("mutatePhraseRoleCatalog")
+            payload["expectedPhraseRoleRevision"] = .number(Double(expectedRevision))
             return payload
         case let .loadDemoSession(expectedRevision):
             return statePayload("loadDemoSession", expectedRevision: expectedRevision)

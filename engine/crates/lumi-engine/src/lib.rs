@@ -4,6 +4,7 @@
 
 mod commands;
 mod library;
+mod phrase_role_defaults;
 mod session;
 mod startup;
 

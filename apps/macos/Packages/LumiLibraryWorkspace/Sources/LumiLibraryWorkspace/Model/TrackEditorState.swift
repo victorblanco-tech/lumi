@@ -57,10 +57,26 @@ public struct TrackEditorPhrase: Identifiable, Equatable, Sendable {
 public struct TrackEditorRole: Identifiable, Equatable, Sendable {
     public let id: String
     public let name: String
+    public let archived: Bool
 
-    public init(id: String, name: String) {
+    public init(id: String, name: String, archived: Bool = false) {
         self.id = id
         self.name = name
+        self.archived = archived
+    }
+}
+
+public struct TrackEditorSourcePhrase: Equatable, Sendable {
+    public let startBeat: UInt32
+    public let endBeat: UInt32
+    public let rawLabel: String
+    public let providerKind: String
+
+    public init(startBeat: UInt32, endBeat: UInt32, rawLabel: String, providerKind: String) {
+        self.startBeat = startBeat
+        self.endBeat = endBeat
+        self.rawLabel = rawLabel
+        self.providerKind = providerKind
     }
 }
 
@@ -143,6 +159,7 @@ public struct TrackEditorAnalysis: Identifiable, Equatable, Sendable {
     public let waveform: [TrackEditorWaveformPoint]
     public let phrases: [TrackEditorPhrase]
     public let roles: [TrackEditorRole]
+    public let sourcePhrases: [TrackEditorSourcePhrase]
     public let timeline: TrackEditorTimeline
 
     public init(
@@ -153,6 +170,7 @@ public struct TrackEditorAnalysis: Identifiable, Equatable, Sendable {
         waveform: [TrackEditorWaveformPoint],
         phrases: [TrackEditorPhrase],
         roles: [TrackEditorRole],
+        sourcePhrases: [TrackEditorSourcePhrase] = [],
         timeline: TrackEditorTimeline
     ) {
         self.track = track
@@ -162,6 +180,7 @@ public struct TrackEditorAnalysis: Identifiable, Equatable, Sendable {
         self.waveform = waveform
         self.phrases = phrases
         self.roles = roles
+        self.sourcePhrases = sourcePhrases
         self.timeline = timeline
     }
 
