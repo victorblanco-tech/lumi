@@ -33,20 +33,31 @@ versie. Lumi:
 - schrijft nooit in Rekordbox, analysebestanden of audiobestanden;
 - ondersteunt Rekordbox 5 en 6 bewust niet.
 
+Ontwikkeling en geautomatiseerde tests gebruiken nooit een productie-library.
+Een deterministische `DemoLibrarySourceProvider` levert licentievrije tracks,
+audio, waveforms, beatgrids, kleuren en raw phrase-observaties via exact hetzelfde
+providercontract. De Rekordbox-spike en smoke tests worden uitsluitend uitgevoerd
+tegen een wegwerp-library in een geïsoleerd macOS-developmentaccount. Toegang tot
+een productie-library is geen ontwikkelvoorwaarde en wordt pas na de spike als
+expliciete gebruikersactie toegestaan.
+
 Bij de eerste import maakt een configureerbaar source-mappingprofiel uit de raw
 phrase-observaties een eigen `LumiPhraseTimeline`. Vanaf dat moment is deze
 timeline autoritatief voor planning. Een timeline:
 
 - is gekoppeld aan een stabiele Lumi-trackidentiteit;
-- is volledig beatgebaseerd en aaneengesloten;
+- gebruikt de beatgrid als tijdas en is volledig aaneengesloten;
 - gebruikt stabiele, configureerbare `PhraseRoleId`-waarden;
 - ondersteunt split, merge, boundary move, create, delete en role change;
 - heeft oplopende revisions en herstelbare historie;
 - bewaart provenance naar de importbaseline zonder daarvan afhankelijk te
   blijven.
 
-Grenzen snappen standaard op de eerste beat van een maat en kunnen expliciet per
-beat worden verfijnd. Vrije millisecondegrenzen zijn niet toegestaan. Een
+Phrasegrenzen liggen uitsluitend op de eerste beat van een volledige maat.
+Individuele beats blijven zichtbaar en adresseerbaar voor waveform, playhead en
+uitvoering, maar de editor kan geen phrasegrens binnen een maat maken. Zoom,
+selectie, split en boundary move werken in gehele maten; vrije beat- of
+millisecondegrenzen zijn niet toegestaan. Een
 library-refresh werkt metadata en veilige waveformdata bij, maar overschrijft
 nooit een Lumi-timeline. Wanneer beatgrid of source-phrases wijzigen, biedt Lumi
 een expliciete vergelijking met `Keep Lumi`, `Rebase`, `Merge` en
@@ -72,6 +83,10 @@ maar die analyse muteert de library niet stilzwijgend.
 - Reimport vereist een zichtbaar conflict- en rebasepad.
 - Trackmatching tussen library- en live-identiteit blijft een expliciete service.
 - De planner leest geen raw Rekordbox-phrasetypes.
+- De volledige Library- en editorstroom kan tegen de demo-provider worden gebouwd
+  en bewezen voordat toegang tot een Rekordbox-developmentlibrary bestaat.
+- Een bronadapter die onverwacht schrijfaccess, een onbekende versie of een
+  instabiele snapshot nodig heeft, faalt gesloten.
 
 ## Afgewezen alternatieven
 
@@ -94,3 +109,9 @@ lichtgedrag kunnen vernietigen.
 
 Afgewezen omdat live uitvoering beatgebaseerd is en tijdposities bij tempo- en
 beatgridcorrecties onnodig fragiel zijn.
+
+### Phrasegrenzen op iedere willekeurige beat toestaan
+
+Afgewezen omdat lichtphrases in deze workflow op volledige muzikale maten worden
+voorbereid. Beats blijven zichtbaar voor herkenning en timing, maar phrase-editing
+blijft bewust bar-aligned en daardoor sneller, voorspelbaarder en veiliger.
