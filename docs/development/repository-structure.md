@@ -21,6 +21,12 @@ Native views depend on presentation state and actions. They must not import
 transport or process-supervision implementations. Those integrations map wire
 contracts into client-owned models outside the view layer.
 
+`LumiLibraryWorkspace` is the native Library feature boundary. It owns bounded
+wire decoding, presentation state, Library navigation, the track table, and the
+metadata inspector. The app target composes it with `LumiLiveWorkspace` and
+owns the only dependency on `LumiEngineClient`; neither feature package imports
+process supervision or another feature.
+
 Wire contracts and fixtures are boundary artifacts, not dumping grounds for
 cross-language business logic. Provider-specific deck and lighting types stay
 behind their adapters.

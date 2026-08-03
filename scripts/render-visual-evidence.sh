@@ -12,4 +12,9 @@ swift run \
   LumiVisualEvidence \
   --output "$output_directory"
 
+swift run \
+  --package-path apps/macos/Packages/LumiLibraryWorkspace \
+  LumiLibraryVisualEvidence \
+  --output "$output_directory"
+
 echo "Visual evidence rendered to $output_directory"

@@ -143,6 +143,10 @@ version = "0.1.0-dev"
 dependencies = [
  "lumi-deck-source",
  "lumi-domain",
+ "lumi-library",
+ "lumi-library-demo",
+ "lumi-library-source",
+ "lumi-library-sqlite",
  "lumi-lighting-output",
  "lumi-output-dry-run",
  "lumi-planner",

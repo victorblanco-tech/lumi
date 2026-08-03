@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 mod commands;
+mod library;
 mod session;
 mod startup;
 

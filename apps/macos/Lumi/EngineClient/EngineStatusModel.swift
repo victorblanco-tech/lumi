@@ -1,11 +1,13 @@
 import Combine
 import Foundation
 import LumiEngineClient
+import LumiLibraryWorkspace
 import LumiLiveWorkspace
 
 @MainActor
 final class EngineStatusModel: ObservableObject {
     @Published private(set) var workspaceState = LiveWorkspacePresenter.stopped()
+    @Published private(set) var libraryState = LibraryWorkspaceState.importing()
 
     private enum Lifecycle: Equatable {
         case stopped
@@ -18,6 +20,7 @@ final class EngineStatusModel: ObservableObject {
 
     private let supervisor = EngineProcessSupervisor()
     private let snapshotDecoder = EngineSnapshotDecoder()
+    private let libraryDecoder = LibrarySnapshotDecoder()
     private var lifecycle: Lifecycle = .stopped
     private var monitoringTask: Task<Void, Never>?
     private var playbackTask: Task<Void, Never>?
@@ -34,6 +37,7 @@ final class EngineStatusModel: ObservableObject {
         monitoringTask?.cancel()
         lifecycle = .starting
         workspaceState = LiveWorkspacePresenter.starting()
+        libraryState = .importing()
 
         do {
             let executable = try engineExecutable()
@@ -50,6 +54,7 @@ final class EngineStatusModel: ObservableObject {
                 endpointDescription: endpointDescription,
                 protocolVersion: endpoint.protocolVersion
             )
+            libraryState = try libraryDecoder.decode(envelope)
             lifecycle = .ready
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
@@ -61,6 +66,7 @@ final class EngineStatusModel: ObservableObject {
             let detail = (error as? LocalizedError)?.errorDescription
                 ?? "Unknown local engine error"
             workspaceState = LiveWorkspacePresenter.failed(detail)
+            libraryState = .failed(detail)
         }
     }
 
@@ -81,6 +87,45 @@ final class EngineStatusModel: ObservableObject {
         endpointDescription = nil
         protocolVersion = nil
         workspaceState = LiveWorkspacePresenter.stopped()
+        libraryState = .importing()
+    }
+
+    func queryLibrary(_ request: LibraryQueryRequest) async {
+        guard lifecycle == .ready,
+              !isExchangingCommand,
+              let endpointDescription,
+              let protocolVersion else {
+            return
+        }
+        isExchangingCommand = true
+        defer { isExchangingCommand = false }
+        do {
+            let envelope = try await supervisor.send(
+                .queryLibrary(
+                    search: request.search,
+                    playlistID: request.playlistID,
+                    offset: request.offset,
+                    limit: request.limit
+                )
+            )
+            if let failure = EngineCommandFailure(envelope) {
+                libraryState = .failed(failure.message)
+                return
+            }
+            let snapshot = try snapshotDecoder.decode(
+                envelope,
+                endpointDescription: endpointDescription,
+                protocolVersion: protocolVersion
+            )
+            latestSnapshot = snapshot
+            workspaceState = LiveWorkspacePresenter.ready(snapshot)
+            libraryState = try libraryDecoder.decode(envelope)
+        } catch {
+            libraryState = .failed(
+                (error as? LocalizedError)?.errorDescription
+                    ?? "The library query could not be completed."
+            )
+        }
     }
 
     func mutatePlan(_ request: PlanMutationRequest) async {

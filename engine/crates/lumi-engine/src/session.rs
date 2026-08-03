@@ -39,6 +39,7 @@ use tokio::time::timeout;
 
 use crate::StartupReady;
 use crate::commands::{SessionCommand, decode_command};
+use crate::library::{LibraryWorker, LibraryWorkerError};
 
 const SESSION_TOKEN_ENVIRONMENT_KEY: &str = "LUMI_SESSION_TOKEN";
 const MINIMUM_SESSION_TOKEN_BYTES: usize = 32;
@@ -210,6 +211,7 @@ struct EngineRuntime {
     deck_source: SimulatorDeckSourceProvider<ManualClock>,
     planning_worker: PlanningWorker,
     output_worker: OutputWorker,
+    library_worker: LibraryWorker,
     operation_sequence: u64,
 }
 
@@ -229,6 +231,7 @@ fn initialized_runtime_with_clock(clock: ManualClock) -> Result<EngineRuntime, E
     let mut deck_source = SimulatorDeckSourceProvider::demo(clock.clone())?;
     let mut planning_worker = PlanningWorker::new();
     let mut output_worker = OutputWorker::new();
+    let library_worker = LibraryWorker::demo()?;
     for event in deck_source.drain_events()? {
         planning_worker.process_source_event(
             &mut runtime,
@@ -243,6 +246,7 @@ fn initialized_runtime_with_clock(clock: ManualClock) -> Result<EngineRuntime, E
         deck_source,
         planning_worker,
         output_worker,
+        library_worker,
         operation_sequence: 0,
     })
 }
@@ -470,14 +474,15 @@ fn handle_command(
         }
     };
 
-    if command.is_mutating() && command_ids.contains(&envelope.message_id) {
+    let is_mutating = command.is_mutating();
+    if is_mutating && command_ids.contains(&envelope.message_id) {
         return snapshot_envelope(runtime, response_sequence, &envelope.message_id);
     }
 
     if let Err(error) = apply_command(runtime, command) {
         return application_error_envelope(response_sequence, &envelope.message_id, &error);
     }
-    if command.is_mutating() {
+    if is_mutating {
         debug_assert_eq!(
             command_ids.observe(&envelope.message_id),
             CommandDisposition::FirstSeen
@@ -492,6 +497,17 @@ fn apply_command(
 ) -> Result<(), CommandApplicationError> {
     match command {
         SessionCommand::GetSnapshot => return Ok(()),
+        SessionCommand::QueryLibrary {
+            search,
+            playlist_id,
+            offset,
+            limit,
+        } => {
+            runtime
+                .library_worker
+                .query(search, playlist_id, offset, limit);
+            return Ok(());
+        }
         SessionCommand::LoadDemoSession { expected_revision }
         | SessionCommand::ResetDemoSession { expected_revision } => {
             validate_state_revision(runtime, expected_revision)?;
@@ -591,6 +607,7 @@ fn apply_command(
 
     let revised = match command {
         SessionCommand::GetSnapshot
+        | SessionCommand::QueryLibrary { .. }
         | SessionCommand::LoadDemoSession { .. }
         | SessionCommand::SetOperationState { .. }
         | SessionCommand::SetSimulationSpeed { .. }
@@ -956,6 +973,10 @@ fn snapshot_envelope(
         .map(plan_json)
         .unwrap_or(Value::Null);
     payload.insert("nextPlan".to_owned(), next_plan);
+    payload.insert(
+        "library".to_owned(),
+        runtime.library_worker.snapshot_json()?,
+    );
 
     Ok(MessageEnvelope {
         protocol_version: PROTOCOL_VERSION,
@@ -1253,6 +1274,8 @@ pub enum EngineError {
     OutputEffectSequenceOverflow,
     #[error("dry-run output failed: {0}")]
     DryRunOutput(#[from] DryRunOutputError),
+    #[error("music library failed: {0}")]
+    Library(#[from] LibraryWorkerError),
     #[error("the response sequence overflowed")]
     ResponseSequenceOverflow,
     #[error("the command ID cache could not initialize: {0}")]

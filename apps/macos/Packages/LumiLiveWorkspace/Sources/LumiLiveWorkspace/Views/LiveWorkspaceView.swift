@@ -6,6 +6,7 @@ public struct LiveWorkspaceView: View {
     private let state: LiveWorkspaceState
     private let productVersion: String
     private let allowsScrolling: Bool
+    private let showsNavigation: Bool
     private let onPlanMutation: @MainActor (PlanMutationRequest) -> Void
     private let onSessionCommand: @MainActor (SessionCommandRequest) -> Void
     @Binding private var appearance: AppearancePreference
@@ -20,12 +21,14 @@ public struct LiveWorkspaceView: View {
         appearance: Binding<AppearancePreference>,
         keyNotation: Binding<KeyNotationPreference>,
         allowsScrolling: Bool = true,
+        showsNavigation: Bool = true,
         onPlanMutation: @escaping @MainActor (PlanMutationRequest) -> Void = { _ in },
         onSessionCommand: @escaping @MainActor (SessionCommandRequest) -> Void = { _ in }
     ) {
         self.state = state
         self.productVersion = productVersion
         self.allowsScrolling = allowsScrolling
+        self.showsNavigation = showsNavigation
         self.onPlanMutation = onPlanMutation
         self.onSessionCommand = onSessionCommand
         _appearance = appearance
@@ -33,10 +36,16 @@ public struct LiveWorkspaceView: View {
     }
 
     public var body: some View {
-        HStack(spacing: 0) {
-            sidebar
-            Divider()
-            mainWorkspace
+        Group {
+            if showsNavigation {
+                HStack(spacing: 0) {
+                    sidebar
+                    Divider()
+                    mainWorkspace
+                }
+            } else {
+                mainWorkspace
+            }
         }
         .background(LumiColor.canvas)
         .frame(minWidth: 760, minHeight: 560)
