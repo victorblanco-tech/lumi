@@ -18,7 +18,8 @@ func decodesCommandFailure() {
             "message": .string("The plan changed before the command was applied."),
             "retryable": .boolean(true),
             "actualPlanRevision": .number(4),
-            "actualStateRevision": .number(11)
+            "actualStateRevision": .number(11),
+            "actualTimelineRevision": .number(7)
         ]
     )
 
@@ -26,6 +27,7 @@ func decodesCommandFailure() {
     #expect(failure?.kind == "revisionConflict")
     #expect(failure?.actualPlanRevision == 4)
     #expect(failure?.actualStateRevision == 11)
+    #expect(failure?.actualTimelineRevision == 7)
     #expect(failure?.retryable == true)
 }
 
@@ -38,14 +40,17 @@ func launchesRealEngine() async throws {
     }
 
     let supervisor = EngineProcessSupervisor()
+    let databaseURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("lumi-swift-engine-\(UUID().uuidString).sqlite")
     do {
         let endpoint = try await supervisor.launch(
-            engineExecutable: URL(fileURLWithPath: executablePath)
+            engineExecutable: URL(fileURLWithPath: executablePath),
+            libraryDatabaseURL: databaseURL
         )
         #expect(endpoint.host == "127.0.0.1")
         #expect(endpoint.protocolVersion == WireProtocol.version)
 
-        let snapshot = try await supervisor.connect(to: endpoint)
+        var snapshot = try await supervisor.connect(to: endpoint)
         #expect(snapshot.messageType == .snapshot)
         #expect(snapshot.sequence == 1)
         #expect(libraryTrackTitles(snapshot).count == 3)
@@ -68,12 +73,74 @@ func launchesRealEngine() async throws {
         #expect(libraryEditorArrayCount(openedEditor, field: "waveform") ?? 0 > 0)
         #expect(libraryEditorArrayCount(openedEditor, field: "phrases") ?? 0 > 0)
         #expect(libraryEditorBeatCount(openedEditor) ?? 0 > 0)
+        #expect(libraryEditorTimelineRevision(openedEditor) == 1)
+        let editedTimeline = try await supervisor.send(
+            .editLibraryTimeline(
+                trackID: requiredFirstLibraryTrackID(snapshot),
+                expectedTimelineRevision: 1,
+                edit: .split(phraseIndex: 0, atBar: 4)
+            ),
+            messageID: "swift-split-library-timeline"
+        )
+        #expect(stateRevision(editedTimeline) == editorRevision)
+        #expect(planRevision(editedTimeline) == planRevision(openedEditor))
+        #expect(outputRecordCount(editedTimeline) == 0)
+        #expect(libraryEditorTimelineRevision(editedTimeline) == 2)
+        #expect(libraryEditorArrayCount(editedTimeline, field: "phrases") == 5)
+
+        let staleTimeline = try await supervisor.send(
+            .editLibraryTimeline(
+                trackID: requiredFirstLibraryTrackID(snapshot),
+                expectedTimelineRevision: 1,
+                edit: .changeRole(phraseIndex: 0, roleID: "synth")
+            ),
+            messageID: "swift-stale-library-timeline"
+        )
+        #expect(EngineCommandFailure(staleTimeline)?.kind == "revisionConflict")
+        #expect(EngineCommandFailure(staleTimeline)?.actualTimelineRevision == 2)
+
+        let undoneTimeline = try await supervisor.send(
+            .undoLibraryTimeline(
+                trackID: requiredFirstLibraryTrackID(snapshot),
+                expectedTimelineRevision: 2
+            ),
+            messageID: "swift-undo-library-timeline"
+        )
+        #expect(libraryEditorTimelineRevision(undoneTimeline) == 3)
+        #expect(libraryEditorCanRedo(undoneTimeline) == true)
+        #expect(libraryEditorArrayCount(undoneTimeline, field: "phrases") == 4)
         let closedEditor = try await supervisor.send(
             .closeLibraryTrackEditor,
             messageID: "swift-close-library-editor"
         )
         #expect(stateRevision(closedEditor) == editorRevision)
         #expect(libraryEditorIsClosed(closedEditor))
+
+        await supervisor.stop()
+        let restartedEndpoint = try await supervisor.launch(
+            engineExecutable: URL(fileURLWithPath: executablePath),
+            libraryDatabaseURL: databaseURL
+        )
+        snapshot = try await supervisor.connect(to: restartedEndpoint)
+        let reopenedEditor = try await supervisor.send(
+            .openLibraryTrackEditor(trackID: requiredFirstLibraryTrackID(snapshot)),
+            messageID: "swift-reopen-library-editor"
+        )
+        #expect(libraryEditorTimelineRevision(reopenedEditor) == 3)
+        #expect(libraryEditorCanRedo(reopenedEditor) == true)
+        let redoneTimeline = try await supervisor.send(
+            .redoLibraryTimeline(
+                trackID: requiredFirstLibraryTrackID(snapshot),
+                expectedTimelineRevision: 3
+            ),
+            messageID: "swift-redo-library-timeline"
+        )
+        #expect(libraryEditorTimelineRevision(redoneTimeline) == 4)
+        #expect(libraryEditorArrayCount(redoneTimeline, field: "phrases") == 5)
+        _ = try await supervisor.send(
+            .closeLibraryTrackEditor,
+            messageID: "swift-close-reopened-library-editor"
+        )
 
         let unknownEditor = try await supervisor.send(
             .openLibraryTrackEditor(trackID: 999_999),
@@ -169,8 +236,14 @@ func launchesRealEngine() async throws {
         await #expect(throws: EngineClientError.connectionClosed) {
             try await supervisor.getSnapshot()
         }
+        try? FileManager.default.removeItem(at: databaseURL)
+        try? FileManager.default.removeItem(atPath: databaseURL.path + "-wal")
+        try? FileManager.default.removeItem(atPath: databaseURL.path + "-shm")
     } catch {
         await supervisor.stop()
+        try? FileManager.default.removeItem(at: databaseURL)
+        try? FileManager.default.removeItem(atPath: databaseURL.path + "-wal")
+        try? FileManager.default.removeItem(atPath: databaseURL.path + "-shm")
         throw error
     }
 }
@@ -246,6 +319,20 @@ private func libraryEditorBeatCount(_ envelope: MessageEnvelope) -> Int? {
 private func libraryEditorIsClosed(_ envelope: MessageEnvelope) -> Bool {
     guard case let .object(library) = envelope.payload["library"] else { return false }
     return library["editor"] == .null
+}
+
+private func libraryEditorTimelineRevision(_ envelope: MessageEnvelope) -> UInt64? {
+    guard let editor = libraryEditor(envelope),
+          case let .object(timeline) = editor["timeline"],
+          case let .number(revision) = timeline["revision"] else { return nil }
+    return UInt64(revision)
+}
+
+private func libraryEditorCanRedo(_ envelope: MessageEnvelope) -> Bool? {
+    guard let editor = libraryEditor(envelope),
+          case let .object(timeline) = editor["timeline"],
+          case let .boolean(canRedo) = timeline["canRedo"] else { return nil }
+    return canRedo
 }
 
 private func requiredStateRevision(_ envelope: MessageEnvelope) -> UInt64 {

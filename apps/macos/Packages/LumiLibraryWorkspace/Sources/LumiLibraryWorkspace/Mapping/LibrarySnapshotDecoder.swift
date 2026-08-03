@@ -74,9 +74,14 @@ public struct LibrarySnapshotDecoder: Sendable {
         let markers = try array(beatGrid, "markers")
         let waveform = try array(editor, "waveform")
         let phrases = try array(editor, "phrases")
+        let roles = try array(editor, "roles")
+        let timeline = try object(editor, "timeline")
+        let revisions = try array(timeline, "revisions")
         guard markers.count <= 1_000_000,
               waveform.count <= 100_000,
-              phrases.count <= 10_000 else {
+              phrases.count <= 10_000,
+              roles.count <= 1_000,
+              revisions.count <= 200 else {
             throw LibrarySnapshotError.unboundedEditor
         }
         let beatsPerBar = try UInt8(exactly: unsigned(beatGrid, "beatsPerBar"))
@@ -120,8 +125,10 @@ public struct LibrarySnapshotDecoder: Sendable {
                     .required(.invalidNumber("phrase.startBeat")),
                 endBeat: try UInt32(exactly: unsigned(phrase, "endBeat"))
                     .required(.invalidNumber("phrase.endBeat")),
+                roleID: try string(phrase, "roleId"),
                 role: try string(phrase, "role"),
-                origin: try string(phrase, "origin")
+                origin: try string(phrase, "origin"),
+                loopStrategy: try string(phrase, "loopStrategy")
             )
         }
         var phraseIDs = Set<UInt64>()
@@ -132,10 +139,47 @@ public struct LibrarySnapshotDecoder: Sendable {
                   phrase.endBeat <= UInt32(beats.count),
                   phrase.startBeat.isMultiple(of: UInt32(beatsPerBar)),
                   phrase.endBeat.isMultiple(of: UInt32(beatsPerBar)),
-                  index == 0 || phrase.startBeat >= previousEnd else {
+                  (index == 0 ? phrase.startBeat == 0 : phrase.startBeat == previousEnd) else {
                 throw LibrarySnapshotError.invalidPhraseTimeline
             }
             previousEnd = phrase.endBeat
+        }
+        guard previousEnd == UInt32(beats.count) else {
+            throw LibrarySnapshotError.invalidPhraseTimeline
+        }
+        let decodedRoles = try roles.map { value -> TrackEditorRole in
+            guard case let .object(role) = value else {
+                throw LibrarySnapshotError.invalidObject
+            }
+            return TrackEditorRole(id: try string(role, "id"), name: try string(role, "name"))
+        }
+        guard Set(decodedRoles.map(\.id)).count == decodedRoles.count,
+              !decodedRoles.isEmpty,
+              decodedPhrases.allSatisfy({ phrase in
+                  decodedRoles.contains(where: { $0.id == phrase.roleID })
+              }) else {
+            throw LibrarySnapshotError.invalidPhraseTimeline
+        }
+        let decodedRevisions = try revisions.map { value -> TrackEditorRevision in
+            guard case let .object(revision) = value else {
+                throw LibrarySnapshotError.invalidObject
+            }
+            return TrackEditorRevision(
+                revision: try unsigned(revision, "revision"),
+                origin: try string(revision, "origin"),
+                reason: try string(revision, "reason"),
+                phraseCount: try UInt32(exactly: unsigned(revision, "phraseCount"))
+                    .required(.invalidNumber("timeline.phraseCount")),
+                restoredFrom: optionalUnsigned(revision, "restoredFrom")
+            )
+        }
+        let timelineRevision = try unsigned(timeline, "revision")
+        guard timelineRevision > 0,
+              decodedRevisions.first?.revision == timelineRevision,
+              zip(decodedRevisions, decodedRevisions.dropFirst()).allSatisfy({ left, right in
+                  left.revision > right.revision
+              }) else {
+            throw LibrarySnapshotError.invalidPhraseTimeline
         }
         let audioURI = try string(editor, "audioUri")
         guard !audioURI.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -159,7 +203,17 @@ public struct LibrarySnapshotDecoder: Sendable {
                         .required(.invalidNumber("waveform.high"))
                 )
             },
-            phrases: decodedPhrases
+            phrases: decodedPhrases,
+            roles: decodedRoles,
+            timeline: TrackEditorTimeline(
+                revision: timelineRevision,
+                baselineRevision: try string(timeline, "baselineRevision"),
+                origin: try string(timeline, "origin"),
+                reason: try string(timeline, "reason"),
+                canUndo: try boolean(timeline, "canUndo"),
+                canRedo: try boolean(timeline, "canRedo"),
+                revisions: decodedRevisions
+            )
         )
     }
 

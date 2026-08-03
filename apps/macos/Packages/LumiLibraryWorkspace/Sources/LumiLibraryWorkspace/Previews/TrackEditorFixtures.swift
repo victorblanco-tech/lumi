@@ -41,11 +41,31 @@ public enum TrackEditorFixtures {
             beats: beats,
             waveform: waveform,
             phrases: [
-                TrackEditorPhrase(id: 0, startBeat: 0, endBeat: 16, role: "Intro", origin: "source"),
-                TrackEditorPhrase(id: 1, startBeat: 16, endBeat: 32, role: "Breakdown", origin: "source"),
-                TrackEditorPhrase(id: 2, startBeat: 32, endBeat: 48, role: "Build", origin: "source"),
-                TrackEditorPhrase(id: 3, startBeat: 48, endBeat: 64, role: "Drop", origin: "source")
-            ]
+                TrackEditorPhrase(id: 0, startBeat: 0, endBeat: 16, roleID: "intro-outro", role: "Intro / Outro", origin: "sourceImport"),
+                TrackEditorPhrase(id: 1, startBeat: 16, endBeat: 32, roleID: "breakdown-1", role: "Breakdown 1", origin: "sourceImport"),
+                TrackEditorPhrase(id: 2, startBeat: 32, endBeat: 48, roleID: "buildup-1", role: "Buildup 1", origin: "sourceImport"),
+                TrackEditorPhrase(id: 3, startBeat: 48, endBeat: 64, roleID: "drop", role: "Drop", origin: "sourceImport")
+            ],
+            roles: [
+                TrackEditorRole(id: "intro-outro", name: "Intro / Outro"),
+                TrackEditorRole(id: "breakdown-1", name: "Breakdown 1"),
+                TrackEditorRole(id: "synth", name: "Synth"),
+                TrackEditorRole(id: "buildup-1", name: "Buildup 1"),
+                TrackEditorRole(id: "drop", name: "Drop")
+            ],
+            timeline: TrackEditorTimeline(
+                revision: 3,
+                baselineRevision: "horizon-lines-v1",
+                origin: "userEdit",
+                reason: "moveBoundary",
+                canUndo: true,
+                canRedo: false,
+                revisions: [
+                    TrackEditorRevision(revision: 3, origin: "userEdit", reason: "moveBoundary", phraseCount: 4, restoredFrom: nil),
+                    TrackEditorRevision(revision: 2, origin: "userEdit", reason: "changeRole", phraseCount: 4, restoredFrom: nil),
+                    TrackEditorRevision(revision: 1, origin: "sourceImport", reason: "initialSourceMapping", phraseCount: 4, restoredFrom: nil)
+                ]
+            )
         )
     }()
 }

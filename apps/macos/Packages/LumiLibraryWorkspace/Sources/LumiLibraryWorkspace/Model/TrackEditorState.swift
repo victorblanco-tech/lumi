@@ -30,16 +30,107 @@ public struct TrackEditorPhrase: Identifiable, Equatable, Sendable {
     public let id: UInt64
     public let startBeat: UInt32
     public let endBeat: UInt32
+    public let roleID: String
     public let role: String
     public let origin: String
+    public let loopStrategy: String
 
-    public init(id: UInt64, startBeat: UInt32, endBeat: UInt32, role: String, origin: String) {
+    public init(
+        id: UInt64,
+        startBeat: UInt32,
+        endBeat: UInt32,
+        roleID: String,
+        role: String,
+        origin: String,
+        loopStrategy: String = "auto"
+    ) {
         self.id = id
         self.startBeat = startBeat
         self.endBeat = endBeat
+        self.roleID = roleID
         self.role = role
         self.origin = origin
+        self.loopStrategy = loopStrategy
     }
+}
+
+public struct TrackEditorRole: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let name: String
+
+    public init(id: String, name: String) {
+        self.id = id
+        self.name = name
+    }
+}
+
+public struct TrackEditorRevision: Identifiable, Equatable, Sendable {
+    public var id: UInt64 { revision }
+
+    public let revision: UInt64
+    public let origin: String
+    public let reason: String
+    public let phraseCount: UInt32
+    public let restoredFrom: UInt64?
+
+    public init(
+        revision: UInt64,
+        origin: String,
+        reason: String,
+        phraseCount: UInt32,
+        restoredFrom: UInt64?
+    ) {
+        self.revision = revision
+        self.origin = origin
+        self.reason = reason
+        self.phraseCount = phraseCount
+        self.restoredFrom = restoredFrom
+    }
+}
+
+public struct TrackEditorTimeline: Equatable, Sendable {
+    public let revision: UInt64
+    public let baselineRevision: String
+    public let origin: String
+    public let reason: String
+    public let canUndo: Bool
+    public let canRedo: Bool
+    public let revisions: [TrackEditorRevision]
+
+    public init(
+        revision: UInt64,
+        baselineRevision: String,
+        origin: String,
+        reason: String,
+        canUndo: Bool,
+        canRedo: Bool,
+        revisions: [TrackEditorRevision]
+    ) {
+        self.revision = revision
+        self.baselineRevision = baselineRevision
+        self.origin = origin
+        self.reason = reason
+        self.canUndo = canUndo
+        self.canRedo = canRedo
+        self.revisions = revisions
+    }
+}
+
+public enum TrackTimelineEditRequest: Equatable, Sendable {
+    case create(startBar: UInt32, endBar: UInt32, roleID: String)
+    case split(phraseIndex: UInt16, atBar: UInt32)
+    case mergePrevious(phraseIndex: UInt16)
+    case mergeNext(phraseIndex: UInt16)
+    case moveBoundary(afterPhraseIndex: UInt16, toBar: UInt32)
+    case deleteAbsorbPrevious(phraseIndex: UInt16)
+    case deleteAbsorbNext(phraseIndex: UInt16)
+    case changeRole(phraseIndex: UInt16, roleID: String)
+}
+
+public enum TrackTimelineHistoryRequest: Equatable, Sendable {
+    case undo
+    case redo
+    case restore(revision: UInt64)
 }
 
 public struct TrackEditorAnalysis: Identifiable, Equatable, Sendable {
@@ -51,6 +142,8 @@ public struct TrackEditorAnalysis: Identifiable, Equatable, Sendable {
     public let beats: [TrackEditorBeat]
     public let waveform: [TrackEditorWaveformPoint]
     public let phrases: [TrackEditorPhrase]
+    public let roles: [TrackEditorRole]
+    public let timeline: TrackEditorTimeline
 
     public init(
         track: LibraryTrack,
@@ -58,7 +151,9 @@ public struct TrackEditorAnalysis: Identifiable, Equatable, Sendable {
         beatsPerBar: UInt8,
         beats: [TrackEditorBeat],
         waveform: [TrackEditorWaveformPoint],
-        phrases: [TrackEditorPhrase]
+        phrases: [TrackEditorPhrase],
+        roles: [TrackEditorRole],
+        timeline: TrackEditorTimeline
     ) {
         self.track = track
         self.audioURI = audioURI
@@ -66,6 +161,8 @@ public struct TrackEditorAnalysis: Identifiable, Equatable, Sendable {
         self.beats = beats
         self.waveform = waveform
         self.phrases = phrases
+        self.roles = roles
+        self.timeline = timeline
     }
 
     public var totalBars: UInt32 {

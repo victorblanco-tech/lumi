@@ -26,13 +26,14 @@ prevent two editors from silently overwriting each other.
 
 ## SQLite persistence
 
-Schema version 1 separates:
+Schema version 2 separates:
 
 - source registrations, immutable import-baseline facts, canonical track and
   playlist identities;
 - current imported analysis, beat markers, waveform samples, and raw phrases;
 - configurable phrase roles;
-- immutable Lumi timeline revisions and their current heads.
+- immutable Lumi timeline revisions, edit reason, parent/restore provenance,
+  per-phrase loop strategy, and their current heads.
 
 The pair `(source_id, source_track_id)` is unique. Reimporting the same analysis
 revision is a no-op and preserves the Lumi track ID. A changed source analysis

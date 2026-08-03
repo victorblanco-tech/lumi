@@ -13,10 +13,78 @@ public struct EnginePlanCommandContext: Equatable, Sendable {
     }
 }
 
+public enum EngineTimelineEdit: Equatable, Sendable {
+    case create(startBar: UInt32, endBar: UInt32, roleID: String)
+    case split(phraseIndex: UInt16, atBar: UInt32)
+    case mergePrevious(phraseIndex: UInt16)
+    case mergeNext(phraseIndex: UInt16)
+    case moveBoundary(afterPhraseIndex: UInt16, toBar: UInt32)
+    case deleteAbsorbPrevious(phraseIndex: UInt16)
+    case deleteAbsorbNext(phraseIndex: UInt16)
+    case changeRole(phraseIndex: UInt16, roleID: String)
+
+    fileprivate var payload: [String: JSONValue] {
+        switch self {
+        case let .create(startBar, endBar, roleID):
+            return [
+                "operation": .string("create"),
+                "startBar": .number(Double(startBar)),
+                "endBar": .number(Double(endBar)),
+                "roleId": .string(roleID)
+            ]
+        case let .split(phraseIndex, atBar):
+            return [
+                "operation": .string("split"),
+                "phraseIndex": .number(Double(phraseIndex)),
+                "atBar": .number(Double(atBar))
+            ]
+        case let .mergePrevious(phraseIndex):
+            return indexed("mergePrevious", phraseIndex: phraseIndex)
+        case let .mergeNext(phraseIndex):
+            return indexed("mergeNext", phraseIndex: phraseIndex)
+        case let .moveBoundary(phraseIndex, toBar):
+            return [
+                "operation": .string("moveBoundary"),
+                "phraseIndex": .number(Double(phraseIndex)),
+                "toBar": .number(Double(toBar))
+            ]
+        case let .deleteAbsorbPrevious(phraseIndex):
+            return indexed("deleteAbsorbPrevious", phraseIndex: phraseIndex)
+        case let .deleteAbsorbNext(phraseIndex):
+            return indexed("deleteAbsorbNext", phraseIndex: phraseIndex)
+        case let .changeRole(phraseIndex, roleID):
+            return [
+                "operation": .string("changeRole"),
+                "phraseIndex": .number(Double(phraseIndex)),
+                "roleId": .string(roleID)
+            ]
+        }
+    }
+
+    private func indexed(_ operation: String, phraseIndex: UInt16) -> [String: JSONValue] {
+        [
+            "operation": .string(operation),
+            "phraseIndex": .number(Double(phraseIndex))
+        ]
+    }
+}
+
 public enum EngineCommand: Equatable, Sendable {
     case queryLibrary(search: String, playlistID: UInt64?, offset: UInt32, limit: UInt16)
     case openLibraryTrackEditor(trackID: UInt64)
     case closeLibraryTrackEditor
+    case editLibraryTimeline(
+        trackID: UInt64,
+        expectedTimelineRevision: UInt64,
+        edit: EngineTimelineEdit
+    )
+    case undoLibraryTimeline(trackID: UInt64, expectedTimelineRevision: UInt64)
+    case redoLibraryTimeline(trackID: UInt64, expectedTimelineRevision: UInt64)
+    case restoreLibraryTimelineRevision(
+        trackID: UInt64,
+        expectedTimelineRevision: UInt64,
+        targetTimelineRevision: UInt64
+    )
     case loadDemoSession(expectedStateRevision: UInt64)
     case setOperationState(String, expectedStateRevision: UInt64)
     case setSimulationSpeed(UInt64, expectedStateRevision: UInt64)
@@ -55,6 +123,32 @@ public enum EngineCommand: Equatable, Sendable {
             ]
         case .closeLibraryTrackEditor:
             return ["kind": .string("closeLibraryTrackEditor")]
+        case let .editLibraryTimeline(trackID, expectedRevision, edit):
+            var payload = edit.payload
+            payload["kind"] = .string("editLibraryTimeline")
+            payload["trackId"] = .number(Double(trackID))
+            payload["expectedTimelineRevision"] = .number(Double(expectedRevision))
+            return payload
+        case let .undoLibraryTimeline(trackID, expectedRevision):
+            return timelinePayload(
+                "undoLibraryTimeline",
+                trackID: trackID,
+                expectedRevision: expectedRevision
+            )
+        case let .redoLibraryTimeline(trackID, expectedRevision):
+            return timelinePayload(
+                "redoLibraryTimeline",
+                trackID: trackID,
+                expectedRevision: expectedRevision
+            )
+        case let .restoreLibraryTimelineRevision(trackID, expectedRevision, targetRevision):
+            var payload = timelinePayload(
+                "restoreLibraryTimelineRevision",
+                trackID: trackID,
+                expectedRevision: expectedRevision
+            )
+            payload["targetTimelineRevision"] = .number(Double(targetRevision))
+            return payload
         case let .loadDemoSession(expectedRevision):
             return statePayload("loadDemoSession", expectedRevision: expectedRevision)
         case let .setOperationState(state, expectedRevision):
@@ -123,6 +217,18 @@ public enum EngineCommand: Equatable, Sendable {
         payload["kind"] = .string(kind)
         payload["expectedStateRevision"] = .number(Double(expectedRevision))
         return payload
+    }
+
+    private func timelinePayload(
+        _ kind: String,
+        trackID: UInt64,
+        expectedRevision: UInt64
+    ) -> [String: JSONValue] {
+        [
+            "kind": .string(kind),
+            "trackId": .number(Double(trackID)),
+            "expectedTimelineRevision": .number(Double(expectedRevision))
+        ]
     }
 
     private func planPayload(

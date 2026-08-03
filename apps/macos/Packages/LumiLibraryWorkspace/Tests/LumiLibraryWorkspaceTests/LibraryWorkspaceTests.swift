@@ -65,6 +65,8 @@ struct LibraryWorkspaceTests {
         #expect(LibraryWorkspaceLocalization.value("library.openEditor").contains("Editor"))
         #expect(LibraryWorkspaceLocalization.value("editor.playPause") == "Play or pause")
         #expect(LibraryWorkspaceLocalization.value("editor.loopPhrase") == "Loop selected phrase")
+        #expect(LibraryWorkspaceLocalization.value("editor.createSelection").contains("selection"))
+        #expect(LibraryWorkspaceLocalization.value("editor.planIsolation").contains("Live plan"))
     }
 
     @Test("Track editor analysis uses one bounded beat coordinate system")
@@ -79,6 +81,10 @@ struct LibraryWorkspaceTests {
         #expect(editor.totalBars == 2)
         #expect(editor.waveform.count == 3)
         #expect(editor.phrases.map(\.role) == ["Intro", "Build"])
+        #expect(editor.phrases.map(\.roleID) == ["intro-outro", "buildup-1"])
+        #expect(editor.timeline.revision == 1)
+        #expect(editor.timeline.revisions.count == 1)
+        #expect(!editor.timeline.canUndo)
         #expect(editor.phraseTimeRange(editor.phrases[1]) == 2_000..<4_000)
     }
 
@@ -123,6 +129,18 @@ struct LibraryWorkspaceTests {
                 #expect(abs(viewport.beat(atX: x, width: 1_024) - beat) < 0.000_001)
             }
         }
+    }
+
+    @Test("Phrase selection snaps every fractional beat to complete bar boundaries")
+    func phraseSelectionSnapsToBars() {
+        #expect(TrackEditorEditGeometry.containingBar(beat: 0.0, beatsPerBar: 4, totalBars: 16) == 0)
+        #expect(TrackEditorEditGeometry.containingBar(beat: 3.99, beatsPerBar: 4, totalBars: 16) == 0)
+        #expect(TrackEditorEditGeometry.containingBar(beat: 4.0, beatsPerBar: 4, totalBars: 16) == 1)
+        #expect(TrackEditorEditGeometry.containingBar(beat: 63.99, beatsPerBar: 4, totalBars: 16) == 15)
+        #expect(
+            TrackEditorEditGeometry.barSelection(anchorBar: 6, currentBar: 2, totalBars: 16)
+                == 2..<7
+        )
     }
 
     @Test("Viewport movement and zoom clamp to whole track bars")
@@ -174,6 +192,7 @@ struct LibraryWorkspaceTests {
             id: phrase.id,
             startBeat: phrase.startBeat + 1,
             endBeat: phrase.endBeat,
+            roleID: phrase.roleID,
             role: phrase.role,
             origin: "user"
         )
@@ -185,11 +204,17 @@ struct LibraryWorkspaceTests {
             id: phrase.id,
             startBeat: 20,
             endBeat: 36,
+            roleID: phrase.roleID,
             role: phrase.role,
             origin: "user"
         )
         #expect(preview.setLoop(acceptedEdit))
         #expect(preview.positionMillis == analysis.timeMillis(atBeat: acceptedEdit.startBeat))
+
+        preview.seek(toMillis: 11_000)
+        #expect(preview.adoptEditedLoop(acceptedEdit))
+        #expect(preview.positionMillis == 11_000)
+        #expect(analysis.phraseTimeRange(acceptedEdit).contains(preview.positionMillis))
     }
 
     @Test("Stale audio completion generations cannot overwrite newer transport")
@@ -200,6 +225,17 @@ struct LibraryWorkspaceTests {
 
         #expect(!generation.isCurrent(first))
         #expect(generation.isCurrent(replacement))
+    }
+
+    @Test("Edit-during-playback loop adoption has a stable safe transcript")
+    func editDuringPlaybackLoopTranscript() {
+        let editedLoop: Range<UInt64> = 10_000..<18_000
+        let transcript = [
+            "inside:\(TrackAudioLoopTransition.position(current: 11_000, loop: editedLoop, preservingPosition: true))",
+            "outside:\(TrackAudioLoopTransition.position(current: 19_000, loop: editedLoop, preservingPosition: true))",
+            "fresh:\(TrackAudioLoopTransition.position(current: 11_000, loop: editedLoop, preservingPosition: false))"
+        ]
+        #expect(transcript == ["inside:11000", "outside:10000", "fresh:10000"])
     }
 
     @MainActor
@@ -236,7 +272,9 @@ private func replacingAudioURI(
         beatsPerBar: analysis.beatsPerBar,
         beats: analysis.beats,
         waveform: analysis.waveform,
-        phrases: analysis.phrases
+        phrases: analysis.phrases,
+        roles: analysis.roles,
+        timeline: analysis.timeline
     )
 }
 
@@ -324,15 +362,40 @@ private func editorValue() -> JSONValue {
                 "id": .number(1),
                 "startBeat": .number(0),
                 "endBeat": .number(4),
+                "roleId": .string("intro-outro"),
                 "role": .string("Intro"),
-                "origin": .string("source")
+                "origin": .string("sourceImport"),
+                "loopStrategy": .string("auto")
             ]),
             .object([
                 "id": .number(2),
                 "startBeat": .number(4),
                 "endBeat": .number(8),
+                "roleId": .string("buildup-1"),
                 "role": .string("Build"),
-                "origin": .string("source")
+                "origin": .string("sourceImport"),
+                "loopStrategy": .string("auto")
+            ])
+        ]),
+        "roles": .array([
+            .object(["id": .string("intro-outro"), "name": .string("Intro")]),
+            .object(["id": .string("buildup-1"), "name": .string("Build")])
+        ]),
+        "timeline": .object([
+            "revision": .number(1),
+            "baselineRevision": .string("horizon-lines-v1"),
+            "origin": .string("sourceImport"),
+            "reason": .string("initialSourceMapping"),
+            "canUndo": .boolean(false),
+            "canRedo": .boolean(false),
+            "revisions": .array([
+                .object([
+                    "revision": .number(1),
+                    "origin": .string("sourceImport"),
+                    "reason": .string("initialSourceMapping"),
+                    "phraseCount": .number(2),
+                    "restoredFrom": .null
+                ])
             ])
         ])
     ])

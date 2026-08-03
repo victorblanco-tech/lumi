@@ -4,8 +4,9 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use lumi_library::{
     ImportedLibraryBaseline, ImportedTrackAnalysis, LibraryRepository, LibraryTrackQuery,
-    LumiPhraseTimeline, PhraseInstance, PhraseRole, PhraseRoleId, SourceRevision, TimelineRevision,
-    TimelineRevisionOrigin, TrackPageRequest,
+    LumiPhraseTimeline, PhraseInstance, PhraseLoopStrategy, PhraseRole, PhraseRoleId,
+    SourceRevision, TimelineEditCommand, TimelineRevision, TimelineRevisionOrigin,
+    TimelineRevisionReason, TrackPageRequest, VariantId,
 };
 use lumi_library_demo::DemoLibrarySourceProvider;
 use lumi_library_source::MusicLibrarySourceProvider;
@@ -15,13 +16,64 @@ use rusqlite::Connection;
 #[test]
 fn migrates_an_empty_database() -> Result<(), Box<dyn Error>> {
     let repository = SqliteLibraryRepository::in_memory()?;
-    assert_eq!(repository.schema_version()?, 1);
+    assert_eq!(repository.schema_version()?, 2);
     assert_eq!(
         repository
             .page_tracks(TrackPageRequest::try_new(0, 25)?)?
             .total(),
         0
     );
+    Ok(())
+}
+
+#[test]
+fn migrates_version_one_timeline_history_without_losing_rows() -> Result<(), Box<dyn Error>> {
+    let path = temporary_database_path()?;
+    {
+        let connection = Connection::open(&path)?;
+        connection.execute_batch(
+            "
+            CREATE TABLE timeline_revisions (
+                track_id INTEGER NOT NULL,
+                revision INTEGER NOT NULL,
+                baseline_revision TEXT NOT NULL,
+                total_bars INTEGER NOT NULL,
+                origin TEXT NOT NULL,
+                PRIMARY KEY(track_id, revision)
+            );
+            CREATE TABLE phrase_instances (
+                track_id INTEGER NOT NULL,
+                revision INTEGER NOT NULL,
+                phrase_index INTEGER NOT NULL,
+                start_bar INTEGER NOT NULL,
+                end_bar INTEGER NOT NULL,
+                role_id TEXT NOT NULL,
+                PRIMARY KEY(track_id, revision, phrase_index)
+            );
+            INSERT INTO timeline_revisions VALUES (1, 1, 'v1', 8, 'source-import');
+            INSERT INTO phrase_instances VALUES (1, 1, 0, 0, 8, 'intro');
+            PRAGMA user_version = 1;
+            ",
+        )?;
+    }
+
+    let repository = SqliteLibraryRepository::open(&path)?;
+    assert_eq!(repository.schema_version()?, 2);
+    drop(repository);
+    let connection = Connection::open(&path)?;
+    let reason: String = connection.query_row(
+        "SELECT reason FROM timeline_revisions WHERE track_id = 1 AND revision = 1",
+        [],
+        |row| row.get(0),
+    )?;
+    let loop_strategy: String = connection.query_row(
+        "SELECT loop_strategy FROM phrase_instances WHERE track_id = 1 AND revision = 1",
+        [],
+        |row| row.get(0),
+    )?;
+    assert_eq!(reason, "initial-source-mapping");
+    assert_eq!(loop_strategy, "auto");
+    std::fs::remove_file(path)?;
     Ok(())
 }
 
@@ -147,17 +199,10 @@ fn phrase_roles_and_timeline_revisions_survive_a_restart() -> Result<(), Box<dyn
             ],
         )?;
         repository.append_timeline_revision(&timeline, None)?;
-        let second_timeline = LumiPhraseTimeline::try_new(
-            track_id,
-            TimelineRevision::try_new(2)?,
-            SourceRevision::try_new("analysis-v1")?,
-            16,
-            TimelineRevisionOrigin::UserEdit,
-            vec![
-                PhraseInstance::new(0, 0, 4, PhraseRoleId::try_new("intro")?),
-                PhraseInstance::new(1, 4, 16, PhraseRoleId::try_new("drop")?),
-            ],
-        )?;
+        let second_timeline = timeline.edit(TimelineEditCommand::Split {
+            phrase_index: 0,
+            at_bar: 4,
+        })?;
         repository.append_timeline_revision(&second_timeline, Some(TimelineRevision::initial()))?;
     }
 
@@ -186,13 +231,22 @@ fn phrase_roles_and_timeline_revisions_survive_a_restart() -> Result<(), Box<dyn
             .timeline_head(track_id)?
             .ok_or("timeline head not found after restart")?;
         assert_eq!(timeline.revision(), TimelineRevision::try_new(2)?);
-        assert_eq!(timeline.phrases().len(), 2);
+        assert_eq!(timeline.phrases().len(), 3);
+        assert_eq!(timeline.reason(), TimelineRevisionReason::SplitPhrase);
+        assert_eq!(
+            timeline.parent_revision(),
+            Some(TimelineRevision::initial())
+        );
         let revisions =
             repository.timeline_revisions(track_id, TrackPageRequest::try_new(0, 25)?)?;
         assert_eq!(revisions.total(), 2);
         assert_eq!(
             revisions.revisions()[0].revision(),
             TimelineRevision::try_new(2)?
+        );
+        assert_eq!(
+            revisions.revisions()[0].reason(),
+            TimelineRevisionReason::SplitPhrase
         );
         assert_eq!(
             revisions.revisions()[1].revision(),
@@ -208,6 +262,36 @@ fn phrase_roles_and_timeline_revisions_survive_a_restart() -> Result<(), Box<dyn
         assert_eq!(stored_baselines, 1);
     }
     std::fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
+fn loop_strategy_survives_a_revision_round_trip() -> Result<(), Box<dyn Error>> {
+    let baseline = DemoLibrarySourceProvider::curated().load_baseline()?;
+    let mut repository = SqliteLibraryRepository::in_memory()?;
+    repository.import_baseline(&baseline)?;
+    let track_id = repository
+        .page_tracks(TrackPageRequest::try_new(0, 1)?)?
+        .tracks()[0]
+        .id();
+    let timeline = LumiPhraseTimeline::try_new_with_history(
+        track_id,
+        TimelineRevision::initial(),
+        SourceRevision::try_new("analysis-v1")?,
+        8,
+        TimelineRevisionOrigin::SourceImport,
+        TimelineRevisionReason::InitialSourceMapping,
+        None,
+        None,
+        vec![
+            PhraseInstance::new(0, 0, 8, PhraseRoleId::try_new("drop")?).with_loop_strategy(
+                PhraseLoopStrategy::FixedVariant(VariantId::try_new("drop-2")?),
+            ),
+        ],
+    )?;
+    repository.append_timeline_revision(&timeline, None)?;
+
+    assert_eq!(repository.timeline_head(track_id)?, Some(timeline));
     Ok(())
 }
 

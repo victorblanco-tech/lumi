@@ -346,16 +346,23 @@ pub struct TimelineRevisionSummary {
     baseline_revision: SourceRevision,
     total_bars: u32,
     origin: TimelineRevisionOrigin,
+    reason: crate::TimelineRevisionReason,
+    parent_revision: Option<TimelineRevision>,
+    restored_from: Option<TimelineRevision>,
     phrase_count: u32,
 }
 
 impl TimelineRevisionSummary {
+    #[allow(clippy::too_many_arguments)]
     #[must_use]
     pub const fn new(
         revision: TimelineRevision,
         baseline_revision: SourceRevision,
         total_bars: u32,
         origin: TimelineRevisionOrigin,
+        reason: crate::TimelineRevisionReason,
+        parent_revision: Option<TimelineRevision>,
+        restored_from: Option<TimelineRevision>,
         phrase_count: u32,
     ) -> Self {
         Self {
@@ -363,6 +370,9 @@ impl TimelineRevisionSummary {
             baseline_revision,
             total_bars,
             origin,
+            reason,
+            parent_revision,
+            restored_from,
             phrase_count,
         }
     }
@@ -385,6 +395,21 @@ impl TimelineRevisionSummary {
     #[must_use]
     pub const fn origin(&self) -> TimelineRevisionOrigin {
         self.origin
+    }
+
+    #[must_use]
+    pub const fn reason(&self) -> crate::TimelineRevisionReason {
+        self.reason
+    }
+
+    #[must_use]
+    pub const fn parent_revision(&self) -> Option<TimelineRevision> {
+        self.parent_revision
+    }
+
+    #[must_use]
+    pub const fn restored_from(&self) -> Option<TimelineRevision> {
+        self.restored_from
     }
 
     #[must_use]
@@ -499,6 +524,11 @@ pub trait LibraryRepository {
         expected_head: Option<TimelineRevision>,
     ) -> Result<(), Self::Error>;
     fn timeline_head(&self, track_id: TrackId) -> Result<Option<LumiPhraseTimeline>, Self::Error>;
+    fn timeline_revision(
+        &self,
+        track_id: TrackId,
+        revision: TimelineRevision,
+    ) -> Result<Option<LumiPhraseTimeline>, Self::Error>;
     fn timeline_revisions(
         &self,
         track_id: TrackId,

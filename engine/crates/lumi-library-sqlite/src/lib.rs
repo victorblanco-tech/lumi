@@ -4,19 +4,20 @@
 
 use std::path::Path;
 
-use lumi_domain::{KeyMode, MusicalKey, PitchClass, TrackId};
+use lumi_domain::{KeyMode, MusicalKey, PitchClass, ThemeId, TrackId};
 use lumi_library::{
     BeatGrid, BeatMarker, ImportResult, ImportedLibraryBaseline, ImportedTrackAnalysis,
-    LibraryRepository, LibraryTrackQuery, LumiPhraseTimeline, PhraseInstance, PhraseRole,
-    PhraseRoleId, PlaylistId, PlaylistPage, PlaylistSummary, RawPhraseObservation,
+    LibraryRepository, LibraryTrackQuery, LumiPhraseTimeline, PhraseInstance, PhraseLoopStrategy,
+    PhraseRole, PhraseRoleId, PlaylistId, PlaylistPage, PlaylistSummary, RawPhraseObservation,
     SourcePlaylistId, SourceRevision, SourceTrackId, StoredTrack, TextIdentifierError,
-    TimelineRevision, TimelineRevisionOrigin, TimelineRevisionPage, TimelineRevisionSummary,
-    TrackColor, TrackPage, TrackPageRequest, TrackSummary, WaveformPoint,
+    ThemeSpecificVariant, TimelineRevision, TimelineRevisionOrigin, TimelineRevisionPage,
+    TimelineRevisionReason, TimelineRevisionSummary, TrackColor, TrackPage, TrackPageRequest,
+    TrackSummary, VariantId, WaveformPoint,
 };
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 use thiserror::Error;
 
-const SCHEMA_VERSION: u32 = 1;
+const SCHEMA_VERSION: u32 = 2;
 
 pub struct SqliteLibraryRepository {
     connection: Connection,
@@ -133,6 +134,9 @@ impl SqliteLibraryRepository {
                     baseline_revision TEXT NOT NULL,
                     total_bars INTEGER NOT NULL,
                     origin TEXT NOT NULL,
+                    reason TEXT NOT NULL,
+                    parent_revision INTEGER,
+                    restored_from_revision INTEGER,
                     PRIMARY KEY(track_id, revision)
                 );
                 CREATE TABLE phrase_instances (
@@ -142,6 +146,7 @@ impl SqliteLibraryRepository {
                     start_bar INTEGER NOT NULL,
                     end_bar INTEGER NOT NULL,
                     role_id TEXT NOT NULL,
+                    loop_strategy TEXT NOT NULL,
                     PRIMARY KEY(track_id, revision, phrase_index),
                     FOREIGN KEY(track_id, revision)
                         REFERENCES timeline_revisions(track_id, revision) ON DELETE CASCADE
@@ -152,7 +157,28 @@ impl SqliteLibraryRepository {
                     FOREIGN KEY(track_id, revision)
                         REFERENCES timeline_revisions(track_id, revision)
                 );
-                PRAGMA user_version = 1;
+                PRAGMA user_version = 2;
+                COMMIT;
+                ",
+            )?;
+        }
+        if current == 1 {
+            self.connection.execute_batch(
+                "
+                BEGIN IMMEDIATE;
+                ALTER TABLE timeline_revisions ADD COLUMN reason TEXT NOT NULL DEFAULT 'change-role';
+                ALTER TABLE timeline_revisions ADD COLUMN parent_revision INTEGER;
+                ALTER TABLE timeline_revisions ADD COLUMN restored_from_revision INTEGER;
+                UPDATE timeline_revisions
+                   SET reason = CASE origin
+                       WHEN 'source-import' THEN 'initial-source-mapping'
+                       WHEN 'source-reconcile' THEN 'source-reconcile'
+                       WHEN 'revision-restore' THEN 'restore-revision'
+                       ELSE 'change-role'
+                   END,
+                       parent_revision = CASE WHEN revision > 1 THEN revision - 1 ELSE NULL END;
+                ALTER TABLE phrase_instances ADD COLUMN loop_strategy TEXT NOT NULL DEFAULT 'auto';
+                PRAGMA user_version = 2;
                 COMMIT;
                 ",
             )?;
@@ -268,7 +294,8 @@ impl SqliteLibraryRepository {
         let header = self
             .connection
             .query_row(
-                "SELECT baseline_revision, total_bars, origin
+                "SELECT baseline_revision, total_bars, origin, reason,
+                        parent_revision, restored_from_revision
                  FROM timeline_revisions WHERE track_id = ?1 AND revision = ?2",
                 params![to_i64(track_id.value())?, to_i64(revision.value())?],
                 |row| {
@@ -276,15 +303,20 @@ impl SqliteLibraryRepository {
                         row.get::<_, String>(0)?,
                         row.get::<_, i64>(1)?,
                         row.get::<_, String>(2)?,
+                        row.get::<_, String>(3)?,
+                        row.get::<_, Option<i64>>(4)?,
+                        row.get::<_, Option<i64>>(5)?,
                     ))
                 },
             )
             .optional()?;
-        let Some((baseline_revision, total_bars, origin)) = header else {
+        let Some((baseline_revision, total_bars, origin, reason, parent_revision, restored_from)) =
+            header
+        else {
             return Ok(None);
         };
         let mut statement = self.connection.prepare(
-            "SELECT phrase_index, start_bar, end_bar, role_id
+            "SELECT phrase_index, start_bar, end_bar, role_id, loop_strategy
              FROM phrase_instances
              WHERE track_id = ?1 AND revision = ?2 ORDER BY phrase_index",
         )?;
@@ -294,19 +326,29 @@ impl SqliteLibraryRepository {
         ])?;
         let mut phrases = Vec::new();
         while let Some(row) = rows.next()? {
-            phrases.push(PhraseInstance::new(
-                to_u16(row.get(0)?, "phrase index")?,
-                to_u32(row.get(1)?, "start bar")?,
-                to_u32(row.get(2)?, "end bar")?,
-                PhraseRoleId::try_new(row.get::<_, String>(3)?)?,
-            ));
+            phrases.push(
+                PhraseInstance::new(
+                    to_u16(row.get(0)?, "phrase index")?,
+                    to_u32(row.get(1)?, "start bar")?,
+                    to_u32(row.get(2)?, "end bar")?,
+                    PhraseRoleId::try_new(row.get::<_, String>(3)?)?,
+                )
+                .with_loop_strategy(decode_loop_strategy(&row.get::<_, String>(4)?)?),
+            );
         }
-        Ok(Some(LumiPhraseTimeline::try_new(
+        Ok(Some(LumiPhraseTimeline::try_new_with_history(
             track_id,
             revision,
             SourceRevision::try_new(baseline_revision)?,
             to_u32(total_bars, "total bars")?,
             decode_origin(&origin)?,
+            decode_reason(&reason)?,
+            parent_revision
+                .map(|value| timeline_revision(value, "timeline parent revision"))
+                .transpose()?,
+            restored_from
+                .map(|value| timeline_revision(value, "timeline restored revision"))
+                .transpose()?,
             phrases,
         )?))
     }
@@ -793,23 +835,35 @@ impl LibraryRepository for SqliteLibraryRepository {
                 received: timeline.revision(),
             });
         }
+        let parent_revision = timeline
+            .parent_revision()
+            .map(|value| to_i64(value.value()))
+            .transpose()?;
+        let restored_from_revision = timeline
+            .restored_from()
+            .map(|value| to_i64(value.value()))
+            .transpose()?;
         transaction.execute(
             "INSERT INTO timeline_revisions
-             (track_id, revision, baseline_revision, total_bars, origin)
-             VALUES (?1, ?2, ?3, ?4, ?5)",
+             (track_id, revision, baseline_revision, total_bars, origin, reason,
+              parent_revision, restored_from_revision)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 to_i64(timeline.track_id().value())?,
                 to_i64(timeline.revision().value())?,
                 timeline.baseline_revision().as_str(),
                 i64::from(timeline.total_bars()),
                 encode_origin(timeline.origin()),
+                encode_reason(timeline.reason()),
+                parent_revision,
+                restored_from_revision,
             ],
         )?;
         {
             let mut statement = transaction.prepare(
                 "INSERT INTO phrase_instances
-                 (track_id, revision, phrase_index, start_bar, end_bar, role_id)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                 (track_id, revision, phrase_index, start_bar, end_bar, role_id, loop_strategy)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
             )?;
             for phrase in timeline.phrases() {
                 statement.execute(params![
@@ -819,6 +873,7 @@ impl LibraryRepository for SqliteLibraryRepository {
                     i64::from(phrase.start_bar()),
                     i64::from(phrase.end_bar()),
                     phrase.role_id().as_str(),
+                    encode_loop_strategy(phrase.loop_strategy())?,
                 ])?;
             }
         }
@@ -851,6 +906,14 @@ impl LibraryRepository for SqliteLibraryRepository {
         }
     }
 
+    fn timeline_revision(
+        &self,
+        track_id: TrackId,
+        revision: TimelineRevision,
+    ) -> Result<Option<LumiPhraseTimeline>, Self::Error> {
+        self.timeline_at_revision(track_id, revision)
+    }
+
     fn timeline_revisions(
         &self,
         track_id: TrackId,
@@ -863,12 +926,14 @@ impl LibraryRepository for SqliteLibraryRepository {
         )?;
         let mut statement = self.connection.prepare(
             "SELECT r.revision, r.baseline_revision, r.total_bars, r.origin,
+                    r.reason, r.parent_revision, r.restored_from_revision,
                     COUNT(p.phrase_index)
              FROM timeline_revisions r
              LEFT JOIN phrase_instances p
                ON p.track_id = r.track_id AND p.revision = r.revision
              WHERE r.track_id = ?1
-             GROUP BY r.revision, r.baseline_revision, r.total_bars, r.origin
+             GROUP BY r.revision, r.baseline_revision, r.total_bars, r.origin,
+                      r.reason, r.parent_revision, r.restored_from_revision
              ORDER BY r.revision DESC
              LIMIT ?2 OFFSET ?3",
         )?;
@@ -884,7 +949,14 @@ impl LibraryRepository for SqliteLibraryRepository {
                 SourceRevision::try_new(row.get::<_, String>(1)?)?,
                 to_u32(row.get(2)?, "timeline total bars")?,
                 decode_origin(&row.get::<_, String>(3)?)?,
-                to_u32(row.get(4)?, "timeline phrase count")?,
+                decode_reason(&row.get::<_, String>(4)?)?,
+                row.get::<_, Option<i64>>(5)?
+                    .map(|value| timeline_revision(value, "timeline parent revision"))
+                    .transpose()?,
+                row.get::<_, Option<i64>>(6)?
+                    .map(|value| timeline_revision(value, "timeline restored revision"))
+                    .transpose()?,
+                to_u32(row.get(7)?, "timeline phrase count")?,
             ));
         }
         Ok(TimelineRevisionPage::new(
@@ -1096,6 +1168,105 @@ fn decode_origin(value: &str) -> Result<TimelineRevisionOrigin, SqliteLibraryErr
         "source-reconcile" => Ok(TimelineRevisionOrigin::SourceReconcile),
         "revision-restore" => Ok(TimelineRevisionOrigin::RevisionRestore),
         _ => Err(corrupt("timeline origin", value)),
+    }
+}
+
+fn encode_reason(value: TimelineRevisionReason) -> &'static str {
+    match value {
+        TimelineRevisionReason::InitialSourceMapping => "initial-source-mapping",
+        TimelineRevisionReason::CreatePhrase => "create-phrase",
+        TimelineRevisionReason::SplitPhrase => "split-phrase",
+        TimelineRevisionReason::MergePrevious => "merge-previous",
+        TimelineRevisionReason::MergeNext => "merge-next",
+        TimelineRevisionReason::MoveBoundary => "move-boundary",
+        TimelineRevisionReason::AbsorbPrevious => "absorb-previous",
+        TimelineRevisionReason::AbsorbNext => "absorb-next",
+        TimelineRevisionReason::ChangeRole => "change-role",
+        TimelineRevisionReason::Undo => "undo",
+        TimelineRevisionReason::Redo => "redo",
+        TimelineRevisionReason::RestoreRevision => "restore-revision",
+        TimelineRevisionReason::SourceReconcile => "source-reconcile",
+    }
+}
+
+fn decode_reason(value: &str) -> Result<TimelineRevisionReason, SqliteLibraryError> {
+    match value {
+        "initial-source-mapping" => Ok(TimelineRevisionReason::InitialSourceMapping),
+        "create-phrase" => Ok(TimelineRevisionReason::CreatePhrase),
+        "split-phrase" => Ok(TimelineRevisionReason::SplitPhrase),
+        "merge-previous" => Ok(TimelineRevisionReason::MergePrevious),
+        "merge-next" => Ok(TimelineRevisionReason::MergeNext),
+        "move-boundary" => Ok(TimelineRevisionReason::MoveBoundary),
+        "absorb-previous" => Ok(TimelineRevisionReason::AbsorbPrevious),
+        "absorb-next" => Ok(TimelineRevisionReason::AbsorbNext),
+        "change-role" => Ok(TimelineRevisionReason::ChangeRole),
+        "undo" => Ok(TimelineRevisionReason::Undo),
+        "redo" => Ok(TimelineRevisionReason::Redo),
+        "restore-revision" => Ok(TimelineRevisionReason::RestoreRevision),
+        "source-reconcile" => Ok(TimelineRevisionReason::SourceReconcile),
+        _ => Err(corrupt("timeline revision reason", value)),
+    }
+}
+
+fn encode_loop_strategy(value: &PhraseLoopStrategy) -> Result<String, SqliteLibraryError> {
+    let json = match value {
+        PhraseLoopStrategy::Auto => serde_json::json!({ "kind": "auto" }),
+        PhraseLoopStrategy::FixedVariant(variant) => serde_json::json!({
+            "kind": "fixedVariant",
+            "variantId": variant.as_str(),
+        }),
+        PhraseLoopStrategy::ThemeSpecificExact(overrides) => serde_json::json!({
+            "kind": "themeSpecificExact",
+            "overrides": overrides.iter().map(|value| serde_json::json!({
+                "themeId": value.theme_id().value(),
+                "variantId": value.variant_id().as_str(),
+            })).collect::<Vec<_>>(),
+        }),
+    };
+    serde_json::to_string(&json).map_err(|error| SqliteLibraryError::CorruptData(error.to_string()))
+}
+
+fn decode_loop_strategy(value: &str) -> Result<PhraseLoopStrategy, SqliteLibraryError> {
+    if value == "auto" {
+        return Ok(PhraseLoopStrategy::Auto);
+    }
+    let json: serde_json::Value = serde_json::from_str(value)
+        .map_err(|error| SqliteLibraryError::CorruptData(error.to_string()))?;
+    let kind = json
+        .get("kind")
+        .and_then(serde_json::Value::as_str)
+        .ok_or_else(|| corrupt("loop strategy kind", value))?;
+    match kind {
+        "auto" => Ok(PhraseLoopStrategy::Auto),
+        "fixedVariant" => Ok(PhraseLoopStrategy::FixedVariant(VariantId::try_new(
+            json.get("variantId")
+                .and_then(serde_json::Value::as_str)
+                .ok_or_else(|| corrupt("fixed variant id", value))?,
+        )?)),
+        "themeSpecificExact" => {
+            let values = json
+                .get("overrides")
+                .and_then(serde_json::Value::as_array)
+                .ok_or_else(|| corrupt("theme-specific overrides", value))?;
+            let mut overrides = Vec::with_capacity(values.len());
+            for item in values {
+                let theme_id = item
+                    .get("themeId")
+                    .and_then(serde_json::Value::as_u64)
+                    .filter(|value| *value > 0)
+                    .ok_or_else(|| corrupt("theme-specific theme id", value))?;
+                let variant_id = item
+                    .get("variantId")
+                    .and_then(serde_json::Value::as_str)
+                    .ok_or_else(|| corrupt("theme-specific variant id", value))?;
+                overrides.push(ThemeSpecificVariant::new(
+                    ThemeId::new(theme_id),
+                    VariantId::try_new(variant_id)?,
+                ));
+            }
+            Ok(PhraseLoopStrategy::ThemeSpecificExact(overrides))
+        }
+        _ => Err(corrupt("loop strategy kind", kind)),
     }
 }
 

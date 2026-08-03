@@ -195,6 +195,7 @@ dependencies = [
  "lumi-library-demo",
  "lumi-library-source",
  "rusqlite",
+ "serde_json",
  "thiserror",
 ]
 

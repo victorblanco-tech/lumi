@@ -76,3 +76,27 @@ public enum TrackEditorCoordinateMapper {
         return marker.timeMillis + UInt64(Double(nextTime - marker.timeMillis) * fraction)
     }
 }
+
+public enum TrackEditorEditGeometry {
+    public static func containingBar(
+        beat: Double,
+        beatsPerBar: UInt8,
+        totalBars: UInt32
+    ) -> UInt32 {
+        let safeTotal = max(1, totalBars)
+        let safeBeatsPerBar = UInt32(max(1, beatsPerBar))
+        let boundedBeat = UInt32(max(0, beat.rounded(.down)))
+        return min(safeTotal - 1, boundedBeat / safeBeatsPerBar)
+    }
+
+    public static func barSelection(
+        anchorBar: UInt32,
+        currentBar: UInt32,
+        totalBars: UInt32
+    ) -> Range<UInt32> {
+        let safeTotal = max(1, totalBars)
+        let anchor = min(anchorBar, safeTotal - 1)
+        let current = min(currentBar, safeTotal - 1)
+        return min(anchor, current)..<min(safeTotal, max(anchor, current) + 1)
+    }
+}

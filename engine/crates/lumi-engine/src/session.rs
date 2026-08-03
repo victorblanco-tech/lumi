@@ -516,6 +516,46 @@ fn apply_command(
             runtime.library_worker.close_editor();
             return Ok(());
         }
+        SessionCommand::EditLibraryTimeline {
+            track_id,
+            expected_revision,
+            command,
+        } => {
+            runtime
+                .library_worker
+                .edit_timeline(track_id, expected_revision, command)?;
+            return Ok(());
+        }
+        SessionCommand::UndoLibraryTimeline {
+            track_id,
+            expected_revision,
+        } => {
+            runtime
+                .library_worker
+                .undo_timeline(track_id, expected_revision)?;
+            return Ok(());
+        }
+        SessionCommand::RedoLibraryTimeline {
+            track_id,
+            expected_revision,
+        } => {
+            runtime
+                .library_worker
+                .redo_timeline(track_id, expected_revision)?;
+            return Ok(());
+        }
+        SessionCommand::RestoreLibraryTimelineRevision {
+            track_id,
+            expected_revision,
+            target_revision,
+        } => {
+            runtime.library_worker.restore_timeline_revision(
+                track_id,
+                expected_revision,
+                target_revision,
+            )?;
+            return Ok(());
+        }
         SessionCommand::LoadDemoSession { expected_revision }
         | SessionCommand::ResetDemoSession { expected_revision } => {
             validate_state_revision(runtime, expected_revision)?;
@@ -618,6 +658,10 @@ fn apply_command(
         | SessionCommand::QueryLibrary { .. }
         | SessionCommand::OpenLibraryTrackEditor { .. }
         | SessionCommand::CloseLibraryTrackEditor
+        | SessionCommand::EditLibraryTimeline { .. }
+        | SessionCommand::UndoLibraryTimeline { .. }
+        | SessionCommand::RedoLibraryTimeline { .. }
+        | SessionCommand::RestoreLibraryTimelineRevision { .. }
         | SessionCommand::LoadDemoSession { .. }
         | SessionCommand::SetOperationState { .. }
         | SessionCommand::SetSimulationSpeed { .. }
@@ -768,6 +812,39 @@ fn application_error_envelope(
             "validationFailed",
             "planMutationRejected",
             &mutation.to_string(),
+            false,
+            None,
+        ),
+        CommandApplicationError::Library(LibraryWorkerError::TimelineRevisionConflict {
+            actual,
+            ..
+        }) => error_envelope(
+            sequence,
+            correlation_id,
+            "revisionConflict",
+            "timelineRevisionMismatch",
+            "The phrase timeline changed before the edit was applied.",
+            true,
+            None,
+        )
+        .map(|mut envelope| {
+            envelope
+                .payload
+                .insert("actualTimelineRevision".to_owned(), json!(actual.value()));
+            envelope
+        }),
+        CommandApplicationError::Library(
+            library_error @ (LibraryWorkerError::TimelineEdit(_)
+            | LibraryWorkerError::NothingToUndo
+            | LibraryWorkerError::NothingToRedo
+            | LibraryWorkerError::UnknownTimelineRevision(_)
+            | LibraryWorkerError::EditorTrackMismatch),
+        ) => error_envelope(
+            sequence,
+            correlation_id,
+            "validationFailed",
+            "timelineEditRejected",
+            &library_error.to_string(),
             false,
             None,
         ),

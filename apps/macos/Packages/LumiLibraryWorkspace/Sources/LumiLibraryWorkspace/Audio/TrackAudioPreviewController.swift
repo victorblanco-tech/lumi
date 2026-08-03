@@ -45,6 +45,16 @@ struct TrackAudioScheduleGeneration: Equatable, Sendable {
     }
 }
 
+enum TrackAudioLoopTransition {
+    static func position(
+        current: UInt64,
+        loop: Range<UInt64>,
+        preservingPosition: Bool
+    ) -> UInt64 {
+        preservingPosition && loop.contains(current) ? current : loop.lowerBound
+    }
+}
+
 @MainActor
 public final class TrackAudioPreviewController: ObservableObject {
     @Published public private(set) var isPlaying = false
@@ -142,6 +152,18 @@ public final class TrackAudioPreviewController: ObservableObject {
 
     @discardableResult
     public func setLoop(_ phrase: TrackEditorPhrase?) -> Bool {
+        updateLoop(phrase, preservingPosition: false)
+    }
+
+    @discardableResult
+    public func adoptEditedLoop(_ phrase: TrackEditorPhrase?) -> Bool {
+        updateLoop(phrase, preservingPosition: true)
+    }
+
+    private func updateLoop(
+        _ phrase: TrackEditorPhrase?,
+        preservingPosition: Bool
+    ) -> Bool {
         if let phrase {
             let beatsPerBar = UInt32(max(1, analysis.beatsPerBar))
             guard phrase.startBeat < phrase.endBeat,
@@ -153,11 +175,16 @@ public final class TrackAudioPreviewController: ObservableObject {
         }
         let wasPlaying = isPlaying
         if wasPlaying { refreshPosition() }
+        let previousPosition = positionMillis
         invalidateSchedule()
         player?.stop()
         loopMillis = phrase.map(analysis.phraseTimeRange)
         if let loopMillis {
-            positionMillis = loopMillis.lowerBound
+            positionMillis = TrackAudioLoopTransition.position(
+                current: previousPosition,
+                loop: loopMillis,
+                preservingPosition: preservingPosition
+            )
         }
         if wasPlaying { play() }
         return true

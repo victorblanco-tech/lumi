@@ -4,6 +4,7 @@ use std::fmt;
 use lumi_domain::{
     OperationCommand, PlanId, PlanRevision, SceneId, StateRevision, ThemeId, TrackLoadId,
 };
+use lumi_library::{PhraseAbsorption, PhraseRoleId, TimelineEditCommand};
 use lumi_protocol::{MessageEnvelope, MessageType};
 use lumi_simulator::SimulationSpeed;
 use serde_json::Value;
@@ -28,6 +29,24 @@ pub enum SessionCommand {
         track_id: u64,
     },
     CloseLibraryTrackEditor,
+    EditLibraryTimeline {
+        track_id: u64,
+        expected_revision: u64,
+        command: TimelineEditCommand,
+    },
+    UndoLibraryTimeline {
+        track_id: u64,
+        expected_revision: u64,
+    },
+    RedoLibraryTimeline {
+        track_id: u64,
+        expected_revision: u64,
+    },
+    RestoreLibraryTimelineRevision {
+        track_id: u64,
+        expected_revision: u64,
+        target_revision: u64,
+    },
     LoadDemoSession {
         expected_revision: StateRevision,
     },
@@ -89,6 +108,10 @@ impl SessionCommand {
             | Self::QueryLibrary { .. }
             | Self::OpenLibraryTrackEditor { .. }
             | Self::CloseLibraryTrackEditor
+            | Self::EditLibraryTimeline { .. }
+            | Self::UndoLibraryTimeline { .. }
+            | Self::RedoLibraryTimeline { .. }
+            | Self::RestoreLibraryTimelineRevision { .. }
             | Self::LoadDemoSession { .. }
             | Self::SetOperationState { .. }
             | Self::SetSimulationSpeed { .. }
@@ -122,6 +145,24 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
             track_id: positive_unsigned(&envelope.payload, "trackId")?,
         }),
         "closeLibraryTrackEditor" => Ok(SessionCommand::CloseLibraryTrackEditor),
+        "editLibraryTimeline" => Ok(SessionCommand::EditLibraryTimeline {
+            track_id: positive_unsigned(&envelope.payload, "trackId")?,
+            expected_revision: positive_unsigned(&envelope.payload, "expectedTimelineRevision")?,
+            command: timeline_edit(&envelope.payload)?,
+        }),
+        "undoLibraryTimeline" => Ok(SessionCommand::UndoLibraryTimeline {
+            track_id: positive_unsigned(&envelope.payload, "trackId")?,
+            expected_revision: positive_unsigned(&envelope.payload, "expectedTimelineRevision")?,
+        }),
+        "redoLibraryTimeline" => Ok(SessionCommand::RedoLibraryTimeline {
+            track_id: positive_unsigned(&envelope.payload, "trackId")?,
+            expected_revision: positive_unsigned(&envelope.payload, "expectedTimelineRevision")?,
+        }),
+        "restoreLibraryTimelineRevision" => Ok(SessionCommand::RestoreLibraryTimelineRevision {
+            track_id: positive_unsigned(&envelope.payload, "trackId")?,
+            expected_revision: positive_unsigned(&envelope.payload, "expectedTimelineRevision")?,
+            target_revision: positive_unsigned(&envelope.payload, "targetTimelineRevision")?,
+        }),
         "loadDemoSession" => Ok(SessionCommand::LoadDemoSession {
             expected_revision: state_revision(envelope)?,
         }),
@@ -166,6 +207,65 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
         }),
         _ => Err(CommandDecodeError::UnsupportedKind),
     }
+}
+
+fn timeline_edit(
+    payload: &serde_json::Map<String, Value>,
+) -> Result<TimelineEditCommand, CommandDecodeError> {
+    let operation = string(payload, "operation")?;
+    match operation {
+        "create" => Ok(TimelineEditCommand::Create {
+            start_bar: timeline_bar(payload, "startBar")?,
+            end_bar: timeline_bar(payload, "endBar")?,
+            role_id: phrase_role_id(payload)?,
+        }),
+        "split" => Ok(TimelineEditCommand::Split {
+            phrase_index: phrase_index_value(payload)?,
+            at_bar: timeline_bar(payload, "atBar")?,
+        }),
+        "mergePrevious" => Ok(TimelineEditCommand::MergePrevious {
+            phrase_index: phrase_index_value(payload)?,
+        }),
+        "mergeNext" => Ok(TimelineEditCommand::MergeNext {
+            phrase_index: phrase_index_value(payload)?,
+        }),
+        "moveBoundary" => Ok(TimelineEditCommand::MoveBoundary {
+            boundary_after_phrase_index: phrase_index_value(payload)?,
+            to_bar: timeline_bar(payload, "toBar")?,
+        }),
+        "deleteAbsorbPrevious" => Ok(TimelineEditCommand::Delete {
+            phrase_index: phrase_index_value(payload)?,
+            absorb_into: PhraseAbsorption::Previous,
+        }),
+        "deleteAbsorbNext" => Ok(TimelineEditCommand::Delete {
+            phrase_index: phrase_index_value(payload)?,
+            absorb_into: PhraseAbsorption::Next,
+        }),
+        "changeRole" => Ok(TimelineEditCommand::ChangeRole {
+            phrase_index: phrase_index_value(payload)?,
+            role_id: phrase_role_id(payload)?,
+        }),
+        _ => Err(CommandDecodeError::InvalidField("operation")),
+    }
+}
+
+fn phrase_role_id(
+    payload: &serde_json::Map<String, Value>,
+) -> Result<PhraseRoleId, CommandDecodeError> {
+    PhraseRoleId::try_new(string(payload, "roleId")?)
+        .map_err(|_| CommandDecodeError::InvalidField("roleId"))
+}
+
+fn phrase_index_value(payload: &serde_json::Map<String, Value>) -> Result<u16, CommandDecodeError> {
+    u16::try_from(unsigned(payload, "phraseIndex")?)
+        .map_err(|_| CommandDecodeError::InvalidField("phraseIndex"))
+}
+
+fn timeline_bar(
+    payload: &serde_json::Map<String, Value>,
+    field: &'static str,
+) -> Result<u32, CommandDecodeError> {
+    u32::try_from(unsigned(payload, field)?).map_err(|_| CommandDecodeError::InvalidField(field))
 }
 
 fn state_revision(envelope: &MessageEnvelope) -> Result<StateRevision, CommandDecodeError> {
