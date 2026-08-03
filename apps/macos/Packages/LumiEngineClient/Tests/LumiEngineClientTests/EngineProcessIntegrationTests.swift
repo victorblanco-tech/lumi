@@ -48,6 +48,14 @@ func launchesRealEngine() async throws {
         let snapshot = try await supervisor.connect(to: endpoint)
         #expect(snapshot.messageType == .snapshot)
         #expect(snapshot.sequence == 1)
+        #expect(libraryTrackTitles(snapshot).count == 3)
+        #expect(librarySourceName(snapshot) == "Lumi Demo Library")
+
+        let searchedLibrary = try await supervisor.send(
+            .queryLibrary(search: "Northern", playlistID: nil, offset: 0, limit: 50),
+            messageID: "swift-library-search"
+        )
+        #expect(libraryTrackTitles(searchedLibrary) == ["Northern Pulse"])
 
         guard case let .object(plan) = snapshot.payload["nextPlan"],
               case let .string(planID) = plan["planId"] else {
@@ -148,6 +156,26 @@ private func stateRevision(_ envelope: MessageEnvelope) -> UInt64? {
         return nil
     }
     return UInt64(revision)
+}
+
+private func libraryTrackTitles(_ envelope: MessageEnvelope) -> [String] {
+    guard case let .object(library) = envelope.payload["library"],
+          case let .object(page) = library["page"],
+          case let .array(tracks) = page["tracks"] else {
+        return []
+    }
+    return tracks.compactMap { value in
+        guard case let .object(track) = value,
+              case let .string(title) = track["title"] else { return nil }
+        return title
+    }
+}
+
+private func librarySourceName(_ envelope: MessageEnvelope) -> String? {
+    guard case let .object(library) = envelope.payload["library"],
+          case let .object(source) = library["source"],
+          case let .string(name) = source["name"] else { return nil }
+    return name
 }
 
 private func requiredStateRevision(_ envelope: MessageEnvelope) -> UInt64 {

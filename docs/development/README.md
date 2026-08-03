@@ -95,6 +95,10 @@ The provider-neutral music-library model, source contract, local SQLite schema,
 and deterministic 10,000-track fixture are documented in
 [`music-library-core.md`](music-library-core.md).
 
+The native Library destination, bounded engine queries, presentation states,
+and track-inspector boundary are documented in
+[`library-workspace.md`](library-workspace.md).
+
 The authoritative Live/Next presentation boundary, explicit degraded states,
 accessibility identifiers, and locked-session PNG workflow are documented in
 [`live-workspace.md`](live-workspace.md).

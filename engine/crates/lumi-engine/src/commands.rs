@@ -15,9 +15,15 @@ pub struct PlanCommandContext {
     pub expected_revision: PlanRevision,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SessionCommand {
     GetSnapshot,
+    QueryLibrary {
+        search: String,
+        playlist_id: Option<u64>,
+        offset: u32,
+        limit: u16,
+    },
     LoadDemoSession {
         expected_revision: StateRevision,
     },
@@ -63,13 +69,14 @@ pub enum SessionCommand {
 }
 
 impl SessionCommand {
-    pub const fn is_mutating(self) -> bool {
-        !matches!(self, Self::GetSnapshot)
+    pub const fn is_mutating(&self) -> bool {
+        !matches!(self, Self::GetSnapshot | Self::QueryLibrary { .. })
     }
 
-    pub const fn context(self) -> Option<PlanCommandContext> {
+    pub const fn context(&self) -> Option<PlanCommandContext> {
         match self {
             Self::GetSnapshot
+            | Self::QueryLibrary { .. }
             | Self::LoadDemoSession { .. }
             | Self::SetOperationState { .. }
             | Self::SetSimulationSpeed { .. }
@@ -80,7 +87,7 @@ impl SessionCommand {
             Self::SelectTheme { context, .. }
             | Self::SelectScene { context, .. }
             | Self::SetCueLock { context, .. }
-            | Self::RegeneratePlan { context } => Some(context),
+            | Self::RegeneratePlan { context } => Some(*context),
         }
     }
 }
@@ -92,6 +99,13 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
     let kind = string(&envelope.payload, "kind")?;
     match kind {
         "getSnapshot" => Ok(SessionCommand::GetSnapshot),
+        "queryLibrary" => Ok(SessionCommand::QueryLibrary {
+            search: library_search(&envelope.payload)?,
+            playlist_id: optional_unsigned(&envelope.payload, "playlistId")?,
+            offset: u32::try_from(optional_unsigned(&envelope.payload, "offset")?.unwrap_or(0))
+                .map_err(|_| CommandDecodeError::InvalidField("offset"))?,
+            limit: library_limit(optional_unsigned(&envelope.payload, "limit")?.unwrap_or(50))?,
+        }),
         "loadDemoSession" => Ok(SessionCommand::LoadDemoSession {
             expected_revision: state_revision(envelope)?,
         }),
@@ -223,6 +237,42 @@ fn boolean(
         .get(field)
         .and_then(Value::as_bool)
         .ok_or(CommandDecodeError::InvalidField(field))
+}
+
+fn optional_string<'a>(
+    payload: &'a serde_json::Map<String, Value>,
+    field: &str,
+) -> Option<&'a str> {
+    payload.get(field).and_then(Value::as_str)
+}
+
+fn optional_unsigned(
+    payload: &serde_json::Map<String, Value>,
+    field: &'static str,
+) -> Result<Option<u64>, CommandDecodeError> {
+    match payload.get(field) {
+        None | Some(Value::Null) => Ok(None),
+        Some(value) => value
+            .as_u64()
+            .map(Some)
+            .ok_or(CommandDecodeError::InvalidField(field)),
+    }
+}
+
+fn library_limit(value: u64) -> Result<u16, CommandDecodeError> {
+    let limit = u16::try_from(value).map_err(|_| CommandDecodeError::InvalidField("limit"))?;
+    if limit == 0 || limit > 200 {
+        return Err(CommandDecodeError::InvalidField("limit"));
+    }
+    Ok(limit)
+}
+
+fn library_search(payload: &serde_json::Map<String, Value>) -> Result<String, CommandDecodeError> {
+    let search = optional_string(payload, "search").unwrap_or_default();
+    if search.len() > 200 {
+        return Err(CommandDecodeError::InvalidField("search"));
+    }
+    Ok(search.to_owned())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

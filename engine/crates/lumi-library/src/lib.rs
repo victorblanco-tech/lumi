@@ -20,8 +20,8 @@ pub use identifiers::{
     TextIdentifierError, TimelineRevision,
 };
 pub use repository::{
-    ImportResult, LibraryRepository, PhraseRole, PlaylistPage, PlaylistSummary, StoredTrack,
-    TimelineRevisionPage, TimelineRevisionSummary, TrackPage, TrackPageRequest,
+    ImportResult, LibraryRepository, LibraryTrackQuery, PhraseRole, PlaylistPage, PlaylistSummary,
+    StoredTrack, TimelineRevisionPage, TimelineRevisionSummary, TrackPage, TrackPageRequest,
     TrackPageRequestError, TrackSummary,
 };
 pub use timeline::{

@@ -3,8 +3,8 @@ use std::path::PathBuf;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use lumi_library::{
-    ImportedLibraryBaseline, ImportedTrackAnalysis, LibraryRepository, LumiPhraseTimeline,
-    PhraseInstance, PhraseRole, PhraseRoleId, SourceRevision, TimelineRevision,
+    ImportedLibraryBaseline, ImportedTrackAnalysis, LibraryRepository, LibraryTrackQuery,
+    LumiPhraseTimeline, PhraseInstance, PhraseRole, PhraseRoleId, SourceRevision, TimelineRevision,
     TimelineRevisionOrigin, TrackPageRequest,
 };
 use lumi_library_demo::DemoLibrarySourceProvider;
@@ -264,6 +264,19 @@ fn ten_thousand_track_fixture_is_pageable() -> Result<(), Box<dyn Error>> {
     )?;
     assert_eq!(final_playlist_page.total(), 10_000);
     assert_eq!(final_playlist_page.tracks().len(), 50);
+    let search = repository.query_tracks(&LibraryTrackQuery::try_new(
+        "Demo Track 09999",
+        None,
+        TrackPageRequest::try_new(0, 50)?,
+    )?)?;
+    assert_eq!(search.total(), 1);
+    assert_eq!(search.tracks()[0].title(), "Demo Track 09999");
+    let literal_wildcard = repository.query_tracks(&LibraryTrackQuery::try_new(
+        "%",
+        None,
+        TrackPageRequest::try_new(0, 50)?,
+    )?)?;
+    assert_eq!(literal_wildcard.total(), 0);
     Ok(())
 }
 

@@ -27,6 +27,11 @@ Lumi gebruikt [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Een native, gepagineerde Library-workspace met Collection- en playlistnavigatie,
+  server-side search, expliciete readiness, metadata/provenance-inspector en een
+  deep-link naar de Track Lighting Editor.
+- Een begrensde library-query over de lokale engineverbinding en visuele evidence
+  voor empty, importing, ready, stale, degraded, conflict en error states.
 - Provider-neutrale music-librarycontracten, stabiele bron- en trackidentiteiten,
   playlists en gereviseerde Lumi phrase-timelines voor Epic 2A.
 - Lokale SQLite-persistence met transactionele migraties, rollback-bewijs,

@@ -14,6 +14,7 @@
 		100000000000000000000005 /* LumiEngineClient in Frameworks */ = {isa = PBXBuildFile; productRef = 900000000000000000000001 /* LumiEngineClient */; };
 		100000000000000000000006 /* LumiDesignSystem in Frameworks */ = {isa = PBXBuildFile; productRef = 900000000000000000000002 /* LumiDesignSystem */; };
 		100000000000000000000007 /* LumiLiveWorkspace in Frameworks */ = {isa = PBXBuildFile; productRef = 900000000000000000000003 /* LumiLiveWorkspace */; };
+		100000000000000000000008 /* LumiLibraryWorkspace in Frameworks */ = {isa = PBXBuildFile; productRef = 900000000000000000000004 /* LumiLibraryWorkspace */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -34,6 +35,7 @@
 				100000000000000000000005 /* LumiEngineClient in Frameworks */,
 				100000000000000000000006 /* LumiDesignSystem in Frameworks */,
 				100000000000000000000007 /* LumiLiveWorkspace in Frameworks */,
+				100000000000000000000008 /* LumiLibraryWorkspace in Frameworks */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -122,6 +124,7 @@
 				900000000000000000000001 /* LumiEngineClient */,
 				900000000000000000000002 /* LumiDesignSystem */,
 				900000000000000000000003 /* LumiLiveWorkspace */,
+				900000000000000000000004 /* LumiLibraryWorkspace */,
 			);
 			productName = Lumi;
 			productReference = 200000000000000000000005 /* Lumi.app */;
@@ -156,6 +159,7 @@
 				800000000000000000000001 /* XCLocalSwiftPackageReference "Packages/LumiEngineClient" */,
 				800000000000000000000002 /* XCLocalSwiftPackageReference "Packages/LumiDesignSystem" */,
 				800000000000000000000003 /* XCLocalSwiftPackageReference "Packages/LumiLiveWorkspace" */,
+				800000000000000000000004 /* XCLocalSwiftPackageReference "Packages/LumiLibraryWorkspace" */,
 			);
 			preferredProjectObjectVersion = 77;
 			productRefGroup = 400000000000000000000006 /* Products */;
@@ -291,6 +295,10 @@
 			isa = XCLocalSwiftPackageReference;
 			relativePath = Packages/LumiLiveWorkspace;
 		};
+		800000000000000000000004 /* XCLocalSwiftPackageReference "Packages/LumiLibraryWorkspace" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/LumiLibraryWorkspace;
+		};
 /* End XCLocalSwiftPackageReference section */
 
 /* Begin XCSwiftPackageProductDependency section */
@@ -308,6 +316,11 @@
 			isa = XCSwiftPackageProductDependency;
 			package = 800000000000000000000003 /* XCLocalSwiftPackageReference "Packages/LumiLiveWorkspace" */;
 			productName = LumiLiveWorkspace;
+		};
+		900000000000000000000004 /* LumiLibraryWorkspace */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 800000000000000000000004 /* XCLocalSwiftPackageReference "Packages/LumiLibraryWorkspace" */;
+			productName = LumiLibraryWorkspace;
 		};
 /* End XCSwiftPackageProductDependency section */
 	};

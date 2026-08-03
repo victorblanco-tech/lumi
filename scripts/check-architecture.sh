@@ -72,5 +72,9 @@ reject_dependency \
   "apps/macos/Packages/LumiLiveWorkspace/Package.swift" \
   'LumiEngineClient' \
   "LumiLiveWorkspace views may not import process or transport ownership."
+reject_dependency \
+  "apps/macos/Packages/LumiLibraryWorkspace/Package.swift" \
+  'Lumi(EngineClient|LiveWorkspace)' \
+  "LumiLibraryWorkspace must remain independent from process ownership and other features."
 
 echo "Architecture dependency check passed."

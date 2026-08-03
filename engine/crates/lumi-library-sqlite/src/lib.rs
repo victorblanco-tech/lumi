@@ -7,11 +7,11 @@ use std::path::Path;
 use lumi_domain::{KeyMode, MusicalKey, PitchClass, TrackId};
 use lumi_library::{
     BeatGrid, BeatMarker, ImportResult, ImportedLibraryBaseline, ImportedTrackAnalysis,
-    LibraryRepository, LumiPhraseTimeline, PhraseInstance, PhraseRole, PhraseRoleId, PlaylistId,
-    PlaylistPage, PlaylistSummary, RawPhraseObservation, SourcePlaylistId, SourceRevision,
-    SourceTrackId, StoredTrack, TextIdentifierError, TimelineRevision, TimelineRevisionOrigin,
-    TimelineRevisionPage, TimelineRevisionSummary, TrackColor, TrackPage, TrackPageRequest,
-    TrackSummary, WaveformPoint,
+    LibraryRepository, LibraryTrackQuery, LumiPhraseTimeline, PhraseInstance, PhraseRole,
+    PhraseRoleId, PlaylistId, PlaylistPage, PlaylistSummary, RawPhraseObservation,
+    SourcePlaylistId, SourceRevision, SourceTrackId, StoredTrack, TextIdentifierError,
+    TimelineRevision, TimelineRevisionOrigin, TimelineRevisionPage, TimelineRevisionSummary,
+    TrackColor, TrackPage, TrackPageRequest, TrackSummary, WaveformPoint,
 };
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 use thiserror::Error;
@@ -44,9 +44,9 @@ impl SqliteLibraryRepository {
             return Err(SqliteLibraryError::UnsupportedSchema(current));
         }
         if current == 0 {
-            let transaction = self.connection.transaction()?;
-            transaction.execute_batch(
+            self.connection.execute_batch(
                 "
+                BEGIN IMMEDIATE;
                 CREATE TABLE library_sources (
                     source_id TEXT PRIMARY KEY,
                     source_kind TEXT NOT NULL,
@@ -153,9 +153,9 @@ impl SqliteLibraryRepository {
                         REFERENCES timeline_revisions(track_id, revision)
                 );
                 PRAGMA user_version = 1;
+                COMMIT;
                 ",
             )?;
-            transaction.commit()?;
         }
         Ok(())
     }
@@ -470,6 +470,91 @@ impl LibraryRepository for SqliteLibraryRepository {
             request.offset(),
             tracks,
         ))
+    }
+
+    fn query_tracks(&self, query: &LibraryTrackQuery) -> Result<TrackPage, Self::Error> {
+        let pattern = search_pattern(query.search());
+        let page = query.page();
+        match query.playlist_id() {
+            Some(playlist_id) => {
+                let total = self.connection.query_row(
+                    "SELECT COUNT(*)
+                     FROM playlist_tracks pt JOIN tracks t ON t.id = pt.track_id
+                     WHERE pt.playlist_id = ?1 AND (
+                       LOWER(t.title) LIKE LOWER(?2) ESCAPE '\\' OR
+                       LOWER(t.artist) LIKE LOWER(?2) ESCAPE '\\' OR
+                       LOWER(t.source_track_id) LIKE LOWER(?2) ESCAPE '\\'
+                     )",
+                    params![to_i64(playlist_id.value())?, pattern],
+                    |row| row.get::<_, i64>(0),
+                )?;
+                let mut statement = self.connection.prepare(
+                    "SELECT t.id, t.source_track_id, t.title, t.artist, t.bpm_milli,
+                            t.key_pitch, t.key_mode, t.duration_millis, t.color_rgb,
+                            t.analysis_revision, h.revision
+                     FROM playlist_tracks pt
+                     JOIN tracks t ON t.id = pt.track_id
+                     LEFT JOIN timeline_heads h ON h.track_id = t.id
+                     WHERE pt.playlist_id = ?1 AND (
+                       LOWER(t.title) LIKE LOWER(?2) ESCAPE '\\' OR
+                       LOWER(t.artist) LIKE LOWER(?2) ESCAPE '\\' OR
+                       LOWER(t.source_track_id) LIKE LOWER(?2) ESCAPE '\\'
+                     )
+                     ORDER BY pt.position
+                     LIMIT ?3 OFFSET ?4",
+                )?;
+                let mut rows = statement.query(params![
+                    to_i64(playlist_id.value())?,
+                    pattern,
+                    i64::from(page.limit()),
+                    i64::from(page.offset())
+                ])?;
+                let mut tracks = Vec::with_capacity(usize::from(page.limit()));
+                while let Some(row) = rows.next()? {
+                    tracks.push(Self::load_summary(row)?);
+                }
+                Ok(TrackPage::new(
+                    from_nonnegative_i64(total, "track query count")?,
+                    page.offset(),
+                    tracks,
+                ))
+            }
+            None => {
+                let total = self.connection.query_row(
+                    "SELECT COUNT(*) FROM tracks t WHERE
+                       LOWER(t.title) LIKE LOWER(?1) ESCAPE '\\' OR
+                       LOWER(t.artist) LIKE LOWER(?1) ESCAPE '\\' OR
+                       LOWER(t.source_track_id) LIKE LOWER(?1) ESCAPE '\\'",
+                    [&pattern],
+                    |row| row.get::<_, i64>(0),
+                )?;
+                let mut statement = self.connection.prepare(
+                    "SELECT t.id, t.source_track_id, t.title, t.artist, t.bpm_milli,
+                            t.key_pitch, t.key_mode, t.duration_millis, t.color_rgb,
+                            t.analysis_revision, h.revision
+                     FROM tracks t LEFT JOIN timeline_heads h ON h.track_id = t.id
+                     WHERE LOWER(t.title) LIKE LOWER(?1) ESCAPE '\\' OR
+                           LOWER(t.artist) LIKE LOWER(?1) ESCAPE '\\' OR
+                           LOWER(t.source_track_id) LIKE LOWER(?1) ESCAPE '\\'
+                     ORDER BY t.title COLLATE NOCASE, t.artist COLLATE NOCASE, t.id
+                     LIMIT ?2 OFFSET ?3",
+                )?;
+                let mut rows = statement.query(params![
+                    pattern,
+                    i64::from(page.limit()),
+                    i64::from(page.offset())
+                ])?;
+                let mut tracks = Vec::with_capacity(usize::from(page.limit()));
+                while let Some(row) = rows.next()? {
+                    tracks.push(Self::load_summary(row)?);
+                }
+                Ok(TrackPage::new(
+                    from_nonnegative_i64(total, "track query count")?,
+                    page.offset(),
+                    tracks,
+                ))
+            }
+        }
     }
 
     fn page_playlists(&self, request: TrackPageRequest) -> Result<PlaylistPage, Self::Error> {
@@ -1051,6 +1136,14 @@ fn to_u8(value: i64, label: &str) -> Result<u8, SqliteLibraryError> {
 
 fn corrupt(label: &str, value: impl std::fmt::Display) -> SqliteLibraryError {
     SqliteLibraryError::CorruptData(format!("invalid {label}: {value}"))
+}
+
+fn search_pattern(search: &str) -> String {
+    let escaped = search
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    format!("%{escaped}%")
 }
 
 #[cfg(test)]

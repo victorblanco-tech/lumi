@@ -34,6 +34,7 @@ cargo build --locked --workspace --all-features
 swift test -Xswiftc -warnings-as-errors --package-path apps/macos/Packages/LumiProtocol
 swift test -Xswiftc -warnings-as-errors --package-path apps/macos/Packages/LumiDesignSystem
 swift test -Xswiftc -warnings-as-errors --package-path apps/macos/Packages/LumiLiveWorkspace
+swift test -Xswiftc -warnings-as-errors --package-path apps/macos/Packages/LumiLibraryWorkspace
 LUMI_ENGINE_TEST_EXECUTABLE="$repository_root/target/debug/lumi-engine" \
   swift test -Xswiftc -warnings-as-errors --package-path apps/macos/Packages/LumiEngineClient
 
@@ -71,8 +72,8 @@ fi
 "$script_dir/render-visual-evidence.sh" "$repository_root/build/VisualEvidence"
 
 visual_evidence_count="$(find "$repository_root/build/VisualEvidence" -type f -name '*.png' | wc -l | tr -d '[:space:]')"
-if [[ "$visual_evidence_count" != "8" ]]; then
-  echo "ERROR: expected 8 visual evidence PNGs, found $visual_evidence_count." >&2
+if [[ "$visual_evidence_count" != "16" ]]; then
+  echo "ERROR: expected 16 visual evidence PNGs, found $visual_evidence_count." >&2
   exit 1
 fi
 

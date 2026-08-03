@@ -69,6 +69,46 @@ pub struct TrackPageRequest {
     limit: u16,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LibraryTrackQuery {
+    search: String,
+    playlist_id: Option<PlaylistId>,
+    page: TrackPageRequest,
+}
+
+impl LibraryTrackQuery {
+    pub fn try_new(
+        search: impl Into<String>,
+        playlist_id: Option<PlaylistId>,
+        page: TrackPageRequest,
+    ) -> Result<Self, TrackPageRequestError> {
+        let search = search.into();
+        if search.len() > 200 {
+            return Err(TrackPageRequestError::SearchTooLong);
+        }
+        Ok(Self {
+            search: search.trim().to_owned(),
+            playlist_id,
+            page,
+        })
+    }
+
+    #[must_use]
+    pub fn search(&self) -> &str {
+        &self.search
+    }
+
+    #[must_use]
+    pub const fn playlist_id(&self) -> Option<PlaylistId> {
+        self.playlist_id
+    }
+
+    #[must_use]
+    pub const fn page(&self) -> TrackPageRequest {
+        self.page
+    }
+}
+
 impl TrackPageRequest {
     pub fn try_new(offset: u32, limit: u16) -> Result<Self, TrackPageRequestError> {
         if limit == 0 || limit > 200 {
@@ -92,6 +132,7 @@ impl TrackPageRequest {
 pub enum TrackPageRequestError {
     InvalidLimit(u16),
     EmptyDisplayName,
+    SearchTooLong,
 }
 
 impl std::fmt::Display for TrackPageRequestError {
@@ -99,6 +140,7 @@ impl std::fmt::Display for TrackPageRequestError {
         match self {
             Self::InvalidLimit(value) => write!(formatter, "page limit {value} is outside 1..=200"),
             Self::EmptyDisplayName => formatter.write_str("display name may not be empty"),
+            Self::SearchTooLong => formatter.write_str("library search exceeds 200 bytes"),
         }
     }
 }
@@ -441,6 +483,7 @@ pub trait LibraryRepository {
         baseline: &ImportedLibraryBaseline,
     ) -> Result<ImportResult, Self::Error>;
     fn page_tracks(&self, request: TrackPageRequest) -> Result<TrackPage, Self::Error>;
+    fn query_tracks(&self, query: &LibraryTrackQuery) -> Result<TrackPage, Self::Error>;
     fn page_playlists(&self, request: TrackPageRequest) -> Result<PlaylistPage, Self::Error>;
     fn page_playlist_tracks(
         &self,

@@ -14,6 +14,7 @@ public struct EnginePlanCommandContext: Equatable, Sendable {
 }
 
 public enum EngineCommand: Equatable, Sendable {
+    case queryLibrary(search: String, playlistID: UInt64?, offset: UInt32, limit: UInt16)
     case loadDemoSession(expectedStateRevision: UInt64)
     case setOperationState(String, expectedStateRevision: UInt64)
     case setSimulationSpeed(UInt64, expectedStateRevision: UInt64)
@@ -36,42 +37,51 @@ public enum EngineCommand: Equatable, Sendable {
 
     func payload() -> [String: JSONValue] {
         switch self {
+        case let .queryLibrary(search, playlistID, offset, limit):
+            var payload: [String: JSONValue] = [
+                "kind": .string("queryLibrary"),
+                "search": .string(search),
+                "offset": .number(Double(offset)),
+                "limit": .number(Double(limit))
+            ]
+            payload["playlistId"] = playlistID.map { .number(Double($0)) } ?? .null
+            return payload
         case let .loadDemoSession(expectedRevision):
-            statePayload("loadDemoSession", expectedRevision: expectedRevision)
+            return statePayload("loadDemoSession", expectedRevision: expectedRevision)
         case let .setOperationState(state, expectedRevision):
-            statePayload(
+            return statePayload(
                 "setOperationState",
                 expectedRevision: expectedRevision,
                 additional: ["operationState": .string(state)]
             )
         case let .setSimulationSpeed(speed, expectedRevision):
-            statePayload(
+            return statePayload(
                 "setSimulationSpeed",
                 expectedRevision: expectedRevision,
                 additional: ["speed": .number(Double(speed))]
             )
         case let .setSimulationPlayback(playing, expectedRevision):
-            statePayload(
+            return statePayload(
                 "setSimulationPlayback",
                 expectedRevision: expectedRevision,
                 additional: ["playing": .boolean(playing)]
             )
         case let .advanceSimulation(elapsedTicks, expectedRevision):
-            statePayload(
+            return statePayload(
                 "advanceSimulation",
                 expectedRevision: expectedRevision,
                 additional: ["elapsedTicks": .number(Double(elapsedTicks))]
             )
         case let .advanceToNextTrack(expectedRevision):
-            statePayload("advanceToNextTrack", expectedRevision: expectedRevision)
+            return statePayload("advanceToNextTrack", expectedRevision: expectedRevision)
         case let .selectTheme(context, themeID):
-            planPayload(
+            return planPayload(
                 "selectTheme",
                 context: context,
                 additional: ["themeId": .number(Double(themeID))]
             )
         case let .selectScene(context, phraseIndex, sceneID):
-            planPayload(
+            return planPayload(
                 "selectScene",
                 context: context,
                 additional: [
@@ -80,7 +90,7 @@ public enum EngineCommand: Equatable, Sendable {
                 ]
             )
         case let .setCueLock(context, phraseIndex, locked):
-            planPayload(
+            return planPayload(
                 "setCueLock",
                 context: context,
                 additional: [
@@ -89,9 +99,9 @@ public enum EngineCommand: Equatable, Sendable {
                 ]
             )
         case let .regeneratePlan(context):
-            planPayload("regeneratePlan", context: context)
+            return planPayload("regeneratePlan", context: context)
         case let .resetDemoSession(expectedRevision):
-            statePayload("resetDemoSession", expectedRevision: expectedRevision)
+            return statePayload("resetDemoSession", expectedRevision: expectedRevision)
         }
     }
 
