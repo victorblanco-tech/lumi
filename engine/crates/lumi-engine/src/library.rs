@@ -171,6 +171,38 @@ impl LibraryWorker {
         Ok(())
     }
 
+    pub fn set_phrase_loop_strategy(
+        &mut self,
+        track_id: u64,
+        expected_timeline_revision: u64,
+        expected_catalog_revision: u64,
+        phrase_index: u16,
+        strategy: PhraseLoopStrategy,
+    ) -> Result<(), LibraryWorkerError> {
+        let track_id = TrackId::new(track_id);
+        self.require_open_track(track_id)?;
+        let head = self.require_expected_head(track_id, expected_timeline_revision)?;
+        let phrase = head
+            .phrases()
+            .get(usize::from(phrase_index))
+            .ok_or(TimelineEditError::UnknownPhrase)?;
+        let catalog = self.repository.autoloop_catalog()?;
+        if catalog.revision() != expected_catalog_revision {
+            return Err(LibraryWorkerError::AutoloopCatalogRevisionConflict {
+                expected: expected_catalog_revision,
+                actual: catalog.revision(),
+            });
+        }
+        catalog.validate_loop_strategy(phrase.role_id(), &strategy)?;
+        let edited = head.edit(TimelineEditCommand::SetLoopStrategy {
+            phrase_index,
+            strategy,
+        })?;
+        self.repository
+            .append_timeline_revision(&edited, Some(head.revision()))?;
+        Ok(())
+    }
+
     pub fn undo_timeline(
         &mut self,
         track_id: u64,
@@ -683,6 +715,7 @@ impl LibraryWorker {
             .ok_or(LibraryWorkerError::MissingTimeline)?;
         let role_catalog = self.repository.phrase_role_catalog()?;
         let roles = role_catalog.roles();
+        let autoloop_catalog = self.repository.autoloop_catalog()?;
         let history = self.rebuild_history(track_id)?;
         let revisions = self
             .repository
@@ -738,7 +771,7 @@ impl LibraryWorker {
                 "roleId": phrase.role_id().as_str(),
                 "role": role_display_name(roles, phrase.role_id()),
                 "origin": origin_name(timeline.origin()),
-                "loopStrategy": loop_strategy_name(phrase.loop_strategy()),
+                "loopStrategy": loop_strategy_json(&autoloop_catalog, phrase),
             })).collect::<Vec<_>>(),
         }))
     }
@@ -863,6 +896,7 @@ fn reason_name(reason: TimelineRevisionReason) -> &'static str {
         TimelineRevisionReason::AbsorbPrevious => "absorbPrevious",
         TimelineRevisionReason::AbsorbNext => "absorbNext",
         TimelineRevisionReason::ChangeRole => "changeRole",
+        TimelineRevisionReason::ChangeLoopStrategy => "changeLoopStrategy",
         TimelineRevisionReason::Undo => "undo",
         TimelineRevisionReason::Redo => "redo",
         TimelineRevisionReason::RestoreRevision => "restoreRevision",
@@ -876,6 +910,100 @@ fn loop_strategy_name(strategy: &PhraseLoopStrategy) -> &'static str {
         PhraseLoopStrategy::FixedVariant(_) => "fixedVariant",
         PhraseLoopStrategy::ThemeSpecificExact(_) => "themeSpecificExact",
     }
+}
+
+fn loop_strategy_json(catalog: &lumi_library::AutoloopCatalog, phrase: &PhraseInstance) -> Value {
+    let role_id = phrase.role_id();
+    let active_variants = catalog
+        .variants()
+        .iter()
+        .filter(|variant| variant.role_id() == role_id && !variant.is_archived())
+        .collect::<Vec<_>>();
+    let mut issues = Vec::new();
+    let mut stale = false;
+    let fixed_variant_id = match phrase.loop_strategy() {
+        PhraseLoopStrategy::FixedVariant(variant_id) => Some(variant_id.as_str()),
+        PhraseLoopStrategy::Auto | PhraseLoopStrategy::ThemeSpecificExact(_) => None,
+    };
+    let overrides = match phrase.loop_strategy() {
+        PhraseLoopStrategy::ThemeSpecificExact(values) => values
+            .iter()
+            .map(|value| {
+                json!({
+                    "themeId": value.theme_id().value(),
+                    "variantId": value.variant_id().as_str(),
+                })
+            })
+            .collect::<Vec<_>>(),
+        PhraseLoopStrategy::Auto | PhraseLoopStrategy::FixedVariant(_) => Vec::new(),
+    };
+    for theme in catalog.themes() {
+        let exact_variant = match phrase.loop_strategy() {
+            PhraseLoopStrategy::FixedVariant(variant_id) => Some(variant_id),
+            PhraseLoopStrategy::ThemeSpecificExact(values) => values
+                .iter()
+                .find(|value| value.theme_id() == theme.id())
+                .map(lumi_library::ThemeSpecificVariant::variant_id),
+            PhraseLoopStrategy::Auto => None,
+        };
+        if let Some(variant_id) = exact_variant {
+            let is_active = active_variants
+                .iter()
+                .any(|variant| variant.id() == variant_id);
+            if !is_active {
+                stale = true;
+                issues.push(json!({
+                    "reason": "variantMissingOrArchived",
+                    "themeId": theme.id().value(),
+                    "variantId": variant_id.as_str(),
+                }));
+            } else if !catalog.cells().iter().any(|cell| {
+                cell.theme_id() == theme.id()
+                    && cell.role_id() == role_id
+                    && cell.variant_id() == variant_id
+            }) {
+                issues.push(json!({
+                    "reason": "exactCellMissing",
+                    "themeId": theme.id().value(),
+                    "variantId": variant_id.as_str(),
+                }));
+            }
+        } else if !active_variants.iter().any(|variant| {
+            catalog.cells().iter().any(|cell| {
+                cell.theme_id() == theme.id()
+                    && cell.role_id() == role_id
+                    && cell.variant_id() == variant.id()
+            })
+        }) {
+            issues.push(json!({
+                "reason": "automaticCoverageMissing",
+                "themeId": theme.id().value(),
+                "variantId": Value::Null,
+            }));
+        }
+    }
+    let status = if stale {
+        "stale"
+    } else if issues.is_empty() {
+        "ready"
+    } else {
+        "incomplete"
+    };
+    json!({
+        "kind": loop_strategy_name(phrase.loop_strategy()),
+        "locked": !matches!(phrase.loop_strategy(), PhraseLoopStrategy::Auto),
+        "provenance": if matches!(phrase.loop_strategy(), PhraseLoopStrategy::Auto) {
+            "automaticDefault"
+        } else {
+            "userSelection"
+        },
+        "rowRoleId": role_id.as_str(),
+        "fixedVariantId": fixed_variant_id,
+        "themeOverrides": overrides,
+        "validatedCatalogRevision": catalog.revision(),
+        "status": status,
+        "issues": issues,
+    })
 }
 
 fn track_json(track: &TrackSummary) -> Value {
@@ -1001,7 +1129,8 @@ mod tests {
 
     use lumi_domain::ThemeId;
     use lumi_library::{
-        LibraryRepository as _, PhraseRoleId, TimelineEditCommand, TrackPageRequest,
+        LibraryRepository as _, PhraseLoopStrategy, PhraseRoleId, TimelineEditCommand,
+        TrackPageRequest, VariantId,
     };
     use lumi_library_demo::DemoLibrarySourceProvider;
     use lumi_library_source::MusicLibrarySourceProvider as _;
@@ -1324,6 +1453,83 @@ mod tests {
             covered["autoloopCatalog"]["preflight"]["missingCellCount"],
             4
         );
+        Ok(())
+    }
+
+    #[test]
+    fn phrase_loop_strategy_is_role_safe_revisioned_and_restart_persistent()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let path = std::env::temp_dir().join(format!("lumi-engine-loop-strategy-{unique}.sqlite"));
+        let track_id;
+        {
+            let mut worker = LibraryWorker::demo_at(&path)?;
+            track_id = worker.snapshot_json()?["page"]["tracks"][0]["id"]
+                .as_u64()
+                .ok_or("demo track ID is missing")?;
+            worker.open_editor(track_id)?;
+            worker.set_phrase_loop_strategy(
+                track_id,
+                1,
+                1,
+                0,
+                PhraseLoopStrategy::FixedVariant(VariantId::try_new("variant-1")?),
+            )?;
+            let fixed = worker.snapshot_json()?;
+            assert_eq!(fixed["editor"]["timeline"]["revision"], 2);
+            assert_eq!(fixed["editor"]["timeline"]["reason"], "changeLoopStrategy");
+            assert_eq!(
+                fixed["editor"]["phrases"][0]["loopStrategy"]["kind"],
+                "fixedVariant"
+            );
+            assert_eq!(
+                fixed["editor"]["phrases"][0]["loopStrategy"]["fixedVariantId"],
+                "variant-1"
+            );
+            assert_eq!(
+                fixed["editor"]["phrases"][0]["loopStrategy"]["locked"],
+                true
+            );
+        }
+        {
+            let mut worker = LibraryWorker::demo_at(&path)?;
+            worker.open_editor(track_id)?;
+            let restarted = worker.snapshot_json()?;
+            assert_eq!(
+                restarted["editor"]["phrases"][0]["loopStrategy"]["kind"],
+                "fixedVariant"
+            );
+            worker.mutate_autoloop_catalog(
+                1,
+                AutoloopCatalogMutation::RenameTheme {
+                    theme_id: ThemeId::new(1),
+                    display_name: "Electric Garden".to_owned(),
+                },
+            )?;
+            let stale =
+                worker.set_phrase_loop_strategy(track_id, 2, 1, 0, PhraseLoopStrategy::Auto);
+            assert!(matches!(
+                stale,
+                Err(LibraryWorkerError::AutoloopCatalogRevisionConflict {
+                    expected: 1,
+                    actual: 2,
+                })
+            ));
+            worker.set_phrase_loop_strategy(track_id, 2, 2, 0, PhraseLoopStrategy::Auto)?;
+        }
+        let mut worker = LibraryWorker::demo_at(&path)?;
+        worker.open_editor(track_id)?;
+        let automatic = worker.snapshot_json()?;
+        assert_eq!(automatic["editor"]["timeline"]["revision"], 3);
+        assert_eq!(
+            automatic["editor"]["phrases"][0]["loopStrategy"]["kind"],
+            "auto"
+        );
+        assert_eq!(
+            automatic["editor"]["phrases"][0]["loopStrategy"]["locked"],
+            false
+        );
+        std::fs::remove_file(path)?;
         Ok(())
     }
 

@@ -167,14 +167,28 @@ final class EngineStatusModel: ObservableObject {
 
     func editLibraryTimeline(_ request: TrackTimelineEditRequest) async {
         guard let editor = libraryState.editor else { return }
-        await exchangeTimelineCommand(
-            .editLibraryTimeline(
+        let command: EngineCommand
+        let success: String
+        switch request {
+        case let .setLoopStrategy(phraseIndex, strategy):
+            guard let catalog = libraryState.autoloopCatalog else { return }
+            command = .setLibraryPhraseLoopStrategy(
+                trackID: editor.track.id,
+                phraseIndex: phraseIndex,
+                expectedTimelineRevision: editor.timeline.revision,
+                expectedAutoloopCatalogRevision: catalog.revision,
+                strategy: engineLoopStrategy(strategy)
+            )
+            success = "Loop strategy saved."
+        default:
+            command = .editLibraryTimeline(
                 trackID: editor.track.id,
                 expectedTimelineRevision: editor.timeline.revision,
                 edit: engineTimelineEdit(request)
-            ),
-            success: "Phrase timeline saved."
-        )
+            )
+            success = "Phrase timeline saved."
+        }
+        await exchangeTimelineCommand(command, success: success)
     }
 
     func mutateLibraryTimelineHistory(_ request: TrackTimelineHistoryRequest) async {
@@ -358,7 +372,9 @@ final class EngineStatusModel: ObservableObject {
                 if failure.kind == "revisionConflict" {
                     let refreshed = try await supervisor.getSnapshot()
                     libraryState = try libraryDecoder.decode(refreshed)
-                    timelineEditFeedback = "Timeline changed elsewhere. Lumi refreshed the latest revision."
+                    timelineEditFeedback = failure.code == "autoloopCatalogRevisionMismatch"
+                        ? "Autoloop catalog changed elsewhere. Lumi refreshed the latest revision."
+                        : "Timeline changed elsewhere. Lumi refreshed the latest revision."
                 } else {
                     timelineEditFeedback = failure.message
                 }
@@ -398,6 +414,23 @@ final class EngineStatusModel: ObservableObject {
             .deleteAbsorbNext(phraseIndex: phraseIndex)
         case let .changeRole(phraseIndex, roleID):
             .changeRole(phraseIndex: phraseIndex, roleID: roleID)
+        case .setLoopStrategy:
+            preconditionFailure("Loop strategies use their dedicated revision-safe command")
+        }
+    }
+
+    private func engineLoopStrategy(
+        _ request: TrackLoopStrategyRequest
+    ) -> EnginePhraseLoopStrategy {
+        switch request {
+        case .automatic:
+            .automatic
+        case let .fixedVariant(variantID):
+            .fixedVariant(variantID)
+        case let .themeSpecificExact(overrides):
+            .themeSpecificExact(overrides.map { value in
+                EngineThemeVariantOverride(themeID: value.themeID, variantID: value.variantID)
+            })
         }
     }
 

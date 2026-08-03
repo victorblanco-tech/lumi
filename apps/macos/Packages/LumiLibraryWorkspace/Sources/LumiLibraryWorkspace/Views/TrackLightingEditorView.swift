@@ -3,6 +3,7 @@ import SwiftUI
 
 public struct TrackLightingEditorView: View {
     private let analysis: TrackEditorAnalysis
+    private let autoloopCatalog: AutoloopCatalogState?
     private let keyNotation: KeyNotationPreference
     private let feedback: String?
     private let rendersInteractiveControls: Bool
@@ -25,6 +26,7 @@ public struct TrackLightingEditorView: View {
 
     public init(
         analysis: TrackEditorAnalysis,
+        autoloopCatalog: AutoloopCatalogState? = nil,
         keyNotation: KeyNotationPreference,
         feedback: String? = nil,
         rendersInteractiveControls: Bool = true,
@@ -32,6 +34,7 @@ public struct TrackLightingEditorView: View {
         onTimelineHistory: @escaping @MainActor (TrackTimelineHistoryRequest) -> Void = { _ in }
     ) {
         self.analysis = analysis
+        self.autoloopCatalog = autoloopCatalog
         self.keyNotation = keyNotation
         self.feedback = feedback
         self.rendersInteractiveControls = rendersInteractiveControls
@@ -304,6 +307,25 @@ public struct TrackLightingEditorView: View {
     }
 
     private var phraseInspector: some View {
+        Group {
+            if rendersInteractiveControls {
+                ScrollView {
+                    phraseInspectorContent
+                }
+            } else {
+                phraseInspectorContent
+            }
+        }
+        .background(panel)
+        .clipShape(RoundedRectangle(cornerRadius: 8))
+        .overlay {
+            RoundedRectangle(cornerRadius: 8)
+                .stroke(Color.white.opacity(0.12), lineWidth: 1)
+        }
+        .accessibilityIdentifier("lumi.trackEditor.inspector")
+    }
+
+    private var phraseInspectorContent: some View {
         VStack(alignment: .leading, spacing: 14) {
             HStack {
                 Text(editorCopy("editor.phraseInspector"))
@@ -390,14 +412,13 @@ public struct TrackLightingEditorView: View {
                 Divider().overlay(Color.white.opacity(0.12))
                 inspectorFact(editorCopy("editor.origin"), phrase.origin)
                 inspectorFact(editorCopy("editor.sourceBaseline"), sourceBaseline(for: phrase))
-                inspectorFact(editorCopy("editor.loopStrategy"), phrase.loopStrategy.uppercased())
+                loopStrategyEditor(phrase)
                 inspectorFact(editorCopy("editor.revisionReason"), readableReason(analysis.timeline.reason))
             } else {
                 Text(editorCopy("editor.noPhrase"))
                     .foregroundStyle(secondary)
             }
 
-            Spacer()
             Label(editorCopy("editor.planIsolation"), systemImage: "lock.shield")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundStyle(secondary)
@@ -405,13 +426,6 @@ public struct TrackLightingEditorView: View {
                 .accessibilityIdentifier("lumi.trackEditor.planIsolation")
         }
         .padding(14)
-        .background(panel)
-        .clipShape(RoundedRectangle(cornerRadius: 8))
-        .overlay {
-            RoundedRectangle(cornerRadius: 8)
-                .stroke(Color.white.opacity(0.12), lineWidth: 1)
-        }
-        .accessibilityIdentifier("lumi.trackEditor.inspector")
     }
 
     private var editorCanvas: some View {
@@ -450,6 +464,161 @@ public struct TrackLightingEditorView: View {
         .accessibilityLabel(editorCopy("editor.timelineLabel"))
         .accessibilityValue("\(barBeatLabel), \(selectedPhrase?.role ?? editorCopy("editor.noPhrase"))")
         .accessibilityIdentifier("lumi.trackEditor.timeline")
+    }
+
+    @ViewBuilder
+    private func loopStrategyEditor(_ phrase: TrackEditorPhrase) -> some View {
+        let role = autoloopCatalog?.roles.first { $0.id == phrase.roleID }
+        let variants = role?.variants.filter { !$0.archived } ?? []
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                inspectorLabel(editorCopy("editor.loopStrategy"))
+                Spacer()
+                Label(
+                    loopStrategyStatusLabel(phrase.loopStrategy),
+                    systemImage: phrase.loopStrategy.locked ? "lock.fill" : "wand.and.stars"
+                )
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundStyle(loopStrategyStatusColor(phrase.loopStrategy))
+            }
+            Text(loopStrategySummary(phrase.loopStrategy, variants: variants))
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(primary)
+
+            if rendersInteractiveControls, let catalog = autoloopCatalog {
+                HStack(spacing: 6) {
+                    Button(editorCopy("editor.loopAutomatic")) {
+                        setLoopStrategy(phrase, .automatic)
+                    }
+                    .disabled(phrase.loopStrategy.kind == "auto")
+                    Menu(editorCopy("editor.lockVariant")) {
+                        ForEach(variants) { variant in
+                            Button(variant.name) {
+                                setLoopStrategy(phrase, .fixedVariant(variant.id))
+                            }
+                        }
+                    }
+                    .disabled(variants.isEmpty)
+                }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+
+                Text(editorCopy("editor.themeOverrides"))
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(secondary)
+                ForEach(catalog.themes) { theme in
+                    themeOverrideRow(theme, phrase: phrase, variants: variants)
+                }
+            }
+
+            if phrase.loopStrategy.status != "ready" {
+                Label(
+                    "\(phrase.loopStrategy.issues.count) \(editorCopy("editor.strategyIssues"))",
+                    systemImage: "exclamationmark.triangle.fill"
+                )
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(Color.orange)
+            }
+        }
+        .accessibilityIdentifier("lumi.trackEditor.loopStrategy")
+    }
+
+    private func themeOverrideRow(
+        _ theme: AutoloopThemeState,
+        phrase: TrackEditorPhrase,
+        variants: [AutoloopVariantState]
+    ) -> some View {
+        let selectedID = phrase.loopStrategy.themeOverrides
+            .first { $0.themeID == theme.id }?.variantID
+        let compatible = variants.filter { variant in
+            variant.cells.contains { $0.themeID == theme.id && !$0.isMissing }
+        }
+        return HStack(spacing: 6) {
+            Text(theme.name)
+                .font(.system(size: 9, weight: .medium))
+                .foregroundStyle(secondary)
+                .lineLimit(1)
+            Spacer()
+            Menu {
+                Button(editorCopy("editor.themeAutomatic")) {
+                    updateThemeOverride(phrase, themeID: theme.id, variantID: nil)
+                }
+                ForEach(compatible) { variant in
+                    Button(variant.name) {
+                        updateThemeOverride(phrase, themeID: theme.id, variantID: variant.id)
+                    }
+                }
+            } label: {
+                Text(
+                    compatible.first(where: { $0.id == selectedID })?.name
+                        ?? editorCopy("editor.themeAutomatic")
+                )
+                .font(.system(size: 9, weight: .semibold))
+                .lineLimit(1)
+            }
+            .menuStyle(.borderlessButton)
+            .frame(width: 116)
+        }
+        .accessibilityIdentifier("lumi.trackEditor.loopStrategy.theme.\(theme.id)")
+    }
+
+    private func setLoopStrategy(
+        _ phrase: TrackEditorPhrase,
+        _ strategy: TrackLoopStrategyRequest
+    ) {
+        guard let phraseIndex = UInt16(exactly: phrase.id) else { return }
+        onTimelineEdit(.setLoopStrategy(phraseIndex: phraseIndex, strategy: strategy))
+    }
+
+    private func updateThemeOverride(
+        _ phrase: TrackEditorPhrase,
+        themeID: UInt64,
+        variantID: String?
+    ) {
+        var overrides = phrase.loopStrategy.kind == "themeSpecificExact"
+            ? phrase.loopStrategy.themeOverrides
+            : []
+        overrides.removeAll { $0.themeID == themeID }
+        if let variantID {
+            overrides.append(TrackEditorThemeVariantOverride(themeID: themeID, variantID: variantID))
+        }
+        overrides.sort { $0.themeID < $1.themeID }
+        setLoopStrategy(
+            phrase,
+            overrides.isEmpty ? .automatic : .themeSpecificExact(overrides)
+        )
+    }
+
+    private func loopStrategySummary(
+        _ strategy: TrackEditorLoopStrategy,
+        variants: [AutoloopVariantState]
+    ) -> String {
+        switch strategy.kind {
+        case "fixedVariant":
+            return variants.first { $0.id == strategy.fixedVariantID }?.name
+                ?? strategy.fixedVariantID
+                ?? editorCopy("editor.variantUnavailable")
+        case "themeSpecificExact":
+            return "\(strategy.themeOverrides.count) \(editorCopy("editor.themeOverrides").lowercased())"
+        default:
+            return editorCopy("editor.automaticSelection")
+        }
+    }
+
+    private func loopStrategyStatusLabel(_ strategy: TrackEditorLoopStrategy) -> String {
+        switch strategy.status {
+        case "stale": editorCopy("editor.strategyStale")
+        case "incomplete": editorCopy("editor.strategyIncomplete")
+        default: strategy.locked ? editorCopy("editor.strategyLocked") : editorCopy("editor.strategyAutomatic")
+        }
+    }
+
+    private func loopStrategyStatusColor(_ strategy: TrackEditorLoopStrategy) -> Color {
+        switch strategy.status {
+        case "stale": Color.red
+        case "incomplete": Color.orange
+        default: strategy.locked ? accent : secondary
+        }
     }
 
     private var overview: some View {

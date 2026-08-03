@@ -219,6 +219,45 @@ func launchesRealEngine() async throws {
         )
         #expect(libraryEditorTimelineRevision(redoneTimeline) == 4)
         #expect(libraryEditorArrayCount(redoneTimeline, field: "phrases") == 5)
+        let fixedLoop = try await supervisor.send(
+            .setLibraryPhraseLoopStrategy(
+                trackID: requiredFirstLibraryTrackID(snapshot),
+                phraseIndex: 0,
+                expectedTimelineRevision: 4,
+                expectedAutoloopCatalogRevision: 3,
+                strategy: .fixedVariant("variant-1")
+            ),
+            messageID: "swift-fix-phrase-loop-variant"
+        )
+        #expect(libraryEditorTimelineRevision(fixedLoop) == 5)
+        #expect(libraryEditorFirstLoopStrategyKind(fixedLoop) == "fixedVariant")
+        #expect(libraryEditorFirstFixedVariantID(fixedLoop) == "variant-1")
+
+        let staleLoopCatalog = try await supervisor.send(
+            .setLibraryPhraseLoopStrategy(
+                trackID: requiredFirstLibraryTrackID(snapshot),
+                phraseIndex: 0,
+                expectedTimelineRevision: 5,
+                expectedAutoloopCatalogRevision: 2,
+                strategy: .automatic
+            ),
+            messageID: "swift-stale-phrase-loop-catalog"
+        )
+        #expect(EngineCommandFailure(staleLoopCatalog)?.code == "autoloopCatalogRevisionMismatch")
+        #expect(EngineCommandFailure(staleLoopCatalog)?.actualAutoloopCatalogRevision == 3)
+
+        let automaticLoop = try await supervisor.send(
+            .setLibraryPhraseLoopStrategy(
+                trackID: requiredFirstLibraryTrackID(snapshot),
+                phraseIndex: 0,
+                expectedTimelineRevision: 5,
+                expectedAutoloopCatalogRevision: 3,
+                strategy: .automatic
+            ),
+            messageID: "swift-reset-phrase-loop-auto"
+        )
+        #expect(libraryEditorTimelineRevision(automaticLoop) == 6)
+        #expect(libraryEditorFirstLoopStrategyKind(automaticLoop) == "auto")
         _ = try await supervisor.send(
             .closeLibraryTrackEditor,
             messageID: "swift-close-reopened-library-editor"
@@ -458,6 +497,26 @@ private func libraryEditorFirstRoleID(_ envelope: MessageEnvelope) -> String? {
           case let .object(first)? = phrases.first,
           case let .string(roleID) = first["roleId"] else { return nil }
     return roleID
+}
+
+private func libraryEditorFirstLoopStrategy(_ envelope: MessageEnvelope) -> [String: JSONValue]? {
+    guard let editor = libraryEditor(envelope),
+          case let .array(phrases) = editor["phrases"],
+          case let .object(first)? = phrases.first,
+          case let .object(strategy) = first["loopStrategy"] else { return nil }
+    return strategy
+}
+
+private func libraryEditorFirstLoopStrategyKind(_ envelope: MessageEnvelope) -> String? {
+    guard let strategy = libraryEditorFirstLoopStrategy(envelope),
+          case let .string(kind) = strategy["kind"] else { return nil }
+    return kind
+}
+
+private func libraryEditorFirstFixedVariantID(_ envelope: MessageEnvelope) -> String? {
+    guard let strategy = libraryEditorFirstLoopStrategy(envelope),
+          case let .string(variantID) = strategy["fixedVariantId"] else { return nil }
+    return variantID
 }
 
 private func libraryEditorBeatCount(_ envelope: MessageEnvelope) -> Int? {

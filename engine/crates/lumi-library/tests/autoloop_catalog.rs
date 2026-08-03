@@ -2,7 +2,7 @@ use lumi_domain::ThemeId;
 use lumi_library::{
     AUTOLOOP_CATALOG_DEFAULTS_VERSION, AutoloopCatalog, AutoloopCatalogError, AutoloopEntryId,
     AutoloopMatrixCell, AutoloopResolutionReason, AutoloopTheme, AutoloopVariant,
-    AutoloopVariantMove, PhraseRoleId, VariantId,
+    AutoloopVariantMove, PhraseLoopStrategy, PhraseRoleId, ThemeSpecificVariant, VariantId,
 };
 
 #[test]
@@ -177,6 +177,67 @@ fn persisted_catalogs_require_exactly_four_theme_targets() -> Result<(), Box<dyn
             catalog.cells().to_vec(),
         ),
         Err(AutoloopCatalogError::InvalidThemeCount)
+    );
+    Ok(())
+}
+
+#[test]
+fn loop_templates_resolve_after_theme_selection_without_storing_a_theme()
+-> Result<(), Box<dyn std::error::Error>> {
+    let catalog = fixture()?;
+    let role = PhraseRoleId::try_new("breakdown-1")?;
+    let fixed = PhraseLoopStrategy::FixedVariant(VariantId::try_new("variant-1")?);
+    let fixed_entries = (1..=4)
+        .map(|theme| {
+            catalog
+                .resolve_loop_strategy(ThemeId::new(theme), &role, &fixed, catalog.revision())
+                .map(|resolution| resolution.entry_id().as_str().to_owned())
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    assert_eq!(
+        fixed_entries
+            .iter()
+            .collect::<std::collections::HashSet<_>>()
+            .len(),
+        4
+    );
+
+    let exact = PhraseLoopStrategy::ThemeSpecificExact(vec![ThemeSpecificVariant::new(
+        ThemeId::new(2),
+        VariantId::try_new("variant-2")?,
+    )]);
+    let theme_one = catalog.resolve_loop_strategy(ThemeId::new(1), &role, &exact, 1)?;
+    let theme_two = catalog.resolve_loop_strategy(ThemeId::new(2), &role, &exact, 1)?;
+    assert_eq!(theme_one.reason(), &AutoloopResolutionReason::Automatic);
+    assert_eq!(
+        theme_two.reason(),
+        &AutoloopResolutionReason::ThemeSpecificExact
+    );
+    assert_eq!(theme_two.variant_id().as_str(), "variant-2");
+    Ok(())
+}
+
+#[test]
+fn fixed_and_theme_exact_strategies_fail_closed_when_their_row_is_incompatible()
+-> Result<(), Box<dyn std::error::Error>> {
+    let catalog = fixture()?;
+    let synth = PhraseRoleId::try_new("synth")?;
+    let breakdown_variant = VariantId::try_new("variant-2")?;
+    assert_eq!(
+        catalog.validate_loop_strategy(
+            &synth,
+            &PhraseLoopStrategy::FixedVariant(breakdown_variant.clone()),
+        ),
+        Err(AutoloopCatalogError::IncompatibleVariant)
+    );
+
+    let missing_exact = PhraseLoopStrategy::ThemeSpecificExact(vec![ThemeSpecificVariant::new(
+        ThemeId::new(4),
+        breakdown_variant,
+    )]);
+    assert_eq!(
+        catalog.validate_loop_strategy(&PhraseRoleId::try_new("breakdown-1")?, &missing_exact),
+        Err(AutoloopCatalogError::MissingExactCell)
     );
     Ok(())
 }

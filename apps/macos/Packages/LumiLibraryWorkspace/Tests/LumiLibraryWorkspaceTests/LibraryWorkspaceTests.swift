@@ -194,8 +194,34 @@ struct LibraryWorkspaceTests {
         #expect(editor.timeline.revision == 1)
         #expect(editor.timeline.revisions.count == 1)
         #expect(editor.sourcePhrases.first?.rawLabel == "Intro")
+        #expect(editor.phrases.first?.loopStrategy.kind == "auto")
+        #expect(editor.phrases.first?.loopStrategy.rowRoleID == "intro-outro")
+        #expect(editor.phrases.first?.loopStrategy.locked == false)
         #expect(!editor.timeline.canUndo)
         #expect(editor.phraseTimeRange(editor.phrases[1]) == 2_000..<4_000)
+    }
+
+    @Test("Loop strategy rows must remain compatible with their phrase role")
+    func rejectsLoopStrategyRoleMismatch() {
+        var editor = editorValue()
+        guard case var .object(editorObject) = editor,
+              case var .array(phrases) = editorObject["phrases"],
+              case var .object(firstPhrase) = phrases.first,
+              case var .object(strategy) = firstPhrase["loopStrategy"] else {
+            Issue.record("Editor fixture must contain a loop strategy")
+            return
+        }
+        strategy["rowRoleId"] = .string("drop")
+        firstPhrase["loopStrategy"] = .object(strategy)
+        phrases[0] = .object(firstPhrase)
+        editorObject["phrases"] = .array(phrases)
+        editor = .object(editorObject)
+
+        #expect(throws: LibrarySnapshotError.invalidPhraseTimeline) {
+            try LibrarySnapshotDecoder().decode(
+                envelope(trackValues: [trackValue()], editorValue: editor)
+            )
+        }
     }
 
     @Test("Incomplete bars are rejected before the editor can render")
@@ -559,7 +585,7 @@ private func editorValue() -> JSONValue {
                 "roleId": .string("intro-outro"),
                 "role": .string("Intro"),
                 "origin": .string("sourceImport"),
-                "loopStrategy": .string("auto")
+                "loopStrategy": loopStrategyValue(roleID: "intro-outro")
             ]),
             .object([
                 "id": .number(2),
@@ -568,7 +594,7 @@ private func editorValue() -> JSONValue {
                 "roleId": .string("buildup-1"),
                 "role": .string("Build"),
                 "origin": .string("sourceImport"),
-                "loopStrategy": .string("auto")
+                "loopStrategy": loopStrategyValue(roleID: "buildup-1")
             ])
         ]),
         "roles": .array([
@@ -606,6 +632,20 @@ private func editorValue() -> JSONValue {
                 ])
             ])
         ])
+    ])
+}
+
+private func loopStrategyValue(roleID: String) -> JSONValue {
+    .object([
+        "kind": .string("auto"),
+        "locked": .boolean(false),
+        "provenance": .string("automaticDefault"),
+        "rowRoleId": .string(roleID),
+        "fixedVariantId": .null,
+        "themeOverrides": .array([]),
+        "validatedCatalogRevision": .number(1),
+        "status": .string("ready"),
+        "issues": .array([])
     ])
 }
 

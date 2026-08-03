@@ -120,6 +120,11 @@ The provider-neutral four-Theme, Phrase Role, and Variant matrix, strict
 same-role fallback, preflight coverage, and target-adapter boundary are
 documented in [`autoloop-catalog.md`](autoloop-catalog.md).
 
+The per-phrase `AUTO`, Theme-independent fixed-Variant, and optional exact
+Theme override strategies, including stale validation and reset behavior, are
+documented in
+[`phrase-loop-strategies.md`](phrase-loop-strategies.md).
+
 The authoritative Live/Next presentation boundary, explicit degraded states,
 accessibility identifiers, and locked-session PNG workflow are documented in
 [`live-workspace.md`](live-workspace.md).

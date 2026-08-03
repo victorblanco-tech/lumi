@@ -119,6 +119,7 @@ struct LumiLibraryVisualEvidenceCommand {
                 hostCanvas
                 TrackLightingEditorView(
                     analysis: TrackEditorFixtures.ready,
+                    autoloopCatalog: AutoloopCatalogFixtures.incomplete,
                     keyNotation: variant.notation,
                     rendersInteractiveControls: false
                 )
