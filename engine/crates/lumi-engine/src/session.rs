@@ -5,11 +5,13 @@ use std::time::Duration;
 
 use lumi_deck_source::DeckSourceProvider as _;
 use lumi_domain::{
-    CueOrigin, CueReason, DecisionReason, DeckObservation, DeckSourceStatus, DomainEvent, EffectId,
-    EffectResult, EffectResultEnvelope, EffectSequence, KeyMode, LightingPlan, MonotonicTime,
-    OperationState, OutputEffectReason, OutputEffectResult, OutputEffectStatus,
-    OutputExecutionRequest, PhraseKind, PitchClass, PlanRevision, PlanStatus, RuntimeHealth,
-    SceneCategory, SemanticLightingAction, SerializedRuntime, SerializedRuntimeError, WorkerId,
+    ClientId, CommandSequence, CueOrigin, CueReason, DecisionReason, DeckObservation,
+    DeckSourceStatus, DomainEvent, EffectId, EffectResult, EffectResultEnvelope, EffectSequence,
+    KeyMode, LightingPlan, MonotonicTime, OperationCommand, OperationState, OutputEffectReason,
+    OutputEffectResult, OutputEffectStatus, OutputExecutionRequest, PhraseKind, PitchClass,
+    PlanRevision, PlanStatus, RuntimeHealth, SceneCategory, SemanticLightingAction,
+    SerializedRuntime, SerializedRuntimeError, TimelineResult, TimelineSource, UserCommandEnvelope,
+    WorkerId,
 };
 use lumi_lighting_output::LightingOutputProvider as _;
 use lumi_output_dry_run::{DryRunLightingOutputProvider, DryRunOutputError};
@@ -21,7 +23,10 @@ use lumi_protocol::{
     CommandDisposition, CommandIdCache, InvalidCacheCapacity, MAX_MESSAGE_BYTES, MessageDecoder,
     MessageEnvelope, MessageType, PROTOCOL_VERSION,
 };
-use lumi_simulator::{ManualClock, SimulatorDeckSourceProvider, SimulatorError};
+use lumi_simulator::{
+    ManualClock, MonotonicClock as _, SimulationControl, SimulatorDeckSourceProvider,
+    SimulatorError,
+};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use subtle::ConstantTimeEq as _;
@@ -201,9 +206,11 @@ fn tokens_match(expected: &str, received: &str) -> bool {
 
 struct EngineRuntime {
     state: SerializedRuntime,
+    clock: ManualClock,
     deck_source: SimulatorDeckSourceProvider<ManualClock>,
     planning_worker: PlanningWorker,
     output_worker: OutputWorker,
+    operation_sequence: u64,
 }
 
 fn initialized_runtime() -> Result<EngineRuntime, EngineError> {
@@ -219,7 +226,7 @@ fn initialized_runtime_with_clock(clock: ManualClock) -> Result<EngineRuntime, E
             at: MonotonicTime::new(0),
         },
     )?;
-    let mut deck_source = SimulatorDeckSourceProvider::demo(clock)?;
+    let mut deck_source = SimulatorDeckSourceProvider::demo(clock.clone())?;
     let mut planning_worker = PlanningWorker::new();
     let mut output_worker = OutputWorker::new();
     for event in deck_source.drain_events()? {
@@ -232,13 +239,14 @@ fn initialized_runtime_with_clock(clock: ManualClock) -> Result<EngineRuntime, E
     }
     Ok(EngineRuntime {
         state: runtime,
+        clock,
         deck_source,
         planning_worker,
         output_worker,
+        operation_sequence: 0,
     })
 }
 
-#[cfg(test)]
 fn process_pending_source_events(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
     let leader_deck_id = runtime.deck_source.leader_deck_id();
     for event in runtime.deck_source.drain_events()? {
@@ -482,8 +490,71 @@ fn apply_command(
     runtime: &mut EngineRuntime,
     command: SessionCommand,
 ) -> Result<(), CommandApplicationError> {
-    if command == SessionCommand::GetSnapshot {
-        return Ok(());
+    match command {
+        SessionCommand::GetSnapshot => return Ok(()),
+        SessionCommand::LoadDemoSession { expected_revision }
+        | SessionCommand::ResetDemoSession { expected_revision } => {
+            validate_state_revision(runtime, expected_revision)?;
+            *runtime = initialized_runtime().map_err(CommandApplicationError::Engine)?;
+            return Ok(());
+        }
+        SessionCommand::SetOperationState {
+            expected_revision,
+            command,
+        } => {
+            apply_operation_command(runtime, expected_revision, command)?;
+            return Ok(());
+        }
+        SessionCommand::SetSimulationSpeed {
+            expected_revision,
+            speed,
+        } => {
+            validate_state_revision(runtime, expected_revision)?;
+            runtime
+                .deck_source
+                .apply_control(SimulationControl::SetSpeed(speed))?;
+            process_pending_source_events(runtime).map_err(CommandApplicationError::Engine)?;
+            return Ok(());
+        }
+        SessionCommand::SetSimulationPlayback {
+            expected_revision,
+            playing,
+        } => {
+            validate_state_revision(runtime, expected_revision)?;
+            let control = if playing {
+                SimulationControl::Resume
+            } else {
+                SimulationControl::Pause
+            };
+            runtime.deck_source.apply_control(control)?;
+            process_pending_source_events(runtime).map_err(CommandApplicationError::Engine)?;
+            return Ok(());
+        }
+        SessionCommand::AdvanceSimulation {
+            expected_revision,
+            elapsed_ticks,
+        } => {
+            validate_state_revision(runtime, expected_revision)?;
+            runtime
+                .clock
+                .advance(elapsed_ticks)
+                .ok_or(CommandApplicationError::ClockOverflow)?;
+            runtime.deck_source.update_to_clock()?;
+            process_pending_source_events(runtime).map_err(CommandApplicationError::Engine)?;
+            return Ok(());
+        }
+        SessionCommand::AdvanceToNextTrack { expected_revision } => {
+            validate_state_revision(runtime, expected_revision)?;
+            runtime
+                .deck_source
+                .apply_control(SimulationControl::AdvanceLeader)?;
+            process_pending_source_events(runtime).map_err(CommandApplicationError::Engine)?;
+            return Ok(());
+        }
+        SessionCommand::SelectTheme { .. }
+        | SessionCommand::SelectScene { .. }
+        | SessionCommand::SetCueLock { .. }
+        | SessionCommand::RegeneratePlan { .. } => {}
     }
     let context = command
         .context()
@@ -519,7 +590,14 @@ fn apply_command(
     };
 
     let revised = match command {
-        SessionCommand::GetSnapshot => return Ok(()),
+        SessionCommand::GetSnapshot
+        | SessionCommand::LoadDemoSession { .. }
+        | SessionCommand::SetOperationState { .. }
+        | SessionCommand::SetSimulationSpeed { .. }
+        | SessionCommand::SetSimulationPlayback { .. }
+        | SessionCommand::AdvanceSimulation { .. }
+        | SessionCommand::AdvanceToNextTrack { .. }
+        | SessionCommand::ResetDemoSession { .. } => return Ok(()),
         SessionCommand::SelectTheme { theme_id, .. } => runtime
             .planning_worker
             .planner
@@ -551,12 +629,85 @@ fn apply_command(
         .map_err(CommandApplicationError::Engine)
 }
 
+fn validate_state_revision(
+    runtime: &EngineRuntime,
+    expected: lumi_domain::StateRevision,
+) -> Result<(), CommandApplicationError> {
+    let actual = runtime.state.state().revision();
+    if actual != expected {
+        return Err(CommandApplicationError::StateRevisionConflict { expected, actual });
+    }
+    Ok(())
+}
+
+fn apply_operation_command(
+    runtime: &mut EngineRuntime,
+    expected_revision: lumi_domain::StateRevision,
+    command: OperationCommand,
+) -> Result<(), CommandApplicationError> {
+    validate_state_revision(runtime, expected_revision)?;
+    let from = runtime.state.state().operation();
+    let valid = matches!(
+        (from, command),
+        (OperationState::Off, OperationCommand::Arm)
+            | (
+                OperationState::Armed | OperationState::Paused,
+                OperationCommand::Start
+            )
+            | (OperationState::Live, OperationCommand::Pause)
+            | (_, OperationCommand::Off)
+    );
+    if !valid {
+        return Err(CommandApplicationError::InvalidOperationTransition { from, command });
+    }
+    runtime.operation_sequence = runtime
+        .operation_sequence
+        .checked_add(1)
+        .ok_or(CommandApplicationError::OperationSequenceOverflow)?;
+    process_domain_event(
+        &mut runtime.state,
+        &mut runtime.output_worker,
+        DomainEvent::UserCommand(UserCommandEnvelope {
+            client_id: ClientId::new(1),
+            sequence: CommandSequence::new(runtime.operation_sequence),
+            expected_state_revision: expected_revision,
+            issued_at: runtime.clock.now(),
+            command,
+        }),
+    )
+    .map_err(CommandApplicationError::Engine)
+}
+
 fn application_error_envelope(
     sequence: u64,
     correlation_id: &str,
     error: &CommandApplicationError,
 ) -> Result<MessageEnvelope, EngineError> {
     match error {
+        CommandApplicationError::StateRevisionConflict { actual, .. } => error_envelope(
+            sequence,
+            correlation_id,
+            "revisionConflict",
+            "stateRevisionMismatch",
+            "The session changed before the command was applied.",
+            true,
+            None,
+        )
+        .map(|mut envelope| {
+            envelope
+                .payload
+                .insert("actualStateRevision".to_owned(), json!(actual.value()));
+            envelope
+        }),
+        CommandApplicationError::InvalidOperationTransition { .. } => error_envelope(
+            sequence,
+            correlation_id,
+            "validationFailed",
+            "invalidOperationTransition",
+            &error.to_string(),
+            false,
+            None,
+        ),
         CommandApplicationError::RevisionConflict { actual, .. } => error_envelope(
             sequence,
             correlation_id,
@@ -593,17 +744,19 @@ fn application_error_envelope(
             false,
             None,
         ),
-        CommandApplicationError::MissingPlanContext | CommandApplicationError::Engine(_) => {
-            error_envelope(
-                sequence,
-                correlation_id,
-                "commandFailed",
-                "internalCommandFailure",
-                "The plan edit could not be applied safely.",
-                true,
-                None,
-            )
-        }
+        CommandApplicationError::MissingPlanContext
+        | CommandApplicationError::OperationSequenceOverflow
+        | CommandApplicationError::ClockOverflow
+        | CommandApplicationError::Engine(_)
+        | CommandApplicationError::Simulator(_) => error_envelope(
+            sequence,
+            correlation_id,
+            "commandFailed",
+            "internalCommandFailure",
+            "The command could not be applied safely.",
+            true,
+            None,
+        ),
     }
 }
 
@@ -645,12 +798,28 @@ enum CommandApplicationError {
         expected: PlanRevision,
         actual: PlanRevision,
     },
+    #[error("state revision conflict: expected {expected:?}, actual {actual:?}")]
+    StateRevisionConflict {
+        expected: lumi_domain::StateRevision,
+        actual: lumi_domain::StateRevision,
+    },
+    #[error("operation command {command:?} is invalid from {from:?}")]
+    InvalidOperationTransition {
+        from: OperationState,
+        command: OperationCommand,
+    },
+    #[error("the operation command sequence overflowed")]
+    OperationSequenceOverflow,
+    #[error("the simulation clock overflowed")]
+    ClockOverflow,
     #[error("the track-load instance no longer matches")]
     TrackLoadMismatch,
     #[error("the plan is unavailable")]
     PlanUnavailable,
     #[error("plan mutation failed: {0}")]
     Mutation(#[from] PlanMutationError),
+    #[error("simulator control failed: {0}")]
+    Simulator(#[from] SimulatorError),
     #[error("engine failed while accepting a plan revision: {0}")]
     Engine(EngineError),
 }
@@ -692,6 +861,13 @@ fn snapshot_envelope(
                 .next()
                 .map(|(_, status)| deck_source_status_name(status))
                 .unwrap_or("starting"),
+        }),
+    );
+    payload.insert(
+        "simulation".to_owned(),
+        json!({
+            "speed": runtime.deck_source.speed().multiplier(),
+            "paused": runtime.deck_source.is_paused(),
         }),
     );
     payload.insert(
@@ -754,6 +930,24 @@ fn snapshot_envelope(
     payload.insert(
         "outputEffects".to_owned(),
         Value::Array(state.output_effects().map(output_effect_json).collect()),
+    );
+    payload.insert(
+        "timeline".to_owned(),
+        Value::Array(
+            state
+                .timeline()
+                .map(|entry| {
+                    json!({
+                        "sequence": entry.sequence(),
+                        "occurredAt": entry.occurred_at().ticks(),
+                        "source": timeline_source_name(entry.source()),
+                        "type": entry.event_type(),
+                        "result": timeline_result_name(entry.result()),
+                        "reason": decision_reason_name(entry.reason()),
+                    })
+                })
+                .collect(),
+        ),
     );
     let next_plan = state
         .decks()
@@ -886,6 +1080,28 @@ const fn output_effect_reason_name(reason: OutputEffectReason) -> &'static str {
         OutputEffectReason::PhraseBoundary => "phraseBoundary",
         OutputEffectReason::ProviderRejected => "providerRejected",
         OutputEffectReason::StaleExecutionContext => "staleExecutionContext",
+    }
+}
+
+const fn timeline_source_name(source: TimelineSource) -> &'static str {
+    match source {
+        TimelineSource::Runtime => "runtime",
+        TimelineSource::DeckSource => "deckSource",
+        TimelineSource::Operation => "operation",
+        TimelineSource::Planner => "planner",
+        TimelineSource::Output => "output",
+    }
+}
+
+const fn timeline_result_name(result: TimelineResult) -> &'static str {
+    match result {
+        TimelineResult::Accepted => "accepted",
+        TimelineResult::Ignored => "ignored",
+        TimelineResult::Scheduled => "scheduled",
+        TimelineResult::Simulated => "simulated",
+        TimelineResult::Rejected => "rejected",
+        TimelineResult::Skipped => "skipped",
+        TimelineResult::Completed => "completed",
     }
 }
 
@@ -1202,6 +1418,176 @@ mod tests {
         };
         assert_eq!(last.status(), OutputEffectStatus::Skipped);
         assert_eq!(last.reason(), OutputEffectReason::StaleExecutionContext);
+    }
+
+    #[test]
+    fn app_commands_complete_the_canonical_demo_and_reset_without_restart() {
+        let mut runtime = match initialized_runtime() {
+            Ok(runtime) => runtime,
+            Err(error) => panic!("test engine must initialize: {error}"),
+        };
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::SetSimulationSpeed {
+                expected_revision,
+                speed: SimulationSpeed::SixtyFour,
+            }
+        });
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::SetOperationState {
+                expected_revision,
+                command: OperationCommand::Arm,
+            }
+        });
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::SetOperationState {
+                expected_revision,
+                command: OperationCommand::Start,
+            }
+        });
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::AdvanceToNextTrack { expected_revision }
+        });
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::AdvanceSimulation {
+                expected_revision,
+                elapsed_ticks: 1_000,
+            }
+        });
+
+        assert_eq!(runtime.state.state().operation(), OperationState::Live);
+        assert_eq!(runtime.output_worker.provider.records().count(), 4);
+        assert!(
+            runtime
+                .state
+                .state()
+                .timeline()
+                .any(|entry| entry.source() == TimelineSource::Operation)
+        );
+        assert!(
+            runtime
+                .state
+                .state()
+                .timeline()
+                .any(|entry| entry.result() == TimelineResult::Simulated)
+        );
+
+        let reset_revision = runtime.state.state().revision();
+        apply_session_command(
+            &mut runtime,
+            SessionCommand::ResetDemoSession {
+                expected_revision: reset_revision,
+            },
+        );
+        let canonical = match initialized_runtime() {
+            Ok(runtime) => runtime,
+            Err(error) => panic!("canonical engine must initialize: {error}"),
+        };
+        assert_eq!(runtime.state.state(), canonical.state.state());
+        assert_eq!(
+            runtime.deck_source.canonical_snapshot(),
+            canonical.deck_source.canonical_snapshot()
+        );
+        assert_eq!(runtime.output_worker.provider.records().count(), 0);
+    }
+
+    #[test]
+    fn simulation_speed_preserves_semantic_output_order() {
+        let sixteen = semantic_output_order(SimulationSpeed::Sixteen, 4_000);
+        let sixty_four = semantic_output_order(SimulationSpeed::SixtyFour, 1_000);
+        assert_eq!(sixteen, sixty_four);
+        assert_eq!(sixteen.len(), 4);
+    }
+
+    #[test]
+    fn runtime_timeline_is_bounded_to_the_latest_256_entries() {
+        let mut runtime = match initialized_runtime() {
+            Ok(runtime) => runtime,
+            Err(error) => panic!("test engine must initialize: {error}"),
+        };
+        for sequence in 1..=300 {
+            if let Err(error) = submit_and_process(
+                &mut runtime.state,
+                DomainEvent::EffectResult(EffectResultEnvelope {
+                    effect_id: EffectId::new(sequence),
+                    worker_id: WorkerId::new(99),
+                    sequence: EffectSequence::new(sequence),
+                    completed_at: MonotonicTime::new(sequence),
+                    result: EffectResult::OutputGateClosed,
+                }),
+            ) {
+                panic!("timeline event must process: {error}");
+            }
+        }
+        let timeline = runtime.state.state().timeline().collect::<Vec<_>>();
+        assert_eq!(timeline.len(), 256);
+        assert_eq!(
+            timeline.last().map(|entry| entry.occurred_at().ticks()),
+            Some(300)
+        );
+        assert!(
+            timeline
+                .windows(2)
+                .all(|entries| entries[0].sequence() < entries[1].sequence())
+        );
+    }
+
+    fn semantic_output_order(speed: SimulationSpeed, elapsed_ticks: u64) -> Vec<(u16, u64)> {
+        let mut runtime = match initialized_runtime() {
+            Ok(runtime) => runtime,
+            Err(error) => panic!("test engine must initialize: {error}"),
+        };
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::SetSimulationSpeed {
+                expected_revision,
+                speed,
+            }
+        });
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::SetOperationState {
+                expected_revision,
+                command: OperationCommand::Arm,
+            }
+        });
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::SetOperationState {
+                expected_revision,
+                command: OperationCommand::Start,
+            }
+        });
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::AdvanceToNextTrack { expected_revision }
+        });
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::AdvanceSimulation {
+                expected_revision,
+                elapsed_ticks,
+            }
+        });
+        runtime
+            .output_worker
+            .provider
+            .records()
+            .map(|result| {
+                (
+                    result.request().phrase_index(),
+                    result.request().cue_id().value(),
+                )
+            })
+            .collect()
+    }
+
+    fn apply_session_command(runtime: &mut EngineRuntime, command: SessionCommand) {
+        if let Err(error) = apply_command(runtime, command) {
+            panic!("test session command must apply: {error}");
+        }
+    }
+
+    fn apply_current_session_command(
+        runtime: &mut EngineRuntime,
+        command: impl FnOnce(lumi_domain::StateRevision) -> SessionCommand,
+    ) {
+        let expected_revision = runtime.state.state().revision();
+        apply_session_command(runtime, command(expected_revision));
     }
 
     fn apply_operation(runtime: &mut EngineRuntime, sequence: u64, command: OperationCommand) {

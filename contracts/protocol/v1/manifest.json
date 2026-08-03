@@ -9,6 +9,8 @@
     "loadDemoSession",
     "setOperationState",
     "setSimulationSpeed",
+    "setSimulationPlayback",
+    "advanceSimulation",
     "advanceToNextTrack",
     "selectTheme",
     "selectScene",

@@ -9,7 +9,7 @@
     "kind": "stateSnapshot",
     "stateRevision": 8,
     "operationState": "armed",
-    "engineVersion": "0.0.7-dev",
+    "engineVersion": "0.0.8-dev",
     "runtimeCore": {
       "model": "singleWriterReducer",
       "health": "ready",
@@ -21,6 +21,10 @@
     "deckSource": {
       "providerKind": "simulator",
       "status": "ready"
+    },
+    "simulation": {
+      "speed": 1,
+      "paused": false
     },
     "leaderDeckId": 1,
     "decks": [
@@ -90,6 +94,16 @@
     },
     "activePlan": null,
     "outputEffects": [],
+    "timeline": [
+      {
+        "sequence": 8,
+        "occurredAt": 0,
+        "source": "deckSource",
+        "type": "phraseChanged",
+        "result": "accepted",
+        "reason": "phraseChanged"
+      }
+    ],
     "nextPlan": {
       "planId": "14113485664261432828",
       "deckId": 2,

@@ -87,6 +87,10 @@ Provider-neutral execution, the operational output gate, stale-context checks,
 and the canonical dry-run transcript are documented in
 [`dry-run-output.md`](dry-run-output.md).
 
+Versioned demo controls, deterministic client-driven playback, state revision
+checks, and the bounded engine event timeline are documented in
+[`demo-control.md`](demo-control.md).
+
 The authoritative Live/Next presentation boundary, explicit degraded states,
 accessibility identifiers, and locked-session PNG workflow are documented in
 [`live-workspace.md`](live-workspace.md).

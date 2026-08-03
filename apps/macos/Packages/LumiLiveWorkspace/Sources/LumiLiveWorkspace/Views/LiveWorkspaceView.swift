@@ -7,6 +7,7 @@ public struct LiveWorkspaceView: View {
     private let productVersion: String
     private let allowsScrolling: Bool
     private let onPlanMutation: @MainActor (PlanMutationRequest) -> Void
+    private let onSessionCommand: @MainActor (SessionCommandRequest) -> Void
     @Binding private var appearance: AppearancePreference
     @Binding private var keyNotation: KeyNotationPreference
     @State private var selectedPhrase: UInt64 = 0
@@ -19,12 +20,14 @@ public struct LiveWorkspaceView: View {
         appearance: Binding<AppearancePreference>,
         keyNotation: Binding<KeyNotationPreference>,
         allowsScrolling: Bool = true,
-        onPlanMutation: @escaping @MainActor (PlanMutationRequest) -> Void = { _ in }
+        onPlanMutation: @escaping @MainActor (PlanMutationRequest) -> Void = { _ in },
+        onSessionCommand: @escaping @MainActor (SessionCommandRequest) -> Void = { _ in }
     ) {
         self.state = state
         self.productVersion = productVersion
         self.allowsScrolling = allowsScrolling
         self.onPlanMutation = onPlanMutation
+        self.onSessionCommand = onSessionCommand
         _appearance = appearance
         _keyNotation = keyNotation
     }
@@ -86,9 +89,12 @@ public struct LiveWorkspaceView: View {
                 diagnosticBanner(diagnostic)
             }
             planInteractionBanner
+            sessionInteractionBanner
             providerPanel
+            simulatorPanel
             deckWorkspace
             planWorkspace
+            timelineWorkspace
         }
         .padding(LumiSpacing.xLarge)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -112,14 +118,40 @@ public struct LiveWorkspaceView: View {
                 preferenceIndicator
             }
         }
+        .fixedSize(horizontal: false, vertical: true)
+        .layoutPriority(2)
     }
 
     private var operationControls: some View {
         HStack(spacing: LumiSpacing.small) {
-            OperationControl(key(copy.arm), systemImage: "shield", isEnabled: false, action: {})
-            OperationControl(key(copy.start), systemImage: "play.fill", isEnabled: false, action: {})
-            OperationControl(key(copy.pause), systemImage: "pause.fill", isEnabled: false, action: {})
-            OperationControl(key(copy.off), systemImage: "stop.fill", isEnabled: false, action: {})
+            OperationControl(
+                key(copy.arm),
+                systemImage: "shield",
+                isSelected: operationState == "armed",
+                isEnabled: canSetOperation("armed"),
+                action: { setOperation("armed") }
+            )
+            OperationControl(
+                key(copy.start),
+                systemImage: "play.fill",
+                isSelected: operationState == "live",
+                isEnabled: canSetOperation("live"),
+                action: { setOperation("live") }
+            )
+            OperationControl(
+                key(copy.pause),
+                systemImage: "pause.fill",
+                isSelected: operationState == "paused",
+                isEnabled: canSetOperation("paused"),
+                action: { setOperation("paused") }
+            )
+            OperationControl(
+                key(copy.off),
+                systemImage: "stop.fill",
+                isSelected: operationState == "off",
+                isEnabled: canSetOperation("off"),
+                action: { setOperation("off") }
+            )
         }
         .accessibilityIdentifier("lumi.operation.controls")
     }
@@ -163,15 +195,163 @@ public struct LiveWorkspaceView: View {
 
     private var providerPanel: some View {
         LumiPanel {
-            VStack(spacing: LumiSpacing.medium) {
-                providerRow(copy.engine, systemImage: "cpu", presentation: state.engine)
-                Divider()
-                providerRow(copy.runtime, systemImage: "point.3.connected.trianglepath.dotted", presentation: state.runtime)
-                Divider()
-                providerRow(copy.deckSource, systemImage: "music.quarternote.3", presentation: state.source)
+            HStack(alignment: .top, spacing: LumiSpacing.large) {
+                providerCompact(copy.engine, systemImage: "cpu", presentation: state.engine)
+                providerCompact(
+                    copy.runtime,
+                    systemImage: "point.3.connected.trianglepath.dotted",
+                    presentation: state.runtime
+                )
+                providerCompact(
+                    copy.deckSource,
+                    systemImage: "music.quarternote.3",
+                    presentation: state.source
+                )
+                providerCompact(
+                    copy.planner,
+                    systemImage: "list.bullet.rectangle",
+                    presentation: state.planner
+                )
+                providerCompact(
+                    copy.outputProvider,
+                    systemImage: "lightbulb.2",
+                    presentation: state.output
+                )
             }
         }
+        .fixedSize(horizontal: false, vertical: true)
         .accessibilityIdentifier("lumi.provider.status")
+    }
+
+    private func providerCompact(
+        _ name: String,
+        systemImage: String,
+        presentation: ProviderPresentation
+    ) -> some View {
+        VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+            HStack(spacing: LumiSpacing.small) {
+                Image(systemName: systemImage)
+                    .foregroundStyle(componentState(for: presentation.condition).color)
+                Text(verbatim: name)
+                    .font(LumiTypography.metadata.weight(.semibold))
+                    .lineLimit(1)
+            }
+            Text(verbatim: presentation.detail)
+                .font(LumiTypography.technical)
+                .foregroundStyle(LumiColor.textSecondary)
+                .lineLimit(2)
+            Text(verbatim: providerLabel(presentation.condition).uppercased())
+                .font(LumiTypography.technical.weight(.semibold))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+    }
+
+    private var simulatorPanel: some View {
+        LumiPanel {
+            HStack(spacing: LumiSpacing.medium) {
+                VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+                    Text(verbatim: copy.demoSession)
+                        .font(LumiTypography.sectionTitle)
+                    Text(verbatim: simulationSummary)
+                        .font(LumiTypography.technical)
+                        .foregroundStyle(LumiColor.textSecondary)
+                }
+                Spacer()
+                Button(copy.loadDemo) {
+                    sendWithRevision { .loadDemo(expectedStateRevision: $0) }
+                }
+                .disabled(!canSendSessionCommand)
+                HStack(spacing: LumiSpacing.xSmall) {
+                    ForEach([UInt64(1), 4, 16, 64], id: \.self) { speed in
+                        Button("\(speed)×") {
+                            sendWithRevision {
+                                .setSimulationSpeed(speed, expectedStateRevision: $0)
+                            }
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(
+                            !canSendSessionCommand
+                                || state.content?.simulation.speed == speed
+                        )
+                    }
+                }
+                .accessibilityLabel(copy.speed)
+                Button {
+                    let playing = state.content?.simulation.paused == true
+                    sendWithRevision {
+                        .setSimulationPlayback(playing, expectedStateRevision: $0)
+                    }
+                } label: {
+                    Label(
+                        state.content?.simulation.paused == true ? copy.resumeDemo : copy.pauseDemo,
+                        systemImage: state.content?.simulation.paused == true ? "play" : "pause"
+                    )
+                }
+                .disabled(!canSendSessionCommand)
+                Button(copy.nextTrack) {
+                    sendWithRevision { .advanceToNextTrack(expectedStateRevision: $0) }
+                }
+                .disabled(!canSendSessionCommand)
+                Button(copy.resetDemo) {
+                    sendWithRevision { .resetDemo(expectedStateRevision: $0) }
+                }
+                .disabled(!canSendSessionCommand)
+            }
+        }
+        .fixedSize(horizontal: false, vertical: true)
+        .accessibilityIdentifier("lumi.simulator.controls")
+    }
+
+    private var timelineWorkspace: some View {
+        VStack(alignment: .leading, spacing: LumiSpacing.large) {
+            HStack {
+                Text(verbatim: copy.timeline)
+                    .font(LumiTypography.sectionTitle)
+                Text(verbatim: "Last \(min(state.content?.timeline.count ?? 0, 12)) events")
+                    .font(LumiTypography.technical)
+                    .foregroundStyle(LumiColor.textSecondary)
+                Spacer()
+            }
+            LumiPanel {
+                VStack(spacing: 0) {
+                    if let entries = state.content?.timeline.suffix(12), !entries.isEmpty {
+                        ForEach(Array(entries)) { entry in
+                            HStack(spacing: LumiSpacing.medium) {
+                                Text(verbatim: "#\(entry.sequence)")
+                                    .font(LumiTypography.technical)
+                                    .foregroundStyle(LumiColor.textSecondary)
+                                    .frame(width: 52, alignment: .leading)
+                                Text(verbatim: entry.source)
+                                    .font(LumiTypography.metadata.weight(.semibold))
+                                    .frame(width: 84, alignment: .leading)
+                                Text(verbatim: entry.type)
+                                    .font(LumiTypography.metadata)
+                                    .frame(minWidth: 130, maxWidth: .infinity, alignment: .leading)
+                                Text(verbatim: entry.result.uppercased())
+                                    .font(LumiTypography.technical.weight(.semibold))
+                                    .frame(width: 82, alignment: .leading)
+                                Text(verbatim: entry.reason)
+                                    .font(LumiTypography.technical)
+                                    .foregroundStyle(LumiColor.textSecondary)
+                                    .frame(minWidth: 160, alignment: .leading)
+                                Text(verbatim: "t+\(entry.occurredAt)")
+                                    .font(LumiTypography.technical)
+                                    .foregroundStyle(LumiColor.textSecondary)
+                            }
+                            .padding(.vertical, LumiSpacing.small)
+                            if entry.id != entries.last?.id { Divider() }
+                        }
+                    } else {
+                        Text(verbatim: copy.waitingTimeline)
+                            .font(LumiTypography.body)
+                            .foregroundStyle(LumiColor.textSecondary)
+                            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
+                    }
+                }
+            }
+        }
+        .accessibilityIdentifier("lumi.timeline")
     }
 
     private var deckWorkspace: some View {
@@ -458,6 +638,28 @@ public struct LiveWorkspaceView: View {
         }
     }
 
+    @ViewBuilder
+    private var sessionInteractionBanner: some View {
+        switch state.sessionInteraction {
+        case .idle:
+            EmptyView()
+        case .submitting:
+            interactionBanner(
+                copy.applyingCommand,
+                systemImage: "arrow.triangle.2.circlepath",
+                color: LumiColor.accent
+            )
+        case let .succeeded(message):
+            interactionBanner(message, systemImage: "checkmark.circle.fill", color: .green)
+        case let .rejected(message):
+            interactionBanner(
+                message,
+                systemImage: "exclamationmark.triangle.fill",
+                color: .orange
+            )
+        }
+    }
+
     private func interactionBanner(
         _ message: String,
         systemImage: String,
@@ -578,7 +780,53 @@ public struct LiveWorkspaceView: View {
     }
 
     private func canEdit(_ plan: PlanSnapshot) -> Bool {
-        plan.status == "ready" && state.planInteraction != .submitting
+        plan.status == "ready"
+            && state.planInteraction != .submitting
+            && state.sessionInteraction != .submitting
+    }
+
+    private var operationState: String {
+        state.content?.operationState ?? "off"
+    }
+
+    private var canSendSessionCommand: Bool {
+        state.content != nil
+            && state.sessionInteraction != .submitting
+            && state.planInteraction != .submitting
+    }
+
+    private func canSetOperation(_ target: String) -> Bool {
+        guard canSendSessionCommand else { return false }
+        return switch (operationState, target) {
+        case ("off", "armed"), ("armed", "live"), ("paused", "live"),
+             ("live", "paused"):
+            true
+        case (_, "off"):
+            operationState != "off"
+        default:
+            false
+        }
+    }
+
+    private func setOperation(_ target: String) {
+        sendWithRevision {
+            .setOperationState(target, expectedStateRevision: $0)
+        }
+    }
+
+    private func sendWithRevision(
+        _ request: (UInt64) -> SessionCommandRequest
+    ) {
+        guard let revision = state.content?.stateRevision else { return }
+        onSessionCommand(request(revision))
+    }
+
+    private var simulationSummary: String {
+        guard let simulation = state.content?.simulation else {
+            return copy.waitingSimulator
+        }
+        let playback = simulation.paused ? copy.paused : copy.playing
+        return "Simulator · \(simulation.speed)× · \(playback) · operation \(operationState.uppercased())"
     }
 
     private func selectTheme(_ themeID: UInt64, plan: PlanSnapshot) {
@@ -764,7 +1012,7 @@ private struct PlanSelectionControl: View {
 #Preview("Ready · Dark") {
     LiveWorkspaceView(
         state: LiveWorkspaceFixtures.ready,
-        productVersion: "0.0.7-dev",
+        productVersion: "0.0.8-dev",
         appearance: .constant(.dark),
         keyNotation: .constant(.camelot)
     )
@@ -775,7 +1023,7 @@ private struct PlanSelectionControl: View {
 #Preview("Fallback · Light") {
     LiveWorkspaceView(
         state: LiveWorkspaceFixtures.fallback,
-        productVersion: "0.0.7-dev",
+        productVersion: "0.0.8-dev",
         appearance: .constant(.light),
         keyNotation: .constant(.classic)
     )

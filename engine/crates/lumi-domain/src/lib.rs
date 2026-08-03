@@ -14,6 +14,7 @@ mod reducer;
 mod runtime;
 mod state;
 mod time;
+mod timeline;
 mod track;
 
 pub use event::{
@@ -39,6 +40,7 @@ pub use reducer::{
 pub use runtime::{ProcessResult, SerializedRuntime, SerializedRuntimeError};
 pub use state::{DeckState, OperationState, RuntimeHealth, RuntimeState};
 pub use time::MonotonicTime;
+pub use timeline::{TimelineEntry, TimelineResult, TimelineSource};
 pub use track::{
     DeckSourceStatus, KeyMode, MusicalKey, PhraseKind, PitchClass, TrackMetadata, TrackPhrase,
     TrackValidationError,

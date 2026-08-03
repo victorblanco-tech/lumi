@@ -6,12 +6,16 @@ public struct EngineSnapshot: Equatable, Sendable {
     public let protocolVersion: Int
     public let snapshotSequence: UInt64
     public let stateRevision: UInt64
+    public let operationState: String
     public let runtime: RuntimeSnapshot
     public let deckSource: DeckSourceSnapshot
+    public let simulation: SimulationSnapshot
+    public let outputProvider: OutputProviderSnapshot
     public let leaderDeckID: UInt64
     public let decks: [DeckSnapshot]
     public let nextPlan: PlanSnapshot?
     public let planningOptions: PlanningOptionsSnapshot
+    public let timeline: [TimelineEntrySnapshot]
 
     public init(
         endpoint: String,
@@ -19,24 +23,85 @@ public struct EngineSnapshot: Equatable, Sendable {
         protocolVersion: Int,
         snapshotSequence: UInt64,
         stateRevision: UInt64,
+        operationState: String = "off",
         runtime: RuntimeSnapshot,
         deckSource: DeckSourceSnapshot,
+        simulation: SimulationSnapshot = .init(speed: 1, paused: false),
+        outputProvider: OutputProviderSnapshot = .init(
+            providerKind: "dryRun",
+            status: "ready",
+            recordCount: 0
+        ),
         leaderDeckID: UInt64,
         decks: [DeckSnapshot],
         nextPlan: PlanSnapshot?,
-        planningOptions: PlanningOptionsSnapshot
+        planningOptions: PlanningOptionsSnapshot,
+        timeline: [TimelineEntrySnapshot] = []
     ) {
         self.endpoint = endpoint
         self.engineVersion = engineVersion
         self.protocolVersion = protocolVersion
         self.snapshotSequence = snapshotSequence
         self.stateRevision = stateRevision
+        self.operationState = operationState
         self.runtime = runtime
         self.deckSource = deckSource
+        self.simulation = simulation
+        self.outputProvider = outputProvider
         self.leaderDeckID = leaderDeckID
         self.decks = decks
         self.nextPlan = nextPlan
         self.planningOptions = planningOptions
+        self.timeline = timeline
+    }
+}
+
+public struct SimulationSnapshot: Equatable, Sendable {
+    public let speed: UInt64
+    public let paused: Bool
+
+    public init(speed: UInt64, paused: Bool) {
+        self.speed = speed
+        self.paused = paused
+    }
+}
+
+public struct OutputProviderSnapshot: Equatable, Sendable {
+    public let providerKind: String
+    public let status: String
+    public let recordCount: UInt64
+
+    public init(providerKind: String, status: String, recordCount: UInt64) {
+        self.providerKind = providerKind
+        self.status = status
+        self.recordCount = recordCount
+    }
+}
+
+public struct TimelineEntrySnapshot: Equatable, Identifiable, Sendable {
+    public let sequence: UInt64
+    public let occurredAt: UInt64
+    public let source: String
+    public let type: String
+    public let result: String
+    public let reason: String
+
+    public var id: UInt64 { sequence }
+
+    public init(
+        sequence: UInt64,
+        occurredAt: UInt64,
+        source: String,
+        type: String,
+        result: String,
+        reason: String
+    ) {
+        self.sequence = sequence
+        self.occurredAt = occurredAt
+        self.source = source
+        self.type = type
+        self.result = result
+        self.reason = reason
     }
 }
 

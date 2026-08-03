@@ -3,11 +3,12 @@ use std::collections::{BTreeMap, VecDeque};
 use crate::{
     ClientId, CommandSequence, DecisionReason, DeckId, DeckSourceStatus, Diagnostic,
     EffectSequence, LightingPlan, MonotonicTime, OutputEffectResult, SourceId, SourceSequence,
-    StateRevision, TrackId, TrackLoadId, TrackMetadata, WorkerId,
+    StateRevision, TimelineEntry, TrackId, TrackLoadId, TrackMetadata, WorkerId,
 };
 
 const MAXIMUM_DIAGNOSTICS: usize = 64;
 const MAXIMUM_OUTPUT_EFFECTS: usize = 256;
+const MAXIMUM_TIMELINE_ENTRIES: usize = 256;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum OperationState {
@@ -93,6 +94,7 @@ pub struct RuntimeState {
     pub(crate) processed_events: u64,
     pub(crate) last_decision: Option<DecisionReason>,
     pub(crate) diagnostics: VecDeque<Diagnostic>,
+    pub(crate) timeline: VecDeque<TimelineEntry>,
 }
 
 impl Default for RuntimeState {
@@ -115,6 +117,7 @@ impl Default for RuntimeState {
             processed_events: 0,
             last_decision: None,
             diagnostics: VecDeque::new(),
+            timeline: VecDeque::new(),
         }
     }
 }
@@ -188,6 +191,10 @@ impl RuntimeState {
         self.diagnostics.iter()
     }
 
+    pub fn timeline(&self) -> impl Iterator<Item = &TimelineEntry> {
+        self.timeline.iter()
+    }
+
     pub(crate) fn load_track(
         &mut self,
         deck_id: DeckId,
@@ -227,5 +234,12 @@ impl RuntimeState {
             self.output_effects.pop_front();
         }
         self.output_effects.push_back(result);
+    }
+
+    pub(crate) fn push_timeline(&mut self, entry: TimelineEntry) {
+        if self.timeline.len() == MAXIMUM_TIMELINE_ENTRIES {
+            self.timeline.pop_front();
+        }
+        self.timeline.push_back(entry);
     }
 }

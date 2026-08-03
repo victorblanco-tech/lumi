@@ -1,8 +1,11 @@
 use std::error::Error;
 use std::fmt;
 
-use lumi_domain::{PlanId, PlanRevision, SceneId, ThemeId, TrackLoadId};
+use lumi_domain::{
+    OperationCommand, PlanId, PlanRevision, SceneId, StateRevision, ThemeId, TrackLoadId,
+};
 use lumi_protocol::{MessageEnvelope, MessageType};
+use lumi_simulator::SimulationSpeed;
 use serde_json::Value;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -15,6 +18,28 @@ pub struct PlanCommandContext {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SessionCommand {
     GetSnapshot,
+    LoadDemoSession {
+        expected_revision: StateRevision,
+    },
+    SetOperationState {
+        expected_revision: StateRevision,
+        command: OperationCommand,
+    },
+    SetSimulationSpeed {
+        expected_revision: StateRevision,
+        speed: SimulationSpeed,
+    },
+    SetSimulationPlayback {
+        expected_revision: StateRevision,
+        playing: bool,
+    },
+    AdvanceSimulation {
+        expected_revision: StateRevision,
+        elapsed_ticks: u64,
+    },
+    AdvanceToNextTrack {
+        expected_revision: StateRevision,
+    },
     SelectTheme {
         context: PlanCommandContext,
         theme_id: ThemeId,
@@ -32,6 +57,9 @@ pub enum SessionCommand {
     RegeneratePlan {
         context: PlanCommandContext,
     },
+    ResetDemoSession {
+        expected_revision: StateRevision,
+    },
 }
 
 impl SessionCommand {
@@ -41,7 +69,14 @@ impl SessionCommand {
 
     pub const fn context(self) -> Option<PlanCommandContext> {
         match self {
-            Self::GetSnapshot => None,
+            Self::GetSnapshot
+            | Self::LoadDemoSession { .. }
+            | Self::SetOperationState { .. }
+            | Self::SetSimulationSpeed { .. }
+            | Self::SetSimulationPlayback { .. }
+            | Self::AdvanceSimulation { .. }
+            | Self::AdvanceToNextTrack { .. }
+            | Self::ResetDemoSession { .. } => None,
             Self::SelectTheme { context, .. }
             | Self::SelectScene { context, .. }
             | Self::SetCueLock { context, .. }
@@ -57,6 +92,28 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
     let kind = string(&envelope.payload, "kind")?;
     match kind {
         "getSnapshot" => Ok(SessionCommand::GetSnapshot),
+        "loadDemoSession" => Ok(SessionCommand::LoadDemoSession {
+            expected_revision: state_revision(envelope)?,
+        }),
+        "setOperationState" => Ok(SessionCommand::SetOperationState {
+            expected_revision: state_revision(envelope)?,
+            command: operation_command(string(&envelope.payload, "operationState")?)?,
+        }),
+        "setSimulationSpeed" => Ok(SessionCommand::SetSimulationSpeed {
+            expected_revision: state_revision(envelope)?,
+            speed: simulation_speed(unsigned(&envelope.payload, "speed")?)?,
+        }),
+        "setSimulationPlayback" => Ok(SessionCommand::SetSimulationPlayback {
+            expected_revision: state_revision(envelope)?,
+            playing: boolean(&envelope.payload, "playing")?,
+        }),
+        "advanceSimulation" => Ok(SessionCommand::AdvanceSimulation {
+            expected_revision: state_revision(envelope)?,
+            elapsed_ticks: elapsed_ticks(envelope)?,
+        }),
+        "advanceToNextTrack" => Ok(SessionCommand::AdvanceToNextTrack {
+            expected_revision: state_revision(envelope)?,
+        }),
         "selectTheme" => Ok(SessionCommand::SelectTheme {
             context: context(envelope)?,
             theme_id: ThemeId::new(unsigned(&envelope.payload, "themeId")?),
@@ -74,8 +131,46 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
         "regeneratePlan" => Ok(SessionCommand::RegeneratePlan {
             context: context(envelope)?,
         }),
+        "resetDemoSession" => Ok(SessionCommand::ResetDemoSession {
+            expected_revision: state_revision(envelope)?,
+        }),
         _ => Err(CommandDecodeError::UnsupportedKind),
     }
+}
+
+fn state_revision(envelope: &MessageEnvelope) -> Result<StateRevision, CommandDecodeError> {
+    Ok(StateRevision::new(unsigned(
+        &envelope.payload,
+        "expectedStateRevision",
+    )?))
+}
+
+fn operation_command(value: &str) -> Result<OperationCommand, CommandDecodeError> {
+    match value {
+        "armed" => Ok(OperationCommand::Arm),
+        "live" => Ok(OperationCommand::Start),
+        "paused" => Ok(OperationCommand::Pause),
+        "off" => Ok(OperationCommand::Off),
+        _ => Err(CommandDecodeError::InvalidField("operationState")),
+    }
+}
+
+fn simulation_speed(value: u64) -> Result<SimulationSpeed, CommandDecodeError> {
+    match value {
+        1 => Ok(SimulationSpeed::One),
+        4 => Ok(SimulationSpeed::Four),
+        16 => Ok(SimulationSpeed::Sixteen),
+        64 => Ok(SimulationSpeed::SixtyFour),
+        _ => Err(CommandDecodeError::InvalidField("speed")),
+    }
+}
+
+fn elapsed_ticks(envelope: &MessageEnvelope) -> Result<u64, CommandDecodeError> {
+    let value = unsigned(&envelope.payload, "elapsedTicks")?;
+    if value == 0 || value > 1_000 {
+        return Err(CommandDecodeError::InvalidField("elapsedTicks"));
+    }
+    Ok(value)
 }
 
 fn context(envelope: &MessageEnvelope) -> Result<PlanCommandContext, CommandDecodeError> {

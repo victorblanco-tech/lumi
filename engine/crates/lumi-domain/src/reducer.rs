@@ -125,6 +125,11 @@ pub fn reduce(state: &RuntimeState, event: &DomainEvent) -> Result<Reduction, Re
         .checked_add(1)
         .ok_or(ReducerError::ProcessedEventOverflow)?;
     next.last_decision = Some(decision);
+    next.push_timeline(crate::TimelineEntry::from_event(
+        next.processed_events,
+        event,
+        decision,
+    ));
     if state_changed {
         next.revision = next
             .revision

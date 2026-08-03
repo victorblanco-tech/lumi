@@ -20,6 +20,8 @@ final class EngineStatusModel: ObservableObject {
     private let snapshotDecoder = EngineSnapshotDecoder()
     private var lifecycle: Lifecycle = .stopped
     private var monitoringTask: Task<Void, Never>?
+    private var playbackTask: Task<Void, Never>?
+    private var isExchangingCommand = false
     private var latestSnapshot: EngineSnapshot?
     private var endpointDescription: String?
     private var protocolVersion: Int?
@@ -52,6 +54,7 @@ final class EngineStatusModel: ObservableObject {
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
             startMonitoring()
+            ensurePlaybackTask()
         } catch {
             await supervisor.stop()
             lifecycle = .failed
@@ -69,6 +72,9 @@ final class EngineStatusModel: ObservableObject {
     func stop() async {
         monitoringTask?.cancel()
         monitoringTask = nil
+        playbackTask?.cancel()
+        playbackTask = nil
+        isExchangingCommand = false
         await supervisor.stop()
         lifecycle = .stopped
         latestSnapshot = nil
@@ -79,11 +85,14 @@ final class EngineStatusModel: ObservableObject {
 
     func mutatePlan(_ request: PlanMutationRequest) async {
         guard lifecycle == .ready,
+              !isExchangingCommand,
               let current = latestSnapshot,
               let endpointDescription,
               let protocolVersion else {
             return
         }
+        isExchangingCommand = true
+        defer { isExchangingCommand = false }
 
         workspaceState = LiveWorkspacePresenter.ready(
             current,
@@ -149,7 +158,60 @@ final class EngineStatusModel: ObservableObject {
         )
     }
 
-    private func engineCommand(for request: PlanMutationRequest) -> EnginePlanCommand {
+    func runSessionCommand(_ request: SessionCommandRequest) async {
+        guard lifecycle == .ready,
+              !isExchangingCommand,
+              let current = latestSnapshot,
+              let endpointDescription,
+              let protocolVersion else {
+            return
+        }
+        isExchangingCommand = true
+        defer { isExchangingCommand = false }
+        workspaceState = LiveWorkspacePresenter.ready(
+            current,
+            sessionInteraction: .submitting
+        )
+        do {
+            let envelope = try await supervisor.send(engineCommand(for: request))
+            if let failure = EngineCommandFailure(envelope) {
+                if failure.kind == "revisionConflict" {
+                    try await refreshSessionAfterConflict(
+                        message: "Session changed elsewhere. Lumi refreshed the latest state.",
+                        endpointDescription: endpointDescription,
+                        protocolVersion: protocolVersion
+                    )
+                } else {
+                    workspaceState = LiveWorkspacePresenter.ready(
+                        current,
+                        sessionInteraction: .rejected(failure.message)
+                    )
+                }
+                return
+            }
+            let snapshot = try snapshotDecoder.decode(
+                envelope,
+                endpointDescription: endpointDescription,
+                protocolVersion: protocolVersion
+            )
+            latestSnapshot = snapshot
+            workspaceState = LiveWorkspacePresenter.ready(
+                snapshot,
+                sessionInteraction: .succeeded(sessionSuccessMessage(request))
+            )
+            ensurePlaybackTask()
+        } catch {
+            workspaceState = LiveWorkspacePresenter.ready(
+                latestSnapshot ?? current,
+                sessionInteraction: .rejected(
+                    (error as? LocalizedError)?.errorDescription
+                        ?? "The session command could not be applied."
+                )
+            )
+        }
+    }
+
+    private func engineCommand(for request: PlanMutationRequest) -> EngineCommand {
         switch request {
         case let .selectTheme(context, themeID):
             .selectTheme(context: engineContext(context), themeID: themeID)
@@ -170,6 +232,41 @@ final class EngineStatusModel: ObservableObject {
         }
     }
 
+    private func refreshSessionAfterConflict(
+        message: String,
+        endpointDescription: String,
+        protocolVersion: Int
+    ) async throws {
+        let envelope = try await supervisor.getSnapshot()
+        let snapshot = try snapshotDecoder.decode(
+            envelope,
+            endpointDescription: endpointDescription,
+            protocolVersion: protocolVersion
+        )
+        latestSnapshot = snapshot
+        workspaceState = LiveWorkspacePresenter.ready(
+            snapshot,
+            sessionInteraction: .rejected(message)
+        )
+    }
+
+    private func engineCommand(for request: SessionCommandRequest) -> EngineCommand {
+        switch request {
+        case let .loadDemo(expectedRevision):
+            .loadDemoSession(expectedStateRevision: expectedRevision)
+        case let .setOperationState(state, expectedRevision):
+            .setOperationState(state, expectedStateRevision: expectedRevision)
+        case let .setSimulationSpeed(speed, expectedRevision):
+            .setSimulationSpeed(speed, expectedStateRevision: expectedRevision)
+        case let .setSimulationPlayback(playing, expectedRevision):
+            .setSimulationPlayback(playing, expectedStateRevision: expectedRevision)
+        case let .advanceToNextTrack(expectedRevision):
+            .advanceToNextTrack(expectedStateRevision: expectedRevision)
+        case let .resetDemo(expectedRevision):
+            .resetDemoSession(expectedStateRevision: expectedRevision)
+        }
+    }
+
     private func engineContext(
         _ context: PlanMutationContext
     ) -> EnginePlanCommandContext {
@@ -178,6 +275,72 @@ final class EngineStatusModel: ObservableObject {
             trackLoadID: context.trackLoadID,
             expectedPlanRevision: context.expectedPlanRevision
         )
+    }
+
+    private func sessionSuccessMessage(_ request: SessionCommandRequest) -> String {
+        switch request {
+        case .loadDemo: "Demo session loaded."
+        case let .setOperationState(state, _): "Operation state is now \(state.uppercased())."
+        case let .setSimulationSpeed(speed, _): "Simulation speed is now \(speed)×."
+        case let .setSimulationPlayback(playing, _):
+            playing ? "Simulation resumed." : "Simulation paused."
+        case .advanceToNextTrack: "Next deck is now Live."
+        case .resetDemo: "Demo session reset to its canonical start."
+        }
+    }
+
+    private func ensurePlaybackTask() {
+        guard playbackTask == nil else { return }
+        playbackTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(250))
+                guard !Task.isCancelled, let self else { return }
+                await self.tickSimulation()
+            }
+        }
+    }
+
+    private func tickSimulation() async {
+        guard lifecycle == .ready,
+              !isExchangingCommand,
+              let current = latestSnapshot,
+              !current.simulation.paused,
+              let endpointDescription,
+              let protocolVersion else {
+            return
+        }
+        isExchangingCommand = true
+        defer { isExchangingCommand = false }
+        do {
+            let envelope = try await supervisor.send(
+                .advanceSimulation(
+                    elapsedTicks: 250,
+                    expectedStateRevision: current.stateRevision
+                )
+            )
+            if let failure = EngineCommandFailure(envelope) {
+                if failure.kind == "revisionConflict" {
+                    let refreshed = try await supervisor.getSnapshot()
+                    let snapshot = try snapshotDecoder.decode(
+                        refreshed,
+                        endpointDescription: endpointDescription,
+                        protocolVersion: protocolVersion
+                    )
+                    latestSnapshot = snapshot
+                    workspaceState = LiveWorkspacePresenter.ready(snapshot)
+                }
+                return
+            }
+            let snapshot = try snapshotDecoder.decode(
+                envelope,
+                endpointDescription: endpointDescription,
+                protocolVersion: protocolVersion
+            )
+            latestSnapshot = snapshot
+            workspaceState = LiveWorkspacePresenter.ready(snapshot)
+        } catch {
+            // The process monitor owns disconnect presentation; a later tick can recover.
+        }
     }
 
     private func engineExecutable() throws -> URL {

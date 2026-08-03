@@ -22,6 +22,11 @@ renders the returned authoritative snapshot, or refreshes after a revision
 conflict. Key notation remains a presentation preference; canonical key data is
 not mutated.
 
+E1-11 extends the same intent boundary to demo and operation controls. The
+workspace sends revisioned commands for load, reset, speed, playback, leader,
+OFF, ARMED, LIVE, and PAUSED. Provider health and the latest bounded engine
+timeline are decoded from snapshots; neither is inferred from button presses.
+
 ## Headless visual evidence
 
 Generate the review matrix with:
@@ -30,7 +35,7 @@ Generate the review matrix with:
 ./scripts/render-visual-evidence.sh
 ```
 
-The command writes eight 1280×960 PNGs to the ignored
+The command writes eight 1280×1200 PNGs to the ignored
 `build/VisualEvidence/` directory. It uses fixed content, dimensions, locale,
 appearance, and key notation. Rendering therefore works while the login session
 is locked and does not require an active app window.
