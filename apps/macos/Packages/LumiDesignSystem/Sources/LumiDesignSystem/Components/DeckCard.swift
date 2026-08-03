@@ -6,6 +6,8 @@ public struct DeckCard: View {
     private let artist: String
     private let bpm: String
     private let musicalKey: String
+    private let bpmLabel: LocalizedStringKey
+    private let keyLabel: LocalizedStringKey
     private let stateLabel: LocalizedStringKey
     private let state: LumiComponentState
 
@@ -15,6 +17,8 @@ public struct DeckCard: View {
         artist: String,
         bpm: String,
         musicalKey: String,
+        bpmLabel: LocalizedStringKey = "design.preview.bpm",
+        keyLabel: LocalizedStringKey = "design.preview.key",
         stateLabel: LocalizedStringKey,
         state: LumiComponentState
     ) {
@@ -23,6 +27,8 @@ public struct DeckCard: View {
         self.artist = artist
         self.bpm = bpm
         self.musicalKey = musicalKey
+        self.bpmLabel = bpmLabel
+        self.keyLabel = keyLabel
         self.stateLabel = stateLabel
         self.state = state
     }
@@ -51,8 +57,8 @@ public struct DeckCard: View {
                 }
 
                 HStack(spacing: LumiSpacing.large) {
-                    metadata(value: bpm, label: "design.preview.bpm")
-                    metadata(value: musicalKey, label: "design.preview.key")
+                    metadata(value: bpm, label: bpmLabel)
+                    metadata(value: musicalKey, label: keyLabel)
                 }
             }
         }

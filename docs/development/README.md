@@ -83,6 +83,10 @@ Deterministic phrase planning, the minimal catalog, fallback behavior, golden
 plan, and performance budget are documented in
 [`deterministic-planner.md`](deterministic-planner.md).
 
+The authoritative Live/Next presentation boundary, explicit degraded states,
+accessibility identifiers, and locked-session PNG workflow are documented in
+[`live-workspace.md`](live-workspace.md).
+
 ## Troubleshooting
 
 - `xcodebuild` points at Command Line Tools: rerun `xcode-select --switch`.
