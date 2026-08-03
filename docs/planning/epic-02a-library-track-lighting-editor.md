@@ -1,6 +1,6 @@
 # Epic 2A – Music Library and Track Lighting Editor
 
-Status: **In build – E2A-03 native Library workspace**
+Status: **In build – E2A-04 Track Lighting Editor preview**
 
 Doelmilestone: **0.2.0 – Deck Intelligence**
 

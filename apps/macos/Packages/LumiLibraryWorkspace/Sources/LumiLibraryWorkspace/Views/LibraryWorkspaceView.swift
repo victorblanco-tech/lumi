@@ -19,25 +19,32 @@ public struct LibraryQueryRequest: Equatable, Sendable {
 public struct LibraryWorkspaceView: View {
     private let state: LibraryWorkspaceState
     private let onQuery: @MainActor (LibraryQueryRequest) -> Void
+    private let onOpenEditor: @MainActor (UInt64) -> Void
+    private let onCloseEditor: @MainActor () -> Void
     private let rendersInteractiveControls: Bool
     @Binding private var keyNotation: KeyNotationPreference
     @State private var search: String
     @State private var selectedTrackID: UInt64?
     @State private var readinessFilter: LibraryReadinessFilter = .all
-    @State private var editorTrack: LibraryTrack?
+    @State private var editorAnalysis: TrackEditorAnalysis?
 
     public init(
         state: LibraryWorkspaceState,
         keyNotation: Binding<KeyNotationPreference>,
         rendersInteractiveControls: Bool = true,
-        onQuery: @escaping @MainActor (LibraryQueryRequest) -> Void = { _ in }
+        onQuery: @escaping @MainActor (LibraryQueryRequest) -> Void = { _ in },
+        onOpenEditor: @escaping @MainActor (UInt64) -> Void = { _ in },
+        onCloseEditor: @escaping @MainActor () -> Void = {}
     ) {
         self.state = state
         self.onQuery = onQuery
+        self.onOpenEditor = onOpenEditor
+        self.onCloseEditor = onCloseEditor
         self.rendersInteractiveControls = rendersInteractiveControls
         _keyNotation = keyNotation
         _search = State(initialValue: state.query.search)
         _selectedTrackID = State(initialValue: state.page.tracks.first?.id)
+        _editorAnalysis = State(initialValue: state.editor)
     }
 
     public var body: some View {
@@ -64,8 +71,11 @@ public struct LibraryWorkspaceView: View {
                 selectedTrackID = tracks.first?.id
             }
         }
-        .sheet(item: $editorTrack) { track in
-            TrackEditorLandingView(track: track, keyNotation: keyNotation)
+        .onChange(of: state.editor) { _, editor in
+            editorAnalysis = editor
+        }
+        .sheet(item: $editorAnalysis, onDismiss: onCloseEditor) { analysis in
+            TrackLightingEditorView(analysis: analysis, keyNotation: keyNotation)
         }
     }
 
@@ -356,7 +366,7 @@ public struct LibraryWorkspaceView: View {
                 capabilitySummary(track)
                 Spacer()
                 Button {
-                    editorTrack = track
+                    onOpenEditor(track.id)
                 } label: {
                     Label(localized("library.openEditor"), systemImage: "waveform.path.ecg.rectangle")
                         .frame(maxWidth: .infinity)
@@ -510,55 +520,6 @@ public struct LibraryWorkspaceView: View {
         let currentIndex = visibleTracks.firstIndex { $0.id == selectedTrackID } ?? 0
         let newIndex = min(max(0, currentIndex + distance), visibleTracks.count - 1)
         selectedTrackID = visibleTracks[newIndex].id
-    }
-}
-
-private struct TrackEditorLandingView: View {
-    let track: LibraryTrack
-    let keyNotation: KeyNotationPreference
-    @Environment(\.dismiss) private var dismiss
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: LumiSpacing.xLarge) {
-            HStack {
-                VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-                    Text(localized("editor.title"))
-                        .font(LumiTypography.screenTitle)
-                    Text("\(track.artist) — \(track.title)")
-                        .font(LumiTypography.metadata)
-                        .foregroundStyle(LumiColor.textSecondary)
-                }
-                Spacer()
-                Button(localized("editor.close")) { dismiss() }
-            }
-            HStack(spacing: LumiSpacing.large) {
-                Text(formatBPM(track.bpmMilli))
-                Text(KeyNotationFormatter(notation: keyNotation).string(from: track.musicalKey))
-                Text(formatDuration(track.durationMillis))
-            }
-            .font(LumiTypography.technical)
-            RoundedRectangle(cornerRadius: LumiRadius.panel)
-                .fill(LumiColor.surfaceElevated)
-                .overlay {
-                    VStack(spacing: LumiSpacing.medium) {
-                        Image(systemName: "waveform.path.ecg.rectangle")
-                            .font(.system(size: 42))
-                            .foregroundStyle(LumiColor.accent)
-                        Text(localized("editor.nextStep"))
-                            .font(LumiTypography.sectionTitle)
-                        Text(localized("editor.nextStepDetail"))
-                            .font(LumiTypography.metadata)
-                            .foregroundStyle(LumiColor.textSecondary)
-                    }
-                }
-            Text("Track ID \(track.id) · Source \(track.sourceTrackID) · Analysis \(track.analysisRevision)")
-                .font(LumiTypography.technical)
-                .foregroundStyle(LumiColor.textSecondary)
-        }
-        .padding(LumiSpacing.xLarge)
-        .frame(width: 760, height: 480)
-        .background(LumiColor.canvas)
-        .accessibilityIdentifier("lumi.trackEditor.landing")
     }
 }
 

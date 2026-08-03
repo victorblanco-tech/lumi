@@ -508,6 +508,14 @@ fn apply_command(
                 .query(search, playlist_id, offset, limit);
             return Ok(());
         }
+        SessionCommand::OpenLibraryTrackEditor { track_id } => {
+            runtime.library_worker.open_editor(track_id)?;
+            return Ok(());
+        }
+        SessionCommand::CloseLibraryTrackEditor => {
+            runtime.library_worker.close_editor();
+            return Ok(());
+        }
         SessionCommand::LoadDemoSession { expected_revision }
         | SessionCommand::ResetDemoSession { expected_revision } => {
             validate_state_revision(runtime, expected_revision)?;
@@ -608,6 +616,8 @@ fn apply_command(
     let revised = match command {
         SessionCommand::GetSnapshot
         | SessionCommand::QueryLibrary { .. }
+        | SessionCommand::OpenLibraryTrackEditor { .. }
+        | SessionCommand::CloseLibraryTrackEditor
         | SessionCommand::LoadDemoSession { .. }
         | SessionCommand::SetOperationState { .. }
         | SessionCommand::SetSimulationSpeed { .. }
@@ -765,6 +775,7 @@ fn application_error_envelope(
         | CommandApplicationError::OperationSequenceOverflow
         | CommandApplicationError::ClockOverflow
         | CommandApplicationError::Engine(_)
+        | CommandApplicationError::Library(_)
         | CommandApplicationError::Simulator(_) => error_envelope(
             sequence,
             correlation_id,
@@ -837,6 +848,8 @@ enum CommandApplicationError {
     Mutation(#[from] PlanMutationError),
     #[error("simulator control failed: {0}")]
     Simulator(#[from] SimulatorError),
+    #[error("library command failed: {0}")]
+    Library(#[from] LibraryWorkerError),
     #[error("engine failed while accepting a plan revision: {0}")]
     Engine(EngineError),
 }

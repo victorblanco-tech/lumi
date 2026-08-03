@@ -50,8 +50,11 @@ playlists, metadata, colors, and `lumi-demo://` references. The adapter derives
 waveform samples, beat markers, and bounded 44.1 kHz mono PCM audio segments
 from fixed inputs. This provides audible offline development data without
 shipping copied music. No Rekordbox exports or local user-library paths are
-used. The demo provider lives in its own adapter crate and is not linked into
-the production engine; a later app build must opt into demo mode explicitly.
+used. The demo provider lives in its own adapter crate. During Epic 2A it is
+selected explicitly by the development engine so Library and editor stories
+remain testable without a Rekordbox installation; production source selection
+will replace that explicit composition rather than leaking demo concerns into
+the canonical library model.
 
 Repository tests inject a failure during an analysis refresh and prove that the
 complete earlier track survives. A separate migration fault test proves that a

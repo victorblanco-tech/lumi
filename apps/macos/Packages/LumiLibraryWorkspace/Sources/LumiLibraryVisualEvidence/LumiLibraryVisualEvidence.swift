@@ -16,6 +16,12 @@ struct LumiLibraryVisualEvidenceCommand {
         let colorScheme: ColorScheme
     }
 
+    private struct EditorVariant {
+        let name: String
+        let notation: KeyNotationPreference
+        let hostColorScheme: ColorScheme
+    }
+
     @MainActor
     static func main() throws {
         let outputDirectory = try outputDirectoryURL()
@@ -90,22 +96,61 @@ struct LumiLibraryVisualEvidenceCommand {
             .environment(\.locale, Locale(identifier: "en"))
             .frame(width: width, height: height)
 
-            let renderer = ImageRenderer(content: view)
-            renderer.proposedSize = ProposedViewSize(width: width, height: height)
-            renderer.scale = 1
-            guard let image = renderer.nsImage,
-                  let tiffData = image.tiffRepresentation,
-                  let representation = NSBitmapImageRep(data: tiffData),
-                  representation.pixelsWide == Int(width),
-                  representation.pixelsHigh == Int(height),
-                  let pngData = representation.representation(using: .png, properties: [:]),
-                  pngData.count > 10_000 else {
-                throw VisualEvidenceError.renderFailed(variant.name)
-            }
-            let output = outputDirectory.appendingPathComponent("\(variant.name).png")
-            try pngData.write(to: output, options: .atomic)
-            print(output.path)
+            try render(view, named: variant.name, to: outputDirectory)
         }
+
+        let editorVariants = [
+            EditorVariant(
+                name: "track-editor-dark-camelot",
+                notation: .camelot,
+                hostColorScheme: .dark
+            ),
+            EditorVariant(
+                name: "track-editor-light-host-classic",
+                notation: .classic,
+                hostColorScheme: .light
+            )
+        ]
+        for variant in editorVariants {
+            let hostCanvas = variant.hostColorScheme == .dark
+                ? Color(red: 0.055, green: 0.063, blue: 0.078)
+                : Color(red: 0.965, green: 0.97, blue: 0.98)
+            let view = ZStack {
+                hostCanvas
+                TrackLightingEditorView(
+                    analysis: TrackEditorFixtures.ready,
+                    keyNotation: variant.notation
+                )
+                .padding(18)
+            }
+            .environment(\.colorScheme, variant.hostColorScheme)
+            .environment(\.locale, Locale(identifier: "en"))
+            .frame(width: width, height: height)
+            try render(view, named: variant.name, to: outputDirectory)
+        }
+    }
+
+    @MainActor
+    private static func render<Content: View>(
+        _ view: Content,
+        named name: String,
+        to outputDirectory: URL
+    ) throws {
+        let renderer = ImageRenderer(content: view)
+        renderer.proposedSize = ProposedViewSize(width: width, height: height)
+        renderer.scale = 1
+        guard let image = renderer.nsImage,
+              let tiffData = image.tiffRepresentation,
+              let representation = NSBitmapImageRep(data: tiffData),
+              representation.pixelsWide == Int(width),
+              representation.pixelsHigh == Int(height),
+              let pngData = representation.representation(using: .png, properties: [:]),
+              pngData.count > 10_000 else {
+            throw VisualEvidenceError.renderFailed(name)
+        }
+        let output = outputDirectory.appendingPathComponent("\(name).png")
+        try pngData.write(to: output, options: .atomic)
+        print(output.path)
     }
 
     private static func outputDirectoryURL() throws -> URL {

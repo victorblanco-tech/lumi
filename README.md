@@ -24,7 +24,8 @@ Het gerefineerde ontwerp en storyplan voor de volgende verticale milestone staat
 in [`docs/planning/epic-02a-library-track-lighting-editor.md`](docs/planning/epic-02a-library-track-lighting-editor.md).
 
 > Status: Epic 1 is geïntegreerd als lokale `0.1.0-dev` release candidate; Epic
-> 2A is gestart met de provider-neutrale music-library foundation.
+> 2A heeft nu de provider-neutrale Library en eerste Track Lighting Editor
+> waveform/audio-preview in actieve bouw.
 
 ## Development
 

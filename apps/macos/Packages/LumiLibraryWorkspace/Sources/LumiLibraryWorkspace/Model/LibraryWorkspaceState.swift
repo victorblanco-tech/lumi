@@ -182,6 +182,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
     public let playlists: [LibraryPlaylist]
     public let query: LibraryQuery
     public let page: LibraryPage
+    public let editor: TrackEditorAnalysis?
     public let diagnostic: String?
 
     public init(
@@ -193,6 +194,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
         playlists: [LibraryPlaylist],
         query: LibraryQuery,
         page: LibraryPage,
+        editor: TrackEditorAnalysis? = nil,
         diagnostic: String? = nil
     ) {
         self.condition = condition
@@ -203,6 +205,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
         self.playlists = playlists
         self.query = query
         self.page = page
+        self.editor = editor
         self.diagnostic = diagnostic
     }
 

@@ -57,6 +57,30 @@ func launchesRealEngine() async throws {
         )
         #expect(libraryTrackTitles(searchedLibrary) == ["Northern Pulse"])
 
+        let editorRevision = stateRevision(searchedLibrary)
+        let openedEditor = try await supervisor.send(
+            .openLibraryTrackEditor(trackID: requiredFirstLibraryTrackID(snapshot)),
+            messageID: "swift-open-library-editor"
+        )
+        #expect(stateRevision(openedEditor) == editorRevision)
+        #expect(libraryEditorTitle(openedEditor) == libraryTrackTitles(snapshot).first)
+        #expect(libraryEditorAudioURI(openedEditor)?.hasPrefix("lumi-demo://") == true)
+        #expect(libraryEditorArrayCount(openedEditor, field: "waveform") ?? 0 > 0)
+        #expect(libraryEditorArrayCount(openedEditor, field: "phrases") ?? 0 > 0)
+        #expect(libraryEditorBeatCount(openedEditor) ?? 0 > 0)
+        let closedEditor = try await supervisor.send(
+            .closeLibraryTrackEditor,
+            messageID: "swift-close-library-editor"
+        )
+        #expect(stateRevision(closedEditor) == editorRevision)
+        #expect(libraryEditorIsClosed(closedEditor))
+
+        let unknownEditor = try await supervisor.send(
+            .openLibraryTrackEditor(trackID: 999_999),
+            messageID: "swift-open-unknown-library-editor"
+        )
+        #expect(EngineCommandFailure(unknownEditor)?.kind == "commandFailed")
+
         guard case let .object(plan) = snapshot.payload["nextPlan"],
               case let .string(planID) = plan["planId"] else {
             Issue.record("Initial snapshot must contain a plan ID")
@@ -176,6 +200,52 @@ private func librarySourceName(_ envelope: MessageEnvelope) -> String? {
           case let .object(source) = library["source"],
           case let .string(name) = source["name"] else { return nil }
     return name
+}
+
+private func requiredFirstLibraryTrackID(_ envelope: MessageEnvelope) -> UInt64 {
+    guard case let .object(library) = envelope.payload["library"],
+          case let .object(page) = library["page"],
+          case let .array(tracks) = page["tracks"],
+          case let .object(track)? = tracks.first,
+          case let .number(id) = track["id"] else { return 0 }
+    return UInt64(id)
+}
+
+private func libraryEditor(_ envelope: MessageEnvelope) -> [String: JSONValue]? {
+    guard case let .object(library) = envelope.payload["library"],
+          case let .object(editor) = library["editor"] else { return nil }
+    return editor
+}
+
+private func libraryEditorTitle(_ envelope: MessageEnvelope) -> String? {
+    guard let editor = libraryEditor(envelope),
+          case let .object(track) = editor["track"],
+          case let .string(title) = track["title"] else { return nil }
+    return title
+}
+
+private func libraryEditorAudioURI(_ envelope: MessageEnvelope) -> String? {
+    guard let editor = libraryEditor(envelope),
+          case let .string(uri) = editor["audioUri"] else { return nil }
+    return uri
+}
+
+private func libraryEditorArrayCount(_ envelope: MessageEnvelope, field: String) -> Int? {
+    guard let editor = libraryEditor(envelope),
+          case let .array(values) = editor[field] else { return nil }
+    return values.count
+}
+
+private func libraryEditorBeatCount(_ envelope: MessageEnvelope) -> Int? {
+    guard let editor = libraryEditor(envelope),
+          case let .object(grid) = editor["beatGrid"],
+          case let .array(markers) = grid["markers"] else { return nil }
+    return markers.count
+}
+
+private func libraryEditorIsClosed(_ envelope: MessageEnvelope) -> Bool {
+    guard case let .object(library) = envelope.payload["library"] else { return false }
+    return library["editor"] == .null
 }
 
 private func requiredStateRevision(_ envelope: MessageEnvelope) -> UInt64 {

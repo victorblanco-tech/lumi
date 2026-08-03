@@ -104,6 +104,10 @@ The native Library destination, bounded engine queries, presentation states,
 and track-inspector boundary are documented in
 [`library-workspace.md`](library-workspace.md).
 
+The fixed-dark CDJ-inspired waveform, shared beat-coordinate system, isolated
+read-only audio preview, controls, and cleanup rules are documented in
+[`track-editor-preview.md`](track-editor-preview.md).
+
 The authoritative Live/Next presentation boundary, explicit degraded states,
 accessibility identifiers, and locked-session PNG workflow are documented in
 [`live-workspace.md`](live-workspace.md).

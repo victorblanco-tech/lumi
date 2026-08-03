@@ -1,4 +1,4 @@
-use lumi_domain::{KeyMode, PitchClass};
+use lumi_domain::{KeyMode, PitchClass, TrackId};
 use lumi_library::{
     LibraryRepository, LibraryTrackQuery, PlaylistId, TrackPageRequest, TrackSummary,
 };
@@ -20,6 +20,7 @@ pub struct LibraryWorker {
     playlist_id: Option<PlaylistId>,
     offset: u32,
     limit: u16,
+    editor_track_id: Option<TrackId>,
 }
 
 impl LibraryWorker {
@@ -38,6 +39,7 @@ impl LibraryWorker {
             playlist_id: None,
             offset: 0,
             limit: DEFAULT_PAGE_LIMIT,
+            editor_track_id: None,
         })
     }
 
@@ -46,6 +48,19 @@ impl LibraryWorker {
         self.playlist_id = playlist_id.map(PlaylistId::new);
         self.offset = offset;
         self.limit = limit;
+    }
+
+    pub fn open_editor(&mut self, track_id: u64) -> Result<(), LibraryWorkerError> {
+        let track_id = TrackId::new(track_id);
+        if self.repository.track(track_id)?.is_none() {
+            return Err(LibraryWorkerError::UnknownTrack(track_id.value()));
+        }
+        self.editor_track_id = Some(track_id);
+        Ok(())
+    }
+
+    pub const fn close_editor(&mut self) {
+        self.editor_track_id = None;
     }
 
     pub fn snapshot_json(&self) -> Result<Value, LibraryWorkerError> {
@@ -102,6 +117,42 @@ impl LibraryWorker {
                 "offset": page.offset(),
                 "tracks": page.tracks().iter().map(track_json).collect::<Vec<_>>(),
             },
+            "editor": self.editor_json()?,
+        }))
+    }
+
+    fn editor_json(&self) -> Result<Value, LibraryWorkerError> {
+        let Some(track_id) = self.editor_track_id else {
+            return Ok(Value::Null);
+        };
+        let track = self
+            .repository
+            .track(track_id)?
+            .ok_or(LibraryWorkerError::UnknownTrack(track_id.value()))?;
+        Ok(json!({
+            "track": track_json(track.summary()),
+            "audioUri": track.audio_uri(),
+            "beatGrid": {
+                "beatsPerBar": track.beat_grid().beats_per_bar(),
+                "markers": track.beat_grid().markers().iter().map(|marker| json!({
+                    "beatIndex": marker.beat_index(),
+                    "timeMillis": marker.time_millis(),
+                    "barIndex": marker.bar_index(),
+                    "beatInBar": marker.beat_in_bar(),
+                })).collect::<Vec<_>>(),
+            },
+            "waveform": track.waveform().iter().map(|point| json!({
+                "low": point.low(),
+                "mid": point.mid(),
+                "high": point.high(),
+            })).collect::<Vec<_>>(),
+            "phrases": track.raw_phrases().iter().enumerate().map(|(index, phrase)| json!({
+                "id": index,
+                "startBeat": phrase.start_beat(),
+                "endBeat": phrase.end_beat(),
+                "role": phrase.source_label(),
+                "origin": "source",
+            })).collect::<Vec<_>>(),
         }))
     }
 }
@@ -161,6 +212,8 @@ pub enum LibraryWorkerError {
     Persistence(#[from] SqliteLibraryError),
     #[error("library query is invalid: {0}")]
     Query(#[from] lumi_library::TrackPageRequestError),
+    #[error("library track {0} does not exist")]
+    UnknownTrack(u64),
 }
 
 #[cfg(test)]
@@ -177,6 +230,49 @@ mod tests {
 
         assert_eq!(snapshot["collectionTotal"], 3);
         assert_eq!(snapshot["page"]["total"], 2);
+        Ok(())
+    }
+
+    #[test]
+    fn editor_snapshot_exposes_read_only_analysis_and_closes_cleanly()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut worker = LibraryWorker::demo()?;
+        let collection = worker.snapshot_json()?;
+        let track_id = collection["page"]["tracks"][0]["id"]
+            .as_u64()
+            .ok_or("demo track ID is missing")?;
+
+        worker.open_editor(track_id)?;
+        let opened = worker.snapshot_json()?;
+        assert_eq!(opened["editor"]["track"]["id"], track_id);
+        assert_eq!(opened["editor"]["beatGrid"]["beatsPerBar"], 4);
+        assert!(
+            opened["editor"]["beatGrid"]["markers"]
+                .as_array()
+                .is_some_and(|markers| !markers.is_empty())
+        );
+        assert!(
+            opened["editor"]["waveform"]
+                .as_array()
+                .is_some_and(|points| !points.is_empty())
+        );
+        assert!(
+            opened["editor"]["phrases"]
+                .as_array()
+                .is_some_and(|phrases| !phrases.is_empty())
+        );
+
+        worker.close_editor();
+        assert!(worker.snapshot_json()?["editor"].is_null());
+        Ok(())
+    }
+
+    #[test]
+    fn unknown_editor_track_is_rejected_without_changing_selection()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut worker = LibraryWorker::demo()?;
+        assert!(worker.open_editor(u64::MAX).is_err());
+        assert!(worker.snapshot_json()?["editor"].is_null());
         Ok(())
     }
 }

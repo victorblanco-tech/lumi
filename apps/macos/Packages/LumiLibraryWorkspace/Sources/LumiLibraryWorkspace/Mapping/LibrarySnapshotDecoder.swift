@@ -1,3 +1,4 @@
+import Foundation
 import LumiDesignSystem
 import LumiProtocol
 
@@ -56,7 +57,109 @@ public struct LibrarySnapshotDecoder: Sendable {
                 offset: try UInt32(exactly: unsigned(pageObject, "offset"))
                     .required(.invalidNumber("page.offset")),
                 tracks: try trackValues.map(decodeTrack)
+            ),
+            editor: try decodeEditor(library["editor"])
+        )
+    }
+
+    private func decodeEditor(_ value: JSONValue?) throws -> TrackEditorAnalysis? {
+        guard let value, value != .null else { return nil }
+        guard case let .object(editor) = value else {
+            throw LibrarySnapshotError.invalidObject
+        }
+        guard case let .object(trackValue) = editor["track"] else {
+            throw LibrarySnapshotError.missingField("editor.track")
+        }
+        let beatGrid = try object(editor, "beatGrid")
+        let markers = try array(beatGrid, "markers")
+        let waveform = try array(editor, "waveform")
+        let phrases = try array(editor, "phrases")
+        guard markers.count <= 1_000_000,
+              waveform.count <= 100_000,
+              phrases.count <= 10_000 else {
+            throw LibrarySnapshotError.unboundedEditor
+        }
+        let beatsPerBar = try UInt8(exactly: unsigned(beatGrid, "beatsPerBar"))
+            .required(.invalidNumber("beatsPerBar"))
+        guard (1...16).contains(beatsPerBar), !markers.isEmpty else {
+            throw LibrarySnapshotError.invalidBeatGrid
+        }
+        let beats = try markers.map { marker -> TrackEditorBeat in
+            guard case let .object(marker) = marker else {
+                throw LibrarySnapshotError.invalidObject
+            }
+            return TrackEditorBeat(
+                beatIndex: try UInt32(exactly: unsigned(marker, "beatIndex"))
+                    .required(.invalidNumber("beatIndex")),
+                timeMillis: try unsigned(marker, "timeMillis"),
+                barIndex: try UInt32(exactly: unsigned(marker, "barIndex"))
+                    .required(.invalidNumber("barIndex")),
+                beatInBar: try UInt8(exactly: unsigned(marker, "beatInBar"))
+                    .required(.invalidNumber("beatInBar"))
             )
+        }
+        guard beats.count.isMultiple(of: Int(beatsPerBar)) else {
+            throw LibrarySnapshotError.invalidBeatGrid
+        }
+        for (index, beat) in beats.enumerated() {
+            guard beat.beatIndex == UInt32(index),
+                  beat.barIndex == UInt32(index / Int(beatsPerBar) + 1),
+                  beat.beatInBar == UInt8(index % Int(beatsPerBar) + 1),
+                  index == 0 || beat.timeMillis > beats[index - 1].timeMillis else {
+                throw LibrarySnapshotError.invalidBeatGrid
+            }
+        }
+        guard !waveform.isEmpty else { throw LibrarySnapshotError.invalidWaveform }
+        let decodedPhrases = try phrases.map { value in
+            guard case let .object(phrase) = value else {
+                throw LibrarySnapshotError.invalidObject
+            }
+            return TrackEditorPhrase(
+                id: try unsigned(phrase, "id"),
+                startBeat: try UInt32(exactly: unsigned(phrase, "startBeat"))
+                    .required(.invalidNumber("phrase.startBeat")),
+                endBeat: try UInt32(exactly: unsigned(phrase, "endBeat"))
+                    .required(.invalidNumber("phrase.endBeat")),
+                role: try string(phrase, "role"),
+                origin: try string(phrase, "origin")
+            )
+        }
+        var phraseIDs = Set<UInt64>()
+        var previousEnd: UInt32 = 0
+        for (index, phrase) in decodedPhrases.enumerated() {
+            guard phraseIDs.insert(phrase.id).inserted,
+                  phrase.startBeat < phrase.endBeat,
+                  phrase.endBeat <= UInt32(beats.count),
+                  phrase.startBeat.isMultiple(of: UInt32(beatsPerBar)),
+                  phrase.endBeat.isMultiple(of: UInt32(beatsPerBar)),
+                  index == 0 || phrase.startBeat >= previousEnd else {
+                throw LibrarySnapshotError.invalidPhraseTimeline
+            }
+            previousEnd = phrase.endBeat
+        }
+        let audioURI = try string(editor, "audioUri")
+        guard !audioURI.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            throw LibrarySnapshotError.invalidAudioURI
+        }
+        return TrackEditorAnalysis(
+            track: try decodeTrack(.object(trackValue)),
+            audioURI: audioURI,
+            beatsPerBar: beatsPerBar,
+            beats: beats,
+            waveform: try waveform.map { value in
+                guard case let .object(point) = value else {
+                    throw LibrarySnapshotError.invalidObject
+                }
+                return TrackEditorWaveformPoint(
+                    low: try UInt8(exactly: unsigned(point, "low"))
+                        .required(.invalidNumber("waveform.low")),
+                    mid: try UInt8(exactly: unsigned(point, "mid"))
+                        .required(.invalidNumber("waveform.mid")),
+                    high: try UInt8(exactly: unsigned(point, "high"))
+                        .required(.invalidNumber("waveform.high"))
+                )
+            },
+            phrases: decodedPhrases
         )
     }
 
@@ -167,6 +270,11 @@ public enum LibrarySnapshotError: Error, Equatable {
     case invalidReadiness
     case invalidNumber(String)
     case unboundedPage
+    case unboundedEditor
+    case invalidBeatGrid
+    case invalidWaveform
+    case invalidPhraseTimeline
+    case invalidAudioURI
 }
 
 private extension Optional {
