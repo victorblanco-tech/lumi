@@ -19,4 +19,22 @@ public struct MessageEnvelope: Codable, Equatable, Sendable {
     public let correlationId: String
     public let sentAt: String
     public let payload: [String: JSONValue]
+
+    public init(
+        protocolVersion: Int,
+        messageType: MessageType,
+        messageId: String,
+        sequence: UInt64,
+        correlationId: String,
+        sentAt: String,
+        payload: [String: JSONValue]
+    ) {
+        self.protocolVersion = protocolVersion
+        self.messageType = messageType
+        self.messageId = messageId
+        self.sequence = sequence
+        self.correlationId = correlationId
+        self.sentAt = sentAt
+        self.payload = payload
+    }
 }

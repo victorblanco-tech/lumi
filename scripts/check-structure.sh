@@ -18,6 +18,7 @@ required_paths=(
   "apps/macos/Packages/LumiProtocol"
   "apps/macos/Packages/LumiEngineClient"
   "apps/macos/Packages/LumiDesignSystem"
+  "apps/macos/Packages/LumiLiveWorkspace"
   "contracts"
   "fixtures"
   "fixtures/demo-session-v1/session.json"
@@ -51,7 +52,8 @@ if grep -Eq 'tokio|serde|tracing' "$repository_root/engine/crates/lumi-domain/Ca
 fi
 
 if grep -REq '\.font\(\.[A-Za-z]|Color\.(red|green|orange|blue|purple|pink)' \
-  "$repository_root/apps/macos/Lumi/App"; then
+  "$repository_root/apps/macos/Lumi/App" \
+  "$repository_root/apps/macos/Packages/LumiLiveWorkspace/Sources/LumiLiveWorkspace/Views"; then
   echo "ERROR: app feature views must use LumiDesignSystem typography and color tokens." >&2
   exit 1
 fi

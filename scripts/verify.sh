@@ -17,6 +17,9 @@ fi
 cd "$repository_root"
 
 python3 -m json.tool apps/macos/Lumi/Resources/Localizable.xcstrings >/dev/null
+python3 -m json.tool \
+  apps/macos/Packages/LumiLiveWorkspace/Localization/Localizable.xcstrings \
+  >/dev/null
 python3 -m json.tool contracts/protocol/v1/manifest.json >/dev/null
 python3 -m json.tool contracts/protocol/v1/envelope.schema.json >/dev/null
 for protocol_fixture in contracts/protocol/v1/fixtures/*.json; do
@@ -28,6 +31,7 @@ cargo test --workspace --all-features
 cargo build --workspace --all-features
 swift test --package-path apps/macos/Packages/LumiProtocol
 swift test --package-path apps/macos/Packages/LumiDesignSystem
+swift test --package-path apps/macos/Packages/LumiLiveWorkspace
 LUMI_ENGINE_TEST_EXECUTABLE="$repository_root/target/debug/lumi-engine" \
   swift test --package-path apps/macos/Packages/LumiEngineClient
 
@@ -58,6 +62,14 @@ fi
 
 if ! file "$built_engine_helper" | grep -q 'arm64'; then
   echo "ERROR: the built Lumi engine helper is not Apple Silicon arm64." >&2
+  exit 1
+fi
+
+"$script_dir/render-visual-evidence.sh" "$repository_root/build/VisualEvidence"
+
+visual_evidence_count="$(find "$repository_root/build/VisualEvidence" -type f -name '*.png' | wc -l | tr -d '[:space:]')"
+if [[ "$visual_evidence_count" != "6" ]]; then
+  echo "ERROR: expected 6 visual evidence PNGs, found $visual_evidence_count." >&2
   exit 1
 fi
 
