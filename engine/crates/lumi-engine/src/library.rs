@@ -2,13 +2,15 @@ use std::collections::BTreeMap;
 
 use lumi_domain::{KeyMode, PitchClass, ThemeId, TrackId};
 use lumi_library::{
-    AutoloopCatalogError, AutoloopVariantMove, LibraryRepository, LibraryTrackQuery,
-    LumiPhraseTimeline, PhraseInstance, PhraseLoopStrategy, PhraseRole, PhraseRoleCatalogError,
-    PhraseRoleId, PhraseRoleMove, PlaylistId, SourcePhraseMapping, SourceRevision,
-    TimelineEditCommand, TimelineEditError, TimelineRevision, TimelineRevisionOrigin,
-    TimelineRevisionReason, TimelineRevisionSummary, TrackPageRequest, TrackSummary, VariantId,
+    AutoloopCatalogError, AutoloopVariantMove, ImportedLibraryBaseline, ImportedTrackAnalysis,
+    LibraryRepository, LibraryTrackQuery, LumiPhraseTimeline, PhraseInstance, PhraseLoopStrategy,
+    PhraseRole, PhraseRoleCatalogError, PhraseRoleId, PhraseRoleMove, PlaylistId, ReconcileError,
+    ReconcilePreview, ReconcileStrategy, SourceChangeClass, SourcePhraseMapping, SourceRevision,
+    SourceTrackDiff, TimelineEditCommand, TimelineEditError, TimelineRevision,
+    TimelineRevisionOrigin, TimelineRevisionReason, TimelineRevisionSummary, TrackPageRequest,
+    TrackSummary, VariantId, reconcile_timeline,
 };
-use lumi_library_demo::{DemoLibraryError, DemoLibrarySourceProvider};
+use lumi_library_demo::{DemoLibraryError, DemoLibraryRevision, DemoLibrarySourceProvider};
 use lumi_library_source::MusicLibrarySourceProvider as _;
 use lumi_library_sqlite::{SqliteLibraryError, SqliteLibraryRepository};
 use serde_json::{Value, json};
@@ -33,6 +35,7 @@ pub struct LibraryWorker {
     offset: u32,
     limit: u16,
     editor_track_id: Option<TrackId>,
+    pending_source_refresh: Option<ImportedLibraryBaseline>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -111,7 +114,13 @@ impl LibraryWorker {
     ) -> Result<Self, LibraryWorkerError> {
         let provider = DemoLibrarySourceProvider::curated();
         let baseline = provider.load_baseline()?;
-        repository.import_baseline(&baseline)?;
+        if repository
+            .page_tracks(TrackPageRequest::try_new(0, 1)?)?
+            .total()
+            == 0
+        {
+            repository.import_baseline(&baseline)?;
+        }
         seed_default_role_catalog(&mut repository)?;
         seed_default_autoloop_catalog(&mut repository)?;
         let mut worker = Self {
@@ -125,6 +134,7 @@ impl LibraryWorker {
             offset: 0,
             limit: DEFAULT_PAGE_LIMIT,
             editor_track_id: None,
+            pending_source_refresh: None,
         };
         let track_ids = worker
             .repository
@@ -245,6 +255,75 @@ impl LibraryWorker {
 
     pub const fn close_editor(&mut self) {
         self.editor_track_id = None;
+    }
+
+    pub fn preview_demo_source_refresh(&mut self) -> Result<(), LibraryWorkerError> {
+        let baseline =
+            DemoLibrarySourceProvider::curated_revision(DemoLibraryRevision::V2).load_baseline()?;
+        if baseline.source_id().as_str() != self.source_id {
+            return Err(LibraryWorkerError::SourceRefreshIdentityMismatch);
+        }
+        self.pending_source_refresh = Some(baseline);
+        Ok(())
+    }
+
+    pub fn reconcile_source_refresh(
+        &mut self,
+        track_id: u64,
+        expected_revision: u64,
+        strategy: ReconcileStrategy,
+    ) -> Result<(), LibraryWorkerError> {
+        let track_id = TrackId::new(track_id);
+        self.require_open_track(track_id)?;
+        let head = self.require_expected_head(track_id, expected_revision)?;
+        let stored = self
+            .repository
+            .track(track_id)?
+            .ok_or(LibraryWorkerError::UnknownTrack(track_id.value()))?;
+        let baseline = self
+            .pending_source_refresh
+            .as_ref()
+            .ok_or(LibraryWorkerError::NoPendingSourceRefresh)?
+            .clone();
+        let incoming = baseline
+            .tracks()
+            .iter()
+            .find(|track| track.source_track_id() == stored.summary().source_track_id())
+            .ok_or(LibraryWorkerError::MissingIncomingTrack)?;
+        let diff = SourceTrackDiff::between(&stored, incoming);
+        if diff.is_metadata_only() {
+            if !matches!(strategy, ReconcileStrategy::KeepLumi) {
+                return Err(LibraryWorkerError::MetadataRefreshRequiresKeepLumi);
+            }
+            self.repository.refresh_track_without_timeline(
+                &baseline,
+                incoming,
+                stored.summary().source_revision(),
+            )?;
+            if self.pending_source_change_count()? == 0 {
+                self.source_revision = baseline.source_revision().as_str().to_owned();
+                self.source_name = baseline.display_name().to_owned();
+                self.pending_source_refresh = None;
+            }
+            return Ok(());
+        }
+        let (source_total_bars, source_phrases) = self.map_source_phrases(incoming)?;
+        let reconciled = reconcile_timeline(
+            &head,
+            incoming.analysis_revision().clone(),
+            source_total_bars,
+            &source_phrases,
+            &strategy,
+        )?;
+        self.repository
+            .reconcile_track(&baseline, incoming, &reconciled, head.revision())?;
+
+        if self.pending_source_change_count()? == 0 {
+            self.source_revision = baseline.source_revision().as_str().to_owned();
+            self.source_name = baseline.display_name().to_owned();
+            self.pending_source_refresh = None;
+        }
+        Ok(())
     }
 
     pub fn mutate_phrase_role_catalog(
@@ -397,16 +476,53 @@ impl LibraryWorker {
         if self.repository.timeline_head(track_id)?.is_some() {
             return Ok(());
         }
-        let beats_per_bar = u32::from(track.beat_grid().beats_per_bar());
-        let total_beats = u32::try_from(track.beat_grid().markers().len())
-            .map_err(|_| LibraryWorkerError::InvalidSourceTimeline)?;
+        let (total_bars, phrases) = self.map_source_phrases_from_parts(
+            track.beat_grid().beats_per_bar(),
+            track.beat_grid().markers().len(),
+            track.raw_phrases(),
+        )?;
+        let timeline = LumiPhraseTimeline::try_new_with_history(
+            track_id,
+            TimelineRevision::initial(),
+            SourceRevision::try_new(track.summary().source_revision().as_str())?,
+            total_bars,
+            TimelineRevisionOrigin::SourceImport,
+            TimelineRevisionReason::InitialSourceMapping,
+            None,
+            None,
+            phrases,
+        )?;
+        self.repository.append_timeline_revision(&timeline, None)?;
+        Ok(())
+    }
+
+    fn map_source_phrases(
+        &self,
+        track: &ImportedTrackAnalysis,
+    ) -> Result<(u32, Vec<PhraseInstance>), LibraryWorkerError> {
+        self.map_source_phrases_from_parts(
+            track.beat_grid().beats_per_bar(),
+            track.beat_grid().markers().len(),
+            track.raw_phrases(),
+        )
+    }
+
+    fn map_source_phrases_from_parts(
+        &self,
+        beats_per_bar: u8,
+        marker_count: usize,
+        raw_phrases: &[lumi_library::RawPhraseObservation],
+    ) -> Result<(u32, Vec<PhraseInstance>), LibraryWorkerError> {
+        let beats_per_bar = u32::from(beats_per_bar);
+        let total_beats =
+            u32::try_from(marker_count).map_err(|_| LibraryWorkerError::InvalidSourceTimeline)?;
         if total_beats == 0 || !total_beats.is_multiple_of(beats_per_bar) {
             return Err(LibraryWorkerError::InvalidSourceTimeline);
         }
         let total_bars = total_beats / beats_per_bar;
         let role_catalog = self.repository.phrase_role_catalog()?;
-        let mut phrases = Vec::with_capacity(track.raw_phrases().len());
-        for (index, phrase) in track.raw_phrases().iter().enumerate() {
+        let mut phrases = Vec::with_capacity(raw_phrases.len());
+        for (index, phrase) in raw_phrases.iter().enumerate() {
             if !phrase.start_beat().is_multiple_of(beats_per_bar)
                 || !phrase.end_beat().is_multiple_of(beats_per_bar)
             {
@@ -437,19 +553,36 @@ impl LibraryWorker {
                 role_id,
             ));
         }
-        let timeline = LumiPhraseTimeline::try_new_with_history(
-            track_id,
-            TimelineRevision::initial(),
-            SourceRevision::try_new(track.summary().source_revision().as_str())?,
-            total_bars,
-            TimelineRevisionOrigin::SourceImport,
-            TimelineRevisionReason::InitialSourceMapping,
-            None,
-            None,
-            phrases,
-        )?;
-        self.repository.append_timeline_revision(&timeline, None)?;
-        Ok(())
+        Ok((total_bars, phrases))
+    }
+
+    fn pending_source_change_count(&self) -> Result<usize, LibraryWorkerError> {
+        let Some(baseline) = &self.pending_source_refresh else {
+            return Ok(0);
+        };
+        let page = self
+            .repository
+            .page_tracks(TrackPageRequest::try_new(0, 200)?)?;
+        let mut count = 0;
+        for stored_summary in page.tracks() {
+            let Some(incoming) = baseline
+                .tracks()
+                .iter()
+                .find(|track| track.source_track_id() == stored_summary.source_track_id())
+            else {
+                continue;
+            };
+            let stored = self.repository.track(stored_summary.id())?.ok_or(
+                LibraryWorkerError::UnknownTrack(stored_summary.id().value()),
+            )?;
+            if !SourceTrackDiff::between(&stored, incoming)
+                .changes()
+                .is_empty()
+            {
+                count += 1;
+            }
+        }
+        Ok(count)
     }
 
     fn restore_from_history(
@@ -522,6 +655,13 @@ impl LibraryWorker {
         let playlist_page = self
             .repository
             .page_playlists(TrackPageRequest::try_new(0, 200)?)?;
+        let source_refresh = match &self.pending_source_refresh {
+            Some(baseline) => json!({
+                "revision": baseline.source_revision().as_str(),
+                "changeCount": self.pending_source_change_count()?,
+            }),
+            None => Value::Null,
+        };
         Ok(json!({
             "condition": if page.total() == 0 && self.search.is_empty() && self.playlist_id.is_none() {
                 "empty"
@@ -533,8 +673,9 @@ impl LibraryWorker {
                 "id": self.source_id,
                 "name": self.source_name,
                 "revision": self.source_revision,
-                "status": "current",
+                "status": if self.pending_source_refresh.is_some() { "changesAvailable" } else { "current" },
             },
+            "sourceRefresh": source_refresh,
             "capabilities": {
                 "playlists": true,
                 "color": true,
@@ -773,6 +914,50 @@ impl LibraryWorker {
                 "origin": origin_name(timeline.origin()),
                 "loopStrategy": loop_strategy_json(&autoloop_catalog, phrase),
             })).collect::<Vec<_>>(),
+            "sourceReconciliation": self.source_reconciliation_json(&track, &timeline)?,
+        }))
+    }
+
+    fn source_reconciliation_json(
+        &self,
+        track: &lumi_library::StoredTrack,
+        timeline: &LumiPhraseTimeline,
+    ) -> Result<Value, LibraryWorkerError> {
+        let Some(baseline) = &self.pending_source_refresh else {
+            return Ok(Value::Null);
+        };
+        let Some(incoming) = baseline
+            .tracks()
+            .iter()
+            .find(|candidate| candidate.source_track_id() == track.summary().source_track_id())
+        else {
+            return Ok(Value::Null);
+        };
+        let diff = SourceTrackDiff::between(track, incoming);
+        if diff.changes().is_empty() {
+            return Ok(Value::Null);
+        }
+        let (source_total_bars, source_phrases) = self.map_source_phrases(incoming)?;
+        let preview = ReconcilePreview::between(timeline, &source_phrases, source_total_bars);
+        Ok(json!({
+            "fromRevision": diff.from_revision().as_str(),
+            "toRevision": diff.to_revision().as_str(),
+            "sourceLibraryRevision": baseline.source_revision().as_str(),
+            "metadataOnly": diff.is_metadata_only(),
+            "requiresTimelineDecision": diff.requires_timeline_decision(),
+            "changes": diff.changes().iter().map(|change| match change {
+                SourceChangeClass::Metadata => "metadata",
+                SourceChangeClass::Waveform => "waveform",
+                SourceChangeClass::BeatGrid => "beatGrid",
+                SourceChangeClass::RawPhrases => "rawPhrases",
+            }).collect::<Vec<_>>(),
+            "sourceTotalBars": source_total_bars,
+            "rebaseAmbiguities": preview.rebase_ambiguities(),
+            "conflicts": preview.conflicts().iter().map(|conflict| json!({
+                "phraseIndex": conflict.phrase_index(),
+                "lumi": conflict.lumi().map(phrase_preview_json),
+                "source": conflict.source().map(phrase_preview_json),
+            })).collect::<Vec<_>>(),
         }))
     }
 }
@@ -874,6 +1059,14 @@ fn role_display_name(roles: &[PhraseRole], id: &PhraseRoleId) -> String {
         .map(PhraseRole::display_name)
         .unwrap_or_else(|| id.as_str())
         .to_owned()
+}
+
+fn phrase_preview_json(phrase: &PhraseInstance) -> Value {
+    json!({
+        "startBar": phrase.start_bar(),
+        "endBar": phrase.end_bar(),
+        "roleId": phrase.role_id().as_str(),
+    })
 }
 
 fn origin_name(origin: TimelineRevisionOrigin) -> &'static str {
@@ -1121,6 +1314,16 @@ pub enum LibraryWorkerError {
     CorruptHistory,
     #[error("timeline history overflowed")]
     HistoryOverflow,
+    #[error("source refresh does not match the active library")]
+    SourceRefreshIdentityMismatch,
+    #[error("there is no source refresh waiting for review")]
+    NoPendingSourceRefresh,
+    #[error("the source refresh no longer contains the selected track")]
+    MissingIncomingTrack,
+    #[error("metadata-only refreshes preserve the Lumi timeline and require Keep Lumi")]
+    MetadataRefreshRequiresKeepLumi,
+    #[error("source reconciliation failed: {0}")]
+    Reconcile(#[from] ReconcileError),
 }
 
 #[cfg(test)]
@@ -1129,8 +1332,8 @@ mod tests {
 
     use lumi_domain::ThemeId;
     use lumi_library::{
-        LibraryRepository as _, PhraseLoopStrategy, PhraseRoleId, TimelineEditCommand,
-        TrackPageRequest, VariantId,
+        LibraryRepository as _, PhraseLoopStrategy, PhraseRoleId, ReconcileStrategy,
+        TimelineEditCommand, TrackPageRequest, VariantId,
     };
     use lumi_library_demo::DemoLibrarySourceProvider;
     use lumi_library_source::MusicLibrarySourceProvider as _;
@@ -1712,6 +1915,66 @@ mod tests {
             assert_eq!(worker.snapshot_json()?["editor"]["timeline"]["revision"], 4);
         }
         std::fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn source_refresh_is_previewed_then_explicitly_reconciled()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut worker = LibraryWorker::demo()?;
+        let horizon_id = worker.snapshot_json()?["page"]["tracks"]
+            .as_array()
+            .ok_or("tracks")?
+            .iter()
+            .find(|track| track["sourceTrackId"] == "horizon-lines")
+            .and_then(|track| track["id"].as_u64())
+            .ok_or("horizon id")?;
+        worker.open_editor(horizon_id)?;
+        worker.preview_demo_source_refresh()?;
+        let preview = worker.snapshot_json()?;
+        assert_eq!(preview["source"]["status"], "changesAvailable");
+        assert_eq!(preview["sourceRefresh"]["changeCount"], 3);
+        assert_eq!(
+            preview["editor"]["sourceReconciliation"]["toRevision"],
+            "horizon-lines-v2"
+        );
+        assert!(
+            preview["editor"]["sourceReconciliation"]["conflicts"]
+                .as_array()
+                .is_some_and(|conflicts| !conflicts.is_empty())
+        );
+        let golden: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../../fixtures/source-reconciliation/horizon-lines-preview.json"
+        ))?;
+        assert_eq!(preview["editor"]["sourceReconciliation"], golden);
+
+        worker.reconcile_source_refresh(horizon_id, 1, ReconcileStrategy::ReplaceWithSource)?;
+        let reconciled = worker.snapshot_json()?;
+        assert_eq!(reconciled["editor"]["timeline"]["revision"], 2);
+        assert_eq!(
+            reconciled["editor"]["timeline"]["reason"],
+            "sourceReconcile"
+        );
+        assert!(reconciled["editor"]["sourceReconciliation"].is_null());
+        assert_eq!(reconciled["sourceRefresh"]["changeCount"], 2);
+
+        worker.close_editor();
+        let afterglow_id = reconciled["page"]["tracks"]
+            .as_array()
+            .ok_or("tracks")?
+            .iter()
+            .find(|track| track["sourceTrackId"] == "afterglow-drive")
+            .and_then(|track| track["id"].as_u64())
+            .ok_or("afterglow id")?;
+        worker.open_editor(afterglow_id)?;
+        worker.reconcile_source_refresh(afterglow_id, 1, ReconcileStrategy::KeepLumi)?;
+        let metadata_refresh = worker.snapshot_json()?;
+        assert_eq!(
+            metadata_refresh["editor"]["track"]["title"],
+            "Afterglow Drive (Extended)"
+        );
+        assert_eq!(metadata_refresh["editor"]["timeline"]["revision"], 1);
+        assert_eq!(metadata_refresh["sourceRefresh"]["changeCount"], 1);
         Ok(())
     }
 }

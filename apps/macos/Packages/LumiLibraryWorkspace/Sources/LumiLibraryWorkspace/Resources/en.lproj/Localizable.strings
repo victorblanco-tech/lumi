@@ -153,3 +153,13 @@
 "settings.mappingPolicy" = "Mapping changes apply only to future initial timelines. User-owned Lumi timelines are never silently rewritten.";
 "settings.unavailable" = "Phrase-role settings unavailable";
 "settings.unavailableDetail" = "Reconnect the local Lumi engine to load the authoritative role catalog.";
+"editor.sourceChanges" = "Source changes available";
+"editor.keepLumi" = "Keep Lumi";
+"editor.rebase" = "Rebase";
+"editor.replaceSource" = "Replace";
+"editor.mergeEachConflict" = "Merge each conflict:";
+"editor.phrase" = "Phrase";
+"editor.applyMerge" = "Apply Merge";
+"editor.rebaseRounding" = "Rebase rounds %llu boundary changes to complete bars.";
+"editor.sourceIndependent" = "Lumi phrases are independent from the source baseline.";
+"editor.compareSource" = "Compare Source Changes";

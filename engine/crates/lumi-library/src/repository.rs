@@ -457,6 +457,19 @@ pub trait LibraryRepository {
         &mut self,
         baseline: &ImportedLibraryBaseline,
     ) -> Result<ImportResult, Self::Error>;
+    fn reconcile_track(
+        &mut self,
+        baseline: &ImportedLibraryBaseline,
+        incoming: &crate::ImportedTrackAnalysis,
+        timeline: &LumiPhraseTimeline,
+        expected_head: TimelineRevision,
+    ) -> Result<(), Self::Error>;
+    fn refresh_track_without_timeline(
+        &mut self,
+        baseline: &ImportedLibraryBaseline,
+        incoming: &crate::ImportedTrackAnalysis,
+        expected_analysis_revision: &crate::SourceRevision,
+    ) -> Result<(), Self::Error>;
     fn page_tracks(&self, request: TrackPageRequest) -> Result<TrackPage, Self::Error>;
     fn query_tracks(&self, query: &LibraryTrackQuery) -> Result<TrackPage, Self::Error>;
     fn page_playlists(&self, request: TrackPageRequest) -> Result<PlaylistPage, Self::Error>;

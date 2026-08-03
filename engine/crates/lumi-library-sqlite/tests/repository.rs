@@ -8,10 +8,11 @@ use lumi_library::{
     AutoloopTheme, AutoloopVariant, ImportedLibraryBaseline, ImportedTrackAnalysis,
     LibraryRepository, LibraryTrackQuery, LumiPhraseTimeline, PHRASE_ROLE_DEFAULTS_VERSION,
     PhraseInstance, PhraseLoopStrategy, PhraseRole, PhraseRoleCatalog, PhraseRoleId,
-    PhraseRoleMove, SourcePhraseMapping, SourceRevision, TimelineEditCommand, TimelineRevision,
-    TimelineRevisionOrigin, TimelineRevisionReason, TrackPageRequest, VariantId,
+    PhraseRoleMove, ReconcileStrategy, SourcePhraseMapping, SourceRevision, TimelineEditCommand,
+    TimelineRevision, TimelineRevisionOrigin, TimelineRevisionReason, TrackPageRequest, VariantId,
+    reconcile_timeline,
 };
-use lumi_library_demo::DemoLibrarySourceProvider;
+use lumi_library_demo::{DemoLibraryRevision, DemoLibrarySourceProvider};
 use lumi_library_source::MusicLibrarySourceProvider;
 use lumi_library_sqlite::{SqliteLibraryError, SqliteLibraryRepository};
 use rusqlite::Connection;
@@ -287,6 +288,93 @@ fn changed_source_analysis_updates_without_replacing_identity() -> Result<(), Bo
         .ok_or("updated track not found")?;
     assert_eq!(updated.summary().id(), first_track.id());
     assert!(updated.summary().title().ends_with("(remastered)"));
+    Ok(())
+}
+
+#[test]
+fn source_reconcile_updates_analysis_and_timeline_in_one_transaction() -> Result<(), Box<dyn Error>>
+{
+    let first =
+        DemoLibrarySourceProvider::curated_revision(DemoLibraryRevision::V1).load_baseline()?;
+    let second =
+        DemoLibrarySourceProvider::curated_revision(DemoLibraryRevision::V2).load_baseline()?;
+    let mut repository = SqliteLibraryRepository::in_memory()?;
+    repository.import_baseline(&first)?;
+    let stored = repository
+        .page_tracks(TrackPageRequest::try_new(0, 200)?)?
+        .tracks()
+        .iter()
+        .find(|track| track.source_track_id().as_str() == "afterglow-drive")
+        .cloned()
+        .ok_or("demo track not found")?;
+    let initial = source_timeline(stored.id(), &repository.track(stored.id())?.ok_or("track")?)?;
+    repository.append_timeline_revision(&initial, None)?;
+    let incoming = second
+        .tracks()
+        .iter()
+        .find(|track| track.source_track_id().as_str() == "afterglow-drive")
+        .ok_or("incoming demo track not found")?;
+    let reconciled = reconcile_timeline(
+        &initial,
+        incoming.analysis_revision().clone(),
+        initial.total_bars(),
+        initial.phrases(),
+        &ReconcileStrategy::KeepLumi,
+    )?;
+    repository.reconcile_track(&second, incoming, &reconciled, initial.revision())?;
+
+    let updated = repository.track(stored.id())?.ok_or("updated track")?;
+    assert_eq!(updated.summary().title(), "Afterglow Drive (Extended)");
+    assert_eq!(repository.timeline_head(stored.id())?, Some(reconciled));
+    Ok(())
+}
+
+#[test]
+fn failed_reconcile_rolls_back_source_analysis_and_timeline_together() -> Result<(), Box<dyn Error>>
+{
+    let first =
+        DemoLibrarySourceProvider::curated_revision(DemoLibraryRevision::V1).load_baseline()?;
+    let second =
+        DemoLibrarySourceProvider::curated_revision(DemoLibraryRevision::V2).load_baseline()?;
+    let path = temporary_database_path()?;
+    let mut repository = SqliteLibraryRepository::open(&path)?;
+    repository.import_baseline(&first)?;
+    let stored = repository
+        .page_tracks(TrackPageRequest::try_new(0, 200)?)?
+        .tracks()
+        .iter()
+        .find(|track| track.source_track_id().as_str() == "horizon-lines")
+        .cloned()
+        .ok_or("demo track not found")?;
+    let imported_track = repository.track(stored.id())?.ok_or("track")?;
+    let initial = source_timeline(stored.id(), &imported_track)?;
+    repository.append_timeline_revision(&initial, None)?;
+    let original_track = repository.track(stored.id())?.ok_or("track")?;
+    let incoming = second
+        .tracks()
+        .iter()
+        .find(|track| track.source_track_id().as_str() == "horizon-lines")
+        .ok_or("incoming demo track not found")?;
+    let reconciled = reconcile_timeline(
+        &initial,
+        incoming.analysis_revision().clone(),
+        initial.total_bars(),
+        initial.phrases(),
+        &ReconcileStrategy::KeepLumi,
+    )?;
+    Connection::open(&path)?.execute_batch(
+        "CREATE TRIGGER fail_reconcile_waveform BEFORE INSERT ON waveform_points
+         BEGIN SELECT RAISE(ABORT, 'injected reconcile failure'); END;",
+    )?;
+    assert!(
+        repository
+            .reconcile_track(&second, incoming, &reconciled, initial.revision())
+            .is_err()
+    );
+    assert_eq!(repository.track(stored.id())?, Some(original_track));
+    assert_eq!(repository.timeline_head(stored.id())?, Some(initial));
+    drop(repository);
+    std::fs::remove_file(path)?;
     Ok(())
 }
 
@@ -629,6 +717,35 @@ fn test_autoloop_catalog() -> Result<AutoloopCatalog, Box<dyn Error>> {
         themes,
         vec![variant],
         cells,
+    )?)
+}
+
+fn source_timeline(
+    track_id: lumi_domain::TrackId,
+    track: &lumi_library::StoredTrack,
+) -> Result<LumiPhraseTimeline, Box<dyn Error>> {
+    let beats_per_bar = u32::from(track.beat_grid().beats_per_bar());
+    let total_bars = u32::try_from(track.beat_grid().markers().len())? / beats_per_bar;
+    let phrases = track
+        .raw_phrases()
+        .iter()
+        .enumerate()
+        .map(|(index, phrase)| {
+            Ok(PhraseInstance::new(
+                u16::try_from(index)?,
+                phrase.start_beat() / beats_per_bar,
+                phrase.end_beat() / beats_per_bar,
+                PhraseRoleId::try_new("source")?,
+            ))
+        })
+        .collect::<Result<Vec<_>, Box<dyn Error>>>()?;
+    Ok(LumiPhraseTimeline::try_new(
+        track_id,
+        TimelineRevision::initial(),
+        track.summary().source_revision().clone(),
+        total_bars,
+        TimelineRevisionOrigin::SourceImport,
+        phrases,
     )?)
 }
 

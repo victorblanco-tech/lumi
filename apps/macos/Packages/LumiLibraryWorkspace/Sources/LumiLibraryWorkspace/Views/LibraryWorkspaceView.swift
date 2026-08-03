@@ -23,6 +23,7 @@ public struct LibraryWorkspaceView: View {
     private let onCloseEditor: @MainActor () -> Void
     private let onTimelineEdit: @MainActor (TrackTimelineEditRequest) -> Void
     private let onTimelineHistory: @MainActor (TrackTimelineHistoryRequest) -> Void
+    private let onSourceReconcile: @MainActor (TrackSourceReconcileRequest) -> Void
     private let timelineFeedback: String?
     private let rendersInteractiveControls: Bool
     @Binding private var keyNotation: KeyNotationPreference
@@ -40,6 +41,7 @@ public struct LibraryWorkspaceView: View {
         onCloseEditor: @escaping @MainActor () -> Void = {},
         onTimelineEdit: @escaping @MainActor (TrackTimelineEditRequest) -> Void = { _ in },
         onTimelineHistory: @escaping @MainActor (TrackTimelineHistoryRequest) -> Void = { _ in },
+        onSourceReconcile: @escaping @MainActor (TrackSourceReconcileRequest) -> Void = { _ in },
         timelineFeedback: String? = nil
     ) {
         self.state = state
@@ -48,6 +50,7 @@ public struct LibraryWorkspaceView: View {
         self.onCloseEditor = onCloseEditor
         self.onTimelineEdit = onTimelineEdit
         self.onTimelineHistory = onTimelineHistory
+        self.onSourceReconcile = onSourceReconcile
         self.timelineFeedback = timelineFeedback
         self.rendersInteractiveControls = rendersInteractiveControls
         _keyNotation = keyNotation
@@ -90,7 +93,8 @@ public struct LibraryWorkspaceView: View {
                 keyNotation: keyNotation,
                 feedback: timelineFeedback,
                 onTimelineEdit: onTimelineEdit,
-                onTimelineHistory: onTimelineHistory
+                onTimelineHistory: onTimelineHistory,
+                onSourceReconcile: onSourceReconcile
             )
         }
     }

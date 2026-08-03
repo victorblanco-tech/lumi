@@ -594,6 +594,195 @@ impl LibraryRepository for SqliteLibraryRepository {
         })
     }
 
+    fn reconcile_track(
+        &mut self,
+        baseline: &ImportedLibraryBaseline,
+        incoming: &ImportedTrackAnalysis,
+        timeline: &LumiPhraseTimeline,
+        expected_head: TimelineRevision,
+    ) -> Result<(), Self::Error> {
+        let transaction = self.connection.transaction()?;
+        let track_id = transaction
+            .query_row(
+                "SELECT id FROM tracks WHERE source_id = ?1 AND source_track_id = ?2",
+                params![
+                    baseline.source_id().as_str(),
+                    incoming.source_track_id().as_str()
+                ],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?
+            .ok_or_else(|| {
+                SqliteLibraryError::MissingReconcileTrack(
+                    incoming.source_track_id().as_str().to_owned(),
+                )
+            })?;
+        if to_i64(timeline.track_id().value())? != track_id {
+            return Err(SqliteLibraryError::ReconcileTrackIdentityMismatch);
+        }
+        let actual_head = transaction
+            .query_row(
+                "SELECT revision FROM timeline_heads WHERE track_id = ?1",
+                [track_id],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?
+            .map(|value| timeline_revision(value, "timeline head"))
+            .transpose()?;
+        if actual_head != Some(expected_head) {
+            return Err(SqliteLibraryError::RevisionConflict {
+                expected: Some(expected_head),
+                actual: actual_head,
+            });
+        }
+        let required_revision = expected_head
+            .checked_next()
+            .ok_or(SqliteLibraryError::ArithmeticOverflow)?;
+        if timeline.revision() != required_revision {
+            return Err(SqliteLibraryError::InvalidNextRevision {
+                required: required_revision,
+                received: timeline.revision(),
+            });
+        }
+
+        transaction.execute(
+            "INSERT INTO import_baselines
+             (source_id, source_revision, source_kind, display_name, track_count, playlist_count)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(source_id, source_revision) DO NOTHING",
+            params![
+                baseline.source_id().as_str(),
+                baseline.source_revision().as_str(),
+                baseline.source_kind(),
+                baseline.display_name(),
+                usize_to_i64(baseline.tracks().len())?,
+                usize_to_i64(baseline.playlists().len())?,
+            ],
+        )?;
+        transaction.execute(
+            "UPDATE library_sources SET source_kind = ?1, display_name = ?2,
+                    source_revision = ?3 WHERE source_id = ?4",
+            params![
+                baseline.source_kind(),
+                baseline.display_name(),
+                baseline.source_revision().as_str(),
+                baseline.source_id().as_str(),
+            ],
+        )?;
+        update_track(&transaction, track_id, incoming)?;
+        Self::delete_analysis(&transaction, track_id)?;
+        Self::store_analysis(&transaction, track_id, incoming)?;
+
+        let parent_revision = timeline
+            .parent_revision()
+            .map(|value| to_i64(value.value()))
+            .transpose()?;
+        let restored_from_revision = timeline
+            .restored_from()
+            .map(|value| to_i64(value.value()))
+            .transpose()?;
+        transaction.execute(
+            "INSERT INTO timeline_revisions
+             (track_id, revision, baseline_revision, total_bars, origin, reason,
+              parent_revision, restored_from_revision)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
+            params![
+                track_id,
+                to_i64(timeline.revision().value())?,
+                timeline.baseline_revision().as_str(),
+                i64::from(timeline.total_bars()),
+                encode_origin(timeline.origin()),
+                encode_reason(timeline.reason()),
+                parent_revision,
+                restored_from_revision,
+            ],
+        )?;
+        {
+            let mut statement = transaction.prepare(
+                "INSERT INTO phrase_instances
+                 (track_id, revision, phrase_index, start_bar, end_bar, role_id, loop_strategy)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            )?;
+            for phrase in timeline.phrases() {
+                statement.execute(params![
+                    track_id,
+                    to_i64(timeline.revision().value())?,
+                    i64::from(phrase.index()),
+                    i64::from(phrase.start_bar()),
+                    i64::from(phrase.end_bar()),
+                    phrase.role_id().as_str(),
+                    encode_loop_strategy(phrase.loop_strategy())?,
+                ])?;
+            }
+        }
+        transaction.execute(
+            "UPDATE timeline_heads SET revision = ?1 WHERE track_id = ?2",
+            params![to_i64(timeline.revision().value())?, track_id],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn refresh_track_without_timeline(
+        &mut self,
+        baseline: &ImportedLibraryBaseline,
+        incoming: &ImportedTrackAnalysis,
+        expected_analysis_revision: &SourceRevision,
+    ) -> Result<(), Self::Error> {
+        let transaction = self.connection.transaction()?;
+        let (track_id, actual_revision) = transaction
+            .query_row(
+                "SELECT id, analysis_revision FROM tracks
+                 WHERE source_id = ?1 AND source_track_id = ?2",
+                params![
+                    baseline.source_id().as_str(),
+                    incoming.source_track_id().as_str()
+                ],
+                |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+            )
+            .optional()?
+            .ok_or_else(|| {
+                SqliteLibraryError::MissingReconcileTrack(
+                    incoming.source_track_id().as_str().to_owned(),
+                )
+            })?;
+        if actual_revision != expected_analysis_revision.as_str() {
+            return Err(SqliteLibraryError::AnalysisRevisionConflict {
+                expected: expected_analysis_revision.as_str().to_owned(),
+                actual: actual_revision,
+            });
+        }
+        transaction.execute(
+            "INSERT INTO import_baselines
+             (source_id, source_revision, source_kind, display_name, track_count, playlist_count)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(source_id, source_revision) DO NOTHING",
+            params![
+                baseline.source_id().as_str(),
+                baseline.source_revision().as_str(),
+                baseline.source_kind(),
+                baseline.display_name(),
+                usize_to_i64(baseline.tracks().len())?,
+                usize_to_i64(baseline.playlists().len())?,
+            ],
+        )?;
+        transaction.execute(
+            "UPDATE library_sources SET source_kind = ?1, display_name = ?2,
+                    source_revision = ?3 WHERE source_id = ?4",
+            params![
+                baseline.source_kind(),
+                baseline.display_name(),
+                baseline.source_revision().as_str(),
+                baseline.source_id().as_str(),
+            ],
+        )?;
+        update_track(&transaction, track_id, incoming)?;
+        Self::delete_analysis(&transaction, track_id)?;
+        Self::store_analysis(&transaction, track_id, incoming)?;
+        transaction.commit()?;
+        Ok(())
+    }
+
     fn page_tracks(&self, request: TrackPageRequest) -> Result<TrackPage, Self::Error> {
         let total = self
             .connection
@@ -1458,6 +1647,12 @@ pub enum SqliteLibraryError {
     ArithmeticOverflow,
     #[error("playlist references missing source track {0}")]
     MissingPlaylistTrack(String),
+    #[error("source refresh references missing track {0}")]
+    MissingReconcileTrack(String),
+    #[error("source refresh track identity does not match the timeline")]
+    ReconcileTrackIdentityMismatch,
+    #[error("analysis revision changed; expected {expected}, actual {actual}")]
+    AnalysisRevisionConflict { expected: String, actual: String },
     #[error("timeline head changed; expected {expected:?}, actual {actual:?}")]
     RevisionConflict {
         expected: Option<TimelineRevision>,

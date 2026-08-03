@@ -224,6 +224,92 @@ public enum TrackTimelineHistoryRequest: Equatable, Sendable {
     case restore(revision: UInt64)
 }
 
+public struct TrackSourcePhraseVersion: Equatable, Sendable {
+    public let startBar: UInt32
+    public let endBar: UInt32
+    public let roleID: String
+
+    public init(startBar: UInt32, endBar: UInt32, roleID: String) {
+        self.startBar = startBar
+        self.endBar = endBar
+        self.roleID = roleID
+    }
+}
+
+public struct TrackSourceConflict: Identifiable, Equatable, Sendable {
+    public var id: UInt16 { phraseIndex }
+    public let phraseIndex: UInt16
+    public let lumi: TrackSourcePhraseVersion?
+    public let source: TrackSourcePhraseVersion?
+
+    public init(
+        phraseIndex: UInt16,
+        lumi: TrackSourcePhraseVersion?,
+        source: TrackSourcePhraseVersion?
+    ) {
+        self.phraseIndex = phraseIndex
+        self.lumi = lumi
+        self.source = source
+    }
+}
+
+public struct TrackSourceReconciliation: Equatable, Sendable {
+    public let fromRevision: String
+    public let toRevision: String
+    public let sourceLibraryRevision: String
+    public let changes: [String]
+    public let metadataOnly: Bool
+    public let requiresTimelineDecision: Bool
+    public let sourceTotalBars: UInt32
+    public let rebaseAmbiguities: [UInt16]
+    public let conflicts: [TrackSourceConflict]
+
+    public init(
+        fromRevision: String,
+        toRevision: String,
+        sourceLibraryRevision: String,
+        changes: [String],
+        metadataOnly: Bool,
+        requiresTimelineDecision: Bool,
+        sourceTotalBars: UInt32,
+        rebaseAmbiguities: [UInt16],
+        conflicts: [TrackSourceConflict]
+    ) {
+        self.fromRevision = fromRevision
+        self.toRevision = toRevision
+        self.sourceLibraryRevision = sourceLibraryRevision
+        self.changes = changes
+        self.metadataOnly = metadataOnly
+        self.requiresTimelineDecision = requiresTimelineDecision
+        self.sourceTotalBars = sourceTotalBars
+        self.rebaseAmbiguities = rebaseAmbiguities
+        self.conflicts = conflicts
+    }
+}
+
+public enum TrackSourceConflictSide: String, Equatable, Sendable {
+    case lumi
+    case source
+}
+
+public struct TrackSourceConflictChoice: Equatable, Sendable {
+    public let phraseIndex: UInt16
+    public let side: TrackSourceConflictSide
+
+    public init(phraseIndex: UInt16, side: TrackSourceConflictSide) {
+        self.phraseIndex = phraseIndex
+        self.side = side
+    }
+}
+
+public enum TrackSourceReconcileRequest: Equatable, Sendable {
+    case previewDemoChanges
+    case keepLumi
+    case rebase
+    case merge([TrackSourceConflictChoice])
+    case replaceWithSource
+}
+
 public struct TrackEditorAnalysis: Identifiable, Equatable, Sendable {
     public var id: UInt64 { track.id }
 
@@ -236,6 +322,7 @@ public struct TrackEditorAnalysis: Identifiable, Equatable, Sendable {
     public let roles: [TrackEditorRole]
     public let sourcePhrases: [TrackEditorSourcePhrase]
     public let timeline: TrackEditorTimeline
+    public let sourceReconciliation: TrackSourceReconciliation?
 
     public init(
         track: LibraryTrack,
@@ -246,7 +333,8 @@ public struct TrackEditorAnalysis: Identifiable, Equatable, Sendable {
         phrases: [TrackEditorPhrase],
         roles: [TrackEditorRole],
         sourcePhrases: [TrackEditorSourcePhrase] = [],
-        timeline: TrackEditorTimeline
+        timeline: TrackEditorTimeline,
+        sourceReconciliation: TrackSourceReconciliation? = nil
     ) {
         self.track = track
         self.audioURI = audioURI
@@ -257,6 +345,7 @@ public struct TrackEditorAnalysis: Identifiable, Equatable, Sendable {
         self.roles = roles
         self.sourcePhrases = sourcePhrases
         self.timeline = timeline
+        self.sourceReconciliation = sourceReconciliation
     }
 
     public var totalBars: UInt32 {

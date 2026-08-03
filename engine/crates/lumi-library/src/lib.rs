@@ -9,6 +9,7 @@ mod autoloop_catalog;
 mod baseline;
 mod identifiers;
 mod phrase_roles;
+mod reconciliation;
 mod repository;
 mod timeline;
 
@@ -30,6 +31,10 @@ pub use phrase_roles::{
     PHRASE_ROLE_DEFAULTS_VERSION, PhraseRole, PhraseRoleCatalog, PhraseRoleCatalogError,
     PhraseRoleMove, PhraseRoleTrackUsage, PhraseRoleUsage, SourcePhraseMapping,
     normalize_source_label,
+};
+pub use reconciliation::{
+    PhraseConflict, PhraseConflictChoice, ReconcileError, ReconcilePreview, ReconcileSide,
+    ReconcileStrategy, SourceChangeClass, SourceTrackDiff, reconcile_timeline,
 };
 pub use repository::{
     ImportResult, LibraryRepository, LibraryTrackQuery, PlaylistPage, PlaylistSummary, StoredTrack,

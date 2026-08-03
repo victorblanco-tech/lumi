@@ -1,4 +1,4 @@
-use lumi_library_demo::DemoLibrarySourceProvider;
+use lumi_library_demo::{DemoLibraryRevision, DemoLibrarySourceProvider};
 use lumi_library_source::MusicLibrarySourceProvider;
 
 #[test]
@@ -16,6 +16,31 @@ fn curated_demo_baseline_is_deterministic_and_complete() -> Result<(), Box<dyn s
             && !track.waveform().is_empty()
             && !track.beat_grid().markers().is_empty()
     }));
+    Ok(())
+}
+
+#[test]
+fn two_curated_revisions_are_deterministic_and_keep_stable_track_identity()
+-> Result<(), Box<dyn std::error::Error>> {
+    let first =
+        DemoLibrarySourceProvider::curated_revision(DemoLibraryRevision::V1).load_baseline()?;
+    let second =
+        DemoLibrarySourceProvider::curated_revision(DemoLibraryRevision::V2).load_baseline()?;
+    assert_eq!(first.source_revision().as_str(), "demo-library-v1");
+    assert_eq!(second.source_revision().as_str(), "demo-library-v2");
+    assert_eq!(
+        first
+            .tracks()
+            .iter()
+            .map(|track| track.source_track_id())
+            .collect::<Vec<_>>(),
+        second
+            .tracks()
+            .iter()
+            .map(|track| track.source_track_id())
+            .collect::<Vec<_>>()
+    );
+    assert_ne!(first.tracks(), second.tracks());
     Ok(())
 }
 

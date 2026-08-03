@@ -201,6 +201,49 @@ struct LibraryWorkspaceTests {
         #expect(editor.phraseTimeRange(editor.phrases[1]) == 2_000..<4_000)
     }
 
+    @Test("Source reconciliation exposes classified changes and explicit phrase conflicts")
+    func decodesSourceReconciliation() throws {
+        var editor = editorValue()
+        guard case var .object(object) = editor else {
+            Issue.record("Editor fixture must be an object")
+            return
+        }
+        object["sourceReconciliation"] = .object([
+            "fromRevision": .string("track-v1"),
+            "toRevision": .string("track-v2"),
+            "sourceLibraryRevision": .string("library-v2"),
+            "metadataOnly": .boolean(false),
+            "requiresTimelineDecision": .boolean(true),
+            "changes": .array([.string("beatGrid"), .string("rawPhrases")]),
+            "sourceTotalBars": .number(2),
+            "rebaseAmbiguities": .array([.number(0)]),
+            "conflicts": .array([
+                .object([
+                    "phraseIndex": .number(0),
+                    "lumi": .object([
+                        "startBar": .number(0),
+                        "endBar": .number(1),
+                        "roleId": .string("intro-outro")
+                    ]),
+                    "source": .object([
+                        "startBar": .number(0),
+                        "endBar": .number(2),
+                        "roleId": .string("intro-outro")
+                    ])
+                ])
+            ])
+        ])
+        editor = .object(object)
+
+        let state = try LibrarySnapshotDecoder().decode(
+            envelope(trackValues: [trackValue()], editorValue: editor)
+        )
+        let reconciliation = try #require(state.editor?.sourceReconciliation)
+        #expect(reconciliation.changes == ["beatGrid", "rawPhrases"])
+        #expect(reconciliation.rebaseAmbiguities == [0])
+        #expect(reconciliation.conflicts.first?.source?.endBar == 2)
+    }
+
     @Test("Loop strategy rows must remain compatible with their phrase role")
     func rejectsLoopStrategyRoleMismatch() {
         var editor = editorValue()

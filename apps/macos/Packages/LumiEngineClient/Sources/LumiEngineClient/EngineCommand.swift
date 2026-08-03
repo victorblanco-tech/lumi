@@ -13,6 +13,44 @@ public struct EnginePlanCommandContext: Equatable, Sendable {
     }
 }
 
+public struct EngineSourceConflictChoice: Equatable, Sendable {
+    public let phraseIndex: UInt16
+    public let side: String
+
+    public init(phraseIndex: UInt16, side: String) {
+        self.phraseIndex = phraseIndex
+        self.side = side
+    }
+}
+
+public enum EngineSourceReconcileStrategy: Equatable, Sendable {
+    case keepLumi
+    case rebase
+    case merge([EngineSourceConflictChoice])
+    case replaceWithSource
+
+    fileprivate var payload: [String: JSONValue] {
+        switch self {
+        case .keepLumi:
+            return ["strategy": .string("keepLumi")]
+        case .rebase:
+            return ["strategy": .string("rebase")]
+        case let .merge(choices):
+            return [
+                "strategy": .string("merge"),
+                "choices": .array(choices.map { choice in
+                    .object([
+                        "phraseIndex": .number(Double(choice.phraseIndex)),
+                        "side": .string(choice.side)
+                    ])
+                })
+            ]
+        case .replaceWithSource:
+            return ["strategy": .string("replaceWithSource")]
+        }
+    }
+}
+
 public enum EngineTimelineEdit: Equatable, Sendable {
     case create(startBar: UInt32, endBar: UInt32, roleID: String)
     case split(phraseIndex: UInt16, atBar: UInt32)
@@ -219,6 +257,12 @@ public enum EngineCommand: Equatable, Sendable {
     case queryLibrary(search: String, playlistID: UInt64?, offset: UInt32, limit: UInt16)
     case openLibraryTrackEditor(trackID: UInt64)
     case closeLibraryTrackEditor
+    case previewDemoSourceRefresh
+    case reconcileLibrarySource(
+        trackID: UInt64,
+        expectedTimelineRevision: UInt64,
+        strategy: EngineSourceReconcileStrategy
+    )
     case editLibraryTimeline(
         trackID: UInt64,
         expectedTimelineRevision: UInt64,
@@ -284,6 +328,14 @@ public enum EngineCommand: Equatable, Sendable {
             ]
         case .closeLibraryTrackEditor:
             return ["kind": .string("closeLibraryTrackEditor")]
+        case .previewDemoSourceRefresh:
+            return ["kind": .string("previewDemoSourceRefresh")]
+        case let .reconcileLibrarySource(trackID, expectedRevision, strategy):
+            var payload = strategy.payload
+            payload["kind"] = .string("reconcileLibrarySource")
+            payload["trackId"] = .number(Double(trackID))
+            payload["expectedTimelineRevision"] = .number(Double(expectedRevision))
+            return payload
         case let .editLibraryTimeline(trackID, expectedRevision, edit):
             var payload = edit.payload
             payload["kind"] = .string("editLibraryTimeline")

@@ -150,6 +150,23 @@ func launchesRealEngine() async throws {
         #expect(libraryEditorFirstRoleID(openedEditor) == "intro-outro")
         #expect(libraryEditorBeatCount(openedEditor) ?? 0 > 0)
         #expect(libraryEditorTimelineRevision(openedEditor) == 1)
+        let comparedSource = try await supervisor.send(
+            .previewDemoSourceRefresh,
+            messageID: "swift-preview-source-refresh"
+        )
+        #expect(libraryEditorReconciliation(comparedSource)?["metadataOnly"] == .boolean(true))
+        #expect(librarySourceRefreshChangeCount(comparedSource) == 3)
+        let refreshedMetadata = try await supervisor.send(
+            .reconcileLibrarySource(
+                trackID: requiredFirstLibraryTrackID(snapshot),
+                expectedTimelineRevision: 1,
+                strategy: .keepLumi
+            ),
+            messageID: "swift-keep-lumi-metadata-refresh"
+        )
+        #expect(libraryEditorTitle(refreshedMetadata) == "Afterglow Drive (Extended)")
+        #expect(libraryEditorTimelineRevision(refreshedMetadata) == 1)
+        #expect(librarySourceRefreshChangeCount(refreshedMetadata) == 2)
         let editedTimeline = try await supervisor.send(
             .editLibraryTimeline(
                 trackID: requiredFirstLibraryTrackID(snapshot),
@@ -482,6 +499,21 @@ private func libraryEditor(_ envelope: MessageEnvelope) -> [String: JSONValue]? 
     guard case let .object(library) = envelope.payload["library"],
           case let .object(editor) = library["editor"] else { return nil }
     return editor
+}
+
+private func libraryEditorReconciliation(
+    _ envelope: MessageEnvelope
+) -> [String: JSONValue]? {
+    guard let editor = libraryEditor(envelope),
+          case let .object(reconciliation) = editor["sourceReconciliation"] else { return nil }
+    return reconciliation
+}
+
+private func librarySourceRefreshChangeCount(_ envelope: MessageEnvelope) -> UInt64? {
+    guard case let .object(library) = envelope.payload["library"],
+          case let .object(refresh) = library["sourceRefresh"],
+          case let .number(count) = refresh["changeCount"] else { return nil }
+    return UInt64(count)
 }
 
 private func libraryEditorTitle(_ envelope: MessageEnvelope) -> String? {
