@@ -1012,7 +1012,7 @@ private struct PlanSelectionControl: View {
 #Preview("Ready · Dark") {
     LiveWorkspaceView(
         state: LiveWorkspaceFixtures.ready,
-        productVersion: "0.0.8-dev",
+        productVersion: "0.1.0-dev",
         appearance: .constant(.dark),
         keyNotation: .constant(.camelot)
     )
@@ -1023,7 +1023,7 @@ private struct PlanSelectionControl: View {
 #Preview("Fallback · Light") {
     LiveWorkspaceView(
         state: LiveWorkspaceFixtures.fallback,
-        productVersion: "0.0.8-dev",
+        productVersion: "0.1.0-dev",
         appearance: .constant(.light),
         keyNotation: .constant(.classic)
     )

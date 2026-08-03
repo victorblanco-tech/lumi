@@ -1,0 +1,108 @@
+{
+  "engineVersion": "0.1.0-dev",
+  "leaderBeat": 128,
+  "leaderDeckId": 2,
+  "operationState": "live",
+  "outputEffects": [
+    {
+      "action": {
+        "category": "ambient",
+        "kind": "applyLook",
+        "loopBank": 1,
+        "loopSlot": 1,
+        "sceneId": 1,
+        "sceneName": "Soft Motion",
+        "themeId": 2,
+        "themeName": "Electric Bloom"
+      },
+      "commandId": 1,
+      "phraseIndex": 0,
+      "planRevision": 3,
+      "scheduledAt": 0,
+      "status": "simulated"
+    },
+    {
+      "action": {
+        "category": "break",
+        "kind": "applyLook",
+        "loopBank": 5,
+        "loopSlot": 1,
+        "sceneId": 9,
+        "sceneName": "Deep Space",
+        "themeId": 2,
+        "themeName": "Electric Bloom"
+      },
+      "commandId": 2,
+      "phraseIndex": 1,
+      "planRevision": 3,
+      "scheduledAt": 250,
+      "status": "simulated"
+    },
+    {
+      "action": {
+        "category": "build",
+        "kind": "applyLook",
+        "loopBank": 3,
+        "loopSlot": 2,
+        "sceneId": 6,
+        "sceneName": "Velocity Build",
+        "themeId": 2,
+        "themeName": "Electric Bloom"
+      },
+      "commandId": 3,
+      "phraseIndex": 2,
+      "planRevision": 3,
+      "scheduledAt": 1500,
+      "status": "simulated"
+    },
+    {
+      "action": {
+        "category": "impact",
+        "kind": "applyLook",
+        "loopBank": 4,
+        "loopSlot": 1,
+        "sceneId": 7,
+        "sceneName": "Full Energy",
+        "themeId": 2,
+        "themeName": "Electric Bloom"
+      },
+      "commandId": 4,
+      "phraseIndex": 3,
+      "planRevision": 3,
+      "scheduledAt": 1500,
+      "status": "simulated"
+    }
+  ],
+  "outputRecordCount": 4,
+  "pausedOutputCount": 2,
+  "plan": {
+    "lockedCue": {
+      "action": {
+        "category": "break",
+        "kind": "applyLook",
+        "loopBank": 5,
+        "loopSlot": 1,
+        "sceneId": 9,
+        "sceneName": "Deep Space",
+        "themeId": 2,
+        "themeName": "Electric Bloom"
+      },
+      "locked": true,
+      "origin": "user",
+      "phraseIndex": 1
+    },
+    "planId": "14113485664261432828",
+    "revision": 3,
+    "status": "ready"
+  },
+  "scenarioVersion": 1,
+  "simulation": {
+    "paused": false,
+    "speed": 64
+  },
+  "timeline": {
+    "entryCount": 153,
+    "lastSequence": 153,
+    "simulatedOutputEntries": 4
+  }
+}

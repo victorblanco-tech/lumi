@@ -240,6 +240,67 @@ fn real_engine_process_serves_authenticated_snapshot_on_loopback() {
         conflict.payload.get("actualPlanRevision"),
         Some(&Value::from(4))
     );
+
+    let stale_state = exchange(
+        &mut connection,
+        &command(
+            "stale-operation",
+            5,
+            json!({
+                "kind": "setOperationState",
+                "operationState": "armed",
+                "expectedStateRevision": 0,
+            }),
+        ),
+    );
+    assert_eq!(stale_state.message_type, MessageType::Error);
+    assert_eq!(
+        stale_state.payload.get("code"),
+        Some(&Value::String("stateRevisionMismatch".to_owned()))
+    );
+    assert_eq!(
+        stale_state.payload.get("actualStateRevision"),
+        regenerated.payload.get("stateRevision")
+    );
+
+    if let Err(error) = writeln!(connection, "{{\"protocolVersion\":") {
+        let _ = child.kill();
+        panic!("malformed command must be writable: {error}");
+    }
+    let mut malformed_line = String::new();
+    if let Err(error) = BufReader::new(&connection).read_line(&mut malformed_line) {
+        let _ = child.kill();
+        panic!("malformed command response must be readable: {error}");
+    }
+    let malformed = match MessageDecoder::decode(malformed_line.as_bytes()) {
+        Ok(response) => response,
+        Err(error) => {
+            let _ = child.kill();
+            panic!("malformed command response must be a valid envelope: {error}");
+        }
+    };
+    assert_eq!(malformed.message_type, MessageType::Error);
+    assert_eq!(
+        malformed.payload.get("code"),
+        Some(&Value::String("invalidEnvelope".to_owned()))
+    );
+
+    let after_faults = exchange(
+        &mut connection,
+        &command("snapshot-after-faults", 6, json!({ "kind": "getSnapshot" })),
+    );
+    assert_eq!(
+        after_faults.payload.get("operationState"),
+        Some(&Value::String("off".to_owned()))
+    );
+    assert_eq!(
+        after_faults
+            .payload
+            .get("outputProvider")
+            .and_then(Value::as_object)
+            .and_then(|output| output.get("recordCount")),
+        Some(&Value::from(0))
+    );
     drop(connection);
 
     let deadline = Instant::now() + Duration::from_secs(2);

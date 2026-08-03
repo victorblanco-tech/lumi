@@ -1531,6 +1531,242 @@ mod tests {
         );
     }
 
+    #[test]
+    fn canonical_app_to_output_scenario_matches_release_evidence() {
+        let mut runtime = match initialized_runtime() {
+            Ok(runtime) => runtime,
+            Err(error) => panic!("test engine must initialize: {error}"),
+        };
+        let Some(initial_plan) = runtime
+            .state
+            .state()
+            .plan(lumi_domain::DeckId::new(2))
+            .cloned()
+        else {
+            panic!("demo must generate the next plan");
+        };
+        let revised = match runtime.planning_worker.planner.select_scene(
+            &initial_plan,
+            1,
+            lumi_domain::SceneId::new(9),
+        ) {
+            Ok(plan) => plan,
+            Err(error) => panic!("canonical scene edit must succeed: {error}"),
+        };
+        if let Err(error) = runtime
+            .planning_worker
+            .accept_revised_plan(&mut runtime.state, revised)
+        {
+            panic!("canonical scene edit must enter the runtime: {error}");
+        }
+        let Some(revised_plan) = runtime
+            .state
+            .state()
+            .plan(lumi_domain::DeckId::new(2))
+            .cloned()
+        else {
+            panic!("revised plan must remain available");
+        };
+        let locked = match runtime
+            .planning_worker
+            .planner
+            .set_cue_lock(&revised_plan, 1, true)
+        {
+            Ok(plan) => plan,
+            Err(error) => panic!("canonical cue lock must succeed: {error}"),
+        };
+        if let Err(error) = runtime
+            .planning_worker
+            .accept_revised_plan(&mut runtime.state, locked)
+        {
+            panic!("canonical cue lock must enter the runtime: {error}");
+        }
+
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::SetSimulationSpeed {
+                expected_revision,
+                speed: SimulationSpeed::SixtyFour,
+            }
+        });
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::SetOperationState {
+                expected_revision,
+                command: OperationCommand::Arm,
+            }
+        });
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::SetOperationState {
+                expected_revision,
+                command: OperationCommand::Start,
+            }
+        });
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::AdvanceToNextTrack { expected_revision }
+        });
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::AdvanceSimulation {
+                expected_revision,
+                elapsed_ticks: 250,
+            }
+        });
+        let output_count_before_pause = runtime.output_worker.provider.records().count();
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::SetOperationState {
+                expected_revision,
+                command: OperationCommand::Pause,
+            }
+        });
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::SetSimulationPlayback {
+                expected_revision,
+                playing: false,
+            }
+        });
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::AdvanceSimulation {
+                expected_revision,
+                elapsed_ticks: 500,
+            }
+        });
+        assert_eq!(
+            runtime.output_worker.provider.records().count(),
+            output_count_before_pause
+        );
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::SetOperationState {
+                expected_revision,
+                command: OperationCommand::Start,
+            }
+        });
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::SetSimulationPlayback {
+                expected_revision,
+                playing: true,
+            }
+        });
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::AdvanceSimulation {
+                expected_revision,
+                elapsed_ticks: 750,
+            }
+        });
+
+        let actual = canonical_e2e_evidence(&runtime, output_count_before_pause);
+        let expected = include_bytes!("../../../../fixtures/demo-session-v1/canonical-e2e.json");
+        assert_eq!(
+            String::from_utf8_lossy(&actual),
+            String::from_utf8_lossy(expected)
+        );
+    }
+
+    #[test]
+    fn queue_overload_forces_pause_and_cannot_emit_new_output() {
+        let mut runtime = match initialized_runtime() {
+            Ok(runtime) => runtime,
+            Err(error) => panic!("test engine must initialize: {error}"),
+        };
+        apply_operation(&mut runtime, 1, OperationCommand::Arm);
+        apply_operation(&mut runtime, 2, OperationCommand::Start);
+        apply_simulation_control(&mut runtime, SimulationControl::AdvanceLeader);
+        let records_before_fault = runtime.output_worker.provider.records().count();
+        if let Err(error) = process_domain_event(
+            &mut runtime.state,
+            &mut runtime.output_worker,
+            DomainEvent::QueueOverloaded(lumi_domain::QueueOverloadEvent {
+                occurred_at: MonotonicTime::new(1),
+                rejected_kind: lumi_domain::DomainEventKind::Observation,
+                rejected_critical: false,
+                occurrences: 1,
+            }),
+        ) {
+            panic!("queue overload must reduce safely: {error}");
+        }
+        assert_eq!(runtime.state.state().operation(), OperationState::Paused);
+        assert_eq!(runtime.state.state().health(), RuntimeHealth::Degraded);
+        assert_eq!(
+            runtime.output_worker.provider.records().count(),
+            records_before_fault
+        );
+
+        apply_simulation_control(
+            &mut runtime,
+            SimulationControl::SetSpeed(SimulationSpeed::SixtyFour),
+        );
+        assert!(runtime.clock.advance(1_000).is_some());
+        if let Err(error) = runtime.deck_source.update_to_clock() {
+            panic!("fault playback must remain processable: {error}");
+        }
+        if let Err(error) = process_pending_source_events(&mut runtime) {
+            panic!("fault playback events must drain: {error}");
+        }
+        assert_eq!(
+            runtime.output_worker.provider.records().count(),
+            records_before_fault
+        );
+    }
+
+    fn canonical_e2e_evidence(runtime: &EngineRuntime, paused_output_count: usize) -> Vec<u8> {
+        let state = runtime.state.state();
+        let Some(plan) = state.plan(lumi_domain::DeckId::new(2)) else {
+            panic!("canonical evidence requires the deck 2 plan");
+        };
+        let Some(locked_cue) = plan.cues().get(1) else {
+            panic!("canonical evidence requires the edited cue");
+        };
+        let timeline = state.timeline().collect::<Vec<_>>();
+        let value = json!({
+            "scenarioVersion": 1,
+            "engineVersion": env!("CARGO_PKG_VERSION"),
+            "operationState": operation_state_name(state.operation()),
+            "simulation": {
+                "speed": runtime.deck_source.speed().multiplier(),
+                "paused": runtime.deck_source.is_paused(),
+            },
+            "leaderDeckId": state.leader_deck().map(lumi_domain::DeckId::value),
+            "leaderBeat": state
+                .deck(lumi_domain::DeckId::new(2))
+                .map(lumi_domain::DeckState::beat),
+            "plan": {
+                "planId": plan.id().value().to_string(),
+                "revision": plan.revision().value(),
+                "status": plan_status_name(plan.status()),
+                "lockedCue": {
+                    "phraseIndex": locked_cue.phrase_index(),
+                    "locked": locked_cue.locked(),
+                    "origin": cue_origin_name(locked_cue.origin()),
+                    "action": action_json(locked_cue.action()),
+                },
+            },
+            "pausedOutputCount": paused_output_count,
+            "outputRecordCount": runtime.output_worker.provider.records().count(),
+            "outputEffects": state.output_effects().map(|result| {
+                let request = result.request();
+                json!({
+                    "commandId": request.command_id().value(),
+                    "phraseIndex": request.phrase_index(),
+                    "planRevision": request.plan_revision().value(),
+                    "scheduledAt": request.scheduled_at().ticks(),
+                    "status": output_effect_status_name(result.status()),
+                    "action": action_json(request.action()),
+                })
+            }).collect::<Vec<_>>(),
+            "timeline": {
+                "entryCount": timeline.len(),
+                "lastSequence": timeline.last().map(|entry| entry.sequence()),
+                "simulatedOutputEntries": timeline
+                    .iter()
+                    .filter(|entry| entry.result() == TimelineResult::Simulated)
+                    .count(),
+            },
+        });
+        let mut encoded = match serde_json::to_vec_pretty(&value) {
+            Ok(encoded) => encoded,
+            Err(error) => panic!("canonical evidence must encode: {error}"),
+        };
+        encoded.push(b'\n');
+        encoded
+    }
+
     fn semantic_output_order(speed: SimulationSpeed, elapsed_ticks: u64) -> Vec<(u16, u64)> {
         let mut runtime = match initialized_runtime() {
             Ok(runtime) => runtime,

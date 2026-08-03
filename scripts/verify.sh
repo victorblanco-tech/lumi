@@ -13,6 +13,7 @@ fi
 "$script_dir/check-environment.sh"
 "$script_dir/check-version.sh"
 "$script_dir/check-structure.sh"
+"$script_dir/check-architecture.sh"
 
 cd "$repository_root"
 
@@ -26,14 +27,15 @@ for protocol_fixture in contracts/protocol/v1/fixtures/*.json; do
   python3 -m json.tool "$protocol_fixture" >/dev/null
 done
 cargo fmt --all -- --check
-cargo clippy --workspace --all-targets --all-features -- -D warnings
-cargo test --workspace --all-features
-cargo build --workspace --all-features
-swift test --package-path apps/macos/Packages/LumiProtocol
-swift test --package-path apps/macos/Packages/LumiDesignSystem
-swift test --package-path apps/macos/Packages/LumiLiveWorkspace
+cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
+cargo test --locked --workspace --all-features
+cargo test --locked --release -p lumi-planner two_hundred_phrase_plan_completes_within_epic_one_budget
+cargo build --locked --workspace --all-features
+swift test -Xswiftc -warnings-as-errors --package-path apps/macos/Packages/LumiProtocol
+swift test -Xswiftc -warnings-as-errors --package-path apps/macos/Packages/LumiDesignSystem
+swift test -Xswiftc -warnings-as-errors --package-path apps/macos/Packages/LumiLiveWorkspace
 LUMI_ENGINE_TEST_EXECUTABLE="$repository_root/target/debug/lumi-engine" \
-  swift test --package-path apps/macos/Packages/LumiEngineClient
+  swift test -Xswiftc -warnings-as-errors --package-path apps/macos/Packages/LumiEngineClient
 
 xcodebuild \
   -project apps/macos/Lumi.xcodeproj \
@@ -42,6 +44,7 @@ xcodebuild \
   -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath build/DerivedData \
   CODE_SIGNING_ALLOWED=NO \
+  GCC_TREAT_WARNINGS_AS_ERRORS=YES \
   -quiet \
   build
 

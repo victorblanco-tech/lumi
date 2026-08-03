@@ -20,11 +20,13 @@ GitHub, staat in
 Het bouwplan voor de eerste verticale productmilestone staat in
 [`docs/planning/epic-01-first-visible-lighting-plan.md`](docs/planning/epic-01-first-visible-lighting-plan.md).
 
-> Status: Epic 1-foundationbouw is gestart op de ontwikkelbranch.
+> Status: Epic 1 is geïntegreerd als de lokale `0.1.0-dev` release candidate.
 
 ## Development
 
-Epic 1 foundation development is active. The repository contains the initial
-Rust workspace and native macOS target. Environment setup and the single local
-verification command are documented in
+Epic 1 contains a working native macOS demo backed by the local Rust engine,
+deterministic simulator, editable next-track plan, operational output gate, and
+dry-run event timeline. The no-terminal demo and known limitations are in
+[`docs/release/0.1.0-demo-and-limitations.md`](docs/release/0.1.0-demo-and-limitations.md).
+Environment setup and the single local verification command are documented in
 [`docs/development/README.md`](docs/development/README.md).
