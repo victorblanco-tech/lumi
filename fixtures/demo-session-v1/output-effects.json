@@ -1,0 +1,114 @@
+[
+  {
+    "commandId": 1,
+    "planId": "14113485664261432828",
+    "planRevision": 1,
+    "deckId": 2,
+    "trackLoadId": 2001,
+    "phraseIndex": 0,
+    "cueId": 6014440759729509997,
+    "scheduledAt": 0,
+    "actualAt": 0,
+    "status": "simulated",
+    "resultReason": "phraseBoundary",
+    "cueReason": {
+      "kind": "phraseCategoryMatched",
+      "phraseKind": "intro",
+      "category": "ambient"
+    },
+    "action": {
+      "kind": "applyLook",
+      "themeId": 2,
+      "themeName": "Electric Bloom",
+      "sceneId": 1,
+      "sceneName": "Soft Motion",
+      "category": "ambient",
+      "loopBank": 1,
+      "loopSlot": 1
+    }
+  },
+  {
+    "commandId": 2,
+    "planId": "14113485664261432828",
+    "planRevision": 1,
+    "deckId": 2,
+    "trackLoadId": 2001,
+    "phraseIndex": 1,
+    "cueId": 12042818375941837684,
+    "scheduledAt": 1000,
+    "actualAt": 1000,
+    "status": "simulated",
+    "resultReason": "phraseBoundary",
+    "cueReason": {
+      "kind": "phraseCategoryMatched",
+      "phraseKind": "breakdown",
+      "category": "break"
+    },
+    "action": {
+      "kind": "applyLook",
+      "themeId": 2,
+      "themeName": "Electric Bloom",
+      "sceneId": 10,
+      "sceneName": "Slow Wave",
+      "category": "break",
+      "loopBank": 5,
+      "loopSlot": 2
+    }
+  },
+  {
+    "commandId": 3,
+    "planId": "14113485664261432828",
+    "planRevision": 1,
+    "deckId": 2,
+    "trackLoadId": 2001,
+    "phraseIndex": 2,
+    "cueId": 11677978877219312950,
+    "scheduledAt": 1000,
+    "actualAt": 1000,
+    "status": "simulated",
+    "resultReason": "phraseBoundary",
+    "cueReason": {
+      "kind": "phraseCategoryMatched",
+      "phraseKind": "build",
+      "category": "build"
+    },
+    "action": {
+      "kind": "applyLook",
+      "themeId": 2,
+      "themeName": "Electric Bloom",
+      "sceneId": 6,
+      "sceneName": "Velocity Build",
+      "category": "build",
+      "loopBank": 3,
+      "loopSlot": 2
+    }
+  },
+  {
+    "commandId": 4,
+    "planId": "14113485664261432828",
+    "planRevision": 1,
+    "deckId": 2,
+    "trackLoadId": 2001,
+    "phraseIndex": 3,
+    "cueId": 17689659654350800510,
+    "scheduledAt": 1000,
+    "actualAt": 1000,
+    "status": "simulated",
+    "resultReason": "phraseBoundary",
+    "cueReason": {
+      "kind": "phraseCategoryMatched",
+      "phraseKind": "drop",
+      "category": "impact"
+    },
+    "action": {
+      "kind": "applyLook",
+      "themeId": 2,
+      "themeName": "Electric Bloom",
+      "sceneId": 7,
+      "sceneName": "Full Energy",
+      "category": "impact",
+      "loopBank": 4,
+      "loopSlot": 1
+    }
+  }
+]

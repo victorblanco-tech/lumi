@@ -7,9 +7,12 @@ use lumi_deck_source::DeckSourceProvider as _;
 use lumi_domain::{
     CueOrigin, CueReason, DecisionReason, DeckObservation, DeckSourceStatus, DomainEvent, EffectId,
     EffectResult, EffectResultEnvelope, EffectSequence, KeyMode, LightingPlan, MonotonicTime,
-    OperationState, PhraseKind, PitchClass, PlanRevision, PlanStatus, RuntimeHealth, SceneCategory,
-    SemanticLightingAction, SerializedRuntime, SerializedRuntimeError, WorkerId,
+    OperationState, OutputEffectReason, OutputEffectResult, OutputEffectStatus,
+    OutputExecutionRequest, PhraseKind, PitchClass, PlanRevision, PlanStatus, RuntimeHealth,
+    SceneCategory, SemanticLightingAction, SerializedRuntime, SerializedRuntimeError, WorkerId,
 };
+use lumi_lighting_output::LightingOutputProvider as _;
+use lumi_output_dry_run::{DryRunLightingOutputProvider, DryRunOutputError};
 use lumi_planner::{
     DeterministicPlanner, PlanMutationError, PlannerError, PlannerTrack, PlanningInput,
     PlanningOptions, StableChoiceSource,
@@ -200,9 +203,14 @@ struct EngineRuntime {
     state: SerializedRuntime,
     deck_source: SimulatorDeckSourceProvider<ManualClock>,
     planning_worker: PlanningWorker,
+    output_worker: OutputWorker,
 }
 
 fn initialized_runtime() -> Result<EngineRuntime, EngineError> {
+    initialized_runtime_with_clock(ManualClock::new(0))
+}
+
+fn initialized_runtime_with_clock(clock: ManualClock) -> Result<EngineRuntime, EngineError> {
     let mut runtime =
         SerializedRuntime::try_new(EVENT_QUEUE_CAPACITY).map_err(SerializedRuntimeError::from)?;
     submit_and_process(
@@ -211,16 +219,37 @@ fn initialized_runtime() -> Result<EngineRuntime, EngineError> {
             at: MonotonicTime::new(0),
         },
     )?;
-    let mut deck_source = SimulatorDeckSourceProvider::demo(ManualClock::new(0))?;
+    let mut deck_source = SimulatorDeckSourceProvider::demo(clock)?;
     let mut planning_worker = PlanningWorker::new();
+    let mut output_worker = OutputWorker::new();
     for event in deck_source.drain_events()? {
-        planning_worker.process_source_event(&mut runtime, event, deck_source.leader_deck_id())?;
+        planning_worker.process_source_event(
+            &mut runtime,
+            &mut output_worker,
+            event,
+            deck_source.leader_deck_id(),
+        )?;
     }
     Ok(EngineRuntime {
         state: runtime,
         deck_source,
         planning_worker,
+        output_worker,
     })
+}
+
+#[cfg(test)]
+fn process_pending_source_events(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
+    let leader_deck_id = runtime.deck_source.leader_deck_id();
+    for event in runtime.deck_source.drain_events()? {
+        runtime.planning_worker.process_source_event(
+            &mut runtime.state,
+            &mut runtime.output_worker,
+            event,
+            leader_deck_id,
+        )?;
+    }
+    Ok(())
 }
 
 struct PlanningWorker {
@@ -239,6 +268,7 @@ impl PlanningWorker {
     fn process_source_event(
         &mut self,
         runtime: &mut SerializedRuntime,
+        output_worker: &mut OutputWorker,
         event: DomainEvent,
         leader_deck_id: lumi_domain::DeckId,
     ) -> Result<(), EngineError> {
@@ -258,15 +288,16 @@ impl PlanningWorker {
             _ => None,
         };
         let observed_at = event.monotonic_time();
-        submit_and_process(runtime, event)?;
+        process_domain_event(runtime, output_worker, event)?;
         if let Some(input) = planning_input {
             self.effect_sequence = self
                 .effect_sequence
                 .checked_add(1)
                 .ok_or(EngineError::PlanningEffectSequenceOverflow)?;
             let plan = self.planner.generate(&input)?;
-            submit_and_process(
+            process_domain_event(
                 runtime,
+                output_worker,
                 DomainEvent::EffectResult(EffectResultEnvelope {
                     effect_id: EffectId::new(self.effect_sequence),
                     worker_id: WorkerId::new(1),
@@ -301,25 +332,113 @@ impl PlanningWorker {
                 completed_at: MonotonicTime::new(0),
                 result: EffectResult::PlanGenerated(plan),
             }),
-        )
+        )?;
+        Ok(())
     }
+}
+
+struct OutputWorker {
+    provider: DryRunLightingOutputProvider,
+    effect_sequence: u64,
+}
+
+impl OutputWorker {
+    fn new() -> Self {
+        Self {
+            provider: DryRunLightingOutputProvider::default(),
+            effect_sequence: 0,
+        }
+    }
+
+    fn process_effects(
+        &mut self,
+        runtime: &mut SerializedRuntime,
+        effects: Vec<lumi_domain::Effect>,
+    ) -> Result<(), EngineError> {
+        for effect in effects {
+            let (result, completed_at) = match effect {
+                lumi_domain::Effect::EnsureOutputClosed { .. } => {
+                    (EffectResult::OutputGateClosed, MonotonicTime::new(0))
+                }
+                lumi_domain::Effect::ExecuteCue(request) => {
+                    let result = if execution_context_is_current(runtime.state(), &request) {
+                        self.provider.execute(&request, request.scheduled_at())?
+                    } else {
+                        OutputEffectResult::new(
+                            request.clone(),
+                            request.scheduled_at(),
+                            OutputEffectStatus::Skipped,
+                            OutputEffectReason::StaleExecutionContext,
+                        )
+                    };
+                    let completed_at = result.actual_at();
+                    (EffectResult::OutputEffectRecorded(result), completed_at)
+                }
+            };
+            self.effect_sequence = self
+                .effect_sequence
+                .checked_add(1)
+                .ok_or(EngineError::OutputEffectSequenceOverflow)?;
+            submit_and_process(
+                runtime,
+                DomainEvent::EffectResult(EffectResultEnvelope {
+                    effect_id: EffectId::new(self.effect_sequence),
+                    worker_id: WorkerId::new(2),
+                    sequence: EffectSequence::new(self.effect_sequence),
+                    completed_at,
+                    result,
+                }),
+            )?;
+        }
+        Ok(())
+    }
+}
+
+fn execution_context_is_current(
+    state: &lumi_domain::RuntimeState,
+    request: &OutputExecutionRequest,
+) -> bool {
+    state.operation() == OperationState::Live
+        && state.leader_deck() == Some(request.deck_id())
+        && state
+            .deck(request.deck_id())
+            .is_some_and(|deck| deck.track_load_id() == request.track_load_id())
+        && state.active_plan().is_some_and(|plan| {
+            plan.id() == request.plan_id()
+                && plan.revision() == request.plan_revision()
+                && plan.track_load_id() == request.track_load_id()
+                && plan
+                    .cues()
+                    .get(usize::from(request.phrase_index()))
+                    .is_some_and(|cue| {
+                        cue.id() == request.cue_id() && cue.action() == request.action()
+                    })
+        })
+}
+
+fn process_domain_event(
+    runtime: &mut SerializedRuntime,
+    output_worker: &mut OutputWorker,
+    event: DomainEvent,
+) -> Result<(), EngineError> {
+    let processed = submit_and_process(runtime, event)?;
+    output_worker.process_effects(runtime, processed.effects)
 }
 
 fn submit_and_process(
     runtime: &mut SerializedRuntime,
     event: DomainEvent,
-) -> Result<(), EngineError> {
+) -> Result<lumi_domain::ProcessResult, EngineError> {
     runtime
         .submit(event)
         .map_err(SerializedRuntimeError::from)?;
-    if runtime
+    let Some(processed) = runtime
         .process_next()
         .map_err(SerializedRuntimeError::from)?
-        .is_none()
-    {
+    else {
         return Err(EngineError::SubmittedEventMissing);
-    }
-    Ok(())
+    };
+    Ok(processed)
 }
 
 fn handle_command(
@@ -613,6 +732,29 @@ fn snapshot_envelope(
         "planningOptions".to_owned(),
         planning_options_json(&runtime.planning_worker.options()),
     );
+    payload.insert(
+        "outputProvider".to_owned(),
+        json!({
+            "providerKind": runtime.output_worker.provider.provider_kind(),
+            "status": "ready",
+            "recordCount": runtime.output_worker.provider.records().count(),
+        }),
+    );
+    payload.insert(
+        "activePlan".to_owned(),
+        state.active_plan().map_or(Value::Null, |plan| {
+            json!({
+                "planId": plan.id().value().to_string(),
+                "planRevision": plan.revision().value(),
+                "deckId": plan.deck_id().value(),
+                "trackLoadId": plan.track_load_id().value(),
+            })
+        }),
+    );
+    payload.insert(
+        "outputEffects".to_owned(),
+        Value::Array(state.output_effects().map(output_effect_json).collect()),
+    );
     let next_plan = state
         .decks()
         .find(|(deck_id, _)| Some(*deck_id) != state.leader_deck())
@@ -629,6 +771,25 @@ fn snapshot_envelope(
         correlation_id: correlation_id.to_owned(),
         sent_at: OffsetDateTime::now_utc().format(&Rfc3339)?,
         payload,
+    })
+}
+
+fn output_effect_json(result: &OutputEffectResult) -> Value {
+    let request = result.request();
+    json!({
+        "commandId": request.command_id().value(),
+        "planId": request.plan_id().value().to_string(),
+        "planRevision": request.plan_revision().value(),
+        "deckId": request.deck_id().value(),
+        "trackLoadId": request.track_load_id().value(),
+        "phraseIndex": request.phrase_index(),
+        "cueId": request.cue_id().value().to_string(),
+        "scheduledAt": request.scheduled_at().ticks(),
+        "actualAt": result.actual_at().ticks(),
+        "status": output_effect_status_name(result.status()),
+        "resultReason": output_effect_reason_name(result.reason()),
+        "cueReason": cue_reason_json(request.cue_reason()),
+        "action": action_json(request.action()),
     })
 }
 
@@ -709,6 +870,22 @@ const fn plan_status_name(status: PlanStatus) -> &'static str {
     match status {
         PlanStatus::Ready => "ready",
         PlanStatus::Fallback => "fallback",
+    }
+}
+
+const fn output_effect_status_name(status: OutputEffectStatus) -> &'static str {
+    match status {
+        OutputEffectStatus::Simulated => "simulated",
+        OutputEffectStatus::Rejected => "rejected",
+        OutputEffectStatus::Skipped => "skipped",
+    }
+}
+
+const fn output_effect_reason_name(reason: OutputEffectReason) -> &'static str {
+    match reason {
+        OutputEffectReason::PhraseBoundary => "phraseBoundary",
+        OutputEffectReason::ProviderRejected => "providerRejected",
+        OutputEffectReason::StaleExecutionContext => "staleExecutionContext",
     }
 }
 
@@ -799,6 +976,10 @@ const fn decision_reason_name(reason: DecisionReason) -> &'static str {
         DecisionReason::PositionAdvanced => "positionAdvanced",
         DecisionReason::PhraseChanged => "phraseChanged",
         DecisionReason::LeaderChanged => "leaderChanged",
+        DecisionReason::PlanActivated => "planActivated",
+        DecisionReason::PlanActivationSkipped => "planActivationSkipped",
+        DecisionReason::PhraseExecutionScheduled => "phraseExecutionScheduled",
+        DecisionReason::PhraseExecutionSkipped => "phraseExecutionSkipped",
         DecisionReason::TrackUnloaded => "trackUnloaded",
         DecisionReason::StaleObservationIgnored => "staleObservationIgnored",
         DecisionReason::ObservationTimeRegressed => "observationTimeRegressed",
@@ -811,6 +992,7 @@ const fn decision_reason_name(reason: DecisionReason) -> &'static str {
         DecisionReason::StalePlanIgnored => "stalePlanIgnored",
         DecisionReason::PlanTrackLoadMismatch => "planTrackLoadMismatch",
         DecisionReason::OutputGateConfirmedClosed => "outputGateConfirmedClosed",
+        DecisionReason::OutputEffectRecorded => "outputEffectRecorded",
         DecisionReason::QueueSaturated => "queueSaturated",
     }
 }
@@ -851,6 +1033,10 @@ pub enum EngineError {
     SubmittedEventMissing,
     #[error("the planning worker effect sequence overflowed")]
     PlanningEffectSequenceOverflow,
+    #[error("the output worker effect sequence overflowed")]
+    OutputEffectSequenceOverflow,
+    #[error("dry-run output failed: {0}")]
+    DryRunOutput(#[from] DryRunOutputError),
     #[error("the response sequence overflowed")]
     ResponseSequenceOverflow,
     #[error("the command ID cache could not initialize: {0}")]
@@ -860,6 +1046,9 @@ pub enum EngineError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use lumi_domain::{ClientId, CommandSequence, OperationCommand, UserCommandEnvelope};
+    use lumi_output_dry_run::canonical_output_transcript;
+    use lumi_simulator::{SimulationControl, SimulationSpeed};
 
     #[test]
     fn next_plan_is_ready_before_the_initial_leader_event() {
@@ -884,6 +1073,7 @@ mod tests {
             Err(error) => panic!("test simulator events must drain: {error}"),
         };
         let mut worker = PlanningWorker::new();
+        let mut output_worker = OutputWorker::new();
 
         for event in events {
             if matches!(
@@ -895,11 +1085,147 @@ mod tests {
             ) {
                 assert!(runtime.state().plan(lumi_domain::DeckId::new(2)).is_some());
             }
-            if let Err(error) =
-                worker.process_source_event(&mut runtime, event, source.leader_deck_id())
-            {
+            if let Err(error) = worker.process_source_event(
+                &mut runtime,
+                &mut output_worker,
+                event,
+                source.leader_deck_id(),
+            ) {
                 panic!("test source event must process: {error}");
             }
+        }
+    }
+
+    #[test]
+    fn live_execution_matches_the_canonical_dry_run_transcript() {
+        let clock = ManualClock::new(0);
+        let mut runtime = match initialized_runtime_with_clock(clock.clone()) {
+            Ok(runtime) => runtime,
+            Err(error) => panic!("test engine must initialize: {error}"),
+        };
+        apply_operation(&mut runtime, 1, OperationCommand::Arm);
+        apply_operation(&mut runtime, 2, OperationCommand::Start);
+        apply_simulation_control(&mut runtime, SimulationControl::AdvanceLeader);
+        apply_simulation_control(
+            &mut runtime,
+            SimulationControl::SetSpeed(SimulationSpeed::SixtyFour),
+        );
+        assert!(clock.advance(1_000).is_some());
+        if let Err(error) = runtime.deck_source.update_to_clock() {
+            panic!("test simulator must advance: {error}");
+        }
+        if let Err(error) = process_pending_source_events(&mut runtime) {
+            panic!("test source events must process: {error}");
+        }
+
+        let results = runtime
+            .state
+            .state()
+            .output_effects()
+            .cloned()
+            .collect::<Vec<_>>();
+        assert_eq!(results.len(), 4);
+        assert!(
+            results
+                .iter()
+                .all(|result| result.status() == OutputEffectStatus::Simulated)
+        );
+        let actual = match canonical_output_transcript(&results) {
+            Ok(actual) => actual,
+            Err(error) => panic!("test transcript must encode: {error}"),
+        };
+        assert_eq!(
+            actual,
+            include_bytes!("../../../../fixtures/demo-session-v1/output-effects.json")
+        );
+    }
+
+    #[test]
+    fn armed_and_paused_states_never_call_the_output_provider() {
+        let clock = ManualClock::new(0);
+        let mut runtime = match initialized_runtime_with_clock(clock.clone()) {
+            Ok(runtime) => runtime,
+            Err(error) => panic!("test engine must initialize: {error}"),
+        };
+        apply_operation(&mut runtime, 1, OperationCommand::Arm);
+        apply_simulation_control(&mut runtime, SimulationControl::AdvanceLeader);
+        assert_eq!(runtime.output_worker.provider.records().count(), 0);
+
+        apply_operation(&mut runtime, 2, OperationCommand::Start);
+        apply_operation(&mut runtime, 3, OperationCommand::Pause);
+        apply_simulation_control(
+            &mut runtime,
+            SimulationControl::SetSpeed(SimulationSpeed::SixtyFour),
+        );
+        assert!(clock.advance(1_000).is_some());
+        if let Err(error) = runtime.deck_source.update_to_clock() {
+            panic!("test simulator must advance: {error}");
+        }
+        if let Err(error) = process_pending_source_events(&mut runtime) {
+            panic!("test source events must process: {error}");
+        }
+        assert_eq!(runtime.output_worker.provider.records().count(), 0);
+        assert_eq!(runtime.state.state().operation(), OperationState::Paused);
+    }
+
+    #[test]
+    fn stale_execution_is_skipped_before_the_provider_call() {
+        let mut runtime = match initialized_runtime() {
+            Ok(runtime) => runtime,
+            Err(error) => panic!("test engine must initialize: {error}"),
+        };
+        apply_operation(&mut runtime, 1, OperationCommand::Arm);
+        apply_operation(&mut runtime, 2, OperationCommand::Start);
+        apply_simulation_control(&mut runtime, SimulationControl::AdvanceLeader);
+        let Some(request) = runtime
+            .state
+            .state()
+            .output_effects()
+            .next()
+            .map(|result| result.request().clone())
+        else {
+            panic!("live leader change must create the first output request");
+        };
+        assert_eq!(runtime.output_worker.provider.records().count(), 1);
+
+        apply_operation(&mut runtime, 3, OperationCommand::Pause);
+        if let Err(error) = runtime.output_worker.process_effects(
+            &mut runtime.state,
+            vec![lumi_domain::Effect::ExecuteCue(request)],
+        ) {
+            panic!("stale output must be recorded safely: {error}");
+        }
+
+        assert_eq!(runtime.output_worker.provider.records().count(), 1);
+        let Some(last) = runtime.state.state().output_effects().last() else {
+            panic!("skipped output must be retained");
+        };
+        assert_eq!(last.status(), OutputEffectStatus::Skipped);
+        assert_eq!(last.reason(), OutputEffectReason::StaleExecutionContext);
+    }
+
+    fn apply_operation(runtime: &mut EngineRuntime, sequence: u64, command: OperationCommand) {
+        let expected_state_revision = runtime.state.state().revision();
+        let event = DomainEvent::UserCommand(UserCommandEnvelope {
+            client_id: ClientId::new(1),
+            sequence: CommandSequence::new(sequence),
+            expected_state_revision,
+            issued_at: MonotonicTime::new(sequence),
+            command,
+        });
+        if let Err(error) =
+            process_domain_event(&mut runtime.state, &mut runtime.output_worker, event)
+        {
+            panic!("test operation must apply: {error}");
+        }
+    }
+
+    fn apply_simulation_control(runtime: &mut EngineRuntime, control: SimulationControl) {
+        if let Err(error) = runtime.deck_source.apply_control(control) {
+            panic!("test simulation control must apply: {error}");
+        }
+        if let Err(error) = process_pending_source_events(runtime) {
+            panic!("test source events must process: {error}");
         }
     }
 }

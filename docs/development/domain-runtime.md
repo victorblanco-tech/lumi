@@ -17,8 +17,9 @@ bounded ingress -> pure reducer -> state + decision + effects
                                       +-> effect results re-enter as events
 ```
 
-Effects are semantic requests. The reducer never performs I/O. Adapter workers
-will execute effects and return typed results in later increments.
+Effects are semantic requests. The reducer never performs I/O. The output
+worker revalidates the exact active plan and track-load context, calls the
+provider only while `LIVE`, and returns typed results through the same queue.
 
 ## Invariants
 
@@ -57,6 +58,6 @@ generates outside the reducer, and re-enters the result as `PlanGenerated`.
 That effect is fully reduced before the following leader event is accepted, so
 the complete plan exists before the transition path can use it.
 
-The operation transition table exists in the domain core, but the visible
-controls and output effects remain disabled until simulator preflight and dry-
-run execution are implemented in E1-06 through E1-10.
+The operation transition table and dry-run execution are active in the engine.
+Visible simulator and operation controls are added separately so Swift remains
+presentation-only.

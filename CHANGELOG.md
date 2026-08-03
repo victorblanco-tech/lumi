@@ -31,6 +31,8 @@ Lumi gebruikt [Semantic Versioning](https://semver.org/).
   scene, loop, revision en de reden achter iedere automatische keuze.
 - Theme- en scenekeuze, cue-locking en regenerate werken vanuit de inspector via
   revision-aware commands, inclusief conflict refresh en headless UI-bewijs.
+- Provider-onafhankelijke phrase-execution met een dubbel gevalideerde
+  operationele outputgate en een deterministische dry-run-adapter.
 
 ### Changed
 
@@ -42,6 +44,7 @@ Lumi gebruikt [Semantic Versioning](https://semver.org/).
   `0.0.4-dev`.
 - De interactieve next-plan vertical slice gebruikt ontwikkelversie
   `0.0.6-dev`.
+- De dry-run execution vertical slice gebruikt ontwikkelversie `0.0.7-dev`.
 
 ### Fixed
 

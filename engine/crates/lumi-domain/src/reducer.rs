@@ -3,7 +3,8 @@ use std::fmt;
 
 use crate::{
     DeckObservation, DomainEvent, DomainEventKind, EffectResult, MonotonicTime, OperationCommand,
-    OperationState, PlanRevision, RuntimeHealth, RuntimeState, StateRevision,
+    OperationState, OutputCommandId, OutputExecutionRequest, PlanRevision, PlanStatus,
+    RuntimeHealth, RuntimeState, StateRevision,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -14,6 +15,10 @@ pub enum DecisionReason {
     PositionAdvanced,
     PhraseChanged,
     LeaderChanged,
+    PlanActivated,
+    PlanActivationSkipped,
+    PhraseExecutionScheduled,
+    PhraseExecutionSkipped,
     TrackUnloaded,
     StaleObservationIgnored,
     ObservationTimeRegressed,
@@ -26,6 +31,7 @@ pub enum DecisionReason {
     StalePlanIgnored,
     PlanTrackLoadMismatch,
     OutputGateConfirmedClosed,
+    OutputEffectRecorded,
     QueueSaturated,
 }
 
@@ -45,9 +51,10 @@ pub struct Diagnostic {
     pub occurred_at: MonotonicTime,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Effect {
     EnsureOutputClosed { reason: DecisionReason },
+    ExecuteCue(OutputExecutionRequest),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -88,7 +95,7 @@ pub fn reduce(state: &RuntimeState, event: &DomainEvent) -> Result<Reduction, Re
     let mut next = state.clone();
     let (decision, effects, state_changed) = match event {
         DomainEvent::RuntimeStarted { .. } => reduce_runtime_started(&mut next)?,
-        DomainEvent::Observation(observation) => reduce_observation(&mut next, observation),
+        DomainEvent::Observation(observation) => reduce_observation(&mut next, observation)?,
         DomainEvent::UserCommand(command) => reduce_command(&mut next, command)?,
         DomainEvent::EffectResult(result) => reduce_effect_result(&mut next, result)?,
         DomainEvent::QueueOverloaded(overload) => {
@@ -146,13 +153,13 @@ fn reduce_runtime_started(
 fn reduce_observation(
     state: &mut RuntimeState,
     event: &crate::ObservationEnvelope,
-) -> (DecisionReason, Vec<Effect>, bool) {
+) -> Result<(DecisionReason, Vec<Effect>, bool), ReducerError> {
     if state
         .source_sequences
         .get(&event.source_id)
         .is_some_and(|last| event.sequence <= *last)
     {
-        return (DecisionReason::StaleObservationIgnored, Vec::new(), false);
+        return Ok((DecisionReason::StaleObservationIgnored, Vec::new(), false));
     }
     state
         .source_sequences
@@ -163,12 +170,13 @@ fn reduce_observation(
         .get(&event.source_id)
         .is_some_and(|last| event.observed_at < *last)
     {
-        return (DecisionReason::ObservationTimeRegressed, Vec::new(), false);
+        return Ok((DecisionReason::ObservationTimeRegressed, Vec::new(), false));
     }
     state
         .source_times
         .insert(event.source_id, event.observed_at);
 
+    let mut effects = Vec::new();
     let decision = match &event.observation {
         DeckObservation::SourceStatusChanged { status } => {
             state.source_statuses.insert(event.source_id, *status);
@@ -213,6 +221,13 @@ fn reduce_observation(
                 if state.leader_deck == Some(*deck_id) {
                     state.leader_deck = None;
                 }
+                if state
+                    .active_plan
+                    .as_ref()
+                    .is_some_and(|plan| plan.deck_id() == *deck_id)
+                {
+                    state.active_plan = None;
+                }
                 DecisionReason::TrackUnloaded
             }
             _ => DecisionReason::TrackLoadMismatch,
@@ -221,26 +236,60 @@ fn reduce_observation(
             deck_id,
             track_load_id,
             phrase_index,
-        } => match state.decks.get_mut(deck_id) {
-            Some(deck)
-                if deck.track_load_id() == *track_load_id
-                    && deck.metadata().phrase(*phrase_index).is_some() =>
-            {
-                deck.phrase_index = Some(*phrase_index);
-                deck.last_observed_at = event.observed_at;
+        } => {
+            let accepted = match state.decks.get_mut(deck_id) {
+                Some(deck)
+                    if deck.track_load_id() == *track_load_id
+                        && deck.metadata().phrase(*phrase_index).is_some() =>
+                {
+                    deck.phrase_index = Some(*phrase_index);
+                    deck.last_observed_at = event.observed_at;
+                    true
+                }
+                _ => false,
+            };
+            if !accepted {
+                DecisionReason::TrackLoadMismatch
+            } else if state.operation != OperationState::Live {
                 DecisionReason::PhraseChanged
+            } else if let Some(effect) = execution_effect(
+                state,
+                *deck_id,
+                *track_load_id,
+                *phrase_index,
+                event.observed_at,
+            )? {
+                effects.push(effect);
+                DecisionReason::PhraseExecutionScheduled
+            } else {
+                DecisionReason::PhraseExecutionSkipped
             }
-            _ => DecisionReason::TrackLoadMismatch,
-        },
+        }
         DeckObservation::LeaderChanged {
             deck_id,
             track_load_id,
         } => match state.decks.get(deck_id) {
             Some(deck) if deck.track_load_id() == *track_load_id => {
                 state.leader_deck = Some(*deck_id);
-                DecisionReason::LeaderChanged
+                state.active_plan = state
+                    .plans
+                    .get(deck_id)
+                    .filter(|plan| {
+                        plan.status() == PlanStatus::Ready
+                            && plan.track_load_id() == *track_load_id
+                            && plan.track_id() == deck.track_id()
+                    })
+                    .cloned();
+                if state.active_plan.is_some() {
+                    DecisionReason::PlanActivated
+                } else {
+                    DecisionReason::PlanActivationSkipped
+                }
             }
-            _ => DecisionReason::TrackLoadMismatch,
+            _ => {
+                state.active_plan = None;
+                DecisionReason::TrackLoadMismatch
+            }
         },
     };
 
@@ -251,9 +300,55 @@ fn reduce_observation(
             | DecisionReason::PositionAdvanced
             | DecisionReason::TrackUnloaded
             | DecisionReason::PhraseChanged
-            | DecisionReason::LeaderChanged
+            | DecisionReason::PlanActivated
+            | DecisionReason::PlanActivationSkipped
+            | DecisionReason::PhraseExecutionScheduled
+            | DecisionReason::PhraseExecutionSkipped
     );
-    (decision, Vec::new(), state_changed)
+    Ok((decision, effects, state_changed))
+}
+
+fn execution_effect(
+    state: &mut RuntimeState,
+    deck_id: crate::DeckId,
+    track_load_id: crate::TrackLoadId,
+    phrase_index: u16,
+    scheduled_at: MonotonicTime,
+) -> Result<Option<Effect>, ReducerError> {
+    if state.leader_deck != Some(deck_id) {
+        return Ok(None);
+    }
+    let Some(plan) = state.active_plan.as_ref() else {
+        return Ok(None);
+    };
+    if plan.deck_id() != deck_id || plan.track_load_id() != track_load_id {
+        return Ok(None);
+    }
+    let Some(cue) = plan
+        .cues()
+        .get(usize::from(phrase_index))
+        .filter(|cue| cue.phrase_index() == phrase_index)
+    else {
+        return Ok(None);
+    };
+    let command_sequence = state
+        .output_command_sequence
+        .checked_add(1)
+        .ok_or(ReducerError::OutputCommandSequenceOverflow)?;
+    let request = OutputExecutionRequest::new(
+        OutputCommandId::new(command_sequence),
+        plan.id(),
+        plan.revision(),
+        deck_id,
+        track_load_id,
+        phrase_index,
+        cue.id(),
+        cue.action().clone(),
+        cue.reason(),
+        scheduled_at,
+    );
+    state.output_command_sequence = command_sequence;
+    Ok(Some(Effect::ExecuteCue(request)))
 }
 
 fn reduce_command(
@@ -300,11 +395,17 @@ fn reduce_command(
         .command_sequences
         .insert(event.client_id, event.sequence);
     state.operation = target;
-    Ok((
-        DecisionReason::OperationTransitionAccepted,
-        Vec::new(),
-        true,
-    ))
+    if target == OperationState::Off {
+        state.active_plan = None;
+    }
+    let effects = if matches!(target, OperationState::Paused | OperationState::Off) {
+        vec![Effect::EnsureOutputClosed {
+            reason: DecisionReason::OperationTransitionAccepted,
+        }]
+    } else {
+        Vec::new()
+    };
+    Ok((DecisionReason::OperationTransitionAccepted, effects, true))
 }
 
 fn reduce_effect_result(
@@ -351,6 +452,10 @@ fn reduce_effect_result(
             state.plans.insert(plan.deck_id(), plan.clone());
             Ok((DecisionReason::PlanAccepted, Vec::new(), true))
         }
+        EffectResult::OutputEffectRecorded(result) => {
+            state.push_output_effect(result.clone());
+            Ok((DecisionReason::OutputEffectRecorded, Vec::new(), true))
+        }
         EffectResult::OutputGateClosed => {
             Ok((DecisionReason::OutputGateConfirmedClosed, Vec::new(), false))
         }
@@ -374,6 +479,7 @@ pub enum ReducerError {
     },
     StateRevisionOverflow,
     PlanRevisionOverflow,
+    OutputCommandSequenceOverflow,
     ProcessedEventOverflow,
 }
 
@@ -401,6 +507,9 @@ impl fmt::Display for ReducerError {
             ),
             Self::StateRevisionOverflow => formatter.write_str("state revision overflow"),
             Self::PlanRevisionOverflow => formatter.write_str("plan revision overflow"),
+            Self::OutputCommandSequenceOverflow => {
+                formatter.write_str("output command sequence overflow")
+            }
             Self::ProcessedEventOverflow => formatter.write_str("processed event counter overflow"),
         }
     }

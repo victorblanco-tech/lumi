@@ -1,6 +1,7 @@
 use crate::{
     ClientId, CommandSequence, DeckId, DeckSourceStatus, EffectId, EffectSequence, LightingPlan,
-    MonotonicTime, SourceId, SourceSequence, StateRevision, TrackLoadId, TrackMetadata, WorkerId,
+    MonotonicTime, OutputEffectResult, SourceId, SourceSequence, StateRevision, TrackLoadId,
+    TrackMetadata, WorkerId,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -61,6 +62,7 @@ pub struct UserCommandEnvelope {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EffectResult {
     PlanGenerated(LightingPlan),
+    OutputEffectRecorded(OutputEffectResult),
     OutputGateClosed,
 }
 

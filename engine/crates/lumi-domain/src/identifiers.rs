@@ -23,6 +23,7 @@ numeric_identifier!(CueId, u64);
 numeric_identifier!(DeckId, u8);
 numeric_identifier!(EffectId, u64);
 numeric_identifier!(EffectSequence, u64);
+numeric_identifier!(OutputCommandId, u64);
 numeric_identifier!(PlanId, u64);
 numeric_identifier!(PlanConfigurationRevision, u64);
 numeric_identifier!(PlanRevision, u64);

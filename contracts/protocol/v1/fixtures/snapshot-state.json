@@ -9,7 +9,7 @@
     "kind": "stateSnapshot",
     "stateRevision": 8,
     "operationState": "armed",
-    "engineVersion": "0.0.6-dev",
+    "engineVersion": "0.0.7-dev",
     "runtimeCore": {
       "model": "singleWriterReducer",
       "health": "ready",
@@ -83,6 +83,13 @@
         { "id": 10, "name": "Slow Wave", "category": "break", "loopBank": 5, "loopSlot": 2 }
       ]
     },
+    "outputProvider": {
+      "providerKind": "dryRun",
+      "status": "ready",
+      "recordCount": 0
+    },
+    "activePlan": null,
+    "outputEffects": [],
     "nextPlan": {
       "planId": "14113485664261432828",
       "deckId": 2,

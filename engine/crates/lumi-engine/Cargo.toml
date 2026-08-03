@@ -8,6 +8,8 @@ license.workspace = true
 [dependencies]
 lumi-deck-source = { path = "../lumi-deck-source" }
 lumi-domain = { path = "../lumi-domain" }
+lumi-lighting-output = { path = "../lumi-lighting-output" }
+lumi-output-dry-run = { path = "../lumi-output-dry-run" }
 lumi-planner = { path = "../lumi-planner" }
 lumi-protocol = { path = "../lumi-protocol" }
 lumi-simulator = { path = "../lumi-simulator" }
