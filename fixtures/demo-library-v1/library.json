@@ -1,0 +1,77 @@
+{
+  "schemaVersion": 1,
+  "source": {
+    "id": "lumi-demo-library",
+    "kind": "demo",
+    "displayName": "Lumi Demo Library",
+    "revision": "demo-library-v1"
+  },
+  "playlists": [
+    {
+      "sourcePlaylistId": "all-demo-tracks",
+      "name": "All Demo Tracks",
+      "trackIds": ["horizon-lines", "afterglow-drive", "northern-pulse"]
+    },
+    {
+      "sourcePlaylistId": "peak-time",
+      "name": "Peak Time",
+      "trackIds": ["afterglow-drive", "northern-pulse"]
+    }
+  ],
+  "tracks": [
+    {
+      "sourceTrackId": "horizon-lines",
+      "analysisRevision": "horizon-lines-v1",
+      "title": "Horizon Lines",
+      "artist": "Lumi Procedural Audio",
+      "bpmMilli": 124000,
+      "key": { "pitchClass": "a", "mode": "minor" },
+      "color": { "red": 72, "green": 112, "blue": 205 },
+      "audioUri": "lumi-demo://audio/horizon-lines",
+      "beatGrid": { "barCount": 32 },
+      "waveformSeed": 1701,
+      "rawPhrases": [
+        { "startBar": 0, "endBar": 8, "label": "Intro" },
+        { "startBar": 8, "endBar": 16, "label": "Breakdown" },
+        { "startBar": 16, "endBar": 24, "label": "Up" },
+        { "startBar": 24, "endBar": 32, "label": "Chorus" }
+      ]
+    },
+    {
+      "sourceTrackId": "afterglow-drive",
+      "analysisRevision": "afterglow-drive-v1",
+      "title": "Afterglow Drive",
+      "artist": "Lumi Procedural Audio",
+      "bpmMilli": 128000,
+      "key": { "pitchClass": "fSharp", "mode": "minor" },
+      "color": { "red": 187, "green": 72, "blue": 126 },
+      "audioUri": "lumi-demo://audio/afterglow-drive",
+      "beatGrid": { "barCount": 40 },
+      "waveformSeed": 2602,
+      "rawPhrases": [
+        { "startBar": 0, "endBar": 8, "label": "Intro" },
+        { "startBar": 8, "endBar": 20, "label": "Verse" },
+        { "startBar": 20, "endBar": 28, "label": "Up 2" },
+        { "startBar": 28, "endBar": 40, "label": "Chorus" }
+      ]
+    },
+    {
+      "sourceTrackId": "northern-pulse",
+      "analysisRevision": "northern-pulse-v1",
+      "title": "Northern Pulse",
+      "artist": "Lumi Procedural Audio",
+      "bpmMilli": 138000,
+      "key": { "pitchClass": "d", "mode": "minor" },
+      "color": { "red": 35, "green": 168, "blue": 190 },
+      "audioUri": "lumi-demo://audio/northern-pulse",
+      "beatGrid": { "barCount": 36 },
+      "waveformSeed": 3903,
+      "rawPhrases": [
+        { "startBar": 0, "endBar": 4, "label": "Intro" },
+        { "startBar": 4, "endBar": 16, "label": "Breakdown 2" },
+        { "startBar": 16, "endBar": 24, "label": "Up 3" },
+        { "startBar": 24, "endBar": 36, "label": "Chorus" }
+      ]
+    }
+  ]
+}

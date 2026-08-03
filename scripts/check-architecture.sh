@@ -15,6 +15,17 @@ reject_dependency() {
   fi
 }
 
+reject_product_dependency() {
+  local manifest="$1"
+  local pattern="$2"
+  local explanation="$3"
+  if sed -n '/^\[dependencies\]/,/^\[/p' "$repository_root/$manifest" \
+    | grep -Eq "$pattern"; then
+    echo "ERROR: $explanation" >&2
+    exit 1
+  fi
+}
+
 if grep -q '^\[dependencies\]' "$repository_root/engine/crates/lumi-domain/Cargo.toml"; then
   echo "ERROR: lumi-domain must remain dependency-free." >&2
   exit 1
@@ -36,6 +47,22 @@ reject_dependency \
   "engine/crates/lumi-lighting-output/Cargo.toml" \
   'lumi-(engine|simulator|planner|output-dry-run|protocol)' \
   "the output port may not depend on adapters or application orchestration."
+reject_dependency \
+  "engine/crates/lumi-library/Cargo.toml" \
+  'lumi-(engine|simulator|planner|protocol|deck-source|lighting-output|output-dry-run|library-source|library-demo|library-sqlite)' \
+  "the canonical library model and repository port may depend inward on the domain only."
+reject_dependency \
+  "engine/crates/lumi-library-source/Cargo.toml" \
+  'lumi-(domain|engine|simulator|planner|protocol|deck-source|lighting-output|output-dry-run|library-demo|library-sqlite)' \
+  "the library source port may depend only on the canonical library model."
+reject_dependency \
+  "engine/crates/lumi-library-demo/Cargo.toml" \
+  'lumi-(engine|simulator|planner|protocol|deck-source|lighting-output|output-dry-run|library-sqlite)' \
+  "the demo library source must remain independent from runtime, transport, and persistence adapters."
+reject_product_dependency \
+  "engine/crates/lumi-library-sqlite/Cargo.toml" \
+  'lumi-(engine|simulator|planner|protocol|deck-source|lighting-output|output-dry-run|library-source|library-demo)' \
+  "the SQLite library adapter may depend inward on the canonical model only."
 
 reject_dependency \
   "apps/macos/Packages/LumiDesignSystem/Package.swift" \

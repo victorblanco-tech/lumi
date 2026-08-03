@@ -1,0 +1,17 @@
+[package]
+name = "lumi-library-demo"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+lumi-domain = { path = "../lumi-domain" }
+lumi-library = { path = "../lumi-library" }
+lumi-library-source = { path = "../lumi-library-source" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[lints]
+workspace = true

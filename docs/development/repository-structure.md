@@ -25,11 +25,14 @@ Wire contracts and fixtures are boundary artifacts, not dumping grounds for
 cross-language business logic. Provider-specific deck and lighting types stay
 behind their adapters.
 
-The future `lumi-library-source` port owns immutable source baselines from local
-music-library adapters. The first adapter targets closed Rekordbox 7 snapshots.
-Canonical tracks, editable phrase timelines, and their revisions belong to Lumi
-and must never depend on Rekordbox storage types. Library persistence is accessed
-through an application-owned repository port; SQL stays in an outer adapter.
+`lumi-library-source` owns the provider contract for immutable analysis
+baselines from local music-library adapters. `lumi-library` owns canonical
+tracks, the application-owned repository port, configurable phrase roles, and
+editable phrase timeline revisions. `lumi-library-demo` supplies deterministic,
+license-safe development data; `lumi-library-sqlite` is the local persistence
+adapter. The later Rekordbox 7 adapter will implement the source port and may
+only emit canonical baseline types. Rekordbox storage types and SQL never cross
+into Lumi's model.
 
 `lumi-deck-source` owns the application-facing deck observation port.
 `lumi-simulator` is one adapter for that port and maps a license-safe fixture

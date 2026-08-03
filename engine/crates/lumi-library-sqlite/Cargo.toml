@@ -1,0 +1,19 @@
+[package]
+name = "lumi-library-sqlite"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+lumi-domain = { path = "../lumi-domain" }
+lumi-library = { path = "../lumi-library" }
+rusqlite = { version = "0.40.1", features = ["bundled"] }
+thiserror = "2"
+
+[dev-dependencies]
+lumi-library-demo = { path = "../lumi-library-demo" }
+lumi-library-source = { path = "../lumi-library-source" }
+
+[lints]
+workspace = true

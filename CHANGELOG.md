@@ -27,6 +27,13 @@ Lumi gebruikt [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Provider-neutrale music-librarycontracten, stabiele bron- en trackidentiteiten,
+  playlists en gereviseerde Lumi phrase-timelines voor Epic 2A.
+- Lokale SQLite-persistence met transactionele migraties, rollback-bewijs,
+  optimistische concurrency en begrensde track-, playlist- en historyqueries.
+- Een expliciete offline demoprovider met synthetische metadata, kleuren,
+  beatgrids, waveforms, phrases, playlists en procedureel PCM-audio, plus een
+  10.000-track schaalfixture.
 - Initiële functionele en technische architectuurbaseline.
 - Eerste Rust-workspace, native macOS-target en reproduceerbare
   foundationverificatie voor Epic 1.
