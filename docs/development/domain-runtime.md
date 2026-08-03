@@ -28,7 +28,8 @@ will execute effects and return typed results in later increments.
   duplicates and stale input still increase the separate processed-event count.
 - Playback observations apply only to the exact current `TrackLoadId`.
 - Plan revision 1 is initial; later accepted revisions increase exactly by one.
-- A plan applies only to the deck and track-load instance it was built for.
+- A plan applies only to the deck, track, and track-load instance it was built
+  for.
 - Runtime decisions use injected `MonotonicTime`; wall-clock time stays at the
   wire/logging boundary.
 - Expected conflicts and invalid transitions return typed errors.
@@ -50,6 +51,11 @@ reducer. The protocol snapshot exposes a presentation-safe `runtimeCore`
 summary. The macOS workspace shows its model, health, queue usage, state
 revision, processed-event count, and latest structured decision. Domain structs
 remain private to Rust and are not wire DTOs.
+
+The application planning worker processes a Next `TrackLoaded` observation,
+generates outside the reducer, and re-enters the result as `PlanGenerated`.
+That effect is fully reduced before the following leader event is accepted, so
+the complete plan exists before the transition path can use it.
 
 The operation transition table exists in the domain core, but the visible
 controls and output effects remain disabled until simulator preflight and dry-

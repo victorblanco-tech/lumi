@@ -1,9 +1,10 @@
 use lumi_domain::{
-    ClientId, CommandSequence, CueId, DecisionReason, DeckId, DeckObservation, DomainEvent,
-    DomainEventKind, Effect, EffectId, EffectResult, EffectResultEnvelope, EffectSequence,
-    IngressError, IngressOutcome, KeyMode, LightingCue, LightingPlan, MonotonicTime, MusicalKey,
-    ObservationEnvelope, OperationCommand, OperationState, PhraseKind, PitchClass, PlanId,
-    PlanRevision, ReducerError, RuntimeHealth, SceneId, SemanticLightingAction, SerializedRuntime,
+    ClientId, CommandSequence, CueId, CueOrigin, CueReason, DecisionReason, DeckId,
+    DeckObservation, DomainEvent, DomainEventKind, Effect, EffectId, EffectResult,
+    EffectResultEnvelope, EffectSequence, IngressError, IngressOutcome, KeyMode, LightingCue,
+    LightingPlan, MonotonicTime, MusicalKey, ObservationEnvelope, OperationCommand, OperationState,
+    PhraseKind, PitchClass, PlanConfigurationRevision, PlanId, PlanRevision, PlanStatus,
+    ReducerError, RuntimeHealth, SceneCategory, SemanticLightingAction, SerializedRuntime,
     SourceId, SourceSequence, StateRevision, TrackId, TrackLoadId, TrackMetadata, TrackPhrase,
     UserCommandEnvelope, WorkerId,
 };
@@ -320,12 +321,24 @@ fn plan(revision: PlanRevision, track_load_id: TrackLoadId) -> LightingPlan {
     let result = LightingPlan::try_new(
         PlanId::new(1),
         DeckId::new(1),
+        TrackId::new(100),
+        128,
         track_load_id,
         revision,
+        PlanConfigurationRevision::new(1),
+        1,
+        PlanStatus::Ready,
         vec![LightingCue::new(
             CueId::new(1),
             0,
-            SemanticLightingAction::SelectScene(SceneId::new(7)),
+            0,
+            128,
+            SemanticLightingAction::HoldCurrentLook,
+            CueOrigin::Automatic,
+            CueReason::PhraseCategoryMatched {
+                phrase_kind: PhraseKind::Intro,
+                category: SceneCategory::Ambient,
+            },
         )],
     );
     match result {

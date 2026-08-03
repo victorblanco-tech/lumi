@@ -10,6 +10,7 @@ required_paths=(
   "engine/crates/lumi-domain"
   "engine/crates/lumi-deck-source"
   "engine/crates/lumi-engine"
+  "engine/crates/lumi-planner"
   "engine/crates/lumi-protocol"
   "engine/crates/lumi-simulator"
   "apps/macos/Lumi.xcodeproj"
@@ -21,6 +22,7 @@ required_paths=(
   "fixtures"
   "fixtures/demo-session-v1/session.json"
   "fixtures/demo-session-v1/initial-transcript.ndjson"
+  "fixtures/demo-session-v1/next-plan.json"
   "docs"
   "scripts"
 )

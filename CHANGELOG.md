@@ -25,6 +25,10 @@ Lumi gebruikt [Semantic Versioning](https://semver.org/).
   canonieke track-, beat- en phrasefixtures, versnelde klok en golden transcript.
 - De macOS-app toont Live en Next vanuit de echte enginesnapshot, inclusief
   BPM en configureerbare Camelot-/klassieke keynotatie.
+- Deterministische next-trackplanner met geïnjecteerde keuzebron, minimale
+  phrasecompatibele scene-catalogus, machineleesbare redenen en veilige fallback.
+- Het echte vooraf berekende Next-plan is in de macOS-app zichtbaar met theme,
+  scene, loop, revision en de reden achter iedere automatische keuze.
 
 ### Changed
 
@@ -32,6 +36,8 @@ Lumi gebruikt [Semantic Versioning](https://semver.org/).
   op `0.0.1-dev`.
 - De volgende functionele bouwstap gebruikt ontwikkelversie `0.0.2-dev`.
 - De simulator vertical slice gebruikt ontwikkelversie `0.0.3-dev`.
+- De deterministische planner vertical slice gebruikt ontwikkelversie
+  `0.0.4-dev`.
 
 ### Fixed
 

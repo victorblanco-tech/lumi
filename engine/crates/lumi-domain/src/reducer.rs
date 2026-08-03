@@ -327,7 +327,7 @@ fn reduce_effect_result(
             let Some(deck) = state.decks.get(&plan.deck_id()) else {
                 return Ok((DecisionReason::PlanTrackLoadMismatch, Vec::new(), false));
             };
-            if deck.track_load_id() != plan.track_load_id() {
+            if deck.track_load_id() != plan.track_load_id() || deck.track_id() != plan.track_id() {
                 return Ok((DecisionReason::PlanTrackLoadMismatch, Vec::new(), false));
             }
 

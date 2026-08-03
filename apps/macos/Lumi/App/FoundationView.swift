@@ -6,7 +6,7 @@ struct FoundationView: View {
     @ObservedObject var engineStatus: EngineStatusModel
     @Bindable var preferences: LumiPreferences
 
-    @State private var selectedPhrase = 0
+    @State private var selectedPhrase: UInt64 = 0
 
     private var productVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "LumiProductVersion") as? String
@@ -24,7 +24,7 @@ struct FoundationView: View {
                     enginePanel
                     runtimePanel
                     deckSourceWorkspace
-                    planPreview
+                    planWorkspace
                 }
                 .padding(LumiSpacing.xLarge)
             }
@@ -125,64 +125,92 @@ struct FoundationView: View {
         }
     }
 
-    private var planPreview: some View {
+    private var planWorkspace: some View {
         VStack(alignment: .leading, spacing: LumiSpacing.large) {
             HStack {
-                Text("design.preview.planWorkspace")
+                Text("planning.workspace.title")
                     .font(LumiTypography.sectionTitle)
-                StatusBadge("design.preview.sampleData", state: .empty)
+                if let context = nextPlanContext {
+                    let format = String(localized: "planning.revision.detail")
+                    Text(
+                        verbatim: String.localizedStringWithFormat(
+                            format,
+                            context.plan.revision,
+                            context.plan.configurationRevision
+                        )
+                    )
+                    .font(LumiTypography.technical)
+                    .foregroundStyle(LumiColor.textSecondary)
+                }
+                StatusBadge(planBadge.label, state: planBadge.state)
                 Spacer()
             }
 
-            HStack(alignment: .top, spacing: LumiSpacing.large) {
-                phrasePanel
-                inspectorPanel
-                    .frame(minWidth: 260, idealWidth: 300, maxWidth: 320)
+            if let context = nextPlanContext {
+                HStack(alignment: .top, spacing: LumiSpacing.large) {
+                    phrasePanel(plan: context.plan, deck: context.deck)
+                    inspectorPanel(plan: context.plan)
+                        .frame(minWidth: 260, idealWidth: 300, maxWidth: 320)
+                }
+            } else {
+                LumiPanel {
+                    Text("planning.status.waiting")
+                        .font(LumiTypography.body)
+                        .foregroundStyle(LumiColor.textSecondary)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
 
             operationPreview
-            statePreview
         }
     }
 
-    private var phrasePanel: some View {
+    private func phrasePanel(
+        plan: EnginePlanViewState,
+        deck: EngineDeckViewState
+    ) -> some View {
         LumiPanel {
             VStack(alignment: .leading, spacing: LumiSpacing.small) {
-                Text("design.preview.phrasePlan")
+                Text("planning.phrasePlan.title")
                     .font(LumiTypography.sectionTitle)
-                PhraseRow(
-                    phrase: "Intro",
-                    range: "00:00–00:32",
-                    scene: "Soft Motion · Loop 1",
-                    isLocked: false,
-                    isSelected: selectedPhrase == 0,
-                    action: { selectedPhrase = 0 }
-                )
-                PhraseRow(
-                    phrase: "Breakdown",
-                    range: "00:32–01:04",
-                    scene: "Neon Pulse · Loop 3",
-                    isLocked: true,
-                    isSelected: selectedPhrase == 1,
-                    action: { selectedPhrase = 1 }
-                )
+                ForEach(plan.cues) { cue in
+                    PhraseRow(
+                        phrase: phraseTitle(cue),
+                        range: timeRange(cue, bpmMilli: deck.bpmMilli),
+                        scene: cueSummary(cue),
+                        isLocked: false,
+                        isSelected: selectedPhrase == cue.phraseIndex,
+                        action: { selectedPhrase = cue.phraseIndex }
+                    )
+                }
             }
         }
         .frame(maxWidth: .infinity)
     }
 
-    private var inspectorPanel: some View {
-        LumiPanel {
+    private func inspectorPanel(plan: EnginePlanViewState) -> some View {
+        let cue = selectedCue(in: plan)
+        return LumiPanel {
             VStack(alignment: .leading, spacing: LumiSpacing.large) {
                 Text("design.preview.inspector")
                     .font(LumiTypography.sectionTitle)
-                InspectorField("design.preview.theme") {
-                    Text("design.preview.themeValue")
+                if let cue {
+                    InspectorField("design.preview.theme") {
+                        Text(verbatim: themeName(cue))
+                            .font(LumiTypography.body)
+                    }
+                    InspectorField("design.preview.scene") {
+                        Text(verbatim: sceneName(cue))
+                            .font(LumiTypography.body)
+                    }
+                    InspectorField("planning.inspector.reason") {
+                        Text(verbatim: reasonSummary(cue))
+                            .font(LumiTypography.body)
+                    }
+                } else {
+                    Text("planning.status.waiting")
                         .font(LumiTypography.body)
-                }
-                InspectorField("design.preview.scene") {
-                    Text(selectedPhrase == 0 ? "Soft Motion" : "Neon Pulse")
-                        .font(LumiTypography.body)
+                        .foregroundStyle(LumiColor.textSecondary)
                 }
             }
         }
@@ -221,14 +249,6 @@ struct FoundationView: View {
         }
     }
 
-    private var statePreview: some View {
-        HStack(spacing: LumiSpacing.small) {
-            ForEach(LumiComponentState.allCases, id: \.self) { state in
-                StatusBadge(state.titleKey, state: state)
-            }
-        }
-    }
-
     private var keyFormatter: KeyNotationFormatter {
         KeyNotationFormatter(notation: preferences.keyNotation)
     }
@@ -240,6 +260,90 @@ struct FoundationView: View {
         return engine.deckSource.status == "ready"
             ? ("design.state.ready", .ready)
             : ("design.state.degraded", .degraded)
+    }
+
+    private var nextPlanContext: (plan: EnginePlanViewState, deck: EngineDeckViewState)? {
+        guard case let .ready(engine) = engineStatus.state,
+              let plan = engine.nextPlan,
+              let deck = engine.decks.first(where: { $0.deckID == plan.deckID }) else {
+            return nil
+        }
+        return (plan, deck)
+    }
+
+    private var planBadge: (label: LocalizedStringKey, state: LumiComponentState) {
+        guard let plan = nextPlanContext?.plan else {
+            return ("design.state.loading", .loading)
+        }
+        return plan.status == "ready"
+            ? ("planning.status.ready", .ready)
+            : ("planning.status.fallback", .degraded)
+    }
+
+    private func selectedCue(in plan: EnginePlanViewState) -> EnginePlanCueViewState? {
+        plan.cues.first(where: { $0.phraseIndex == selectedPhrase }) ?? plan.cues.first
+    }
+
+    private func phraseTitle(_ cue: EnginePlanCueViewState) -> String {
+        switch cue.reason {
+        case let .phraseCategoryMatched(phraseKind, _):
+            String(localized: String.LocalizationValue("phrase.kind.\(phraseKind)"))
+        case .missingPhraseAnalysis:
+            String(localized: "phrase.kind.fallback")
+        }
+    }
+
+    private func timeRange(_ cue: EnginePlanCueViewState, bpmMilli: UInt64) -> String {
+        "\(time(cue.startBeat, bpmMilli: bpmMilli))–\(time(cue.endBeat, bpmMilli: bpmMilli))"
+    }
+
+    private func time(_ beat: UInt64, bpmMilli: UInt64) -> String {
+        guard bpmMilli > 0 else { return "00:00" }
+        let seconds = Int((Double(beat) * 60_000 / Double(bpmMilli)).rounded(.down))
+        return String(
+            format: "%02d:%02d",
+            locale: Locale(identifier: "en_US_POSIX"),
+            seconds / 60,
+            seconds % 60
+        )
+    }
+
+    private func cueSummary(_ cue: EnginePlanCueViewState) -> String {
+        switch cue.action {
+        case let .applyLook(_, sceneName, _, loopBank, loopSlot):
+            let format = String(localized: "planning.cue.look")
+            return String.localizedStringWithFormat(format, sceneName, loopBank, loopSlot)
+        case .holdCurrentLook:
+            return String(localized: "planning.cue.hold")
+        }
+    }
+
+    private func themeName(_ cue: EnginePlanCueViewState) -> String {
+        switch cue.action {
+        case let .applyLook(themeName, _, _, _, _): themeName
+        case .holdCurrentLook: String(localized: "planning.value.notAvailable")
+        }
+    }
+
+    private func sceneName(_ cue: EnginePlanCueViewState) -> String {
+        switch cue.action {
+        case let .applyLook(_, sceneName, _, _, _): sceneName
+        case .holdCurrentLook: String(localized: "planning.cue.hold")
+        }
+    }
+
+    private func reasonSummary(_ cue: EnginePlanCueViewState) -> String {
+        switch cue.reason {
+        case let .phraseCategoryMatched(_, category):
+            let format = String(localized: "planning.reason.phraseMatched")
+            return String.localizedStringWithFormat(
+                format,
+                phraseTitle(cue),
+                String(localized: String.LocalizationValue("scene.category.\(category)"))
+            )
+        case .missingPhraseAnalysis:
+            return String(localized: "planning.reason.missingAnalysis")
+        }
     }
 
     private func orderedDecks(from engine: EngineReadyViewState) -> [EngineDeckViewState] {

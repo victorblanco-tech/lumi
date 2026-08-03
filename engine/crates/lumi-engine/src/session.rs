@@ -5,8 +5,13 @@ use std::time::Duration;
 
 use lumi_deck_source::DeckSourceProvider as _;
 use lumi_domain::{
-    DecisionReason, DeckSourceStatus, DomainEvent, KeyMode, MonotonicTime, OperationState,
-    PhraseKind, PitchClass, RuntimeHealth, SerializedRuntime, SerializedRuntimeError,
+    CueOrigin, CueReason, DecisionReason, DeckObservation, DeckSourceStatus, DomainEvent, EffectId,
+    EffectResult, EffectResultEnvelope, EffectSequence, KeyMode, LightingPlan, MonotonicTime,
+    OperationState, PhraseKind, PitchClass, PlanStatus, RuntimeHealth, SceneCategory,
+    SemanticLightingAction, SerializedRuntime, SerializedRuntimeError, WorkerId,
+};
+use lumi_planner::{
+    DeterministicPlanner, PlannerError, PlannerTrack, PlanningInput, StableChoiceSource,
 };
 use lumi_protocol::{MessageEnvelope, MessageType, PROTOCOL_VERSION};
 use lumi_simulator::{ManualClock, SimulatorDeckSourceProvider, SimulatorError};
@@ -143,33 +148,95 @@ struct EngineRuntime {
 fn initialized_runtime() -> Result<EngineRuntime, EngineError> {
     let mut runtime =
         SerializedRuntime::try_new(EVENT_QUEUE_CAPACITY).map_err(SerializedRuntimeError::from)?;
-    runtime
-        .submit(DomainEvent::RuntimeStarted {
+    submit_and_process(
+        &mut runtime,
+        DomainEvent::RuntimeStarted {
             at: MonotonicTime::new(0),
-        })
+        },
+    )?;
+    let mut deck_source = SimulatorDeckSourceProvider::demo(ManualClock::new(0))?;
+    let mut planning_worker = PlanningWorker::new();
+    for event in deck_source.drain_events()? {
+        planning_worker.process_source_event(&mut runtime, event, deck_source.leader_deck_id())?;
+    }
+    Ok(EngineRuntime {
+        state: runtime,
+        deck_source,
+    })
+}
+
+struct PlanningWorker {
+    planner: DeterministicPlanner<StableChoiceSource>,
+    effect_sequence: u64,
+}
+
+impl PlanningWorker {
+    fn new() -> Self {
+        Self {
+            planner: DeterministicPlanner::epic_one(),
+            effect_sequence: 0,
+        }
+    }
+
+    fn process_source_event(
+        &mut self,
+        runtime: &mut SerializedRuntime,
+        event: DomainEvent,
+        leader_deck_id: lumi_domain::DeckId,
+    ) -> Result<(), EngineError> {
+        let planning_input = match &event {
+            DomainEvent::Observation(observation) => match &observation.observation {
+                DeckObservation::TrackLoaded {
+                    deck_id,
+                    metadata,
+                    track_load_id,
+                } if *deck_id != leader_deck_id => Some(PlanningInput {
+                    deck_id: *deck_id,
+                    track_load_id: *track_load_id,
+                    track: PlannerTrack::analyzed(metadata),
+                }),
+                _ => None,
+            },
+            _ => None,
+        };
+        let observed_at = event.monotonic_time();
+        submit_and_process(runtime, event)?;
+        if let Some(input) = planning_input {
+            self.effect_sequence = self
+                .effect_sequence
+                .checked_add(1)
+                .ok_or(EngineError::PlanningEffectSequenceOverflow)?;
+            let plan = self.planner.generate(&input)?;
+            submit_and_process(
+                runtime,
+                DomainEvent::EffectResult(EffectResultEnvelope {
+                    effect_id: EffectId::new(self.effect_sequence),
+                    worker_id: WorkerId::new(1),
+                    sequence: EffectSequence::new(self.effect_sequence),
+                    completed_at: observed_at,
+                    result: EffectResult::PlanGenerated(plan),
+                }),
+            )?;
+        }
+        Ok(())
+    }
+}
+
+fn submit_and_process(
+    runtime: &mut SerializedRuntime,
+    event: DomainEvent,
+) -> Result<(), EngineError> {
+    runtime
+        .submit(event)
         .map_err(SerializedRuntimeError::from)?;
     if runtime
         .process_next()
         .map_err(SerializedRuntimeError::from)?
         .is_none()
     {
-        return Err(SerializedRuntimeError::StartupEventMissing.into());
+        return Err(EngineError::SubmittedEventMissing);
     }
-    let mut deck_source = SimulatorDeckSourceProvider::demo(ManualClock::new(0))?;
-    for event in deck_source.drain_events()? {
-        runtime
-            .submit(event)
-            .map_err(SerializedRuntimeError::from)?;
-    }
-    while runtime
-        .process_next()
-        .map_err(SerializedRuntimeError::from)?
-        .is_some()
-    {}
-    Ok(EngineRuntime {
-        state: runtime,
-        deck_source,
-    })
+    Ok(())
 }
 
 fn initial_snapshot(runtime: &EngineRuntime) -> Result<MessageEnvelope, EngineError> {
@@ -241,6 +308,13 @@ fn initial_snapshot(runtime: &EngineRuntime) -> Result<MessageEnvelope, EngineEr
         })
         .collect::<Vec<_>>();
     payload.insert("decks".to_owned(), Value::Array(decks));
+    let next_plan = state
+        .decks()
+        .find(|(deck_id, _)| Some(*deck_id) != state.leader_deck())
+        .and_then(|(deck_id, _)| state.plan(deck_id))
+        .map(plan_json)
+        .unwrap_or(Value::Null);
+    payload.insert("nextPlan".to_owned(), next_plan);
 
     Ok(MessageEnvelope {
         protocol_version: PROTOCOL_VERSION,
@@ -251,6 +325,86 @@ fn initial_snapshot(runtime: &EngineRuntime) -> Result<MessageEnvelope, EngineEr
         sent_at: OffsetDateTime::now_utc().format(&Rfc3339)?,
         payload,
     })
+}
+
+fn plan_json(plan: &LightingPlan) -> Value {
+    json!({
+        "deckId": plan.deck_id().value(),
+        "trackId": plan.track_id().value(),
+        "trackDurationBeats": plan.track_duration_beats(),
+        "trackLoadId": plan.track_load_id().value(),
+        "revision": plan.revision().value(),
+        "configurationRevision": plan.configuration_revision().value(),
+        "seed": plan.seed().to_string(),
+        "status": plan_status_name(plan.status()),
+        "cues": plan.cues().iter().map(|cue| json!({
+            "phraseIndex": cue.phrase_index(),
+            "startBeat": cue.start_beat(),
+            "endBeat": cue.end_beat(),
+            "origin": cue_origin_name(cue.origin()),
+            "reason": cue_reason_json(cue.reason()),
+            "action": action_json(cue.action()),
+        })).collect::<Vec<_>>(),
+    })
+}
+
+fn cue_reason_json(reason: CueReason) -> Value {
+    match reason {
+        CueReason::PhraseCategoryMatched {
+            phrase_kind,
+            category,
+        } => json!({
+            "kind": "phraseCategoryMatched",
+            "phraseKind": phrase_kind_name(phrase_kind),
+            "category": scene_category_name(category),
+        }),
+        CueReason::MissingPhraseAnalysis => json!({
+            "kind": "missingPhraseAnalysis",
+        }),
+    }
+}
+
+fn action_json(action: &SemanticLightingAction) -> Value {
+    match action {
+        SemanticLightingAction::ApplyLook(look) => json!({
+            "kind": "applyLook",
+            "themeId": look.theme_id().value(),
+            "themeName": look.theme_name(),
+            "sceneId": look.scene_id().value(),
+            "sceneName": look.scene_name(),
+            "category": scene_category_name(look.category()),
+            "loopBank": look.loop_selection().bank(),
+            "loopSlot": look.loop_selection().slot(),
+        }),
+        SemanticLightingAction::HoldCurrentLook => json!({
+            "kind": "holdCurrentLook",
+        }),
+    }
+}
+
+const fn plan_status_name(status: PlanStatus) -> &'static str {
+    match status {
+        PlanStatus::Ready => "ready",
+        PlanStatus::Fallback => "fallback",
+    }
+}
+
+const fn cue_origin_name(origin: CueOrigin) -> &'static str {
+    match origin {
+        CueOrigin::Automatic => "automatic",
+        CueOrigin::Fallback => "fallback",
+        CueOrigin::User => "user",
+    }
+}
+
+const fn scene_category_name(category: SceneCategory) -> &'static str {
+    match category {
+        SceneCategory::Ambient => "ambient",
+        SceneCategory::Groove => "groove",
+        SceneCategory::Build => "build",
+        SceneCategory::Impact => "impact",
+        SceneCategory::Break => "break",
+    }
 }
 
 const fn deck_source_status_name(status: DeckSourceStatus) -> &'static str {
@@ -366,4 +520,57 @@ pub enum EngineError {
     DomainRuntime(#[from] SerializedRuntimeError),
     #[error("simulator initialization failed: {0}")]
     Simulator(#[from] SimulatorError),
+    #[error("planner failed: {0}")]
+    Planner(#[from] PlannerError),
+    #[error("the serialized runtime lost an event after accepting it")]
+    SubmittedEventMissing,
+    #[error("the planning worker effect sequence overflowed")]
+    PlanningEffectSequenceOverflow,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn next_plan_is_ready_before_the_initial_leader_event() {
+        let mut runtime = match SerializedRuntime::try_new(EVENT_QUEUE_CAPACITY) {
+            Ok(runtime) => runtime,
+            Err(error) => panic!("test runtime must initialize: {error}"),
+        };
+        if let Err(error) = submit_and_process(
+            &mut runtime,
+            DomainEvent::RuntimeStarted {
+                at: MonotonicTime::new(0),
+            },
+        ) {
+            panic!("test runtime must start: {error}");
+        }
+        let mut source = match SimulatorDeckSourceProvider::demo(ManualClock::new(0)) {
+            Ok(source) => source,
+            Err(error) => panic!("test simulator must initialize: {error}"),
+        };
+        let events = match source.drain_events() {
+            Ok(events) => events,
+            Err(error) => panic!("test simulator events must drain: {error}"),
+        };
+        let mut worker = PlanningWorker::new();
+
+        for event in events {
+            if matches!(
+                &event,
+                DomainEvent::Observation(lumi_domain::ObservationEnvelope {
+                    observation: DeckObservation::LeaderChanged { .. },
+                    ..
+                })
+            ) {
+                assert!(runtime.state().plan(lumi_domain::DeckId::new(2)).is_some());
+            }
+            if let Err(error) =
+                worker.process_source_event(&mut runtime, event, source.leader_deck_id())
+            {
+                panic!("test source event must process: {error}");
+            }
+        }
+    }
 }
