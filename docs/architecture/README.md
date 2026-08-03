@@ -18,6 +18,8 @@ Decision Records (ADR's) die de belangrijkste besluiten vastleggen.
 - [ADR-0009: Dev/main en gecontroleerde SemVer-releases](adr/0009-dev-main-en-semver-releases.md)
 - [ADR-0010: Provider-onafhankelijke deck-sources](adr/0010-provider-onafhankelijke-deck-sources.md)
 - [ADR-0011: Provider-onafhankelijke MIDI-output](adr/0011-provider-onafhankelijke-midi-output.md)
+- [ADR-0012: Library-sources en Lumi-owned phrase-timelines](adr/0012-library-sources-en-lumi-owned-phrase-timelines.md)
+- [ADR-0013: Late-bound Themes en de Autoloop-matrix](adr/0013-late-bound-themes-en-autoloop-matrix.md)
 
 Release- en deploymentmanagement staat in [`docs/release`](../release/README.md).
 

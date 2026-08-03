@@ -98,7 +98,8 @@ flowchart TB
       LIVE["DeckSourceProvider<br/>Beat Link eerst; native/anders later"]
     end
 
-    META["Rekordbox library-import"]
+    META["MusicLibrarySourceProvider<br/>Rekordbox 7 eerst"]
+    LIBSTORE[("Lumi Music Library<br/>baselines + phrase revisions")]
 
     QUEUE[("Begrensde eventqueue")]
     REDUCER[["Single-writer reducer<br/>centrale runtime-state"]]
@@ -106,7 +107,7 @@ flowchart TB
     subgraph planning["Planning Engine"]
       direction LR
       MATCH["Track matching"]
-      RULES["Theme, kleur, rotatie<br/>en variation rules"]
+      RULES["Late-bound Theme, kleur, rotatie<br/>en matrixresolutie"]
       PREFLIGHT["Preflight en fallbacks"]
     end
 
@@ -127,7 +128,8 @@ flowchart TB
 
     SIM --> QUEUE
     REPLAY --> QUEUE
-    META --> QUEUE
+    META --> LIBSTORE
+    LIBSTORE --> QUEUE
     LIVE --> QUEUE
     API -->|"user commands"| QUEUE
     QUEUE --> REDUCER
@@ -146,6 +148,7 @@ flowchart TB
     PROFILE --> TRANSPORT
     TRANSPORT -->|"effectresultaat"| QUEUE
     REDUCER <--> LOGS
+    LIBSTORE <--> LOGS
     PLANS <--> LOGS
     REDUCER -->|"state + plan events"| API
   end
@@ -157,11 +160,13 @@ flowchart TB
   TRANSPORT -->|"virtuele MIDI-poort"| SS
 ```
 
-De Planning Engine doet het creatieve werk vooraf. De Execution Engine voert in
-`LIVE` alleen een reeds gevalideerde cue uit. UI's, source-adapters en
-outputproviders muteren nooit rechtstreeks de centrale state. Beat Link en
-SoundSwitch zijn de eerste providerimplementaties en geen dependencies van de
-corecontracten.
+De Music Library bewaart een eigen versioned phrase-timeline nadat een
+source-adapter de eerste baseline heeft geleverd. De Planning Engine bindt het
+Theme pas per geladen track en doet het creatieve werk vooraf. De Execution
+Engine voert in `LIVE` alleen een reeds gevalideerde cue uit. UI's,
+source-adapters en outputproviders muteren nooit rechtstreeks de centrale state.
+Rekordbox, Beat Link en SoundSwitch zijn eerste providerimplementaties en geen
+dependencies van de corecontracten.
 
 ## Plaat 3 – De Lumi-usecase: het ontbrekende stuk
 

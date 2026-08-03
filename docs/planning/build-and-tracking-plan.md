@@ -102,6 +102,12 @@ DJ-hardware en draait in CI. De technische uitwerking staat in
 
 ### Fase 2 – Deck intelligence en planning (`0.2.0`)
 
+- provider-onafhankelijke library-source met Rekordbox 7 als eerste read-only
+  snapshotadapter;
+- duurzame canonieke music library en Lumi-owned phrase-timelines;
+- native Library- en Track Lighting Editor met waveform en audio-preview;
+- configureerbare phrase roles, source-mapping en versioned reimport/rebase;
+- logische Theme × Phrase Role × Variant-matrix met late Theme-binding;
 - provider-onafhankelijk deck-sourcecontract met Beat Link als eerste live
   provider;
 - dual-deck en master state;
@@ -109,7 +115,14 @@ DJ-hardware en draait in CI. De technische uitwerking staat in
 - phrase/loop/themeplanning;
 - handmatige overrides en stale-editbescherming.
 
-Exit: vóór de transitie bestaat een volledig, uitlegbaar en aanpasbaar plan.
+De fase bestaat uit drie opeenvolgende verticale epics:
+
+1. [Epic 2A – Music Library and Track Lighting Editor](epic-02a-library-track-lighting-editor.md);
+2. PRO DJ LINK ingest en dual-deck state;
+3. de production-ready preplanned next-track planner.
+
+Exit: echte librarytracks hebben een duurzame, bewerkbare Lumi-timeline en vóór
+de transitie bestaat een volledig, uitlegbaar en aanpasbaar plan.
 
 ### Fase 3 – SoundSwitch Live MVP (`0.3.0`)
 

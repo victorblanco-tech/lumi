@@ -25,6 +25,12 @@ Wire contracts and fixtures are boundary artifacts, not dumping grounds for
 cross-language business logic. Provider-specific deck and lighting types stay
 behind their adapters.
 
+The future `lumi-library-source` port owns immutable source baselines from local
+music-library adapters. The first adapter targets closed Rekordbox 7 snapshots.
+Canonical tracks, editable phrase timelines, and their revisions belong to Lumi
+and must never depend on Rekordbox storage types. Library persistence is accessed
+through an application-owned repository port; SQL stays in an outer adapter.
+
 `lumi-deck-source` owns the application-facing deck observation port.
 `lumi-simulator` is one adapter for that port and maps a license-safe fixture
 into domain events. Future Beat Link or direct Pro DJ Link adapters implement
@@ -40,6 +46,11 @@ a Next load and feeds its result back through the reducer as an effect result.
 `lumi-output-dry-run` implements that port without external I/O and records a
 bounded execution transcript. Future MIDI or other lighting integrations must
 implement the same port; provider details never enter the domain or protocol.
+
+Logical Themes, Phrase Roles, and Variants form a provider-neutral matrix in the
+planner boundary. A later SoundSwitch catalog adapter binds matrix cells to
+banks and slots; neither the library nor a track template stores those physical
+coordinates.
 
 ## Naming
 
