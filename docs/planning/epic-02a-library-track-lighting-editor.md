@@ -9,9 +9,11 @@ Doelmilestone: **0.2.0 – Deck Intelligence**
 Epic 2A maakt van de lege `Library`-navigatie een bruikbare offline
 voorbereidingsomgeving. Zonder decks of SoundSwitch-koppeling kan de gebruiker:
 
-1. een lokale, gesloten Rekordbox 7-library veilig read-only importeren;
-2. echte tracks, playlists, metadata, waveform, beatgrid en bronphrases zien;
-3. luisteren, scrubben en de tracktimeline op maten en beats bewerken;
+1. de volledige workflow eerst veilig gebruiken met een deterministische
+   demo-library en later een gesloten Rekordbox 7-library read-only importeren;
+2. tracks, playlists, metadata, waveform, beatgrid en bronphrases zien;
+3. luisteren, scrubben, een phrase loopen en de tracktimeline op volledige maten
+   bewerken terwijl individuele beats zichtbaar blijven;
 4. eigen Lumi-phrases maken en roles toewijzen;
 5. per phrase automatische selectie behouden of een vaste logische variant
    kiezen;
@@ -30,6 +32,8 @@ buiten deze epic.
 ### In scope
 
 - alleen Rekordbox 7-detectie en -import op macOS;
+- deterministische `DemoLibrarySourceProvider` met licentievrije audio en analyse;
+- ontwikkel- en smoketests uitsluitend tegen een geïsoleerde wegwerp-library;
 - import uitsluitend wanneer Rekordbox gesloten is;
 - consistente read-only snapshot en versie/capabilityvalidatie;
 - provider-neutraal `MusicLibrarySourceProvider`-contract;
@@ -37,8 +41,12 @@ buiten deze epic.
 - lokale SQLite-opslag achter een repositorypoort;
 - importbaselines en versioned Lumi phrase-timelines;
 - playlistbrowser, search, importstatus en track-readiness;
-- waveform, beatgrid, lokale audio-preview en scrub/playhead;
-- create, split, merge, move, delete en role change;
+- een CDJ-geïnspireerde vaste donkere editorcanvas met beatgrid boven de
+  gekleurde waveform en gekleurde Lumi-phrases eronder;
+- play, pause, stop, seek, scrub, vorige/volgende maat, volume en selected-
+  phrase-loop zonder de show engine te beïnvloeden;
+- bar-aligned create, split, merge, boundary move, delete/absorb, role change,
+  undo/redo en revision restore;
 - configureerbare phrase roles en Rekordbox-initiële mapping;
 - default roles uit ADR-0013;
 - logische `Theme × Phrase Role × Variant`-matrix met fixtures;
@@ -61,7 +69,8 @@ buiten deze epic.
 - autonome LaunchAgent-installatie;
 - iPhone-implementatie;
 - cloudsync, accounts of internetafhankelijkheid;
-- AI-audioanalyse.
+- AI-audioanalyse;
+- ontwikkeltoegang tot een productie-Rekordbox-library.
 
 ## 3. Domeinmodel
 
@@ -92,9 +101,17 @@ het Theme verandert.
 - linker kolom: Collection, playlists en readinessfilters;
 - midden: doorzoekbare tracktabel met import- en analysisstatus;
 - rechter detail: metadata, source revision en warnings;
-- editor: uitgelijnde waveform-, beatgrid-, phrase- en loopstrategylanes;
-- inspector: role, start/endbeat, origin, revision en loopstrategie;
+- editorcanvas: CDJ-geïnspireerd en vast donker in zowel Lumi dark als light
+  appearance, met track, Camelot-key, BPM, resterende tijd en actuele bar/beat;
+- tijdas van boven naar beneden: bar/beatgrid, gekleurde performance-waveform,
+  gekleurde Lumi-phrases en een compacte full-track overview;
+- inspector: role, start/eindmaat, origin, revision en loopstrategie;
 - preview: voorlopig Theme, reason en opgeloste dry-run-Autoloop per phrase;
+- transport: play/pause, stop, seek/scrub, vorige/volgende maat, volume en
+  `Loop selected phrase`;
+- editacties: create from bar selection, split, merge previous/next, move
+  boundary, change role, undo/redo, save revision en revision restore;
+- shortcuts: Space voor play/pause en pijltjestoetsen voor maatnavigatie;
 - acties: Refresh, Load on Deck A/B, Compare source en revision history.
 
 Alle controls gebruiken het bestaande Lumi Design System, dark/light appearance,
@@ -102,14 +119,19 @@ Engelse localization resources en de configureerbare Camelot/Classic-keynotatie.
 
 ### 4.2 Veilige editingregels
 
-- iedere beat behoort aan precies één phrase;
-- standaard snapping op maatgrenzen, expliciet verfijnbaar per beat;
+- iedere maat en daarmee iedere beat behoort aan precies één phrase;
+- phrasegrenzen, selecties en schaalstappen liggen uitsluitend op volledige
+  maten; individuele beats blijven zichtbaar maar zijn geen editgrens;
 - ongeldige overlaps, gaps en zero-length phrases worden geweigerd;
+- delete absorbeert de geselecteerde phrase expliciet in een buur of wordt als
+  merge uitgevoerd en kan nooit een gap maken;
 - iedere mutatie maakt een nieuwe revision;
 - split erft de role aan beide kanten, behoudt een exacte keuze links en zet het
   nieuwe rechterdeel op `AUTO`;
 - bronrefresh overschrijft nooit user revisions;
-- edit van een actieve Live-track wijzigt het reeds actieve plan niet.
+- edit van een actieve Live-track wijzigt het reeds actieve plan niet;
+- editing tijdens audio-preview onderbreekt het geluid niet; de selected-phrase
+  loop volgt pas na een geldige boundarywijziging de nieuwe maatgrenzen.
 
 ## 5. Theme- en matrixgedrag
 
@@ -121,7 +143,9 @@ Engelse localization resources en de configureerbare Camelot/Classic-keynotatie.
 - `FIXED_VARIANT` blijft dezelfde matrixrij gebruiken;
 - ontbrekende cellen blijven binnen dezelfde Phrase Role en worden zichtbaar als
   fallback of preflightprobleem;
-- iedere Theme- en variantkeuze heeft een machineleesbare reason.
+- iedere Theme- en variantkeuze heeft een machineleesbare reason;
+- vier banktabs vertegenwoordigen vier Theme-targets; variants zijn flexibele
+  alternatieven binnen een role en bank en hebben geen vaste count.
 
 ## 6. Story map
 
@@ -129,12 +153,15 @@ Engelse localization resources en de configureerbare Camelot/Classic-keynotatie.
 
 Timeboxed research naar detectie, consistente snapshot, trackidentiteit,
 waveform, beatgrid, kleur en raw phrases op de daadwerkelijk geïnstalleerde
-Rekordbox 7-versie. Levert fixtures, parserproof en een go/no-go-besluit.
+Rekordbox 7-versie in een geïsoleerd developmentaccount. Levert fixtures,
+parserproof en een go/no-go-besluit; de productie-library wordt niet gebruikt.
 
 ### E2A-01 – Persist the canonical Lumi music library
 
 Introduceert sourcecontracten, stabiele identities, SQLite-repository,
-migraties, importbaselines en revision-safe transacties.
+migraties, importbaselines en revision-safe transacties. Levert tevens de
+deterministische demo-provider waarmee de rest van de epic zonder Rekordbox kan
+worden gebouwd.
 
 ### E2A-02 – Import a closed local Rekordbox 7 library
 
@@ -148,23 +175,30 @@ readiness, errors en importprovenance.
 
 ### E2A-04 – Render waveform and audition local audio
 
-Toont waveform en beatgrid en ondersteunt lokaal play, pause, seek, scrub en
-phrase-looppreview zonder bestanden te kopiëren.
+Levert de CDJ-geïnspireerde editorcanvas met beatgrid, gekleurde waveform,
+gekleurde phrase lane en overview. Ondersteunt lokaal play/pause/stop, seek,
+scrub, maatnavigatie, volume en selected-phrase-loop zonder bestanden te
+kopiëren of showstate te muteren.
 
 ### E2A-05 – Own and edit versioned Lumi phrase timelines
 
-Maakt de Lumi-timeline autoritatief en implementeert split, merge, boundary move,
-create, delete, undo/redo, revisions en validatie in engine en native UI.
+Maakt de Lumi-timeline autoritatief en implementeert uitsluitend bar-aligned
+create, split, merge, boundary move, delete/absorb, role change, undo/redo,
+revisions en validatie in engine en native UI.
 
 ### E2A-06 – Configure phrase roles and initial source mapping
 
-Levert stabiele maar hernoembare roles, de afgesproken defaults, Rekordbox
-raw-to-Lumi mapping en per-phrase role editing.
+Levert Settings > Phrase Roles met stabiele IDs, toevoegen, hernoemen, ordenen,
+archiveren/herstellen, usage diagnostics, de afgesproken defaults, provider-
+specifieke initiële mapping en per-phrase role editing. In-use roles worden nooit
+hard verwijderd.
 
 ### E2A-07 – Build the logical Theme/role/variant matrix
 
 Introduceert de provider-neutrale catalogus, consistente matrixrijen, Theme-
-fixtures, coverage/preflight en veilige role-fallbacks zonder SoundSwitch-types.
+fixtures, vier benoembare Theme-banktabs, flexibele variants per role,
+coverage/preflight en veilige role-fallbacks zonder SoundSwitch-types. Bank en
+variant blijven verschillende assen.
 
 ### E2A-08 – Assign per-phrase loop strategies
 
@@ -193,15 +227,41 @@ Levert golden import/editor/preview/reimportfixtures, grote-librarybenchmarks,
 fault injection, architecture checks, visuele evidence en een gedocumenteerde
 demo met bekende beperkingen.
 
+## 6.1 Bouwvolgorde zonder Rekordbox-developmentlibrary
+
+De Rekordbox-spike is alleen een harde gate voor `E2A-02`, niet voor de
+provider-neutrale Library- en editorfunctionaliteit. De aanbevolen eerste slice
+is:
+
+1. `E2A-01`: librarycontract, SQLite en deterministische demo-provider;
+2. `E2A-03`: browse en inspecteer demotracks in de echte native Library UI;
+3. `E2A-04`: CDJ-editorcanvas en volledige lokale audio-preview;
+4. `E2A-05`: bar-aligned phrase editing en revisions;
+5. `E2A-06`: Settings > Phrase Roles en editorintegratie;
+6. `E2A-07` en `E2A-08`: vier Theme-banks, flexibele variants en loopstrategieën.
+
+`E2A-00` kan parallel starten zodra het geïsoleerde macOS-account met een
+wegwerp-Rekordbox-library beschikbaar is. Pas na een go-besluit start `E2A-02`.
+De demo-provider blijft daarna bestaan voor CI, screenshots en foutscenario's.
+
 ## 7. Exitcriteria
 
 - Een lokaal gevonden Rekordbox 7-library kan zonder handmatige export en zonder
   bronmutatie worden geïmporteerd wanneer Rekordbox gesloten is.
 - Minimaal één echte track toont metadata, waveform, beatgrid en sourcephrases.
+- Voor toegang tot Rekordbox is dezelfde volledige flow aantoonbaar met
+  licentievrije demotracks en zonder productiegegevens.
+- De editor toont maatnummers en alle beats boven een gekleurde waveform,
+  gekleurde phrases direct eronder en een full-track overview.
+- Play/pause/stop, seek/scrub, maatnavigatie, volume en phrase-loop werken zonder
+  showstate of audiobestand te muteren.
 - De gebruiker kan een eigen aaneengesloten Lumi-timeline maken en na restart
   terugzien.
+- Geen phrase-edit kan een boundary binnen een maat, gap of overlap maken.
 - De afgesproken roles, inclusief Breakdown/Buildup 1–3, Synth en Pre-drop, zijn
   configureerbaar en in de editor toepasbaar.
+- Roles zijn in Settings toevoegbaar, hernoembaar, ordenbaar en archiveerbaar;
+  in-use IDs blijven geldig.
 - Iedere phrase gebruikt automatisch zijn gelijknamige Autoloop Category.
 - Ongeconfigureerde phrases blijven volledig automatisch.
 - Een vaste variant blijft behouden bij een previewswitch tussen minimaal twee
@@ -224,5 +284,8 @@ demo met bekende beperkingen.
 - Trackmatching met latere USB/live-identiteiten moet al in identities en
   fixtures voorbereid zijn, maar wordt pas met echte decks bewezen.
 - De logische matrix veronderstelt consistente role/variantrijen per Theme.
+- Vier SoundSwitch-banks worden als vier Theme-targets voorbereid; het aantal
+  variants per role blijft flexibel en fysieke capaciteit wordt pas door het
+  latere targetprofiel afgedwongen.
 - Echte SoundSwitch-identiteiten en projectdiffs blijven onbewezen tot de latere
   integration spike.
