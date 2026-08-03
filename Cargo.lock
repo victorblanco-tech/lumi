@@ -28,21 +28,23 @@ checksum = "3eaf3ede3fee6db1a4c2ee091bf8a8b4dccdc6d17f656fb07896ee72867612f2"
 
 [[package]]
 name = "lumi-deck-source"
-version = "0.0.6-dev"
+version = "0.0.7-dev"
 dependencies = [
  "lumi-domain",
 ]
 
 [[package]]
 name = "lumi-domain"
-version = "0.0.6-dev"
+version = "0.0.7-dev"
 
 [[package]]
 name = "lumi-engine"
-version = "0.0.6-dev"
+version = "0.0.7-dev"
 dependencies = [
  "lumi-deck-source",
  "lumi-domain",
+ "lumi-lighting-output",
+ "lumi-output-dry-run",
  "lumi-planner",
  "lumi-protocol",
  "lumi-simulator",
@@ -55,8 +57,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "lumi-lighting-output"
+version = "0.0.7-dev"
+dependencies = [
+ "lumi-domain",
+]
+
+[[package]]
+name = "lumi-output-dry-run"
+version = "0.0.7-dev"
+dependencies = [
+ "lumi-domain",
+ "lumi-lighting-output",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "lumi-planner"
-version = "0.0.6-dev"
+version = "0.0.7-dev"
 dependencies = [
  "lumi-domain",
  "serde",
@@ -65,7 +84,7 @@ dependencies = [
 
 [[package]]
 name = "lumi-protocol"
-version = "0.0.6-dev"
+version = "0.0.7-dev"
 dependencies = [
  "serde",
  "serde_json",
@@ -73,7 +92,7 @@ dependencies = [
 
 [[package]]
 name = "lumi-simulator"
-version = "0.0.6-dev"
+version = "0.0.7-dev"
 dependencies = [
  "lumi-deck-source",
  "lumi-domain",

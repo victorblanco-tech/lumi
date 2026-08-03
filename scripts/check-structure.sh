@@ -10,6 +10,8 @@ required_paths=(
   "engine/crates/lumi-domain"
   "engine/crates/lumi-deck-source"
   "engine/crates/lumi-engine"
+  "engine/crates/lumi-lighting-output"
+  "engine/crates/lumi-output-dry-run"
   "engine/crates/lumi-planner"
   "engine/crates/lumi-protocol"
   "engine/crates/lumi-simulator"
@@ -24,6 +26,7 @@ required_paths=(
   "fixtures/demo-session-v1/session.json"
   "fixtures/demo-session-v1/initial-transcript.ndjson"
   "fixtures/demo-session-v1/next-plan.json"
+  "fixtures/demo-session-v1/output-effects.json"
   "docs"
   "scripts"
 )

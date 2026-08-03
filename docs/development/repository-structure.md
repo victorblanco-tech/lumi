@@ -36,6 +36,11 @@ evidence. It depends only on `lumi-domain`; it knows no simulator, transport,
 SwiftUI, MIDI, or SoundSwitch types. The engine invokes it synchronously after
 a Next load and feeds its result back through the reducer as an effect result.
 
+`lumi-lighting-output` owns the provider-neutral lighting output port.
+`lumi-output-dry-run` implements that port without external I/O and records a
+bounded execution transcript. Future MIDI or other lighting integrations must
+implement the same port; provider details never enter the domain or protocol.
+
 ## Naming
 
 Rust crates and modules use specific domain or capability names in idiomatic

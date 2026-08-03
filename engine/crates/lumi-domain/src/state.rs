@@ -2,11 +2,12 @@ use std::collections::{BTreeMap, VecDeque};
 
 use crate::{
     ClientId, CommandSequence, DecisionReason, DeckId, DeckSourceStatus, Diagnostic,
-    EffectSequence, LightingPlan, MonotonicTime, SourceId, SourceSequence, StateRevision, TrackId,
-    TrackLoadId, TrackMetadata, WorkerId,
+    EffectSequence, LightingPlan, MonotonicTime, OutputEffectResult, SourceId, SourceSequence,
+    StateRevision, TrackId, TrackLoadId, TrackMetadata, WorkerId,
 };
 
 const MAXIMUM_DIAGNOSTICS: usize = 64;
+const MAXIMUM_OUTPUT_EFFECTS: usize = 256;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub enum OperationState {
@@ -82,6 +83,9 @@ pub struct RuntimeState {
     pub(crate) plans: BTreeMap<DeckId, LightingPlan>,
     pub(crate) source_statuses: BTreeMap<SourceId, DeckSourceStatus>,
     pub(crate) leader_deck: Option<DeckId>,
+    pub(crate) active_plan: Option<LightingPlan>,
+    pub(crate) output_command_sequence: u64,
+    pub(crate) output_effects: VecDeque<OutputEffectResult>,
     pub(crate) source_sequences: BTreeMap<SourceId, SourceSequence>,
     pub(crate) source_times: BTreeMap<SourceId, MonotonicTime>,
     pub(crate) command_sequences: BTreeMap<ClientId, CommandSequence>,
@@ -101,6 +105,9 @@ impl Default for RuntimeState {
             plans: BTreeMap::new(),
             source_statuses: BTreeMap::new(),
             leader_deck: None,
+            active_plan: None,
+            output_command_sequence: 0,
+            output_effects: VecDeque::new(),
             source_sequences: BTreeMap::new(),
             source_times: BTreeMap::new(),
             command_sequences: BTreeMap::new(),
@@ -159,6 +166,15 @@ impl RuntimeState {
     }
 
     #[must_use]
+    pub const fn active_plan(&self) -> Option<&LightingPlan> {
+        self.active_plan.as_ref()
+    }
+
+    pub fn output_effects(&self) -> impl Iterator<Item = &OutputEffectResult> {
+        self.output_effects.iter()
+    }
+
+    #[must_use]
     pub const fn processed_events(&self) -> u64 {
         self.processed_events
     }
@@ -190,6 +206,13 @@ impl RuntimeState {
             },
         );
         self.plans.remove(&deck_id);
+        if self
+            .active_plan
+            .as_ref()
+            .is_some_and(|plan| plan.deck_id() == deck_id)
+        {
+            self.active_plan = None;
+        }
     }
 
     pub(crate) fn push_diagnostic(&mut self, diagnostic: Diagnostic) {
@@ -197,5 +220,12 @@ impl RuntimeState {
             self.diagnostics.pop_front();
         }
         self.diagnostics.push_back(diagnostic);
+    }
+
+    pub(crate) fn push_output_effect(&mut self, result: OutputEffectResult) {
+        if self.output_effects.len() == MAXIMUM_OUTPUT_EFFECTS {
+            self.output_effects.pop_front();
+        }
+        self.output_effects.push_back(result);
     }
 }

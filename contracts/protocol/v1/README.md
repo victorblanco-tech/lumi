@@ -49,3 +49,9 @@ revision exactly once. A revision conflict returns a typed error; the client
 requests a fresh snapshot before accepting another edit. Plan IDs and seeds are
 encoded as decimal strings because protocol v1 clients must not lose 64-bit
 integer precision through a JSON floating-point representation.
+
+`activePlan` identifies the exact immutable plan revision used for the leader.
+`outputProvider` reports provider-neutral diagnostics, while bounded
+`outputEffects` entries expose scheduled and actual monotonic times, the cue and
+semantic action, and an explicit `simulated`, `rejected`, or `skipped` result.
+These fields are presentation evidence only; execution remains engine-owned.
