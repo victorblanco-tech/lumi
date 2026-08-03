@@ -1,6 +1,6 @@
 # Epic 2A – Music Library and Track Lighting Editor
 
-Status: **Ready for build review**
+Status: **In build – E2A-01 library foundation**
 
 Doelmilestone: **0.2.0 – Deck Intelligence**
 

@@ -23,7 +23,8 @@ Het bouwplan voor de eerste verticale productmilestone staat in
 Het gerefineerde ontwerp en storyplan voor de volgende verticale milestone staat
 in [`docs/planning/epic-02a-library-track-lighting-editor.md`](docs/planning/epic-02a-library-track-lighting-editor.md).
 
-> Status: Epic 1 is geïntegreerd als de lokale `0.1.0-dev` release candidate.
+> Status: Epic 1 is geïntegreerd als lokale `0.1.0-dev` release candidate; Epic
+> 2A is gestart met de provider-neutrale music-library foundation.
 
 ## Development
 
