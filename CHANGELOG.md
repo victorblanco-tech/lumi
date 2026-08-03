@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.0.8-dev
+
+- De demo-simulator is volledig vanuit de macOS-app te bedienen: laden,
+  snelheid, afspelen/pauzeren, deckwissel en reset.
+- OFF, ARMED, LIVE en PAUSED zijn gekoppeld aan versioned engine commands met
+  revision checks en geldige transities.
+- De app toont begrensde, geordende runtime-, bron-, planner- en output-events
+  met expliciet resultaat en reden.
+
 Alle relevante wijzigingen aan Lumi worden in dit bestand bijgehouden.
 
 Het formaat is gebaseerd op [Keep a Changelog](https://keepachangelog.com/) en

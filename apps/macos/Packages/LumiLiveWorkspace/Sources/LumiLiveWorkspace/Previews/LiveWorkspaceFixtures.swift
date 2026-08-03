@@ -3,10 +3,11 @@ import Foundation
 public enum LiveWorkspaceFixtures {
     public static let readySnapshot = EngineSnapshot(
         endpoint: "127.0.0.1:52841",
-        engineVersion: "0.0.7-dev",
+        engineVersion: "0.0.8-dev",
         protocolVersion: 1,
         snapshotSequence: 42,
         stateRevision: 8,
+        operationState: "armed",
         runtime: RuntimeSnapshot(
             model: "singleWriterReducer",
             health: "ready",
@@ -16,6 +17,12 @@ public enum LiveWorkspaceFixtures {
             lastDecision: "phraseChanged"
         ),
         deckSource: DeckSourceSnapshot(providerKind: "simulator", status: "ready"),
+        simulation: SimulationSnapshot(speed: 64, paused: false),
+        outputProvider: OutputProviderSnapshot(
+            providerKind: "dryRun",
+            status: "ready",
+            recordCount: 4
+        ),
         leaderDeckID: 1,
         decks: [
             DeckSnapshot(
@@ -56,7 +63,25 @@ public enum LiveWorkspaceFixtures {
                 cue(3, 96, 128, "drop", "impact", 7, "Full Energy", 4, 1)
             ]
         ),
-        planningOptions: planningOptions
+        planningOptions: planningOptions,
+        timeline: [
+            TimelineEntrySnapshot(
+                sequence: 20,
+                occurredAt: 1_000,
+                source: "deckSource",
+                type: "phraseChanged",
+                result: "scheduled",
+                reason: "phraseExecutionScheduled"
+            ),
+            TimelineEntrySnapshot(
+                sequence: 21,
+                occurredAt: 1_000,
+                source: "output",
+                type: "outputEffectRecorded",
+                result: "simulated",
+                reason: "outputEffectRecorded"
+            )
+        ]
     )
 
     public static let ready = LiveWorkspacePresenter.ready(readySnapshot)
@@ -115,12 +140,16 @@ public enum LiveWorkspaceFixtures {
             protocolVersion: readySnapshot.protocolVersion,
             snapshotSequence: 44,
             stateRevision: 10,
+            operationState: readySnapshot.operationState,
             runtime: readySnapshot.runtime,
             deckSource: readySnapshot.deckSource,
+            simulation: readySnapshot.simulation,
+            outputProvider: readySnapshot.outputProvider,
             leaderDeckID: readySnapshot.leaderDeckID,
             decks: readySnapshot.decks,
             nextPlan: plan,
-            planningOptions: readySnapshot.planningOptions
+            planningOptions: readySnapshot.planningOptions,
+            timeline: readySnapshot.timeline
         )
     }
 
@@ -151,12 +180,16 @@ public enum LiveWorkspaceFixtures {
             protocolVersion: readySnapshot.protocolVersion,
             snapshotSequence: 43,
             stateRevision: 9,
+            operationState: readySnapshot.operationState,
             runtime: readySnapshot.runtime,
             deckSource: readySnapshot.deckSource,
+            simulation: readySnapshot.simulation,
+            outputProvider: readySnapshot.outputProvider,
             leaderDeckID: readySnapshot.leaderDeckID,
             decks: readySnapshot.decks,
             nextPlan: plan,
-            planningOptions: readySnapshot.planningOptions
+            planningOptions: readySnapshot.planningOptions,
+            timeline: readySnapshot.timeline
         )
     }
 
@@ -170,15 +203,19 @@ public enum LiveWorkspaceFixtures {
             protocolVersion: snapshot.protocolVersion,
             snapshotSequence: snapshot.snapshotSequence,
             stateRevision: snapshot.stateRevision,
+            operationState: snapshot.operationState,
             runtime: snapshot.runtime,
             deckSource: DeckSourceSnapshot(
                 providerKind: snapshot.deckSource.providerKind,
                 status: status
             ),
+            simulation: snapshot.simulation,
+            outputProvider: snapshot.outputProvider,
             leaderDeckID: snapshot.leaderDeckID,
             decks: snapshot.decks,
             nextPlan: snapshot.nextPlan,
-            planningOptions: snapshot.planningOptions
+            planningOptions: snapshot.planningOptions,
+            timeline: snapshot.timeline
         )
     }
 

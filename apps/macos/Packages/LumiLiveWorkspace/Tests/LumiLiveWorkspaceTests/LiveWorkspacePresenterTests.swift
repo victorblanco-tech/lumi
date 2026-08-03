@@ -27,6 +27,11 @@ struct LiveWorkspacePresenterTests {
         #expect(state.content?.plan?.cues.allSatisfy { !$0.locked } == true)
         #expect(state.content?.planningOptions.themes.count == 2)
         #expect(state.content?.planningOptions.scenes.count == 10)
+        #expect(state.content?.operationState == "armed")
+        #expect(state.content?.simulation.speed == 1)
+        #expect(state.content?.timeline.count == 1)
+        #expect(state.output.condition == .ready)
+        #expect(state.planner.condition == .ready)
     }
 
     @Test("Plan interaction feedback retains the authoritative snapshot")

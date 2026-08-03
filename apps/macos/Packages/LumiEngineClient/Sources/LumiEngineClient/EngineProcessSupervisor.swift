@@ -68,7 +68,7 @@ public actor EngineProcessSupervisor {
     }
 
     public func send(
-        _ command: EnginePlanCommand,
+        _ command: EngineCommand,
         messageID: String = "cmd-\(UUID().uuidString)"
     ) async throws -> MessageEnvelope {
         try await exchange(payload: command.payload(), messageID: messageID)

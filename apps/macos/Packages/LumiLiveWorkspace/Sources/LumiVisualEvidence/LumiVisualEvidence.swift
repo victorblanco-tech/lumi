@@ -7,7 +7,7 @@ import SwiftUI
 @main
 struct LumiVisualEvidenceCommand {
     private static let width: CGFloat = 1_280
-    private static let height: CGFloat = 960
+    private static let height: CGFloat = 1_200
 
     private struct Variant {
         let name: String
@@ -92,7 +92,7 @@ struct LumiVisualEvidenceCommand {
                 canvas
                 LiveWorkspaceView(
                     state: variant.state,
-                    productVersion: "0.0.7-dev",
+                    productVersion: "0.0.8-dev",
                     appearance: .constant(variant.appearance),
                     keyNotation: .constant(variant.keyNotation),
                     allowsScrolling: false

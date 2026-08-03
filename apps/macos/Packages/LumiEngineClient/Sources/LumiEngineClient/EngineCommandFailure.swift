@@ -6,6 +6,7 @@ public struct EngineCommandFailure: Error, Equatable, Sendable {
     public let message: String
     public let retryable: Bool
     public let actualPlanRevision: UInt64?
+    public let actualStateRevision: UInt64?
 
     public init?(_ envelope: MessageEnvelope) {
         guard envelope.messageType == .error,
@@ -26,6 +27,14 @@ public struct EngineCommandFailure: Error, Equatable, Sendable {
             actualPlanRevision = UInt64(revision)
         } else {
             actualPlanRevision = nil
+        }
+        if case let .number(revision) = envelope.payload["actualStateRevision"],
+           revision >= 0,
+           revision.rounded(.towardZero) == revision,
+           revision <= Double(UInt64.max) {
+            actualStateRevision = UInt64(revision)
+        } else {
+            actualStateRevision = nil
         }
     }
 }

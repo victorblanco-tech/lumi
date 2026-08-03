@@ -27,6 +27,7 @@ required_paths=(
   "fixtures/demo-session-v1/initial-transcript.ndjson"
   "fixtures/demo-session-v1/next-plan.json"
   "fixtures/demo-session-v1/output-effects.json"
+  "docs/development/demo-control.md"
   "docs"
   "scripts"
 )

@@ -17,6 +17,8 @@ public struct EngineSnapshotDecoder: Sendable {
               envelope.payload["kind"] == .string("stateSnapshot"),
               case let .string(engineVersion) = envelope.payload["engineVersion"],
               let stateRevision = unsignedInteger(envelope.payload["stateRevision"]),
+              case let .string(operationState) = envelope.payload["operationState"],
+              ["off", "armed", "live", "paused"].contains(operationState),
               case let .object(runtimePayload) = envelope.payload["runtimeCore"],
               case let .string(runtimeModel) = runtimePayload["model"],
               case let .string(runtimeHealth) = runtimePayload["health"],
@@ -27,17 +29,33 @@ public struct EngineSnapshotDecoder: Sendable {
               case let .object(sourcePayload) = envelope.payload["deckSource"],
               case let .string(providerKind) = sourcePayload["providerKind"],
               case let .string(sourceStatus) = sourcePayload["status"],
+              case let .object(simulationPayload) = envelope.payload["simulation"],
+              let simulationSpeed = unsignedInteger(simulationPayload["speed"]),
+              [1, 4, 16, 64].contains(simulationSpeed),
+              case let .boolean(simulationPaused) = simulationPayload["paused"],
+              case let .object(outputPayload) = envelope.payload["outputProvider"],
+              case let .string(outputProviderKind) = outputPayload["providerKind"],
+              case let .string(outputStatus) = outputPayload["status"],
+              let outputRecordCount = unsignedInteger(outputPayload["recordCount"]),
               let leaderDeckID = unsignedInteger(envelope.payload["leaderDeckId"]),
               case let .array(deckPayloads) = envelope.payload["decks"],
-              case let .object(optionsPayload) = envelope.payload["planningOptions"] else {
+              case let .object(optionsPayload) = envelope.payload["planningOptions"],
+              case let .array(timelinePayloads) = envelope.payload["timeline"] else {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
 
         let decks = try deckPayloads.map(decodeDeck)
+        let timeline = try timelinePayloads.map(decodeTimelineEntry)
         let deckIDs = Set(decks.map(\.deckID))
         guard decks.count == 2,
               deckIDs.count == decks.count,
               deckIDs.contains(leaderDeckID) else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        guard timeline.count <= 256,
+              timeline.enumerated().allSatisfy({ index, entry in
+                  index == 0 || timeline[index - 1].sequence < entry.sequence
+              }) else {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
 
@@ -59,6 +77,7 @@ public struct EngineSnapshotDecoder: Sendable {
             protocolVersion: protocolVersion,
             snapshotSequence: envelope.sequence,
             stateRevision: stateRevision,
+            operationState: operationState,
             runtime: RuntimeSnapshot(
                 model: runtimeModel,
                 health: runtimeHealth,
@@ -71,10 +90,47 @@ public struct EngineSnapshotDecoder: Sendable {
                 providerKind: providerKind,
                 status: sourceStatus
             ),
+            simulation: SimulationSnapshot(
+                speed: simulationSpeed,
+                paused: simulationPaused
+            ),
+            outputProvider: OutputProviderSnapshot(
+                providerKind: outputProviderKind,
+                status: outputStatus,
+                recordCount: outputRecordCount
+            ),
             leaderDeckID: leaderDeckID,
             decks: decks,
             nextPlan: nextPlan,
-            planningOptions: try decodePlanningOptions(optionsPayload)
+            planningOptions: try decodePlanningOptions(optionsPayload),
+            timeline: timeline
+        )
+    }
+
+    private func decodeTimelineEntry(_ value: JSONValue) throws -> TimelineEntrySnapshot {
+        guard case let .object(entry) = value,
+              let sequence = unsignedInteger(entry["sequence"]),
+              let occurredAt = unsignedInteger(entry["occurredAt"]),
+              case let .string(source) = entry["source"],
+              ["runtime", "deckSource", "operation", "planner", "output"].contains(source),
+              case let .string(type) = entry["type"],
+              !type.isEmpty,
+              case let .string(result) = entry["result"],
+              [
+                  "accepted", "ignored", "scheduled", "simulated", "rejected",
+                  "skipped", "completed"
+              ].contains(result),
+              case let .string(reason) = entry["reason"],
+              !reason.isEmpty else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        return TimelineEntrySnapshot(
+            sequence: sequence,
+            occurredAt: occurredAt,
+            source: source,
+            type: type,
+            result: result,
+            reason: reason
         )
     }
 

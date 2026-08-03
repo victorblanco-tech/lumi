@@ -19,6 +19,9 @@ struct FoundationView: View {
             keyNotation: $preferences.keyNotation,
             onPlanMutation: { request in
                 Task { await engineStatus.mutatePlan(request) }
+            },
+            onSessionCommand: { request in
+                Task { await engineStatus.runSessionCommand(request) }
             }
         )
     }

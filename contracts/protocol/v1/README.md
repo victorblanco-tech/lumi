@@ -55,3 +55,10 @@ integer precision through a JSON floating-point representation.
 `outputEffects` entries expose scheduled and actual monotonic times, the cue and
 semantic action, and an explicit `simulated`, `rejected`, or `skipped` result.
 These fields are presentation evidence only; execution remains engine-owned.
+
+Demo and operation mutations carry `expectedStateRevision`. The engine accepts
+load/reset, 1x/4x/16x/64x speed, playback pause/resume, bounded deterministic
+clock advancement, leader advancement, and OFF/ARMED/LIVE/PAUSED commands.
+`simulation` contains the authoritative speed and paused state. `timeline`
+contains at most 256 ordered engine-owned entries with source, type, monotonic
+time, result, and reducer reason.

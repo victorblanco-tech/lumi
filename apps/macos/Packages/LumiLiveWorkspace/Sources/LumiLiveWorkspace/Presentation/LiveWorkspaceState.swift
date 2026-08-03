@@ -35,26 +35,35 @@ public struct LiveWorkspaceState: Equatable, Sendable {
     public let engine: ProviderPresentation
     public let runtime: ProviderPresentation
     public let source: ProviderPresentation
+    public let planner: ProviderPresentation
+    public let output: ProviderPresentation
     public let content: LiveWorkspaceContent?
     public let diagnostic: String?
     public let planInteraction: PlanInteractionPresentation
+    public let sessionInteraction: SessionInteractionPresentation
 
     public init(
         condition: LiveWorkspaceCondition,
         engine: ProviderPresentation,
         runtime: ProviderPresentation,
         source: ProviderPresentation,
+        planner: ProviderPresentation,
+        output: ProviderPresentation,
         content: LiveWorkspaceContent?,
         diagnostic: String? = nil,
-        planInteraction: PlanInteractionPresentation = .idle
+        planInteraction: PlanInteractionPresentation = .idle,
+        sessionInteraction: SessionInteractionPresentation = .idle
     ) {
         self.condition = condition
         self.engine = engine
         self.runtime = runtime
         self.source = source
+        self.planner = planner
+        self.output = output
         self.content = content
         self.diagnostic = diagnostic
         self.planInteraction = planInteraction
+        self.sessionInteraction = sessionInteraction
     }
 }
 
@@ -65,6 +74,9 @@ public struct LiveWorkspaceContent: Equatable, Sendable {
     public let sourceName: String
     public let stateRevision: UInt64
     public let planningOptions: PlanningOptionsSnapshot
+    public let operationState: String
+    public let simulation: SimulationSnapshot
+    public let timeline: [TimelineEntrySnapshot]
 
     public init(
         liveDeck: DeckSnapshot,
@@ -72,7 +84,10 @@ public struct LiveWorkspaceContent: Equatable, Sendable {
         plan: PlanSnapshot?,
         sourceName: String,
         stateRevision: UInt64,
-        planningOptions: PlanningOptionsSnapshot
+        planningOptions: PlanningOptionsSnapshot,
+        operationState: String,
+        simulation: SimulationSnapshot,
+        timeline: [TimelineEntrySnapshot]
     ) {
         self.liveDeck = liveDeck
         self.nextDeck = nextDeck
@@ -80,6 +95,9 @@ public struct LiveWorkspaceContent: Equatable, Sendable {
         self.sourceName = sourceName
         self.stateRevision = stateRevision
         self.planningOptions = planningOptions
+        self.operationState = operationState
+        self.simulation = simulation
+        self.timeline = timeline
     }
 }
 
@@ -88,6 +106,22 @@ public enum PlanInteractionPresentation: Equatable, Sendable {
     case submitting
     case succeeded(String)
     case rejected(String)
+}
+
+public enum SessionInteractionPresentation: Equatable, Sendable {
+    case idle
+    case submitting
+    case succeeded(String)
+    case rejected(String)
+}
+
+public enum SessionCommandRequest: Equatable, Sendable {
+    case loadDemo(expectedStateRevision: UInt64)
+    case setOperationState(String, expectedStateRevision: UInt64)
+    case setSimulationSpeed(UInt64, expectedStateRevision: UInt64)
+    case setSimulationPlayback(Bool, expectedStateRevision: UInt64)
+    case advanceToNextTrack(expectedStateRevision: UInt64)
+    case resetDemo(expectedStateRevision: UInt64)
 }
 
 public struct PlanMutationContext: Equatable, Sendable {
@@ -144,13 +178,15 @@ public enum LiveWorkspacePresenter {
 
     public static func ready(
         _ snapshot: EngineSnapshot,
-        planInteraction: PlanInteractionPresentation = .idle
+        planInteraction: PlanInteractionPresentation = .idle,
+        sessionInteraction: SessionInteractionPresentation = .idle
     ) -> LiveWorkspaceState {
         state(
             from: snapshot,
             forceCondition: nil,
             diagnostic: nil,
-            planInteraction: planInteraction
+            planInteraction: planInteraction,
+            sessionInteraction: sessionInteraction
         )
     }
 
@@ -159,7 +195,8 @@ public enum LiveWorkspacePresenter {
             from: snapshot,
             forceCondition: .stale,
             diagnostic: "Showing the last complete snapshot while Lumi reconnects.",
-            planInteraction: .idle
+            planInteraction: .idle,
+            sessionInteraction: .idle
         )
     }
 
@@ -185,7 +222,8 @@ public enum LiveWorkspacePresenter {
         from snapshot: EngineSnapshot,
         forceCondition: LiveWorkspaceCondition?,
         diagnostic: String?,
-        planInteraction: PlanInteractionPresentation
+        planInteraction: PlanInteractionPresentation,
+        sessionInteraction: SessionInteractionPresentation
     ) -> LiveWorkspaceState {
         let content = content(from: snapshot)
         let derivedCondition: LiveWorkspaceCondition
@@ -216,9 +254,19 @@ public enum LiveWorkspacePresenter {
                 detail: snapshot.deckSource.providerKind.capitalized,
                 condition: snapshot.deckSource.status == "ready" ? healthyProviderCondition : .degraded
             ),
+            planner: ProviderPresentation(
+                detail: snapshot.nextPlan.map { "Plan revision \($0.revision) · \($0.status)" }
+                    ?? "No next-track plan",
+                condition: snapshot.nextPlan?.status == "ready" ? healthyProviderCondition : .degraded
+            ),
+            output: ProviderPresentation(
+                detail: "\(snapshot.outputProvider.providerKind) · \(snapshot.outputProvider.recordCount) records",
+                condition: snapshot.outputProvider.status == "ready" ? healthyProviderCondition : .degraded
+            ),
             content: content,
             diagnostic: diagnostic ?? defaultDiagnostic(for: derivedCondition),
-            planInteraction: planInteraction
+            planInteraction: planInteraction,
+            sessionInteraction: sessionInteraction
         )
     }
 
@@ -233,7 +281,10 @@ public enum LiveWorkspacePresenter {
             plan: snapshot.nextPlan,
             sourceName: snapshot.deckSource.providerKind.capitalized,
             stateRevision: snapshot.stateRevision,
-            planningOptions: snapshot.planningOptions
+            planningOptions: snapshot.planningOptions,
+            operationState: snapshot.operationState,
+            simulation: snapshot.simulation,
+            timeline: snapshot.timeline
         )
     }
 
@@ -255,6 +306,14 @@ public enum LiveWorkspacePresenter {
             ),
             source: ProviderPresentation(
                 detail: "Waiting for a deck source",
+                condition: providerCondition == .error ? .empty : providerCondition
+            ),
+            planner: ProviderPresentation(
+                detail: "Waiting for the planner",
+                condition: providerCondition == .error ? .empty : providerCondition
+            ),
+            output: ProviderPresentation(
+                detail: "Waiting for an output provider",
                 condition: providerCondition == .error ? .empty : providerCondition
             ),
             content: nil,
