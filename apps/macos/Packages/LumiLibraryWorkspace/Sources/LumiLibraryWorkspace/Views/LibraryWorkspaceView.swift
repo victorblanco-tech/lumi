@@ -21,6 +21,9 @@ public struct LibraryWorkspaceView: View {
     private let onQuery: @MainActor (LibraryQueryRequest) -> Void
     private let onOpenEditor: @MainActor (UInt64) -> Void
     private let onCloseEditor: @MainActor () -> Void
+    private let onTimelineEdit: @MainActor (TrackTimelineEditRequest) -> Void
+    private let onTimelineHistory: @MainActor (TrackTimelineHistoryRequest) -> Void
+    private let timelineFeedback: String?
     private let rendersInteractiveControls: Bool
     @Binding private var keyNotation: KeyNotationPreference
     @State private var search: String
@@ -34,12 +37,18 @@ public struct LibraryWorkspaceView: View {
         rendersInteractiveControls: Bool = true,
         onQuery: @escaping @MainActor (LibraryQueryRequest) -> Void = { _ in },
         onOpenEditor: @escaping @MainActor (UInt64) -> Void = { _ in },
-        onCloseEditor: @escaping @MainActor () -> Void = {}
+        onCloseEditor: @escaping @MainActor () -> Void = {},
+        onTimelineEdit: @escaping @MainActor (TrackTimelineEditRequest) -> Void = { _ in },
+        onTimelineHistory: @escaping @MainActor (TrackTimelineHistoryRequest) -> Void = { _ in },
+        timelineFeedback: String? = nil
     ) {
         self.state = state
         self.onQuery = onQuery
         self.onOpenEditor = onOpenEditor
         self.onCloseEditor = onCloseEditor
+        self.onTimelineEdit = onTimelineEdit
+        self.onTimelineHistory = onTimelineHistory
+        self.timelineFeedback = timelineFeedback
         self.rendersInteractiveControls = rendersInteractiveControls
         _keyNotation = keyNotation
         _search = State(initialValue: state.query.search)
@@ -75,7 +84,13 @@ public struct LibraryWorkspaceView: View {
             editorAnalysis = editor
         }
         .sheet(item: $editorAnalysis, onDismiss: onCloseEditor) { analysis in
-            TrackLightingEditorView(analysis: analysis, keyNotation: keyNotation)
+            TrackLightingEditorView(
+                analysis: analysis,
+                keyNotation: keyNotation,
+                feedback: timelineFeedback,
+                onTimelineEdit: onTimelineEdit,
+                onTimelineHistory: onTimelineHistory
+            )
         }
     }
 

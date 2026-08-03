@@ -52,7 +52,14 @@ struct FoundationView: View {
                         },
                         onCloseEditor: {
                             Task { await engineStatus.closeLibraryTrackEditor() }
-                        }
+                        },
+                        onTimelineEdit: { request in
+                            Task { await engineStatus.editLibraryTimeline(request) }
+                        },
+                        onTimelineHistory: { request in
+                            Task { await engineStatus.mutateLibraryTimelineHistory(request) }
+                        },
+                        timelineFeedback: engineStatus.timelineEditFeedback
                     )
                 }
             }

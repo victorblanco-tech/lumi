@@ -17,7 +17,7 @@ pub use baseline::{
 };
 pub use identifiers::{
     LibrarySourceId, PhraseRoleId, PlaylistId, SourcePlaylistId, SourceRevision, SourceTrackId,
-    TextIdentifierError, TimelineRevision,
+    TextIdentifierError, TimelineRevision, VariantId,
 };
 pub use repository::{
     ImportResult, LibraryRepository, LibraryTrackQuery, PhraseRole, PlaylistPage, PlaylistSummary,
@@ -25,5 +25,7 @@ pub use repository::{
     TrackPageRequestError, TrackSummary,
 };
 pub use timeline::{
-    LumiPhraseTimeline, PhraseInstance, TimelineRevisionOrigin, TimelineValidationError,
+    LumiPhraseTimeline, PhraseAbsorption, PhraseInstance, PhraseLoopStrategy, ThemeSpecificVariant,
+    TimelineEditCommand, TimelineEditError, TimelineRevisionOrigin, TimelineRevisionReason,
+    TimelineValidationError,
 };

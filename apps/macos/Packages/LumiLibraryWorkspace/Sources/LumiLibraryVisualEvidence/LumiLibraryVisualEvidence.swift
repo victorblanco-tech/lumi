@@ -119,7 +119,8 @@ struct LumiLibraryVisualEvidenceCommand {
                 hostCanvas
                 TrackLightingEditorView(
                     analysis: TrackEditorFixtures.ready,
-                    keyNotation: variant.notation
+                    keyNotation: variant.notation,
+                    rendersInteractiveControls: false
                 )
                 .padding(18)
             }

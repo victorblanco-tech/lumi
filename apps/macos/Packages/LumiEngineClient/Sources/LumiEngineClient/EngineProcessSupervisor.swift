@@ -17,7 +17,10 @@ public actor EngineProcessSupervisor {
         self.transport = transport
     }
 
-    public func launch(engineExecutable: URL) async throws -> EngineEndpoint {
+    public func launch(
+        engineExecutable: URL,
+        libraryDatabaseURL: URL? = nil
+    ) async throws -> EngineEndpoint {
         await stop()
 
         guard FileManager.default.isExecutableFile(atPath: engineExecutable.path) else {
@@ -32,6 +35,9 @@ public actor EngineProcessSupervisor {
         process.standardError = FileHandle.nullDevice
         var environment = ProcessInfo.processInfo.environment
         environment["LUMI_SESSION_TOKEN"] = token
+        if let libraryDatabaseURL {
+            environment["LUMI_LIBRARY_DATABASE_PATH"] = libraryDatabaseURL.path
+        }
         process.environment = environment
 
         do {
