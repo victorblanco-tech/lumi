@@ -48,6 +48,7 @@ public struct LibrarySnapshotDecoder: Sendable {
                 rawPhrases: try boolean(capabilitiesObject, "rawPhrases"),
                 localAudio: try boolean(capabilitiesObject, "localAudio")
             ),
+            collectionTotal: try unsigned(library, "collectionTotal"),
             playlists: try playlistValues.map(decodePlaylist),
             query: query,
             page: LibraryPage(

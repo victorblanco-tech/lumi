@@ -9,6 +9,7 @@ struct LibraryWorkspaceTests {
         let state = try LibrarySnapshotDecoder().decode(envelope(trackValues: [trackValue()]))
         #expect(state.condition == .ready)
         #expect(state.source?.id == "lumi-demo-library")
+        #expect(state.collectionTotal == 10_000)
         #expect(state.playlists.first?.name == "All Demo Tracks")
         #expect(state.page.total == 10_000)
         #expect(state.page.tracks.first?.title == "Horizon Lines")
@@ -90,6 +91,7 @@ private func envelope(trackValues: [JSONValue]) -> MessageEnvelope {
                     "rawPhrases": .boolean(true),
                     "localAudio": .boolean(true)
                 ]),
+                "collectionTotal": .number(10_000),
                 "query": .object([
                     "search": .string(""),
                     "playlistId": .null,

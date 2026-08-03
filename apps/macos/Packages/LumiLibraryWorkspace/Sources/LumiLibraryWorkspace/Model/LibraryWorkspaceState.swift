@@ -178,6 +178,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
     public let providerKind: String
     public let source: LibrarySource?
     public let capabilities: LibraryCapabilities?
+    public let collectionTotal: UInt64
     public let playlists: [LibraryPlaylist]
     public let query: LibraryQuery
     public let page: LibraryPage
@@ -188,6 +189,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
         providerKind: String,
         source: LibrarySource?,
         capabilities: LibraryCapabilities?,
+        collectionTotal: UInt64,
         playlists: [LibraryPlaylist],
         query: LibraryQuery,
         page: LibraryPage,
@@ -197,6 +199,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
         self.providerKind = providerKind
         self.source = source
         self.capabilities = capabilities
+        self.collectionTotal = collectionTotal
         self.playlists = playlists
         self.query = query
         self.page = page
@@ -220,6 +223,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
             providerKind: "unavailable",
             source: nil,
             capabilities: nil,
+            collectionTotal: 0,
             playlists: [],
             query: LibraryQuery(search: "", playlistID: nil, offset: 0, limit: 50),
             page: LibraryPage(total: 0, offset: 0, tracks: []),

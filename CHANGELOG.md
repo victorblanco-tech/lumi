@@ -78,5 +78,12 @@ Lumi gebruikt [Semantic Versioning](https://semver.org/).
 
 ### Fixed
 
+- Interactieve appcommando's wachten nu op de lokale engineverbinding en krijgen
+  voorrang op simulatie-ticks, zodat Library-queries en showcontrols niet meer
+  stil kunnen worden overgeslagen.
+- `Clear search`, de vaste Collection-teller en de minimale Library-venstermaat
+  blijven correct tijdens playlist- en zoeknavigatie.
+- Xcode herschrijft de handmatig beheerde localization catalog niet meer tijdens
+  een gewone debugrun.
 - Wisselen van Light naar System volgt macOS nu zonder donkere content met
   onleesbare light-mode voorgrondkleuren achter te laten.

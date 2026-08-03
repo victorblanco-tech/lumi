@@ -23,7 +23,7 @@ struct LumiApp: App {
                     await engineStatus.start()
                 }
         }
-        .defaultSize(width: 1_100, height: 760)
+        .defaultSize(width: 1_280, height: 820)
     }
 }
 
