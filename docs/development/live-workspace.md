@@ -35,7 +35,7 @@ Generate the review matrix with:
 ./scripts/render-visual-evidence.sh
 ```
 
-The command writes eight 1280×1200 PNGs to the ignored
+The command writes nine 1280×1200 PNGs to the ignored
 `build/VisualEvidence/` directory. It uses fixed content, dimensions, locale,
 appearance, and key notation. Rendering therefore works while the login session
 is locked and does not require an active app window.

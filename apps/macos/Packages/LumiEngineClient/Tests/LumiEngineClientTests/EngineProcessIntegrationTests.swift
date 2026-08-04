@@ -398,11 +398,144 @@ func launchesRealEngine() async throws {
     }
 }
 
+@Test("A library track keeps its exact Lumi identity through Next and dry-run output")
+func loadsLibraryTrackIntoSimulator() async throws {
+    let environment = ProcessInfo.processInfo.environment
+    guard let executablePath = environment["LUMI_ENGINE_TEST_EXECUTABLE"] else {
+        Issue.record("LUMI_ENGINE_TEST_EXECUTABLE is required")
+        return
+    }
+    let supervisor = EngineProcessSupervisor()
+    let databaseURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("lumi-swift-library-simulator-\(UUID().uuidString).sqlite")
+    defer {
+        try? FileManager.default.removeItem(at: databaseURL)
+        try? FileManager.default.removeItem(atPath: databaseURL.path + "-wal")
+        try? FileManager.default.removeItem(atPath: databaseURL.path + "-shm")
+    }
+    do {
+        let endpoint = try await supervisor.launch(
+            engineExecutable: URL(fileURLWithPath: executablePath),
+            libraryDatabaseURL: databaseURL
+        )
+        let initial = try await supervisor.connect(to: endpoint)
+        let loaded = try await supervisor.send(
+            .loadLibraryTrackOnSimulatorDeck(
+                trackID: requiredFirstLibraryTrackID(initial),
+                deckID: 2,
+                expectedTimelineRevision: 1,
+                expectedStateRevision: requiredStateRevision(initial)
+            ),
+            messageID: "swift-load-library-track-deck-2"
+        )
+        #expect(nextPlanLibraryTimelineRevision(loaded) == 1)
+        #expect(nextPlanLibraryProvider(loaded) == "demo")
+        #expect(nextPlanResolutionCount(loaded) == nextPlanCueCount(loaded))
+        #expect(nextPlanResolutionFieldsAreComplete(loaded))
+
+        let stale = try await supervisor.send(
+            .loadLibraryTrackOnSimulatorDeck(
+                trackID: requiredFirstLibraryTrackID(initial),
+                deckID: 1,
+                expectedTimelineRevision: 99,
+                expectedStateRevision: requiredStateRevision(loaded)
+            ),
+            messageID: "swift-load-stale-library-track"
+        )
+        #expect(EngineCommandFailure(stale)?.code == "timelineRevisionMismatch")
+        #expect(EngineCommandFailure(stale)?.actualTimelineRevision == 1)
+
+        let armed = try await supervisor.send(
+            .setOperationState("armed", expectedStateRevision: requiredStateRevision(loaded))
+        )
+        let live = try await supervisor.send(
+            .setOperationState("live", expectedStateRevision: requiredStateRevision(armed))
+        )
+        let activated = try await supervisor.send(
+            .advanceToNextTrack(expectedStateRevision: requiredStateRevision(live))
+        )
+        let accelerated = try await supervisor.send(
+            .setSimulationSpeed(64, expectedStateRevision: requiredStateRevision(activated))
+        )
+        let completed = try await supervisor.send(
+            .advanceSimulation(
+                elapsedTicks: 1_000,
+                expectedStateRevision: requiredStateRevision(accelerated)
+            )
+        )
+        #expect(outputRecordCount(completed) == UInt64(nextPlanCueCount(loaded)))
+        #expect(outputResolutionsAreComplete(completed))
+        await supervisor.stop()
+    } catch {
+        await supervisor.stop()
+        throw error
+    }
+}
+
 private func stateRevision(_ envelope: MessageEnvelope) -> UInt64? {
     guard case let .number(revision) = envelope.payload["stateRevision"] else {
         return nil
     }
     return UInt64(revision)
+}
+
+private func nextPlan(_ envelope: MessageEnvelope) -> [String: JSONValue]? {
+    guard case let .object(plan) = envelope.payload["nextPlan"] else { return nil }
+    return plan
+}
+
+private func nextPlanCueCount(_ envelope: MessageEnvelope) -> Int {
+    guard let plan = nextPlan(envelope), case let .array(cues) = plan["cues"] else { return 0 }
+    return cues.count
+}
+
+private func nextPlanLibraryTimelineRevision(_ envelope: MessageEnvelope) -> UInt64? {
+    guard let plan = nextPlan(envelope),
+          case let .object(identity) = plan["libraryTrack"],
+          case let .number(revision) = identity["timelineRevision"] else { return nil }
+    return UInt64(revision)
+}
+
+private func nextPlanLibraryProvider(_ envelope: MessageEnvelope) -> String? {
+    guard let plan = nextPlan(envelope),
+          case let .object(identity) = plan["libraryTrack"],
+          case let .string(provider) = identity["providerKind"] else { return nil }
+    return provider
+}
+
+private func nextPlanResolutionCount(_ envelope: MessageEnvelope) -> Int {
+    guard let plan = nextPlan(envelope), case let .array(cues) = plan["cues"] else { return 0 }
+    return cues.filter { value in
+        guard case let .object(cue) = value,
+              case .object = cue["libraryResolution"] else { return false }
+        return true
+    }.count
+}
+
+private func nextPlanResolutionFieldsAreComplete(_ envelope: MessageEnvelope) -> Bool {
+    guard let plan = nextPlan(envelope), case let .array(cues) = plan["cues"] else { return false }
+    return !cues.isEmpty && cues.allSatisfy { value in
+        guard case let .object(cue) = value,
+              case let .object(resolution) = cue["libraryResolution"],
+              case .string = resolution["roleId"],
+              case .string = resolution["strategy"],
+              case .string = resolution["variantId"],
+              case let .object(entry) = resolution["dryRunEntry"],
+              case .string = entry["id"] else { return false }
+        return true
+    }
+}
+
+private func outputResolutionsAreComplete(_ envelope: MessageEnvelope) -> Bool {
+    guard case let .array(effects) = envelope.payload["outputEffects"] else { return false }
+    return !effects.isEmpty && effects.allSatisfy { value in
+        guard case let .object(effect) = value,
+              effect["status"] == .string("simulated"),
+              case let .object(resolution) = effect["libraryResolution"],
+              case let .object(entry) = resolution["dryRunEntry"],
+              case .string = entry["id"] else { return false }
+        return true
+    }
 }
 
 private func libraryTrackTitles(_ envelope: MessageEnvelope) -> [String] {

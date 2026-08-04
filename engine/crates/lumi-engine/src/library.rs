@@ -1,14 +1,17 @@
 use std::collections::BTreeMap;
 
-use lumi_domain::{KeyMode, PitchClass, ThemeId, TrackId};
+use lumi_domain::{
+    KeyMode, PhraseKind, PitchClass, ThemeId, TrackId, TrackIdentityFacts, TrackMetadata,
+    TrackPhrase,
+};
 use lumi_library::{
-    AutoloopCatalogError, AutoloopVariantMove, ImportedLibraryBaseline, ImportedTrackAnalysis,
-    LibraryRepository, LibraryTrackQuery, LumiPhraseTimeline, PhraseInstance, PhraseLoopStrategy,
-    PhraseRole, PhraseRoleCatalogError, PhraseRoleId, PhraseRoleMove, PlaylistId, ReconcileError,
-    ReconcilePreview, ReconcileStrategy, SourceChangeClass, SourcePhraseMapping, SourceRevision,
-    SourceTrackDiff, TimelineEditCommand, TimelineEditError, TimelineRevision,
-    TimelineRevisionOrigin, TimelineRevisionReason, TimelineRevisionSummary, TrackPageRequest,
-    TrackSummary, VariantId, reconcile_timeline,
+    AutoloopCatalog, AutoloopCatalogError, AutoloopResolutionReason, AutoloopVariantMove,
+    ImportedLibraryBaseline, ImportedTrackAnalysis, LibraryRepository, LibraryTrackQuery,
+    LumiPhraseTimeline, PhraseInstance, PhraseLoopStrategy, PhraseRole, PhraseRoleCatalogError,
+    PhraseRoleId, PhraseRoleMove, PlaylistId, ReconcileError, ReconcilePreview, ReconcileStrategy,
+    SourceChangeClass, SourcePhraseMapping, SourceRevision, SourceTrackDiff, TimelineEditCommand,
+    TimelineEditError, TimelineRevision, TimelineRevisionOrigin, TimelineRevisionReason,
+    TimelineRevisionSummary, TrackPageRequest, TrackSummary, VariantId, reconcile_timeline,
 };
 use lumi_library_demo::{DemoLibraryError, DemoLibraryRevision, DemoLibrarySourceProvider};
 use lumi_library_source::MusicLibrarySourceProvider as _;
@@ -36,6 +39,95 @@ pub struct LibraryWorker {
     limit: u16,
     editor_track_id: Option<TrackId>,
     pending_source_refresh: Option<ImportedLibraryBaseline>,
+}
+
+#[derive(Clone, Debug)]
+pub struct LibrarySimulatorTrack {
+    metadata: TrackMetadata,
+    context: LibraryPlanContext,
+}
+
+impl LibrarySimulatorTrack {
+    #[must_use]
+    pub fn into_parts(self) -> (TrackMetadata, LibraryPlanContext) {
+        (self.metadata, self.context)
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct LibraryPlanContext {
+    provider_kind: String,
+    source_id: String,
+    source_name: String,
+    source_track_id: String,
+    analysis_revision: String,
+    timeline_revision: u64,
+    catalog: AutoloopCatalog,
+    phrases: Vec<LibraryPhrasePlanContext>,
+}
+
+#[derive(Clone, Debug)]
+struct LibraryPhrasePlanContext {
+    phrase_index: u16,
+    role_id: PhraseRoleId,
+    role_name: String,
+    strategy: PhraseLoopStrategy,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResolvedLibraryCue {
+    pub phrase_index: u16,
+    pub role_id: String,
+    pub role_name: String,
+    pub strategy: &'static str,
+    pub variant_id: String,
+    pub entry_id: String,
+    pub entry_name: String,
+    pub catalog_revision: u64,
+    pub resolution_reason: String,
+}
+
+impl LibraryPlanContext {
+    #[must_use]
+    pub fn identity_json(&self) -> Value {
+        json!({
+            "matchStatus": "exact",
+            "providerKind": self.provider_kind,
+            "sourceId": self.source_id,
+            "sourceName": self.source_name,
+            "sourceTrackId": self.source_track_id,
+            "analysisRevision": self.analysis_revision,
+            "timelineRevision": self.timeline_revision,
+        })
+    }
+
+    pub fn resolve(
+        &self,
+        theme_id: ThemeId,
+    ) -> Result<Vec<ResolvedLibraryCue>, AutoloopCatalogError> {
+        self.phrases
+            .iter()
+            .map(|phrase| {
+                let resolution = self.catalog.resolve_loop_strategy(
+                    theme_id,
+                    &phrase.role_id,
+                    &phrase.strategy,
+                    self.catalog.revision(),
+                )?;
+                Ok(ResolvedLibraryCue {
+                    phrase_index: phrase.phrase_index,
+                    role_id: phrase.role_id.as_str().to_owned(),
+                    role_name: phrase.role_name.clone(),
+                    strategy: loop_strategy_name(&phrase.strategy),
+                    variant_id: resolution.variant_id().as_str().to_owned(),
+                    entry_id: resolution.entry_id().as_str().to_owned(),
+                    entry_name: resolution.display_name().to_owned(),
+                    catalog_revision: resolution.catalog_revision(),
+                    resolution_reason: autoloop_resolution_reason_name(resolution.reason()),
+                })
+            })
+            .collect()
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -161,6 +253,92 @@ impl LibraryWorker {
         self.ensure_timeline(track_id)?;
         self.editor_track_id = Some(track_id);
         Ok(())
+    }
+
+    /// Builds a simulator load exclusively from the stored track identity and
+    /// the exact current Lumi-owned timeline. Raw source phrases are never used
+    /// after the initial timeline import.
+    pub fn simulator_track(
+        &mut self,
+        track_id: u64,
+        expected_timeline_revision: u64,
+    ) -> Result<LibrarySimulatorTrack, LibraryWorkerError> {
+        let track_id = TrackId::new(track_id);
+        self.ensure_timeline(track_id)?;
+        let track = self
+            .repository
+            .track(track_id)?
+            .ok_or(LibraryWorkerError::UnknownTrack(track_id.value()))?;
+        let timeline = self.require_expected_head(track_id, expected_timeline_revision)?;
+        let role_catalog = self.repository.phrase_role_catalog()?;
+        let catalog = self.repository.autoloop_catalog()?;
+        let beats_per_bar = u32::from(track.beat_grid().beats_per_bar());
+        let duration_beats = timeline
+            .total_bars()
+            .checked_mul(beats_per_bar)
+            .ok_or(LibraryWorkerError::SimulatorTrackOverflow)?;
+        let phrases = timeline
+            .phrases()
+            .iter()
+            .map(|phrase| {
+                Ok(TrackPhrase::new(
+                    phrase.index(),
+                    phrase
+                        .start_bar()
+                        .checked_mul(beats_per_bar)
+                        .ok_or(LibraryWorkerError::SimulatorTrackOverflow)?,
+                    phrase
+                        .end_bar()
+                        .checked_mul(beats_per_bar)
+                        .ok_or(LibraryWorkerError::SimulatorTrackOverflow)?,
+                    planner_phrase_kind(phrase, timeline.phrases().len()),
+                ))
+            })
+            .collect::<Result<Vec<_>, LibraryWorkerError>>()?;
+        let identity = TrackIdentityFacts::try_new(
+            self.source_kind.clone(),
+            self.source_id.clone(),
+            track.summary().source_track_id().as_str(),
+            track.summary().source_revision().as_str(),
+            timeline.revision().value(),
+        )?;
+        let metadata = TrackMetadata::try_new_with_color(
+            track_id,
+            track.summary().title().to_owned(),
+            track.summary().artist().to_owned(),
+            track.summary().bpm_milli(),
+            track.summary().musical_key(),
+            track.summary().color(),
+            duration_beats,
+            phrases,
+        )?
+        .with_identity_facts(identity);
+        let context = LibraryPlanContext {
+            provider_kind: self.source_kind.clone(),
+            source_id: self.source_id.clone(),
+            source_name: self.source_name.clone(),
+            source_track_id: track.summary().source_track_id().as_str().to_owned(),
+            analysis_revision: track.summary().source_revision().as_str().to_owned(),
+            timeline_revision: timeline.revision().value(),
+            catalog,
+            phrases: timeline
+                .phrases()
+                .iter()
+                .map(|phrase| LibraryPhrasePlanContext {
+                    phrase_index: phrase.index(),
+                    role_id: phrase.role_id().clone(),
+                    role_name: role_display_name(role_catalog.roles(), phrase.role_id()),
+                    strategy: phrase.loop_strategy().clone(),
+                })
+                .collect(),
+        };
+
+        // Fail closed before mutating simulator state when any current Theme
+        // cannot resolve this exact timeline against the logical catalog.
+        for theme in context.catalog.themes() {
+            context.resolve(theme.id())?;
+        }
+        Ok(LibrarySimulatorTrack { metadata, context })
     }
 
     pub fn edit_timeline(
@@ -1061,6 +1239,32 @@ fn role_display_name(roles: &[PhraseRole], id: &PhraseRoleId) -> String {
         .to_owned()
 }
 
+fn planner_phrase_kind(phrase: &PhraseInstance, phrase_count: usize) -> PhraseKind {
+    match phrase.role_id().as_str() {
+        "intro-outro" if usize::from(phrase.index()) + 1 == phrase_count => PhraseKind::Outro,
+        "intro-outro" => PhraseKind::Intro,
+        "bridge" => PhraseKind::Verse,
+        "breakdown-1" | "breakdown-2" | "breakdown-3" => PhraseKind::Breakdown,
+        "synth" | "pre-drop" | "buildup-1" | "buildup-2" | "buildup-3" => PhraseKind::Build,
+        "drop" => PhraseKind::Drop,
+        // Custom roles remain authoritative for Autoloop resolution. The
+        // legacy scene planner receives a neutral category until its role
+        // taxonomy becomes fully configurable in a later epic.
+        _ => PhraseKind::Verse,
+    }
+}
+
+fn autoloop_resolution_reason_name(reason: &AutoloopResolutionReason) -> String {
+    match reason {
+        AutoloopResolutionReason::Automatic => "automatic".to_owned(),
+        AutoloopResolutionReason::ExactVariant => "exactVariant".to_owned(),
+        AutoloopResolutionReason::ThemeSpecificExact => "themeSpecificExact".to_owned(),
+        AutoloopResolutionReason::SameRoleFallback {
+            requested_variant_id,
+        } => format!("sameRoleFallback:{}", requested_variant_id.as_str()),
+    }
+}
+
 fn phrase_preview_json(phrase: &PhraseInstance) -> Value {
     json!({
         "startBar": phrase.start_bar(),
@@ -1268,6 +1472,10 @@ pub enum LibraryWorkerError {
     TimelineEdit(#[from] TimelineEditError),
     #[error("persisted timeline is invalid: {0}")]
     TimelineValidation(#[from] lumi_library::TimelineValidationError),
+    #[error("simulator track is invalid: {0}")]
+    SimulatorTrackValidation(#[from] lumi_domain::TrackValidationError),
+    #[error("simulator track arithmetic overflow")]
+    SimulatorTrackOverflow,
     #[error("library track {0} does not exist")]
     UnknownTrack(u64),
     #[error("the track editor selection changed")]
@@ -1330,7 +1538,7 @@ pub enum LibraryWorkerError {
 mod tests {
     use std::time::{SystemTime, UNIX_EPOCH};
 
-    use lumi_domain::ThemeId;
+    use lumi_domain::{PhraseKind, ThemeId};
     use lumi_library::{
         LibraryRepository as _, PhraseLoopStrategy, PhraseRoleId, ReconcileStrategy,
         TimelineEditCommand, TrackPageRequest, VariantId,
@@ -1352,6 +1560,43 @@ mod tests {
 
         assert_eq!(snapshot["collectionTotal"], 3);
         assert_eq!(snapshot["page"]["total"], 2);
+        Ok(())
+    }
+
+    #[test]
+    fn simulator_track_uses_exact_lumi_revision_and_fails_closed_on_stale_or_unknown_matches()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut worker = LibraryWorker::demo()?;
+        worker.open_editor(1)?;
+        worker.edit_timeline(
+            1,
+            1,
+            TimelineEditCommand::ChangeRole {
+                phrase_index: 0,
+                role_id: PhraseRoleId::try_new("synth")?,
+            },
+        )?;
+
+        let (metadata, context) = worker.simulator_track(1, 2)?.into_parts();
+        let identity = metadata
+            .identity_facts()
+            .ok_or("library simulator track must include identity facts")?;
+        assert_eq!(identity.provider_kind(), "demo");
+        assert_eq!(identity.lumi_timeline_revision(), 2);
+        assert_eq!(metadata.phrases()[0].kind(), PhraseKind::Build);
+        let resolved = context.resolve(ThemeId::new(1))?;
+        assert_eq!(resolved[0].role_id, "synth");
+        assert_eq!(resolved[0].strategy, "auto");
+        assert!(resolved[0].entry_id.contains("--synth--"));
+
+        assert!(matches!(
+            worker.simulator_track(1, 1),
+            Err(LibraryWorkerError::TimelineRevisionConflict { .. })
+        ));
+        assert!(matches!(
+            worker.simulator_track(999_999, 1),
+            Err(LibraryWorkerError::UnknownTrack(999_999))
+        ));
         Ok(())
     }
 

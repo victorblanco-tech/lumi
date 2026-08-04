@@ -188,6 +188,7 @@ public struct PlanSnapshot: Equatable, Sendable {
     public let configurationRevision: UInt64
     public let status: String
     public let themeDecision: ThemeDecisionSnapshot?
+    public let libraryTrack: PlanLibraryTrackSnapshot?
     public let cues: [PlanCueSnapshot]
 
     public init(
@@ -199,6 +200,7 @@ public struct PlanSnapshot: Equatable, Sendable {
         configurationRevision: UInt64,
         status: String,
         themeDecision: ThemeDecisionSnapshot? = nil,
+        libraryTrack: PlanLibraryTrackSnapshot? = nil,
         cues: [PlanCueSnapshot]
     ) {
         self.planID = planID
@@ -209,7 +211,33 @@ public struct PlanSnapshot: Equatable, Sendable {
         self.configurationRevision = configurationRevision
         self.status = status
         self.themeDecision = themeDecision
+        self.libraryTrack = libraryTrack
         self.cues = cues
+    }
+}
+
+public struct PlanLibraryTrackSnapshot: Equatable, Sendable {
+    public let providerKind: String
+    public let sourceID: String
+    public let sourceName: String
+    public let sourceTrackID: String
+    public let analysisRevision: String
+    public let timelineRevision: UInt64
+
+    public init(
+        providerKind: String,
+        sourceID: String,
+        sourceName: String,
+        sourceTrackID: String,
+        analysisRevision: String,
+        timelineRevision: UInt64
+    ) {
+        self.providerKind = providerKind
+        self.sourceID = sourceID
+        self.sourceName = sourceName
+        self.sourceTrackID = sourceTrackID
+        self.analysisRevision = analysisRevision
+        self.timelineRevision = timelineRevision
     }
 }
 
@@ -240,6 +268,7 @@ public struct PlanCueSnapshot: Equatable, Identifiable, Sendable {
     public let locked: Bool
     public let reason: PlanReasonSnapshot
     public let action: PlanActionSnapshot
+    public let libraryResolution: PlanCueLibraryResolutionSnapshot?
 
     public var id: UInt64 { phraseIndex }
 
@@ -250,7 +279,8 @@ public struct PlanCueSnapshot: Equatable, Identifiable, Sendable {
         origin: String,
         locked: Bool,
         reason: PlanReasonSnapshot,
-        action: PlanActionSnapshot
+        action: PlanActionSnapshot,
+        libraryResolution: PlanCueLibraryResolutionSnapshot? = nil
     ) {
         self.phraseIndex = phraseIndex
         self.startBeat = startBeat
@@ -259,6 +289,38 @@ public struct PlanCueSnapshot: Equatable, Identifiable, Sendable {
         self.locked = locked
         self.reason = reason
         self.action = action
+        self.libraryResolution = libraryResolution
+    }
+}
+
+public struct PlanCueLibraryResolutionSnapshot: Equatable, Sendable {
+    public let roleID: String
+    public let roleName: String
+    public let strategy: String
+    public let variantID: String
+    public let catalogRevision: UInt64
+    public let resolutionReason: String
+    public let entryID: String
+    public let entryName: String
+
+    public init(
+        roleID: String,
+        roleName: String,
+        strategy: String,
+        variantID: String,
+        catalogRevision: UInt64,
+        resolutionReason: String,
+        entryID: String,
+        entryName: String
+    ) {
+        self.roleID = roleID
+        self.roleName = roleName
+        self.strategy = strategy
+        self.variantID = variantID
+        self.catalogRevision = catalogRevision
+        self.resolutionReason = resolutionReason
+        self.entryID = entryID
+        self.entryName = entryName
     }
 }
 

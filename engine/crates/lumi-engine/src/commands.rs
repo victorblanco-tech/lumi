@@ -2,7 +2,7 @@ use std::error::Error;
 use std::fmt;
 
 use lumi_domain::{
-    OperationCommand, PlanId, PlanRevision, SceneId, StateRevision, ThemeId, TrackLoadId,
+    DeckId, OperationCommand, PlanId, PlanRevision, SceneId, StateRevision, ThemeId, TrackLoadId,
 };
 use lumi_library::{
     AutoloopVariantMove, PhraseAbsorption, PhraseConflictChoice, PhraseLoopStrategy, PhraseRoleId,
@@ -74,6 +74,12 @@ pub enum SessionCommand {
         expected_revision: u64,
         mutation: AutoloopCatalogMutation,
     },
+    LoadLibraryTrackOnSimulatorDeck {
+        track_id: u64,
+        deck_id: DeckId,
+        expected_timeline_revision: u64,
+        expected_state_revision: StateRevision,
+    },
     LoadDemoSession {
         expected_revision: StateRevision,
     },
@@ -144,6 +150,7 @@ impl SessionCommand {
             | Self::RestoreLibraryTimelineRevision { .. }
             | Self::MutatePhraseRoleCatalog { .. }
             | Self::MutateAutoloopCatalog { .. }
+            | Self::LoadLibraryTrackOnSimulatorDeck { .. }
             | Self::LoadDemoSession { .. }
             | Self::SetOperationState { .. }
             | Self::SetSimulationSpeed { .. }
@@ -224,6 +231,18 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
                 "expectedAutoloopCatalogRevision",
             )?,
             mutation: autoloop_catalog_mutation(&envelope.payload)?,
+        }),
+        "loadLibraryTrackOnSimulatorDeck" => Ok(SessionCommand::LoadLibraryTrackOnSimulatorDeck {
+            track_id: positive_unsigned(&envelope.payload, "trackId")?,
+            deck_id: DeckId::new(
+                u8::try_from(positive_unsigned(&envelope.payload, "deckId")?)
+                    .map_err(|_| CommandDecodeError::InvalidField("deckId"))?,
+            ),
+            expected_timeline_revision: positive_unsigned(
+                &envelope.payload,
+                "expectedTimelineRevision",
+            )?,
+            expected_state_revision: state_revision(envelope)?,
         }),
         "loadDemoSession" => Ok(SessionCommand::LoadDemoSession {
             expected_revision: state_revision(envelope)?,

@@ -146,6 +146,68 @@ impl<C: MonotonicClock> SimulatorDeckSourceProvider<C> {
         Ok(())
     }
 
+    /// Replaces the track on one simulated deck and emits the same normalized
+    /// `TrackLoaded` observation a real deck-source adapter would publish.
+    pub fn load_track(
+        &mut self,
+        deck_id: DeckId,
+        metadata: TrackMetadata,
+    ) -> Result<TrackLoadId, SimulatorError> {
+        self.update_to_clock()?;
+        if !self.decks.contains_key(&deck_id) {
+            return Err(SimulatorError::UnknownDeck(deck_id));
+        }
+        let next_load = self
+            .decks
+            .values()
+            .map(|deck| deck.track_load_id.value())
+            .max()
+            .unwrap_or(0)
+            .checked_add(1)
+            .ok_or(SimulatorError::TrackLoadIdOverflow)?;
+        let track_load_id = TrackLoadId::new(next_load);
+        self.decks.insert(
+            deck_id,
+            SimulatedDeck {
+                track_load_id,
+                metadata: metadata.clone(),
+                beat: 0,
+                phrase_index: 0,
+            },
+        );
+        if deck_id == self.leader_deck_id {
+            self.beat_remainder = 0;
+        }
+        let now = self.clock.now();
+        self.emit(
+            now,
+            DeckObservation::TrackLoaded {
+                deck_id,
+                metadata,
+                track_load_id,
+            },
+        )?;
+        if deck_id == self.leader_deck_id {
+            self.emit(
+                now,
+                DeckObservation::PlaybackPosition {
+                    deck_id,
+                    track_load_id,
+                    beat: 0,
+                },
+            )?;
+            self.emit(
+                now,
+                DeckObservation::PhraseChanged {
+                    deck_id,
+                    track_load_id,
+                    phrase_index: 0,
+                },
+            )?;
+        }
+        Ok(track_load_id)
+    }
+
     pub fn update_to_clock(&mut self) -> Result<(), SimulatorError> {
         let now = self.clock.now();
         if now < self.last_clock {
@@ -431,6 +493,8 @@ pub enum SimulatorError {
     SequenceOverflow,
     LeaderDeckMissing,
     NextDeckMissing,
+    UnknownDeck(DeckId),
+    TrackLoadIdOverflow,
     TranscriptEncoding(serde_json::Error),
 }
 
@@ -451,6 +515,14 @@ impl fmt::Display for SimulatorError {
             Self::SequenceOverflow => formatter.write_str("source event sequence overflow"),
             Self::LeaderDeckMissing => formatter.write_str("leader deck is missing"),
             Self::NextDeckMissing => formatter.write_str("next deck is missing"),
+            Self::UnknownDeck(deck_id) => {
+                write!(
+                    formatter,
+                    "simulator deck {} does not exist",
+                    deck_id.value()
+                )
+            }
+            Self::TrackLoadIdOverflow => formatter.write_str("track-load identifier overflow"),
             Self::TranscriptEncoding(error) => {
                 write!(formatter, "transcript encoding failed: {error}")
             }

@@ -72,8 +72,8 @@ fi
 "$script_dir/render-visual-evidence.sh" "$repository_root/build/VisualEvidence"
 
 visual_evidence_count="$(find "$repository_root/build/VisualEvidence" -type f -name '*.png' | wc -l | tr -d '[:space:]')"
-if [[ "$visual_evidence_count" != "21" ]]; then
-  echo "ERROR: expected 21 visual evidence PNGs, found $visual_evidence_count." >&2
+if [[ "$visual_evidence_count" != "22" ]]; then
+  echo "ERROR: expected 22 visual evidence PNGs, found $visual_evidence_count." >&2
   exit 1
 fi
 

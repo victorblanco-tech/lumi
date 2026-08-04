@@ -19,6 +19,7 @@
 "library.readiness" = "Readiness";
 "library.analysisComplete" = "Analysis complete";
 "library.openEditor" = "Open Track Lighting Editor";
+"library.loadOnDeck" = "Load on Deck %llu";
 "library.selectTrack" = "Select a track to inspect its authoritative metadata.";
 "library.previous" = "Previous";
 "library.next" = "Next";

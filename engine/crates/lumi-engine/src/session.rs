@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::env;
 use std::io::{self, Write as _};
 use std::net::Ipv4Addr;
@@ -10,8 +11,8 @@ use lumi_domain::{
     KeyMode, LightingPlan, MonotonicTime, OperationCommand, OperationState, OutputEffectReason,
     OutputEffectResult, OutputEffectStatus, OutputExecutionRequest, PhraseKind, PitchClass,
     PlanRevision, PlanStatus, RuntimeHealth, SceneCategory, SemanticLightingAction,
-    SerializedRuntime, SerializedRuntimeError, TimelineResult, TimelineSource, UserCommandEnvelope,
-    WorkerId,
+    SerializedRuntime, SerializedRuntimeError, TimelineResult, TimelineSource, TrackLoadId,
+    UserCommandEnvelope, WorkerId,
 };
 use lumi_lighting_output::LightingOutputProvider as _;
 use lumi_output_dry_run::{DryRunLightingOutputProvider, DryRunOutputError};
@@ -39,7 +40,7 @@ use tokio::time::timeout;
 
 use crate::StartupReady;
 use crate::commands::{SessionCommand, decode_command};
-use crate::library::{LibraryWorker, LibraryWorkerError};
+use crate::library::{LibraryPlanContext, LibraryWorker, LibraryWorkerError, ResolvedLibraryCue};
 
 const SESSION_TOKEN_ENVIRONMENT_KEY: &str = "LUMI_SESSION_TOKEN";
 const MINIMUM_SESSION_TOKEN_BYTES: usize = 32;
@@ -49,6 +50,7 @@ const CONNECTION_TIMEOUT: Duration = Duration::from_secs(10);
 const AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(5);
 const EVENT_QUEUE_CAPACITY: usize = 256;
 const COMMAND_ID_CACHE_CAPACITY: usize = 256;
+const LIBRARY_CONTEXT_CAPACITY: usize = 256;
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -268,6 +270,7 @@ struct PlanningWorker {
     planner: DeterministicPlanner<StableChoiceSource>,
     effect_sequence: u64,
     recent_theme_ids: Vec<lumi_domain::ThemeId>,
+    library_contexts: BTreeMap<TrackLoadId, LibraryPlanContext>,
 }
 
 impl PlanningWorker {
@@ -276,7 +279,26 @@ impl PlanningWorker {
             planner: DeterministicPlanner::epic_one(),
             effect_sequence: 0,
             recent_theme_ids: Vec::new(),
+            library_contexts: BTreeMap::new(),
         }
+    }
+
+    fn register_library_context(
+        &mut self,
+        track_load_id: TrackLoadId,
+        context: LibraryPlanContext,
+    ) {
+        self.library_contexts.insert(track_load_id, context);
+        while self.library_contexts.len() > LIBRARY_CONTEXT_CAPACITY {
+            let Some(oldest) = self.library_contexts.keys().next().copied() else {
+                break;
+            };
+            self.library_contexts.remove(&oldest);
+        }
+    }
+
+    fn library_context(&self, track_load_id: TrackLoadId) -> Option<&LibraryPlanContext> {
+        self.library_contexts.get(&track_load_id)
     }
 
     fn process_source_event(
@@ -615,6 +637,24 @@ fn apply_command(
                 .mutate_autoloop_catalog(expected_revision, mutation)?;
             return Ok(());
         }
+        SessionCommand::LoadLibraryTrackOnSimulatorDeck {
+            track_id,
+            deck_id,
+            expected_timeline_revision,
+            expected_state_revision,
+        } => {
+            validate_state_revision(runtime, expected_state_revision)?;
+            let prepared = runtime
+                .library_worker
+                .simulator_track(track_id, expected_timeline_revision)?;
+            let (metadata, context) = prepared.into_parts();
+            let track_load_id = runtime.deck_source.load_track(deck_id, metadata)?;
+            runtime
+                .planning_worker
+                .register_library_context(track_load_id, context);
+            process_pending_source_events(runtime).map_err(CommandApplicationError::Engine)?;
+            return Ok(());
+        }
         SessionCommand::LoadDemoSession { expected_revision }
         | SessionCommand::ResetDemoSession { expected_revision } => {
             validate_state_revision(runtime, expected_revision)?;
@@ -726,6 +766,7 @@ fn apply_command(
         | SessionCommand::RestoreLibraryTimelineRevision { .. }
         | SessionCommand::MutatePhraseRoleCatalog { .. }
         | SessionCommand::MutateAutoloopCatalog { .. }
+        | SessionCommand::LoadLibraryTrackOnSimulatorDeck { .. }
         | SessionCommand::LoadDemoSession { .. }
         | SessionCommand::SetOperationState { .. }
         | SessionCommand::SetSimulationSpeed { .. }
@@ -1118,6 +1159,14 @@ fn snapshot_envelope(
                         "mode": key_mode_name(metadata.musical_key().mode()),
                     },
                     "durationBeats": metadata.duration_beats(),
+                    "identityFacts": metadata.identity_facts().map(|identity| json!({
+                        "matchStatus": "exact",
+                        "providerKind": identity.provider_kind(),
+                        "sourceId": identity.source_id(),
+                        "sourceTrackId": identity.source_track_id(),
+                        "analysisRevision": identity.analysis_revision(),
+                        "timelineRevision": identity.lumi_timeline_revision(),
+                    })),
                     "phrases": metadata.phrases().iter().map(|phrase| json!({
                         "index": phrase.index(),
                         "startBeat": phrase.start_beat(),
@@ -1154,7 +1203,12 @@ fn snapshot_envelope(
     );
     payload.insert(
         "outputEffects".to_owned(),
-        Value::Array(state.output_effects().map(output_effect_json).collect()),
+        Value::Array(
+            state
+                .output_effects()
+                .map(|effect| output_effect_json(effect, &runtime.planning_worker))
+                .collect::<Result<Vec<_>, _>>()?,
+        ),
     );
     payload.insert(
         "timeline".to_owned(),
@@ -1178,7 +1232,8 @@ fn snapshot_envelope(
         .decks()
         .find(|(deck_id, _)| Some(*deck_id) != state.leader_deck())
         .and_then(|(deck_id, _)| state.plan(deck_id))
-        .map(plan_json)
+        .map(|plan| plan_json(plan, &runtime.planning_worker))
+        .transpose()?
         .unwrap_or(Value::Null);
     payload.insert("nextPlan".to_owned(), next_plan);
     payload.insert(
@@ -1197,9 +1252,27 @@ fn snapshot_envelope(
     })
 }
 
-fn output_effect_json(result: &OutputEffectResult) -> Value {
+fn output_effect_json(
+    result: &OutputEffectResult,
+    planning_worker: &PlanningWorker,
+) -> Result<Value, LibraryWorkerError> {
     let request = result.request();
-    json!({
+    let library_resolution = action_theme_id(request.action())
+        .and_then(|theme_id| {
+            planning_worker
+                .library_context(request.track_load_id())
+                .map(|context| {
+                    context.resolve(theme_id).map(|cues| {
+                        cues.into_iter()
+                            .find(|cue| cue.phrase_index == request.phrase_index())
+                            .map(|cue| library_resolution_json(&cue))
+                            .unwrap_or(Value::Null)
+                    })
+                })
+        })
+        .transpose()?
+        .unwrap_or(Value::Null);
+    Ok(json!({
         "commandId": request.command_id().value(),
         "planId": request.plan_id().value().to_string(),
         "planRevision": request.plan_revision().value(),
@@ -1213,11 +1286,25 @@ fn output_effect_json(result: &OutputEffectResult) -> Value {
         "resultReason": output_effect_reason_name(result.reason()),
         "cueReason": cue_reason_json(request.cue_reason()),
         "action": action_json(request.action()),
-    })
+        "libraryResolution": library_resolution,
+    }))
 }
 
-fn plan_json(plan: &LightingPlan) -> Value {
-    json!({
+fn plan_json(
+    plan: &LightingPlan,
+    planning_worker: &PlanningWorker,
+) -> Result<Value, LibraryWorkerError> {
+    let library_context = planning_worker.library_context(plan.track_load_id());
+    let library_track = library_context.map_or(Value::Null, LibraryPlanContext::identity_json);
+    let library_cues = match (library_context, plan.theme_decision()) {
+        (Some(context), Some(decision)) => context
+            .resolve(decision.theme_id())?
+            .into_iter()
+            .map(|cue| (cue.phrase_index, cue))
+            .collect::<BTreeMap<_, _>>(),
+        _ => BTreeMap::new(),
+    };
+    Ok(json!({
         "planId": plan.id().value().to_string(),
         "deckId": plan.deck_id().value(),
         "trackId": plan.track_id().value(),
@@ -1233,6 +1320,7 @@ fn plan_json(plan: &LightingPlan) -> Value {
             "reason": theme_selection_reason_name(decision.reason()),
             "matchedColorRgb": decision.matched_color(),
         })),
+        "libraryTrack": library_track,
         "cues": plan.cues().iter().map(|cue| json!({
             "phraseIndex": cue.phrase_index(),
             "startBeat": cue.start_beat(),
@@ -1241,8 +1329,33 @@ fn plan_json(plan: &LightingPlan) -> Value {
             "locked": cue.locked(),
             "reason": cue_reason_json(cue.reason()),
             "action": action_json(cue.action()),
+            "libraryResolution": library_cues
+                .get(&cue.phrase_index())
+                .map_or(Value::Null, library_resolution_json),
         })).collect::<Vec<_>>(),
+    }))
+}
+
+fn library_resolution_json(cue: &ResolvedLibraryCue) -> Value {
+    json!({
+        "roleId": cue.role_id,
+        "roleName": cue.role_name,
+        "strategy": cue.strategy,
+        "variantId": cue.variant_id,
+        "catalogRevision": cue.catalog_revision,
+        "resolutionReason": cue.resolution_reason,
+        "dryRunEntry": {
+            "id": cue.entry_id,
+            "name": cue.entry_name,
+        },
     })
+}
+
+fn action_theme_id(action: &SemanticLightingAction) -> Option<lumi_domain::ThemeId> {
+    match action {
+        SemanticLightingAction::ApplyLook(look) => Some(look.theme_id()),
+        SemanticLightingAction::HoldCurrentLook => None,
+    }
 }
 
 const fn theme_selection_reason_name(reason: lumi_domain::ThemeSelectionReason) -> &'static str {
@@ -1601,6 +1714,138 @@ mod tests {
         assert_eq!(
             actual,
             include_bytes!("../../../../fixtures/demo-session-v1/output-effects.json")
+        );
+    }
+
+    #[test]
+    fn library_track_runs_from_exact_timeline_through_next_activation_and_dry_run() {
+        let mut runtime = match initialized_runtime() {
+            Ok(runtime) => runtime,
+            Err(error) => panic!("test engine must initialize: {error}"),
+        };
+        runtime
+            .library_worker
+            .open_editor(1)
+            .unwrap_or_else(|error| panic!("fixture track must open: {error}"));
+        runtime
+            .library_worker
+            .set_phrase_loop_strategy(
+                1,
+                1,
+                1,
+                1,
+                lumi_library::PhraseLoopStrategy::FixedVariant(
+                    lumi_library::VariantId::try_new("variant-2")
+                        .unwrap_or_else(|error| panic!("fixture variant must be valid: {error}")),
+                ),
+            )
+            .unwrap_or_else(|error| panic!("fixture loop strategy must save: {error}"));
+        let expected_state_revision = runtime.state.state().revision();
+        apply_session_command(
+            &mut runtime,
+            SessionCommand::LoadLibraryTrackOnSimulatorDeck {
+                track_id: 1,
+                deck_id: lumi_domain::DeckId::new(2),
+                expected_timeline_revision: 2,
+                expected_state_revision,
+            },
+        );
+
+        let preview = snapshot_envelope(&runtime, 1, "library-preview")
+            .unwrap_or_else(|error| panic!("preview must encode: {error}"));
+        assert_eq!(preview.payload["decks"][1]["track"]["id"], 1);
+        assert_eq!(
+            preview.payload["decks"][1]["track"]["identityFacts"]["timelineRevision"],
+            2
+        );
+        assert_eq!(
+            preview.payload["nextPlan"]["libraryTrack"]["matchStatus"],
+            "exact"
+        );
+        assert_eq!(
+            preview.payload["nextPlan"]["libraryTrack"]["providerKind"],
+            "demo"
+        );
+        assert!(preview.payload["nextPlan"]["themeDecision"]["reason"].is_string());
+        let preview_cues = preview.payload["nextPlan"]["cues"]
+            .as_array()
+            .unwrap_or_else(|| panic!("next plan must expose cues"));
+        assert!(!preview_cues.is_empty());
+        assert!(preview_cues.iter().all(|cue| {
+            cue["libraryResolution"]["roleId"].is_string()
+                && cue["libraryResolution"]["strategy"].is_string()
+                && cue["libraryResolution"]["variantId"].is_string()
+                && cue["libraryResolution"]["dryRunEntry"]["id"].is_string()
+        }));
+
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::SetOperationState {
+                expected_revision,
+                command: OperationCommand::Arm,
+            }
+        });
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::SetOperationState {
+                expected_revision,
+                command: OperationCommand::Start,
+            }
+        });
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::AdvanceToNextTrack { expected_revision }
+        });
+        let activated_snapshot = snapshot_envelope(&runtime, 2, "library-activated")
+            .unwrap_or_else(|error| panic!("activated snapshot must encode: {error}"));
+        let active = runtime
+            .state
+            .state()
+            .active_plan()
+            .unwrap_or_else(|| panic!("leader change must activate the prepared plan"));
+        assert_eq!(active.track_id(), lumi_domain::TrackId::new(1));
+        let cue_count = active.cues().len();
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::SetSimulationSpeed {
+                expected_revision,
+                speed: SimulationSpeed::SixtyFour,
+            }
+        });
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::AdvanceSimulation {
+                expected_revision,
+                elapsed_ticks: 1_000,
+            }
+        });
+
+        let results = runtime.state.state().output_effects().collect::<Vec<_>>();
+        assert_eq!(results.len(), cue_count);
+        assert_eq!(
+            results
+                .iter()
+                .map(|result| result.request().phrase_index())
+                .collect::<Vec<_>>(),
+            (0..u16::try_from(cue_count)
+                .unwrap_or_else(|error| panic!("fixture cue count must fit u16: {error}")))
+                .collect::<Vec<_>>()
+        );
+        let completed = snapshot_envelope(&runtime, 3, "library-completed")
+            .unwrap_or_else(|error| panic!("completed snapshot must encode: {error}"));
+        assert!(
+            completed.payload["outputEffects"]
+                .as_array()
+                .is_some_and(|effects| effects.iter().all(|effect| {
+                    effect["status"] == "simulated"
+                        && effect["libraryResolution"]["dryRunEntry"]["id"].is_string()
+                }))
+        );
+        let evidence = canonical_library_simulation_evidence(
+            &preview.payload,
+            &activated_snapshot.payload,
+            &completed.payload,
+        );
+        assert_eq!(
+            String::from_utf8_lossy(&evidence),
+            String::from_utf8_lossy(include_bytes!(
+                "../../../../fixtures/demo-library-v1/simulator-e2e.json"
+            ))
         );
     }
 
@@ -2065,6 +2310,62 @@ mod tests {
         };
         encoded.push(b'\n');
         encoded
+    }
+
+    fn canonical_library_simulation_evidence(
+        preview: &Map<String, Value>,
+        activated: &Map<String, Value>,
+        completed: &Map<String, Value>,
+    ) -> Vec<u8> {
+        let next = &preview["nextPlan"];
+        let cues = next["cues"]
+            .as_array()
+            .unwrap_or_else(|| panic!("golden evidence requires preview cues"))
+            .iter()
+            .map(|cue| {
+                json!({
+                    "phraseIndex": cue["phraseIndex"],
+                    "startBeat": cue["startBeat"],
+                    "endBeat": cue["endBeat"],
+                    "roleId": cue["libraryResolution"]["roleId"],
+                    "strategy": cue["libraryResolution"]["strategy"],
+                    "variantId": cue["libraryResolution"]["variantId"],
+                    "entryId": cue["libraryResolution"]["dryRunEntry"]["id"],
+                })
+            })
+            .collect::<Vec<_>>();
+        let outputs = completed["outputEffects"]
+            .as_array()
+            .unwrap_or_else(|| panic!("golden evidence requires output effects"))
+            .iter()
+            .map(|effect| {
+                json!({
+                    "phraseIndex": effect["phraseIndex"],
+                    "status": effect["status"],
+                    "entryId": effect["libraryResolution"]["dryRunEntry"]["id"],
+                })
+            })
+            .collect::<Vec<_>>();
+        let evidence = json!({
+            "scenarioVersion": 1,
+            "next": {
+                "deckId": next["deckId"],
+                "trackId": next["trackId"],
+                "trackLoadId": next["trackLoadId"],
+                "libraryTrack": next["libraryTrack"],
+                "themeDecision": next["themeDecision"],
+                "cues": cues,
+            },
+            "activation": {
+                "leaderDeckId": activated["leaderDeckId"],
+                "activePlan": activated["activePlan"],
+            },
+            "outputs": outputs,
+        });
+        let mut bytes = serde_json::to_vec_pretty(&evidence)
+            .unwrap_or_else(|error| panic!("golden evidence must encode: {error}"));
+        bytes.push(b'\n');
+        bytes
     }
 
     fn semantic_output_order(speed: SimulationSpeed, elapsed_ticks: u64) -> Vec<(u16, u64)> {

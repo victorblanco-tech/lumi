@@ -43,6 +43,6 @@ pub use state::{DeckState, OperationState, RuntimeHealth, RuntimeState};
 pub use time::MonotonicTime;
 pub use timeline::{TimelineEntry, TimelineResult, TimelineSource};
 pub use track::{
-    DeckSourceStatus, KeyMode, MusicalKey, PhraseKind, PitchClass, TrackColor, TrackMetadata,
-    TrackPhrase, TrackValidationError,
+    DeckSourceStatus, KeyMode, MusicalKey, PhraseKind, PitchClass, TrackColor, TrackIdentityFacts,
+    TrackMetadata, TrackPhrase, TrackValidationError,
 };

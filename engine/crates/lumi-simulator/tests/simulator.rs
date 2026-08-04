@@ -1,5 +1,7 @@
 use lumi_deck_source::DeckSourceProvider;
-use lumi_domain::{DeckId, DeckObservation, DomainEvent, MonotonicTime};
+use lumi_domain::{
+    DeckId, DeckObservation, DomainEvent, MonotonicTime, TrackIdentityFacts, TrackLoadId,
+};
 use lumi_simulator::{
     ManualClock, SimulationControl, SimulationSpeed, SimulatorDeckSourceProvider, SimulatorError,
     canonical_transcript,
@@ -38,6 +40,84 @@ fn initial_events_publish_both_tracks_before_the_leader() {
             ..
         }
     ));
+}
+
+#[test]
+fn loading_a_library_track_emits_one_normalized_identity_safe_deck_event() {
+    let clock = ManualClock::new(0);
+    let mut provider = demo(clock);
+    let initial = drain(&mut provider);
+    let metadata = initial
+        .iter()
+        .find_map(|event| match observation(event) {
+            DeckObservation::TrackLoaded { metadata, .. } => Some(metadata.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("demo must contain a track"))
+        .with_identity_facts(
+            TrackIdentityFacts::try_new("demo", "library-v1", "source-track-1", "a1", 7)
+                .unwrap_or_else(|error| panic!("identity must be valid: {error}")),
+        );
+
+    let load_id = provider
+        .load_track(DeckId::new(2), metadata)
+        .unwrap_or_else(|error| panic!("library track must load: {error}"));
+    assert_eq!(load_id, TrackLoadId::new(2002));
+    let events = drain(&mut provider);
+    assert_eq!(events.len(), 1);
+    assert!(matches!(
+        observation(&events[0]),
+        DeckObservation::TrackLoaded {
+            deck_id,
+            track_load_id,
+            metadata,
+        } if *deck_id == DeckId::new(2)
+            && *track_load_id == load_id
+            && metadata.identity_facts().is_some_and(|facts| {
+                facts.source_track_id() == "source-track-1"
+                    && facts.lumi_timeline_revision() == 7
+            })
+    ));
+}
+
+#[test]
+fn loading_the_leader_deck_resets_position_without_fabricating_a_leader_change() {
+    let mut provider = demo(ManualClock::new(0));
+    let initial = drain(&mut provider);
+    let metadata = initial
+        .iter()
+        .find_map(|event| match observation(event) {
+            DeckObservation::TrackLoaded { metadata, .. } => Some(metadata.clone()),
+            _ => None,
+        })
+        .unwrap_or_else(|| panic!("demo must contain a track"));
+
+    let load_id = provider
+        .load_track(DeckId::new(1), metadata)
+        .unwrap_or_else(|error| panic!("leader track must load: {error}"));
+    let events = drain(&mut provider);
+    assert_eq!(events.len(), 3);
+    assert!(matches!(
+        observation(&events[0]),
+        DeckObservation::TrackLoaded { deck_id, .. } if *deck_id == DeckId::new(1)
+    ));
+    assert!(matches!(
+        observation(&events[1]),
+        DeckObservation::PlaybackPosition {
+            deck_id,
+            track_load_id,
+            beat: 0,
+        } if *deck_id == DeckId::new(1) && *track_load_id == load_id
+    ));
+    assert!(matches!(
+        observation(&events[2]),
+        DeckObservation::PhraseChanged {
+            deck_id,
+            track_load_id,
+            phrase_index: 0,
+        } if *deck_id == DeckId::new(1) && *track_load_id == load_id
+    ));
+    assert_eq!(provider.leader_deck_id(), DeckId::new(1));
 }
 
 #[test]

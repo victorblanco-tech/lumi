@@ -12,6 +12,11 @@ state. No simulator type crosses into `lumi-domain`, the protocol contract, or
 Swift presentation state. The protocol exposes `providerKind` for diagnostics,
 not for business decisions.
 
+E2A-11 adds dynamic normalized track loads to either simulated deck. The
+Library prepares the metadata and identity facts; the simulator only allocates
+a new load instance and emits ordinary deck observations. See
+[`library-track-simulator.md`](library-track-simulator.md).
+
 ## Canonical session
 
 `fixtures/demo-session-v1/session.json` contains two synthetic, license-free
