@@ -49,13 +49,17 @@ De rij wordt geïdentificeerd door `PhraseRoleId + VariantId`; de kolom door
 providerbinding zoals SoundSwitch-bank en -slot. Banks, slots en MIDI-noten zijn
 geen library- of planneridentiteiten.
 
-Een bank en een variant zijn verschillende assen. Voor de eerste SoundSwitch-
-workflow wordt ieder van de vier gebruikersbanks aan één Lumi-Theme gekoppeld.
+Een bank en een variant zijn verschillende assen. Voor de eerste ingebouwde
+SoundSwitch-preset wordt ieder van de vier gebruikersbanks aan één Lumi-Theme-
+group gekoppeld.
 Een variant is vervolgens een alternatieve Autoloop binnen dezelfde Phrase Role
 en dezelfde Theme-bank. Vier banks betekenen dus vier beschikbare Themes, niet
-vier verplichte variants. Variantsets zijn per role uitbreidbaar; het aantal
-wordt niet hard-coded. Providercapaciteit en de uiteindelijke verdeling over
-banks en slots worden later door het targetprofiel gevalideerd.
+vier verplichte variants. Dit is geen generieke outputprofielinvariant: een
+latere profielbuilder kan banks als Genre, Function of Custom organiseren en
+bindt dan Group + Phrase Role + Variant aan een positie, conform ADR-0015.
+Variantsets zijn per role uitbreidbaar; het aantal wordt niet hard-coded.
+Providercapaciteit en de uiteindelijke verdeling over banks en slots worden door
+het targetprofiel gevalideerd.
 
 Een trackphrase bewaart geen vast Theme. De library ondersteunt drie
 loopstrategieën:

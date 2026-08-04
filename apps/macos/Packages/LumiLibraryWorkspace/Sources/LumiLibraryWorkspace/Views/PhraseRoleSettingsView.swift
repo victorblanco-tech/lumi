@@ -115,7 +115,7 @@ public struct PhraseRoleSettingsView: View {
             settingsSectionButton(.general, title: copy("settings.general"), icon: "slider.horizontal.3")
             settingsSectionButton(.phraseRoles, title: copy("settings.phraseRoles"), icon: "text.badge.checkmark")
             settingsSectionButton(.sourceMapping, title: copy("settings.sourceMapping"), icon: "arrow.triangle.branch")
-            settingsSectionButton(.autoloopMatrix, title: copy("settings.autoloopMatrix"), icon: "square.grid.3x3")
+            settingsSectionButton(.autoloopMatrix, title: copy("settings.outputProfiles"), icon: "hifispeaker.2.fill")
             Spacer()
         }
         .padding(LumiSpacing.large)

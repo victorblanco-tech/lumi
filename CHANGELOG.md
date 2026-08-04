@@ -27,6 +27,12 @@ Lumi gebruikt [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Een ingebouwd `SoundSwitch Autoloops` Output Profile met vier benoemde banks,
+  32 stabiele Autoloop-posities per bank, een virtuele Lumi-controller en een
+  expliciete MIDI/POC-readinessweergave op basis van demo-data.
+- ADR-0015 en een timeboxed CoreMIDI/SoundSwitch-POC-plan dat parallelle Control
+  One-bediening en zichtbare DMX-output via Control One als harde acceptatie
+  vastlegt.
 - Een vaste donkere, CDJ-geïnspireerde Track Lighting Editor met maat/beatgrid,
   gekleurde performance-waveform, gekleurde phrase lane, full-track overview en
   één gedeeld beatcoördinatenstelsel.
