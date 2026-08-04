@@ -139,122 +139,106 @@ public struct AutoloopCatalogSettingsView: View {
     }
 
     private func banksAndAutoloops(_ catalog: AutoloopCatalogState) -> some View {
-        VStack(spacing: LumiSpacing.medium) {
-            bankTabs(catalog)
-            HStack(alignment: .top, spacing: LumiSpacing.medium) {
-                bankSurface(catalog).frame(maxWidth: .infinity)
-                mappingInspector(catalog).frame(width: 310)
-            }
+        HStack(alignment: .top, spacing: LumiSpacing.medium) {
+            soundSwitchMappingSurface(catalog).frame(maxWidth: .infinity)
+            mappingInspector(catalog).frame(width: 310)
         }
     }
 
-    private func bankTabs(_ catalog: AutoloopCatalogState) -> some View {
-        HStack(spacing: LumiSpacing.small) {
-            ForEach(catalog.themes) { bank in
-                let mapped = SoundSwitchOutputProfileProjection.mappedCount(
-                    for: bank.id,
-                    catalog: catalog
-                )
-                Button { selectBank(bank, catalog: catalog) } label: {
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text("BANK \(bank.sortOrder)")
-                            .font(LumiTypography.technical)
-                            .foregroundStyle(LumiColor.textSecondary)
-                        Text(bank.name)
-                            .font(LumiTypography.body.weight(.semibold))
-                            .lineLimit(1)
-                        Text("\(mapped) / 8 AutoLoops")
-                            .font(LumiTypography.technical)
-                            .foregroundStyle(LumiColor.textSecondary)
-                    }
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, LumiSpacing.medium)
-                    .frame(height: 68)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(selectedBankID == bank.id ? LumiColor.accent : LumiColor.textPrimary)
-                .background(
-                    selectedBankID == bank.id
-                        ? LumiColor.accent.opacity(0.14)
-                        : LumiColor.surfaceElevated
-                )
-                .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
-                .overlay {
-                    RoundedRectangle(cornerRadius: LumiRadius.control)
-                        .stroke(selectedBankID == bank.id ? LumiColor.accent : LumiColor.border)
-                }
-                .accessibilityIdentifier("lumi.settings.outputProfiles.bank.\(bank.id)")
-            }
-        }
-    }
-
-    private func bankSurface(_ catalog: AutoloopCatalogState) -> some View {
-        let bank = selectedBank(catalog)
-        return LumiPanel {
+    private func soundSwitchMappingSurface(_ catalog: AutoloopCatalogState) -> some View {
+        LumiPanel {
             VStack(alignment: .leading, spacing: LumiSpacing.medium) {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
-                        Text("Bank \(bank?.sortOrder ?? 1) · \(bank?.name ?? "")")
+                        Text("SoundSwitch AutoLoops")
                             .font(LumiTypography.cardTitle)
-                        Text("The order below matches the eight SoundSwitch AutoLoop buttons.")
+                        Text("Select a virtual AutoLoop button to edit its Lumi mapping.")
                             .font(LumiTypography.caption)
                             .foregroundStyle(LumiColor.textSecondary)
                     }
                     Spacer()
-                    Text("BUTTON → AUTOLOOP NAME → PHRASE TYPE")
+                    Text("4 BANKS × 8 BUTTONS")
                         .font(LumiTypography.technical)
                         .foregroundStyle(LumiColor.textSecondary)
                 }
-                VStack(spacing: 7) {
-                    ForEach(slots(catalog)) { slot in
-                        Button { selectSlot(slot, catalog: catalog) } label: {
-                            HStack(spacing: LumiSpacing.medium) {
-                                Text("\(slot.number)")
-                                    .font(LumiTypography.technical.weight(.bold))
-                                    .frame(width: 28, height: 28)
-                                    .background(LumiColor.accent.opacity(0.14))
-                                    .clipShape(RoundedRectangle(cornerRadius: 5))
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(slot.entryName ?? "Empty AutoLoop")
-                                        .font(LumiTypography.body.weight(.semibold))
-                                        .lineLimit(1)
-                                    Text("AutoLoop Name")
-                                        .font(LumiTypography.technical)
-                                        .foregroundStyle(LumiColor.textSecondary)
-                                }
-                                Spacer()
-                                Text(slot.roleName ?? "Choose Phrase Type")
-                                    .font(LumiTypography.caption.weight(.semibold))
-                                    .foregroundStyle(slot.status == .mapped ? LumiColor.accent : LumiColor.warning)
-                                    .padding(.horizontal, 9)
-                                    .frame(height: 27)
-                                    .background(LumiColor.surface)
-                                    .clipShape(Capsule())
-                            }
-                            .padding(.horizontal, 10)
-                            .frame(height: 51)
-                        }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(LumiColor.textPrimary)
-                        .background(
-                            selectedButtonNumber == slot.number
-                                ? LumiColor.accent.opacity(0.14)
-                                : LumiColor.surfaceElevated
-                        )
-                        .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
-                        .overlay {
-                            RoundedRectangle(cornerRadius: LumiRadius.control)
-                                .stroke(
-                                    selectedButtonNumber == slot.number
-                                        ? LumiColor.accent
-                                        : LumiColor.border
-                                )
-                        }
-                        .accessibilityIdentifier("lumi.settings.outputProfiles.button.\(slot.number)")
+                Text("PLAY ALL BANKS")
+                    .font(LumiTypography.technical.weight(.semibold))
+                    .frame(maxWidth: .infinity, minHeight: 28)
+                    .background(LumiColor.surfaceElevated)
+                    .overlay(alignment: .top) {
+                        Rectangle().fill(LumiColor.textSecondary).frame(height: 2)
+                    }
+                HStack(alignment: .top, spacing: 10) {
+                    ForEach(catalog.themes) { bank in
+                        soundSwitchBankColumn(bank, catalog: catalog)
                     }
                 }
             }
         }
+    }
+
+    private func soundSwitchBankColumn(
+        _ bank: AutoloopThemeState,
+        catalog: AutoloopCatalogState
+    ) -> some View {
+        let bankSlots = SoundSwitchOutputProfileProjection.slots(for: bank.id, catalog: catalog)
+        return VStack(spacing: 7) {
+            Button { selectBank(bank, catalog: catalog) } label: {
+                VStack(spacing: 2) {
+                    Text("BANK \(bank.sortOrder)")
+                        .font(LumiTypography.technical)
+                    Text(bank.name.uppercased())
+                        .font(LumiTypography.caption.weight(.semibold))
+                        .lineLimit(1)
+                }
+                .frame(maxWidth: .infinity, minHeight: 39)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(selectedBankID == bank.id ? LumiColor.textPrimary : LumiColor.textSecondary)
+            .background(
+                selectedBankID == bank.id
+                    ? LumiColor.accent.opacity(0.22)
+                    : LumiColor.surfaceElevated
+            )
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(selectedBankID == bank.id ? LumiColor.accent : LumiColor.textSecondary)
+                    .frame(height: 2)
+            }
+            .accessibilityIdentifier("lumi.settings.outputProfiles.bank.\(bank.id)")
+
+            ForEach(bankSlots) { slot in
+                let selected = selectedBankID == bank.id && selectedButtonNumber == slot.number
+                let roleColor = phraseRoleColor(slot.roleID)
+                Button { selectBankAndSlot(bank, slot: slot, catalog: catalog) } label: {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(slot.entryName ?? "EMPTY AUTOLOOP")
+                            .font(LumiTypography.caption.weight(.semibold))
+                            .lineLimit(1)
+                        Text("\(slot.number) · \(slot.roleName ?? "Choose Phrase Type")")
+                            .font(LumiTypography.technical)
+                            .foregroundStyle(LumiColor.textSecondary)
+                            .lineLimit(1)
+                    }
+                    .frame(maxWidth: .infinity, minHeight: 42, alignment: .leading)
+                    .padding(.horizontal, 8)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(LumiColor.textPrimary)
+                .background(selected ? LumiColor.accent.opacity(0.15) : LumiColor.surfaceElevated)
+                .overlay(alignment: .top) {
+                    Rectangle().fill(roleColor).frame(height: 2)
+                }
+                .overlay {
+                    Rectangle()
+                        .stroke(selected ? LumiColor.accent : LumiColor.border, lineWidth: selected ? 2 : 1)
+                }
+                .accessibilityIdentifier(
+                    "lumi.settings.outputProfiles.bank.\(bank.id).button.\(slot.number)"
+                )
+            }
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private func mappingInspector(_ catalog: AutoloopCatalogState) -> some View {
@@ -482,6 +466,32 @@ public struct AutoloopCatalogSettingsView: View {
 
     private func roleName(_ id: String, catalog: AutoloopCatalogState) -> String {
         catalog.roles.first { $0.id == id }?.name ?? "Choose Phrase Type"
+    }
+
+    private func phraseRoleColor(_ roleID: String?) -> Color {
+        guard let roleID else { return LumiColor.textSecondary }
+        if roleID == "intro-outro" {
+            return Color(red: 0.25, green: 0.55, blue: 0.95)
+        }
+        if roleID == "bridge" {
+            return Color(red: 0.37, green: 0.42, blue: 0.78)
+        }
+        if roleID.hasPrefix("breakdown") {
+            return Color(red: 0.48, green: 0.28, blue: 0.83)
+        }
+        if roleID == "synth" {
+            return Color(red: 0.82, green: 0.24, blue: 0.72)
+        }
+        if roleID == "pre-drop" {
+            return Color(red: 0.95, green: 0.46, blue: 0.20)
+        }
+        if roleID.hasPrefix("buildup") {
+            return Color(red: 0.20, green: 0.78, blue: 0.36)
+        }
+        if roleID == "drop" {
+            return Color(red: 0.92, green: 0.20, blue: 0.26)
+        }
+        return Color(red: 0.20, green: 0.68, blue: 0.60)
     }
 
     private func selectBank(_ bank: AutoloopThemeState, catalog: AutoloopCatalogState) {
