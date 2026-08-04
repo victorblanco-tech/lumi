@@ -4,7 +4,7 @@ use lumi_domain::ThemeId;
 
 use crate::{AutoloopEntryId, PhraseLoopStrategy, PhraseRoleCatalog, PhraseRoleId, VariantId};
 
-pub const AUTOLOOP_CATALOG_DEFAULTS_VERSION: u16 = 2;
+pub const AUTOLOOP_CATALOG_DEFAULTS_VERSION: u16 = 3;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AutoloopTheme {

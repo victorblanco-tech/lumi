@@ -320,15 +320,16 @@ Status: **implemented and locally verified**. Het ontwerp staat in
 de controllergrens in ADR-0015 en de volgende POC in
 [`soundswitch-coremidi-poc.md`](soundswitch-coremidi-poc.md).
 
-### E2A-18 – Map the real 4×8 SoundSwitch AutoLoop surface
+### E2A-18 – Map the real 4×32 SoundSwitch AutoLoop surface
 
-Status: **implemented and locally verified**. Iedere bank heeft exact acht
-buttons. De gebruiker beheert per button de exacte `AutoLoop Name` en kiest een
+Status: **implemented and locally verified**. Iedere bank heeft exact 32
+AutoLoop-posities, verdeeld over vier pagina's van acht fysieke buttons. De
+gebruiker beheert per positie de exacte `AutoLoop Name` en kiest een
 configureerbaar Lumi `Phrase Type`. De mapping wordt atomair en persistent
 opgeslagen; interne mapping-ID's worden niet als Variant Name getoond. De vier
 banks blijven in het primaire mappingscherm tegelijk zichtbaar in de herkenbare
 SoundSwitch/Control One-indeling; de inspector vervangt die surface niet. De
-Test Controller spiegelt dezelfde 4×8-configuratie en blijft send-disabled tot
+Test Controller spiegelt dezelfde 4×32-configuratie en blijft send-disabled tot
 de CoreMIDI-POC.
 
 ## 6.1 Bouwvolgorde zonder Rekordbox-developmentlibrary
