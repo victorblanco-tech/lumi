@@ -222,6 +222,7 @@ public struct LibrarySnapshotDecoder: Sendable {
                     }
                     return AutoloopCellState(
                         themeID: try unsigned(cell, "themeId"),
+                        buttonNumber: optionalUnsigned(cell, "buttonNumber").flatMap(UInt16.init(exactly:)),
                         entryID: entryID,
                         name: name,
                         status: status

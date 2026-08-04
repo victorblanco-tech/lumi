@@ -14,12 +14,20 @@ public struct AutoloopCellState: Identifiable, Equatable, Sendable {
     public var id: UInt64 { themeID }
 
     public let themeID: UInt64
+    public let buttonNumber: UInt16?
     public let entryID: String?
     public let name: String?
     public let status: String
 
-    public init(themeID: UInt64, entryID: String?, name: String?, status: String) {
+    public init(
+        themeID: UInt64,
+        buttonNumber: UInt16? = nil,
+        entryID: String?,
+        name: String?,
+        status: String
+    ) {
         self.themeID = themeID
+        self.buttonNumber = buttonNumber
         self.entryID = entryID
         self.name = name
         self.status = status
@@ -143,4 +151,5 @@ public enum AutoloopCatalogMutationRequest: Equatable, Sendable {
     case archiveVariant(roleID: String, variantID: String)
     case restoreVariant(roleID: String, variantID: String)
     case setCell(themeID: UInt64, roleID: String, variantID: String, displayName: String?)
+    case setButton(themeID: UInt64, buttonNumber: UInt16, roleID: String, displayName: String?)
 }

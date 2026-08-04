@@ -196,6 +196,7 @@ public enum EngineAutoloopCatalogMutation: Equatable, Sendable {
     case archiveVariant(roleID: String, variantID: String)
     case restoreVariant(roleID: String, variantID: String)
     case setCell(themeID: UInt64, roleID: String, variantID: String, displayName: String?)
+    case setButton(themeID: UInt64, buttonNumber: UInt16, roleID: String, displayName: String?)
 
     fileprivate var payload: [String: JSONValue] {
         switch self {
@@ -236,6 +237,14 @@ public enum EngineAutoloopCatalogMutation: Equatable, Sendable {
                     "displayName": displayName.map(JSONValue.string) ?? .null
                 ]
             )
+        case let .setButton(themeID, buttonNumber, roleID, displayName):
+            [
+                "operation": .string("setButton"),
+                "themeId": .number(Double(themeID)),
+                "buttonNumber": .number(Double(buttonNumber)),
+                "roleId": .string(roleID),
+                "displayName": displayName.map(JSONValue.string) ?? .null
+            ]
         }
     }
 

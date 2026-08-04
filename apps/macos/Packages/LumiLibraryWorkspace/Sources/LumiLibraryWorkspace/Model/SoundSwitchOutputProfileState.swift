@@ -5,7 +5,7 @@ public struct SoundSwitchOutputProfileState: Equatable, Sendable {
         targetName: "SoundSwitch",
         controllerName: "Lumi Virtual MIDI Controller",
         bankCount: 4,
-        slotsPerBank: 32,
+        slotsPerBank: 8,
         slotsPerPage: 8
     )
 
@@ -134,17 +134,15 @@ public enum SoundSwitchOutputProfileProjection {
         catalog: AutoloopCatalogState,
         profile: SoundSwitchOutputProfileState = .builtIn
     ) -> [SoundSwitchAutoloopSlotState] {
-        let logicalRows = catalog.roles
-            .filter { !$0.archived }
-            .flatMap { role in
-                role.variants
-                    .filter { !$0.archived }
-                    .sorted { $0.sortOrder < $1.sortOrder }
-                    .map { (role, $0) }
-            }
         return (1...profile.slotsPerBank).map { slotNumber in
-            let index = Int(slotNumber - 1)
-            guard logicalRows.indices.contains(index) else {
+            let mapping = catalog.roles.lazy.compactMap { role in
+                role.variants.lazy.compactMap { variant in
+                    variant.cells.first {
+                        $0.themeID == bankID && $0.buttonNumber == slotNumber && !$0.isMissing
+                    }.map { (role, variant, $0) }
+                }.first
+            }.first
+            guard let (role, variant, cell) = mapping else {
                 return SoundSwitchAutoloopSlotState(
                     number: slotNumber,
                     roleID: nil,
@@ -156,17 +154,15 @@ public enum SoundSwitchOutputProfileProjection {
                     status: .available
                 )
             }
-            let (role, variant) = logicalRows[index]
-            let cell = variant.cells.first { $0.themeID == bankID }
             return SoundSwitchAutoloopSlotState(
                 number: slotNumber,
                 roleID: role.id,
                 roleName: role.name,
                 variantID: variant.id,
                 variantName: variant.name,
-                entryID: cell?.entryID,
-                entryName: cell?.name,
-                status: cell?.isMissing == false ? .mapped : .incomplete
+                entryID: cell.entryID,
+                entryName: cell.name,
+                status: .mapped
             )
         }
     }

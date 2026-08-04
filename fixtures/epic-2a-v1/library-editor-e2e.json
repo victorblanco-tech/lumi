@@ -22,7 +22,7 @@
   "loopStrategy": {
     "catalogRevision": 1,
     "kind": "fixedVariant",
-    "variantId": "variant-1"
+    "variantId": "mapping-5"
   },
   "offline": true,
   "persistence": {
@@ -45,32 +45,32 @@
   },
   "themeResolution": [
     {
-      "entryId": "theme-1--synth--variant-1",
+      "entryId": "theme-1--mapping-5",
       "roleId": "synth",
       "strategy": "fixedVariant",
       "themeId": 1,
-      "variantId": "variant-1"
+      "variantId": "mapping-5"
     },
     {
-      "entryId": "theme-2--synth--variant-1",
+      "entryId": "theme-2--mapping-5",
       "roleId": "synth",
       "strategy": "fixedVariant",
       "themeId": 2,
-      "variantId": "variant-1"
+      "variantId": "mapping-5"
     },
     {
-      "entryId": "theme-3--synth--variant-1",
+      "entryId": "theme-3--mapping-5",
       "roleId": "synth",
       "strategy": "fixedVariant",
       "themeId": 3,
-      "variantId": "variant-1"
+      "variantId": "mapping-5"
     },
     {
-      "entryId": "theme-4--synth--variant-1",
+      "entryId": "theme-4--mapping-5",
       "roleId": "synth",
       "strategy": "fixedVariant",
       "themeId": 4,
-      "variantId": "variant-1"
+      "variantId": "mapping-5"
     }
   ]
 }

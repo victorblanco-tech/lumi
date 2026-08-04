@@ -165,6 +165,44 @@ fn duplicate_cells_are_rejected() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 #[test]
+fn an_output_mapping_atomically_owns_its_entry_name_and_phrase_role()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mapped = fixture()?.set_mapping(
+        ThemeId::new(1),
+        VariantId::try_new("mapping-1")?,
+        PhraseRoleId::try_new("drop")?,
+        Some("DROP BLUE PINK - NEW 1".to_owned()),
+    )?;
+    let cell = mapped
+        .cells()
+        .iter()
+        .find(|cell| {
+            cell.theme_id() == ThemeId::new(1) && cell.variant_id().as_str() == "mapping-1"
+        })
+        .ok_or("button mapping is missing")?;
+    assert_eq!(cell.role_id().as_str(), "drop");
+    assert_eq!(cell.display_name(), "DROP BLUE PINK - NEW 1");
+
+    let reassigned = mapped.set_mapping(
+        ThemeId::new(1),
+        VariantId::try_new("mapping-1")?,
+        PhraseRoleId::try_new("synth")?,
+        Some("SYNTH BLUE PINK".to_owned()),
+    )?;
+    let button_cells = reassigned
+        .cells()
+        .iter()
+        .filter(|cell| {
+            cell.theme_id() == ThemeId::new(1) && cell.variant_id().as_str() == "mapping-1"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(button_cells.len(), 1);
+    assert_eq!(button_cells[0].role_id().as_str(), "synth");
+    assert_eq!(button_cells[0].entry_id().as_str(), "theme-1--mapping-1");
+    Ok(())
+}
+
+#[test]
 fn persisted_catalogs_require_exactly_four_theme_targets() -> Result<(), Box<dyn std::error::Error>>
 {
     let catalog = fixture()?;

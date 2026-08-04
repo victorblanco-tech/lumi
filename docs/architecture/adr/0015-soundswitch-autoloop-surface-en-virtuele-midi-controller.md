@@ -26,17 +26,19 @@ De eerste ingebouwde outputpresentatie heet `SoundSwitch Autoloops`.
   SoundSwitch-controller en geen Lumi-dependency.
 - SoundSwitch bezit de lichtuitvoer en gebruikt de gekozen hardware-interface
   voor DMX. Dat kan Control One zijn; Lumi kent deze downstream hardware niet.
-- De ingebouwde surface projecteert vier banks, 32 Autoloop-posities per bank en
-  vier pagina's van acht virtuele buttons.
+- De ingebouwde surface projecteert vier banks met ieder acht AutoLoop-buttons:
+  32 mappings totaal.
 - Een outputbank heeft een eigen naam en organisatievorm: `Theme`, `Genre`,
   `Function` of `Custom`.
-- Een Autoloop-binding verwijst naar een logische Group, Phrase Role en Variant.
-  Provideradres, MIDI-note en sequencing worden pas door het outputprofiel
-  gebonden.
+- Een buttonbinding bevat de bank, stabiele buttonpositie, de exacte
+  SoundSwitch AutoLoop Name en één Lumi Phrase Type.
+- Een zichtbare of door de gebruiker te beheren `Variant Name` bestaat niet in
+  het outputprofiel. Een interne ID ondersteunt persistence en een latere
+  track-specifieke keuze, maar blijft implementatiedetail.
 - De eerste demo-projectie gebruikt één Theme-group per bank. Dat is een preset,
   geen invariant van het generieke outputprofielmodel.
-- De virtuele-controllerweergave gebruikt de SoundSwitch Autoloop-surface als
-  referentie. Zij heet niet `Virtual Control One`.
+- De `Test Controller` spiegelt exact dezelfde 4×8 SoundSwitch-surface en
+  introduceert geen tweede mappingmodel. Zij heet niet `Virtual Control One`.
 
 ```text
 Beat Link Trigger ── Ableton Link ───────────────> SoundSwitch timing
@@ -68,8 +70,9 @@ De POC stuurt nog geen show automatisch aan en bouwt geen profielbuilder.
   externe controller of downstream DMX-interface zichtbaar.
 - Settings kan de surface en preflight al met demo-data tonen, terwijl live
   MIDI-acties uitgeschakeld blijven.
-- De planner blijft spreken in stabiele Group/Theme-, Phrase Role- en Variant-
-  identiteiten; alleen het outputprofiel kent banks, slots en MIDI.
+- De planner spreekt in Bank/Theme- en Phrase Type-identiteiten. Een optionele
+  exacte AutoLoop-keuze gebruikt een interne stabiele mapping-ID; alleen het
+  outputprofiel kent buttons en MIDI.
 - ShowNET, lasers en andere targets kunnen later een ander outputprofiel krijgen.
 
 ## Afgewezen alternatieven
