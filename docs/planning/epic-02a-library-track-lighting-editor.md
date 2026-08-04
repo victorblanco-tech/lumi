@@ -261,6 +261,22 @@ Status: **implemented; local verification and native visual evidence pass**.
 Het leidende design staat in
 [`docs/design/track-editor`](../design/track-editor/README.md) en ADR-0014.
 
+### E2A-14 – Integrate and resize the Track Editor workspace
+
+Vervangt de modale editor door een ingebedde verticale split: de Track Editor
+boven en de volledige Library-browser eronder. De gebruiker kan de divider
+verslepen om meer editruimte of meer tracklistruimte te kiezen. De gedetailleerde
+waveform ondersteunt native horizontale trackpad-/muiswielpan. Interne Phrase
+Points tonen expliciete resize-handles en blijven bij slepen op hele beats
+quantizen. De Swift wire-validator accepteert daarbij iedere geldige hele beat,
+niet alleen maatgrenzen, zodat opgeslagen edits na herstart heropenen.
+
+Status: **implemented; local package and native application verification pass**.
+De geaccepteerde layout- en interactieregels zijn toegevoegd aan het Track
+Editor design. Verdere CDJ/Rekordbox RGB-pixelfidelity blijft een aparte
+[E2A-15 rendererverbetering](https://github.com/victorblanco-tech/lumi/issues/70)
+en verandert deze UX-contracten niet.
+
 ## 6.1 Bouwvolgorde zonder Rekordbox-developmentlibrary
 
 De Rekordbox-spike is alleen een harde gate voor `E2A-02`, niet voor de

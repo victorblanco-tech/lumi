@@ -82,18 +82,31 @@ public struct LibraryWorkspaceView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            header
-            Divider()
-            conditionBanner
-            HStack(spacing: 0) {
-                collectionNavigation
-                    .frame(minWidth: 180, idealWidth: 210, maxWidth: 250)
-                Divider()
-                trackBrowser
-                    .frame(minWidth: 480, maxWidth: .infinity)
-                Divider()
-                inspector
-                    .frame(minWidth: 260, idealWidth: 310, maxWidth: 360)
+            if let analysis = editorAnalysis {
+                VSplitView {
+                    TrackLightingEditorView(
+                        analysis: analysis,
+                        autoloopCatalog: state.autoloopCatalog,
+                        keyNotation: keyNotation,
+                        feedback: timelineFeedback,
+                        isEmbedded: true,
+                        onClose: onCloseEditor,
+                        onTimelineEdit: onTimelineEdit,
+                        onTimelineHistory: onTimelineHistory,
+                        onSourceReconcile: onSourceReconcile
+                    )
+                    .frame(minHeight: 580, idealHeight: 680)
+
+                    libraryBrowser
+                        .frame(minHeight: 100, idealHeight: 260)
+                }
+            } else {
+                VStack(spacing: 0) {
+                    header
+                    Divider()
+                    conditionBanner
+                    libraryBrowser
+                }
             }
         }
         .background(LumiColor.canvas)
@@ -107,16 +120,18 @@ public struct LibraryWorkspaceView: View {
         .onChange(of: state.editor) { _, editor in
             editorAnalysis = editor
         }
-        .sheet(item: $editorAnalysis, onDismiss: onCloseEditor) { analysis in
-            TrackLightingEditorView(
-                analysis: analysis,
-                autoloopCatalog: state.autoloopCatalog,
-                keyNotation: keyNotation,
-                feedback: timelineFeedback,
-                onTimelineEdit: onTimelineEdit,
-                onTimelineHistory: onTimelineHistory,
-                onSourceReconcile: onSourceReconcile
-            )
+    }
+
+    private var libraryBrowser: some View {
+        HStack(spacing: 0) {
+            collectionNavigation
+                .frame(minWidth: 180, idealWidth: 210, maxWidth: 250)
+            Divider()
+            trackBrowser
+                .frame(minWidth: 480, maxWidth: .infinity)
+            Divider()
+            inspector
+                .frame(minWidth: 260, idealWidth: 310, maxWidth: 360)
         }
     }
 

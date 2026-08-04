@@ -424,8 +424,6 @@ public struct LibrarySnapshotDecoder: Sendable {
             guard phraseIDs.insert(phrase.id).inserted,
                   phrase.startBeat < phrase.endBeat,
                   phrase.endBeat <= UInt32(beats.count),
-                  phrase.startBeat.isMultiple(of: UInt32(beatsPerBar)),
-                  phrase.endBeat.isMultiple(of: UInt32(beatsPerBar)),
                   (index == 0 ? phrase.startBeat == 0 : phrase.startBeat == previousEnd) else {
                 throw LibrarySnapshotError.invalidPhraseTimeline
             }

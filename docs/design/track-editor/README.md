@@ -1,10 +1,12 @@
 # Track Editor – RGB waveform and phrase-point UX
 
-- Status: **Implemented in E2A-13**
+- Status: **Implemented in E2A-13 and refined in E2A-14**
 - Accepted: **2026-08-04**
 - Product language: **English**
 - Reference interaction: **Rekordbox/CDJ waveform editing**
 - Delivery story: [E2A-13 – Track Editor phrase-point workflow](https://github.com/victorblanco-tech/lumi/issues/65)
+- Workspace refinement: [E2A-14 – Integrated resizable editor](https://github.com/victorblanco-tech/lumi/issues/69)
+- Renderer follow-up: [E2A-15 – CDJ/Rekordbox RGB fidelity](https://github.com/victorblanco-tech/lumi/issues/70)
 
 ## Accepted outcome
 
@@ -59,14 +61,25 @@ The full-track overview is navigation, not a second editor. Clicking it moves
 and centers the detailed viewport. Clicking a phrase range selects its start
 point and opens the same inspector state in both waveform views.
 
+The editor is an integrated Library workspace, not a modal sheet. It occupies
+the upper pane and the Library browser remains visible in the lower pane. A
+native vertical splitter lets the user trade Library height for editing space;
+the lower pane retains a small usable minimum. The ordinary Library title and
+filter header are hidden while editing so track identity, transport, waveform,
+overview, and phrase inspector remain visible at the normal window size.
+
 ## Interaction requirements
 
 - Click or drag in the detailed waveform to move the playhead freely.
 - Zoom from a useful multi-phrase view down to individual beats without changing
   waveform geometry or turning audio into block tiles.
-- Scroll horizontally at every zoom level.
+- Scroll horizontally at every zoom level with the full-track viewport, a
+  trackpad two-finger swipe, or a horizontal mouse wheel.
 - Click the overview to jump and center the detailed viewport.
-- `Add Phrase Point` and marker drag/move snap to one whole beat.
+- `Add Phrase Point` and marker drag/move snap to one whole beat. Every internal
+  phrase boundary has a visible resize handle and horizontal-resize pointer;
+  dragging it makes one adjacent phrase shorter and the other longer without
+  creating gaps or overlaps.
 - Left/Right moves one beat; Shift+Left/Right moves one bar.
 - Space toggles play/pause; `P` adds a Phrase Point; Delete removes the selected
   point when timeline validity permits it.
@@ -89,3 +102,11 @@ evidence is rendered to `build/VisualEvidence/track-editor-dark-camelot.png`
 and `track-editor-light-host-classic.png`. Domain, SQLite migration, Swift wire,
 audio-loop, simulator, planner, undo/redo, and reconciliation tests all use the
 same canonical beat positions.
+
+## Deferred renderer fidelity
+
+E2A-14 deliberately keeps the current provider-neutral RGB amplitude renderer.
+A follow-up renderer story, E2A-15, will refine its spectral weighting, compositing,
+vertical envelope, and density against the accepted Rekordbox/CDJ RGB visual
+reference. That work may change pixels, but not beat geometry, Phrase Point
+semantics, navigation, persistence, or the integrated workspace layout.
