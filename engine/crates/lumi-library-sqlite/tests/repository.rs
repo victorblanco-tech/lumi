@@ -1,6 +1,7 @@
 use std::error::Error;
 use std::path::PathBuf;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::time::{Duration, Instant};
 
 use lumi_domain::ThemeId;
 use lumi_library::{
@@ -326,6 +327,24 @@ fn source_reconcile_updates_analysis_and_timeline_in_one_transaction() -> Result
     let updated = repository.track(stored.id())?.ok_or("updated track")?;
     assert_eq!(updated.summary().title(), "Afterglow Drive (Extended)");
     assert_eq!(repository.timeline_head(stored.id())?, Some(reconciled));
+    assert_eq!(
+        repository
+            .library_source(first.source_id())?
+            .ok_or("source summary before completion")?
+            .revision(),
+        first.source_revision()
+    );
+    assert!(matches!(
+        repository.complete_source_refresh(&second),
+        Err(SqliteLibraryError::IncompleteSourceRefresh(_))
+    ));
+    assert_eq!(
+        repository
+            .library_source(second.source_id())?
+            .ok_or("source summary after rejected completion")?
+            .revision(),
+        first.source_revision()
+    );
     Ok(())
 }
 
@@ -615,12 +634,31 @@ fn timeline_writes_use_optimistic_concurrency() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
-fn ten_thousand_track_fixture_is_pageable() -> Result<(), Box<dyn Error>> {
-    let baseline = DemoLibrarySourceProvider::scaled(10_000)?.load_baseline()?;
-    let mut repository = SqliteLibraryRepository::in_memory()?;
-    let result = repository.import_baseline(&baseline)?;
-    assert_eq!(result.inserted, 10_000);
+fn ten_thousand_track_fixture_meets_epic_two_a_budgets() -> Result<(), Box<dyn Error>> {
+    const FIXTURE_BUDGET: Duration = Duration::from_secs(1);
+    const IMPORT_BUDGET: Duration = Duration::from_secs(5);
+    const PAGE_BUDGET: Duration = Duration::from_millis(100);
+    const SEARCH_BUDGET: Duration = Duration::from_millis(250);
 
+    let fixture_started = Instant::now();
+    let baseline = DemoLibrarySourceProvider::scaled(10_000)?.load_baseline()?;
+    let fixture_elapsed = fixture_started.elapsed();
+    assert!(
+        fixture_elapsed <= FIXTURE_BUDGET,
+        "10,000-track fixture generation took {fixture_elapsed:?}, budget {FIXTURE_BUDGET:?}"
+    );
+
+    let mut repository = SqliteLibraryRepository::in_memory()?;
+    let import_started = Instant::now();
+    let result = repository.import_baseline(&baseline)?;
+    let import_elapsed = import_started.elapsed();
+    assert_eq!(result.inserted, 10_000);
+    assert!(
+        import_elapsed <= IMPORT_BUDGET,
+        "10,000-track import took {import_elapsed:?}, budget {IMPORT_BUDGET:?}"
+    );
+
+    let page_started = Instant::now();
     let final_page = repository.page_tracks(TrackPageRequest::try_new(9_950, 50)?)?;
     assert_eq!(final_page.total(), 10_000);
     assert_eq!(final_page.offset(), 9_950);
@@ -630,21 +668,36 @@ fn ten_thousand_track_fixture_is_pageable() -> Result<(), Box<dyn Error>> {
         playlists.playlists()[0].id(),
         TrackPageRequest::try_new(9_950, 50)?,
     )?;
+    let page_elapsed = page_started.elapsed();
     assert_eq!(final_playlist_page.total(), 10_000);
     assert_eq!(final_playlist_page.tracks().len(), 50);
+    assert!(
+        page_elapsed <= PAGE_BUDGET,
+        "last collection and playlist pages took {page_elapsed:?}, budget {PAGE_BUDGET:?}"
+    );
+
+    let search_started = Instant::now();
     let search = repository.query_tracks(&LibraryTrackQuery::try_new(
         "Demo Track 09999",
         None,
         TrackPageRequest::try_new(0, 50)?,
     )?)?;
+    let search_elapsed = search_started.elapsed();
     assert_eq!(search.total(), 1);
     assert_eq!(search.tracks()[0].title(), "Demo Track 09999");
+    assert!(
+        search_elapsed <= SEARCH_BUDGET,
+        "exact 10,000-track search took {search_elapsed:?}, budget {SEARCH_BUDGET:?}"
+    );
     let literal_wildcard = repository.query_tracks(&LibraryTrackQuery::try_new(
         "%",
         None,
         TrackPageRequest::try_new(0, 50)?,
     )?)?;
     assert_eq!(literal_wildcard.total(), 0);
+    eprintln!(
+        "Epic 2A 10k benchmark: fixture={fixture_elapsed:?}, import={import_elapsed:?}, pages={page_elapsed:?}, search={search_elapsed:?}"
+    );
     Ok(())
 }
 
@@ -750,7 +803,8 @@ fn source_timeline(
 }
 
 fn temporary_database_path() -> Result<PathBuf, Box<dyn Error>> {
-    let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    static NEXT_TEMPORARY_DATABASE: AtomicU64 = AtomicU64::new(1);
+    let unique = NEXT_TEMPORARY_DATABASE.fetch_add(1, Ordering::Relaxed);
     Ok(std::env::temp_dir().join(format!(
         "lumi-library-{}-{unique}.sqlite3",
         std::process::id()

@@ -544,54 +544,134 @@ impl LibraryRepository for SqliteLibraryRepository {
                 }
             }
         }
-        for playlist in baseline.playlists() {
-            transaction.execute(
-                "INSERT INTO playlists(source_id, source_playlist_id, name)
-                 VALUES (?1, ?2, ?3)
-                 ON CONFLICT(source_id, source_playlist_id) DO UPDATE SET name = excluded.name",
-                params![
-                    baseline.source_id().as_str(),
-                    playlist.source_playlist_id().as_str(),
-                    playlist.name(),
-                ],
-            )?;
-            let playlist_id = transaction.query_row(
-                "SELECT id FROM playlists WHERE source_id = ?1 AND source_playlist_id = ?2",
-                params![
-                    baseline.source_id().as_str(),
-                    playlist.source_playlist_id().as_str()
-                ],
-                |row| row.get::<_, i64>(0),
-            )?;
-            transaction.execute(
-                "DELETE FROM playlist_tracks WHERE playlist_id = ?1",
-                [playlist_id],
-            )?;
-            let mut statement = transaction.prepare(
-                "INSERT INTO playlist_tracks(playlist_id, track_id, position)
-                 SELECT ?1, id, ?2 FROM tracks
-                 WHERE source_id = ?3 AND source_track_id = ?4",
-            )?;
-            for (position, source_track_id) in playlist.track_ids().iter().enumerate() {
-                let affected = statement.execute(params![
-                    playlist_id,
-                    usize_to_i64(position)?,
-                    baseline.source_id().as_str(),
-                    source_track_id.as_str(),
-                ])?;
-                if affected != 1 {
-                    return Err(SqliteLibraryError::MissingPlaylistTrack(
-                        source_track_id.as_str().to_owned(),
-                    ));
-                }
-            }
-        }
+        sync_playlists(&transaction, baseline)?;
         transaction.commit()?;
         Ok(ImportResult {
             inserted,
             updated,
             unchanged,
         })
+    }
+
+    fn library_source(
+        &self,
+        id: &lumi_library::LibrarySourceId,
+    ) -> Result<Option<lumi_library::LibrarySourceSummary>, Self::Error> {
+        self.connection
+            .query_row(
+                "SELECT source_kind, display_name, source_revision
+                 FROM library_sources WHERE source_id = ?1",
+                [id.as_str()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()?
+            .map(|(kind, display_name, revision)| {
+                Ok(lumi_library::LibrarySourceSummary::new(
+                    id.clone(),
+                    kind,
+                    display_name,
+                    SourceRevision::try_new(revision)?,
+                ))
+            })
+            .transpose()
+    }
+
+    fn complete_source_refresh(
+        &mut self,
+        baseline: &ImportedLibraryBaseline,
+    ) -> Result<(), Self::Error> {
+        let transaction = self.connection.transaction()?;
+        let stored_track_count = transaction.query_row(
+            "SELECT COUNT(*) FROM tracks WHERE source_id = ?1",
+            [baseline.source_id().as_str()],
+            |row| row.get::<_, i64>(0),
+        )?;
+        if stored_track_count != usize_to_i64(baseline.tracks().len())? {
+            return Err(SqliteLibraryError::IncompleteSourceRefresh(
+                "the source track set is not identical".to_owned(),
+            ));
+        }
+        for track in baseline.tracks() {
+            let stored_revision = transaction
+                .query_row(
+                    "SELECT analysis_revision FROM tracks
+                     WHERE source_id = ?1 AND source_track_id = ?2",
+                    params![
+                        baseline.source_id().as_str(),
+                        track.source_track_id().as_str(),
+                    ],
+                    |row| row.get::<_, String>(0),
+                )
+                .optional()?;
+            if stored_revision.as_deref() != Some(track.analysis_revision().as_str()) {
+                return Err(SqliteLibraryError::IncompleteSourceRefresh(
+                    track.source_track_id().as_str().to_owned(),
+                ));
+            }
+        }
+        transaction.execute(
+            "INSERT INTO import_baselines
+             (source_id, source_revision, source_kind, display_name, track_count, playlist_count)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+             ON CONFLICT(source_id, source_revision) DO NOTHING",
+            params![
+                baseline.source_id().as_str(),
+                baseline.source_revision().as_str(),
+                baseline.source_kind(),
+                baseline.display_name(),
+                usize_to_i64(baseline.tracks().len())?,
+                usize_to_i64(baseline.playlists().len())?,
+            ],
+        )?;
+        let affected = transaction.execute(
+            "UPDATE library_sources SET source_kind = ?1, display_name = ?2,
+                    source_revision = ?3 WHERE source_id = ?4",
+            params![
+                baseline.source_kind(),
+                baseline.display_name(),
+                baseline.source_revision().as_str(),
+                baseline.source_id().as_str(),
+            ],
+        )?;
+        if affected != 1 {
+            return Err(SqliteLibraryError::MissingLibrarySource(
+                baseline.source_id().as_str().to_owned(),
+            ));
+        }
+        sync_playlists(&transaction, baseline)?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    fn restore_source_checkpoint(
+        &mut self,
+        baseline: &ImportedLibraryBaseline,
+    ) -> Result<(), Self::Error> {
+        let transaction = self.connection.transaction()?;
+        let affected = transaction.execute(
+            "UPDATE library_sources SET source_kind = ?1, display_name = ?2,
+                    source_revision = ?3 WHERE source_id = ?4",
+            params![
+                baseline.source_kind(),
+                baseline.display_name(),
+                baseline.source_revision().as_str(),
+                baseline.source_id().as_str(),
+            ],
+        )?;
+        if affected != 1 {
+            return Err(SqliteLibraryError::MissingLibrarySource(
+                baseline.source_id().as_str().to_owned(),
+            ));
+        }
+        sync_playlists(&transaction, baseline)?;
+        transaction.commit()?;
+        Ok(())
     }
 
     fn reconcile_track(
@@ -657,16 +737,6 @@ impl LibraryRepository for SqliteLibraryRepository {
                 baseline.display_name(),
                 usize_to_i64(baseline.tracks().len())?,
                 usize_to_i64(baseline.playlists().len())?,
-            ],
-        )?;
-        transaction.execute(
-            "UPDATE library_sources SET source_kind = ?1, display_name = ?2,
-                    source_revision = ?3 WHERE source_id = ?4",
-            params![
-                baseline.source_kind(),
-                baseline.display_name(),
-                baseline.source_revision().as_str(),
-                baseline.source_id().as_str(),
             ],
         )?;
         update_track(&transaction, track_id, incoming)?;
@@ -764,16 +834,6 @@ impl LibraryRepository for SqliteLibraryRepository {
                 baseline.display_name(),
                 usize_to_i64(baseline.tracks().len())?,
                 usize_to_i64(baseline.playlists().len())?,
-            ],
-        )?;
-        transaction.execute(
-            "UPDATE library_sources SET source_kind = ?1, display_name = ?2,
-                    source_revision = ?3 WHERE source_id = ?4",
-            params![
-                baseline.source_kind(),
-                baseline.display_name(),
-                baseline.source_revision().as_str(),
-                baseline.source_id().as_str(),
             ],
         )?;
         update_track(&transaction, track_id, incoming)?;
@@ -1568,6 +1628,77 @@ fn replace_mapping_rows(
     Ok(())
 }
 
+fn sync_playlists(
+    transaction: &Transaction<'_>,
+    baseline: &ImportedLibraryBaseline,
+) -> Result<(), SqliteLibraryError> {
+    let incoming_ids = baseline
+        .playlists()
+        .iter()
+        .map(|playlist| playlist.source_playlist_id().as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    let obsolete_ids = {
+        let mut statement = transaction
+            .prepare("SELECT id, source_playlist_id FROM playlists WHERE source_id = ?1")?;
+        let rows = statement.query_map([baseline.source_id().as_str()], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        rows.collect::<Result<Vec<_>, _>>()?
+            .into_iter()
+            .filter_map(|(id, source_playlist_id)| {
+                (!incoming_ids.contains(source_playlist_id.as_str())).then_some(id)
+            })
+            .collect::<Vec<_>>()
+    };
+    for playlist_id in obsolete_ids {
+        transaction.execute("DELETE FROM playlists WHERE id = ?1", [playlist_id])?;
+    }
+
+    for playlist in baseline.playlists() {
+        transaction.execute(
+            "INSERT INTO playlists(source_id, source_playlist_id, name)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(source_id, source_playlist_id) DO UPDATE SET name = excluded.name",
+            params![
+                baseline.source_id().as_str(),
+                playlist.source_playlist_id().as_str(),
+                playlist.name(),
+            ],
+        )?;
+        let playlist_id = transaction.query_row(
+            "SELECT id FROM playlists WHERE source_id = ?1 AND source_playlist_id = ?2",
+            params![
+                baseline.source_id().as_str(),
+                playlist.source_playlist_id().as_str()
+            ],
+            |row| row.get::<_, i64>(0),
+        )?;
+        transaction.execute(
+            "DELETE FROM playlist_tracks WHERE playlist_id = ?1",
+            [playlist_id],
+        )?;
+        let mut statement = transaction.prepare(
+            "INSERT INTO playlist_tracks(playlist_id, track_id, position)
+             SELECT ?1, id, ?2 FROM tracks
+             WHERE source_id = ?3 AND source_track_id = ?4",
+        )?;
+        for (position, source_track_id) in playlist.track_ids().iter().enumerate() {
+            let affected = statement.execute(params![
+                playlist_id,
+                usize_to_i64(position)?,
+                baseline.source_id().as_str(),
+                source_track_id.as_str(),
+            ])?;
+            if affected != 1 {
+                return Err(SqliteLibraryError::MissingPlaylistTrack(
+                    source_track_id.as_str().to_owned(),
+                ));
+            }
+        }
+    }
+    Ok(())
+}
+
 fn replace_autoloop_rows(
     transaction: &Transaction<'_>,
     catalog: &AutoloopCatalog,
@@ -1647,6 +1778,10 @@ pub enum SqliteLibraryError {
     ArithmeticOverflow,
     #[error("playlist references missing source track {0}")]
     MissingPlaylistTrack(String),
+    #[error("music-library source {0} is missing")]
+    MissingLibrarySource(String),
+    #[error("source refresh is incomplete for {0}")]
+    IncompleteSourceRefresh(String),
     #[error("source refresh references missing track {0}")]
     MissingReconcileTrack(String),
     #[error("source refresh track identity does not match the timeline")]
