@@ -21,6 +21,7 @@ Decision Records (ADR's) die de belangrijkste besluiten vastleggen.
 - [ADR-0012: Library-sources en Lumi-owned phrase-timelines](adr/0012-library-sources-en-lumi-owned-phrase-timelines.md)
 - [ADR-0013: Late-bound Themes en de Autoloop-matrix](adr/0013-late-bound-themes-en-autoloop-matrix.md)
 - [ADR-0014: Beat-quantized Phrase Points and RGB Track Editor](adr/0014-beat-quantized-phrase-points-and-rgb-editor.md)
+- [ADR-0015: SoundSwitch Autoloop-surface en virtuele MIDI-controller](adr/0015-soundswitch-autoloop-surface-en-virtuele-midi-controller.md)
 
 Release- en deploymentmanagement staat in [`docs/release`](../release/README.md).
 

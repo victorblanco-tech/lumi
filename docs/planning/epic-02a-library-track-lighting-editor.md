@@ -1,6 +1,6 @@
 # Epic 2A – Music Library and Track Lighting Editor
 
-Status: **In progress – E2A-13 implemented and locally verified; isolated Rekordbox gate pending**
+Status: **Demo scope complete through E2A-17; Rekordbox import and RGB pixel-fidelity explicitly parked**
 
 Doelmilestone: **0.2.0 – Deck Intelligence**
 
@@ -21,7 +21,9 @@ voorbereidingsomgeving. Zonder decks of SoundSwitch-koppeling kan de gebruiker:
 7. het Theme in een preview wijzigen en alle concrete dry-run-Autoloops opnieuw
    laten resolven;
 8. een echte librarytrack in de bestaande dual-deck simulator testen;
-9. bronwijzigingen vergelijken zonder Lumi-edits te verliezen.
+9. bronwijzigingen vergelijken zonder Lumi-edits te verliezen;
+10. de logische catalogus herkennen als een ingebouwd SoundSwitch-outputprofiel
+    met vier banks, 32 Autoloop-posities en een virtuele Lumi-controller.
 
 Dit levert een zichtbare vertical slice over import, persistence, native UI,
 editing en planning. De echte SoundSwitch-project- en bank/slotbinding valt
@@ -56,6 +58,8 @@ buiten deze epic.
 - simulatorintegratie met echte geïmporteerde tracks;
 - diff, rebase, merge en replace bij sourcewijzigingen;
 - contract-, parser-, persistence-, UI-, golden-, performance- en end-to-endtests.
+- demo-data Output Profiles voor SoundSwitch met Banks & Autoloops, Virtual
+  Controller en MIDI & POC readiness, zonder live MIDI te versturen.
 
 ### Buiten scope
 
@@ -277,6 +281,15 @@ Editor design. Verdere CDJ/Rekordbox RGB-pixelfidelity blijft een aparte
 [E2A-15 rendererverbetering](https://github.com/victorblanco-tech/lumi/issues/70)
 en verandert deze UX-contracten niet.
 
+### E2A-15 – Refine RGB waveform to CDJ/Rekordbox fidelity
+
+Verbetert spectral weighting, compositing, transientdetail en zoomdensity zonder
+de geaccepteerde editorinteracties of phrasegeometrie te wijzigen.
+
+Status: **parked by product decision on 2026-08-04**. De huidige provider-
+neutrale RGB-renderer blijft bruikbaar voor de demo. Pixel-fidelity wordt later
+opgepakt zodat de huidige ontwikkelcapaciteit naar de SoundSwitch/MIDI-kern gaat.
+
 ### E2A-16 – Make the persistent editor and native track table the Library baseline
 
 Maakt de Track Editor permanent onderdeel van Library en laadt bij openen veilig
@@ -295,6 +308,20 @@ en overview-drag blijven ondersteunde navigatievormen.
 
 Status: **implemented; package tests, full repository gate, and native
 application verification pass**.
+
+### E2A-17 – Present the built-in SoundSwitch Autoloop Output Profile
+
+Vervangt de abstracte matrix-first Settings-weergave door de geaccepteerde
+bank-first Output Profiles UX. De ingebouwde demo projecteert vier banks, 32
+Autoloop-posities per bank, stabiele role/variantrijen en vier pagina's van acht
+virtuele Lumi-controllerbuttons. Mappingstatus en ontbrekende cellen blijven
+zichtbaar; live MIDI, poortselectie en concrete provideradressen blijven bewust
+uitgeschakeld tot de POC.
+
+Status: **implemented and locally verified**. Het ontwerp staat in
+[`docs/design/output-profiles`](../design/output-profiles/soundswitch-autoloops.md),
+de controllergrens in ADR-0015 en de volgende POC in
+[`soundswitch-coremidi-poc.md`](soundswitch-coremidi-poc.md).
 
 ## 6.1 Bouwvolgorde zonder Rekordbox-developmentlibrary
 
@@ -344,6 +371,18 @@ De demo-provider blijft daarna bestaan voor CI, screenshots en foutscenario's.
 - Een deterministische fixture van minimaal 10.000 tracks importeert binnen de
   vastgelegde performancebudgetten en blokkeert de UI niet.
 - Alle verificatie draait lokaal en in CI zonder decks, SoundSwitch of internet.
+- Settings toont SoundSwitch als target en Lumi als eigen virtuele controller;
+  Control One wordt uitsluitend als optionele parallelle controller/DMX-interface
+  benoemd.
+
+## 7.1 Geparkeerd na de demo-scope
+
+- `E2A-00` en `E2A-02`: directe Rekordbox 7-import blijft geparkeerd totdat een
+  geïsoleerd macOS-account met wegwerp-library beschikbaar is. De productie-
+  library wordt nooit als ontwikkelbron gebruikt.
+- `E2A-15`: verdere CDJ/Rekordbox RGB-pixelfidelity wordt later hervat.
+- De eerstvolgende actieve slice is de timeboxed SoundSwitch/CoreMIDI-POC uit
+  ADR-0015; deze is geen stilzwijgende live-outputimplementatie.
 
 ## 8. Afhankelijkheden en risico's
 

@@ -63,6 +63,10 @@ stilzwijgend vervangen. De operationele outputgate (`OFF`, `ARMED`, `LIVE`,
 - Geen acknowledgement betekent `ASSUMED` of `UNKNOWN`, nooit automatisch
   `CONFIRMED`.
 - De co-existentie en override-regels uit ADR-0007 blijven ongewijzigd.
+- De eerste provider bedient SoundSwitch rechtstreeks via Lumi's eigen virtuele
+  MIDI-bron. Control One is geen provider of transport, maar hoogstens een
+  parallelle controller en/of downstream DMX-interface van SoundSwitch, zoals
+  vastgelegd in ADR-0015.
 
 ## Afgewezen alternatieven
 

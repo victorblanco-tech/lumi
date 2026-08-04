@@ -130,6 +130,7 @@
 "settings.catalogRows" = "Catalog rows";
 "settings.autoloopMatrix" = "Autoloop Matrix";
 "settings.autoloopMatrixDetail" = "Four Theme targets share the same Phrase Role and Variant rows. Physical banks, slots, and MIDI bindings stay outside this catalog.";
+"settings.outputProfiles" = "Output Profiles";
 "settings.autoloopUnavailable" = "Autoloop catalog unavailable";
 "settings.autoloopUnavailableDetail" = "Connect to the local Lumi engine to manage Themes, variants, and matrix coverage.";
 "settings.preflightReady" = "Preflight ready";

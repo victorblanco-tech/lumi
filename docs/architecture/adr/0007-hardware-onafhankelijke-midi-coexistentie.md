@@ -27,6 +27,9 @@ zijn onafhankelijke MIDI-besturingsbronnen voor SoundSwitch.
 
 De provider- en transportgrens voor Lumi's eigen output is afzonderlijk
 vastgelegd in [ADR-0011](0011-provider-onafhankelijke-midi-output.md).
+De concrete SoundSwitch-surface, Lumi's positie naast Control One en de
+verplichte coexistence/DMX-POC zijn verduidelijkt in
+[ADR-0015](0015-soundswitch-autoloop-surface-en-virtuele-midi-controller.md).
 
 ## Consequenties
 
