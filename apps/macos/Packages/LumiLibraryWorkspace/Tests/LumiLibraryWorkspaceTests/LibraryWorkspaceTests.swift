@@ -306,6 +306,15 @@ struct LibraryWorkspaceTests {
                 #expect(abs(viewport.beat(atX: x, width: 1_024) - beat) < 0.000_001)
             }
         }
+
+        let viewport = TrackEditorViewport(
+            startBeat: 13.25,
+            visibleBeats: 16,
+            totalBeats: 256,
+            beatsPerBar: 4
+        )
+        let trackpadPan = viewport.panned(byPixels: 125, width: 1_000)
+        #expect(abs(trackpadPan.startBeat - 15.25) < 0.000_001)
     }
 
     @Test("Phrase mutations quantize fractional positions to whole beats")
@@ -318,6 +327,30 @@ struct LibraryWorkspaceTests {
             TrackEditorEditGeometry.beatSelection(anchorBeat: 6, currentBeat: 2, totalBeats: 16)
                 == 2..<7
         )
+    }
+
+    @Test("Persisted phrase points may land on any whole beat")
+    func decodesNonBarAlignedPhrasePoint() throws {
+        var editor = editorValue()
+        guard case var .object(editorObject) = editor,
+              case var .array(phrases) = editorObject["phrases"],
+              case var .object(firstPhrase) = phrases[0],
+              case var .object(secondPhrase) = phrases[1] else {
+            Issue.record("Editor fixture must contain adjacent phrases")
+            return
+        }
+        firstPhrase["endBeat"] = .number(3)
+        secondPhrase["startBeat"] = .number(3)
+        phrases[0] = .object(firstPhrase)
+        phrases[1] = .object(secondPhrase)
+        editorObject["phrases"] = .array(phrases)
+        editor = .object(editorObject)
+
+        let state = try LibrarySnapshotDecoder().decode(
+            envelope(trackValues: [trackValue()], editorValue: editor)
+        )
+        #expect(state.editor?.phrases.map(\.startBeat) == [0, 3])
+        #expect(state.editor?.phrases.map(\.endBeat) == [3, 8])
     }
 
     @Test("Viewport movement and zoom clamp to the track without bar snapping")

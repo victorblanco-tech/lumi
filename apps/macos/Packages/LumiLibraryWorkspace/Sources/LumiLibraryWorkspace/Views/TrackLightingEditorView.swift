@@ -1,3 +1,4 @@
+import AppKit
 import LumiDesignSystem
 import SwiftUI
 
@@ -7,6 +8,8 @@ public struct TrackLightingEditorView: View {
     private let keyNotation: KeyNotationPreference
     private let feedback: String?
     private let rendersInteractiveControls: Bool
+    private let isEmbedded: Bool
+    private let onClose: @MainActor () -> Void
     private let onTimelineEdit: @MainActor (TrackTimelineEditRequest) -> Void
     private let onTimelineHistory: @MainActor (TrackTimelineHistoryRequest) -> Void
     private let onSourceReconcile: @MainActor (TrackSourceReconcileRequest) -> Void
@@ -19,6 +22,7 @@ public struct TrackLightingEditorView: View {
     @State private var selectionAnchorBeat: UInt32?
     @State private var magnificationAnchorBeats: Double?
     @State private var draggingBoundaryAfterPhraseIndex: UInt16?
+    @State private var hoveredBoundaryAfterPhraseIndex: UInt16?
     @State private var pendingBoundaryBeat: UInt32?
     @State private var conflictSides: [UInt16: TrackSourceConflictSide]
     @Environment(\.dismiss) private var dismiss
@@ -35,6 +39,8 @@ public struct TrackLightingEditorView: View {
         keyNotation: KeyNotationPreference,
         feedback: String? = nil,
         rendersInteractiveControls: Bool = true,
+        isEmbedded: Bool = false,
+        onClose: @escaping @MainActor () -> Void = {},
         onTimelineEdit: @escaping @MainActor (TrackTimelineEditRequest) -> Void = { _ in },
         onTimelineHistory: @escaping @MainActor (TrackTimelineHistoryRequest) -> Void = { _ in },
         onSourceReconcile: @escaping @MainActor (TrackSourceReconcileRequest) -> Void = { _ in }
@@ -44,6 +50,8 @@ public struct TrackLightingEditorView: View {
         self.keyNotation = keyNotation
         self.feedback = feedback
         self.rendersInteractiveControls = rendersInteractiveControls
+        self.isEmbedded = isEmbedded
+        self.onClose = onClose
         self.onTimelineEdit = onTimelineEdit
         self.onTimelineHistory = onTimelineHistory
         self.onSourceReconcile = onSourceReconcile
@@ -90,7 +98,12 @@ public struct TrackLightingEditorView: View {
         .foregroundStyle(primary)
         .background(background)
         .environment(\.colorScheme, .dark)
-        .frame(minWidth: 980, idealWidth: 1_160, minHeight: 620, idealHeight: 720)
+        .frame(
+            minWidth: isEmbedded ? 0 : 980,
+            idealWidth: isEmbedded ? nil : 1_160,
+            minHeight: isEmbedded ? 500 : 620,
+            idealHeight: isEmbedded ? nil : 720
+        )
         .preferredColorScheme(.dark)
         .accessibilityIdentifier("lumi.trackEditor")
         .focusable()
@@ -144,12 +157,19 @@ public struct TrackLightingEditorView: View {
             metric("BPM", formatEditorBPM(analysis.track.bpmMilli))
             metric("REMAIN", formatEditorTime(remainingMillis))
             metric("BAR · BEAT", barBeatLabel)
-            Button(editorCopy("editor.close")) { dismiss() }
+            Button(editorCopy("editor.close")) {
+                if isEmbedded {
+                    onClose()
+                } else {
+                    dismiss()
+                }
+            }
                 .buttonStyle(.bordered)
                 .accessibilityIdentifier("lumi.trackEditor.close")
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 15)
+        .frame(minHeight: 68)
         .background(panel)
     }
 
@@ -574,6 +594,11 @@ public struct TrackLightingEditorView: View {
                 drawEditor(context: &context, size: size)
             }
             .contentShape(Rectangle())
+            .overlay {
+                HorizontalScrollMonitor { deltaX in
+                    viewport = viewport.panned(byPixels: deltaX, width: proxy.size.width)
+                }
+            }
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
@@ -581,7 +606,7 @@ public struct TrackLightingEditorView: View {
                            let boundary = boundaryIndex(
                                atX: value.startLocation.x,
                                width: proxy.size.width,
-                               tolerance: 9
+                               tolerance: 12
                            ) {
                             draggingBoundaryAfterPhraseIndex = boundary
                         }
@@ -625,8 +650,23 @@ public struct TrackLightingEditorView: View {
                     }
                     .onEnded { _ in magnificationAnchorBeats = nil }
             )
+            .onContinuousHover { phase in
+                switch phase {
+                case .active(let location):
+                    let boundary = boundaryIndex(
+                        atX: location.x,
+                        width: proxy.size.width,
+                        tolerance: 12
+                    )
+                    hoveredBoundaryAfterPhraseIndex = boundary
+                    (boundary == nil ? NSCursor.arrow : NSCursor.resizeLeftRight).set()
+                case .ended:
+                    hoveredBoundaryAfterPhraseIndex = nil
+                    NSCursor.arrow.set()
+                }
+            }
         }
-        .frame(minHeight: 315)
+        .frame(minHeight: isEmbedded ? 285 : 315)
         .background(panel)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay {
@@ -942,6 +982,30 @@ public struct TrackLightingEditorView: View {
                     .font(.system(size: 8, weight: .bold, design: .monospaced))
                     .foregroundColor(primary)
                 context.draw(pointLabel, at: CGPoint(x: start + 7, y: 43), anchor: .topLeading)
+            }
+        }
+
+        for (index, phrase) in analysis.phrases.enumerated().dropFirst() {
+            let boundary = UInt16(index - 1)
+            let x = viewport.x(forBeat: Double(phrase.startBeat), width: width)
+            guard x >= -6, x <= width + 6 else { continue }
+            let emphasized = hoveredBoundaryAfterPhraseIndex == boundary
+                || draggingBoundaryAfterPhraseIndex == boundary
+            let handle = CGRect(x: x - 4, y: phraseTop + 7, width: 8, height: 40)
+            context.fill(
+                Path(roundedRect: handle, cornerRadius: 3),
+                with: .color(Color.black.opacity(emphasized ? 0.84 : 0.58))
+            )
+            context.stroke(
+                Path(roundedRect: handle, cornerRadius: 3),
+                with: .color(Color.white.opacity(emphasized ? 1 : 0.68)),
+                lineWidth: emphasized ? 1.8 : 1
+            )
+            for offset in [-1.3, 1.3] {
+                var grip = Path()
+                grip.move(to: CGPoint(x: x + offset, y: phraseTop + 18))
+                grip.addLine(to: CGPoint(x: x + offset, y: phraseTop + 36))
+                context.stroke(grip, with: .color(Color.white.opacity(0.78)), lineWidth: 0.8)
             }
         }
 

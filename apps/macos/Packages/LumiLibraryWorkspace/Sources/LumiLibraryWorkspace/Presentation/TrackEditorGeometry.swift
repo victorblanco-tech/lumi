@@ -38,6 +38,13 @@ public struct TrackEditorViewport: Equatable, Sendable {
         )
     }
 
+    /// Converts a native horizontal scroll gesture into a beat-space pan.
+    /// Positive scroll deltas reveal later beats, matching an AppKit scroll view.
+    public func panned(byPixels delta: Double, width: Double) -> Self {
+        guard width > 0 else { return self }
+        return moving(byBeats: delta / width * visibleBeats)
+    }
+
     public func centered(onBeat beat: Double) -> Self {
         Self(
             startBeat: beat - visibleBeats / 2,
