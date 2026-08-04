@@ -32,7 +32,6 @@ public struct LibraryWorkspaceView: View {
     private let state: LibraryWorkspaceState
     private let onQuery: @MainActor (LibraryQueryRequest) -> Void
     private let onOpenEditor: @MainActor (UInt64) -> Void
-    private let onCloseEditor: @MainActor () -> Void
     private let onTimelineEdit: @MainActor (TrackTimelineEditRequest) -> Void
     private let onTimelineHistory: @MainActor (TrackTimelineHistoryRequest) -> Void
     private let onSourceReconcile: @MainActor (TrackSourceReconcileRequest) -> Void
@@ -46,6 +45,9 @@ public struct LibraryWorkspaceView: View {
     @State private var selectedTrackID: UInt64?
     @State private var readinessFilter: LibraryReadinessFilter = .all
     @State private var editorAnalysis: TrackEditorAnalysis?
+    @State private var requestedEditorTrackID: UInt64?
+    @AppStorage("nl.blancoservices.lumi.library.table-columns")
+    private var trackTableCustomization = TableColumnCustomization<LibraryTrack>()
 
     public init(
         state: LibraryWorkspaceState,
@@ -53,7 +55,6 @@ public struct LibraryWorkspaceView: View {
         rendersInteractiveControls: Bool = true,
         onQuery: @escaping @MainActor (LibraryQueryRequest) -> Void = { _ in },
         onOpenEditor: @escaping @MainActor (UInt64) -> Void = { _ in },
-        onCloseEditor: @escaping @MainActor () -> Void = {},
         onTimelineEdit: @escaping @MainActor (TrackTimelineEditRequest) -> Void = { _ in },
         onTimelineHistory: @escaping @MainActor (TrackTimelineHistoryRequest) -> Void = { _ in },
         onSourceReconcile: @escaping @MainActor (TrackSourceReconcileRequest) -> Void = { _ in },
@@ -65,7 +66,6 @@ public struct LibraryWorkspaceView: View {
         self.state = state
         self.onQuery = onQuery
         self.onOpenEditor = onOpenEditor
-        self.onCloseEditor = onCloseEditor
         self.onTimelineEdit = onTimelineEdit
         self.onTimelineHistory = onTimelineHistory
         self.onSourceReconcile = onSourceReconcile
@@ -82,43 +82,45 @@ public struct LibraryWorkspaceView: View {
 
     public var body: some View {
         VStack(spacing: 0) {
-            if let analysis = editorAnalysis {
-                VSplitView {
-                    TrackLightingEditorView(
-                        analysis: analysis,
-                        autoloopCatalog: state.autoloopCatalog,
-                        keyNotation: keyNotation,
-                        feedback: timelineFeedback,
-                        isEmbedded: true,
-                        onClose: onCloseEditor,
-                        onTimelineEdit: onTimelineEdit,
-                        onTimelineHistory: onTimelineHistory,
-                        onSourceReconcile: onSourceReconcile
-                    )
-                    .frame(minHeight: 580, idealHeight: 680)
+            VSplitView {
+                Group {
+                    if let analysis = editorAnalysis {
+                        TrackLightingEditorView(
+                            analysis: analysis,
+                            autoloopCatalog: state.autoloopCatalog,
+                            keyNotation: keyNotation,
+                            feedback: timelineFeedback,
+                            isEmbedded: true,
+                            onTimelineEdit: onTimelineEdit,
+                            onTimelineHistory: onTimelineHistory,
+                            onSourceReconcile: onSourceReconcile
+                        )
+                    } else {
+                        editorPlaceholder
+                    }
+                }
+                .frame(minHeight: 580, idealHeight: 680)
 
-                    libraryBrowser
-                        .frame(minHeight: 100, idealHeight: 260)
-                }
-            } else {
-                VStack(spacing: 0) {
-                    header
-                    Divider()
-                    conditionBanner
-                    libraryBrowser
-                }
+                libraryBrowser
+                    .frame(minHeight: 130, idealHeight: 280)
             }
         }
         .background(LumiColor.canvas)
         .accessibilityIdentifier("lumi.library.workspace")
+        .task { requestInitialEditorIfNeeded() }
         .onChange(of: state.query.search) { _, value in search = value }
         .onChange(of: state.page.tracks) { _, tracks in
             if !tracks.contains(where: { $0.id == selectedTrackID }) {
                 selectedTrackID = tracks.first?.id
             }
+            requestInitialEditorIfNeeded()
         }
         .onChange(of: state.editor) { _, editor in
             editorAnalysis = editor
+            if let editor {
+                requestedEditorTrackID = nil
+                selectedTrackID = editor.track.id
+            }
         }
     }
 
@@ -129,54 +131,30 @@ public struct LibraryWorkspaceView: View {
             Divider()
             trackBrowser
                 .frame(minWidth: 480, maxWidth: .infinity)
-            Divider()
-            inspector
-                .frame(minWidth: 260, idealWidth: 310, maxWidth: 360)
         }
     }
 
-    private var header: some View {
-        HStack(spacing: LumiSpacing.large) {
-            VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-                Text(localized("library.title"))
-                    .font(LumiTypography.screenTitle)
-                    .foregroundStyle(LumiColor.textPrimary)
-                Text(localized("library.subtitle"))
-                    .font(LumiTypography.metadata)
-                    .foregroundStyle(LumiColor.textSecondary)
-            }
-            Spacer()
-            if rendersInteractiveControls {
-                TextField(localized("library.search"), text: $search)
-                    .textFieldStyle(.roundedBorder)
-                    .frame(maxWidth: 320)
-                    .onSubmit { submitQuery(offset: 0) }
-                    .accessibilityIdentifier("lumi.library.search")
-                Picker(localized("library.filter"), selection: $readinessFilter) {
-                    ForEach(LibraryReadinessFilter.allCases) { filter in
-                        Text(readinessName(filter)).tag(filter)
-                    }
-                }
-                .frame(width: 180)
-                .accessibilityIdentifier("lumi.library.readinessFilter")
-            } else {
-                Label(localized("library.search"), systemImage: "magnifyingglass")
-                    .font(LumiTypography.metadata)
-                    .foregroundStyle(LumiColor.textSecondary)
-                    .padding(.horizontal, LumiSpacing.medium)
-                    .frame(width: 300, height: LumiControlMetric.standardHeight, alignment: .leading)
-                    .background(LumiColor.surfaceElevated)
-                    .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
-                Label(readinessName(readinessFilter), systemImage: "line.3.horizontal.decrease.circle")
-                    .font(LumiTypography.metadata)
-                    .padding(.horizontal, LumiSpacing.medium)
-                    .frame(width: 180, height: LumiControlMetric.standardHeight, alignment: .leading)
-                    .background(LumiColor.surfaceElevated)
-                    .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
+    private var editorPlaceholder: some View {
+        VStack(spacing: LumiSpacing.medium) {
+            Image(systemName: state.condition == .error ? "exclamationmark.triangle.fill" : "waveform")
+                .font(.system(size: 34, weight: .medium))
+                .foregroundStyle(state.condition == .error ? LumiColor.warning : LumiColor.accent)
+            Text("Track Lighting Editor")
+                .font(LumiTypography.screenTitle)
+            Text(
+                state.condition == .error
+                    ? (state.diagnostic ?? "The local Track Editor is unavailable.")
+                    : "Loading the selected track…"
+            )
+            .font(LumiTypography.metadata)
+            .foregroundStyle(LumiColor.textSecondary)
+            if state.condition != .error {
+                ProgressView().controlSize(.small)
             }
         }
-        .padding(LumiSpacing.xLarge)
-        .background(LumiColor.surface)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(LumiColor.canvas)
+        .accessibilityIdentifier("lumi.trackEditor.placeholder")
     }
 
     @ViewBuilder
@@ -277,6 +255,7 @@ public struct LibraryWorkspaceView: View {
     private var trackBrowser: some View {
         VStack(spacing: 0) {
             trackHeader
+            conditionBanner
             Divider()
             if state.condition == .importing {
                 statePlaceholder(.importing)
@@ -285,24 +264,7 @@ public struct LibraryWorkspaceView: View {
             } else if visibleTracks.isEmpty {
                 statePlaceholder(.empty)
             } else {
-                if rendersInteractiveControls {
-                    ScrollView {
-                        trackListContent
-                    }
-                    .accessibilityIdentifier("lumi.library.trackList")
-                    .focusable()
-                    .onKeyPress(.upArrow) {
-                        moveSelection(by: -1)
-                        return .handled
-                    }
-                    .onKeyPress(.downArrow) {
-                        moveSelection(by: 1)
-                        return .handled
-                    }
-                } else {
-                    trackListContent
-                    Spacer(minLength: 0)
-                }
+                trackTable
             }
             Divider()
             pagination
@@ -311,154 +273,172 @@ public struct LibraryWorkspaceView: View {
     }
 
     private var trackHeader: some View {
-        HStack {
+        HStack(spacing: LumiSpacing.medium) {
             Text(String(format: localized("library.trackCount"), state.page.total))
                 .font(LumiTypography.metadata)
                 .foregroundStyle(LumiColor.textSecondary)
             Spacer()
-            if !state.query.search.isEmpty {
-                Button(localized("library.clearSearch")) {
-                    search = ""
-                    submitQuery(search: "", offset: 0)
+            if rendersInteractiveControls {
+                TextField(localized("library.search"), text: $search)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(minWidth: 180, idealWidth: 260, maxWidth: 320)
+                    .onSubmit { submitQuery(offset: 0) }
+                    .accessibilityIdentifier("lumi.library.search")
+                Picker(localized("library.filter"), selection: $readinessFilter) {
+                    ForEach(LibraryReadinessFilter.allCases) { filter in
+                        Text(readinessName(filter)).tag(filter)
+                    }
                 }
-                .buttonStyle(.borderless)
+                .labelsHidden()
+                .frame(width: 150)
+                .accessibilityIdentifier("lumi.library.readinessFilter")
+            }
+            if let selectedTrack {
+                if let simulatorFeedback {
+                    Image(
+                        systemName: simulatorFeedbackIsError
+                            ? "exclamationmark.triangle.fill"
+                            : "checkmark.circle.fill"
+                    )
+                    .foregroundStyle(simulatorFeedbackIsError ? LumiColor.warning : LumiColor.success)
+                    .help(simulatorFeedback)
+                    .accessibilityIdentifier("lumi.library.simulatorFeedback")
+                }
+                simulatorToolbarButton(selectedTrack, deckID: 1)
+                simulatorToolbarButton(selectedTrack, deckID: 2)
             }
         }
         .padding(.horizontal, LumiSpacing.large)
         .frame(height: LumiControlMetric.prominentHeight)
-    }
-
-    private func trackRow(_ track: LibraryTrack) -> some View {
-        HStack(spacing: LumiSpacing.medium) {
-            colorSwatch(track.colorRGB)
-            VStack(alignment: .leading, spacing: 2) {
-                Text(track.title)
-                    .font(LumiTypography.body)
-                    .foregroundStyle(LumiColor.textPrimary)
-                    .lineLimit(1)
-                Text(track.artist)
-                    .font(LumiTypography.caption)
-                    .foregroundStyle(LumiColor.textSecondary)
-                    .lineLimit(1)
-            }
-            Spacer()
-            Text(formatBPM(track.bpmMilli))
-                .font(LumiTypography.technical)
-                .frame(width: 48, alignment: .trailing)
-            Text(KeyNotationFormatter(notation: keyNotation).string(from: track.musicalKey))
-                .font(LumiTypography.technical)
-                .frame(width: 38, alignment: .trailing)
-            Image(systemName: readinessIcon(track.readiness))
-                .foregroundStyle(readinessColor(track.readiness))
-                .accessibilityLabel(readinessName(track.readiness))
-        }
-        .padding(.vertical, LumiSpacing.xSmall)
-    }
-
-    private var trackListContent: some View {
-        VStack(spacing: LumiSpacing.xSmall) {
-            ForEach(visibleTracks) { track in
-                trackListItem(track)
-            }
-        }
-        .padding(LumiSpacing.small)
-    }
-
-    @ViewBuilder
-    private func trackListItem(_ track: LibraryTrack) -> some View {
-        let row = trackRow(track)
-            .padding(.horizontal, LumiSpacing.small)
-            .background(
-                selectedTrackID == track.id
-                    ? LumiColor.accent.opacity(0.14)
-                    : Color.clear
-            )
-            .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
-
-        if rendersInteractiveControls {
-            Button {
-                selectedTrackID = track.id
-            } label: {
-                row
-            }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier("lumi.library.track.\(track.id)")
-        } else {
-            row
-        }
-    }
-
-    private var inspector: some View {
-        VStack(alignment: .leading, spacing: LumiSpacing.large) {
-            Text(localized("library.inspector"))
-                .font(LumiTypography.sectionTitle)
-            if let track = selectedTrack {
-                VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-                    Text(track.title)
-                        .font(LumiTypography.cardTitle)
-                    Text(track.artist)
-                        .font(LumiTypography.metadata)
-                        .foregroundStyle(LumiColor.textSecondary)
-                }
-                HStack(spacing: LumiSpacing.small) {
-                    colorSwatch(track.colorRGB)
-                    readinessBadge(track.readiness)
-                }
-                Divider()
-                inspectorField(localized("library.bpm"), formatBPM(track.bpmMilli))
-                inspectorField(
-                    localized("library.key"),
-                    KeyNotationFormatter(notation: keyNotation).string(from: track.musicalKey)
-                )
-                inspectorField(localized("library.duration"), formatDuration(track.durationMillis))
-                inspectorField(localized("library.source"), state.source?.name ?? "—")
-                inspectorField(localized("library.sourceTrackID"), track.sourceTrackID)
-                inspectorField(localized("library.analysisRevision"), track.analysisRevision)
-                inspectorField(
-                    localized("library.timelineRevision"),
-                    track.timelineRevision.map(String.init) ?? localized("library.notEdited")
-                )
-                Divider()
-                capabilitySummary(track)
-                Spacer()
-                if let simulatorFeedback {
-                    Label(
-                        simulatorFeedback,
-                        systemImage: simulatorFeedbackIsError
-                            ? "exclamationmark.triangle.fill"
-                            : "checkmark.circle.fill"
-                    )
-                        .font(LumiTypography.caption)
-                        .foregroundStyle(
-                            simulatorFeedbackIsError ? LumiColor.warning : LumiColor.success
-                        )
-                        .accessibilityIdentifier("lumi.library.simulatorFeedback")
-                }
-                HStack(spacing: LumiSpacing.small) {
-                    simulatorLoadButton(track, deckID: 1)
-                    simulatorLoadButton(track, deckID: 2)
-                }
-                Button {
-                    onOpenEditor(track.id)
-                } label: {
-                    Label(localized("library.openEditor"), systemImage: "waveform.path.ecg.rectangle")
-                        .frame(maxWidth: .infinity)
-                }
-                .buttonStyle(.borderedProminent)
-                .accessibilityIdentifier("lumi.library.openEditor")
-            } else {
-                Text(localized("library.selectTrack"))
-                    .font(LumiTypography.metadata)
-                    .foregroundStyle(LumiColor.textSecondary)
-                Spacer()
-            }
-        }
-        .padding(LumiSpacing.large)
         .background(LumiColor.surface)
-        .accessibilityIdentifier("lumi.library.inspector")
     }
 
-    private func simulatorLoadButton(_ track: LibraryTrack, deckID: UInt64) -> some View {
+    private var trackTable: some View {
+        Table(
+            visibleTracks,
+            selection: $selectedTrackID,
+            columnCustomization: $trackTableCustomization
+        ) {
+            TableColumn(localized("library.trackTitle")) { track in
+                editorLoadingCell(track) {
+                    HStack(spacing: LumiSpacing.small) {
+                        colorSwatch(track.colorRGB, height: 18)
+                        Text(track.title)
+                            .font(LumiTypography.body.weight(.semibold))
+                            .foregroundStyle(LumiColor.textPrimary)
+                            .lineLimit(1)
+                    }
+                    .accessibilityIdentifier("lumi.library.track.\(track.id)")
+                }
+            }
+            .width(min: 160, ideal: 260, max: 520)
+            .customizationID("title")
+
+            TableColumn(localized("library.artist")) { track in
+                editorLoadingCell(track) {
+                    Text(track.artist).lineLimit(1)
+                }
+            }
+            .width(min: 120, ideal: 190, max: 420)
+            .customizationID("artist")
+
+            TableColumn(localized("library.bpm")) { track in
+                editorLoadingCell(track) {
+                    Text(formatBPM(track.bpmMilli)).font(LumiTypography.technical)
+                }
+            }
+            .width(min: 54, ideal: 64, max: 90)
+            .customizationID("bpm")
+
+            TableColumn(localized("library.key")) { track in
+                editorLoadingCell(track) {
+                    Text(KeyNotationFormatter(notation: keyNotation).string(from: track.musicalKey))
+                        .font(LumiTypography.technical)
+                }
+            }
+            .width(min: 44, ideal: 54, max: 80)
+            .customizationID("key")
+
+            TableColumn(localized("library.duration")) { track in
+                editorLoadingCell(track) {
+                    Text(formatDuration(track.durationMillis)).font(LumiTypography.technical)
+                }
+            }
+            .width(min: 56, ideal: 68, max: 100)
+            .customizationID("duration")
+
+            TableColumn(localized("library.source")) { track in
+                editorLoadingCell(track) {
+                    Text(state.source?.name ?? "—").lineLimit(1)
+                }
+            }
+            .width(min: 100, ideal: 140, max: 280)
+            .customizationID("source")
+
+            TableColumn(localized("library.timelineRevision")) { track in
+                editorLoadingCell(track) {
+                    Text(track.timelineRevision.map { "R\($0)" } ?? "—")
+                        .font(LumiTypography.technical)
+                }
+            }
+            .width(min: 70, ideal: 92, max: 140)
+            .customizationID("timeline")
+
+            TableColumn(localized("library.readiness")) { track in
+                editorLoadingCell(track) {
+                    Label(readinessName(track.readiness), systemImage: readinessIcon(track.readiness))
+                        .font(LumiTypography.caption)
+                        .foregroundStyle(readinessColor(track.readiness))
+                }
+            }
+            .width(min: 88, ideal: 112, max: 180)
+            .customizationID("readiness")
+
+            TableColumn(localized("library.sourceTrackID")) { track in
+                editorLoadingCell(track) {
+                    Text(track.sourceTrackID).font(LumiTypography.technical).lineLimit(1)
+                }
+            }
+            .width(min: 110, ideal: 170, max: 360)
+            .defaultVisibility(.hidden)
+            .customizationID("sourceTrackID")
+
+            TableColumn(localized("library.analysisRevision")) { track in
+                editorLoadingCell(track) {
+                    Text(track.analysisRevision).font(LumiTypography.technical).lineLimit(1)
+                }
+            }
+            .width(min: 110, ideal: 170, max: 360)
+            .defaultVisibility(.hidden)
+            .customizationID("analysisRevision")
+        }
+        .tableStyle(.inset(alternatesRowBackgrounds: true))
+        .scrollContentBackground(.hidden)
+        .background(LumiColor.canvas)
+        .overlay {
+            TableDoubleClickMonitor {
+                guard rendersInteractiveControls, let selectedTrackID else { return }
+                requestEditor(trackID: selectedTrackID)
+            }
+        }
+        .help("Double-click a track to load it in the Track Lighting Editor.")
+        .accessibilityIdentifier("lumi.library.trackTable")
+    }
+
+    private func editorLoadingCell<Content: View>(
+        _ track: LibraryTrack,
+        @ViewBuilder content: () -> Content
+    ) -> some View {
+        content()
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .contentShape(Rectangle())
+            .onTapGesture(count: 2) {
+                guard rendersInteractiveControls else { return }
+                requestEditor(trackID: track.id)
+            }
+    }
+
+    private func simulatorToolbarButton(_ track: LibraryTrack, deckID: UInt64) -> some View {
         Button {
             guard let timelineRevision = track.timelineRevision else { return }
             onLoadOnSimulatorDeck(
@@ -470,13 +450,14 @@ public struct LibraryWorkspaceView: View {
             )
         } label: {
             Label(
-                String(format: localized("library.loadOnDeck"), deckID),
+                "Deck \(deckID)",
                 systemImage: "arrow.down.to.line.compact"
             )
-            .frame(maxWidth: .infinity)
         }
         .buttonStyle(.bordered)
+        .controlSize(.small)
         .disabled(track.timelineRevision == nil)
+        .help(String(format: localized("library.loadOnDeck"), deckID))
         .accessibilityIdentifier("lumi.library.loadDeck\(deckID)")
     }
 
@@ -528,52 +509,7 @@ public struct LibraryWorkspaceView: View {
         .accessibilityIdentifier("lumi.library.placeholder.\(condition.rawValue)")
     }
 
-    private func capabilitySummary(_ track: LibraryTrack) -> some View {
-        VStack(alignment: .leading, spacing: LumiSpacing.small) {
-            Text(localized("library.readiness"))
-                .font(LumiTypography.sectionTitle)
-            if track.missingCapabilities.isEmpty, track.warnings.isEmpty {
-                Label(localized("library.analysisComplete"), systemImage: "checkmark.circle.fill")
-                    .font(LumiTypography.metadata)
-                    .foregroundStyle(LumiColor.success)
-            } else {
-                ForEach(track.missingCapabilities + track.warnings, id: \.self) { warning in
-                    Label(warning, systemImage: "exclamationmark.triangle.fill")
-                        .font(LumiTypography.caption)
-                        .foregroundStyle(LumiColor.warning)
-                }
-            }
-            if let capabilities = state.capabilities, !capabilities.missingNames.isEmpty {
-                Text(capabilities.missingNames.joined(separator: ", "))
-                    .font(LumiTypography.caption)
-                    .foregroundStyle(LumiColor.warning)
-            }
-        }
-    }
-
-    private func inspectorField(_ label: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(label.uppercased())
-                .font(LumiTypography.caption)
-                .foregroundStyle(LumiColor.textSecondary)
-            Text(value)
-                .font(LumiTypography.technical)
-                .foregroundStyle(LumiColor.textPrimary)
-                .textSelection(.enabled)
-        }
-    }
-
-    private func readinessBadge(_ readiness: LibraryReadiness) -> some View {
-        Label(readinessName(readiness), systemImage: readinessIcon(readiness))
-            .font(LumiTypography.caption)
-            .foregroundStyle(readinessColor(readiness))
-            .padding(.horizontal, LumiSpacing.small)
-            .frame(height: LumiControlMetric.compactHeight)
-            .background(readinessColor(readiness).opacity(0.12))
-            .clipShape(Capsule())
-    }
-
-    private func colorSwatch(_ rgb: UInt32?) -> some View {
+    private func colorSwatch(_ rgb: UInt32?, height: CGFloat = 32) -> some View {
         let color = rgb.map {
             Color(
                 red: Double(($0 >> 16) & 0xff) / 255,
@@ -583,7 +519,7 @@ public struct LibraryWorkspaceView: View {
         } ?? LumiColor.surfaceElevated
         return RoundedRectangle(cornerRadius: LumiRadius.compact)
             .fill(color)
-            .frame(width: 12, height: 32)
+            .frame(width: 12, height: height)
             .overlay { RoundedRectangle(cornerRadius: LumiRadius.compact).stroke(LumiColor.border) }
     }
 
@@ -610,11 +546,20 @@ public struct LibraryWorkspaceView: View {
         )
     }
 
-    private func moveSelection(by distance: Int) {
-        guard !visibleTracks.isEmpty else { return }
-        let currentIndex = visibleTracks.firstIndex { $0.id == selectedTrackID } ?? 0
-        let newIndex = min(max(0, currentIndex + distance), visibleTracks.count - 1)
-        selectedTrackID = visibleTracks[newIndex].id
+    private func requestInitialEditorIfNeeded() {
+        guard rendersInteractiveControls,
+              editorAnalysis == nil,
+              requestedEditorTrackID == nil,
+              state.condition == .ready,
+              let trackID = selectedTrackID ?? visibleTracks.first?.id else { return }
+        requestEditor(trackID: trackID)
+    }
+
+    private func requestEditor(trackID: UInt64) {
+        guard editorAnalysis?.track.id != trackID,
+              requestedEditorTrackID != trackID else { return }
+        requestedEditorTrackID = trackID
+        onOpenEditor(trackID)
     }
 }
 

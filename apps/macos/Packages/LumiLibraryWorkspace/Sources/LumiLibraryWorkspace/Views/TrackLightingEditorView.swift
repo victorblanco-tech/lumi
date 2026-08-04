@@ -9,7 +9,6 @@ public struct TrackLightingEditorView: View {
     private let feedback: String?
     private let rendersInteractiveControls: Bool
     private let isEmbedded: Bool
-    private let onClose: @MainActor () -> Void
     private let onTimelineEdit: @MainActor (TrackTimelineEditRequest) -> Void
     private let onTimelineHistory: @MainActor (TrackTimelineHistoryRequest) -> Void
     private let onSourceReconcile: @MainActor (TrackSourceReconcileRequest) -> Void
@@ -27,11 +26,11 @@ public struct TrackLightingEditorView: View {
     @State private var conflictSides: [UInt16: TrackSourceConflictSide]
     @Environment(\.dismiss) private var dismiss
 
-    private let background = Color(red: 0.025, green: 0.032, blue: 0.045)
-    private let panel = Color(red: 0.055, green: 0.070, blue: 0.095)
-    private let primary = Color(red: 0.94, green: 0.97, blue: 1)
-    private let secondary = Color(red: 0.56, green: 0.64, blue: 0.73)
-    private let accent = Color(red: 0.25, green: 0.76, blue: 1)
+    private let background = LumiColor.canvas
+    private let panel = LumiColor.surfaceElevated
+    private let primary = LumiColor.textPrimary
+    private let secondary = LumiColor.textSecondary
+    private let accent = LumiColor.accent
 
     public init(
         analysis: TrackEditorAnalysis,
@@ -40,7 +39,6 @@ public struct TrackLightingEditorView: View {
         feedback: String? = nil,
         rendersInteractiveControls: Bool = true,
         isEmbedded: Bool = false,
-        onClose: @escaping @MainActor () -> Void = {},
         onTimelineEdit: @escaping @MainActor (TrackTimelineEditRequest) -> Void = { _ in },
         onTimelineHistory: @escaping @MainActor (TrackTimelineHistoryRequest) -> Void = { _ in },
         onSourceReconcile: @escaping @MainActor (TrackSourceReconcileRequest) -> Void = { _ in }
@@ -51,7 +49,6 @@ public struct TrackLightingEditorView: View {
         self.feedback = feedback
         self.rendersInteractiveControls = rendersInteractiveControls
         self.isEmbedded = isEmbedded
-        self.onClose = onClose
         self.onTimelineEdit = onTimelineEdit
         self.onTimelineHistory = onTimelineHistory
         self.onSourceReconcile = onSourceReconcile
@@ -157,15 +154,13 @@ public struct TrackLightingEditorView: View {
             metric("BPM", formatEditorBPM(analysis.track.bpmMilli))
             metric("REMAIN", formatEditorTime(remainingMillis))
             metric("BAR · BEAT", barBeatLabel)
-            Button(editorCopy("editor.close")) {
-                if isEmbedded {
-                    onClose()
-                } else {
+            if !isEmbedded {
+                Button(editorCopy("editor.close")) {
                     dismiss()
                 }
-            }
                 .buttonStyle(.bordered)
                 .accessibilityIdentifier("lumi.trackEditor.close")
+            }
         }
         .padding(.horizontal, 20)
         .padding(.vertical, 15)
@@ -462,15 +457,7 @@ public struct TrackLightingEditorView: View {
     }
 
     private var phraseInspector: some View {
-        Group {
-            if rendersInteractiveControls {
-                ScrollView {
-                    phraseInspectorContent
-                }
-            } else {
-                phraseInspectorContent
-            }
-        }
+        phraseInspectorContent
         .background(panel)
         .clipShape(RoundedRectangle(cornerRadius: 8))
         .overlay {
@@ -481,7 +468,7 @@ public struct TrackLightingEditorView: View {
     }
 
     private var phraseInspectorContent: some View {
-        VStack(alignment: .leading, spacing: 14) {
+        VStack(alignment: .leading, spacing: 8) {
             HStack {
                 Text(editorCopy("editor.phraseInspector"))
                     .font(.system(size: 14, weight: .bold, design: .rounded))
@@ -569,23 +556,13 @@ public struct TrackLightingEditorView: View {
                         .clipShape(RoundedRectangle(cornerRadius: 5))
                 }
 
-                Divider().overlay(Color.white.opacity(0.12))
-                inspectorFact(editorCopy("editor.origin"), phrase.origin)
-                inspectorFact(editorCopy("editor.sourceBaseline"), sourceBaseline(for: phrase))
                 loopStrategyEditor(phrase)
-                inspectorFact(editorCopy("editor.revisionReason"), readableReason(analysis.timeline.reason))
             } else {
                 Text(editorCopy("editor.noPhrase"))
                     .foregroundStyle(secondary)
             }
-
-            Label(editorCopy("editor.planIsolation"), systemImage: "lock.shield")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundStyle(secondary)
-                .fixedSize(horizontal: false, vertical: true)
-                .accessibilityIdentifier("lumi.trackEditor.planIsolation")
         }
-        .padding(14)
+        .padding(10)
     }
 
     private var editorCanvas: some View {
@@ -683,7 +660,7 @@ public struct TrackLightingEditorView: View {
     private func loopStrategyEditor(_ phrase: TrackEditorPhrase) -> some View {
         let role = autoloopCatalog?.roles.first { $0.id == phrase.roleID }
         let variants = role?.variants.filter { !$0.archived } ?? []
-        VStack(alignment: .leading, spacing: 8) {
+        VStack(alignment: .leading, spacing: 5) {
             HStack {
                 inspectorLabel(editorCopy("editor.loopStrategy"))
                 Spacer()
@@ -716,12 +693,32 @@ public struct TrackLightingEditorView: View {
                 .buttonStyle(.bordered)
                 .controlSize(.small)
 
-                Text(editorCopy("editor.themeOverrides"))
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundStyle(secondary)
-                ForEach(catalog.themes) { theme in
-                    themeOverrideRow(theme, phrase: phrase, variants: variants)
+                Menu {
+                    ForEach(catalog.themes) { theme in
+                        Menu(theme.name) {
+                            Button(editorCopy("editor.themeAutomatic")) {
+                                updateThemeOverride(phrase, themeID: theme.id, variantID: nil)
+                            }
+                            ForEach(compatibleVariants(theme, variants: variants)) { variant in
+                                Button(variant.name) {
+                                    updateThemeOverride(
+                                        phrase,
+                                        themeID: theme.id,
+                                        variantID: variant.id
+                                    )
+                                }
+                            }
+                        }
+                    }
+                } label: {
+                    Label(
+                        "\(editorCopy("editor.themeOverrides")) · \(phrase.loopStrategy.themeOverrides.count)",
+                        systemImage: "square.grid.2x2"
+                    )
+                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
+                .menuStyle(.button)
+                .controlSize(.small)
             }
 
             if phrase.loopStrategy.status != "ready" {
@@ -736,43 +733,13 @@ public struct TrackLightingEditorView: View {
         .accessibilityIdentifier("lumi.trackEditor.loopStrategy")
     }
 
-    private func themeOverrideRow(
+    private func compatibleVariants(
         _ theme: AutoloopThemeState,
-        phrase: TrackEditorPhrase,
         variants: [AutoloopVariantState]
-    ) -> some View {
-        let selectedID = phrase.loopStrategy.themeOverrides
-            .first { $0.themeID == theme.id }?.variantID
-        let compatible = variants.filter { variant in
+    ) -> [AutoloopVariantState] {
+        variants.filter { variant in
             variant.cells.contains { $0.themeID == theme.id && !$0.isMissing }
         }
-        return HStack(spacing: 6) {
-            Text(theme.name)
-                .font(.system(size: 9, weight: .medium))
-                .foregroundStyle(secondary)
-                .lineLimit(1)
-            Spacer()
-            Menu {
-                Button(editorCopy("editor.themeAutomatic")) {
-                    updateThemeOverride(phrase, themeID: theme.id, variantID: nil)
-                }
-                ForEach(compatible) { variant in
-                    Button(variant.name) {
-                        updateThemeOverride(phrase, themeID: theme.id, variantID: variant.id)
-                    }
-                }
-            } label: {
-                Text(
-                    compatible.first(where: { $0.id == selectedID })?.name
-                        ?? editorCopy("editor.themeAutomatic")
-                )
-                .font(.system(size: 9, weight: .semibold))
-                .lineLimit(1)
-            }
-            .menuStyle(.borderlessButton)
-            .frame(width: 116)
-        }
-        .accessibilityIdentifier("lumi.trackEditor.loopStrategy.theme.\(theme.id)")
     }
 
     private func setLoopStrategy(
@@ -1112,29 +1079,10 @@ public struct TrackLightingEditorView: View {
         )
     }
 
-    private func sourceBaseline(for phrase: TrackEditorPhrase) -> String {
-        let labels = analysis.sourcePhrases
-            .filter { source in source.startBeat < phrase.endBeat && source.endBeat > phrase.startBeat }
-            .map(\.rawLabel)
-        return labels.isEmpty ? editorCopy("editor.noSourcePhrase") : labels.joined(separator: " · ")
-    }
-
     private func inspectorLabel(_ value: String) -> some View {
         Text(value.uppercased())
             .font(.system(size: 9, weight: .bold, design: .monospaced))
             .foregroundStyle(secondary)
-    }
-
-    private func inspectorFact(_ label: String, _ value: String) -> some View {
-        HStack(alignment: .firstTextBaseline) {
-            Text(label)
-                .foregroundStyle(secondary)
-            Spacer()
-            Text(value)
-                .foregroundStyle(primary)
-                .multilineTextAlignment(.trailing)
-        }
-        .font(.system(size: 10, weight: .medium, design: .monospaced))
     }
 
     private func boundaryRow(

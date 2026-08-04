@@ -51,9 +51,6 @@ struct FoundationView: View {
                         onOpenEditor: { trackID in
                             Task { await engineStatus.openLibraryTrackEditor(trackID: trackID) }
                         },
-                        onCloseEditor: {
-                            Task { await engineStatus.closeLibraryTrackEditor() }
-                        },
                         onTimelineEdit: { request in
                             Task { await engineStatus.editLibraryTimeline(request) }
                         },
@@ -90,6 +87,7 @@ struct FoundationView: View {
             .frame(maxWidth: .infinity, maxHeight: .infinity)
         }
         .background(LumiColor.canvas)
+        .tint(LumiColor.accent)
         .frame(minWidth: 1_180, minHeight: 620)
         .accessibilityIdentifier("lumi.app.shell")
     }

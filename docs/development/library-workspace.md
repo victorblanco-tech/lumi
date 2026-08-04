@@ -28,17 +28,30 @@ analysis, stale source, and source conflict, with explicit missing capabilities
 and warnings. The current demo baseline is complete; deterministic presentation
 fixtures prove the non-ready states until a fallible external source exists.
 
-Track selection exposes BPM, global Camelot/Classic key formatting, duration,
-source identity, analysis revision, Lumi timeline revision, color, and readiness.
-The editor action opens the selected track's engine-backed Track Lighting
-Editor analysis. Its waveform and isolated audio behavior are documented in
+The Library always composes the engine-backed Track Lighting Editor above a
+native, paged track table. The first available track loads automatically;
+double-clicking any table cell loads that row into the editor. Selection alone
+does not replace the editor, which prevents accidental loads while browsing.
+
+Track color/title, artist, BPM, global Camelot/Classic key formatting, duration,
+source, Lumi timeline revision, and readiness are native table columns. Source
+track ID and analysis revision are hidden by default but can be enabled. AppKit
+owns resize, reorder, sorting affordances, horizontal/vertical table scrolling,
+and accessibility; `TableColumnCustomization` persists the user's column
+arrangement locally. There is no separate metadata inspector.
+
+The upper and lower panes use a native vertical splitter. The phrase inspector
+contains no nested vertical scroll view, while the detailed waveform keeps its
+dedicated native horizontal trackpad/mouse-wheel monitor and overview drag
+navigation. Its waveform and isolated audio behavior are documented in
 [`track-editor-preview.md`](track-editor-preview.md).
 
 ## Verification
 
 The feature package tests authoritative decoding, 200-row wire bounds,
-readiness filtering, English localization, and a 10,000-result/50-row native
-page benchmark. The real Swift client integration test launches the Rust helper
-and performs a server-side Library search plus editor open/close. Eight Library
-PNGs cover dark/light, Camelot/Classic, and all operational states; two more
-prove the fixed-dark editor under both host appearances.
+readiness filtering, English localization, exact fractional waveform pan/zoom,
+and a 10,000-result/50-row native page benchmark. The real Swift client
+integration test launches the Rust helper and performs a server-side Library
+search plus editor analysis load. Native application verification covers the
+persistent editor, row double-click loading, fixed inspector layout, and table
+column behavior.

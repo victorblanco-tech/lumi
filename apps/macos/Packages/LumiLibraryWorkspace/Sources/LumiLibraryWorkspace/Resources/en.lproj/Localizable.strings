@@ -6,6 +6,9 @@
 "library.collection" = "Collection";
 "library.playlists" = "Playlists";
 "library.trackCount" = "%llu tracks";
+"library.color" = "Color";
+"library.trackTitle" = "Track Title";
+"library.artist" = "Artist";
 "library.clearSearch" = "Clear search";
 "library.inspector" = "Track Inspector";
 "library.bpm" = "BPM";

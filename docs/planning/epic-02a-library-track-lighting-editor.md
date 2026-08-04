@@ -277,6 +277,25 @@ Editor design. Verdere CDJ/Rekordbox RGB-pixelfidelity blijft een aparte
 [E2A-15 rendererverbetering](https://github.com/victorblanco-tech/lumi/issues/70)
 en verandert deze UX-contracten niet.
 
+### E2A-16 – Make the persistent editor and native track table the Library baseline
+
+Maakt de Track Editor permanent onderdeel van Library en laadt bij openen veilig
+de eerste beschikbare track. Een dubbelklik op iedere cel van een andere
+trackrij laadt die track in dezelfde editor. De losse metadata-inspector vervalt:
+trackkleur/titel, artiest, BPM, key, duration, source, Lumi timeline en readiness
+worden native tabelkolommen; technische IDs en analysis revision zijn optioneel.
+Kolommen zijn met standaard macOS-interacties te verslepen en in breedte aan te
+passen en de lokale indeling blijft bewaard.
+
+De app gebruikt voortaan overal de semantische near-black/dark-gray Lumi-basis
+met een vaste cyan accentkleur. De Phrase Inspector en vaste editorcontrols
+passen zonder geneste verticale scrollbar. Dit verandert nadrukkelijk niets aan
+de onafhankelijke horizontale waveformpan: trackpad-swipe, horizontaal muiswiel
+en overview-drag blijven ondersteunde navigatievormen.
+
+Status: **implemented; package tests, full repository gate, and native
+application verification pass**.
+
 ## 6.1 Bouwvolgorde zonder Rekordbox-developmentlibrary
 
 De Rekordbox-spike is alleen een harde gate voor `E2A-02`, niet voor de
