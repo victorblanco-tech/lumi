@@ -65,3 +65,18 @@ only through:
 ```bash
 open -n /Users/victor/Engineering/Repo/Lumi/build/DerivedData/Build/Products/Debug/Lumi.app
 ```
+
+## Accepted E2A-13 successor design
+
+Hands-on UX review supersedes the existing block-like visual treatment and
+complete-bar-only editor interaction for the next implementation slice. The
+accepted design uses a continuously rendered **RGB** waveform by default,
+unrestricted horizontal pan and zoom, a free playhead, and Phrase Point
+mutations quantized to one whole beat. Each point starts a phrase whose end is
+derived from the next point or track end.
+
+The compact full-track waveform remains below the detailed editor and shows the
+viewport, playhead, and derived phrase ranges. The approved interaction and
+layout are recorded in [`docs/design/track-editor`](../design/track-editor/README.md)
+and ADR-0014. This section describes accepted follow-up scope; the behavior above
+remains the factual E2A-04 implementation until E2A-13 is delivered.

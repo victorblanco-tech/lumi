@@ -1,6 +1,6 @@
 # Epic 2A – Music Library and Track Lighting Editor
 
-Status: **In verification – E2A-11 complete; E2A-12 demo proof built, isolated Rekordbox gate pending**
+Status: **In progress – E2A-13 RGB Track Editor UX accepted; build and isolated Rekordbox gate pending**
 
 Doelmilestone: **0.2.0 – Deck Intelligence**
 
@@ -12,8 +12,8 @@ voorbereidingsomgeving. Zonder decks of SoundSwitch-koppeling kan de gebruiker:
 1. de volledige workflow eerst veilig gebruiken met een deterministische
    demo-library en later een gesloten Rekordbox 7-library read-only importeren;
 2. tracks, playlists, metadata, waveform, beatgrid en bronphrases zien;
-3. luisteren, scrubben, een phrase loopen en de tracktimeline op volledige maten
-   bewerken terwijl individuele beats zichtbaar blijven;
+3. luisteren, scrubben, een phrase loopen en Phrase Points op hele beats plaatsen
+   terwijl waveformnavigatie, zoom en playhead volledig vrij blijven;
 4. eigen Lumi-phrases maken en roles toewijzen;
 5. per phrase automatische selectie behouden of een vaste logische variant
    kiezen;
@@ -41,12 +41,12 @@ buiten deze epic.
 - lokale SQLite-opslag achter een repositorypoort;
 - importbaselines en versioned Lumi phrase-timelines;
 - playlistbrowser, search, importstatus en track-readiness;
-- een CDJ-geïnspireerde vaste donkere editorcanvas met beatgrid boven de
-  gekleurde waveform en gekleurde Lumi-phrases eronder;
+- een Rekordbox/CDJ-geïnspireerde vaste donkere editorcanvas met beatgrid boven
+  een continu gerenderde RGB-waveform en gekleurde Lumi-phrases eronder;
 - play, pause, stop, seek, scrub, vorige/volgende maat, volume en selected-
   phrase-loop zonder de show engine te beïnvloeden;
-- bar-aligned create, split, merge, boundary move, delete/absorb, role change,
-  undo/redo en revision restore;
+- beat-quantized Phrase Point create/move/delete, afgeleide aaneengesloten
+  ranges, role change, undo/redo en revision restore;
 - configureerbare phrase roles en Rekordbox-initiële mapping;
 - default roles uit ADR-0013;
 - logische `Theme × Phrase Role × Variant`-matrix met fixtures;
@@ -103,15 +103,17 @@ het Theme verandert.
 - rechter detail: metadata, source revision en warnings;
 - editorcanvas: CDJ-geïnspireerd en vast donker in zowel Lumi dark als light
   appearance, met track, Camelot-key, BPM, resterende tijd en actuele bar/beat;
-- tijdas van boven naar beneden: bar/beatgrid, gekleurde performance-waveform,
-  gekleurde Lumi-phrases en een compacte full-track overview;
+- tijdas van boven naar beneden: bar/beatgrid, continu gerenderde RGB-waveform,
+  gekleurde Lumi-phrases en een compacte full-track overview eronder;
 - inspector: role, start/eindmaat, origin, revision en loopstrategie;
 - preview: voorlopig Theme, reason en opgeloste dry-run-Autoloop per phrase;
 - transport: play/pause, stop, seek/scrub, vorige/volgende maat, volume en
   `Loop selected phrase`;
-- editacties: create from bar selection, split, merge previous/next, move
-  boundary, change role, undo/redo, save revision en revision restore;
-- shortcuts: Space voor play/pause en pijltjestoetsen voor maatnavigatie;
+- editacties: plaats/verplaats/verwijder een Phrase Point, change role,
+  undo/redo, save revision en revision restore; ieder eindpunt wordt afgeleid
+  van het volgende Phrase Point of trackeinde;
+- shortcuts: Space voor play/pause, Left/Right voor één beat, Shift+Left/Right
+  voor één maat en `P` voor een nieuw Phrase Point;
 - acties: Refresh, Load on Deck A/B, Compare source en revision history.
 
 Alle controls gebruiken het bestaande Lumi Design System, dark/light appearance,
@@ -120,8 +122,8 @@ Engelse localization resources en de configureerbare Camelot/Classic-keynotatie.
 ### 4.2 Veilige editingregels
 
 - iedere maat en daarmee iedere beat behoort aan precies één phrase;
-- phrasegrenzen, selecties en schaalstappen liggen uitsluitend op volledige
-  maten; individuele beats blijven zichtbaar maar zijn geen editgrens;
+- phrasegrenzen quantizen uitsluitend naar volledige beats; waveformpan, zoom,
+  scrub en playhead blijven continu en zijn niet maatgebonden;
 - ongeldige overlaps, gaps en zero-length phrases worden geweigerd;
 - delete absorbeert de geselecteerde phrase expliciet in een buur of wordt als
   merge uitgevoerd en kan nooit een gap maken;
@@ -245,6 +247,20 @@ zijn onderdeel van de vaste repositorygate. Definitieve afronding wacht bewust
 op E2A-00/E2A-02 met een geïsoleerde wegwerp-Rekordbox-7-library; de productie-
 library wordt niet als ontwikkelbewijs gebruikt.
 
+### E2A-13 – Align the Track Editor with Rekordbox/CDJ phrase-point workflow
+
+Vervangt de block-achtige en bar-only editorervaring door de geaccepteerde
+Track Editor UX: continu gerenderde RGB-waveform als standaard, volledige zoom
+en horizontale scroll, vrije playhead, beatgrid met maataccenten, Phrase Points
+die op één beat quantizen, automatisch afgeleide phrase-ranges en een compacte
+full-track overview eronder. Migreert bestaande bar-aligned timelines
+verliesvrij naar beatgridposities en behoudt revision-, undo/redo-, audio- en
+plannerveiligheid.
+
+Status: **UX accepted; ready for technical refinement and build**. Het leidende
+design staat in [`docs/design/track-editor`](../design/track-editor/README.md)
+en ADR-0014.
+
 ## 6.1 Bouwvolgorde zonder Rekordbox-developmentlibrary
 
 De Rekordbox-spike is alleen een harde gate voor `E2A-02`, niet voor de
@@ -275,7 +291,8 @@ De demo-provider blijft daarna bestaan voor CI, screenshots en foutscenario's.
   showstate of audiobestand te muteren.
 - De gebruiker kan een eigen aaneengesloten Lumi-timeline maken en na restart
   terugzien.
-- Geen phrase-edit kan een boundary binnen een maat, gap of overlap maken.
+- Geen phrase-edit kan een boundary tussen beats, gap, overlap of zero-length
+  range maken; iedere range eindigt bij het volgende Phrase Point.
 - De afgesproken roles, inclusief Breakdown/Buildup 1–3, Synth en Pre-drop, zijn
   configureerbaar en in de editor toepasbaar.
 - Roles zijn in Settings toevoegbaar, hernoembaar, ordenbaar en archiveerbaar;
