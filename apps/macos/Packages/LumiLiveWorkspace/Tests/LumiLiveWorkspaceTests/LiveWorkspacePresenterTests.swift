@@ -49,6 +49,19 @@ struct LiveWorkspacePresenterTests {
         #expect(state.content?.plan?.revision == 1)
     }
 
+    @Test("Library-backed Next retains source, exact Lumi revision, and logical Autoloop evidence")
+    func libraryBackedNextIsVisible() {
+        let plan = LiveWorkspaceFixtures.libraryBacked.content?.plan
+
+        #expect(plan?.libraryTrack?.providerKind == "demo")
+        #expect(plan?.libraryTrack?.timelineRevision == 2)
+        #expect(plan?.cues.count == 4)
+        #expect(plan?.cues[1].libraryResolution?.roleID == "breakdown-1")
+        #expect(plan?.cues[1].libraryResolution?.strategy == "fixedVariant")
+        #expect(plan?.cues[1].libraryResolution?.variantID == "variant-2")
+        #expect(plan?.cues[1].libraryResolution?.entryID.contains("theme-2--") == true)
+    }
+
     @Test("Fallback remains visible with authoritative decks and plan")
     func fallbackIsExplicit() {
         let state = LiveWorkspaceFixtures.fallback

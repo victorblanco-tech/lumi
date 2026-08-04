@@ -482,6 +482,44 @@ public struct LiveWorkspaceView: View {
                                 .accessibilityIdentifier("lumi.plan.themeReason")
                         }
                     }
+                    if let libraryTrack = plan.libraryTrack {
+                        InspectorField(key(copy.librarySource)) {
+                            Text(verbatim: "\(libraryTrack.sourceName) · \(libraryTrack.providerKind)")
+                                .font(LumiTypography.body)
+                                .accessibilityIdentifier("lumi.plan.librarySource")
+                        }
+                        InspectorField(key(copy.lumiTimeline)) {
+                            Text(verbatim: "r\(libraryTrack.timelineRevision) · \(libraryTrack.analysisRevision)")
+                                .font(LumiTypography.technical)
+                                .accessibilityIdentifier("lumi.plan.timelineRevision")
+                        }
+                    }
+                    if let resolution = cue.libraryResolution {
+                        InspectorField(key(copy.phraseRole)) {
+                            Text(verbatim: resolution.roleName)
+                                .font(LumiTypography.body)
+                                .accessibilityIdentifier("lumi.plan.phraseRole")
+                        }
+                        InspectorField(key(copy.loopStrategy)) {
+                            Text(verbatim: loopStrategyName(resolution.strategy))
+                                .font(LumiTypography.body)
+                                .accessibilityIdentifier("lumi.plan.loopStrategy")
+                        }
+                        InspectorField(key(copy.loopVariant)) {
+                            Text(verbatim: resolution.variantID)
+                                .font(LumiTypography.technical)
+                                .accessibilityIdentifier("lumi.plan.loopVariant")
+                        }
+                        InspectorField(key(copy.dryRunEntry)) {
+                            VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+                                Text(verbatim: resolution.entryName).font(LumiTypography.body)
+                                Text(verbatim: resolution.entryID)
+                                    .font(LumiTypography.technical)
+                                    .foregroundStyle(LumiColor.textSecondary)
+                            }
+                            .accessibilityIdentifier("lumi.plan.dryRunEntry")
+                        }
+                    }
                     InspectorField(key(copy.scene)) {
                         PlanSelectionControl(
                             value: sceneName(cue),
@@ -801,6 +839,15 @@ public struct LiveWorkspaceView: View {
             "Matched \(copy.phrase(phrase)) to the \(copy.category(category)) scene category."
         case .missingPhraseAnalysis:
             "Phrase analysis unavailable; preserving the current safe look."
+        }
+    }
+
+    private func loopStrategyName(_ strategy: String) -> String {
+        switch strategy {
+        case "auto": "Automatic"
+        case "fixedVariant": "Fixed variant"
+        case "themeSpecificExact": "Theme-specific exact"
+        default: strategy
         }
     }
 

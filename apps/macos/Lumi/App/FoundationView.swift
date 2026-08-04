@@ -63,7 +63,12 @@ struct FoundationView: View {
                         onSourceReconcile: { request in
                             Task { await engineStatus.reconcileLibrarySource(request) }
                         },
-                        timelineFeedback: engineStatus.timelineEditFeedback
+                        onLoadOnSimulatorDeck: { request in
+                            Task { await engineStatus.loadLibraryTrackOnSimulatorDeck(request) }
+                        },
+                        timelineFeedback: engineStatus.timelineEditFeedback,
+                        simulatorFeedback: engineStatus.simulatorLoadFeedback,
+                        simulatorFeedbackIsError: engineStatus.simulatorLoadFeedbackIsError
                     )
                 case .settings:
                     PhraseRoleSettingsView(

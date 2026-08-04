@@ -16,6 +16,18 @@ public struct LibraryQueryRequest: Equatable, Sendable {
     }
 }
 
+public struct LibrarySimulatorLoadRequest: Equatable, Sendable {
+    public let trackID: UInt64
+    public let deckID: UInt64
+    public let expectedTimelineRevision: UInt64
+
+    public init(trackID: UInt64, deckID: UInt64, expectedTimelineRevision: UInt64) {
+        self.trackID = trackID
+        self.deckID = deckID
+        self.expectedTimelineRevision = expectedTimelineRevision
+    }
+}
+
 public struct LibraryWorkspaceView: View {
     private let state: LibraryWorkspaceState
     private let onQuery: @MainActor (LibraryQueryRequest) -> Void
@@ -24,7 +36,10 @@ public struct LibraryWorkspaceView: View {
     private let onTimelineEdit: @MainActor (TrackTimelineEditRequest) -> Void
     private let onTimelineHistory: @MainActor (TrackTimelineHistoryRequest) -> Void
     private let onSourceReconcile: @MainActor (TrackSourceReconcileRequest) -> Void
+    private let onLoadOnSimulatorDeck: @MainActor (LibrarySimulatorLoadRequest) -> Void
     private let timelineFeedback: String?
+    private let simulatorFeedback: String?
+    private let simulatorFeedbackIsError: Bool
     private let rendersInteractiveControls: Bool
     @Binding private var keyNotation: KeyNotationPreference
     @State private var search: String
@@ -42,7 +57,10 @@ public struct LibraryWorkspaceView: View {
         onTimelineEdit: @escaping @MainActor (TrackTimelineEditRequest) -> Void = { _ in },
         onTimelineHistory: @escaping @MainActor (TrackTimelineHistoryRequest) -> Void = { _ in },
         onSourceReconcile: @escaping @MainActor (TrackSourceReconcileRequest) -> Void = { _ in },
-        timelineFeedback: String? = nil
+        onLoadOnSimulatorDeck: @escaping @MainActor (LibrarySimulatorLoadRequest) -> Void = { _ in },
+        timelineFeedback: String? = nil,
+        simulatorFeedback: String? = nil,
+        simulatorFeedbackIsError: Bool = false
     ) {
         self.state = state
         self.onQuery = onQuery
@@ -51,7 +69,10 @@ public struct LibraryWorkspaceView: View {
         self.onTimelineEdit = onTimelineEdit
         self.onTimelineHistory = onTimelineHistory
         self.onSourceReconcile = onSourceReconcile
+        self.onLoadOnSimulatorDeck = onLoadOnSimulatorDeck
         self.timelineFeedback = timelineFeedback
+        self.simulatorFeedback = simulatorFeedback
+        self.simulatorFeedbackIsError = simulatorFeedbackIsError
         self.rendersInteractiveControls = rendersInteractiveControls
         _keyNotation = keyNotation
         _search = State(initialValue: state.query.search)
@@ -385,6 +406,23 @@ public struct LibraryWorkspaceView: View {
                 Divider()
                 capabilitySummary(track)
                 Spacer()
+                if let simulatorFeedback {
+                    Label(
+                        simulatorFeedback,
+                        systemImage: simulatorFeedbackIsError
+                            ? "exclamationmark.triangle.fill"
+                            : "checkmark.circle.fill"
+                    )
+                        .font(LumiTypography.caption)
+                        .foregroundStyle(
+                            simulatorFeedbackIsError ? LumiColor.warning : LumiColor.success
+                        )
+                        .accessibilityIdentifier("lumi.library.simulatorFeedback")
+                }
+                HStack(spacing: LumiSpacing.small) {
+                    simulatorLoadButton(track, deckID: 1)
+                    simulatorLoadButton(track, deckID: 2)
+                }
                 Button {
                     onOpenEditor(track.id)
                 } label: {
@@ -403,6 +441,28 @@ public struct LibraryWorkspaceView: View {
         .padding(LumiSpacing.large)
         .background(LumiColor.surface)
         .accessibilityIdentifier("lumi.library.inspector")
+    }
+
+    private func simulatorLoadButton(_ track: LibraryTrack, deckID: UInt64) -> some View {
+        Button {
+            guard let timelineRevision = track.timelineRevision else { return }
+            onLoadOnSimulatorDeck(
+                LibrarySimulatorLoadRequest(
+                    trackID: track.id,
+                    deckID: deckID,
+                    expectedTimelineRevision: timelineRevision
+                )
+            )
+        } label: {
+            Label(
+                String(format: localized("library.loadOnDeck"), deckID),
+                systemImage: "arrow.down.to.line.compact"
+            )
+            .frame(maxWidth: .infinity)
+        }
+        .buttonStyle(.bordered)
+        .disabled(track.timelineRevision == nil)
+        .accessibilityIdentifier("lumi.library.loadDeck\(deckID)")
     }
 
     private var pagination: some View {

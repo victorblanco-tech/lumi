@@ -26,6 +26,12 @@
 "workspace.scene" = "Scene";
 "workspace.reason" = "Reason";
 "workspace.origin" = "Source";
+"workspace.librarySource" = "Library source";
+"workspace.lumiTimeline" = "Lumi timeline";
+"workspace.phraseRole" = "Phrase role";
+"workspace.loopStrategy" = "Loop strategy";
+"workspace.loopVariant" = "Loop variant";
+"workspace.dryRunEntry" = "Dry-run Autoloop";
 "workspace.regenerate" = "Regenerate";
 "workspace.lockCue" = "Lock cue";
 "workspace.unlockCue" = "Unlock cue";

@@ -290,6 +290,12 @@ public enum EngineCommand: Equatable, Sendable {
         expectedAutoloopCatalogRevision: UInt64,
         mutation: EngineAutoloopCatalogMutation
     )
+    case loadLibraryTrackOnSimulatorDeck(
+        trackID: UInt64,
+        deckID: UInt64,
+        expectedTimelineRevision: UInt64,
+        expectedStateRevision: UInt64
+    )
     case loadDemoSession(expectedStateRevision: UInt64)
     case setOperationState(String, expectedStateRevision: UInt64)
     case setSimulationSpeed(UInt64, expectedStateRevision: UInt64)
@@ -386,6 +392,21 @@ public enum EngineCommand: Equatable, Sendable {
             payload["kind"] = .string("mutateAutoloopCatalog")
             payload["expectedAutoloopCatalogRevision"] = .number(Double(expectedRevision))
             return payload
+        case let .loadLibraryTrackOnSimulatorDeck(
+            trackID,
+            deckID,
+            expectedTimelineRevision,
+            expectedStateRevision
+        ):
+            return statePayload(
+                "loadLibraryTrackOnSimulatorDeck",
+                expectedRevision: expectedStateRevision,
+                additional: [
+                    "trackId": .number(Double(trackID)),
+                    "deckId": .number(Double(deckID)),
+                    "expectedTimelineRevision": .number(Double(expectedTimelineRevision))
+                ]
+            )
         case let .loadDemoSession(expectedRevision):
             return statePayload("loadDemoSession", expectedRevision: expectedRevision)
         case let .setOperationState(state, expectedRevision):

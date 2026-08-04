@@ -1,6 +1,6 @@
 # Epic 2A – Music Library and Track Lighting Editor
 
-Status: **In build – E2A-10 complete; next E2A-11 imported-track simulation**
+Status: **In build – E2A-11 complete; next E2A-12 end-to-end proof**
 
 Doelmilestone: **0.2.0 – Deck Intelligence**
 
@@ -225,6 +225,12 @@ golden previewfixture en native editorflow zijn gebouwd en geverifieerd.
 
 Laadt een echte geïmporteerde track op Deck A/B, gebruikt uitsluitend de
 Lumi-timeline en bewijst phrase- en matrixresolutie in de bestaande Live/Next UI.
+
+Status: **complete**. De Library kan elke demo/importtrack revision-safe op Deck
+A of B laden. Provider-neutrale identity facts, de exacte Lumi-timeline,
+late-bound Theme-resolutie, logische Autoloop-evidence, atomaire activatie,
+versnelde exactly-once dry-run-output, typed mismatchgedrag, een golden
+transcript en native visuele evidence zijn gebouwd en geverifieerd.
 
 ### E2A-12 – Prove Epic 2A end-to-end
 

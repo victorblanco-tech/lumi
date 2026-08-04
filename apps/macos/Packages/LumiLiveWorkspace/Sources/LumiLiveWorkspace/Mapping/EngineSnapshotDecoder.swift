@@ -159,6 +159,12 @@ public struct EngineSnapshotDecoder: Sendable {
         } else {
             themeDecision = try decodeThemeDecision(plan["themeDecision"])
         }
+        let libraryTrack: PlanLibraryTrackSnapshot?
+        if plan["libraryTrack"] == .null || plan["libraryTrack"] == nil {
+            libraryTrack = nil
+        } else {
+            libraryTrack = try decodePlanLibraryTrack(plan["libraryTrack"])
+        }
         guard !cues.isEmpty,
               cues.enumerated().allSatisfy({ offset, cue in
                   cue.phraseIndex == UInt64(offset)
@@ -190,6 +196,9 @@ public struct EngineSnapshotDecoder: Sendable {
                 throw EngineSnapshotDecodingError.invalidSnapshot
             }
         }
+        guard libraryTrack == nil || cues.allSatisfy({ $0.libraryResolution != nil }) else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
 
         return PlanSnapshot(
             planID: planID,
@@ -200,7 +209,35 @@ public struct EngineSnapshotDecoder: Sendable {
             configurationRevision: configurationRevision,
             status: status,
             themeDecision: themeDecision,
+            libraryTrack: libraryTrack,
             cues: cues
+        )
+    }
+
+    private func decodePlanLibraryTrack(_ value: JSONValue?) throws -> PlanLibraryTrackSnapshot {
+        guard case let .object(identity) = value,
+              identity["matchStatus"] == .string("exact"),
+              case let .string(providerKind) = identity["providerKind"],
+              !providerKind.isEmpty,
+              case let .string(sourceID) = identity["sourceId"],
+              !sourceID.isEmpty,
+              case let .string(sourceName) = identity["sourceName"],
+              !sourceName.isEmpty,
+              case let .string(sourceTrackID) = identity["sourceTrackId"],
+              !sourceTrackID.isEmpty,
+              case let .string(analysisRevision) = identity["analysisRevision"],
+              !analysisRevision.isEmpty,
+              let timelineRevision = unsignedInteger(identity["timelineRevision"]),
+              timelineRevision > 0 else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        return PlanLibraryTrackSnapshot(
+            providerKind: providerKind,
+            sourceID: sourceID,
+            sourceName: sourceName,
+            sourceTrackID: sourceTrackID,
+            analysisRevision: analysisRevision,
+            timelineRevision: timelineRevision
         )
     }
 
@@ -257,7 +294,46 @@ public struct EngineSnapshotDecoder: Sendable {
             origin: origin,
             locked: locked,
             reason: try decodeReason(reasonPayload),
-            action: try decodeAction(actionPayload)
+            action: try decodeAction(actionPayload),
+            libraryResolution: try decodeLibraryResolution(cue["libraryResolution"])
+        )
+    }
+
+    private func decodeLibraryResolution(
+        _ value: JSONValue?
+    ) throws -> PlanCueLibraryResolutionSnapshot? {
+        if value == nil || value == .null {
+            return nil
+        }
+        guard case let .object(resolution) = value,
+              case let .string(roleID) = resolution["roleId"],
+              !roleID.isEmpty,
+              case let .string(roleName) = resolution["roleName"],
+              !roleName.isEmpty,
+              case let .string(strategy) = resolution["strategy"],
+              ["auto", "fixedVariant", "themeSpecificExact"].contains(strategy),
+              case let .string(variantID) = resolution["variantId"],
+              !variantID.isEmpty,
+              let catalogRevision = unsignedInteger(resolution["catalogRevision"]),
+              catalogRevision > 0,
+              case let .string(resolutionReason) = resolution["resolutionReason"],
+              !resolutionReason.isEmpty,
+              case let .object(entry) = resolution["dryRunEntry"],
+              case let .string(entryID) = entry["id"],
+              !entryID.isEmpty,
+              case let .string(entryName) = entry["name"],
+              !entryName.isEmpty else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        return PlanCueLibraryResolutionSnapshot(
+            roleID: roleID,
+            roleName: roleName,
+            strategy: strategy,
+            variantID: variantID,
+            catalogRevision: catalogRevision,
+            resolutionReason: resolutionReason,
+            entryID: entryID,
+            entryName: entryName
         )
     }
 

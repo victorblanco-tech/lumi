@@ -11,6 +11,8 @@ final class EngineStatusModel: ObservableObject {
     @Published private(set) var timelineEditFeedback: String?
     @Published private(set) var phraseRoleFeedback: String?
     @Published private(set) var autoloopCatalogFeedback: String?
+    @Published private(set) var simulatorLoadFeedback: String?
+    @Published private(set) var simulatorLoadFeedbackIsError = false
 
     private enum Lifecycle: Equatable {
         case stopped
@@ -45,6 +47,8 @@ final class EngineStatusModel: ObservableObject {
         timelineEditFeedback = nil
         phraseRoleFeedback = nil
         autoloopCatalogFeedback = nil
+        simulatorLoadFeedback = nil
+        simulatorLoadFeedbackIsError = false
 
         do {
             let executable = try engineExecutable()
@@ -115,6 +119,8 @@ final class EngineStatusModel: ObservableObject {
         libraryState = .importing()
         phraseRoleFeedback = nil
         autoloopCatalogFeedback = nil
+        simulatorLoadFeedback = nil
+        simulatorLoadFeedbackIsError = false
     }
 
     func queryLibrary(_ request: LibraryQueryRequest) async {
@@ -163,6 +169,25 @@ final class EngineStatusModel: ObservableObject {
         guard libraryState.editor != nil else { return }
         await exchangeLibraryCommand(.closeLibraryTrackEditor)
         timelineEditFeedback = nil
+    }
+
+    func loadLibraryTrackOnSimulatorDeck(_ request: LibrarySimulatorLoadRequest) async {
+        guard let snapshot = latestSnapshot else { return }
+        simulatorLoadFeedback = nil
+        simulatorLoadFeedbackIsError = false
+        let loaded = await exchangeLibraryCommand(
+            .loadLibraryTrackOnSimulatorDeck(
+                trackID: request.trackID,
+                deckID: request.deckID,
+                expectedTimelineRevision: request.expectedTimelineRevision,
+                expectedStateRevision: snapshot.stateRevision
+            ),
+            preservesLibraryOnFailure: true
+        )
+        if loaded {
+            simulatorLoadFeedback = "Loaded exact Lumi timeline r\(request.expectedTimelineRevision) on Deck \(request.deckID)."
+            simulatorLoadFeedbackIsError = false
+        }
     }
 
     func editLibraryTimeline(_ request: TrackTimelineEditRequest) async {
@@ -479,19 +504,28 @@ final class EngineStatusModel: ObservableObject {
         }
     }
 
-    private func exchangeLibraryCommand(_ command: EngineCommand) async {
+    @discardableResult
+    private func exchangeLibraryCommand(
+        _ command: EngineCommand,
+        preservesLibraryOnFailure: Bool = false
+    ) async -> Bool {
         guard lifecycle == .ready,
               let endpointDescription,
               let protocolVersion,
               await acquireInteractiveExchange() else {
-            return
+            return false
         }
         defer { isExchangingCommand = false }
         do {
             let envelope = try await supervisor.send(command)
             if let failure = EngineCommandFailure(envelope) {
-                libraryState = .failed(failure.message)
-                return
+                if preservesLibraryOnFailure {
+                    simulatorLoadFeedback = failure.message
+                    simulatorLoadFeedbackIsError = true
+                } else {
+                    libraryState = .failed(failure.message)
+                }
+                return false
             }
             let snapshot = try snapshotDecoder.decode(
                 envelope,
@@ -501,11 +535,17 @@ final class EngineStatusModel: ObservableObject {
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
             libraryState = try libraryDecoder.decode(envelope)
+            return true
         } catch {
-            libraryState = .failed(
-                (error as? LocalizedError)?.errorDescription
-                    ?? "The track editor could not be updated."
-            )
+            let message = (error as? LocalizedError)?.errorDescription
+                ?? "The track editor could not be updated."
+            if preservesLibraryOnFailure {
+                simulatorLoadFeedback = message
+                simulatorLoadFeedbackIsError = true
+            } else {
+                libraryState = .failed(message)
+            }
+            return false
         }
     }
 

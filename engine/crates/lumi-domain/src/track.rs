@@ -3,6 +3,73 @@ use std::fmt;
 
 use crate::TrackId;
 
+/// Stable, provider-neutral identity facts attached to a library-backed deck
+/// load. A deck-source adapter may omit these facts for an unknown live track,
+/// but it must never substitute a different library record.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TrackIdentityFacts {
+    provider_kind: String,
+    source_id: String,
+    source_track_id: String,
+    analysis_revision: String,
+    lumi_timeline_revision: u64,
+}
+
+impl TrackIdentityFacts {
+    pub fn try_new(
+        provider_kind: impl Into<String>,
+        source_id: impl Into<String>,
+        source_track_id: impl Into<String>,
+        analysis_revision: impl Into<String>,
+        lumi_timeline_revision: u64,
+    ) -> Result<Self, TrackValidationError> {
+        let provider_kind = provider_kind.into();
+        let source_id = source_id.into();
+        let source_track_id = source_track_id.into();
+        let analysis_revision = analysis_revision.into();
+        if provider_kind.trim().is_empty()
+            || source_id.trim().is_empty()
+            || source_track_id.trim().is_empty()
+            || analysis_revision.trim().is_empty()
+            || lumi_timeline_revision == 0
+        {
+            return Err(TrackValidationError::InvalidIdentityFacts);
+        }
+        Ok(Self {
+            provider_kind,
+            source_id,
+            source_track_id,
+            analysis_revision,
+            lumi_timeline_revision,
+        })
+    }
+
+    #[must_use]
+    pub fn provider_kind(&self) -> &str {
+        &self.provider_kind
+    }
+
+    #[must_use]
+    pub fn source_id(&self) -> &str {
+        &self.source_id
+    }
+
+    #[must_use]
+    pub fn source_track_id(&self) -> &str {
+        &self.source_track_id
+    }
+
+    #[must_use]
+    pub fn analysis_revision(&self) -> &str {
+        &self.analysis_revision
+    }
+
+    #[must_use]
+    pub const fn lumi_timeline_revision(&self) -> u64 {
+        self.lumi_timeline_revision
+    }
+}
+
 /// Canonical normalized sRGB color supplied by a deck or library adapter.
 /// Provider-specific color indexes and labels must be translated before this
 /// value enters the Lumi domain.
@@ -162,6 +229,7 @@ pub struct TrackMetadata {
     color: Option<TrackColor>,
     duration_beats: u32,
     phrases: Vec<TrackPhrase>,
+    identity_facts: Option<TrackIdentityFacts>,
 }
 
 impl TrackMetadata {
@@ -239,7 +307,14 @@ impl TrackMetadata {
             color,
             duration_beats,
             phrases,
+            identity_facts: None,
         })
+    }
+
+    #[must_use]
+    pub fn with_identity_facts(mut self, identity_facts: TrackIdentityFacts) -> Self {
+        self.identity_facts = Some(identity_facts);
+        self
     }
 
     #[must_use]
@@ -283,6 +358,11 @@ impl TrackMetadata {
     }
 
     #[must_use]
+    pub const fn identity_facts(&self) -> Option<&TrackIdentityFacts> {
+        self.identity_facts.as_ref()
+    }
+
+    #[must_use]
     pub fn phrase(&self, index: u16) -> Option<TrackPhrase> {
         self.phrases.get(usize::from(index)).copied()
     }
@@ -298,6 +378,7 @@ pub enum TrackValidationError {
     UnorderedPhraseIndex,
     InvalidPhraseRange,
     IncompletePhraseCoverage,
+    InvalidIdentityFacts,
 }
 
 impl fmt::Display for TrackValidationError {
@@ -316,6 +397,9 @@ impl fmt::Display for TrackValidationError {
             }
             Self::IncompletePhraseCoverage => {
                 formatter.write_str("track phrases must cover the complete track")
+            }
+            Self::InvalidIdentityFacts => {
+                formatter.write_str("track identity facts must be complete and revisioned")
             }
         }
     }

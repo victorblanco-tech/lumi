@@ -93,6 +93,7 @@ public enum LiveWorkspaceFixtures {
     )
 
     public static let ready = LiveWorkspacePresenter.ready(readySnapshot)
+    public static let libraryBacked = LiveWorkspacePresenter.ready(libraryBackedSnapshot())
     public static let loading = LiveWorkspacePresenter.starting()
     public static let stale = LiveWorkspacePresenter.stale(readySnapshot)
     public static let disconnected = LiveWorkspacePresenter.disconnected()
@@ -110,6 +111,80 @@ public enum LiveWorkspaceFixtures {
             "Plan changed elsewhere. Lumi refreshed the latest revision."
         )
     )
+
+    private static func libraryBackedSnapshot() -> EngineSnapshot {
+        let nextDeck = DeckSnapshot(
+            deckID: 2,
+            trackLoadID: 2_002,
+            title: "Horizon Lines",
+            artist: "Lumi Demo Library",
+            bpmMilli: 128_000,
+            colorRGB: 4_747_469,
+            pitchClass: "c",
+            keyMode: "major",
+            beat: 0,
+            phraseIndex: nil
+        )
+        let roles = ["Intro / Outro", "Breakdown 1", "Buildup 1", "Drop"]
+        let roleIDs = ["intro-outro", "breakdown-1", "buildup-1", "drop"]
+        let cues = readySnapshot.nextPlan?.cues.enumerated().map { index, cue in
+            PlanCueSnapshot(
+                phraseIndex: cue.phraseIndex,
+                startBeat: cue.startBeat,
+                endBeat: cue.endBeat,
+                origin: cue.origin,
+                locked: cue.locked,
+                reason: cue.reason,
+                action: cue.action,
+                libraryResolution: PlanCueLibraryResolutionSnapshot(
+                    roleID: roleIDs[index],
+                    roleName: roles[index],
+                    strategy: index == 1 ? "fixedVariant" : "auto",
+                    variantID: index == 1 ? "variant-2" : "variant-1",
+                    catalogRevision: 1,
+                    resolutionReason: index == 1 ? "exactVariant" : "automatic",
+                    entryID: "theme-2--\(roleIDs[index])--variant-\(index == 1 ? 2 : 1)",
+                    entryName: "Deep Ocean · \(roles[index]) · Variant \(index == 1 ? 2 : 1)"
+                )
+            )
+        } ?? []
+        let plan = PlanSnapshot(
+            planID: "16571449367899180180",
+            deckID: 2,
+            trackLoadID: 2_002,
+            trackDurationBeats: 128,
+            revision: 1,
+            configurationRevision: 1,
+            status: "ready",
+            themeDecision: readySnapshot.nextPlan?.themeDecision,
+            libraryTrack: PlanLibraryTrackSnapshot(
+                providerKind: "demo",
+                sourceID: "lumi-demo-library",
+                sourceName: "Lumi Demo Library",
+                sourceTrackID: "horizon-lines",
+                analysisRevision: "horizon-lines-v1",
+                timelineRevision: 2
+            ),
+            cues: cues
+        )
+        return EngineSnapshot(
+            endpoint: readySnapshot.endpoint,
+            engineVersion: readySnapshot.engineVersion,
+            protocolVersion: readySnapshot.protocolVersion,
+            snapshotSequence: 45,
+            stateRevision: 10,
+            operationState: readySnapshot.operationState,
+            runtime: readySnapshot.runtime,
+            deckSource: readySnapshot.deckSource,
+            simulation: readySnapshot.simulation,
+            outputProvider: readySnapshot.outputProvider,
+            leaderDeckID: readySnapshot.leaderDeckID,
+            decks: [readySnapshot.decks[0], nextDeck],
+            nextPlan: plan,
+            planningOptions: readySnapshot.planningOptions,
+            timeline: readySnapshot.timeline
+        )
+    }
 
     private static func editedSnapshot() -> EngineSnapshot {
         let editedCues: [PlanCueSnapshot] = readySnapshot.nextPlan?.cues.map { cue in
