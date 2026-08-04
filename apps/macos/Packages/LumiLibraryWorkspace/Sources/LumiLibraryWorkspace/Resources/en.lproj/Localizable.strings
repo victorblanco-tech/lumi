@@ -58,7 +58,7 @@
 "editor.timelineLabel" = "Beat grid, performance waveform, and Lumi phrase timeline";
 "editor.overviewLabel" = "Full track overview; drag to navigate";
 "editor.originalAudio" = "Original audio · read-only preview";
-"editor.shortcuts" = "Space play/pause · ←/→ bars";
+"editor.shortcuts" = "Space play/pause · ←/→ beats · Shift ←/→ bars · P point";
 "editor.noPhrase" = "no phrase selected";
 "editor.undo" = "Undo";
 "editor.redo" = "Redo";
@@ -72,9 +72,9 @@
 "editor.savedRevision" = "Revision %llu saved";
 "editor.phraseInspector" = "Phrase Inspector";
 "editor.role" = "Phrase role";
-"editor.boundaries" = "Bar-aligned boundaries";
-"editor.startBar" = "Start bar";
-"editor.endBar" = "End bar";
+"editor.boundaries" = "Beat-quantized boundaries";
+"editor.startBar" = "Start beat";
+"editor.endBar" = "End beat";
 "editor.barSelection" = "Bar selection";
 "editor.from" = "From";
 "editor.to" = "To";
@@ -161,6 +161,6 @@
 "editor.mergeEachConflict" = "Merge each conflict:";
 "editor.phrase" = "Phrase";
 "editor.applyMerge" = "Apply Merge";
-"editor.rebaseRounding" = "Rebase rounds %llu boundary changes to complete bars.";
+"editor.rebaseRounding" = "Rebase rounds %llu boundary changes to whole beats.";
 "editor.sourceIndependent" = "Lumi phrases are independent from the source baseline.";
 "editor.compareSource" = "Compare Source Changes";

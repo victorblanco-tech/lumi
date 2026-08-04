@@ -14,9 +14,12 @@ public struct TrackLightingEditorView: View {
     @State private var viewport: TrackEditorViewport
     @State private var selectedPhraseID: UInt64?
     @State private var loopSelectedPhrase = false
-    @State private var selectionStartBar: UInt32
-    @State private var selectionEndBar: UInt32
-    @State private var selectionAnchorBar: UInt32?
+    @State private var selectionStartBeat: UInt32
+    @State private var selectionEndBeat: UInt32
+    @State private var selectionAnchorBeat: UInt32?
+    @State private var magnificationAnchorBeats: Double?
+    @State private var draggingBoundaryAfterPhraseIndex: UInt16?
+    @State private var pendingBoundaryBeat: UInt32?
     @State private var conflictSides: [UInt16: TrackSourceConflictSide]
     @Environment(\.dismiss) private var dismiss
 
@@ -47,21 +50,17 @@ public struct TrackLightingEditorView: View {
         _audio = StateObject(wrappedValue: TrackAudioPreviewController(analysis: analysis))
         _viewport = State(
             initialValue: TrackEditorViewport(
-                startBar: 0,
-                visibleBars: min(8, max(1, analysis.totalBars)),
-                totalBars: analysis.totalBars,
+                startBeat: 0,
+                visibleBeats: Double(min(32, max(1, analysis.totalBeats))),
+                totalBeats: analysis.totalBeats,
                 beatsPerBar: analysis.beatsPerBar
             )
         )
         _selectedPhraseID = State(initialValue: analysis.phrases.first?.id)
         let firstStart = analysis.phrases.first?.startBeat ?? 0
         let firstEnd = analysis.phrases.first?.endBeat ?? UInt32(analysis.beatsPerBar)
-        _selectionStartBar = State(
-            initialValue: firstStart / UInt32(max(1, analysis.beatsPerBar))
-        )
-        _selectionEndBar = State(
-            initialValue: firstEnd / UInt32(max(1, analysis.beatsPerBar))
-        )
+        _selectionStartBeat = State(initialValue: firstStart)
+        _selectionEndBeat = State(initialValue: firstEnd)
         _conflictSides = State(
             initialValue: Dictionary(
                 uniqueKeysWithValues: (analysis.sourceReconciliation?.conflicts ?? [])
@@ -99,14 +98,23 @@ public struct TrackLightingEditorView: View {
             audio.togglePlayback()
             return .handled
         }
-        .onKeyPress(.leftArrow) {
-            audio.moveByBar(-1)
+        .onKeyPress(keys: [.leftArrow, .rightArrow], phases: .down) { press in
+            let direction = press.key == .leftArrow ? -1 : 1
+            if press.modifiers.contains(.shift) {
+                audio.moveByBar(direction)
+            } else {
+                audio.moveByBeat(direction)
+            }
             revealPlayhead()
             return .handled
         }
-        .onKeyPress(.rightArrow) {
-            audio.moveByBar(1)
-            revealPlayhead()
+        .onKeyPress("p") {
+            if let roleID = selectedPhrase?.roleID { placePhrasePoint(roleID: roleID) }
+            return .handled
+        }
+        .onKeyPress(.delete) {
+            guard analysis.phrases.count > 1, let index = selectedPhraseIndex else { return .ignored }
+            deleteSelected(absorbPrevious: index > 0)
             return .handled
         }
         .onChange(of: audio.positionMillis) { _, _ in
@@ -259,7 +267,7 @@ public struct TrackLightingEditorView: View {
 
     private var transport: some View {
         HStack(spacing: 12) {
-            Button { stepBar(-1) } label: {
+            Button { stepBeat(-1) } label: {
                 Image(systemName: "backward.end.fill")
             }
             .help("\(editorCopy("editor.previousBar")) · Left Arrow")
@@ -283,7 +291,7 @@ public struct TrackLightingEditorView: View {
             .accessibilityLabel(editorCopy("editor.stop"))
             .accessibilityIdentifier("lumi.trackEditor.stop")
 
-            Button { stepBar(1) } label: {
+            Button { stepBeat(1) } label: {
                 Image(systemName: "forward.end.fill")
             }
             .help("\(editorCopy("editor.nextBar")) · Right Arrow")
@@ -315,18 +323,18 @@ public struct TrackLightingEditorView: View {
                 Button { zoom(by: 1) } label: {
                     Image(systemName: "minus.magnifyingglass")
                 }
-                .disabled(zoomOptions.firstIndex(of: viewport.visibleBars) == zoomOptions.count - 1)
-                Text(String(format: editorCopy("editor.visibleBars"), UInt64(viewport.visibleBars)))
+                .disabled(viewport.visibleBeats >= Double(analysis.totalBeats))
+                Text(String(format: "%.1f bars", viewport.visibleBars))
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .frame(width: 48)
                 Button { zoom(by: -1) } label: {
                     Image(systemName: "plus.magnifyingglass")
                 }
-                .disabled(zoomOptions.firstIndex(of: viewport.visibleBars) == 0)
+                .disabled(viewport.visibleBeats <= 1.01)
             }
             .accessibilityElement(children: .combine)
             .accessibilityLabel(
-                String(format: editorCopy("editor.visibleBarsLabel"), UInt64(viewport.visibleBars))
+                String(format: "Visible %.1f bars", viewport.visibleBars)
             )
             .accessibilityIdentifier("lumi.trackEditor.zoom")
         }
@@ -489,16 +497,16 @@ public struct TrackLightingEditorView: View {
 
                 inspectorLabel(editorCopy("editor.boundaries"))
                 boundaryRow(
-                    title: editorCopy("editor.startBar"),
-                    displayValue: phraseStartBarZeroBased(phrase) + 1,
+                    title: "Start beat",
+                    displayValue: phrase.startBeat + 1,
                     canDecrease: canMoveStart(by: -1),
                     canIncrease: canMoveStart(by: 1),
                     decrease: { moveStartBoundary(by: -1) },
                     increase: { moveStartBoundary(by: 1) }
                 )
                 boundaryRow(
-                    title: editorCopy("editor.endBar"),
-                    displayValue: phraseEndBarZeroBased(phrase),
+                    title: "End beat",
+                    displayValue: phrase.endBeat,
                     canDecrease: canMoveEnd(by: -1),
                     canIncrease: canMoveEnd(by: 1),
                     decrease: { moveEndBoundary(by: -1) },
@@ -506,35 +514,40 @@ public struct TrackLightingEditorView: View {
                 )
 
                 Divider().overlay(Color.white.opacity(0.12))
-                inspectorLabel(editorCopy("editor.barSelection"))
+                inspectorLabel("Beat selection")
                 HStack {
                     selectionStepper(
                         title: editorCopy("editor.from"),
-                        value: $selectionStartBar,
-                        range: 0...max(0, selectionEndBar - 1)
+                        value: $selectionStartBeat,
+                        range: 0...max(0, selectionEndBeat - 1)
                     )
                     selectionStepper(
                         title: editorCopy("editor.to"),
-                        value: $selectionEndBar,
-                        range: min(analysis.totalBars, selectionStartBar + 1)...analysis.totalBars
+                        value: $selectionEndBeat,
+                        range: min(analysis.totalBeats, selectionStartBeat + 1)...analysis.totalBeats
                     )
                 }
-                Button {
-                    onTimelineEdit(
-                        .create(
-                            startBar: selectionStartBar,
-                            endBar: selectionEndBar,
-                            roleID: phrase.roleID
-                        )
-                    )
-                } label: {
-                    Label(editorCopy("editor.createSelection"), systemImage: "plus.rectangle.on.rectangle")
+                if rendersInteractiveControls {
+                    Menu {
+                        ForEach(analysis.roles.filter { !$0.archived }) { role in
+                            Button(role.name) { placePhrasePoint(roleID: role.id) }
+                        }
+                    } label: {
+                        Label("Place Phrase Point", systemImage: "mappin.and.ellipse")
+                            .frame(maxWidth: .infinity)
+                    }
+                    .menuStyle(.button)
+                    .buttonStyle(.borderedProminent)
+                    .tint(accent)
+                    .disabled(quantizedPlayheadBeat >= analysis.totalBeats)
+                    .accessibilityIdentifier("lumi.trackEditor.createSelection")
+                } else {
+                    Label("Place Phrase Point", systemImage: "mappin.and.ellipse")
                         .frame(maxWidth: .infinity)
+                        .padding(.vertical, 5)
+                        .background(accent)
+                        .clipShape(RoundedRectangle(cornerRadius: 5))
                 }
-                .buttonStyle(.borderedProminent)
-                .tint(accent)
-                .disabled(selectionStartBar >= selectionEndBar)
-                .accessibilityIdentifier("lumi.trackEditor.createSelection")
 
                 Divider().overlay(Color.white.opacity(0.12))
                 inspectorFact(editorCopy("editor.origin"), phrase.origin)
@@ -564,20 +577,53 @@ public struct TrackLightingEditorView: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
-                        if value.location.y < phraseLaneTop(height: proxy.size.height) {
+                        if draggingBoundaryAfterPhraseIndex == nil,
+                           let boundary = boundaryIndex(
+                               atX: value.startLocation.x,
+                               width: proxy.size.width,
+                               tolerance: 9
+                           ) {
+                            draggingBoundaryAfterPhraseIndex = boundary
+                        }
+                        if let boundary = draggingBoundaryAfterPhraseIndex {
+                            updatePendingBoundary(
+                                boundary,
+                                atX: value.location.x,
+                                width: proxy.size.width
+                            )
+                        } else if value.location.y < phraseLaneTop(height: proxy.size.height) {
                             seek(atX: value.location.x, width: proxy.size.width)
                         } else {
-                            updateBarSelection(atX: value.location.x, width: proxy.size.width)
+                            updateBeatSelection(atX: value.location.x, width: proxy.size.width)
                         }
                     }
                     .onEnded { value in
-                        if value.location.y >= phraseLaneTop(height: proxy.size.height) {
+                        if let boundary = draggingBoundaryAfterPhraseIndex,
+                           let beat = pendingBoundaryBeat {
+                            onTimelineEdit(
+                                .moveBoundary(afterPhraseIndex: boundary, toBeat: beat)
+                            )
+                        } else if value.location.y >= phraseLaneTop(height: proxy.size.height) {
                             if abs(value.translation.width) < 3 {
                                 selectPhrase(atX: value.location.x, width: proxy.size.width)
                             }
-                            selectionAnchorBar = nil
                         }
+                        draggingBoundaryAfterPhraseIndex = nil
+                        pendingBoundaryBeat = nil
+                        selectionAnchorBeat = nil
                     }
+            )
+            .simultaneousGesture(
+                MagnifyGesture()
+                    .onChanged { value in
+                        let baseline = magnificationAnchorBeats ?? viewport.visibleBeats
+                        magnificationAnchorBeats = baseline
+                        viewport = viewport.zoomed(
+                            to: baseline / max(0.05, value.magnification),
+                            aroundBeat: currentBeat
+                        )
+                    }
+                    .onEnded { _ in magnificationAnchorBeats = nil }
             )
         }
         .frame(minHeight: 315)
@@ -758,13 +804,8 @@ public struct TrackLightingEditorView: View {
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
                         let progress = min(max(0, value.location.x / max(1, proxy.size.width)), 1)
-                        let bar = UInt32(progress * Double(max(1, analysis.totalBars - 1)))
-                        viewport = TrackEditorViewport(
-                            startBar: bar,
-                            visibleBars: viewport.visibleBars,
-                            totalBars: analysis.totalBars,
-                            beatsPerBar: analysis.beatsPerBar
-                        )
+                        let beat = progress * Double(analysis.totalBeats)
+                        viewport = viewport.centered(onBeat: beat)
                     }
             )
         }
@@ -788,7 +829,7 @@ public struct TrackLightingEditorView: View {
             Spacer()
             if let phrase = selectedPhrase {
                 Circle().fill(phraseColor(phrase.role)).frame(width: 9, height: 9)
-                Text("\(phrase.role) · bars \(phraseStartBar(phrase))–\(phraseEndBar(phrase)) · \(phrase.origin)")
+                Text("\(phrase.role) · beats \(phrase.startBeat + 1)–\(phrase.endBeat) · \(phrase.origin)")
             }
             if let feedback {
                 Text(feedback)
@@ -823,9 +864,11 @@ public struct TrackLightingEditorView: View {
         let center = (waveformTop + waveformBottom) / 2
         let amplitude = max(24, (waveformBottom - waveformTop) / 2 - 8)
 
-        for beat in viewport.startBeat...viewport.endBeat {
+        let firstVisibleBeat = max(0, Int(viewport.startBeat.rounded(.down)))
+        let lastVisibleBeat = min(Int(analysis.totalBeats), Int(viewport.endBeat.rounded(.up)))
+        for beat in firstVisibleBeat...lastVisibleBeat {
             let x = viewport.x(forBeat: Double(beat), width: width)
-            let isBar = beat.isMultiple(of: UInt32(analysis.beatsPerBar))
+            let isBar = beat.isMultiple(of: Int(analysis.beatsPerBar))
             var line = Path()
             line.move(to: CGPoint(x: x, y: isBar ? 22 : 39))
             line.addLine(to: CGPoint(x: x, y: phraseTop - 4))
@@ -834,44 +877,40 @@ public struct TrackLightingEditorView: View {
                 with: .color(Color.white.opacity(isBar ? 0.28 : 0.10)),
                 lineWidth: isBar ? 1.2 : 0.6
             )
-            if isBar, beat < viewport.endBeat {
-                let label = Text("\(beat / UInt32(analysis.beatsPerBar) + 1)")
+            if isBar, Double(beat) < viewport.endBeat {
+                let label = Text("\(beat / Int(analysis.beatsPerBar) + 1)")
                     .font(.system(size: 11, weight: .bold, design: .monospaced))
                     .foregroundColor(primary)
                 context.draw(label, at: CGPoint(x: x + 5, y: 13), anchor: .topLeading)
             }
-            if beat < viewport.endBeat {
-                let beatLabel = Text("\(beat % UInt32(analysis.beatsPerBar) + 1)")
+            if Double(beat) < viewport.endBeat {
+                let beatLabel = Text("\(beat % Int(analysis.beatsPerBar) + 1)")
                     .font(.system(size: 8, weight: .medium, design: .monospaced))
                     .foregroundColor(secondary)
                 context.draw(beatLabel, at: CGPoint(x: x + 3, y: 31), anchor: .topLeading)
             }
         }
 
-        let totalBeats = max(1, analysis.beats.count)
-        let sampleWidth = max(1, width / Double(viewport.visibleBeats))
-        for (index, point) in analysis.waveform.enumerated() {
-            let beat = Double(index) / Double(max(1, analysis.waveform.count - 1)) * Double(totalBeats)
-            guard beat >= Double(viewport.startBeat), beat <= Double(viewport.endBeat) else { continue }
-            let x = viewport.x(forBeat: beat, width: width)
-            let low = Double(point.low) / 255 * amplitude
-            let mid = Double(point.mid) / 255 * amplitude * 0.88
-            let high = Double(point.high) / 255 * amplitude * 0.76
-            context.fill(
-                Path(CGRect(x: x, y: center - low, width: sampleWidth, height: low * 2)),
-                with: .color(Color(red: 0.14, green: 0.34, blue: 0.95).opacity(0.62))
+        context.blendMode = .plusLighter
+        for pixel in 0..<max(1, Int(width.rounded(.up))) {
+            let x = Double(pixel)
+            let point = interpolatedWaveformPoint(atBeat: viewport.beat(atX: x, width: width))
+            drawWaveformChannel(
+                context: &context, x: x, center: center,
+                amplitude: point.low * amplitude, color: .red.opacity(0.76)
             )
-            context.fill(
-                Path(CGRect(x: x, y: center - mid, width: sampleWidth, height: mid * 2)),
-                with: .color(Color(red: 0.24, green: 0.86, blue: 0.78).opacity(0.76))
+            drawWaveformChannel(
+                context: &context, x: x, center: center,
+                amplitude: point.mid * amplitude * 0.9, color: .green.opacity(0.72)
             )
-            context.fill(
-                Path(CGRect(x: x, y: center - high, width: sampleWidth, height: high * 2)),
-                with: .color(Color(red: 1.0, green: 0.78, blue: 0.25).opacity(0.86))
+            drawWaveformChannel(
+                context: &context, x: x, center: center,
+                amplitude: point.high * amplitude * 0.78, color: .blue.opacity(0.88)
             )
         }
+        context.blendMode = .normal
 
-        for phrase in analysis.phrases where phrase.endBeat > viewport.startBeat && phrase.startBeat < viewport.endBeat {
+        for phrase in analysis.phrases where Double(phrase.endBeat) > viewport.startBeat && Double(phrase.startBeat) < viewport.endBeat {
             let start = viewport.x(forBeat: Double(phrase.startBeat), width: width)
             let end = viewport.x(forBeat: Double(phrase.endBeat), width: width)
             let rect = CGRect(x: start + 1, y: phraseTop, width: max(2, end - start - 2), height: 54)
@@ -883,11 +922,30 @@ public struct TrackLightingEditorView: View {
                 .font(.system(size: 10, weight: .bold, design: .monospaced))
                 .foregroundColor(.white)
             context.draw(label, at: CGPoint(x: rect.minX + 7, y: rect.midY), anchor: .leading)
+
+            if start >= 0, start <= width {
+                var markerLine = Path()
+                markerLine.move(to: CGPoint(x: start, y: 43))
+                markerLine.addLine(to: CGPoint(x: start, y: phraseTop))
+                context.stroke(
+                    markerLine,
+                    with: .color(phraseColor(phrase.role).opacity(0.92)),
+                    lineWidth: 1.5
+                )
+                var marker = Path()
+                marker.move(to: CGPoint(x: start - 6, y: 43))
+                marker.addLine(to: CGPoint(x: start + 6, y: 43))
+                marker.addLine(to: CGPoint(x: start, y: 51))
+                marker.closeSubpath()
+                context.fill(marker, with: .color(phraseColor(phrase.role)))
+                let pointLabel = Text("P\(phrase.id + 1)")
+                    .font(.system(size: 8, weight: .bold, design: .monospaced))
+                    .foregroundColor(primary)
+                context.draw(pointLabel, at: CGPoint(x: start + 7, y: 43), anchor: .topLeading)
+            }
         }
 
-        let selectionStartBeat = selectionStartBar * UInt32(analysis.beatsPerBar)
-        let selectionEndBeat = selectionEndBar * UInt32(analysis.beatsPerBar)
-        if selectionEndBeat > viewport.startBeat && selectionStartBeat < viewport.endBeat {
+        if Double(selectionEndBeat) > viewport.startBeat && Double(selectionStartBeat) < viewport.endBeat {
             let start = viewport.x(forBeat: Double(selectionStartBeat), width: width)
             let end = viewport.x(forBeat: Double(selectionEndBeat), width: width)
             let rect = CGRect(
@@ -909,20 +967,38 @@ public struct TrackLightingEditorView: View {
         }
 
         drawPlayhead(context: &context, width: width, height: Double(size.height), viewport: viewport)
+        if let pendingBoundaryBeat {
+            let x = viewport.x(forBeat: Double(pendingBoundaryBeat), width: width)
+            var pending = Path()
+            pending.move(to: CGPoint(x: x, y: 38))
+            pending.addLine(to: CGPoint(x: x, y: Double(size.height)))
+            context.stroke(pending, with: .color(accent), style: StrokeStyle(lineWidth: 2, dash: [4, 3]))
+        }
     }
 
     private func drawOverview(context: inout GraphicsContext, size: CGSize) {
         let width = Double(size.width)
-        for (index, point) in analysis.waveform.enumerated() {
-            let x = Double(index) / Double(max(1, analysis.waveform.count - 1)) * width
-            let height = Double(max(point.low, max(point.mid, point.high))) / 255 * 42
-            context.fill(
-                Path(CGRect(x: x, y: (Double(size.height) - height) / 2, width: max(1, width / Double(max(1, analysis.waveform.count))), height: height)),
-                with: .color(accent.opacity(0.65))
-            )
+        let waveformBottom = Double(size.height) - 18
+        let center = waveformBottom / 2
+        let amplitude = max(4, center - 3)
+        context.blendMode = .plusLighter
+        for pixel in 0..<max(1, Int(width.rounded(.up))) {
+            let x = Double(pixel)
+            let beat = x / max(1, width) * Double(analysis.totalBeats)
+            let point = interpolatedWaveformPoint(atBeat: beat)
+            drawWaveformChannel(context: &context, x: x, center: center, amplitude: point.low * amplitude, color: .red.opacity(0.72))
+            drawWaveformChannel(context: &context, x: x, center: center, amplitude: point.mid * amplitude * 0.9, color: .green.opacity(0.68))
+            drawWaveformChannel(context: &context, x: x, center: center, amplitude: point.high * amplitude * 0.78, color: .blue.opacity(0.80))
         }
-        let start = Double(viewport.startBar) / Double(max(1, analysis.totalBars)) * width
-        let visible = Double(viewport.visibleBars) / Double(max(1, analysis.totalBars)) * width
+        context.blendMode = .normal
+        for phrase in analysis.phrases {
+            let start = Double(phrase.startBeat) / Double(max(1, analysis.totalBeats)) * width
+            let end = Double(phrase.endBeat) / Double(max(1, analysis.totalBeats)) * width
+            let lane = CGRect(x: start, y: waveformBottom + 2, width: max(1, end - start), height: 12)
+            context.fill(Path(lane), with: .color(phraseColor(phrase.role).opacity(0.88)))
+        }
+        let start = viewport.startBeat / Double(max(1, analysis.totalBeats)) * width
+        let visible = viewport.visibleBeats / Double(max(1, analysis.totalBeats)) * width
         let frame = CGRect(x: start, y: 2, width: visible, height: Double(size.height) - 4)
         context.fill(Path(frame), with: .color(Color.white.opacity(0.08)))
         context.stroke(Path(frame), with: .color(Color.white.opacity(0.76)), lineWidth: 1.2)
@@ -949,12 +1025,6 @@ public struct TrackLightingEditorView: View {
         context.fill(Path(CGRect(x: x - 3, y: 0, width: 6, height: 7)), with: .color(.white))
     }
 
-    private var zoomOptions: [UInt32] {
-        let standard: [UInt32] = [1, 2, 4, 8, 16, 32]
-        let options = standard.filter { $0 <= analysis.totalBars }
-        return options.isEmpty ? [1] : options
-    }
-
     private var selectedPhrase: TrackEditorPhrase? {
         analysis.phrases.first { $0.id == selectedPhraseID }
     }
@@ -965,7 +1035,7 @@ public struct TrackLightingEditorView: View {
 
     private var canSplitSelectedPhrase: Bool {
         guard let phrase = selectedPhrase else { return false }
-        return phraseEndBarZeroBased(phrase) - phraseStartBarZeroBased(phrase) > 1
+        return phrase.endBeat - phrase.startBeat > 1
     }
 
     private func roleBinding(for phrase: TrackEditorPhrase, index: Int) -> Binding<String> {
@@ -1044,7 +1114,7 @@ public struct TrackLightingEditorView: View {
         }
         .accessibilityLabel(title)
         .accessibilityValue(
-            "Bar \(value.wrappedValue + (title == editorCopy("editor.to") ? 0 : 1))"
+            "Beat \(value.wrappedValue + (title == editorCopy("editor.to") ? 0 : 1))"
         )
     }
 
@@ -1062,10 +1132,8 @@ public struct TrackLightingEditorView: View {
         guard let phrase = selectedPhrase,
               let index = selectedPhraseIndex,
               let phraseIndex = UInt16(exactly: index) else { return }
-        let start = phraseStartBarZeroBased(phrase)
-        let end = phraseEndBarZeroBased(phrase)
-        let boundary = min(max(start + 1, currentBarIndex), end - 1)
-        onTimelineEdit(.split(phraseIndex: phraseIndex, atBar: boundary))
+        let boundary = min(max(phrase.startBeat + 1, quantizedPlayheadBeat), phrase.endBeat - 1)
+        onTimelineEdit(.split(phraseIndex: phraseIndex, atBeat: boundary))
     }
 
     private func mergeSelectedPrevious() {
@@ -1089,18 +1157,18 @@ public struct TrackLightingEditorView: View {
 
     private func canMoveStart(by delta: Int) -> Bool {
         guard let phrase = selectedPhrase, let index = selectedPhraseIndex, index > 0 else { return false }
-        let target = Int(phraseStartBarZeroBased(phrase)) + delta
-        return target > Int(phraseStartBarZeroBased(analysis.phrases[index - 1]))
-            && target < Int(phraseEndBarZeroBased(phrase))
+        let target = Int(phrase.startBeat) + delta
+        return target > Int(analysis.phrases[index - 1].startBeat)
+            && target < Int(phrase.endBeat)
     }
 
     private func canMoveEnd(by delta: Int) -> Bool {
         guard let phrase = selectedPhrase,
               let index = selectedPhraseIndex,
               index + 1 < analysis.phrases.count else { return false }
-        let target = Int(phraseEndBarZeroBased(phrase)) + delta
-        return target > Int(phraseStartBarZeroBased(phrase))
-            && target < Int(phraseEndBarZeroBased(analysis.phrases[index + 1]))
+        let target = Int(phrase.endBeat) + delta
+        return target > Int(phrase.startBeat)
+            && target < Int(analysis.phrases[index + 1].endBeat)
     }
 
     private func moveStartBoundary(by delta: Int) {
@@ -1108,8 +1176,8 @@ public struct TrackLightingEditorView: View {
               let phrase = selectedPhrase,
               let index = selectedPhraseIndex,
               let boundaryIndex = UInt16(exactly: index - 1) else { return }
-        let target = UInt32(Int(phraseStartBarZeroBased(phrase)) + delta)
-        onTimelineEdit(.moveBoundary(afterPhraseIndex: boundaryIndex, toBar: target))
+        let target = UInt32(Int(phrase.startBeat) + delta)
+        onTimelineEdit(.moveBoundary(afterPhraseIndex: boundaryIndex, toBeat: target))
     }
 
     private func moveEndBoundary(by delta: Int) {
@@ -1117,26 +1185,42 @@ public struct TrackLightingEditorView: View {
               let phrase = selectedPhrase,
               let index = selectedPhraseIndex,
               let boundaryIndex = UInt16(exactly: index) else { return }
-        let target = UInt32(Int(phraseEndBarZeroBased(phrase)) + delta)
-        onTimelineEdit(.moveBoundary(afterPhraseIndex: boundaryIndex, toBar: target))
+        let target = UInt32(Int(phrase.endBeat) + delta)
+        onTimelineEdit(.moveBoundary(afterPhraseIndex: boundaryIndex, toBeat: target))
     }
 
-    private func updateBarSelection(atX x: Double, width: Double) {
+    private func boundaryIndex(atX x: Double, width: Double, tolerance: Double) -> UInt16? {
+        analysis.phrases.enumerated().dropFirst().first { _, phrase in
+            abs(viewport.x(forBeat: Double(phrase.startBeat), width: width) - x) <= tolerance
+        }.flatMap { index, _ in
+            UInt16(exactly: index - 1)
+        }
+    }
+
+    private func updatePendingBoundary(_ boundary: UInt16, atX x: Double, width: Double) {
+        let left = Int(boundary)
+        guard left >= 0, left + 1 < analysis.phrases.count else { return }
+        let raw = TrackEditorEditGeometry.quantizedBeat(
+            viewport.beat(atX: x, width: width),
+            totalBeats: analysis.totalBeats
+        )
+        let minimum = analysis.phrases[left].startBeat + 1
+        let maximum = analysis.phrases[left + 1].endBeat - 1
+        pendingBoundaryBeat = min(maximum, max(minimum, raw))
+    }
+
+    private func updateBeatSelection(atX x: Double, width: Double) {
         let beat = max(0, viewport.beat(atX: x, width: width))
-        let bar = TrackEditorEditGeometry.containingBar(
-            beat: beat,
-            beatsPerBar: analysis.beatsPerBar,
-            totalBars: analysis.totalBars
+        let quantized = min(analysis.totalBeats - 1, TrackEditorEditGeometry.quantizedBeat(beat, totalBeats: analysis.totalBeats))
+        let anchor = selectionAnchorBeat ?? quantized
+        selectionAnchorBeat = anchor
+        let selection = TrackEditorEditGeometry.beatSelection(
+            anchorBeat: anchor,
+            currentBeat: quantized,
+            totalBeats: analysis.totalBeats
         )
-        let anchor = selectionAnchorBar ?? bar
-        selectionAnchorBar = anchor
-        let selection = TrackEditorEditGeometry.barSelection(
-            anchorBar: anchor,
-            currentBar: bar,
-            totalBars: analysis.totalBars
-        )
-        selectionStartBar = selection.lowerBound
-        selectionEndBar = selection.upperBound
+        selectionStartBeat = selection.lowerBound
+        selectionEndBeat = selection.upperBound
     }
 
     private func adoptTimelineUpdate(
@@ -1152,8 +1236,8 @@ public struct TrackLightingEditorView: View {
             current.phrases.first(where: { beat >= $0.startBeat && beat < $0.endBeat })?.id
         } ?? current.phrases.first?.id
         if let phrase = current.phrases.first(where: { $0.id == selectedPhraseID }) {
-            selectionStartBar = phrase.startBeat / UInt32(max(1, current.beatsPerBar))
-            selectionEndBar = phrase.endBeat / UInt32(max(1, current.beatsPerBar))
+            selectionStartBeat = phrase.startBeat
+            selectionEndBeat = phrase.endBeat
             if loopSelectedPhrase {
                 _ = audio.adoptEditedLoop(phrase)
             }
@@ -1174,8 +1258,8 @@ public struct TrackLightingEditorView: View {
         TrackEditorCoordinateMapper.beat(atTimeMillis: audio.positionMillis, beats: analysis.beats)
     }
 
-    private var currentBarIndex: UInt32 {
-        UInt32(max(0, Int(currentBeat) / Int(max(1, analysis.beatsPerBar))))
+    private var quantizedPlayheadBeat: UInt32 {
+        TrackEditorEditGeometry.quantizedBeat(currentBeat, totalBeats: analysis.totalBeats)
     }
 
     private var barBeatLabel: String {
@@ -1205,47 +1289,69 @@ public struct TrackLightingEditorView: View {
             return
         }
         selectedPhraseID = phrase.id
-        selectionStartBar = phraseStartBarZeroBased(phrase)
-        selectionEndBar = phraseEndBarZeroBased(phrase)
+        selectionStartBeat = phrase.startBeat
+        selectionEndBeat = phrase.endBeat
         if loopSelectedPhrase { audio.setLoop(phrase) }
     }
 
-    private func stepBar(_ delta: Int) {
-        audio.moveByBar(delta)
+    private func stepBeat(_ delta: Int) {
+        audio.moveByBeat(delta)
         revealPlayhead()
     }
 
     private func zoom(by delta: Int) {
-        guard let index = zoomOptions.firstIndex(of: viewport.visibleBars) else { return }
-        let next = min(max(0, index + delta), zoomOptions.count - 1)
-        viewport = viewport.zoomed(to: zoomOptions[next], aroundBar: currentBarIndex)
+        let factor = delta > 0 ? 1.35 : 1 / 1.35
+        viewport = viewport.zoomed(to: viewport.visibleBeats * factor, aroundBeat: currentBeat)
     }
 
     private func revealPlayhead() {
-        let target = currentBarIndex
-        guard target < viewport.startBar || target >= viewport.startBar + viewport.visibleBars else { return }
-        viewport = TrackEditorViewport(
-            startBar: target,
-            visibleBars: viewport.visibleBars,
-            totalBars: analysis.totalBars,
-            beatsPerBar: analysis.beatsPerBar
-        )
+        guard currentBeat < viewport.startBeat || currentBeat >= viewport.endBeat else { return }
+        viewport = viewport.centered(onBeat: currentBeat)
     }
 
-    private func phraseStartBar(_ phrase: TrackEditorPhrase) -> UInt32 {
-        phraseStartBarZeroBased(phrase) + 1
+    private func placePhrasePoint(roleID: String) {
+        let beat = quantizedPlayheadBeat
+        guard beat < analysis.totalBeats,
+              let containingIndex = analysis.phrases.firstIndex(where: {
+                  beat >= $0.startBeat && beat < $0.endBeat
+              }),
+              let phraseIndex = UInt16(exactly: containingIndex) else { return }
+        let phrase = analysis.phrases[containingIndex]
+        if beat == phrase.startBeat {
+            if phrase.roleID != roleID {
+                onTimelineEdit(.changeRole(phraseIndex: phraseIndex, roleID: roleID))
+            }
+        } else {
+            onTimelineEdit(.create(startBeat: beat, endBeat: phrase.endBeat, roleID: roleID))
+        }
     }
 
-    private func phraseEndBar(_ phrase: TrackEditorPhrase) -> UInt32 {
-        phraseEndBarZeroBased(phrase)
+    private func interpolatedWaveformPoint(atBeat beat: Double) -> (low: Double, mid: Double, high: Double) {
+        guard !analysis.waveform.isEmpty else { return (0, 0, 0) }
+        let progress = min(max(0, beat / Double(max(1, analysis.totalBeats))), 1)
+        let position = progress * Double(max(0, analysis.waveform.count - 1))
+        let lower = Int(position.rounded(.down))
+        let upper = min(analysis.waveform.count - 1, lower + 1)
+        let fraction = position - Double(lower)
+        let a = analysis.waveform[lower]
+        let b = analysis.waveform[upper]
+        func mix(_ lhs: UInt8, _ rhs: UInt8) -> Double {
+            (Double(lhs) + (Double(rhs) - Double(lhs)) * fraction) / 255
+        }
+        return (mix(a.low, b.low), mix(a.mid, b.mid), mix(a.high, b.high))
     }
 
-    private func phraseStartBarZeroBased(_ phrase: TrackEditorPhrase) -> UInt32 {
-        phrase.startBeat / UInt32(max(1, analysis.beatsPerBar))
-    }
-
-    private func phraseEndBarZeroBased(_ phrase: TrackEditorPhrase) -> UInt32 {
-        max(phrase.startBeat + 1, phrase.endBeat) / UInt32(max(1, analysis.beatsPerBar))
+    private func drawWaveformChannel(
+        context: inout GraphicsContext,
+        x: Double,
+        center: Double,
+        amplitude: Double,
+        color: Color
+    ) {
+        var line = Path()
+        line.move(to: CGPoint(x: x, y: center - amplitude))
+        line.addLine(to: CGPoint(x: x, y: center + amplitude))
+        context.stroke(line, with: .color(color), lineWidth: 1)
     }
 
     private func phraseColor(_ role: String) -> Color {

@@ -13,14 +13,14 @@ provider-neutral analysis projection:
 
 - canonical track metadata and a read-only audio URI;
 - the complete beat grid with bar and beat indices;
-- low, mid, and high colored waveform samples;
+- neutral low, mid, and high waveform samples rendered as RGB by the editor;
 - source phrase observations for the initial read-only phrase lane.
 
 Open and close commands never advance `stateRevision`, open the output gate, or
 change a Live/Next plan. Swift decodes the projection into `TrackEditorAnalysis`.
 The bar/beat grid, performance waveform, phrase lane, overview, scrubber, and
-playhead all use the same beat-coordinate mapper. Every viewport starts and
-ends on a complete bar; individual beats remain visible at every scale.
+playhead all use the same beat-coordinate mapper. The viewport pans and zooms
+continuously; phrase mutations alone quantize to whole beats.
 
 ## Local read-only audio
 
@@ -39,20 +39,20 @@ or disconnecting the local helper stops playback and releases the audio graph.
 
 - Play/Pause and `Space` share one deterministic transport action.
 - Stop resets to the start of the track.
-- Left/Right Arrow and the previous/next buttons seek to an exact bar boundary.
+- Left/Right Arrow and the previous/next buttons seek one beat; Shift+Arrow seeks one bar.
 - Dragging the main waveform seeks and scrubs through the shared beat map.
-- Dragging the overview moves the complete-bar viewport.
+- Dragging the overview centers the continuous detailed viewport.
 - Volume affects preview audio only.
-- `Loop selected phrase` schedules the exact complete-bar phrase range.
+- `Loop selected phrase` schedules the exact derived whole-beat phrase range.
 
-Phrase editing is intentionally delivered by E2A-05. Its mutations will replace
-the phrase projection without replacing the isolated audio transport, so valid
-edits can update loop boundaries without interrupting ordinary preview.
+Phrase editing replaces the phrase projection without replacing the isolated
+audio transport, so valid edits update loop boundaries without interrupting
+ordinary preview.
 
 ## Verification
 
 The feature package proves bounded decoding, invalid/incomplete grid rejection,
-all complete-bar zoom scales, coordinate inversion, viewport clamping, safe
+continuous zoom scales, coordinate inversion, viewport clamping, safe
 source resolution, and bar/phrase transport boundaries. Rust tests prove editor
 open/close projection and unknown-track failure. The real Swift process test
 opens and closes an editor against the bundled Rust helper and proves that show
@@ -66,11 +66,10 @@ only through:
 open -n /Users/victor/Engineering/Repo/Lumi/build/DerivedData/Build/Products/Debug/Lumi.app
 ```
 
-## Accepted E2A-13 successor design
+## E2A-13 RGB Phrase Point implementation
 
-Hands-on UX review supersedes the existing block-like visual treatment and
-complete-bar-only editor interaction for the next implementation slice. The
-accepted design uses a continuously rendered **RGB** waveform by default,
+Hands-on UX review superseded the block-like visual treatment and
+complete-bar-only editor interaction. The delivered editor uses a continuously rendered **RGB** waveform by default,
 unrestricted horizontal pan and zoom, a free playhead, and Phrase Point
 mutations quantized to one whole beat. Each point starts a phrase whose end is
 derived from the next point or track end.
@@ -78,5 +77,5 @@ derived from the next point or track end.
 The compact full-track waveform remains below the detailed editor and shows the
 viewport, playhead, and derived phrase ranges. The approved interaction and
 layout are recorded in [`docs/design/track-editor`](../design/track-editor/README.md)
-and ADR-0014. This section describes accepted follow-up scope; the behavior above
-remains the factual E2A-04 implementation until E2A-13 is delivered.
+and ADR-0014. SQLite schema v5, engine commands, reconciliation, simulator, and
+planner all consume the same whole-beat Phrase Point positions.

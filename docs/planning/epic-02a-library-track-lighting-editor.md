@@ -1,6 +1,6 @@
 # Epic 2A – Music Library and Track Lighting Editor
 
-Status: **In progress – E2A-13 RGB Track Editor UX accepted; build and isolated Rekordbox gate pending**
+Status: **In progress – E2A-13 implemented and locally verified; isolated Rekordbox gate pending**
 
 Doelmilestone: **0.2.0 – Deck Intelligence**
 
@@ -257,9 +257,9 @@ full-track overview eronder. Migreert bestaande bar-aligned timelines
 verliesvrij naar beatgridposities en behoudt revision-, undo/redo-, audio- en
 plannerveiligheid.
 
-Status: **UX accepted; ready for technical refinement and build**. Het leidende
-design staat in [`docs/design/track-editor`](../design/track-editor/README.md)
-en ADR-0014.
+Status: **implemented; local verification and native visual evidence pass**.
+Het leidende design staat in
+[`docs/design/track-editor`](../design/track-editor/README.md) en ADR-0014.
 
 ## 6.1 Bouwvolgorde zonder Rekordbox-developmentlibrary
 

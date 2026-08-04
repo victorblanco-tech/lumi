@@ -53,7 +53,7 @@ fn keep_lumi_records_the_new_baseline_without_changing_phrase_content()
 }
 
 #[test]
-fn rebase_is_deterministic_bar_aligned_and_exposes_fractional_ambiguity()
+fn rebase_is_deterministic_beat_aligned_and_exposes_fractional_ambiguity()
 -> Result<(), Box<dyn std::error::Error>> {
     let current = timeline(10, &[(0, 3, "intro"), (3, 7, "build"), (7, 10, "drop")])?;
     let source = source_phrases(&[(0, 4, "intro"), (4, 8, "build"), (8, 12, "drop")])?;
@@ -79,7 +79,7 @@ fn rebase_is_deterministic_bar_aligned_and_exposes_fractional_ambiguity()
         first
             .phrases()
             .iter()
-            .map(|phrase| (phrase.start_bar(), phrase.end_bar()))
+            .map(|phrase| (phrase.start_beat(), phrase.end_beat()))
             .collect::<Vec<_>>(),
         vec![(0, 4), (4, 8), (8, 12)]
     );
@@ -140,14 +140,14 @@ fn replace_creates_a_recoverable_revision_before_source_initialization()
 }
 
 fn timeline(
-    total_bars: u32,
+    total_beats: u32,
     phrases: &[(u32, u32, &str)],
 ) -> Result<LumiPhraseTimeline, Box<dyn std::error::Error>> {
     LumiPhraseTimeline::try_new(
         TrackId::new(1),
         TimelineRevision::initial(),
         SourceRevision::try_new("analysis-v1")?,
-        total_bars,
+        total_beats,
         TimelineRevisionOrigin::UserEdit,
         source_phrases(phrases)?,
     )

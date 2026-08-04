@@ -120,7 +120,7 @@ The fixed-dark CDJ-inspired waveform, shared beat-coordinate system, isolated
 read-only audio preview, controls, and cleanup rules are documented in
 [`track-editor-preview.md`](track-editor-preview.md).
 
-The authoritative, versioned, bar-aligned Lumi phrase timeline and its editing
+The authoritative, versioned, beat-quantized Lumi Phrase Point timeline and its editing
 and recovery rules are documented in
 [`phrase-timeline-editing.md`](phrase-timeline-editing.md).
 
@@ -137,7 +137,7 @@ Theme override strategies, including stale validation and reset behavior, are
 documented in
 [`phrase-loop-strategies.md`](phrase-loop-strategies.md).
 
-Versioned source comparison, metadata-safe refreshes, bar-aligned rebase,
+Versioned source comparison, metadata-safe refreshes, beat-aligned rebase,
 explicit merge conflicts, and transactional recovery are documented in
 [`source-reconciliation.md`](source-reconciliation.md).
 

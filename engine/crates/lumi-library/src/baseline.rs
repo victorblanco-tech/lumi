@@ -105,6 +105,11 @@ impl BeatGrid {
     pub fn total_bars(&self) -> u32 {
         u32::try_from(self.markers.len() / usize::from(self.beats_per_bar)).unwrap_or(u32::MAX)
     }
+
+    #[must_use]
+    pub fn total_beats(&self) -> u32 {
+        u32::try_from(self.markers.len()).unwrap_or(u32::MAX)
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

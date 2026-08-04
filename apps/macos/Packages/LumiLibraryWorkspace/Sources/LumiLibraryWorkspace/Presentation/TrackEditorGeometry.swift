@@ -1,52 +1,59 @@
 import Foundation
 
+/// A continuous beat-space viewport. Navigation is deliberately independent
+/// of bar boundaries; only phrase mutations are quantized to whole beats.
 public struct TrackEditorViewport: Equatable, Sendable {
-    public let startBar: UInt32
-    public let visibleBars: UInt32
-    public let totalBars: UInt32
+    public let startBeat: Double
+    public let visibleBeats: Double
+    public let totalBeats: UInt32
     public let beatsPerBar: UInt8
 
-    public init(startBar: UInt32, visibleBars: UInt32, totalBars: UInt32, beatsPerBar: UInt8) {
-        let safeTotal = max(1, totalBars)
-        let safeVisible = min(max(1, visibleBars), safeTotal)
-        self.startBar = min(startBar, safeTotal - safeVisible)
-        self.visibleBars = safeVisible
-        self.totalBars = safeTotal
+    public init(startBeat: Double, visibleBeats: Double, totalBeats: UInt32, beatsPerBar: UInt8) {
+        let safeTotal = max(1, totalBeats)
+        let safeVisible = min(max(1, visibleBeats), Double(safeTotal))
+        self.startBeat = min(max(0, startBeat), Double(safeTotal) - safeVisible)
+        self.visibleBeats = safeVisible
+        self.totalBeats = safeTotal
         self.beatsPerBar = max(1, beatsPerBar)
     }
 
-    public var startBeat: UInt32 { startBar * UInt32(beatsPerBar) }
-    public var visibleBeats: UInt32 { visibleBars * UInt32(beatsPerBar) }
-    public var endBeat: UInt32 { startBeat + visibleBeats }
+    public var endBeat: Double { startBeat + visibleBeats }
+    public var visibleBars: Double { visibleBeats / Double(beatsPerBar) }
 
     public func x(forBeat beat: Double, width: Double) -> Double {
-        let progress = (beat - Double(startBeat)) / Double(visibleBeats)
-        return min(max(0, progress), 1) * max(0, width)
+        (beat - startBeat) / visibleBeats * max(0, width)
     }
 
     public func beat(atX x: Double, width: Double) -> Double {
-        guard width > 0 else { return Double(startBeat) }
-        let progress = min(max(0, x / width), 1)
-        return Double(startBeat) + progress * Double(visibleBeats)
+        guard width > 0 else { return startBeat }
+        return startBeat + min(max(0, x / width), 1) * visibleBeats
     }
 
-    public func moving(byBars delta: Int) -> Self {
-        let target = max(0, Int(startBar) + delta)
-        return Self(
-            startBar: UInt32(target),
-            visibleBars: visibleBars,
-            totalBars: totalBars,
+    public func moving(byBeats delta: Double) -> Self {
+        Self(
+            startBeat: startBeat + delta,
+            visibleBeats: visibleBeats,
+            totalBeats: totalBeats,
             beatsPerBar: beatsPerBar
         )
     }
 
-    public func zoomed(to bars: UInt32, aroundBar bar: UInt32) -> Self {
-        let half = bars / 2
-        let start = bar > half ? bar - half : 0
+    public func centered(onBeat beat: Double) -> Self {
+        Self(
+            startBeat: beat - visibleBeats / 2,
+            visibleBeats: visibleBeats,
+            totalBeats: totalBeats,
+            beatsPerBar: beatsPerBar
+        )
+    }
+
+    public func zoomed(to beats: Double, aroundBeat beat: Double) -> Self {
+        let anchor = visibleBeats > 0 ? (beat - startBeat) / visibleBeats : 0.5
+        let boundedAnchor = min(max(0, anchor), 1)
         return Self(
-            startBar: start,
-            visibleBars: bars,
-            totalBars: totalBars,
+            startBeat: beat - boundedAnchor * beats,
+            visibleBeats: beats,
+            totalBeats: totalBeats,
             beatsPerBar: beatsPerBar
         )
     }
@@ -78,25 +85,18 @@ public enum TrackEditorCoordinateMapper {
 }
 
 public enum TrackEditorEditGeometry {
-    public static func containingBar(
-        beat: Double,
-        beatsPerBar: UInt8,
-        totalBars: UInt32
-    ) -> UInt32 {
-        let safeTotal = max(1, totalBars)
-        let safeBeatsPerBar = UInt32(max(1, beatsPerBar))
-        let boundedBeat = UInt32(max(0, beat.rounded(.down)))
-        return min(safeTotal - 1, boundedBeat / safeBeatsPerBar)
+    public static func quantizedBeat(_ beat: Double, totalBeats: UInt32) -> UInt32 {
+        UInt32(min(max(0, beat.rounded()), Double(totalBeats)))
     }
 
-    public static func barSelection(
-        anchorBar: UInt32,
-        currentBar: UInt32,
-        totalBars: UInt32
+    public static func beatSelection(
+        anchorBeat: UInt32,
+        currentBeat: UInt32,
+        totalBeats: UInt32
     ) -> Range<UInt32> {
-        let safeTotal = max(1, totalBars)
-        let anchor = min(anchorBar, safeTotal - 1)
-        let current = min(currentBar, safeTotal - 1)
+        let safeTotal = max(1, totalBeats)
+        let anchor = min(anchorBeat, safeTotal - 1)
+        let current = min(currentBeat, safeTotal - 1)
         return min(anchor, current)..<min(safeTotal, max(anchor, current) + 1)
     }
 }

@@ -201,11 +201,11 @@ public struct TrackEditorTimeline: Equatable, Sendable {
 }
 
 public enum TrackTimelineEditRequest: Equatable, Sendable {
-    case create(startBar: UInt32, endBar: UInt32, roleID: String)
-    case split(phraseIndex: UInt16, atBar: UInt32)
+    case create(startBeat: UInt32, endBeat: UInt32, roleID: String)
+    case split(phraseIndex: UInt16, atBeat: UInt32)
     case mergePrevious(phraseIndex: UInt16)
     case mergeNext(phraseIndex: UInt16)
-    case moveBoundary(afterPhraseIndex: UInt16, toBar: UInt32)
+    case moveBoundary(afterPhraseIndex: UInt16, toBeat: UInt32)
     case deleteAbsorbPrevious(phraseIndex: UInt16)
     case deleteAbsorbNext(phraseIndex: UInt16)
     case changeRole(phraseIndex: UInt16, roleID: String)
@@ -225,13 +225,13 @@ public enum TrackTimelineHistoryRequest: Equatable, Sendable {
 }
 
 public struct TrackSourcePhraseVersion: Equatable, Sendable {
-    public let startBar: UInt32
-    public let endBar: UInt32
+    public let startBeat: UInt32
+    public let endBeat: UInt32
     public let roleID: String
 
-    public init(startBar: UInt32, endBar: UInt32, roleID: String) {
-        self.startBar = startBar
-        self.endBar = endBar
+    public init(startBeat: UInt32, endBeat: UInt32, roleID: String) {
+        self.startBeat = startBeat
+        self.endBeat = endBeat
         self.roleID = roleID
     }
 }
@@ -260,7 +260,7 @@ public struct TrackSourceReconciliation: Equatable, Sendable {
     public let changes: [String]
     public let metadataOnly: Bool
     public let requiresTimelineDecision: Bool
-    public let sourceTotalBars: UInt32
+    public let sourceTotalBeats: UInt32
     public let rebaseAmbiguities: [UInt16]
     public let conflicts: [TrackSourceConflict]
 
@@ -271,7 +271,7 @@ public struct TrackSourceReconciliation: Equatable, Sendable {
         changes: [String],
         metadataOnly: Bool,
         requiresTimelineDecision: Bool,
-        sourceTotalBars: UInt32,
+        sourceTotalBeats: UInt32,
         rebaseAmbiguities: [UInt16],
         conflicts: [TrackSourceConflict]
     ) {
@@ -281,7 +281,7 @@ public struct TrackSourceReconciliation: Equatable, Sendable {
         self.changes = changes
         self.metadataOnly = metadataOnly
         self.requiresTimelineDecision = requiresTimelineDecision
-        self.sourceTotalBars = sourceTotalBars
+        self.sourceTotalBeats = sourceTotalBeats
         self.rebaseAmbiguities = rebaseAmbiguities
         self.conflicts = conflicts
     }
@@ -351,6 +351,10 @@ public struct TrackEditorAnalysis: Identifiable, Equatable, Sendable {
     public var totalBars: UInt32 {
         guard beatsPerBar > 0 else { return 0 }
         return UInt32(beats.count) / UInt32(beatsPerBar)
+    }
+
+    public var totalBeats: UInt32 {
+        UInt32(beats.count)
     }
 
     public func timeMillis(atBeat beat: UInt32) -> UInt64 {

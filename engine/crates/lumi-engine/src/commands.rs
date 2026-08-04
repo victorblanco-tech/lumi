@@ -416,13 +416,13 @@ fn timeline_edit(
     let operation = string(payload, "operation")?;
     match operation {
         "create" => Ok(TimelineEditCommand::Create {
-            start_bar: timeline_bar(payload, "startBar")?,
-            end_bar: timeline_bar(payload, "endBar")?,
+            start_beat: timeline_beat(payload, "startBeat")?,
+            end_beat: timeline_beat(payload, "endBeat")?,
             role_id: phrase_role_id(payload)?,
         }),
         "split" => Ok(TimelineEditCommand::Split {
             phrase_index: phrase_index_value(payload)?,
-            at_bar: timeline_bar(payload, "atBar")?,
+            at_beat: timeline_beat(payload, "atBeat")?,
         }),
         "mergePrevious" => Ok(TimelineEditCommand::MergePrevious {
             phrase_index: phrase_index_value(payload)?,
@@ -432,7 +432,7 @@ fn timeline_edit(
         }),
         "moveBoundary" => Ok(TimelineEditCommand::MoveBoundary {
             boundary_after_phrase_index: phrase_index_value(payload)?,
-            to_bar: timeline_bar(payload, "toBar")?,
+            to_beat: timeline_beat(payload, "toBeat")?,
         }),
         "deleteAbsorbPrevious" => Ok(TimelineEditCommand::Delete {
             phrase_index: phrase_index_value(payload)?,
@@ -494,7 +494,7 @@ fn phrase_index_value(payload: &serde_json::Map<String, Value>) -> Result<u16, C
         .map_err(|_| CommandDecodeError::InvalidField("phraseIndex"))
 }
 
-fn timeline_bar(
+fn timeline_beat(
     payload: &serde_json::Map<String, Value>,
     field: &'static str,
 ) -> Result<u32, CommandDecodeError> {

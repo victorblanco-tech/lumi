@@ -91,32 +91,32 @@ public enum TrackEditorFixtures {
                 changes: ["waveform", "rawPhrases"],
                 metadataOnly: false,
                 requiresTimelineDecision: true,
-                sourceTotalBars: 16,
+                sourceTotalBeats: 64,
                 rebaseAmbiguities: [1],
                 conflicts: [
                     TrackSourceConflict(
                         phraseIndex: 1,
                         lumi: TrackSourcePhraseVersion(
-                            startBar: 4,
-                            endBar: 8,
+                            startBeat: 16,
+                            endBeat: 32,
                             roleID: "breakdown-1"
                         ),
                         source: TrackSourcePhraseVersion(
-                            startBar: 4,
-                            endBar: 9,
+                            startBeat: 16,
+                            endBeat: 36,
                             roleID: "breakdown-1"
                         )
                     ),
                     TrackSourceConflict(
                         phraseIndex: 2,
                         lumi: TrackSourcePhraseVersion(
-                            startBar: 8,
-                            endBar: 12,
+                            startBeat: 32,
+                            endBeat: 48,
                             roleID: "buildup-1"
                         ),
                         source: TrackSourcePhraseVersion(
-                            startBar: 9,
-                            endBar: 12,
+                            startBeat: 36,
+                            endBeat: 48,
                             roleID: "buildup-1"
                         )
                     )

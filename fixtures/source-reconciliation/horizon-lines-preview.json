@@ -5,18 +5,18 @@
   "metadataOnly": false,
   "requiresTimelineDecision": true,
   "changes": ["waveform", "rawPhrases"],
-  "sourceTotalBars": 32,
+  "sourceTotalBeats": 128,
   "rebaseAmbiguities": [],
   "conflicts": [
     {
       "phraseIndex": 1,
-      "lumi": { "startBar": 8, "endBar": 16, "roleId": "breakdown-1" },
-      "source": { "startBar": 8, "endBar": 18, "roleId": "breakdown-1" }
+      "lumi": { "startBeat": 32, "endBeat": 64, "roleId": "breakdown-1" },
+      "source": { "startBeat": 32, "endBeat": 72, "roleId": "breakdown-1" }
     },
     {
       "phraseIndex": 2,
-      "lumi": { "startBar": 16, "endBar": 24, "roleId": "buildup-1" },
-      "source": { "startBar": 18, "endBar": 24, "roleId": "buildup-1" }
+      "lumi": { "startBeat": 64, "endBeat": 96, "roleId": "buildup-1" },
+      "source": { "startBeat": 72, "endBeat": 96, "roleId": "buildup-1" }
     }
   ]
 }

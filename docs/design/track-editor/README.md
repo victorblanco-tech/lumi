@@ -1,6 +1,6 @@
 # Track Editor – RGB waveform and phrase-point UX
 
-- Status: **Accepted for E2A-13**
+- Status: **Implemented in E2A-13**
 - Accepted: **2026-08-04**
 - Product language: **English**
 - Reference interaction: **Rekordbox/CDJ waveform editing**
@@ -81,3 +81,11 @@ point and opens the same inspector state in both waveform views.
 The interactive proposal is a UX reference, not production code. Product code
 must use the native Lumi Design System and the provider-neutral waveform,
 beatgrid, and phrase-domain contracts.
+
+## Implementation evidence
+
+The native implementation is in `TrackLightingEditorView.swift`. Automated
+evidence is rendered to `build/VisualEvidence/track-editor-dark-camelot.png`
+and `track-editor-light-host-classic.png`. Domain, SQLite migration, Swift wire,
+audio-loop, simulator, planner, undo/redo, and reconciliation tests all use the
+same canonical beat positions.

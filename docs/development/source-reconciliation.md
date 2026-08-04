@@ -14,8 +14,8 @@ The demo provider exposes deterministic V1 and V2 baselines so this workflow is 
 
 ## Strategies
 
-- **Keep Lumi** retains the complete Lumi timeline and loop strategies. It is only valid when the complete-bar duration still matches.
-- **Rebase** proportionally moves Lumi boundaries onto whole bars. Any rounded boundary is shown as an ambiguity before applying.
+- **Keep Lumi** retains the complete Lumi timeline and loop strategies. It is only valid when the beat duration still matches.
+- **Rebase** proportionally moves Lumi boundaries onto whole beats. Any rounded boundary is shown as an ambiguity before applying.
 - **Merge** requires one explicit Lumi/source choice for every conflict. Gaps, overlaps, duplicate choices, and incomplete coverage are rejected.
 - **Replace** adopts the newly mapped source phrases. The prior Lumi timeline remains in revision history and can be restored or reached through undo.
 
@@ -26,7 +26,7 @@ All successful timeline strategies create a `sourceReconcile` revision with an o
 - Track matching uses the stable source track ID, never title or list position.
 - Preview is read-only and does not update the active baseline.
 - Source mappings are used only to build the incoming candidate; existing Lumi phrase roles are not silently remapped.
-- Every boundary stored by Lumi is expressed in complete bars.
+- Every Phrase Point stored by Lumi is expressed as a whole-beat position.
 - The database transaction covers baseline evidence, source analysis, and the timeline head.
 - A replaced or rebased timeline is recoverable through immutable revision history.
 

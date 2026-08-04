@@ -150,6 +150,18 @@ public final class TrackAudioPreviewController: ObservableObject {
         seek(toMillis: TrackEditorCoordinateMapper.timeMillis(atBeat: targetBeat, analysis: analysis))
     }
 
+    public func moveByBeat(_ delta: Int) {
+        let currentBeat = TrackEditorCoordinateMapper.beat(
+            atTimeMillis: positionMillis,
+            beats: analysis.beats
+        )
+        let targetBeat = min(
+            max(0, currentBeat.rounded(.down) + Double(delta)),
+            Double(analysis.totalBeats)
+        )
+        seek(toMillis: TrackEditorCoordinateMapper.timeMillis(atBeat: targetBeat, analysis: analysis))
+    }
+
     @discardableResult
     public func setLoop(_ phrase: TrackEditorPhrase?) -> Bool {
         updateLoop(phrase, preservingPosition: false)

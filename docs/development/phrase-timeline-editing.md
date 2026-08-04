@@ -8,12 +8,12 @@ accepted edit after that appends a new immutable SQLite revision.
 
 ## Safety model
 
-The canonical aggregate stores boundaries in bars. A valid timeline therefore:
+The canonical aggregate stores ordered start points in beats. A valid timeline therefore:
 
-- starts at bar zero and ends at the track's complete-bar count;
+- starts at beat zero and ends at the track's total beat count;
 - contains one or more non-zero phrases with contiguous indexes;
-- assigns every bar and every beat to exactly one phrase;
-- cannot represent a boundary inside a bar;
+- assigns every beat to exactly one phrase;
+- permits any whole-beat boundary, including beats inside a bar;
 - retains the imported analysis revision as provenance;
 - references only earlier parent and restored-from revisions.
 
@@ -25,7 +25,7 @@ client receives the typed `timelineRevisionMismatch` response with
 
 | Command | Result |
 | --- | --- |
-| Create from selection | Replaces a complete-bar range and preserves valid left/right remnants |
+| Place Phrase Point | Adds a role-bearing start point on the quantized playhead; its end is derived from the next point or track end |
 | Split | Creates two non-zero phrases; both inherit the role, the left keeps its loop choice, the right becomes `AUTO` |
 | Merge previous/next | Absorbs the chosen neighbour while retaining the selected phrase's role and strategy |
 | Move boundary | Resizes exactly two adjacent phrases without allowing either to become empty |
@@ -43,10 +43,10 @@ do not depend on transient Swift state.
 
 The Rust engine is the single writer. The macOS editor submits typed commands,
 then renders only the returned authoritative snapshot. The fixed-dark editor
-provides whole-bar drag selection and handles, split/merge/delete controls,
-role selection, boundary steppers, revision history, undo/redo, and an explicit
-saved-revision badge. Individual beats remain visible and usable for preview,
-seek, playhead, and execution.
+provides a continuous RGB waveform, continuous pan/zoom, beat-quantized Phrase
+Points, split/merge/delete controls, role selection, boundary steppers, revision
+history, undo/redo, and an explicit saved-revision badge. Bars remain stronger
+visual and keyboard landmarks.
 
 The local development app passes this durable database path to its engine
 helper:
@@ -66,7 +66,7 @@ without exposing a transient invalid boundary.
 
 ## Verification
 
-- randomized aggregate sequences prove contiguous complete-bar coverage;
+- randomized aggregate sequences prove contiguous whole-beat coverage;
 - typed rejection tests cover zero-length selections, invalid split/boundary
   moves, missing absorption targets, stale revisions, and corrupt history;
 - golden transcripts cover edit ordering and edit-during-preview loop adoption;
@@ -74,16 +74,15 @@ without exposing a transient invalid boundary.
   optimistic concurrency, and restart recovery;
 - the real Swift client test executes edit → stale rejection → undo → engine
   restart → redo against the Rust process and a temporary SQLite database;
-- Swift tests cover strict wire validation, whole-bar selection snapping,
+- Swift tests cover strict wire validation, whole-beat mutation snapping,
   keyboard/accessibility identifiers, and loop-safe playback;
 - repository visual evidence and hands-on testing use the exact Terminal-built
   `Lumi.app`.
 
-## Accepted E2A-13 migration
+## E2A-13 migration
 
-ADR-0014 supersedes the bar-only edit granularity for the next implementation
-slice. E2A-13 migrates canonical boundaries from bar indexes to beatgrid
+ADR-0014 supersedes the bar-only edit granularity. E2A-13 migrates canonical boundaries from bar indexes to beatgrid
 positions and replaces range-first editing with ordered Phrase Points. Existing
 bar-aligned revisions remain valid and migrate losslessly because a bar start is
-also a whole-beat position. Until that migration ships, the sections above
-remain the factual E2A-05 behavior.
+also a whole-beat position. SQLite schema v5 performs this conversion and stores
+only the Phrase Point beat; every end boundary is derived on load.
