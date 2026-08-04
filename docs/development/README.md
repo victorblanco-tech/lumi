@@ -51,6 +51,14 @@ Run all local foundation checks and builds with:
 ./scripts/verify.sh
 ```
 
+CI preserves that same complete gate while assigning work to the least costly
+correct platform. `./scripts/verify-rust.sh` is portable and owns Rust lint,
+tests, migrations, contracts, and release benchmarks on Linux.
+`./scripts/verify-apple.sh` owns Swift tests, the real Swift-to-Rust process,
+the unsigned arm64 app, and deterministic visual evidence on macOS. Dependency
+and build caches are keyed only by locked toolchain and build manifests; a
+cache hit never skips a compiler, test, benchmark, or evidence command.
+
 After a successful build, launch the exact unsigned development app with:
 
 ```bash

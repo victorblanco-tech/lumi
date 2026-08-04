@@ -46,6 +46,9 @@ required_paths=(
   "docs/release/0.2.0-epic-2a-evidence.md"
   "scripts/check-architecture.sh"
   "scripts/check-epic-2a-evidence.sh"
+  "scripts/verify-rust.sh"
+  "scripts/verify-apple.sh"
+  "scripts/verify.sh"
   "docs"
   "scripts"
 )
@@ -77,6 +80,36 @@ if grep -REq '\.font\(\.[A-Za-z]|Color\.(red|green|orange|blue|purple|pink)' \
   "$repository_root/apps/macos/Lumi/App" \
   "$repository_root/apps/macos/Packages/LumiLiveWorkspace/Sources/LumiLiveWorkspace/Views"; then
   echo "ERROR: app feature views must use LumiDesignSystem typography and color tokens." >&2
+  exit 1
+fi
+
+foundation_workflow="$repository_root/.github/workflows/foundation.yml"
+if ! grep -Fq 'runs-on: ubuntu-24.04' "$foundation_workflow" \
+  || ! grep -Fq 'run: ./scripts/verify-rust.sh' "$foundation_workflow"; then
+  echo "ERROR: portable Rust verification must run on the Linux CI job." >&2
+  exit 1
+fi
+if ! grep -Fq 'runs-on: macos-26' "$foundation_workflow" \
+  || ! grep -Fq 'run: ./scripts/verify-apple.sh' "$foundation_workflow"; then
+  echo "ERROR: Apple application verification must run on the macOS CI job." >&2
+  exit 1
+fi
+if grep -Fq 'run: ./scripts/verify.sh' "$foundation_workflow"; then
+  echo "ERROR: CI must not run the complete cross-platform gate on macOS." >&2
+  exit 1
+fi
+if [[ "$(grep -Fc 'uses: actions/cache@v5' "$foundation_workflow")" != "2" ]]; then
+  echo "ERROR: both CI platform jobs must restore their manifest-keyed build cache." >&2
+  exit 1
+fi
+if grep -Eq '^[[:space:]]*(swift|xcodebuild)[[:space:]]' \
+  "$repository_root/scripts/verify-rust.sh"; then
+  echo "ERROR: the portable Rust gate may not acquire Apple-only work." >&2
+  exit 1
+fi
+if grep -Eq '^[[:space:]]*cargo[[:space:]]+(fmt|clippy|test)' \
+  "$repository_root/scripts/verify-apple.sh"; then
+  echo "ERROR: the Apple gate may not duplicate portable Rust verification." >&2
   exit 1
 fi
 
