@@ -47,8 +47,8 @@
 "condition.error.detail" = "Lumi could not open a complete local library snapshot.";
 "editor.title" = "Track Lighting Editor";
 "editor.close" = "Close";
-"editor.previousBar" = "Previous bar";
-"editor.nextBar" = "Next bar";
+"editor.previousBar" = "Previous beat";
+"editor.nextBar" = "Next beat";
 "editor.playPause" = "Play or pause";
 "editor.stop" = "Stop";
 "editor.loopPhrase" = "Loop selected phrase";
