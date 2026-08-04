@@ -325,9 +325,11 @@ de controllergrens in ADR-0015 en de volgende POC in
 Status: **implemented and locally verified**. Iedere bank heeft exact acht
 buttons. De gebruiker beheert per button de exacte `AutoLoop Name` en kiest een
 configureerbaar Lumi `Phrase Type`. De mapping wordt atomair en persistent
-opgeslagen; interne mapping-ID's worden niet als Variant Name getoond. De Test
-Controller spiegelt dezelfde 4×8-configuratie en blijft send-disabled tot de
-CoreMIDI-POC.
+opgeslagen; interne mapping-ID's worden niet als Variant Name getoond. De vier
+banks blijven in het primaire mappingscherm tegelijk zichtbaar in de herkenbare
+SoundSwitch/Control One-indeling; de inspector vervangt die surface niet. De
+Test Controller spiegelt dezelfde 4×8-configuratie en blijft send-disabled tot
+de CoreMIDI-POC.
 
 ## 6.1 Bouwvolgorde zonder Rekordbox-developmentlibrary
 

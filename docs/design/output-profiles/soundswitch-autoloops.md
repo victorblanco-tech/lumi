@@ -19,7 +19,9 @@ controller. The UI never suggests that Lumi controls or depends on Control One.
 - organization prepared for Theme, Genre, Function, and Custom;
 - eight stable AutoLoop buttons per bank, 32 total;
 - mapped and available states;
-- selected bank and Autoloop inspector;
+- a primary mapping surface that mirrors the recognizable SoundSwitch/Control
+  One four-column layout instead of reducing it to a technical list;
+- direct button selection with a selected bank and AutoLoop inspector;
 - editable Bank Name and exact SoundSwitch AutoLoop Name;
 - editable Lumi Phrase Type per button;
 - explicit separation between logical mapping and later MIDI binding.
@@ -27,6 +29,11 @@ controller. The UI never suggests that Lumi controls or depends on Control One.
 Each button is one atomic mapping: `Bank + Button + AutoLoop Name + Phrase Type`.
 The same button number may use a different Phrase Type in another bank. Internal
 mapping identifiers are never presented as editable Variant names.
+
+The spatial layout is part of the product contract: four bank columns remain
+visible together and each column contains eight vertically ordered buttons, as
+in SoundSwitch AutoLoops and the corresponding Control One mental model. The
+inspector augments that surface; it never replaces it.
 
 ### Test Controller
 
