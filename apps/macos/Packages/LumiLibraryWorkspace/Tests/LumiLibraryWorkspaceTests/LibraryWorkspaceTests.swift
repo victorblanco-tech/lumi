@@ -141,42 +141,38 @@ struct LibraryWorkspaceTests {
         #expect(!catalog.hardCodedPhysicalCapacity)
     }
 
-    @Test("Built-in SoundSwitch profile projects every logical row onto four 32-slot banks")
+    @Test("Built-in SoundSwitch profile projects four banks with eight explicit button mappings")
     func projectsSoundSwitchAutoloopBanks() {
         let catalog = AutoloopCatalogFixtures.incomplete
         #expect(SoundSwitchOutputProfileState.builtIn.bankCount == 4)
-        #expect(SoundSwitchOutputProfileState.builtIn.slotsPerBank == 32)
-        #expect(SoundSwitchOutputProfileState.builtIn.pageCount == 4)
+        #expect(SoundSwitchOutputProfileState.builtIn.slotsPerBank == 8)
+        #expect(SoundSwitchOutputProfileState.builtIn.pageCount == 1)
         let projectedBanks = SoundSwitchOutputProfileProjection.banks(catalog: catalog)
         #expect(projectedBanks.map(\.number) == [1, 2, 3, 4])
         #expect(projectedBanks.allSatisfy { $0.organization == .theme })
-        #expect(projectedBanks.first?.groupName == "Electric Bloom")
+        #expect(projectedBanks.first?.groupName == "Blue Pink")
         let banks = catalog.themes.map { bank in
             SoundSwitchOutputProfileProjection.slots(for: bank.id, catalog: catalog)
         }
         #expect(banks.count == 4)
-        #expect(banks.allSatisfy { $0.count == 32 })
-        #expect(banks.allSatisfy { $0.map(\.number) == Array(1...32) })
-        #expect(banks[0][0].roleID == banks[3][0].roleID)
-        #expect(banks[0][0].variantID == banks[3][0].variantID)
-        #expect(banks[2].contains { $0.status == .incomplete })
-        #expect(banks[0].contains { $0.status == .available })
+        #expect(banks.allSatisfy { $0.count == 8 })
+        #expect(banks.allSatisfy { $0.map(\.number) == Array(1...8) })
+        #expect(banks[0][0].roleID == "intro-outro")
+        #expect(banks[3][0].roleID == "intro-outro")
+        #expect(banks.flatMap { $0 }.allSatisfy { $0.status == .mapped })
     }
 
-    @Test("SoundSwitch projection keeps a missing bank cell on its stable logical slot")
-    func projectsMissingSoundSwitchCell() throws {
+    @Test("The same SoundSwitch button may use a different Phrase Type in each bank")
+    func projectsIndependentSoundSwitchButtons() throws {
         let catalog = AutoloopCatalogFixtures.incomplete
-        let bankThree = try #require(catalog.themes.first { $0.id == 3 })
-        let slots = SoundSwitchOutputProfileProjection.slots(
-            for: bankThree.id,
-            catalog: catalog
-        )
-        let missingSynth = try #require(slots.first {
-            $0.roleID == "synth" && $0.variantID == "variant-3"
-        })
-        #expect(missingSynth.status == .incomplete)
-        #expect(missingSynth.entryID == nil)
-        #expect(missingSynth.number > 0)
+        let bankOne = SoundSwitchOutputProfileProjection.slots(for: 1, catalog: catalog)
+        let bankTwo = SoundSwitchOutputProfileProjection.slots(for: 2, catalog: catalog)
+        let bankOneButtonSix = try #require(bankOne.first { $0.number == 6 })
+        let bankTwoButtonSix = try #require(bankTwo.first { $0.number == 6 })
+        #expect(bankOneButtonSix.roleID == "breakdown-2")
+        #expect(bankOneButtonSix.entryName == "BREAKDOWN 2 BLUE PINK")
+        #expect(bankTwoButtonSix.roleID == "bridge")
+        #expect(bankTwoButtonSix.entryName == "BRIDGE GREEN PINK")
     }
 
     @Test("Autoloop catalog rejects any projection that conflates Theme targets with a variable count")

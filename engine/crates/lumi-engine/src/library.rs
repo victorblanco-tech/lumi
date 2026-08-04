@@ -185,6 +185,12 @@ pub enum AutoloopCatalogMutation {
         variant_id: VariantId,
         display_name: Option<String>,
     },
+    SetButton {
+        theme_id: ThemeId,
+        button_number: u16,
+        role_id: PhraseRoleId,
+        display_name: Option<String>,
+    },
 }
 
 impl LibraryWorker {
@@ -341,11 +347,10 @@ impl LibraryWorker {
                 .collect(),
         };
 
-        // Fail closed before mutating simulator state when any current Theme
-        // cannot resolve this exact timeline against the logical catalog.
-        for theme in context.catalog.themes() {
-            context.resolve(theme.id())?;
-        }
+        // A physical 8-button bank is intentionally allowed to be sparse. The
+        // selected Theme is therefore validated when the plan is resolved,
+        // instead of rejecting a track because an unrelated bank lacks one of
+        // its Phrase Types.
         Ok(LibrarySimulatorTrack { metadata, context })
     }
 
@@ -617,6 +622,23 @@ impl LibraryWorker {
                 variant_id,
                 display_name,
             } => catalog.set_cell(theme_id, &role_id, &variant_id, display_name)?,
+            AutoloopCatalogMutation::SetButton {
+                theme_id,
+                button_number,
+                role_id,
+                display_name,
+            } => {
+                self.require_active_role(&role_id)?;
+                if !(1..=8).contains(&button_number) {
+                    return Err(AutoloopCatalogError::IdentifierOverflow.into());
+                }
+                catalog.set_mapping(
+                    theme_id,
+                    VariantId::try_new(format!("mapping-{button_number}"))?,
+                    role_id,
+                    display_name,
+                )?
+            }
         };
         let roles = self.repository.phrase_role_catalog()?;
         updated.validate_roles(&roles)?;
@@ -1006,6 +1028,9 @@ impl LibraryWorker {
                             });
                             json!({
                                 "themeId": theme.id().value(),
+                                "buttonNumber": cell.and_then(|value| {
+                                    value.variant_id().as_str().strip_prefix("mapping-")?.parse::<u16>().ok()
+                                }),
                                 "entryId": cell.map(|value| value.entry_id().as_str()),
                                 "name": cell.map(|value| value.display_name()),
                                 "status": if cell.is_some() { "ready" } else { "missing" },
@@ -1238,7 +1263,11 @@ fn seed_default_autoloop_catalog(
     }
     let phrase_roles = repository.phrase_role_catalog()?;
     let seeded = seeded_autoloop_catalog(&existing, &phrase_roles)?;
-    repository.initialize_autoloop_catalog(&seeded)?;
+    if existing.revision() == 0 {
+        repository.initialize_autoloop_catalog(&seeded)?;
+    } else {
+        repository.replace_autoloop_catalog(&seeded, existing.revision())?;
+    }
     Ok(())
 }
 
@@ -1602,7 +1631,7 @@ mod tests {
         let resolved = context.resolve(ThemeId::new(1))?;
         assert_eq!(resolved[0].role_id, "synth");
         assert_eq!(resolved[0].strategy, "auto");
-        assert!(resolved[0].entry_id.contains("--synth--"));
+        assert_eq!(resolved[0].entry_id, "theme-1--mapping-5");
 
         assert!(matches!(
             worker.simulator_track(1, 1),
@@ -1782,7 +1811,7 @@ mod tests {
             .ok_or("Synth usage is missing")?;
         assert_eq!(synth["usage"]["trackCount"], 1);
         assert_eq!(synth["usage"]["phraseCount"], 1);
-        assert_eq!(synth["usage"]["catalogRowCount"], 2);
+        assert_eq!(synth["usage"]["catalogRowCount"], 1);
 
         let stale = worker.mutate_phrase_role_catalog(
             2,
@@ -1822,7 +1851,7 @@ mod tests {
                 .as_array()
                 .and_then(|roles| roles.iter().find(|role| role["id"] == "synth"))
                 .ok_or("Synth matrix row is missing")?;
-            assert_eq!(synth["variants"].as_array().map(Vec::len), Some(2));
+            assert_eq!(synth["variants"].as_array().map(Vec::len), Some(1));
             assert_eq!(initial["autoloopCatalog"]["preflight"]["status"], "ready");
 
             worker.mutate_autoloop_catalog(
@@ -1936,7 +1965,7 @@ mod tests {
                 1,
                 1,
                 0,
-                PhraseLoopStrategy::FixedVariant(VariantId::try_new("variant-1")?),
+                PhraseLoopStrategy::FixedVariant(VariantId::try_new("mapping-1")?),
             )?;
             let fixed = worker.snapshot_json()?;
             assert_eq!(fixed["editor"]["timeline"]["revision"], 2);
@@ -1947,7 +1976,7 @@ mod tests {
             );
             assert_eq!(
                 fixed["editor"]["phrases"][0]["loopStrategy"]["fixedVariantId"],
-                "variant-1"
+                "mapping-1"
             );
             assert_eq!(
                 fixed["editor"]["phrases"][0]["loopStrategy"]["locked"],
@@ -2281,7 +2310,7 @@ mod tests {
                 2,
                 1,
                 0,
-                PhraseLoopStrategy::FixedVariant(VariantId::try_new("variant-1")?),
+                PhraseLoopStrategy::FixedVariant(VariantId::try_new("mapping-5")?),
             )?;
             worker.mutate_phrase_role_catalog(
                 1,
@@ -2315,7 +2344,7 @@ mod tests {
         assert_eq!(snapshot["editor"]["phrases"][0]["roleId"], "synth");
         assert_eq!(
             snapshot["editor"]["phrases"][0]["loopStrategy"]["fixedVariantId"],
-            "variant-1"
+            "mapping-5"
         );
 
         let (_, context) = restarted.simulator_track(horizon_id, 4)?.into_parts();

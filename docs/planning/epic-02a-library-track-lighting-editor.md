@@ -1,6 +1,6 @@
 # Epic 2A – Music Library and Track Lighting Editor
 
-Status: **Demo scope complete through E2A-17; Rekordbox import and RGB pixel-fidelity explicitly parked**
+Status: **Demo scope complete through E2A-18; Rekordbox import and RGB pixel-fidelity explicitly parked**
 
 Doelmilestone: **0.2.0 – Deck Intelligence**
 
@@ -22,8 +22,8 @@ voorbereidingsomgeving. Zonder decks of SoundSwitch-koppeling kan de gebruiker:
    laten resolven;
 8. een echte librarytrack in de bestaande dual-deck simulator testen;
 9. bronwijzigingen vergelijken zonder Lumi-edits te verliezen;
-10. de logische catalogus herkennen als een ingebouwd SoundSwitch-outputprofiel
-    met vier banks, 32 Autoloop-posities en een virtuele Lumi-controller.
+10. het ingebouwde SoundSwitch-outputprofiel beheren als vier banks met ieder
+    acht buttons, een exacte AutoLoop Name en één Phrase Type per button.
 
 Dit levert een zichtbare vertical slice over import, persistence, native UI,
 editing en planning. De echte SoundSwitch-project- en bank/slotbinding valt
@@ -311,17 +311,23 @@ application verification pass**.
 
 ### E2A-17 – Present the built-in SoundSwitch Autoloop Output Profile
 
-Vervangt de abstracte matrix-first Settings-weergave door de geaccepteerde
-bank-first Output Profiles UX. De ingebouwde demo projecteert vier banks, 32
-Autoloop-posities per bank, stabiele role/variantrijen en vier pagina's van acht
-virtuele Lumi-controllerbuttons. Mappingstatus en ontbrekende cellen blijven
-zichtbaar; live MIDI, poortselectie en concrete provideradressen blijven bewust
-uitgeschakeld tot de POC.
+Vervangt de abstracte matrix-first Settings-weergave door de eerste bank-first
+Output Profiles UX. De oorspronkelijke 32-posities-per-bankprojectie is door
+E2A-18 gecorrigeerd naar de echte SoundSwitch-surface.
 
 Status: **implemented and locally verified**. Het ontwerp staat in
 [`docs/design/output-profiles`](../design/output-profiles/soundswitch-autoloops.md),
 de controllergrens in ADR-0015 en de volgende POC in
 [`soundswitch-coremidi-poc.md`](soundswitch-coremidi-poc.md).
+
+### E2A-18 – Map the real 4×8 SoundSwitch AutoLoop surface
+
+Status: **implemented and locally verified**. Iedere bank heeft exact acht
+buttons. De gebruiker beheert per button de exacte `AutoLoop Name` en kiest een
+configureerbaar Lumi `Phrase Type`. De mapping wordt atomair en persistent
+opgeslagen; interne mapping-ID's worden niet als Variant Name getoond. De Test
+Controller spiegelt dezelfde 4×8-configuratie en blijft send-disabled tot de
+CoreMIDI-POC.
 
 ## 6.1 Bouwvolgorde zonder Rekordbox-developmentlibrary
 
@@ -392,9 +398,7 @@ De demo-provider blijft daarna bestaan voor CI, screenshots en foutscenario's.
   en versievalidatie moeten fail-closed zijn.
 - Trackmatching met latere USB/live-identiteiten moet al in identities en
   fixtures voorbereid zijn, maar wordt pas met echte decks bewezen.
-- De logische matrix veronderstelt consistente role/variantrijen per Theme.
-- Vier SoundSwitch-banks worden als vier Theme-targets voorbereid; het aantal
-  variants per role blijft flexibel en fysieke capaciteit wordt pas door het
-  latere targetprofiel afgedwongen.
+- Het ingebouwde SoundSwitch-profiel begrenst iedere bank tot acht buttons en
+  laat iedere bank die buttons onafhankelijk aan Phrase Types koppelen.
 - Echte SoundSwitch-identiteiten en projectdiffs blijven onbewezen tot de latere
   integration spike.

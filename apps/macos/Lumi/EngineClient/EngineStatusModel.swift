@@ -404,6 +404,13 @@ final class EngineStatusModel: ObservableObject {
                 variantID: variantID,
                 displayName: displayName
             )
+        case let .setButton(themeID, buttonNumber, roleID, displayName):
+            .setButton(
+                themeID: themeID,
+                buttonNumber: buttonNumber,
+                roleID: roleID,
+                displayName: displayName
+            )
         }
     }
 

@@ -17,24 +17,23 @@ controller. The UI never suggests that Lumi controls or depends on Control One.
 
 - four clearly numbered and named banks;
 - organization prepared for Theme, Genre, Function, and Custom;
-- 32 stable Autoloop positions per bank;
-- mapped, incomplete, and available states;
+- eight stable AutoLoop buttons per bank, 32 total;
+- mapped and available states;
 - selected bank and Autoloop inspector;
-- logical Group, Phrase Role, and Variant identity;
-- editable bank, Variant, and logical Autoloop names where supported;
+- editable Bank Name and exact SoundSwitch AutoLoop Name;
+- editable Lumi Phrase Type per button;
 - explicit separation between logical mapping and later MIDI binding.
 
-The demo preset organizes every bank as a Theme and projects the same logical
-role/variant row onto the same numbered position in every bank. A missing matrix
-cell therefore stays visible at a stable position.
+Each button is one atomic mapping: `Bank + Button + AutoLoop Name + Phrase Type`.
+The same button number may use a different Phrase Type in another bank. Internal
+mapping identifiers are never presented as editable Variant names.
 
-### Virtual Controller
+### Test Controller
 
 - `Lumi Virtual MIDI Controller` identity;
-- four bank controls;
-- four pages of eight Autoloop buttons;
-- the same selected position and logical binding as the Banks view;
-- utility controls represented for layout completeness;
+- four bank columns with eight AutoLoop buttons each;
+- the exact same names and Phrase Types as the Banks view;
+- no second configuration model;
 - live test disabled until the CoreMIDI POC.
 
 ### MIDI & POC
@@ -50,9 +49,9 @@ cell therefore stays visible at a stable position.
 
 ```text
 Library phrase
-  -> logical Group/Theme + Phrase Role + Variant
+  -> selected Bank/Theme + Phrase Type
   -> SoundSwitch Output Profile
-  -> Bank + Autoloop position + MIDI sequence
+  -> Bank + Button + exact AutoLoop Name + MIDI sequence
   -> SoundSwitch
 ```
 

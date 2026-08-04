@@ -1735,7 +1735,7 @@ mod tests {
                 1,
                 1,
                 lumi_library::PhraseLoopStrategy::FixedVariant(
-                    lumi_library::VariantId::try_new("variant-2")
+                    lumi_library::VariantId::try_new("mapping-2")
                         .unwrap_or_else(|error| panic!("fixture variant must be valid: {error}")),
                 ),
             )

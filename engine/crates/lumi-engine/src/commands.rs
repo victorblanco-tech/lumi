@@ -370,6 +370,13 @@ fn autoloop_catalog_mutation(
             variant_id: variant_id(payload)?,
             display_name: optional_string(payload, "displayName").map(str::to_owned),
         }),
+        "setButton" => Ok(AutoloopCatalogMutation::SetButton {
+            theme_id: ThemeId::new(positive_unsigned(payload, "themeId")?),
+            button_number: u16::try_from(positive_unsigned(payload, "buttonNumber")?)
+                .map_err(|_| CommandDecodeError::InvalidField("buttonNumber"))?,
+            role_id: phrase_role_id(payload)?,
+            display_name: optional_string(payload, "displayName").map(str::to_owned),
+        }),
         _ => Err(CommandDecodeError::InvalidField("operation")),
     }
 }

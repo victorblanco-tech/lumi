@@ -63,7 +63,7 @@ func launchesRealEngine() async throws {
         #expect(phraseRoleName(snapshot, roleID: "synth") == "Synth")
         #expect(autoloopCatalogRevision(snapshot) == 1)
         #expect(autoloopThemeNames(snapshot).count == 4)
-        #expect(autoloopVariantCount(snapshot, roleID: "synth") == 2)
+        #expect(autoloopVariantCount(snapshot, roleID: "synth") == 1)
 
         let renamedRole = try await supervisor.send(
             .mutatePhraseRoleCatalog(
@@ -112,13 +112,19 @@ func launchesRealEngine() async throws {
         snapshot = try await supervisor.send(
             .mutateAutoloopCatalog(
                 expectedAutoloopCatalogRevision: 2,
-                mutation: .addVariant(roleID: "synth", displayName: "Variant 3")
+                mutation: .setButton(
+                    themeID: 1,
+                    buttonNumber: 1,
+                    roleID: "drop",
+                    displayName: "DROP BLUE PINK - NEW 1"
+                )
             ),
-            messageID: "swift-add-autoloop-variant"
+            messageID: "swift-map-autoloop-button"
         )
         #expect(autoloopCatalogRevision(snapshot) == 3)
-        #expect(autoloopVariantCount(snapshot, roleID: "synth") == 3)
-        #expect(autoloopMissingCellCount(snapshot) == 4)
+        #expect(autoloopButtonName(snapshot, themeID: 1, buttonNumber: 1) == "DROP BLUE PINK - NEW 1")
+        #expect(autoloopButtonRole(snapshot, themeID: 1, buttonNumber: 1) == "drop")
+        #expect(autoloopMissingCellCount(snapshot) == 0)
 
         let staleAutoloop = try await supervisor.send(
             .mutateAutoloopCatalog(
@@ -220,8 +226,9 @@ func launchesRealEngine() async throws {
         #expect(phraseRoleName(snapshot, roleID: "synth") == "Lead Synth")
         #expect(autoloopCatalogRevision(snapshot) == 3)
         #expect(autoloopThemeNames(snapshot).first == "Electric Garden")
-        #expect(autoloopVariantCount(snapshot, roleID: "synth") == 3)
-        #expect(autoloopMissingCellCount(snapshot) == 4)
+        #expect(autoloopButtonName(snapshot, themeID: 1, buttonNumber: 1) == "DROP BLUE PINK - NEW 1")
+        #expect(autoloopButtonRole(snapshot, themeID: 1, buttonNumber: 1) == "drop")
+        #expect(autoloopMissingCellCount(snapshot) == 0)
         let reopenedEditor = try await supervisor.send(
             .openLibraryTrackEditor(trackID: requiredFirstLibraryTrackID(snapshot)),
             messageID: "swift-reopen-library-editor"
@@ -243,13 +250,13 @@ func launchesRealEngine() async throws {
                 phraseIndex: 0,
                 expectedTimelineRevision: 4,
                 expectedAutoloopCatalogRevision: 3,
-                strategy: .fixedVariant("variant-1")
+                strategy: .fixedVariant("mapping-1")
             ),
             messageID: "swift-fix-phrase-loop-variant"
         )
         #expect(libraryEditorTimelineRevision(fixedLoop) == 5)
         #expect(libraryEditorFirstLoopStrategyKind(fixedLoop) == "fixedVariant")
-        #expect(libraryEditorFirstFixedVariantID(fixedLoop) == "variant-1")
+        #expect(libraryEditorFirstFixedVariantID(fixedLoop) == "mapping-1")
 
         let staleLoopCatalog = try await supervisor.send(
             .setLibraryPhraseLoopStrategy(
@@ -617,6 +624,48 @@ private func autoloopMissingCellCount(_ envelope: MessageEnvelope) -> UInt64? {
           case let .object(preflight) = catalog["preflight"],
           case let .number(count) = preflight["missingCellCount"] else { return nil }
     return UInt64(count)
+}
+
+private func autoloopButtonName(
+    _ envelope: MessageEnvelope,
+    themeID: UInt64,
+    buttonNumber: UInt16
+) -> String? {
+    autoloopButton(envelope, themeID: themeID, buttonNumber: buttonNumber)?.name
+}
+
+private func autoloopButtonRole(
+    _ envelope: MessageEnvelope,
+    themeID: UInt64,
+    buttonNumber: UInt16
+) -> String? {
+    autoloopButton(envelope, themeID: themeID, buttonNumber: buttonNumber)?.roleID
+}
+
+private func autoloopButton(
+    _ envelope: MessageEnvelope,
+    themeID: UInt64,
+    buttonNumber: UInt16
+) -> (roleID: String, name: String)? {
+    guard let catalog = autoloopCatalog(envelope),
+          case let .array(roles) = catalog["roles"] else { return nil }
+    for roleValue in roles {
+        guard case let .object(role) = roleValue,
+              case let .string(roleID) = role["id"],
+              case let .array(variants) = role["variants"] else { continue }
+        for variantValue in variants {
+            guard case let .object(variant) = variantValue,
+                  case let .array(cells) = variant["cells"] else { continue }
+            for cellValue in cells {
+                guard case let .object(cell) = cellValue,
+                      cell["themeId"] == .number(Double(themeID)),
+                      cell["buttonNumber"] == .number(Double(buttonNumber)),
+                      case let .string(name) = cell["name"] else { continue }
+                return (roleID, name)
+            }
+        }
+    }
+    return nil
 }
 
 private func requiredFirstLibraryTrackID(_ envelope: MessageEnvelope) -> UInt64 {

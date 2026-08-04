@@ -4,7 +4,7 @@ use lumi_domain::ThemeId;
 
 use crate::{AutoloopEntryId, PhraseLoopStrategy, PhraseRoleCatalog, PhraseRoleId, VariantId};
 
-pub const AUTOLOOP_CATALOG_DEFAULTS_VERSION: u16 = 1;
+pub const AUTOLOOP_CATALOG_DEFAULTS_VERSION: u16 = 2;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AutoloopTheme {
@@ -322,6 +322,17 @@ impl AutoloopCatalog {
                 return Err(AutoloopCatalogError::DuplicateEntryId);
             }
         }
+        let mut mapping_keys = HashSet::new();
+        for cell in &cells {
+            if catalog_mapping_number(cell.variant_id()).is_some()
+                && !mapping_keys.insert((
+                    cell.theme_id().value(),
+                    cell.variant_id().as_str().to_owned(),
+                ))
+            {
+                return Err(AutoloopCatalogError::DuplicateMappingIdentity);
+            }
+        }
         Ok(Self {
             revision,
             defaults_version,
@@ -390,11 +401,9 @@ impl AutoloopCatalog {
             .collect::<HashSet<_>>();
         let mut missing = Vec::new();
         for theme in &self.themes {
-            for variant in self
-                .variants
-                .iter()
-                .filter(|variant| !variant.is_archived())
-            {
+            for variant in self.variants.iter().filter(|variant| {
+                !variant.is_archived() && catalog_mapping_number(variant.id()).is_none()
+            }) {
                 if !populated.contains(&(
                     theme.id().value(),
                     variant.role_id().as_str(),
@@ -732,6 +741,74 @@ impl AutoloopCatalog {
         self.revised(self.themes.clone(), self.variants.clone(), cells)
     }
 
+    pub fn set_mapping(
+        &self,
+        theme_id: ThemeId,
+        mapping_id: VariantId,
+        role_id: PhraseRoleId,
+        display_name: Option<String>,
+    ) -> Result<Self, AutoloopCatalogError> {
+        if !self.themes.iter().any(|theme| theme.id() == theme_id) {
+            return Err(AutoloopCatalogError::UnknownTheme);
+        }
+        let mut cells = self.cells.clone();
+        let existing = cells
+            .iter()
+            .position(|cell| cell.theme_id() == theme_id && cell.variant_id() == &mapping_id);
+        let existing_cell = existing.map(|index| cells.remove(index));
+        let Some(display_name) = display_name else {
+            if existing_cell.is_none() {
+                return Err(AutoloopCatalogError::NoChange);
+            }
+            let variants = prune_unused_variants(self.variants.clone(), &cells)?;
+            sort_cells(&mut cells, &self.themes, &variants);
+            return self.revised(self.themes.clone(), variants, cells);
+        };
+        let display_name = validated_name(display_name)?;
+        if let Some(existing_cell) = &existing_cell
+            && existing_cell.role_id() == &role_id
+            && existing_cell.display_name() == display_name
+        {
+            return Err(AutoloopCatalogError::NoChange);
+        }
+        let mut variants = self.variants.clone();
+        if !variants
+            .iter()
+            .any(|variant| variant.role_id() == &role_id && variant.id() == &mapping_id)
+        {
+            let sort_order = u16::try_from(
+                variants
+                    .iter()
+                    .filter(|variant| variant.role_id() == &role_id)
+                    .count()
+                    + 1,
+            )
+            .map_err(|_| AutoloopCatalogError::TooManyVariants)?;
+            variants.push(AutoloopVariant::try_new(
+                role_id.clone(),
+                mapping_id.clone(),
+                format!("Output {}", mapping_id.as_str()),
+                sort_order,
+                false,
+            )?);
+        }
+        cells.push(AutoloopMatrixCell::try_new(
+            theme_id,
+            role_id,
+            mapping_id.clone(),
+            AutoloopEntryId::try_new(format!(
+                "theme-{}--{}",
+                theme_id.value(),
+                mapping_id.as_str()
+            ))
+            .map_err(|_| AutoloopCatalogError::IdentifierOverflow)?,
+            display_name,
+        )?);
+        variants = prune_unused_variants(variants, &cells)?;
+        sort_cells(&mut cells, &self.themes, &variants);
+        self.revised(self.themes.clone(), variants, cells)
+    }
+
     fn cell(
         &self,
         theme_id: ThemeId,
@@ -871,6 +948,42 @@ fn validate_variants(variants: &[AutoloopVariant]) -> Result<(), AutoloopCatalog
     Ok(())
 }
 
+fn catalog_mapping_number(variant_id: &VariantId) -> Option<u16> {
+    variant_id
+        .as_str()
+        .strip_prefix("mapping-")?
+        .parse::<u16>()
+        .ok()
+}
+
+fn prune_unused_variants(
+    variants: Vec<AutoloopVariant>,
+    cells: &[AutoloopMatrixCell],
+) -> Result<Vec<AutoloopVariant>, AutoloopCatalogError> {
+    let mut retained = variants
+        .into_iter()
+        .filter(|variant| {
+            cells.iter().any(|cell| {
+                cell.role_id() == variant.role_id() && cell.variant_id() == variant.id()
+            })
+        })
+        .collect::<Vec<_>>();
+    sort_variants(&mut retained);
+    let mut next_orders = HashMap::<String, u16>::new();
+    for variant in &mut retained {
+        let next = next_orders
+            .entry(variant.role_id().as_str().to_owned())
+            .and_modify(|value| *value += 1)
+            .or_insert(1);
+        *variant = variant.rebuilt(
+            variant.display_name().to_owned(),
+            *next,
+            variant.is_archived(),
+        )?;
+    }
+    Ok(retained)
+}
+
 fn sort_variants(variants: &mut [AutoloopVariant]) {
     variants.sort_by(|left, right| {
         left.role_id()
@@ -964,6 +1077,7 @@ pub enum AutoloopCatalogError {
     IdentifierOverflow,
     TooManyVariants,
     ArithmeticOverflow,
+    DuplicateMappingIdentity,
 }
 
 impl std::fmt::Display for AutoloopCatalogError {
