@@ -15,13 +15,53 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  verify:
-    name: Rust and macOS foundation
+  rust:
+    name: Rust, contracts, and persistence
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Restore portable Rust build cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: rust-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '**/Cargo.toml') }}
+          restore-keys: |
+            rust-v1-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Verify Rust, contracts, migrations, and performance
+        run: ./scripts/verify-rust.sh
+
+  apple:
+    name: Apple Silicon application
     runs-on: macos-26
     timeout-minutes: 20
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
 
-      - name: Verify foundation
-        run: ./scripts/verify.sh
+      - name: Restore Apple build cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+            ~/Library/Caches/org.swift.swiftpm
+            apps/macos/Packages/LumiProtocol/.build
+            apps/macos/Packages/LumiDesignSystem/.build
+            apps/macos/Packages/LumiLiveWorkspace/.build
+            apps/macos/Packages/LumiLibraryWorkspace/.build
+            apps/macos/Packages/LumiEngineClient/.build
+            build/DerivedData
+          key: apple-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'apps/macos/Lumi.xcodeproj/project.pbxproj', 'apps/macos/Packages/**/Package.swift') }}
+          restore-keys: |
+            apple-v1-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Verify Swift, Xcode, arm64 bundle, and visual evidence
+        run: ./scripts/verify-apple.sh
