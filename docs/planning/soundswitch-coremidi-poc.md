@@ -44,7 +44,7 @@ Control One remains usable and continues to provide working DMX output?
 ## Explicitly deferred
 
 - generic Output Profile Builder;
-- all 32 AutoLoop button bindings;
+- production binding of all 128 AutoLoop positions;
 - ShowNET/laser output;
 - automatic live execution;
 - iPhone controls;

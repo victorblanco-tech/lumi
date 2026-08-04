@@ -141,12 +141,12 @@ struct LibraryWorkspaceTests {
         #expect(!catalog.hardCodedPhysicalCapacity)
     }
 
-    @Test("Built-in SoundSwitch profile projects four banks with eight explicit button mappings")
+    @Test("Built-in SoundSwitch profile projects four banks with 32 explicit button mappings")
     func projectsSoundSwitchAutoloopBanks() {
         let catalog = AutoloopCatalogFixtures.incomplete
         #expect(SoundSwitchOutputProfileState.builtIn.bankCount == 4)
-        #expect(SoundSwitchOutputProfileState.builtIn.slotsPerBank == 8)
-        #expect(SoundSwitchOutputProfileState.builtIn.pageCount == 1)
+        #expect(SoundSwitchOutputProfileState.builtIn.slotsPerBank == 32)
+        #expect(SoundSwitchOutputProfileState.builtIn.pageCount == 4)
         let projectedBanks = SoundSwitchOutputProfileProjection.banks(catalog: catalog)
         #expect(projectedBanks.map(\.number) == [1, 2, 3, 4])
         #expect(projectedBanks.allSatisfy { $0.organization == .theme })
@@ -155,11 +155,12 @@ struct LibraryWorkspaceTests {
             SoundSwitchOutputProfileProjection.slots(for: bank.id, catalog: catalog)
         }
         #expect(banks.count == 4)
-        #expect(banks.allSatisfy { $0.count == 8 })
-        #expect(banks.allSatisfy { $0.map(\.number) == Array(1...8) })
+        #expect(banks.allSatisfy { $0.count == 32 })
+        #expect(banks.allSatisfy { $0.map(\.number) == Array(1...32) })
         #expect(banks[0][0].roleID == "intro-outro")
         #expect(banks[3][0].roleID == "intro-outro")
         #expect(banks.flatMap { $0 }.allSatisfy { $0.status == .mapped })
+        #expect(banks.flatMap { $0 }.count == 128)
     }
 
     @Test("The same SoundSwitch button may use a different Phrase Type in each bank")

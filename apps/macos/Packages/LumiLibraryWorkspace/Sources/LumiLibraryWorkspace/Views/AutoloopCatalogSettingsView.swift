@@ -18,6 +18,7 @@ public struct AutoloopCatalogSettingsView: View {
     @State private var section: ProfileSection = .banks
     @State private var selectedBankID: UInt64?
     @State private var selectedButtonNumber: UInt16 = 1
+    @State private var activePage: UInt16 = 1
     @State private var bankNameDraft = ""
     @State private var autoloopNameDraft = ""
     @State private var phraseRoleDraft = ""
@@ -93,7 +94,7 @@ public struct AutoloopCatalogSettingsView: View {
                     .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(profile.name).font(LumiTypography.cardTitle)
-                    Text("4 banks · 8 AutoLoops per bank · 32 mappings total")
+                    Text("4 banks · 32 AutoLoops per bank · 128 mappings total")
                         .font(LumiTypography.caption)
                         .foregroundStyle(LumiColor.textSecondary)
                 }
@@ -107,7 +108,7 @@ public struct AutoloopCatalogSettingsView: View {
                 Label("Demo configuration", systemImage: "shippingbox.fill")
                     .font(LumiTypography.caption.weight(.semibold))
                     .foregroundStyle(LumiColor.accent)
-                Text("\(totalMapped(catalog)) / 32 mapped")
+                Text("\(totalMapped(catalog)) / 128 mapped")
                     .font(LumiTypography.technical.weight(.semibold))
             }
         }
@@ -157,10 +158,11 @@ public struct AutoloopCatalogSettingsView: View {
                             .foregroundStyle(LumiColor.textSecondary)
                     }
                     Spacer()
-                    Text("4 BANKS × 8 BUTTONS")
+                    Text("4 BANKS × 32 AUTOLOOPS")
                         .font(LumiTypography.technical)
                         .foregroundStyle(LumiColor.textSecondary)
                 }
+                pageSelector(catalog)
                 Text("PLAY ALL BANKS")
                     .font(LumiTypography.technical.weight(.semibold))
                     .frame(maxWidth: .infinity, minHeight: 28)
@@ -181,7 +183,7 @@ public struct AutoloopCatalogSettingsView: View {
         _ bank: AutoloopThemeState,
         catalog: AutoloopCatalogState
     ) -> some View {
-        let bankSlots = SoundSwitchOutputProfileProjection.slots(for: bank.id, catalog: catalog)
+        let bankSlots = visibleSlots(for: bank.id, catalog: catalog)
         return VStack(spacing: 7) {
             Button { selectBank(bank, catalog: catalog) } label: {
                 VStack(spacing: 2) {
@@ -329,40 +331,43 @@ public struct AutoloopCatalogSettingsView: View {
     }
 
     private func virtualController(_ catalog: AutoloopCatalogState) -> some View {
-        HStack(alignment: .top, spacing: 10) {
-            ForEach(catalog.themes) { bank in
-                let bankSlots = SoundSwitchOutputProfileProjection.slots(for: bank.id, catalog: catalog)
-                LumiPanel {
-                    VStack(alignment: .leading, spacing: 8) {
-                        Text("BANK \(bank.sortOrder)")
-                            .font(LumiTypography.technical)
-                            .foregroundStyle(LumiColor.textSecondary)
-                        Text(bank.name)
-                            .font(LumiTypography.body.weight(.semibold))
-                            .lineLimit(1)
-                        ForEach(bankSlots) { slot in
-                            Button {
-                                selectBankAndSlot(bank, slot: slot, catalog: catalog)
-                            } label: {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(slot.entryName ?? "EMPTY AUTOLOOP")
-                                        .font(LumiTypography.caption.weight(.semibold))
-                                        .lineLimit(1)
-                                    Text("\(slot.number) · \(slot.roleName ?? "Unmapped")")
-                                        .font(LumiTypography.technical)
-                                        .foregroundStyle(LumiColor.textSecondary)
+        VStack(alignment: .leading, spacing: LumiSpacing.medium) {
+            pageSelector(catalog)
+            HStack(alignment: .top, spacing: 10) {
+                ForEach(catalog.themes) { bank in
+                    let bankSlots = visibleSlots(for: bank.id, catalog: catalog)
+                    LumiPanel {
+                        VStack(alignment: .leading, spacing: 8) {
+                            Text("BANK \(bank.sortOrder)")
+                                .font(LumiTypography.technical)
+                                .foregroundStyle(LumiColor.textSecondary)
+                            Text(bank.name)
+                                .font(LumiTypography.body.weight(.semibold))
+                                .lineLimit(1)
+                            ForEach(bankSlots) { slot in
+                                Button {
+                                    selectBankAndSlot(bank, slot: slot, catalog: catalog)
+                                } label: {
+                                    VStack(alignment: .leading, spacing: 2) {
+                                        Text(slot.entryName ?? "EMPTY AUTOLOOP")
+                                            .font(LumiTypography.caption.weight(.semibold))
+                                            .lineLimit(1)
+                                        Text("\(slot.number) · \(slot.roleName ?? "Unmapped")")
+                                            .font(LumiTypography.technical)
+                                            .foregroundStyle(LumiColor.textSecondary)
+                                    }
+                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                    .padding(.horizontal, 9)
+                                    .frame(height: 45)
                                 }
-                                .frame(maxWidth: .infinity, alignment: .leading)
-                                .padding(.horizontal, 9)
-                                .frame(height: 45)
-                            }
-                            .buttonStyle(.plain)
-                            .foregroundStyle(LumiColor.textPrimary)
-                            .background(LumiColor.surfaceElevated)
-                            .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
-                            .overlay {
-                                RoundedRectangle(cornerRadius: LumiRadius.control)
-                                    .stroke(LumiColor.border)
+                                .buttonStyle(.plain)
+                                .foregroundStyle(LumiColor.textPrimary)
+                                .background(LumiColor.surfaceElevated)
+                                .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
+                                .overlay {
+                                    RoundedRectangle(cornerRadius: LumiRadius.control)
+                                        .stroke(LumiColor.border)
+                                }
                             }
                         }
                     }
@@ -383,7 +388,7 @@ public struct AutoloopCatalogSettingsView: View {
                 VStack(alignment: .leading, spacing: LumiSpacing.large) {
                     Text("MIDI Transport").font(LumiTypography.cardTitle)
                     inspectorValue("Output Device", "Lumi Virtual MIDI → SoundSwitch")
-                    inspectorValue("Configured Surface", "4 banks · 8 AutoLoops")
+                    inspectorValue("Configured Surface", "4 banks · 32 AutoLoops")
                     inspectorValue("Timing", "Ableton Link → SoundSwitch")
                     inspectorValue("Bank Switch Delay", "Measure in POC")
                     Spacer(minLength: 0)
@@ -436,6 +441,56 @@ public struct AutoloopCatalogSettingsView: View {
         Label(text, systemImage: "circle.dashed")
             .font(LumiTypography.body)
             .foregroundStyle(LumiColor.textSecondary)
+    }
+
+    private func pageSelector(_ catalog: AutoloopCatalogState) -> some View {
+        HStack(spacing: 6) {
+            Text("AUTOLOOP PAGE")
+                .font(LumiTypography.technical.weight(.semibold))
+                .foregroundStyle(LumiColor.textSecondary)
+            ForEach(1...profile.pageCount, id: \.self) { page in
+                let range = buttonRange(for: page)
+                Button("\(range.lowerBound)–\(range.upperBound)") {
+                    activePage = page
+                    selectedButtonNumber = range.lowerBound
+                    refreshDrafts(catalog)
+                }
+                .buttonStyle(.plain)
+                .font(LumiTypography.technical.weight(.semibold))
+                .foregroundStyle(activePage == page ? LumiColor.textPrimary : LumiColor.textSecondary)
+                .padding(.horizontal, 10)
+                .frame(height: 28)
+                .background(
+                    activePage == page
+                        ? LumiColor.accent.opacity(0.22)
+                        : LumiColor.surfaceElevated
+                )
+                .overlay(alignment: .bottom) {
+                    Rectangle()
+                        .fill(activePage == page ? LumiColor.accent : Color.clear)
+                        .frame(height: 2)
+                }
+                .accessibilityIdentifier("lumi.settings.outputProfiles.page.\(page)")
+            }
+            Spacer()
+            Text("PAGE \(activePage) OF \(profile.pageCount)")
+                .font(LumiTypography.technical)
+                .foregroundStyle(LumiColor.textSecondary)
+        }
+    }
+
+    private func buttonRange(for page: UInt16) -> ClosedRange<UInt16> {
+        let first = (page - 1) * profile.slotsPerPage + 1
+        return first...(first + profile.slotsPerPage - 1)
+    }
+
+    private func visibleSlots(
+        for bankID: UInt64,
+        catalog: AutoloopCatalogState
+    ) -> [SoundSwitchAutoloopSlotState] {
+        let range = buttonRange(for: activePage)
+        return SoundSwitchOutputProfileProjection.slots(for: bankID, catalog: catalog)
+            .filter { range.contains($0.number) }
     }
 
     private func slots(_ catalog: AutoloopCatalogState) -> [SoundSwitchAutoloopSlotState] {
@@ -496,13 +551,14 @@ public struct AutoloopCatalogSettingsView: View {
 
     private func selectBank(_ bank: AutoloopThemeState, catalog: AutoloopCatalogState) {
         selectedBankID = bank.id
-        selectedButtonNumber = 1
+        selectedButtonNumber = buttonRange(for: activePage).lowerBound
         bankNameDraft = bank.name
         refreshDrafts(catalog)
     }
 
     private func selectSlot(_ slot: SoundSwitchAutoloopSlotState, catalog: AutoloopCatalogState) {
         selectedButtonNumber = slot.number
+        activePage = (slot.number - 1) / profile.slotsPerPage + 1
         refreshDrafts(catalog)
     }
 
@@ -513,6 +569,7 @@ public struct AutoloopCatalogSettingsView: View {
     ) {
         selectedBankID = bank.id
         selectedButtonNumber = slot.number
+        activePage = (slot.number - 1) / profile.slotsPerPage + 1
         bankNameDraft = bank.name
         refreshDrafts(catalog)
     }
@@ -533,6 +590,7 @@ public struct AutoloopCatalogSettingsView: View {
         if !(1...profile.slotsPerBank).contains(selectedButtonNumber) {
             selectedButtonNumber = 1
         }
+        activePage = (selectedButtonNumber - 1) / profile.slotsPerPage + 1
         refreshDrafts(catalog)
     }
 

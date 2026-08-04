@@ -5,7 +5,7 @@ public enum AutoloopCatalogFixtures {
         let autoloopName: String
     }
 
-    private static let banks: [[Mapping]] = [
+    private static let baseBanks: [[Mapping]] = [
         [
             mapping("intro-outro", "Intro / Outro", "INTRO BLUE PINK"),
             mapping("breakdown-1", "Breakdown 1", "BREAKDOWN BLUE PINK"),
@@ -48,9 +48,43 @@ public enum AutoloopCatalogFixtures {
         ]
     ]
 
+    private static let extendedRoleIDs = [
+        "buildup-2", "breakdown-3", "buildup-3", "drop",
+        "synth", "bridge", "pre-drop", "intro-outro",
+        "breakdown-1", "buildup-1", "breakdown-2", "buildup-2",
+        "breakdown-3", "buildup-3", "synth", "drop",
+        "bridge", "pre-drop", "intro-outro", "breakdown-1",
+        "buildup-1", "drop", "synth", "bridge"
+    ]
+
+    private static let roleNames = [
+        "intro-outro": "Intro / Outro",
+        "bridge": "Bridge",
+        "breakdown-1": "Breakdown 1",
+        "breakdown-2": "Breakdown 2",
+        "breakdown-3": "Breakdown 3",
+        "synth": "Synth",
+        "pre-drop": "Pre-Drop",
+        "buildup-1": "Buildup 1",
+        "buildup-2": "Buildup 2",
+        "buildup-3": "Buildup 3",
+        "drop": "Drop"
+    ]
+
+    private static let banks: [[Mapping]] = baseBanks.enumerated().map { bankIndex, base in
+        base + extendedRoleIDs.enumerated().map { index, roleID in
+            let buttonNumber = index + 9
+            return mapping(
+                roleID,
+                roleNames[roleID] ?? roleID,
+                "AUTOLOOP \(buttonNumber) · BANK \(bankIndex + 1)"
+            )
+        }
+    }
+
     public static let incomplete = AutoloopCatalogState(
         revision: 4,
-        defaultsVersion: 2,
+        defaultsVersion: 3,
         themes: [
             AutoloopThemeState(id: 1, name: "Blue Pink", sortOrder: 1),
             AutoloopThemeState(id: 2, name: "Green Pink", sortOrder: 2),

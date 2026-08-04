@@ -63,7 +63,7 @@ func launchesRealEngine() async throws {
         #expect(phraseRoleName(snapshot, roleID: "synth") == "Synth")
         #expect(autoloopCatalogRevision(snapshot) == 1)
         #expect(autoloopThemeNames(snapshot).count == 4)
-        #expect(autoloopVariantCount(snapshot, roleID: "synth") == 1)
+        #expect(autoloopVariantCount(snapshot, roleID: "synth") == 4)
 
         let renamedRole = try await supervisor.send(
             .mutatePhraseRoleCatalog(
@@ -114,16 +114,16 @@ func launchesRealEngine() async throws {
                 expectedAutoloopCatalogRevision: 2,
                 mutation: .setButton(
                     themeID: 1,
-                    buttonNumber: 1,
+                    buttonNumber: 32,
                     roleID: "drop",
-                    displayName: "DROP BLUE PINK - NEW 1"
+                    displayName: "DROP BLUE PINK - NEW 32"
                 )
             ),
             messageID: "swift-map-autoloop-button"
         )
         #expect(autoloopCatalogRevision(snapshot) == 3)
-        #expect(autoloopButtonName(snapshot, themeID: 1, buttonNumber: 1) == "DROP BLUE PINK - NEW 1")
-        #expect(autoloopButtonRole(snapshot, themeID: 1, buttonNumber: 1) == "drop")
+        #expect(autoloopButtonName(snapshot, themeID: 1, buttonNumber: 32) == "DROP BLUE PINK - NEW 32")
+        #expect(autoloopButtonRole(snapshot, themeID: 1, buttonNumber: 32) == "drop")
         #expect(autoloopMissingCellCount(snapshot) == 0)
 
         let staleAutoloop = try await supervisor.send(
@@ -226,8 +226,8 @@ func launchesRealEngine() async throws {
         #expect(phraseRoleName(snapshot, roleID: "synth") == "Lead Synth")
         #expect(autoloopCatalogRevision(snapshot) == 3)
         #expect(autoloopThemeNames(snapshot).first == "Electric Garden")
-        #expect(autoloopButtonName(snapshot, themeID: 1, buttonNumber: 1) == "DROP BLUE PINK - NEW 1")
-        #expect(autoloopButtonRole(snapshot, themeID: 1, buttonNumber: 1) == "drop")
+        #expect(autoloopButtonName(snapshot, themeID: 1, buttonNumber: 32) == "DROP BLUE PINK - NEW 32")
+        #expect(autoloopButtonRole(snapshot, themeID: 1, buttonNumber: 32) == "drop")
         #expect(autoloopMissingCellCount(snapshot) == 0)
         let reopenedEditor = try await supervisor.send(
             .openLibraryTrackEditor(trackID: requiredFirstLibraryTrackID(snapshot)),

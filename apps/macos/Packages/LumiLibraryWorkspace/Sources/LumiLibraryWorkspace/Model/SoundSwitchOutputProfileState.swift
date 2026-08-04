@@ -5,7 +5,7 @@ public struct SoundSwitchOutputProfileState: Equatable, Sendable {
         targetName: "SoundSwitch",
         controllerName: "Lumi Virtual MIDI Controller",
         bankCount: 4,
-        slotsPerBank: 8,
+        slotsPerBank: 32,
         slotsPerPage: 8
     )
 

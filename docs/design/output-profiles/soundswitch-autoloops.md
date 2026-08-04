@@ -17,7 +17,8 @@ controller. The UI never suggests that Lumi controls or depends on Control One.
 
 - four clearly numbered and named banks;
 - organization prepared for Theme, Genre, Function, and Custom;
-- eight stable AutoLoop buttons per bank, 32 total;
+- 32 stable AutoLoop positions per bank, 128 total;
+- four pages of eight physically recognizable buttons;
 - mapped and available states;
 - a primary mapping surface that mirrors the recognizable SoundSwitch/Control
   One four-column layout instead of reducing it to a technical list;
@@ -31,14 +32,17 @@ The same button number may use a different Phrase Type in another bank. Internal
 mapping identifiers are never presented as editable Variant names.
 
 The spatial layout is part of the product contract: four bank columns remain
-visible together and each column contains eight vertically ordered buttons, as
-in SoundSwitch AutoLoops and the corresponding Control One mental model. The
-inspector augments that surface; it never replaces it.
+visible together and each column contains eight vertically ordered physical
+buttons for the selected page, as in SoundSwitch AutoLoops and the corresponding
+Control One mental model. Pages `1–8`, `9–16`, `17–24`, and `25–32` expose all
+32 positions in each bank. The inspector augments that surface; it never
+replaces it.
 
 ### Test Controller
 
 - `Lumi Virtual MIDI Controller` identity;
-- four bank columns with eight AutoLoop buttons each;
+- four bank columns with eight physical buttons for the selected page;
+- four pages expose all 32 AutoLoops in each bank;
 - the exact same names and Phrase Types as the Banks view;
 - no second configuration model;
 - live test disabled until the CoreMIDI POC.

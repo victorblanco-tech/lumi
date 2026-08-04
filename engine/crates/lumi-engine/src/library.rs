@@ -629,7 +629,7 @@ impl LibraryWorker {
                 display_name,
             } => {
                 self.require_active_role(&role_id)?;
-                if !(1..=8).contains(&button_number) {
+                if !(1..=32).contains(&button_number) {
                     return Err(AutoloopCatalogError::IdentifierOverflow.into());
                 }
                 catalog.set_mapping(
@@ -1811,7 +1811,7 @@ mod tests {
             .ok_or("Synth usage is missing")?;
         assert_eq!(synth["usage"]["trackCount"], 1);
         assert_eq!(synth["usage"]["phraseCount"], 1);
-        assert_eq!(synth["usage"]["catalogRowCount"], 1);
+        assert_eq!(synth["usage"]["catalogRowCount"], 4);
 
         let stale = worker.mutate_phrase_role_catalog(
             2,
@@ -1851,7 +1851,7 @@ mod tests {
                 .as_array()
                 .and_then(|roles| roles.iter().find(|role| role["id"] == "synth"))
                 .ok_or("Synth matrix row is missing")?;
-            assert_eq!(synth["variants"].as_array().map(Vec::len), Some(1));
+            assert_eq!(synth["variants"].as_array().map(Vec::len), Some(4));
             assert_eq!(initial["autoloopCatalog"]["preflight"]["status"], "ready");
 
             worker.mutate_autoloop_catalog(
