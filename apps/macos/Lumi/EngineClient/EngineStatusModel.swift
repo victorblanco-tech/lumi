@@ -265,7 +265,7 @@ final class EngineStatusModel: ObservableObject {
                 expectedTimelineRevision: editor.timeline.revision,
                 strategy: .rebase
             )
-            success = "Lumi phrases rebased to complete bars."
+            success = "Lumi Phrase Points rebased to whole beats."
         case let .merge(choices):
             command = .reconcileLibrarySource(
                 trackID: editor.track.id,
@@ -468,16 +468,16 @@ final class EngineStatusModel: ObservableObject {
 
     private func engineTimelineEdit(_ request: TrackTimelineEditRequest) -> EngineTimelineEdit {
         switch request {
-        case let .create(startBar, endBar, roleID):
-            .create(startBar: startBar, endBar: endBar, roleID: roleID)
-        case let .split(phraseIndex, atBar):
-            .split(phraseIndex: phraseIndex, atBar: atBar)
+        case let .create(startBeat, endBeat, roleID):
+            .create(startBeat: startBeat, endBeat: endBeat, roleID: roleID)
+        case let .split(phraseIndex, atBeat):
+            .split(phraseIndex: phraseIndex, atBeat: atBeat)
         case let .mergePrevious(phraseIndex):
             .mergePrevious(phraseIndex: phraseIndex)
         case let .mergeNext(phraseIndex):
             .mergeNext(phraseIndex: phraseIndex)
-        case let .moveBoundary(phraseIndex, toBar):
-            .moveBoundary(afterPhraseIndex: phraseIndex, toBar: toBar)
+        case let .moveBoundary(phraseIndex, toBeat):
+            .moveBoundary(afterPhraseIndex: phraseIndex, toBeat: toBeat)
         case let .deleteAbsorbPrevious(phraseIndex):
             .deleteAbsorbPrevious(phraseIndex: phraseIndex)
         case let .deleteAbsorbNext(phraseIndex):

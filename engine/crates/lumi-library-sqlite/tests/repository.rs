@@ -21,7 +21,7 @@ use rusqlite::Connection;
 #[test]
 fn migrates_an_empty_database() -> Result<(), Box<dyn Error>> {
     let repository = SqliteLibraryRepository::in_memory()?;
-    assert_eq!(repository.schema_version()?, 4);
+    assert_eq!(repository.schema_version()?, 5);
     assert_eq!(
         repository
             .page_tracks(TrackPageRequest::try_new(0, 25)?)?
@@ -55,6 +55,11 @@ fn migrates_version_one_timeline_history_without_losing_rows() -> Result<(), Box
                 role_id TEXT NOT NULL,
                 PRIMARY KEY(track_id, revision, phrase_index)
             );
+            CREATE TABLE beat_grids (
+                track_id INTEGER PRIMARY KEY,
+                beats_per_bar INTEGER NOT NULL
+            );
+            INSERT INTO beat_grids VALUES (1, 4);
             INSERT INTO timeline_revisions VALUES (1, 1, 'v1', 8, 'source-import');
             INSERT INTO phrase_instances VALUES (1, 1, 0, 0, 8, 'intro');
             PRAGMA user_version = 1;
@@ -63,7 +68,7 @@ fn migrates_version_one_timeline_history_without_losing_rows() -> Result<(), Box
     }
 
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 4);
+    assert_eq!(repository.schema_version()?, 5);
     drop(repository);
     let connection = Connection::open(&path)?;
     let reason: String = connection.query_row(
@@ -72,12 +77,30 @@ fn migrates_version_one_timeline_history_without_losing_rows() -> Result<(), Box
         |row| row.get(0),
     )?;
     let loop_strategy: String = connection.query_row(
-        "SELECT loop_strategy FROM phrase_instances WHERE track_id = 1 AND revision = 1",
+        "SELECT loop_strategy FROM phrase_points WHERE track_id = 1 AND revision = 1",
         [],
         |row| row.get(0),
     )?;
+    let total_beats: i64 = connection.query_row(
+        "SELECT total_beats FROM timeline_revisions WHERE track_id = 1 AND revision = 1",
+        [],
+        |row| row.get(0),
+    )?;
+    let point_beat: i64 = connection.query_row(
+        "SELECT beat FROM phrase_points WHERE track_id = 1 AND revision = 1",
+        [],
+        |row| row.get(0),
+    )?;
+    let mut point_column_statement = connection.prepare("PRAGMA table_info(phrase_points)")?;
+    let point_columns = point_column_statement
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()?;
     assert_eq!(reason, "initial-source-mapping");
     assert_eq!(loop_strategy, "auto");
+    assert_eq!(total_beats, 32);
+    assert_eq!(point_beat, 0);
+    assert!(point_columns.contains(&"beat".to_owned()));
+    assert!(!point_columns.iter().any(|column| column.contains("end")));
     std::fs::remove_file(path)?;
     Ok(())
 }
@@ -102,7 +125,7 @@ fn migrates_version_two_phrase_roles_into_an_unseeded_catalog() -> Result<(), Bo
     }
 
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 4);
+    assert_eq!(repository.schema_version()?, 5);
     let catalog = repository.phrase_role_catalog()?;
     assert_eq!(catalog.revision(), 0);
     assert_eq!(catalog.defaults_version(), 0);
@@ -145,7 +168,7 @@ fn migrates_version_three_into_an_unseeded_autoloop_catalog() -> Result<(), Box<
     }
 
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 4);
+    assert_eq!(repository.schema_version()?, 5);
     let catalog = repository.autoloop_catalog()?;
     assert_eq!(catalog.revision(), 0);
     assert_eq!(catalog.defaults_version(), 0);
@@ -318,7 +341,7 @@ fn source_reconcile_updates_analysis_and_timeline_in_one_transaction() -> Result
     let reconciled = reconcile_timeline(
         &initial,
         incoming.analysis_revision().clone(),
-        initial.total_bars(),
+        initial.total_beats(),
         initial.phrases(),
         &ReconcileStrategy::KeepLumi,
     )?;
@@ -377,7 +400,7 @@ fn failed_reconcile_rolls_back_source_analysis_and_timeline_together() -> Result
     let reconciled = reconcile_timeline(
         &initial,
         incoming.analysis_revision().clone(),
-        initial.total_bars(),
+        initial.total_beats(),
         initial.phrases(),
         &ReconcileStrategy::KeepLumi,
     )?;
@@ -431,7 +454,7 @@ fn phrase_roles_and_timeline_revisions_survive_a_restart() -> Result<(), Box<dyn
         repository.append_timeline_revision(&timeline, None)?;
         let second_timeline = timeline.edit(TimelineEditCommand::Split {
             phrase_index: 0,
-            at_bar: 4,
+            at_beat: 4,
         })?;
         repository.append_timeline_revision(&second_timeline, Some(TimelineRevision::initial()))?;
     }
@@ -777,8 +800,7 @@ fn source_timeline(
     track_id: lumi_domain::TrackId,
     track: &lumi_library::StoredTrack,
 ) -> Result<LumiPhraseTimeline, Box<dyn Error>> {
-    let beats_per_bar = u32::from(track.beat_grid().beats_per_bar());
-    let total_bars = u32::try_from(track.beat_grid().markers().len())? / beats_per_bar;
+    let total_beats = u32::try_from(track.beat_grid().markers().len())?;
     let phrases = track
         .raw_phrases()
         .iter()
@@ -786,8 +808,8 @@ fn source_timeline(
         .map(|(index, phrase)| {
             Ok(PhraseInstance::new(
                 u16::try_from(index)?,
-                phrase.start_beat() / beats_per_bar,
-                phrase.end_beat() / beats_per_bar,
+                phrase.start_beat(),
+                phrase.end_beat(),
                 PhraseRoleId::try_new("source")?,
             ))
         })
@@ -796,7 +818,7 @@ fn source_timeline(
         track_id,
         TimelineRevision::initial(),
         track.summary().source_revision().clone(),
-        total_bars,
+        total_beats,
         TimelineRevisionOrigin::SourceImport,
         phrases,
     )?)

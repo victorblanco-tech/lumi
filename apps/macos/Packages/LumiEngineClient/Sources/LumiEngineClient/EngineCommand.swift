@@ -52,39 +52,39 @@ public enum EngineSourceReconcileStrategy: Equatable, Sendable {
 }
 
 public enum EngineTimelineEdit: Equatable, Sendable {
-    case create(startBar: UInt32, endBar: UInt32, roleID: String)
-    case split(phraseIndex: UInt16, atBar: UInt32)
+    case create(startBeat: UInt32, endBeat: UInt32, roleID: String)
+    case split(phraseIndex: UInt16, atBeat: UInt32)
     case mergePrevious(phraseIndex: UInt16)
     case mergeNext(phraseIndex: UInt16)
-    case moveBoundary(afterPhraseIndex: UInt16, toBar: UInt32)
+    case moveBoundary(afterPhraseIndex: UInt16, toBeat: UInt32)
     case deleteAbsorbPrevious(phraseIndex: UInt16)
     case deleteAbsorbNext(phraseIndex: UInt16)
     case changeRole(phraseIndex: UInt16, roleID: String)
 
     fileprivate var payload: [String: JSONValue] {
         switch self {
-        case let .create(startBar, endBar, roleID):
+        case let .create(startBeat, endBeat, roleID):
             return [
                 "operation": .string("create"),
-                "startBar": .number(Double(startBar)),
-                "endBar": .number(Double(endBar)),
+                "startBeat": .number(Double(startBeat)),
+                "endBeat": .number(Double(endBeat)),
                 "roleId": .string(roleID)
             ]
-        case let .split(phraseIndex, atBar):
+        case let .split(phraseIndex, atBeat):
             return [
                 "operation": .string("split"),
                 "phraseIndex": .number(Double(phraseIndex)),
-                "atBar": .number(Double(atBar))
+                "atBeat": .number(Double(atBeat))
             ]
         case let .mergePrevious(phraseIndex):
             return indexed("mergePrevious", phraseIndex: phraseIndex)
         case let .mergeNext(phraseIndex):
             return indexed("mergeNext", phraseIndex: phraseIndex)
-        case let .moveBoundary(phraseIndex, toBar):
+        case let .moveBoundary(phraseIndex, toBeat):
             return [
                 "operation": .string("moveBoundary"),
                 "phraseIndex": .number(Double(phraseIndex)),
-                "toBar": .number(Double(toBar))
+                "toBeat": .number(Double(toBeat))
             ]
         case let .deleteAbsorbPrevious(phraseIndex):
             return indexed("deleteAbsorbPrevious", phraseIndex: phraseIndex)

@@ -32,38 +32,41 @@ fn timeline() -> Result<LumiPhraseTimeline, Box<dyn std::error::Error>> {
 
 fn assert_canonical(timeline: &LumiPhraseTimeline) {
     assert!(!timeline.phrases().is_empty());
-    assert_eq!(timeline.phrases()[0].start_bar(), 0);
+    assert_eq!(timeline.phrases()[0].start_beat(), 0);
     assert_eq!(
-        timeline.phrases().last().map(PhraseInstance::end_bar),
+        timeline.phrases().last().map(PhraseInstance::end_beat),
         Some(16)
     );
     for (index, phrase) in timeline.phrases().iter().enumerate() {
         assert_eq!(usize::from(phrase.index()), index);
-        assert!(phrase.start_bar() < phrase.end_bar());
+        assert!(phrase.start_beat() < phrase.end_beat());
         if index > 0 {
-            assert_eq!(timeline.phrases()[index - 1].end_bar(), phrase.start_bar());
+            assert_eq!(
+                timeline.phrases()[index - 1].end_beat(),
+                phrase.start_beat()
+            );
         }
     }
 }
 
 #[test]
-fn every_edit_preserves_contiguous_complete_bar_coverage_and_history()
+fn every_edit_preserves_contiguous_beat_coverage_and_history()
 -> Result<(), Box<dyn std::error::Error>> {
     let commands = [
         TimelineEditCommand::Create {
-            start_bar: 2,
-            end_bar: 6,
+            start_beat: 2,
+            end_beat: 6,
             role_id: role("synth")?,
         },
         TimelineEditCommand::Split {
             phrase_index: 1,
-            at_bar: 5,
+            at_beat: 5,
         },
         TimelineEditCommand::MergePrevious { phrase_index: 2 },
         TimelineEditCommand::MergeNext { phrase_index: 1 },
         TimelineEditCommand::MoveBoundary {
             boundary_after_phrase_index: 1,
-            to_bar: 10,
+            to_beat: 10,
         },
         TimelineEditCommand::Delete {
             phrase_index: 1,
@@ -132,7 +135,7 @@ fn split_keeps_exact_choice_left_and_resets_new_right_to_auto()
 -> Result<(), Box<dyn std::error::Error>> {
     let edited = timeline()?.edit(TimelineEditCommand::Split {
         phrase_index: 1,
-        at_bar: 6,
+        at_beat: 6,
     })?;
 
     assert!(matches!(
@@ -154,24 +157,24 @@ fn invalid_boundaries_and_implicit_delete_are_typed_rejections()
     assert_eq!(
         original.edit(TimelineEditCommand::Split {
             phrase_index: 1,
-            at_bar: 4,
+            at_beat: 4,
         }),
         Err(TimelineEditError::InvalidSplitBoundary)
     );
     assert_eq!(
         original.edit(TimelineEditCommand::MoveBoundary {
             boundary_after_phrase_index: 1,
-            to_bar: 4,
+            to_beat: 4,
         }),
         Err(TimelineEditError::InvalidBoundaryMove)
     );
     assert_eq!(
         original.edit(TimelineEditCommand::Create {
-            start_bar: 9,
-            end_bar: 9,
+            start_beat: 9,
+            end_beat: 9,
             role_id: role("drop")?,
         }),
-        Err(TimelineEditError::InvalidBarSelection)
+        Err(TimelineEditError::InvalidBeatSelection)
     );
     assert_eq!(
         original.edit(TimelineEditCommand::Delete {
@@ -182,8 +185,8 @@ fn invalid_boundaries_and_implicit_delete_are_typed_rejections()
     );
     assert_eq!(
         original.edit(TimelineEditCommand::Create {
-            start_bar: 0,
-            end_bar: 4,
+            start_beat: 0,
+            end_beat: 4,
             role_id: role("intro")?,
         }),
         Err(TimelineEditError::NoChange)
@@ -225,13 +228,13 @@ fn randomized_valid_edits_never_create_a_gap_overlap_or_zero_length_phrase()
             let index = usize::try_from(seed % u64::try_from(phrases.len())?)?;
             let phrase = &phrases[index];
             let command = match seed % 5 {
-                0 if phrase.end_bar() - phrase.start_bar() > 1 => TimelineEditCommand::Split {
+                0 if phrase.end_beat() - phrase.start_beat() > 1 => TimelineEditCommand::Split {
                     phrase_index: phrase.index(),
-                    at_bar: phrase.start_bar() + 1,
+                    at_beat: phrase.start_beat() + 1,
                 },
                 1 if index + 1 < phrases.len() => TimelineEditCommand::MoveBoundary {
                     boundary_after_phrase_index: phrase.index(),
-                    to_bar: phrases[index + 1].end_bar() - 1,
+                    to_beat: phrases[index + 1].end_beat() - 1,
                 },
                 2 if index > 0 => TimelineEditCommand::MergePrevious {
                     phrase_index: phrase.index(),
@@ -290,7 +293,7 @@ fn canonical_edit_transcript_is_stable() -> Result<(), Box<dyn std::error::Error
     let commands = [
         TimelineEditCommand::Split {
             phrase_index: 1,
-            at_bar: 6,
+            at_beat: 6,
         },
         TimelineEditCommand::ChangeRole {
             phrase_index: 2,
@@ -298,7 +301,7 @@ fn canonical_edit_transcript_is_stable() -> Result<(), Box<dyn std::error::Error
         },
         TimelineEditCommand::MoveBoundary {
             boundary_after_phrase_index: 1,
-            to_bar: 5,
+            to_beat: 5,
         },
         TimelineEditCommand::Delete {
             phrase_index: 1,
@@ -335,8 +338,8 @@ fn timeline_signature(value: &LumiPhraseTimeline) -> String {
             };
             format!(
                 "{}-{}:{}:{strategy}",
-                phrase.start_bar(),
-                phrase.end_bar(),
+                phrase.start_beat(),
+                phrase.end_beat(),
                 phrase.role_id().as_str()
             )
         })

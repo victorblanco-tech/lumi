@@ -340,7 +340,7 @@ impl PlaylistPage {
 pub struct TimelineRevisionSummary {
     revision: TimelineRevision,
     baseline_revision: SourceRevision,
-    total_bars: u32,
+    total_beats: u32,
     origin: TimelineRevisionOrigin,
     reason: crate::TimelineRevisionReason,
     parent_revision: Option<TimelineRevision>,
@@ -354,7 +354,7 @@ impl TimelineRevisionSummary {
     pub const fn new(
         revision: TimelineRevision,
         baseline_revision: SourceRevision,
-        total_bars: u32,
+        total_beats: u32,
         origin: TimelineRevisionOrigin,
         reason: crate::TimelineRevisionReason,
         parent_revision: Option<TimelineRevision>,
@@ -364,7 +364,7 @@ impl TimelineRevisionSummary {
         Self {
             revision,
             baseline_revision,
-            total_bars,
+            total_beats,
             origin,
             reason,
             parent_revision,
@@ -384,8 +384,8 @@ impl TimelineRevisionSummary {
     }
 
     #[must_use]
-    pub const fn total_bars(&self) -> u32 {
-        self.total_bars
+    pub const fn total_beats(&self) -> u32 {
+        self.total_beats
     }
 
     #[must_use]

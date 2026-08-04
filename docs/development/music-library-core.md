@@ -19,14 +19,14 @@ source color, audio reference, and raw source phrase observations. Source
 observations are evidence for a later mapping step; they are not Lumi's editable
 phrase model.
 
-Lumi stores its own phrase timeline separately. A timeline covers complete bars
-without gaps, references configurable phrase-role identifiers, and is appended
+Lumi stores its own phrase timeline separately. Ordered Phrase Points cover all
+beats without gaps, reference configurable phrase-role identifiers, and are appended
 as an immutable revision. Repository writes use an expected head revision to
 prevent two editors from silently overwriting each other.
 
 ## SQLite persistence
 
-Schema version 4 separates:
+Schema version 5 separates:
 
 - source registrations, immutable import-baseline facts, canonical track and
   playlist identities;
@@ -36,7 +36,8 @@ Schema version 4 separates:
 - a provider-neutral four-Theme Autoloop matrix with role-owned variants,
   logical cells, optimistic revisions, and no physical target addressing;
 - immutable Lumi timeline revisions, edit reason, parent/restore provenance,
-  per-phrase loop strategy, and their current heads.
+  per-point role/loop strategy, derived ends, and their current heads. Schema v5
+  migrates every legacy bar boundary losslessly to its corresponding beat.
 
 The pair `(source_id, source_track_id)` is unique. Reimporting the same analysis
 revision is a no-op and preserves the Lumi track ID. A changed source analysis

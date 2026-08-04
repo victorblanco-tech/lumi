@@ -574,8 +574,8 @@ public struct LibrarySnapshotDecoder: Sendable {
             changes: changes,
             metadataOnly: try boolean(object, "metadataOnly"),
             requiresTimelineDecision: try boolean(object, "requiresTimelineDecision"),
-            sourceTotalBars: try UInt32(exactly: unsigned(object, "sourceTotalBars"))
-                .required(.invalidNumber("sourceTotalBars")),
+            sourceTotalBeats: try UInt32(exactly: unsigned(object, "sourceTotalBeats"))
+                .required(.invalidNumber("sourceTotalBeats")),
             rebaseAmbiguities: ambiguities,
             conflicts: conflicts
         )
@@ -588,14 +588,14 @@ public struct LibrarySnapshotDecoder: Sendable {
         guard case let .object(object) = value else {
             throw LibrarySnapshotError.invalidObject
         }
-        let start = try UInt32(exactly: unsigned(object, "startBar"))
-            .required(.invalidNumber("startBar"))
-        let end = try UInt32(exactly: unsigned(object, "endBar"))
-            .required(.invalidNumber("endBar"))
+        let start = try UInt32(exactly: unsigned(object, "startBeat"))
+            .required(.invalidNumber("startBeat"))
+        let end = try UInt32(exactly: unsigned(object, "endBeat"))
+            .required(.invalidNumber("endBeat"))
         guard start < end else { throw LibrarySnapshotError.invalidPhraseTimeline }
         return TrackSourcePhraseVersion(
-            startBar: start,
-            endBar: end,
+            startBeat: start,
+            endBeat: end,
             roleID: try string(object, "roleId")
         )
     }

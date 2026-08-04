@@ -21,7 +21,7 @@ use lumi_library::{
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 use thiserror::Error;
 
-const SCHEMA_VERSION: u32 = 4;
+const SCHEMA_VERSION: u32 = 5;
 const DEFAULTS_VERSION_KEY: &str = "phrase-role-defaults-version";
 const CATALOG_REVISION_KEY: &str = "phrase-role-catalog-revision";
 const AUTOLOOP_DEFAULTS_VERSION_KEY: &str = "autoloop-catalog-defaults-version";
@@ -180,19 +180,18 @@ impl SqliteLibraryRepository {
                     track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
                     revision INTEGER NOT NULL,
                     baseline_revision TEXT NOT NULL,
-                    total_bars INTEGER NOT NULL,
+                    total_beats INTEGER NOT NULL,
                     origin TEXT NOT NULL,
                     reason TEXT NOT NULL,
                     parent_revision INTEGER,
                     restored_from_revision INTEGER,
                     PRIMARY KEY(track_id, revision)
                 );
-                CREATE TABLE phrase_instances (
+                CREATE TABLE phrase_points (
                     track_id INTEGER NOT NULL,
                     revision INTEGER NOT NULL,
                     phrase_index INTEGER NOT NULL,
-                    start_bar INTEGER NOT NULL,
-                    end_bar INTEGER NOT NULL,
+                    beat INTEGER NOT NULL,
                     role_id TEXT NOT NULL,
                     loop_strategy TEXT NOT NULL,
                     PRIMARY KEY(track_id, revision, phrase_index),
@@ -205,7 +204,7 @@ impl SqliteLibraryRepository {
                     FOREIGN KEY(track_id, revision)
                         REFERENCES timeline_revisions(track_id, revision)
                 );
-                PRAGMA user_version = 4;
+                PRAGMA user_version = 5;
                 COMMIT;
                 ",
             )?;
@@ -291,8 +290,49 @@ impl SqliteLibraryRepository {
                 COMMIT;
                 ",
             )?;
+            current = 4;
+        }
+        if current == 4 {
+            if self.table_exists("timeline_revisions")?
+                && self.table_exists("phrase_instances")?
+                && self.table_exists("beat_grids")?
+            {
+                self.connection.execute_batch(
+                    "
+                    BEGIN IMMEDIATE;
+                    UPDATE timeline_revisions
+                       SET total_bars = total_bars * COALESCE(
+                           (SELECT beats_per_bar FROM beat_grids
+                             WHERE beat_grids.track_id = timeline_revisions.track_id),
+                           4
+                       );
+                    UPDATE phrase_instances
+                       SET start_bar = start_bar * COALESCE(
+                           (SELECT beats_per_bar FROM beat_grids
+                             WHERE beat_grids.track_id = phrase_instances.track_id),
+                           4
+                       );
+                    ALTER TABLE timeline_revisions RENAME COLUMN total_bars TO total_beats;
+                    ALTER TABLE phrase_instances RENAME TO phrase_points;
+                    ALTER TABLE phrase_points RENAME COLUMN start_bar TO beat;
+                    ALTER TABLE phrase_points DROP COLUMN end_bar;
+                    PRAGMA user_version = 5;
+                    COMMIT;
+                    ",
+                )?;
+            } else {
+                self.connection.execute_batch("PRAGMA user_version = 5;")?;
+            }
         }
         Ok(())
+    }
+
+    fn table_exists(&self, name: &str) -> Result<bool, SqliteLibraryError> {
+        Ok(self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?1)",
+            [name],
+            |row| row.get::<_, bool>(0),
+        )?)
     }
 
     fn store_analysis(
@@ -403,7 +443,7 @@ impl SqliteLibraryRepository {
         let header = self
             .connection
             .query_row(
-                "SELECT baseline_revision, total_bars, origin, reason,
+                "SELECT baseline_revision, total_beats, origin, reason,
                         parent_revision, restored_from_revision
                  FROM timeline_revisions WHERE track_id = ?1 AND revision = ?2",
                 params![to_i64(track_id.value())?, to_i64(revision.value())?],
@@ -419,37 +459,44 @@ impl SqliteLibraryRepository {
                 },
             )
             .optional()?;
-        let Some((baseline_revision, total_bars, origin, reason, parent_revision, restored_from)) =
+        let Some((baseline_revision, total_beats, origin, reason, parent_revision, restored_from)) =
             header
         else {
             return Ok(None);
         };
         let mut statement = self.connection.prepare(
-            "SELECT phrase_index, start_bar, end_bar, role_id, loop_strategy
-             FROM phrase_instances
+            "SELECT phrase_index, beat, role_id, loop_strategy
+             FROM phrase_points
              WHERE track_id = ?1 AND revision = ?2 ORDER BY phrase_index",
         )?;
         let mut rows = statement.query(params![
             to_i64(track_id.value())?,
             to_i64(revision.value())?
         ])?;
-        let mut phrases = Vec::new();
+        let mut points = Vec::new();
         while let Some(row) = rows.next()? {
-            phrases.push(
-                PhraseInstance::new(
-                    to_u16(row.get(0)?, "phrase index")?,
-                    to_u32(row.get(1)?, "start bar")?,
-                    to_u32(row.get(2)?, "end bar")?,
-                    PhraseRoleId::try_new(row.get::<_, String>(3)?)?,
-                )
-                .with_loop_strategy(decode_loop_strategy(&row.get::<_, String>(4)?)?),
-            );
+            points.push((
+                to_u16(row.get(0)?, "phrase point index")?,
+                to_u32(row.get(1)?, "phrase point beat")?,
+                PhraseRoleId::try_new(row.get::<_, String>(2)?)?,
+                decode_loop_strategy(&row.get::<_, String>(3)?)?,
+            ));
         }
+        let total_beats = to_u32(total_beats, "total beats")?;
+        let phrases = points
+            .iter()
+            .enumerate()
+            .map(|(offset, (index, beat, role_id, loop_strategy))| {
+                let end_beat = points.get(offset + 1).map_or(total_beats, |point| point.1);
+                PhraseInstance::new(*index, *beat, end_beat, role_id.clone())
+                    .with_loop_strategy(loop_strategy.clone())
+            })
+            .collect();
         Ok(Some(LumiPhraseTimeline::try_new_with_history(
             track_id,
             revision,
             SourceRevision::try_new(baseline_revision)?,
-            to_u32(total_bars, "total bars")?,
+            total_beats,
             decode_origin(&origin)?,
             decode_reason(&reason)?,
             parent_revision
@@ -753,14 +800,14 @@ impl LibraryRepository for SqliteLibraryRepository {
             .transpose()?;
         transaction.execute(
             "INSERT INTO timeline_revisions
-             (track_id, revision, baseline_revision, total_bars, origin, reason,
+             (track_id, revision, baseline_revision, total_beats, origin, reason,
               parent_revision, restored_from_revision)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 track_id,
                 to_i64(timeline.revision().value())?,
                 timeline.baseline_revision().as_str(),
-                i64::from(timeline.total_bars()),
+                i64::from(timeline.total_beats()),
                 encode_origin(timeline.origin()),
                 encode_reason(timeline.reason()),
                 parent_revision,
@@ -769,17 +816,16 @@ impl LibraryRepository for SqliteLibraryRepository {
         )?;
         {
             let mut statement = transaction.prepare(
-                "INSERT INTO phrase_instances
-                 (track_id, revision, phrase_index, start_bar, end_bar, role_id, loop_strategy)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT INTO phrase_points
+                 (track_id, revision, phrase_index, beat, role_id, loop_strategy)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             )?;
             for phrase in timeline.phrases() {
                 statement.execute(params![
                     track_id,
                     to_i64(timeline.revision().value())?,
                     i64::from(phrase.index()),
-                    i64::from(phrase.start_bar()),
-                    i64::from(phrase.end_bar()),
+                    i64::from(phrase.start_beat()),
                     phrase.role_id().as_str(),
                     encode_loop_strategy(phrase.loop_strategy())?,
                 ])?;
@@ -1219,14 +1265,14 @@ impl LibraryRepository for SqliteLibraryRepository {
 
     fn phrase_role_usages(&self) -> Result<Vec<PhraseRoleUsage>, Self::Error> {
         let mut statement = self.connection.prepare(
-            "SELECT phrase_instances.role_id, tracks.id, tracks.title, COUNT(*)
-             FROM phrase_instances
+            "SELECT phrase_points.role_id, tracks.id, tracks.title, COUNT(*)
+             FROM phrase_points
              JOIN timeline_heads
-               ON timeline_heads.track_id = phrase_instances.track_id
-              AND timeline_heads.revision = phrase_instances.revision
-             JOIN tracks ON tracks.id = phrase_instances.track_id
-             GROUP BY phrase_instances.role_id, tracks.id, tracks.title
-             ORDER BY phrase_instances.role_id, tracks.title COLLATE NOCASE, tracks.id",
+               ON timeline_heads.track_id = phrase_points.track_id
+              AND timeline_heads.revision = phrase_points.revision
+             JOIN tracks ON tracks.id = phrase_points.track_id
+             GROUP BY phrase_points.role_id, tracks.id, tracks.title
+             ORDER BY phrase_points.role_id, tracks.title COLLATE NOCASE, tracks.id",
         )?;
         let mut rows = statement.query([])?;
         let mut grouped = BTreeMap::<PhraseRoleId, (u64, Vec<PhraseRoleTrackUsage>)>::new();
@@ -1442,14 +1488,14 @@ impl LibraryRepository for SqliteLibraryRepository {
             .transpose()?;
         transaction.execute(
             "INSERT INTO timeline_revisions
-             (track_id, revision, baseline_revision, total_bars, origin, reason,
+             (track_id, revision, baseline_revision, total_beats, origin, reason,
               parent_revision, restored_from_revision)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
             params![
                 to_i64(timeline.track_id().value())?,
                 to_i64(timeline.revision().value())?,
                 timeline.baseline_revision().as_str(),
-                i64::from(timeline.total_bars()),
+                i64::from(timeline.total_beats()),
                 encode_origin(timeline.origin()),
                 encode_reason(timeline.reason()),
                 parent_revision,
@@ -1458,17 +1504,16 @@ impl LibraryRepository for SqliteLibraryRepository {
         )?;
         {
             let mut statement = transaction.prepare(
-                "INSERT INTO phrase_instances
-                 (track_id, revision, phrase_index, start_bar, end_bar, role_id, loop_strategy)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+                "INSERT INTO phrase_points
+                 (track_id, revision, phrase_index, beat, role_id, loop_strategy)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
             )?;
             for phrase in timeline.phrases() {
                 statement.execute(params![
                     to_i64(timeline.track_id().value())?,
                     to_i64(timeline.revision().value())?,
                     i64::from(phrase.index()),
-                    i64::from(phrase.start_bar()),
-                    i64::from(phrase.end_bar()),
+                    i64::from(phrase.start_beat()),
                     phrase.role_id().as_str(),
                     encode_loop_strategy(phrase.loop_strategy())?,
                 ])?;
@@ -1522,14 +1567,14 @@ impl LibraryRepository for SqliteLibraryRepository {
             |row| row.get::<_, i64>(0),
         )?;
         let mut statement = self.connection.prepare(
-            "SELECT r.revision, r.baseline_revision, r.total_bars, r.origin,
+            "SELECT r.revision, r.baseline_revision, r.total_beats, r.origin,
                     r.reason, r.parent_revision, r.restored_from_revision,
                     COUNT(p.phrase_index)
              FROM timeline_revisions r
-             LEFT JOIN phrase_instances p
+             LEFT JOIN phrase_points p
                ON p.track_id = r.track_id AND p.revision = r.revision
              WHERE r.track_id = ?1
-             GROUP BY r.revision, r.baseline_revision, r.total_bars, r.origin,
+             GROUP BY r.revision, r.baseline_revision, r.total_beats, r.origin,
                       r.reason, r.parent_revision, r.restored_from_revision
              ORDER BY r.revision DESC
              LIMIT ?2 OFFSET ?3",
@@ -1544,7 +1589,7 @@ impl LibraryRepository for SqliteLibraryRepository {
             revisions.push(TimelineRevisionSummary::new(
                 timeline_revision(row.get(0)?, "timeline revision")?,
                 SourceRevision::try_new(row.get::<_, String>(1)?)?,
-                to_u32(row.get(2)?, "timeline total bars")?,
+                to_u32(row.get(2)?, "timeline total beats")?,
                 decode_origin(&row.get::<_, String>(3)?)?,
                 decode_reason(&row.get::<_, String>(4)?)?,
                 row.get::<_, Option<i64>>(5)?

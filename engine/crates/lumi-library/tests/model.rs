@@ -13,7 +13,7 @@ fn page_requests_are_bounded() {
 }
 
 #[test]
-fn timeline_rejects_gaps_and_preserves_complete_bar_coverage()
+fn timeline_rejects_gaps_and_preserves_complete_beat_coverage()
 -> Result<(), Box<dyn std::error::Error>> {
     let role = PhraseRoleId::try_new("breakdown-1")?;
     let valid = LumiPhraseTimeline::try_new(

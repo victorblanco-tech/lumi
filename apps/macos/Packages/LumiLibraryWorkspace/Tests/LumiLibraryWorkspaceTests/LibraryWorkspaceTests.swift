@@ -215,19 +215,19 @@ struct LibraryWorkspaceTests {
             "metadataOnly": .boolean(false),
             "requiresTimelineDecision": .boolean(true),
             "changes": .array([.string("beatGrid"), .string("rawPhrases")]),
-            "sourceTotalBars": .number(2),
+            "sourceTotalBeats": .number(8),
             "rebaseAmbiguities": .array([.number(0)]),
             "conflicts": .array([
                 .object([
                     "phraseIndex": .number(0),
                     "lumi": .object([
-                        "startBar": .number(0),
-                        "endBar": .number(1),
+                        "startBeat": .number(0),
+                        "endBeat": .number(4),
                         "roleId": .string("intro-outro")
                     ]),
                     "source": .object([
-                        "startBar": .number(0),
-                        "endBar": .number(2),
+                        "startBeat": .number(0),
+                        "endBeat": .number(8),
                         "roleId": .string("intro-outro")
                     ])
                 ])
@@ -241,7 +241,7 @@ struct LibraryWorkspaceTests {
         let reconciliation = try #require(state.editor?.sourceReconciliation)
         #expect(reconciliation.changes == ["beatGrid", "rawPhrases"])
         #expect(reconciliation.rebaseAmbiguities == [0])
-        #expect(reconciliation.conflicts.first?.source?.endBar == 2)
+        #expect(reconciliation.conflicts.first?.source?.endBeat == 8)
     }
 
     @Test("Loop strategy rows must remain compatible with their phrase role")
@@ -288,20 +288,18 @@ struct LibraryWorkspaceTests {
         }
     }
 
-    @Test("Every viewport scale preserves complete bars and invertible beat positions")
+    @Test("Viewport permits fractional pan and zoom while preserving invertible beat positions")
     func trackEditorViewportAlignment() {
-        for bars: UInt32 in [1, 2, 4, 8, 16, 32] {
+        for visibleBeats: Double in [1, 3.5, 8, 17.25, 64, 128] {
             let viewport = TrackEditorViewport(
-                startBar: 13,
-                visibleBars: bars,
-                totalBars: 64,
+                startBeat: 13.25,
+                visibleBeats: visibleBeats,
+                totalBeats: 256,
                 beatsPerBar: 4
             )
-            #expect(viewport.visibleBeats.isMultiple(of: 4))
-            #expect(viewport.startBeat.isMultiple(of: 4))
             for beat in stride(
-                from: Double(viewport.startBeat),
-                through: Double(viewport.endBeat),
+                from: viewport.startBeat,
+                through: viewport.endBeat,
                 by: 0.5
             ) {
                 let x = viewport.x(forBeat: beat, width: 1_024)
@@ -310,27 +308,27 @@ struct LibraryWorkspaceTests {
         }
     }
 
-    @Test("Phrase selection snaps every fractional beat to complete bar boundaries")
-    func phraseSelectionSnapsToBars() {
-        #expect(TrackEditorEditGeometry.containingBar(beat: 0.0, beatsPerBar: 4, totalBars: 16) == 0)
-        #expect(TrackEditorEditGeometry.containingBar(beat: 3.99, beatsPerBar: 4, totalBars: 16) == 0)
-        #expect(TrackEditorEditGeometry.containingBar(beat: 4.0, beatsPerBar: 4, totalBars: 16) == 1)
-        #expect(TrackEditorEditGeometry.containingBar(beat: 63.99, beatsPerBar: 4, totalBars: 16) == 15)
+    @Test("Phrase mutations quantize fractional positions to whole beats")
+    func phraseSelectionSnapsToBeats() {
+        #expect(TrackEditorEditGeometry.quantizedBeat(0.49, totalBeats: 64) == 0)
+        #expect(TrackEditorEditGeometry.quantizedBeat(0.5, totalBeats: 64) == 1)
+        #expect(TrackEditorEditGeometry.quantizedBeat(3.99, totalBeats: 64) == 4)
+        #expect(TrackEditorEditGeometry.quantizedBeat(63.99, totalBeats: 64) == 64)
         #expect(
-            TrackEditorEditGeometry.barSelection(anchorBar: 6, currentBar: 2, totalBars: 16)
+            TrackEditorEditGeometry.beatSelection(anchorBeat: 6, currentBeat: 2, totalBeats: 16)
                 == 2..<7
         )
     }
 
-    @Test("Viewport movement and zoom clamp to whole track bars")
+    @Test("Viewport movement and zoom clamp to the track without bar snapping")
     func trackEditorViewportClamping() {
-        let initial = TrackEditorViewport(startBar: 14, visibleBars: 8, totalBars: 16, beatsPerBar: 4)
-        #expect(initial.startBar == 8)
-        #expect(initial.moving(byBars: -100).startBar == 0)
-        #expect(initial.moving(byBars: 100).startBar == 8)
-        let zoomed = initial.zoomed(to: 4, aroundBar: 15)
-        #expect(zoomed.visibleBars == 4)
-        #expect(zoomed.startBar == 12)
+        let initial = TrackEditorViewport(startBeat: 56.5, visibleBeats: 32, totalBeats: 64, beatsPerBar: 4)
+        #expect(initial.startBeat == 32)
+        #expect(initial.moving(byBeats: -100).startBeat == 0)
+        #expect(initial.moving(byBeats: 100).startBeat == 32)
+        let zoomed = initial.zoomed(to: 15.5, aroundBeat: 60.25)
+        #expect(zoomed.visibleBeats == 15.5)
+        #expect(abs(zoomed.startBeat - 46.566_406_25) < 0.000_001)
     }
 
     @Test("Preview resolver accepts demo and readable local sources without source mutation")

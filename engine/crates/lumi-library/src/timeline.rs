@@ -67,19 +67,19 @@ pub enum PhraseLoopStrategy {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PhraseInstance {
     index: u16,
-    start_bar: u32,
-    end_bar: u32,
+    start_beat: u32,
+    end_beat: u32,
     role_id: PhraseRoleId,
     loop_strategy: PhraseLoopStrategy,
 }
 
 impl PhraseInstance {
     #[must_use]
-    pub const fn new(index: u16, start_bar: u32, end_bar: u32, role_id: PhraseRoleId) -> Self {
+    pub const fn new(index: u16, start_beat: u32, end_beat: u32, role_id: PhraseRoleId) -> Self {
         Self {
             index,
-            start_bar,
-            end_bar,
+            start_beat,
+            end_beat,
             role_id,
             loop_strategy: PhraseLoopStrategy::Auto,
         }
@@ -97,13 +97,13 @@ impl PhraseInstance {
     }
 
     #[must_use]
-    pub const fn start_bar(&self) -> u32 {
-        self.start_bar
+    pub const fn start_beat(&self) -> u32 {
+        self.start_beat
     }
 
     #[must_use]
-    pub const fn end_bar(&self) -> u32 {
-        self.end_bar
+    pub const fn end_beat(&self) -> u32 {
+        self.end_beat
     }
 
     #[must_use]
@@ -122,7 +122,7 @@ pub struct LumiPhraseTimeline {
     track_id: TrackId,
     revision: TimelineRevision,
     baseline_revision: SourceRevision,
-    total_bars: u32,
+    total_beats: u32,
     origin: TimelineRevisionOrigin,
     reason: TimelineRevisionReason,
     parent_revision: Option<TimelineRevision>,
@@ -135,7 +135,7 @@ impl LumiPhraseTimeline {
         track_id: TrackId,
         revision: TimelineRevision,
         baseline_revision: SourceRevision,
-        total_bars: u32,
+        total_beats: u32,
         origin: TimelineRevisionOrigin,
         phrases: Vec<PhraseInstance>,
     ) -> Result<Self, TimelineValidationError> {
@@ -154,7 +154,7 @@ impl LumiPhraseTimeline {
             track_id,
             revision,
             baseline_revision,
-            total_bars,
+            total_beats,
             origin,
             reason,
             parent_revision,
@@ -168,7 +168,7 @@ impl LumiPhraseTimeline {
         track_id: TrackId,
         revision: TimelineRevision,
         baseline_revision: SourceRevision,
-        total_bars: u32,
+        total_beats: u32,
         origin: TimelineRevisionOrigin,
         reason: TimelineRevisionReason,
         parent_revision: Option<TimelineRevision>,
@@ -178,7 +178,7 @@ impl LumiPhraseTimeline {
         if track_id.value() == 0 {
             return Err(TimelineValidationError::InvalidTrackId);
         }
-        if total_bars == 0 {
+        if total_beats == 0 {
             return Err(TimelineValidationError::EmptyDuration);
         }
         if phrases.is_empty() {
@@ -194,9 +194,9 @@ impl LumiPhraseTimeline {
             if usize::from(phrase.index()) != expected_index {
                 return Err(TimelineValidationError::UnorderedPhraseIndex);
             }
-            if phrase.start_bar() != previous_end
-                || phrase.end_bar() <= phrase.start_bar()
-                || phrase.end_bar() > total_bars
+            if phrase.start_beat() != previous_end
+                || phrase.end_beat() <= phrase.start_beat()
+                || phrase.end_beat() > total_beats
             {
                 return Err(TimelineValidationError::InvalidPhraseCoverage);
             }
@@ -208,16 +208,16 @@ impl LumiPhraseTimeline {
             {
                 return Err(TimelineValidationError::InvalidLoopStrategy);
             }
-            previous_end = phrase.end_bar();
+            previous_end = phrase.end_beat();
         }
-        if previous_end != total_bars {
+        if previous_end != total_beats {
             return Err(TimelineValidationError::InvalidPhraseCoverage);
         }
         Ok(Self {
             track_id,
             revision,
             baseline_revision,
-            total_bars,
+            total_beats,
             origin,
             reason,
             parent_revision,
@@ -242,8 +242,8 @@ impl LumiPhraseTimeline {
     }
 
     #[must_use]
-    pub const fn total_bars(&self) -> u32 {
-        self.total_bars
+    pub const fn total_beats(&self) -> u32 {
+        self.total_beats
     }
 
     #[must_use]
@@ -277,7 +277,7 @@ impl LumiPhraseTimeline {
             .checked_next()
             .ok_or(TimelineEditError::RevisionOverflow)?;
         let reason = command.reason();
-        let phrases = apply_edit(&self.phrases, self.total_bars, command)?;
+        let phrases = apply_edit(&self.phrases, self.total_beats, command)?;
         if phrases == self.phrases {
             return Err(TimelineEditError::NoChange);
         }
@@ -285,7 +285,7 @@ impl LumiPhraseTimeline {
             self.track_id,
             next_revision,
             self.baseline_revision.clone(),
-            self.total_bars,
+            self.total_beats,
             TimelineRevisionOrigin::UserEdit,
             reason,
             Some(self.revision),
@@ -300,7 +300,7 @@ impl LumiPhraseTimeline {
         target: &Self,
         reason: TimelineRevisionReason,
     ) -> Result<Self, TimelineEditError> {
-        if head.track_id != target.track_id || head.total_bars != target.total_bars {
+        if head.track_id != target.track_id || head.total_beats != target.total_beats {
             return Err(TimelineEditError::IncompatibleRevision);
         }
         if !matches!(
@@ -322,8 +322,8 @@ impl LumiPhraseTimeline {
             .map(|(index, phrase)| {
                 PhraseInstance::new(
                     u16::try_from(index).unwrap_or(u16::MAX),
-                    phrase.start_bar,
-                    phrase.end_bar,
+                    phrase.start_beat,
+                    phrase.end_beat,
                     phrase.role_id.clone(),
                 )
                 .with_loop_strategy(phrase.loop_strategy.clone())
@@ -333,7 +333,7 @@ impl LumiPhraseTimeline {
             head.track_id,
             next_revision,
             head.baseline_revision.clone(),
-            head.total_bars,
+            head.total_beats,
             TimelineRevisionOrigin::RevisionRestore,
             reason,
             Some(head.revision),
@@ -353,13 +353,13 @@ pub enum PhraseAbsorption {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TimelineEditCommand {
     Create {
-        start_bar: u32,
-        end_bar: u32,
+        start_beat: u32,
+        end_beat: u32,
         role_id: PhraseRoleId,
     },
     Split {
         phrase_index: u16,
-        at_bar: u32,
+        at_beat: u32,
     },
     MergePrevious {
         phrase_index: u16,
@@ -369,7 +369,7 @@ pub enum TimelineEditCommand {
     },
     MoveBoundary {
         boundary_after_phrase_index: u16,
-        to_bar: u32,
+        to_beat: u32,
     },
     Delete {
         phrase_index: u16,
@@ -424,40 +424,50 @@ impl TimelineEditCommand {
 
 fn apply_edit(
     current: &[PhraseInstance],
-    total_bars: u32,
+    total_beats: u32,
     command: TimelineEditCommand,
 ) -> Result<Vec<PhraseInstance>, TimelineEditError> {
     let mut phrases = current.to_vec();
     match command {
         TimelineEditCommand::Create {
-            start_bar,
-            end_bar,
+            start_beat,
+            end_beat,
             role_id,
         } => {
-            if start_bar >= end_bar || end_bar > total_bars {
-                return Err(TimelineEditError::InvalidBarSelection);
+            if start_beat >= end_beat || end_beat > total_beats {
+                return Err(TimelineEditError::InvalidBeatSelection);
             }
             let mut replacement = Vec::new();
             for phrase in &phrases {
-                if phrase.end_bar <= start_bar || phrase.start_bar >= end_bar {
+                if phrase.end_beat <= start_beat || phrase.start_beat >= end_beat {
                     replacement.push(phrase.clone());
                     continue;
                 }
-                if phrase.start_bar < start_bar {
+                if phrase.start_beat < start_beat {
                     replacement.push(
-                        PhraseInstance::new(0, phrase.start_bar, start_bar, phrase.role_id.clone())
-                            .with_loop_strategy(phrase.loop_strategy.clone()),
+                        PhraseInstance::new(
+                            0,
+                            phrase.start_beat,
+                            start_beat,
+                            phrase.role_id.clone(),
+                        )
+                        .with_loop_strategy(phrase.loop_strategy.clone()),
                     );
                 }
                 if replacement
                     .last()
-                    .is_none_or(|last| last.end_bar <= start_bar)
+                    .is_none_or(|last| last.end_beat <= start_beat)
                 {
-                    replacement.push(PhraseInstance::new(0, start_bar, end_bar, role_id.clone()));
+                    replacement.push(PhraseInstance::new(
+                        0,
+                        start_beat,
+                        end_beat,
+                        role_id.clone(),
+                    ));
                 }
-                if phrase.end_bar > end_bar {
+                if phrase.end_beat > end_beat {
                     replacement.push(
-                        PhraseInstance::new(0, end_bar, phrase.end_bar, phrase.role_id.clone())
+                        PhraseInstance::new(0, end_beat, phrase.end_beat, phrase.role_id.clone())
                             .with_loop_strategy(phrase.loop_strategy.clone()),
                     );
                 }
@@ -466,19 +476,19 @@ fn apply_edit(
         }
         TimelineEditCommand::Split {
             phrase_index,
-            at_bar,
+            at_beat,
         } => {
             let index = phrase_index_index(phrase_index, phrases.len())?;
             let phrase = phrases[index].clone();
-            if at_bar <= phrase.start_bar || at_bar >= phrase.end_bar {
+            if at_beat <= phrase.start_beat || at_beat >= phrase.end_beat {
                 return Err(TimelineEditError::InvalidSplitBoundary);
             }
             phrases[index] =
-                PhraseInstance::new(0, phrase.start_bar, at_bar, phrase.role_id.clone())
+                PhraseInstance::new(0, phrase.start_beat, at_beat, phrase.role_id.clone())
                     .with_loop_strategy(phrase.loop_strategy);
             phrases.insert(
                 index + 1,
-                PhraseInstance::new(0, at_bar, phrase.end_bar, phrase.role_id),
+                PhraseInstance::new(0, at_beat, phrase.end_beat, phrase.role_id),
             );
         }
         TimelineEditCommand::MergePrevious { phrase_index } => {
@@ -489,8 +499,8 @@ fn apply_edit(
             let selected = phrases[index].clone();
             phrases[index] = PhraseInstance::new(
                 0,
-                phrases[index - 1].start_bar,
-                selected.end_bar,
+                phrases[index - 1].start_beat,
+                selected.end_beat,
                 selected.role_id,
             )
             .with_loop_strategy(selected.loop_strategy);
@@ -504,8 +514,8 @@ fn apply_edit(
             let selected = phrases[index].clone();
             phrases[index] = PhraseInstance::new(
                 0,
-                selected.start_bar,
-                phrases[index + 1].end_bar,
+                selected.start_beat,
+                phrases[index + 1].end_beat,
                 selected.role_id,
             )
             .with_loop_strategy(selected.loop_strategy);
@@ -513,22 +523,22 @@ fn apply_edit(
         }
         TimelineEditCommand::MoveBoundary {
             boundary_after_phrase_index,
-            to_bar,
+            to_beat,
         } => {
             let left = phrase_index_index(boundary_after_phrase_index, phrases.len())?;
             if left + 1 >= phrases.len() {
                 return Err(TimelineEditError::MissingNextPhrase);
             }
-            if to_bar <= phrases[left].start_bar || to_bar >= phrases[left + 1].end_bar {
+            if to_beat <= phrases[left].start_beat || to_beat >= phrases[left + 1].end_beat {
                 return Err(TimelineEditError::InvalidBoundaryMove);
             }
             let left_phrase = phrases[left].clone();
             let right_phrase = phrases[left + 1].clone();
             phrases[left] =
-                PhraseInstance::new(0, left_phrase.start_bar, to_bar, left_phrase.role_id)
+                PhraseInstance::new(0, left_phrase.start_beat, to_beat, left_phrase.role_id)
                     .with_loop_strategy(left_phrase.loop_strategy);
             phrases[left + 1] =
-                PhraseInstance::new(0, to_bar, right_phrase.end_bar, right_phrase.role_id)
+                PhraseInstance::new(0, to_beat, right_phrase.end_beat, right_phrase.role_id)
                     .with_loop_strategy(right_phrase.loop_strategy);
         }
         TimelineEditCommand::Delete {
@@ -545,8 +555,8 @@ fn apply_edit(
                     let previous = phrases[index - 1].clone();
                     phrases[index - 1] = PhraseInstance::new(
                         0,
-                        previous.start_bar,
-                        removed.end_bar,
+                        previous.start_beat,
+                        removed.end_beat,
                         previous.role_id,
                     )
                     .with_loop_strategy(previous.loop_strategy);
@@ -555,7 +565,7 @@ fn apply_edit(
                 PhraseAbsorption::Next if index + 1 < phrases.len() => {
                     let next = phrases[index + 1].clone();
                     phrases[index + 1] =
-                        PhraseInstance::new(0, removed.start_bar, next.end_bar, next.role_id)
+                        PhraseInstance::new(0, removed.start_beat, next.end_beat, next.role_id)
                             .with_loop_strategy(next.loop_strategy);
                     phrases.remove(index);
                 }
@@ -574,7 +584,7 @@ fn apply_edit(
             if phrase.role_id == role_id {
                 return Err(TimelineEditError::NoChange);
             }
-            phrases[index] = PhraseInstance::new(0, phrase.start_bar, phrase.end_bar, role_id);
+            phrases[index] = PhraseInstance::new(0, phrase.start_beat, phrase.end_beat, role_id);
         }
         TimelineEditCommand::SetLoopStrategy {
             phrase_index,
@@ -586,7 +596,7 @@ fn apply_edit(
                 return Err(TimelineEditError::NoChange);
             }
             phrases[index] =
-                PhraseInstance::new(0, phrase.start_bar, phrase.end_bar, phrase.role_id)
+                PhraseInstance::new(0, phrase.start_beat, phrase.end_beat, phrase.role_id)
                     .with_loop_strategy(strategy);
         }
     }
@@ -608,7 +618,7 @@ fn reindex(phrases: Vec<PhraseInstance>) -> Result<Vec<PhraseInstance>, Timeline
         .map(|(index, phrase)| {
             let index = u16::try_from(index).map_err(|_| TimelineEditError::TooManyPhrases)?;
             Ok(
-                PhraseInstance::new(index, phrase.start_bar, phrase.end_bar, phrase.role_id)
+                PhraseInstance::new(index, phrase.start_beat, phrase.end_beat, phrase.role_id)
                     .with_loop_strategy(phrase.loop_strategy),
             )
         })
@@ -618,7 +628,7 @@ fn reindex(phrases: Vec<PhraseInstance>) -> Result<Vec<PhraseInstance>, Timeline
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum TimelineEditError {
     UnknownPhrase,
-    InvalidBarSelection,
+    InvalidBeatSelection,
     InvalidSplitBoundary,
     InvalidBoundaryMove,
     MissingPreviousPhrase,
@@ -636,11 +646,11 @@ impl fmt::Display for TimelineEditError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::UnknownPhrase => formatter.write_str("the selected phrase no longer exists"),
-            Self::InvalidBarSelection => {
-                formatter.write_str("phrase selection must contain complete bars")
+            Self::InvalidBeatSelection => {
+                formatter.write_str("phrase selection must contain at least one complete beat")
             }
             Self::InvalidSplitBoundary => {
-                formatter.write_str("split must be on an interior bar boundary")
+                formatter.write_str("split must be on an interior beat boundary")
             }
             Self::InvalidBoundaryMove => {
                 formatter.write_str("boundary move would create an empty phrase")
@@ -681,13 +691,13 @@ impl fmt::Display for TimelineValidationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::InvalidTrackId => formatter.write_str("timeline track id must be positive"),
-            Self::EmptyDuration => formatter.write_str("timeline must contain at least one bar"),
+            Self::EmptyDuration => formatter.write_str("timeline must contain at least one beat"),
             Self::EmptyPhrases => formatter.write_str("timeline must contain phrases"),
             Self::UnorderedPhraseIndex => {
                 formatter.write_str("phrase indexes must be contiguous and ordered")
             }
             Self::InvalidPhraseCoverage => {
-                formatter.write_str("phrases must cover every complete bar without gaps")
+                formatter.write_str("phrases must cover every complete beat without gaps")
             }
             Self::InvalidRevisionHistory => {
                 formatter.write_str("timeline history must only reference earlier revisions")

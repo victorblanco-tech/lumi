@@ -171,7 +171,7 @@ func launchesRealEngine() async throws {
             .editLibraryTimeline(
                 trackID: requiredFirstLibraryTrackID(snapshot),
                 expectedTimelineRevision: 1,
-                edit: .split(phraseIndex: 0, atBar: 4)
+                edit: .split(phraseIndex: 0, atBeat: 16)
             ),
             messageID: "swift-split-library-timeline"
         )

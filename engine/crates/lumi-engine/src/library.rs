@@ -290,25 +290,15 @@ impl LibraryWorker {
         let timeline = self.require_expected_head(track_id, expected_timeline_revision)?;
         let role_catalog = self.repository.phrase_role_catalog()?;
         let catalog = self.repository.autoloop_catalog()?;
-        let beats_per_bar = u32::from(track.beat_grid().beats_per_bar());
-        let duration_beats = timeline
-            .total_bars()
-            .checked_mul(beats_per_bar)
-            .ok_or(LibraryWorkerError::SimulatorTrackOverflow)?;
+        let duration_beats = timeline.total_beats();
         let phrases = timeline
             .phrases()
             .iter()
             .map(|phrase| {
                 Ok(TrackPhrase::new(
                     phrase.index(),
-                    phrase
-                        .start_bar()
-                        .checked_mul(beats_per_bar)
-                        .ok_or(LibraryWorkerError::SimulatorTrackOverflow)?,
-                    phrase
-                        .end_bar()
-                        .checked_mul(beats_per_bar)
-                        .ok_or(LibraryWorkerError::SimulatorTrackOverflow)?,
+                    phrase.start_beat(),
+                    phrase.end_beat(),
                     planner_phrase_kind(phrase, timeline.phrases().len()),
                 ))
             })
@@ -513,11 +503,11 @@ impl LibraryWorker {
             }
             return Ok(());
         }
-        let (source_total_bars, source_phrases) = self.map_source_phrases(incoming)?;
+        let (source_total_beats, source_phrases) = self.map_source_phrases(incoming)?;
         let reconciled = reconcile_timeline(
             &head,
             incoming.analysis_revision().clone(),
-            source_total_bars,
+            source_total_beats,
             &source_phrases,
             &strategy,
         )?;
@@ -683,7 +673,7 @@ impl LibraryWorker {
         if self.repository.timeline_head(track_id)?.is_some() {
             return Ok(());
         }
-        let (total_bars, phrases) = self.map_source_phrases_from_parts(
+        let (total_beats, phrases) = self.map_source_phrases_from_parts(
             track.beat_grid().beats_per_bar(),
             track.beat_grid().markers().len(),
             track.raw_phrases(),
@@ -692,7 +682,7 @@ impl LibraryWorker {
             track_id,
             TimelineRevision::initial(),
             SourceRevision::try_new(track.summary().source_revision().as_str())?,
-            total_bars,
+            total_beats,
             TimelineRevisionOrigin::SourceImport,
             TimelineRevisionReason::InitialSourceMapping,
             None,
@@ -726,15 +716,9 @@ impl LibraryWorker {
         if total_beats == 0 || !total_beats.is_multiple_of(beats_per_bar) {
             return Err(LibraryWorkerError::InvalidSourceTimeline);
         }
-        let total_bars = total_beats / beats_per_bar;
         let role_catalog = self.repository.phrase_role_catalog()?;
         let mut phrases = Vec::with_capacity(raw_phrases.len());
         for (index, phrase) in raw_phrases.iter().enumerate() {
-            if !phrase.start_beat().is_multiple_of(beats_per_bar)
-                || !phrase.end_beat().is_multiple_of(beats_per_bar)
-            {
-                return Err(LibraryWorkerError::InvalidSourceTimeline);
-            }
             let role_id = role_catalog
                 .resolve(&self.source_kind, phrase.source_label())
                 .cloned()
@@ -755,12 +739,12 @@ impl LibraryWorker {
             }
             phrases.push(PhraseInstance::new(
                 u16::try_from(index).map_err(|_| LibraryWorkerError::InvalidSourceTimeline)?,
-                phrase.start_beat() / beats_per_bar,
-                phrase.end_beat() / beats_per_bar,
+                phrase.start_beat(),
+                phrase.end_beat(),
                 role_id,
             ));
         }
-        Ok((total_bars, phrases))
+        Ok((total_beats, phrases))
     }
 
     fn pending_source_change_count(&self) -> Result<usize, LibraryWorkerError> {
@@ -1068,7 +1052,6 @@ impl LibraryWorker {
         let revisions = self
             .repository
             .timeline_revisions(track_id, TrackPageRequest::try_new(0, 200)?)?;
-        let beats_per_bar = u32::from(track.beat_grid().beats_per_bar());
         Ok(json!({
             "track": track_json(track.summary()),
             "audioUri": track.audio_uri(),
@@ -1114,8 +1097,8 @@ impl LibraryWorker {
             })).collect::<Vec<_>>(),
             "phrases": timeline.phrases().iter().map(|phrase| json!({
                 "id": phrase.index(),
-                "startBeat": phrase.start_bar() * beats_per_bar,
-                "endBeat": phrase.end_bar() * beats_per_bar,
+                "startBeat": phrase.start_beat(),
+                "endBeat": phrase.end_beat(),
                 "roleId": phrase.role_id().as_str(),
                 "role": role_display_name(roles, phrase.role_id()),
                 "origin": origin_name(timeline.origin()),
@@ -1144,8 +1127,8 @@ impl LibraryWorker {
         if diff.changes().is_empty() {
             return Ok(Value::Null);
         }
-        let (source_total_bars, source_phrases) = self.map_source_phrases(incoming)?;
-        let preview = ReconcilePreview::between(timeline, &source_phrases, source_total_bars);
+        let (source_total_beats, source_phrases) = self.map_source_phrases(incoming)?;
+        let preview = ReconcilePreview::between(timeline, &source_phrases, source_total_beats);
         Ok(json!({
             "fromRevision": diff.from_revision().as_str(),
             "toRevision": diff.to_revision().as_str(),
@@ -1158,7 +1141,7 @@ impl LibraryWorker {
                 SourceChangeClass::BeatGrid => "beatGrid",
                 SourceChangeClass::RawPhrases => "rawPhrases",
             }).collect::<Vec<_>>(),
-            "sourceTotalBars": source_total_bars,
+            "sourceTotalBeats": source_total_beats,
             "rebaseAmbiguities": preview.rebase_ambiguities(),
             "conflicts": preview.conflicts().iter().map(|conflict| json!({
                 "phraseIndex": conflict.phrase_index(),
@@ -1296,8 +1279,8 @@ fn autoloop_resolution_reason_name(reason: &AutoloopResolutionReason) -> String 
 
 fn phrase_preview_json(phrase: &PhraseInstance) -> Value {
     json!({
-        "startBar": phrase.start_bar(),
-        "endBar": phrase.end_bar(),
+        "startBeat": phrase.start_beat(),
+        "endBeat": phrase.end_beat(),
         "roleId": phrase.role_id().as_str(),
     })
 }
@@ -2104,7 +2087,7 @@ mod tests {
             1,
             TimelineEditCommand::Split {
                 phrase_index: 0,
-                at_bar: 4,
+                at_beat: 4,
             },
         )?;
         let edited = worker.snapshot_json()?;
@@ -2176,7 +2159,7 @@ mod tests {
                 1,
                 TimelineEditCommand::Split {
                     phrase_index: 0,
-                    at_bar: 4,
+                    at_beat: 4,
                 },
             )?;
             worker.undo_timeline(track_id, 2)?;
