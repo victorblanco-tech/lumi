@@ -19,6 +19,12 @@ management dependency.
 - The macOS app applies appearance through `NSApplication.appearance`. Setting
   System clears the override so AppKit updates background and foreground
   semantics together and continues following the macOS setting.
+- The application canvas uses a semantic near-black/dark-gray palette and a
+  Lumi-owned cyan interaction accent rather than the user's mutable macOS
+  accent color. Semantic colors remain adaptive so Light and System appearances
+  continue to work outside fixed-dark media surfaces.
+- Waveform/media editing surfaces may force Dark for stable RGB contrast, but
+  must still consume `LumiColor` tokens instead of defining a parallel palette.
 - Components use native controls, keyboard semantics, accessibility labels, and
   San Francisco system typography.
 

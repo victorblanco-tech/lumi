@@ -1,12 +1,13 @@
-# Track Editor – RGB waveform and phrase-point UX
+# Track Editor – RGB waveform, phrase-point, and Library workspace UX
 
-- Status: **Implemented in E2A-13 and refined in E2A-14**
+- Status: **Implemented in E2A-13 and refined in E2A-14/E2A-16**
 - Accepted: **2026-08-04**
 - Product language: **English**
 - Reference interaction: **Rekordbox/CDJ waveform editing**
 - Delivery story: [E2A-13 – Track Editor phrase-point workflow](https://github.com/victorblanco-tech/lumi/issues/65)
 - Workspace refinement: [E2A-14 – Integrated resizable editor](https://github.com/victorblanco-tech/lumi/issues/69)
 - Renderer follow-up: [E2A-15 – CDJ/Rekordbox RGB fidelity](https://github.com/victorblanco-tech/lumi/issues/70)
+- Library baseline: [E2A-16 – Persistent editor and native track table](https://github.com/victorblanco-tech/lumi/issues/72)
 
 ## Accepted outcome
 
@@ -68,6 +69,22 @@ the lower pane retains a small usable minimum. The ordinary Library title and
 filter header are hidden while editing so track identity, transport, waveform,
 overview, and phrase inspector remain visible at the normal window size.
 
+The editor is always present when Library is open. Lumi automatically loads the
+first available track when needed, and a double-click anywhere in another
+track's row loads that track into the same editor pane. There is no close action
+and no modal or floating editor state.
+
+The lower pane is a native macOS track table rather than a separate metadata
+inspector. Track title/color, artist, BPM, key, duration, source, Lumi timeline,
+and readiness are ordinary columns. Source track ID and analysis revision remain
+available as hidden-by-default technical columns. Users can resize and reorder
+columns with standard table interactions; the arrangement persists locally.
+
+The complete workspace uses Lumi's near-black canvas, dark-gray elevated
+surfaces, and fixed cyan interaction accent. The embedded editor itself stays
+dark under every host appearance for waveform legibility. Lumi still supports
+Light and System appearances elsewhere through the same semantic tokens.
+
 ## Interaction requirements
 
 - Click or drag in the detailed waveform to move the playhead freely.
@@ -75,6 +92,9 @@ overview, and phrase inspector remain visible at the normal window size.
   waveform geometry or turning audio into block tiles.
 - Scroll horizontally at every zoom level with the full-track viewport, a
   trackpad two-finger swipe, or a horizontal mouse wheel.
+- Removing vertical inspector scrolling must never remove or intercept this
+  horizontal waveform navigation. The fixed inspector and controls fit the
+  editor pane; the waveform remains independently pannable.
 - Click the overview to jump and center the detailed viewport.
 - `Add Phrase Point` and marker drag/move snap to one whole beat. Every internal
   phrase boundary has a visible resize handle and horizontal-resize pointer;
