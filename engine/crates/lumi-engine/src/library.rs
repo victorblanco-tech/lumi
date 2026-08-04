@@ -213,14 +213,32 @@ impl LibraryWorker {
         {
             repository.import_baseline(&baseline)?;
         }
+        let latest_baseline =
+            DemoLibrarySourceProvider::curated_revision(DemoLibraryRevision::V2).load_baseline()?;
+        let persisted_before_recovery = repository
+            .library_source(baseline.source_id())?
+            .ok_or(LibraryWorkerError::MissingLibrarySource)?;
+        match repository.complete_source_refresh(&latest_baseline) {
+            Ok(()) => {}
+            Err(SqliteLibraryError::IncompleteSourceRefresh(_))
+                if persisted_before_recovery.revision() == latest_baseline.source_revision() =>
+            {
+                repository.restore_source_checkpoint(&baseline)?;
+            }
+            Err(SqliteLibraryError::IncompleteSourceRefresh(_)) => {}
+            Err(error) => return Err(error.into()),
+        }
+        let persisted_source = repository
+            .library_source(baseline.source_id())?
+            .ok_or(LibraryWorkerError::MissingLibrarySource)?;
         seed_default_role_catalog(&mut repository)?;
         seed_default_autoloop_catalog(&mut repository)?;
         let mut worker = Self {
             repository,
-            source_id: baseline.source_id().as_str().to_owned(),
-            source_kind: baseline.source_kind().to_owned(),
-            source_name: baseline.display_name().to_owned(),
-            source_revision: baseline.source_revision().as_str().to_owned(),
+            source_id: persisted_source.id().as_str().to_owned(),
+            source_kind: persisted_source.kind().to_owned(),
+            source_name: persisted_source.display_name().to_owned(),
+            source_revision: persisted_source.revision().as_str().to_owned(),
             search: String::new(),
             playlist_id: None,
             offset: 0,
@@ -442,6 +460,15 @@ impl LibraryWorker {
             return Err(LibraryWorkerError::SourceRefreshIdentityMismatch);
         }
         self.pending_source_refresh = Some(baseline);
+        if self.pending_source_change_count()? == 0 {
+            let baseline = self
+                .pending_source_refresh
+                .take()
+                .ok_or(LibraryWorkerError::NoPendingSourceRefresh)?;
+            self.repository.complete_source_refresh(&baseline)?;
+            self.source_revision = baseline.source_revision().as_str().to_owned();
+            self.source_name = baseline.display_name().to_owned();
+        }
         Ok(())
     }
 
@@ -479,6 +506,7 @@ impl LibraryWorker {
                 stored.summary().source_revision(),
             )?;
             if self.pending_source_change_count()? == 0 {
+                self.repository.complete_source_refresh(&baseline)?;
                 self.source_revision = baseline.source_revision().as_str().to_owned();
                 self.source_name = baseline.display_name().to_owned();
                 self.pending_source_refresh = None;
@@ -497,6 +525,7 @@ impl LibraryWorker {
             .reconcile_track(&baseline, incoming, &reconciled, head.revision())?;
 
         if self.pending_source_change_count()? == 0 {
+            self.repository.complete_source_refresh(&baseline)?;
             self.source_revision = baseline.source_revision().as_str().to_owned();
             self.source_name = baseline.display_name().to_owned();
             self.pending_source_refresh = None;
@@ -1518,6 +1547,8 @@ pub enum LibraryWorkerError {
     NothingToUndo,
     #[error("there is no timeline edit to redo")]
     NothingToRedo,
+    #[error("the configured music-library source is missing from persistence")]
+    MissingLibrarySource,
     #[error("timeline history is corrupt")]
     CorruptHistory,
     #[error("timeline history overflowed")]
@@ -1543,8 +1574,9 @@ mod tests {
         LibraryRepository as _, PhraseLoopStrategy, PhraseRoleId, ReconcileStrategy,
         TimelineEditCommand, TrackPageRequest, VariantId,
     };
-    use lumi_library_demo::DemoLibrarySourceProvider;
+    use lumi_library_demo::{DemoLibraryRevision, DemoLibrarySourceProvider};
     use lumi_library_source::MusicLibrarySourceProvider as _;
+    use serde_json::json;
 
     use super::{
         AutoloopCatalogMutation, LibraryWorker, LibraryWorkerError, PhraseRoleCatalogMutation,
@@ -2220,6 +2252,231 @@ mod tests {
         );
         assert_eq!(metadata_refresh["editor"]["timeline"]["revision"], 1);
         assert_eq!(metadata_refresh["sourceRefresh"]["changeCount"], 1);
+        Ok(())
+    }
+
+    #[test]
+    fn epic_two_a_golden_survives_restart_refresh_and_four_theme_resolution()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let path = std::env::temp_dir().join(format!("lumi-epic-2a-golden-{unique}.sqlite"));
+        let horizon_id;
+
+        {
+            let mut worker = LibraryWorker::demo_at(&path)?;
+            let initial = worker.snapshot_json()?;
+            let tracks = initial["page"]["tracks"]
+                .as_array()
+                .ok_or("demo tracks are missing")?;
+            let track_id = |source_track_id: &str| {
+                tracks
+                    .iter()
+                    .find(|track| track["sourceTrackId"] == source_track_id)
+                    .and_then(|track| track["id"].as_u64())
+                    .ok_or("demo track ID is missing")
+            };
+            horizon_id = track_id("horizon-lines")?;
+            let afterglow_id = track_id("afterglow-drive")?;
+            let northern_id = track_id("northern-pulse")?;
+
+            worker.query("Horizon Lines".to_owned(), None, 0, 50);
+            let browsed = worker.snapshot_json()?;
+            assert_eq!(browsed["page"]["total"], 1);
+            assert_eq!(browsed["page"]["tracks"][0]["id"], horizon_id);
+
+            worker.open_editor(horizon_id)?;
+            worker.edit_timeline(
+                horizon_id,
+                1,
+                TimelineEditCommand::ChangeRole {
+                    phrase_index: 0,
+                    role_id: PhraseRoleId::try_new("synth")?,
+                },
+            )?;
+            worker.set_phrase_loop_strategy(
+                horizon_id,
+                2,
+                1,
+                0,
+                PhraseLoopStrategy::FixedVariant(VariantId::try_new("variant-1")?),
+            )?;
+            worker.mutate_phrase_role_catalog(
+                1,
+                PhraseRoleCatalogMutation::Rename {
+                    role_id: PhraseRoleId::try_new("synth")?,
+                    display_name: "Lead Synth".to_owned(),
+                },
+            )?;
+
+            worker.preview_demo_source_refresh()?;
+            assert_eq!(worker.snapshot_json()?["sourceRefresh"]["changeCount"], 3);
+            worker.reconcile_source_refresh(horizon_id, 3, ReconcileStrategy::KeepLumi)?;
+
+            worker.close_editor();
+            worker.open_editor(afterglow_id)?;
+            worker.reconcile_source_refresh(afterglow_id, 1, ReconcileStrategy::KeepLumi)?;
+
+            worker.close_editor();
+            worker.open_editor(northern_id)?;
+            worker.reconcile_source_refresh(northern_id, 1, ReconcileStrategy::KeepLumi)?;
+            let refreshed = worker.snapshot_json()?;
+            assert!(refreshed["sourceRefresh"].is_null());
+            assert_eq!(refreshed["source"]["revision"], "demo-library-v2");
+        }
+
+        let mut restarted = LibraryWorker::demo_at(&path)?;
+        restarted.open_editor(horizon_id)?;
+        let snapshot = restarted.snapshot_json()?;
+        assert_eq!(snapshot["source"]["revision"], "demo-library-v2");
+        assert_eq!(snapshot["editor"]["timeline"]["revision"], 4);
+        assert_eq!(snapshot["editor"]["phrases"][0]["roleId"], "synth");
+        assert_eq!(
+            snapshot["editor"]["phrases"][0]["loopStrategy"]["fixedVariantId"],
+            "variant-1"
+        );
+
+        let (_, context) = restarted.simulator_track(horizon_id, 4)?.into_parts();
+        let theme_resolution = (1..=4)
+            .map(|theme_id| {
+                let cue = context
+                    .resolve(ThemeId::new(theme_id))?
+                    .into_iter()
+                    .next()
+                    .ok_or("resolved Theme has no first cue")?;
+                Ok(json!({
+                    "themeId": theme_id,
+                    "roleId": cue.role_id,
+                    "strategy": cue.strategy,
+                    "variantId": cue.variant_id,
+                    "entryId": cue.entry_id,
+                }))
+            })
+            .collect::<Result<Vec<_>, Box<dyn std::error::Error>>>()?;
+        let synth_role = snapshot["phraseRoleSettings"]["roles"]
+            .as_array()
+            .and_then(|roles| roles.iter().find(|role| role["id"] == "synth"))
+            .ok_or("persisted Synth role is missing")?;
+        let peak_time_playlist = snapshot["playlists"]
+            .as_array()
+            .and_then(|playlists| {
+                playlists
+                    .iter()
+                    .find(|playlist| playlist["sourcePlaylistId"] == "peak-time")
+            })
+            .ok_or("persisted Peak Time playlist is missing")?;
+        assert_eq!(peak_time_playlist["name"], "Peak Time 2026");
+        let phrase_roles = snapshot["editor"]["phrases"]
+            .as_array()
+            .ok_or("persisted phrases are missing")?
+            .iter()
+            .map(|phrase| phrase["roleId"].clone())
+            .collect::<Vec<_>>();
+        let evidence = json!({
+            "scenarioVersion": 1,
+            "offline": true,
+            "source": {
+                "id": snapshot["source"]["id"],
+                "providerKind": snapshot["providerKind"],
+                "revision": snapshot["source"]["revision"],
+                "status": snapshot["source"]["status"],
+                "peakTimePlaylist": peak_time_playlist["name"],
+            },
+            "browse": {
+                "query": "Horizon Lines",
+                "resultCount": 1,
+                "trackId": horizon_id,
+                "sourceTrackId": snapshot["editor"]["track"]["sourceTrackId"],
+            },
+            "editor": {
+                "analysisRevision": snapshot["editor"]["track"]["analysisRevision"],
+                "timelineRevision": snapshot["editor"]["timeline"]["revision"],
+                "baselineRevision": snapshot["editor"]["timeline"]["baselineRevision"],
+                "reason": snapshot["editor"]["timeline"]["reason"],
+                "phraseRoles": phrase_roles,
+                "firstPhraseStartBeat": snapshot["editor"]["phrases"][0]["startBeat"],
+                "firstPhraseEndBeat": snapshot["editor"]["phrases"][0]["endBeat"],
+            },
+            "phraseRoleSettings": {
+                "revision": snapshot["phraseRoleSettings"]["revision"],
+                "stableId": synth_role["id"],
+                "displayName": synth_role["name"],
+                "archived": synth_role["archived"],
+            },
+            "loopStrategy": {
+                "kind": snapshot["editor"]["phrases"][0]["loopStrategy"]["kind"],
+                "variantId": snapshot["editor"]["phrases"][0]["loopStrategy"]["fixedVariantId"],
+                "catalogRevision": snapshot["editor"]["phrases"][0]["loopStrategy"]["validatedCatalogRevision"],
+            },
+            "themeResolution": theme_resolution,
+            "persistence": {
+                "workerRestarted": true,
+                "sourceRefreshPending": !snapshot["sourceRefresh"].is_null(),
+            },
+        });
+        let mut encoded = serde_json::to_vec_pretty(&evidence)?;
+        encoded.push(b'\n');
+        assert_eq!(
+            String::from_utf8_lossy(&encoded),
+            String::from_utf8_lossy(include_bytes!(
+                "../../../../fixtures/epic-2a-v1/library-editor-e2e.json"
+            ))
+        );
+        std::fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn interrupted_source_refresh_reopens_on_last_committed_source_and_resumes()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let path = std::env::temp_dir().join(format!("lumi-refresh-recovery-{unique}.sqlite"));
+        let horizon_id;
+
+        {
+            let mut worker = LibraryWorker::demo_at(&path)?;
+            horizon_id = worker.snapshot_json()?["page"]["tracks"]
+                .as_array()
+                .and_then(|tracks| {
+                    tracks
+                        .iter()
+                        .find(|track| track["sourceTrackId"] == "horizon-lines")
+                })
+                .and_then(|track| track["id"].as_u64())
+                .ok_or("Horizon Lines is missing")?;
+            worker.open_editor(horizon_id)?;
+            worker.preview_demo_source_refresh()?;
+            worker.reconcile_source_refresh(horizon_id, 1, ReconcileStrategy::ReplaceWithSource)?;
+            let partial = worker.snapshot_json()?;
+            assert_eq!(partial["source"]["revision"], "demo-library-v1");
+            assert_eq!(partial["sourceRefresh"]["changeCount"], 2);
+            assert_eq!(
+                partial["editor"]["track"]["analysisRevision"],
+                "horizon-lines-v2"
+            );
+            let latest = DemoLibrarySourceProvider::curated_revision(DemoLibraryRevision::V2)
+                .load_baseline()?;
+            worker.repository.restore_source_checkpoint(&latest)?;
+        }
+
+        let mut restarted = LibraryWorker::demo_at(&path)?;
+        let recovered = restarted.snapshot_json()?;
+        assert_eq!(recovered["source"]["revision"], "demo-library-v1");
+        assert!(recovered["sourceRefresh"].is_null());
+        let peak_time = recovered["playlists"]
+            .as_array()
+            .and_then(|playlists| {
+                playlists
+                    .iter()
+                    .find(|playlist| playlist["sourcePlaylistId"] == "peak-time")
+            })
+            .ok_or("recovered Peak Time playlist is missing")?;
+        assert_eq!(peak_time["name"], "Peak Time");
+        restarted.preview_demo_source_refresh()?;
+        let resumed = restarted.snapshot_json()?;
+        assert_eq!(resumed["sourceRefresh"]["changeCount"], 2);
+        assert_eq!(resumed["source"]["status"], "changesAvailable");
+
+        std::fs::remove_file(path)?;
         Ok(())
     }
 }

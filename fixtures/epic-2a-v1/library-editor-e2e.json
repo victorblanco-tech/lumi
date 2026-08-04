@@ -1,0 +1,76 @@
+{
+  "browse": {
+    "query": "Horizon Lines",
+    "resultCount": 1,
+    "sourceTrackId": "horizon-lines",
+    "trackId": 1
+  },
+  "editor": {
+    "analysisRevision": "horizon-lines-v2",
+    "baselineRevision": "horizon-lines-v2",
+    "firstPhraseEndBeat": 32,
+    "firstPhraseStartBeat": 0,
+    "phraseRoles": [
+      "synth",
+      "breakdown-1",
+      "buildup-1",
+      "drop"
+    ],
+    "reason": "sourceReconcile",
+    "timelineRevision": 4
+  },
+  "loopStrategy": {
+    "catalogRevision": 1,
+    "kind": "fixedVariant",
+    "variantId": "variant-1"
+  },
+  "offline": true,
+  "persistence": {
+    "sourceRefreshPending": false,
+    "workerRestarted": true
+  },
+  "phraseRoleSettings": {
+    "archived": false,
+    "displayName": "Lead Synth",
+    "revision": 2,
+    "stableId": "synth"
+  },
+  "scenarioVersion": 1,
+  "source": {
+    "id": "lumi-demo-library",
+    "peakTimePlaylist": "Peak Time 2026",
+    "providerKind": "demo",
+    "revision": "demo-library-v2",
+    "status": "current"
+  },
+  "themeResolution": [
+    {
+      "entryId": "theme-1--synth--variant-1",
+      "roleId": "synth",
+      "strategy": "fixedVariant",
+      "themeId": 1,
+      "variantId": "variant-1"
+    },
+    {
+      "entryId": "theme-2--synth--variant-1",
+      "roleId": "synth",
+      "strategy": "fixedVariant",
+      "themeId": 2,
+      "variantId": "variant-1"
+    },
+    {
+      "entryId": "theme-3--synth--variant-1",
+      "roleId": "synth",
+      "strategy": "fixedVariant",
+      "themeId": 3,
+      "variantId": "variant-1"
+    },
+    {
+      "entryId": "theme-4--synth--variant-1",
+      "roleId": "synth",
+      "strategy": "fixedVariant",
+      "themeId": 4,
+      "variantId": "variant-1"
+    }
+  ]
+}

@@ -137,6 +137,10 @@ The authoritative Live/Next presentation boundary, explicit degraded states,
 accessibility identifiers, and locked-session PNG workflow are documented in
 [`live-workspace.md`](live-workspace.md).
 
+The cross-cutting Epic 2A golden scenarios, scale budgets, fault matrix, visual
+manifest, demo walkthrough, and remaining isolated Rekordbox gate are collected
+in [`../release/0.2.0-epic-2a-evidence.md`](../release/0.2.0-epic-2a-evidence.md).
+
 ## Troubleshooting
 
 - `xcodebuild` points at Command Line Tools: rerun `xcode-select --switch`.

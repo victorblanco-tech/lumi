@@ -1,6 +1,6 @@
 # Epic 2A – Music Library and Track Lighting Editor
 
-Status: **In build – E2A-11 complete; next E2A-12 end-to-end proof**
+Status: **In verification – E2A-11 complete; E2A-12 demo proof built, isolated Rekordbox gate pending**
 
 Doelmilestone: **0.2.0 – Deck Intelligence**
 
@@ -237,6 +237,13 @@ transcript en native visuele evidence zijn gebouwd en geverifieerd.
 Levert golden import/editor/preview/reimportfixtures, grote-librarybenchmarks,
 fault injection, architecture checks, visuele evidence en een gedocumenteerde
 demo met bekende beperkingen.
+
+Status: **demo-data proof in verification**. De golden Library/editor/restart/
+refreshflow, vier-Theme-resolutie, Library→Simulator-evidence, expliciete
+10.000-trackbudgetten, faultmatrix, visual manifest en demo/limitations guide
+zijn onderdeel van de vaste repositorygate. Definitieve afronding wacht bewust
+op E2A-00/E2A-02 met een geïsoleerde wegwerp-Rekordbox-7-library; de productie-
+library wordt niet als ontwikkelbewijs gebruikt.
 
 ## 6.1 Bouwvolgorde zonder Rekordbox-developmentlibrary
 

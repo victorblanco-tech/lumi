@@ -64,14 +64,39 @@ public struct LiveWorkspaceView: View {
             }
 
             VStack(spacing: LumiSpacing.xSmall) {
-                navigationRow(copy.live, systemImage: "waveform", isSelected: true)
-                navigationRow(copy.plans, systemImage: "list.bullet.rectangle", isSelected: false)
-                navigationRow(copy.library, systemImage: "music.note.list", isSelected: false)
-                navigationRow(copy.integrations, systemImage: "cable.connector", isSelected: false)
+                navigationRow(
+                    copy.live,
+                    systemImage: "waveform",
+                    isSelected: true,
+                    isAvailable: true
+                )
+                navigationRow(
+                    copy.plans,
+                    systemImage: "list.bullet.rectangle",
+                    isSelected: false,
+                    isAvailable: false
+                )
+                navigationRow(
+                    copy.library,
+                    systemImage: "music.note.list",
+                    isSelected: false,
+                    isAvailable: true
+                )
+                navigationRow(
+                    copy.integrations,
+                    systemImage: "cable.connector",
+                    isSelected: false,
+                    isAvailable: false
+                )
             }
 
             Spacer()
-            navigationRow(copy.settings, systemImage: "gearshape", isSelected: false)
+            navigationRow(
+                copy.settings,
+                systemImage: "gearshape",
+                isSelected: false,
+                isAvailable: true
+            )
         }
         .padding(LumiSpacing.large)
         .frame(width: 196)
@@ -570,7 +595,8 @@ public struct LiveWorkspaceView: View {
     private func navigationRow(
         _ title: String,
         systemImage: String,
-        isSelected: Bool
+        isSelected: Bool,
+        isAvailable: Bool
     ) -> some View {
         HStack(spacing: LumiSpacing.medium) {
             Image(systemName: systemImage)
@@ -578,7 +604,7 @@ public struct LiveWorkspaceView: View {
             Text(verbatim: title)
                 .font(LumiTypography.body.weight(isSelected ? .semibold : .regular))
             Spacer()
-            if !isSelected && title != copy.settings {
+            if !isSelected && !isAvailable {
                 Text(verbatim: copy.comingSoon)
                     .font(LumiTypography.caption)
                     .foregroundStyle(LumiColor.textSecondary)

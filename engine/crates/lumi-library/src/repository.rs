@@ -3,9 +3,10 @@ use std::error::Error;
 use lumi_domain::{MusicalKey, TrackId};
 
 use crate::{
-    AutoloopCatalog, BeatGrid, ImportedLibraryBaseline, LumiPhraseTimeline, PhraseRoleCatalog,
-    PhraseRoleUsage, PlaylistId, RawPhraseObservation, SourcePlaylistId, SourceRevision,
-    SourceTrackId, TimelineRevision, TimelineRevisionOrigin, TrackColor, WaveformPoint,
+    AutoloopCatalog, BeatGrid, ImportedLibraryBaseline, LibrarySourceId, LumiPhraseTimeline,
+    PhraseRoleCatalog, PhraseRoleUsage, PlaylistId, RawPhraseObservation, SourcePlaylistId,
+    SourceRevision, SourceTrackId, TimelineRevision, TimelineRevisionOrigin, TrackColor,
+    WaveformPoint,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -13,6 +14,51 @@ pub struct ImportResult {
     pub inserted: u32,
     pub updated: u32,
     pub unchanged: u32,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct LibrarySourceSummary {
+    id: LibrarySourceId,
+    kind: String,
+    display_name: String,
+    revision: SourceRevision,
+}
+
+impl LibrarySourceSummary {
+    #[must_use]
+    pub const fn new(
+        id: LibrarySourceId,
+        kind: String,
+        display_name: String,
+        revision: SourceRevision,
+    ) -> Self {
+        Self {
+            id,
+            kind,
+            display_name,
+            revision,
+        }
+    }
+
+    #[must_use]
+    pub const fn id(&self) -> &LibrarySourceId {
+        &self.id
+    }
+
+    #[must_use]
+    pub fn kind(&self) -> &str {
+        &self.kind
+    }
+
+    #[must_use]
+    pub fn display_name(&self) -> &str {
+        &self.display_name
+    }
+
+    #[must_use]
+    pub const fn revision(&self) -> &SourceRevision {
+        &self.revision
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -457,6 +503,18 @@ pub trait LibraryRepository {
         &mut self,
         baseline: &ImportedLibraryBaseline,
     ) -> Result<ImportResult, Self::Error>;
+    fn library_source(
+        &self,
+        id: &LibrarySourceId,
+    ) -> Result<Option<LibrarySourceSummary>, Self::Error>;
+    fn complete_source_refresh(
+        &mut self,
+        baseline: &ImportedLibraryBaseline,
+    ) -> Result<(), Self::Error>;
+    fn restore_source_checkpoint(
+        &mut self,
+        baseline: &ImportedLibraryBaseline,
+    ) -> Result<(), Self::Error>;
     fn reconcile_track(
         &mut self,
         baseline: &ImportedLibraryBaseline,

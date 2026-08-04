@@ -30,6 +30,8 @@ cargo fmt --all -- --check
 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings
 cargo test --locked --workspace --all-features
 cargo test --locked --release -p lumi-planner two_hundred_phrase_plan_completes_within_epic_one_budget
+cargo test --locked --release -p lumi-library-sqlite --test repository \
+  ten_thousand_track_fixture_meets_epic_two_a_budgets -- --exact --nocapture
 cargo build --locked --workspace --all-features
 swift test -Xswiftc -warnings-as-errors --package-path apps/macos/Packages/LumiProtocol
 swift test -Xswiftc -warnings-as-errors --package-path apps/macos/Packages/LumiDesignSystem
@@ -76,5 +78,7 @@ if [[ "$visual_evidence_count" != "22" ]]; then
   echo "ERROR: expected 22 visual evidence PNGs, found $visual_evidence_count." >&2
   exit 1
 fi
+
+"$script_dir/check-epic-2a-evidence.sh" "$repository_root/build/VisualEvidence"
 
 echo "Repository verification passed."
