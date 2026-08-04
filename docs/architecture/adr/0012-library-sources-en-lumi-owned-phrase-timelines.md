@@ -3,6 +3,10 @@
 - Status: **Accepted**
 - Datum: **2026-08-03**
 
+> **Partial supersession:** ADR-0014 replaces the bar-only phrase-boundary
+> decision below with beat-quantized Phrase Points. The remaining provider,
+> ownership, safety, and persistence decisions stay accepted.
+
 ## Context
 
 Lumi heeft trackmetadata, beatgrids, waveforms en een initiële phrase-analyse

@@ -78,3 +78,12 @@ without exposing a transient invalid boundary.
   keyboard/accessibility identifiers, and loop-safe playback;
 - repository visual evidence and hands-on testing use the exact Terminal-built
   `Lumi.app`.
+
+## Accepted E2A-13 migration
+
+ADR-0014 supersedes the bar-only edit granularity for the next implementation
+slice. E2A-13 migrates canonical boundaries from bar indexes to beatgrid
+positions and replaces range-first editing with ordered Phrase Points. Existing
+bar-aligned revisions remain valid and migrate losslessly because a bar start is
+also a whole-beat position. Until that migration ships, the sections above
+remain the factual E2A-05 behavior.
