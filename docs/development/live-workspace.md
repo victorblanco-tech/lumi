@@ -59,6 +59,11 @@ selectable remaining phrases in the same surface. Until E2B-03 publishes the
 retained active plan, its future Theme and AutoLoop fields remain authoritative
 read-only placeholders rather than optimistic client state.
 
+The bounded v1 transport limit is 128 KiB. This accommodates the two normalized
+RGB waveform previews in an authoritative dual-deck snapshot while retaining a
+strict decoder ceiling in both Rust and Swift. Production detail data remains a
+separate E2B-02 capability and must not grow the live snapshot without bound.
+
 ## Headless visual evidence
 
 Generate the review matrix with:

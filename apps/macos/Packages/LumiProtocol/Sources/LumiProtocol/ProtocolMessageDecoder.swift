@@ -2,7 +2,7 @@ import Foundation
 
 public enum WireProtocol {
     public static let version = 1
-    public static let maximumMessageBytes = 65_536
+    public static let maximumMessageBytes = 131_072
 }
 
 public enum ProtocolDecodingError: Error, Equatable, Sendable {
