@@ -12,6 +12,8 @@ public struct LiveWorkspaceView: View {
     @Binding private var appearance: AppearancePreference
     @Binding private var keyNotation: KeyNotationPreference
     @State private var selectedPhrase: UInt64 = 0
+    @State private var selectedLivePhrase: UInt64?
+    @State private var showsTechnicalStatus = false
 
     private let copy = LiveWorkspaceCopy()
 
@@ -117,27 +119,23 @@ public struct LiveWorkspaceView: View {
     }
 
     private var workspaceContent: some View {
-        VStack(alignment: .leading, spacing: LumiSpacing.xLarge) {
+        VStack(alignment: .leading, spacing: LumiSpacing.large) {
             header
             if let diagnostic = state.diagnostic {
                 diagnosticBanner(diagnostic)
             }
             planInteractionBanner
             sessionInteractionBanner
-            providerPanel
-            simulatorPanel
             deckWorkspace
-            planWorkspace
-            timelineWorkspace
         }
-        .padding(LumiSpacing.xLarge)
+        .padding(LumiSpacing.large)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private var header: some View {
         HStack(spacing: LumiSpacing.large) {
             VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-                Text(verbatim: copy.live)
+                Text(verbatim: "\(copy.appTitle) \(copy.live)")
                     .font(LumiTypography.screenTitle)
                     .foregroundStyle(LumiColor.textPrimary)
                 Text(verbatim: copy.subtitle)
@@ -145,6 +143,14 @@ public struct LiveWorkspaceView: View {
                     .foregroundStyle(LumiColor.textSecondary)
             }
             Spacer()
+            technicalStatusButton
+            if state.content?.sourceName.lowercased() == "simulator" {
+                if allowsScrolling {
+                    simulatorMenu
+                } else {
+                    simulatorIndicator
+                }
+            }
             operationControls
             if allowsScrolling {
                 preferenceMenu
@@ -154,6 +160,144 @@ public struct LiveWorkspaceView: View {
         }
         .fixedSize(horizontal: false, vertical: true)
         .layoutPriority(2)
+    }
+
+    private var technicalStatusButton: some View {
+        Button {
+            showsTechnicalStatus.toggle()
+        } label: {
+            HStack(spacing: LumiSpacing.small) {
+                Circle()
+                    .fill(componentState.color)
+                    .frame(width: 8, height: 8)
+                Text(verbatim: "Tech · \(conditionLabel)")
+                    .font(LumiTypography.metadata.weight(.semibold))
+            }
+            .padding(.horizontal, LumiSpacing.medium)
+            .frame(height: LumiControlMetric.standardHeight)
+        }
+        .buttonStyle(.bordered)
+        .popover(isPresented: $showsTechnicalStatus, arrowEdge: .bottom) {
+            technicalStatusPopover
+        }
+        .accessibilityIdentifier("lumi.technicalStatus.button")
+    }
+
+    private var technicalStatusPopover: some View {
+        VStack(alignment: .leading, spacing: LumiSpacing.large) {
+            HStack {
+                Text(verbatim: "Technical status")
+                    .font(LumiTypography.sectionTitle)
+                Spacer()
+                StatusBadge(key(conditionLabel), state: componentState)
+            }
+            providerRow(copy.engine, systemImage: "cpu", presentation: state.engine)
+            providerRow(
+                copy.runtime,
+                systemImage: "point.3.connected.trianglepath.dotted",
+                presentation: state.runtime
+            )
+            providerRow(
+                copy.deckSource,
+                systemImage: "music.quarternote.3",
+                presentation: state.source
+            )
+            providerRow(
+                copy.planner,
+                systemImage: "list.bullet.rectangle",
+                presentation: state.planner
+            )
+            providerRow(
+                copy.outputProvider,
+                systemImage: "lightbulb.2",
+                presentation: state.output
+            )
+            Divider()
+            VStack(alignment: .leading, spacing: LumiSpacing.small) {
+                Text(verbatim: "Recent engine events")
+                    .font(LumiTypography.metadata.weight(.semibold))
+                if let entries = state.content?.timeline.suffix(5), !entries.isEmpty {
+                    ForEach(Array(entries)) { entry in
+                        HStack(spacing: LumiSpacing.small) {
+                            Text(verbatim: "#\(entry.sequence)")
+                                .font(LumiTypography.technical)
+                                .foregroundStyle(LumiColor.textSecondary)
+                            Text(verbatim: entry.type)
+                                .font(LumiTypography.metadata)
+                            Spacer()
+                            Text(verbatim: entry.result.uppercased())
+                                .font(LumiTypography.technical.weight(.semibold))
+                        }
+                    }
+                } else {
+                    Text(verbatim: copy.waitingTimeline)
+                        .font(LumiTypography.metadata)
+                        .foregroundStyle(LumiColor.textSecondary)
+                }
+            }
+        }
+        .padding(LumiSpacing.large)
+        .frame(width: 430)
+        .background(LumiColor.surface)
+        .accessibilityIdentifier("lumi.technicalStatus.popover")
+    }
+
+    private var simulatorMenu: some View {
+        Menu {
+            Button(copy.loadDemo) {
+                sendWithRevision { .loadDemo(expectedStateRevision: $0) }
+            }
+            .disabled(!canSendSessionCommand)
+            Menu(copy.speed) {
+                ForEach([UInt64(1), 4, 16, 64], id: \.self) { speed in
+                    Button("\(speed)×") {
+                        sendWithRevision {
+                            .setSimulationSpeed(speed, expectedStateRevision: $0)
+                        }
+                    }
+                    .disabled(
+                        !canSendSessionCommand || state.content?.simulation.speed == speed
+                    )
+                }
+            }
+            Button(
+                state.content?.simulation.paused == true ? copy.resumeDemo : copy.pauseDemo
+            ) {
+                let playing = state.content?.simulation.paused == true
+                sendWithRevision {
+                    .setSimulationPlayback(playing, expectedStateRevision: $0)
+                }
+            }
+            .disabled(!canSendSessionCommand)
+            Divider()
+            Button(copy.nextTrack) {
+                sendWithRevision { .advanceToNextTrack(expectedStateRevision: $0) }
+            }
+            .disabled(!canSendSessionCommand)
+            Button(copy.resetDemo) {
+                sendWithRevision { .resetDemo(expectedStateRevision: $0) }
+            }
+            .disabled(!canSendSessionCommand)
+        } label: {
+            Label("Demo", systemImage: "waveform.path.ecg")
+        }
+        .menuStyle(.borderlessButton)
+        .fixedSize()
+        .accessibilityIdentifier("lumi.simulator.menu")
+    }
+
+    private var simulatorIndicator: some View {
+        Label("Demo", systemImage: "waveform.path.ecg")
+            .font(LumiTypography.metadata.weight(.semibold))
+            .foregroundStyle(LumiColor.textSecondary)
+            .padding(.horizontal, LumiSpacing.medium)
+            .frame(height: LumiControlMetric.standardHeight)
+            .background(LumiColor.surface)
+            .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
+            .overlay {
+                RoundedRectangle(cornerRadius: LumiRadius.control)
+                    .stroke(LumiColor.border, lineWidth: 1)
+            }
     }
 
     private var operationControls: some View {
@@ -227,194 +371,33 @@ public struct LiveWorkspaceView: View {
             .accessibilityLabel("Workspace preferences")
     }
 
-    private var providerPanel: some View {
-        LumiPanel {
-            HStack(alignment: .top, spacing: LumiSpacing.large) {
-                providerCompact(copy.engine, systemImage: "cpu", presentation: state.engine)
-                providerCompact(
-                    copy.runtime,
-                    systemImage: "point.3.connected.trianglepath.dotted",
-                    presentation: state.runtime
-                )
-                providerCompact(
-                    copy.deckSource,
-                    systemImage: "music.quarternote.3",
-                    presentation: state.source
-                )
-                providerCompact(
-                    copy.planner,
-                    systemImage: "list.bullet.rectangle",
-                    presentation: state.planner
-                )
-                providerCompact(
-                    copy.outputProvider,
-                    systemImage: "lightbulb.2",
-                    presentation: state.output
-                )
-            }
-        }
-        .fixedSize(horizontal: false, vertical: true)
-        .accessibilityIdentifier("lumi.provider.status")
-    }
-
-    private func providerCompact(
-        _ name: String,
-        systemImage: String,
-        presentation: ProviderPresentation
-    ) -> some View {
-        VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-            HStack(spacing: LumiSpacing.small) {
-                Image(systemName: systemImage)
-                    .foregroundStyle(componentState(for: presentation.condition).color)
-                Text(verbatim: name)
-                    .font(LumiTypography.metadata.weight(.semibold))
-                    .lineLimit(1)
-            }
-            Text(verbatim: presentation.detail)
-                .font(LumiTypography.technical)
-                .foregroundStyle(LumiColor.textSecondary)
-                .lineLimit(2)
-            Text(verbatim: providerLabel(presentation.condition).uppercased())
-                .font(LumiTypography.technical.weight(.semibold))
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
-    }
-
-    private var simulatorPanel: some View {
-        LumiPanel {
-            HStack(spacing: LumiSpacing.medium) {
-                VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-                    Text(verbatim: copy.demoSession)
-                        .font(LumiTypography.sectionTitle)
-                    Text(verbatim: simulationSummary)
-                        .font(LumiTypography.technical)
-                        .foregroundStyle(LumiColor.textSecondary)
-                }
-                Spacer()
-                Button(copy.loadDemo) {
-                    sendWithRevision { .loadDemo(expectedStateRevision: $0) }
-                }
-                .disabled(!canSendSessionCommand)
-                HStack(spacing: LumiSpacing.xSmall) {
-                    ForEach([UInt64(1), 4, 16, 64], id: \.self) { speed in
-                        Button("\(speed)×") {
-                            sendWithRevision {
-                                .setSimulationSpeed(speed, expectedStateRevision: $0)
-                            }
-                        }
-                        .buttonStyle(.bordered)
-                        .disabled(
-                            !canSendSessionCommand
-                                || state.content?.simulation.speed == speed
-                        )
-                    }
-                }
-                .accessibilityLabel(copy.speed)
-                Button {
-                    let playing = state.content?.simulation.paused == true
-                    sendWithRevision {
-                        .setSimulationPlayback(playing, expectedStateRevision: $0)
-                    }
-                } label: {
-                    Label(
-                        state.content?.simulation.paused == true ? copy.resumeDemo : copy.pauseDemo,
-                        systemImage: state.content?.simulation.paused == true ? "play" : "pause"
-                    )
-                }
-                .disabled(!canSendSessionCommand)
-                Button(copy.nextTrack) {
-                    sendWithRevision { .advanceToNextTrack(expectedStateRevision: $0) }
-                }
-                .disabled(!canSendSessionCommand)
-                Button(copy.resetDemo) {
-                    sendWithRevision { .resetDemo(expectedStateRevision: $0) }
-                }
-                .disabled(!canSendSessionCommand)
-            }
-        }
-        .fixedSize(horizontal: false, vertical: true)
-        .accessibilityIdentifier("lumi.simulator.controls")
-    }
-
-    private var timelineWorkspace: some View {
-        VStack(alignment: .leading, spacing: LumiSpacing.large) {
-            HStack {
-                Text(verbatim: copy.timeline)
-                    .font(LumiTypography.sectionTitle)
-                Text(verbatim: "Last \(min(state.content?.timeline.count ?? 0, 12)) events")
-                    .font(LumiTypography.technical)
-                    .foregroundStyle(LumiColor.textSecondary)
-                Spacer()
-            }
-            LumiPanel {
-                VStack(spacing: 0) {
-                    if let entries = state.content?.timeline.suffix(12), !entries.isEmpty {
-                        ForEach(Array(entries)) { entry in
-                            HStack(spacing: LumiSpacing.medium) {
-                                Text(verbatim: "#\(entry.sequence)")
-                                    .font(LumiTypography.technical)
-                                    .foregroundStyle(LumiColor.textSecondary)
-                                    .frame(width: 52, alignment: .leading)
-                                Text(verbatim: entry.source)
-                                    .font(LumiTypography.metadata.weight(.semibold))
-                                    .frame(width: 84, alignment: .leading)
-                                Text(verbatim: entry.type)
-                                    .font(LumiTypography.metadata)
-                                    .frame(minWidth: 130, maxWidth: .infinity, alignment: .leading)
-                                Text(verbatim: entry.result.uppercased())
-                                    .font(LumiTypography.technical.weight(.semibold))
-                                    .frame(width: 82, alignment: .leading)
-                                Text(verbatim: entry.reason)
-                                    .font(LumiTypography.technical)
-                                    .foregroundStyle(LumiColor.textSecondary)
-                                    .frame(minWidth: 160, alignment: .leading)
-                                Text(verbatim: "t+\(entry.occurredAt)")
-                                    .font(LumiTypography.technical)
-                                    .foregroundStyle(LumiColor.textSecondary)
-                            }
-                            .padding(.vertical, LumiSpacing.small)
-                            if entry.id != entries.last?.id { Divider() }
-                        }
-                    } else {
-                        Text(verbatim: copy.waitingTimeline)
-                            .font(LumiTypography.body)
-                            .foregroundStyle(LumiColor.textSecondary)
-                            .frame(maxWidth: .infinity, minHeight: 56, alignment: .leading)
-                    }
-                }
-            }
-        }
-        .accessibilityIdentifier("lumi.timeline")
-    }
-
     private var deckWorkspace: some View {
-        VStack(alignment: .leading, spacing: LumiSpacing.large) {
-            HStack(spacing: LumiSpacing.medium) {
-                Text(verbatim: copy.liveDeckSource)
-                    .font(LumiTypography.sectionTitle)
-                if let content = state.content {
-                    Text(verbatim: content.sourceName)
-                        .font(LumiTypography.metadata)
-                        .foregroundStyle(LumiColor.textSecondary)
-                }
-                StatusBadge(key(deckConditionLabel), state: deckComponentState)
-                Spacer()
-            }
-
+        Group {
             if let content = state.content {
-                HStack(alignment: .top, spacing: LumiSpacing.large) {
+                HStack(alignment: .top, spacing: LumiSpacing.medium) {
                     ForEach(content.decks) { deck in
+                        let isMaster = deck.deckID == content.leaderDeckID
+                        let plan = content.plan?.deckID == deck.deckID ? content.plan : nil
                         LiveDeckSurface(
                             deck: deck,
-                            isMaster: deck.deckID == content.leaderDeckID,
-                            plan: content.plan?.deckID == deck.deckID ? content.plan : nil,
+                            isMaster: isMaster,
+                            plan: plan,
                             musicalKey: musicalKey(for: deck)
-                        )
+                        ) {
+                            if isMaster {
+                                remainingLiveTrackPlan(deck: deck)
+                            } else if let plan {
+                                nextTrackPlan(
+                                    plan: plan,
+                                    deck: deck,
+                                    options: content.planningOptions
+                                )
+                            } else {
+                                waitingDeckPlan
+                            }
+                        }
                         .frame(maxWidth: .infinity)
-                        .accessibilityIdentifier(
-                            deck.deckID == 1 ? "lumi.deck.a" : "lumi.deck.b"
-                        )
+                        .accessibilityIdentifier(deck.deckID == 1 ? "lumi.deck.a" : "lumi.deck.b")
                     }
                 }
             } else {
@@ -423,183 +406,268 @@ public struct LiveWorkspaceView: View {
         }
     }
 
-    private var planWorkspace: some View {
-        VStack(alignment: .leading, spacing: LumiSpacing.large) {
-            HStack(spacing: LumiSpacing.medium) {
-                Text(verbatim: copy.nextPlan)
-                    .font(LumiTypography.sectionTitle)
-                if let plan = state.content?.plan {
-                    Text(verbatim: "Revision \(plan.revision) · Config \(plan.configurationRevision)")
-                        .font(LumiTypography.technical)
-                        .foregroundStyle(LumiColor.textSecondary)
-                    if let decision = plan.themeDecision {
-                        Text(verbatim: "\(decision.themeName) · \(copy.themeReason(decision.reason))")
-                            .font(LumiTypography.technical)
-                            .foregroundStyle(LumiColor.textSecondary)
-                            .accessibilityIdentifier("lumi.plan.themeDecision")
-                    }
-                }
-                StatusBadge(key(planConditionLabel), state: planComponentState)
+    private func remainingLiveTrackPlan(deck: DeckSnapshot) -> some View {
+        let activeIndex = deck.phraseIndex
+        let selected = selectedLivePhrase.flatMap { selectedIndex in
+            deck.phrases.first(where: { $0.index == selectedIndex })
+        } ?? deck.phrases.first(where: { phrase in
+            guard let activeIndex else { return true }
+            return phrase.index > activeIndex
+        })
+
+        return VStack(alignment: .leading, spacing: LumiSpacing.small) {
+            HStack {
+                Text(verbatim: "Remaining live-track plan")
+                    .font(LumiTypography.metadata.weight(.semibold))
+                    .foregroundStyle(Color.white)
                 Spacer()
-                if let plan = state.content?.plan {
-                    Button {
-                        onPlanMutation(.regeneratePlan(context: mutationContext(for: plan)))
-                    } label: {
-                        Label(copy.regenerate, systemImage: "arrow.clockwise")
+                Text(verbatim: "Future phrases")
+                    .font(LumiTypography.technical)
+                    .foregroundStyle(LumiColor.accent)
+            }
+
+            ForEach(deck.phrases) { phrase in
+                let isActive = phrase.index == activeIndex
+                let isPast = activeIndex.map { phrase.index < $0 } ?? false
+                let isFuture = activeIndex.map { phrase.index > $0 } ?? true
+                Button {
+                    if isFuture { selectedLivePhrase = phrase.index }
+                } label: {
+                    HStack(spacing: LumiSpacing.small) {
+                        Text(verbatim: phrase.kind.capitalized)
+                            .font(LumiTypography.metadata.weight(.semibold))
+                            .frame(width: 82, alignment: .leading)
+                        Text(verbatim: isActive ? "Current output plan" : "Auto-select at boundary")
+                            .font(LumiTypography.metadata)
+                            .foregroundStyle(Color.white.opacity(isPast ? 0.38 : 0.76))
+                            .lineLimit(1)
+                        Spacer()
+                        Text(verbatim: livePhraseStatus(
+                            phrase: phrase,
+                            activeIndex: activeIndex,
+                            currentBeat: deck.beat
+                        ))
+                        .font(LumiTypography.technical.weight(.semibold))
+                        .foregroundStyle(isActive ? LumiColor.destructive : Color.white.opacity(0.55))
                     }
-                    .buttonStyle(.bordered)
-                    .disabled(!canEdit(plan))
-                    .accessibilityIdentifier("lumi.plan.regenerate")
+                    .padding(.horizontal, LumiSpacing.small)
+                    .frame(minHeight: 34)
+                    .background {
+                        RoundedRectangle(cornerRadius: LumiRadius.compact)
+                            .fill(
+                                selected?.index == phrase.index
+                                    ? LumiColor.accent.opacity(0.14)
+                                    : isActive
+                                        ? LumiColor.destructive.opacity(0.12)
+                                        : Color.white.opacity(0.035)
+                            )
+                    }
+                    .overlay {
+                        RoundedRectangle(cornerRadius: LumiRadius.compact)
+                            .stroke(
+                                selected?.index == phrase.index
+                                    ? LumiColor.accent.opacity(0.72)
+                                    : Color.white.opacity(0.08),
+                                lineWidth: 1
+                            )
+                    }
                 }
+                .buttonStyle(.plain)
+                .disabled(!isFuture)
             }
 
-            if let content = state.content, let plan = content.plan {
-                HStack(alignment: .top, spacing: LumiSpacing.large) {
-                    phrasePanel(plan: plan, deck: content.nextDeck)
-                    inspectorPanel(plan: plan, options: content.planningOptions)
-                        .frame(minWidth: 240, idealWidth: 280, maxWidth: 300)
-                }
-            } else {
-                placeholder(copy.waitingPlan, systemImage: "list.bullet.rectangle.portrait")
-            }
-
-        }
-        .accessibilityIdentifier("lumi.next.plan")
-    }
-
-    private func phrasePanel(plan: PlanSnapshot, deck: DeckSnapshot) -> some View {
-        LumiPanel {
-            VStack(alignment: .leading, spacing: LumiSpacing.small) {
-                Text(verbatim: copy.phrasePlan)
-                    .font(LumiTypography.sectionTitle)
-                ForEach(plan.cues) { cue in
-                    PhraseRow(
-                        phrase: phraseTitle(cue),
-                        range: timeRange(cue, bpmMilli: deck.bpmMilli),
-                        scene: cueSummary(cue),
-                        isLocked: cue.locked,
-                        isSelected: selectedPhrase == cue.phraseIndex,
-                        action: { selectedPhrase = cue.phraseIndex }
+            if let selected {
+                HStack(spacing: LumiSpacing.small) {
+                    compactPlanField(
+                        label: "THEME FROM \(selected.kind.uppercased())",
+                        value: "Auto-select"
                     )
-                    .accessibilityIdentifier("lumi.plan.phrase.\(cue.phraseIndex)")
+                    compactPlanField(label: "AUTOLOOP", value: "Auto-select")
+                    compactPlanField(label: "APPLY", value: "At phrase start")
                 }
+                Text(verbatim: "The current phrase stays live; planned changes apply at the selected boundary.")
+                    .font(LumiTypography.technical)
+                    .foregroundStyle(Color.white.opacity(0.46))
             }
         }
-        .frame(maxWidth: .infinity)
+        .padding(LumiSpacing.medium)
+        .background(Color.white.opacity(0.025))
+        .overlay(alignment: .top) { Divider().overlay(Color.white.opacity(0.1)) }
+        .accessibilityIdentifier("lumi.live.remainingPlan")
     }
 
-    private func inspectorPanel(
+    private func nextTrackPlan(
         plan: PlanSnapshot,
+        deck: DeckSnapshot,
         options: PlanningOptionsSnapshot
     ) -> some View {
         let cue = selectedCue(in: plan)
-        return LumiPanel {
-            VStack(alignment: .leading, spacing: LumiSpacing.large) {
-                Text(verbatim: copy.inspector)
-                    .font(LumiTypography.sectionTitle)
-                if let cue {
-                    InspectorField(key(copy.theme)) {
-                        PlanSelectionControl(
-                            value: themeName(cue),
-                            selectedID: themeID(cue),
-                            choices: options.themes.map {
-                                PlanSelectionChoice(id: $0.id, name: $0.name)
-                            },
-                            isEnabled: canEdit(plan) && themeID(cue) != nil,
-                            onSelect: { selectTheme($0, plan: plan) }
-                        )
-                        .accessibilityIdentifier("lumi.plan.theme")
-                    }
-                    if let decision = plan.themeDecision {
-                        InspectorField(key(copy.themeSource)) {
-                            Text(verbatim: themeDecisionSummary(decision))
-                                .font(LumiTypography.body)
-                                .accessibilityIdentifier("lumi.plan.themeReason")
-                        }
-                    }
-                    if let libraryTrack = plan.libraryTrack {
-                        InspectorField(key(copy.librarySource)) {
-                            Text(verbatim: "\(libraryTrack.sourceName) · \(libraryTrack.providerKind)")
-                                .font(LumiTypography.body)
-                                .accessibilityIdentifier("lumi.plan.librarySource")
-                        }
-                        InspectorField(key(copy.lumiTimeline)) {
-                            Text(verbatim: "r\(libraryTrack.timelineRevision) · \(libraryTrack.analysisRevision)")
-                                .font(LumiTypography.technical)
-                                .accessibilityIdentifier("lumi.plan.timelineRevision")
-                        }
-                    }
-                    if let resolution = cue.libraryResolution {
-                        InspectorField(key(copy.phraseRole)) {
-                            Text(verbatim: resolution.roleName)
-                                .font(LumiTypography.body)
-                                .accessibilityIdentifier("lumi.plan.phraseRole")
-                        }
-                        InspectorField(key(copy.loopStrategy)) {
-                            Text(verbatim: loopStrategyName(resolution.strategy))
-                                .font(LumiTypography.body)
-                                .accessibilityIdentifier("lumi.plan.loopStrategy")
-                        }
-                        InspectorField(key(copy.loopVariant)) {
-                            Text(verbatim: resolution.variantID)
-                                .font(LumiTypography.technical)
-                                .accessibilityIdentifier("lumi.plan.loopVariant")
-                        }
-                        InspectorField(key(copy.dryRunEntry)) {
-                            VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-                                Text(verbatim: resolution.entryName).font(LumiTypography.body)
-                                Text(verbatim: resolution.entryID)
-                                    .font(LumiTypography.technical)
-                                    .foregroundStyle(LumiColor.textSecondary)
-                            }
-                            .accessibilityIdentifier("lumi.plan.dryRunEntry")
-                        }
-                    }
-                    InspectorField(key(copy.scene)) {
-                        PlanSelectionControl(
-                            value: sceneName(cue),
-                            selectedID: sceneID(cue),
-                            choices: compatibleScenes(for: cue, options: options).map {
-                                PlanSelectionChoice(id: $0.id, name: $0.name)
-                            },
-                            isEnabled: canEdit(plan) && sceneID(cue) != nil,
-                            onSelect: { selectScene($0, cue: cue, plan: plan) }
-                        )
-                        .accessibilityIdentifier("lumi.plan.scene")
-                    }
-                    InspectorField(key(copy.origin)) {
-                        Text(verbatim: cue.origin.capitalized).font(LumiTypography.body)
-                    }
-                    InspectorField(key(copy.reason)) {
-                        Text(verbatim: reasonSummary(cue)).font(LumiTypography.body)
-                    }
-                    Button {
-                        onPlanMutation(
-                            .setCueLock(
-                                context: mutationContext(for: plan),
-                                phraseIndex: cue.phraseIndex,
-                                locked: !cue.locked
+        return VStack(alignment: .leading, spacing: LumiSpacing.small) {
+            HStack {
+                Text(verbatim: "Next-track plan")
+                    .font(LumiTypography.metadata.weight(.semibold))
+                    .foregroundStyle(Color.white)
+                Spacer()
+                Text(verbatim: "Editable until transition")
+                    .font(LumiTypography.technical)
+                    .foregroundStyle(LumiColor.success)
+            }
+
+            ForEach(plan.cues) { planCue in
+                Button {
+                    selectedPhrase = planCue.phraseIndex
+                } label: {
+                    HStack(spacing: LumiSpacing.small) {
+                        Text(verbatim: phraseTitle(planCue))
+                            .font(LumiTypography.metadata.weight(.semibold))
+                            .frame(width: 92, alignment: .leading)
+                        Text(verbatim: cueSummary(planCue))
+                            .font(LumiTypography.metadata)
+                            .foregroundStyle(Color.white.opacity(0.76))
+                            .lineLimit(1)
+                        Spacer()
+                        Text(verbatim: planCue.locked ? "LOCKED" : "AUTO")
+                            .font(LumiTypography.technical.weight(.semibold))
+                            .foregroundStyle(
+                                planCue.locked ? LumiColor.accent : Color.white.opacity(0.48)
                             )
-                        )
-                    } label: {
-                        Label(
-                            cue.locked ? copy.unlockCue : copy.lockCue,
-                            systemImage: cue.locked ? "lock.open" : "lock"
-                        )
-                        .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!canEdit(plan) || themeID(cue) == nil)
-                    .accessibilityIdentifier("lumi.plan.lock")
-                } else {
-                    Text(verbatim: copy.waitingPlan)
-                        .font(LumiTypography.body)
-                        .foregroundStyle(LumiColor.textSecondary)
+                    .padding(.horizontal, LumiSpacing.small)
+                    .frame(minHeight: 34)
+                    .background(
+                        selectedPhrase == planCue.phraseIndex
+                            ? LumiColor.accent.opacity(0.14)
+                            : Color.white.opacity(0.035)
+                    )
+                    .clipShape(RoundedRectangle(cornerRadius: LumiRadius.compact))
+                    .overlay {
+                        RoundedRectangle(cornerRadius: LumiRadius.compact)
+                            .stroke(
+                                selectedPhrase == planCue.phraseIndex
+                                    ? LumiColor.accent.opacity(0.72)
+                                    : Color.white.opacity(0.08),
+                                lineWidth: 1
+                            )
+                    }
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier("lumi.plan.phrase.\(planCue.phraseIndex)")
+            }
+
+            if let cue {
+                VStack(alignment: .leading, spacing: LumiSpacing.small) {
+                    HStack(spacing: LumiSpacing.small) {
+                        VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+                            Text(verbatim: "THEME")
+                                .font(LumiTypography.technical)
+                                .foregroundStyle(Color.white.opacity(0.46))
+                            PlanSelectionControl(
+                                value: themeName(cue),
+                                selectedID: themeID(cue),
+                                choices: options.themes.map {
+                                    PlanSelectionChoice(id: $0.id, name: $0.name)
+                                },
+                                isEnabled: canEdit(plan) && themeID(cue) != nil,
+                                onSelect: { selectTheme($0, plan: plan) }
+                            )
+                        }
+                        VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+                            Text(verbatim: "AUTOLOOP")
+                                .font(LumiTypography.technical)
+                                .foregroundStyle(Color.white.opacity(0.46))
+                            PlanSelectionControl(
+                                value: sceneName(cue),
+                                selectedID: sceneID(cue),
+                                choices: compatibleScenes(for: cue, options: options).map {
+                                    PlanSelectionChoice(id: $0.id, name: $0.name)
+                                },
+                                isEnabled: canEdit(plan) && sceneID(cue) != nil,
+                                onSelect: { selectScene($0, cue: cue, plan: plan) }
+                            )
+                        }
+                    }
+                    HStack(spacing: LumiSpacing.small) {
+                        Text(verbatim: "Selected: \(phraseTitle(cue)) · \(timeRange(cue, bpmMilli: deck.bpmMilli))")
+                            .font(LumiTypography.technical)
+                            .foregroundStyle(Color.white.opacity(0.54))
+                        Spacer()
+                        Button {
+                            onPlanMutation(
+                                .setCueLock(
+                                    context: mutationContext(for: plan),
+                                    phraseIndex: cue.phraseIndex,
+                                    locked: !cue.locked
+                                )
+                            )
+                        } label: {
+                            Label(
+                                cue.locked ? copy.unlockCue : copy.lockCue,
+                                systemImage: cue.locked ? "lock.open" : "lock"
+                            )
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!canEdit(plan) || themeID(cue) == nil)
+                        Button {
+                            onPlanMutation(.regeneratePlan(context: mutationContext(for: plan)))
+                        } label: {
+                            Label(copy.regenerate, systemImage: "arrow.clockwise")
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!canEdit(plan))
+                    }
+                }
+                .padding(LumiSpacing.small)
+                .background(LumiColor.accent.opacity(0.07))
+                .clipShape(RoundedRectangle(cornerRadius: LumiRadius.compact))
+                .overlay {
+                    RoundedRectangle(cornerRadius: LumiRadius.compact)
+                        .stroke(LumiColor.accent.opacity(0.25), lineWidth: 1)
                 }
             }
         }
-        .frame(maxWidth: .infinity)
-        .accessibilityIdentifier("lumi.plan.inspector")
+        .padding(LumiSpacing.medium)
+        .background(Color.white.opacity(0.025))
+        .overlay(alignment: .top) { Divider().overlay(Color.white.opacity(0.1)) }
+        .accessibilityIdentifier("lumi.next.plan")
+    }
+
+    private var waitingDeckPlan: some View {
+        Text(verbatim: copy.waitingPlan)
+            .font(LumiTypography.metadata)
+            .foregroundStyle(Color.white.opacity(0.54))
+            .padding(LumiSpacing.medium)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .overlay(alignment: .top) { Divider().overlay(Color.white.opacity(0.1)) }
+    }
+
+    private func compactPlanField(label: String, value: String) -> some View {
+        VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+            Text(verbatim: label)
+                .font(LumiTypography.technical)
+                .foregroundStyle(Color.white.opacity(0.44))
+                .lineLimit(1)
+            Text(verbatim: value)
+                .font(LumiTypography.metadata.weight(.semibold))
+                .foregroundStyle(Color.white.opacity(0.84))
+                .lineLimit(1)
+        }
+        .padding(LumiSpacing.small)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.white.opacity(0.04))
+        .clipShape(RoundedRectangle(cornerRadius: LumiRadius.compact))
+    }
+
+    private func livePhraseStatus(
+        phrase: DeckPhraseSnapshot,
+        activeIndex: UInt64?,
+        currentBeat: UInt64
+    ) -> String {
+        guard let activeIndex else {
+            return "in \(phrase.startBeat) beats"
+        }
+        if phrase.index < activeIndex { return "PAST" }
+        if phrase.index == activeIndex { return "LIVE · LOCKED" }
+        return "in \(phrase.startBeat > currentBeat ? phrase.startBeat - currentBeat : 0) beats"
     }
 
     private func navigationRow(
@@ -827,39 +895,10 @@ public struct LiveWorkspaceView: View {
         }
     }
 
-    private func themeDecisionSummary(_ decision: ThemeDecisionSnapshot) -> String {
-        let reason = copy.themeReason(decision.reason)
-        guard let color = decision.matchedColorRGB else { return reason }
-        return String(
-            format: "%@ · #%06llX",
-            locale: Locale(identifier: "en_US_POSIX"),
-            reason,
-            color
-        )
-    }
-
     private func sceneName(_ cue: PlanCueSnapshot) -> String {
         switch cue.action {
         case let .applyLook(_, _, _, sceneName, _, _, _): sceneName
         case .holdCurrentLook: copy.hold
-        }
-    }
-
-    private func reasonSummary(_ cue: PlanCueSnapshot) -> String {
-        switch cue.reason {
-        case let .phraseCategoryMatched(phrase, category):
-            "Matched \(copy.phrase(phrase)) to the \(copy.category(category)) scene category."
-        case .missingPhraseAnalysis:
-            "Phrase analysis unavailable; preserving the current safe look."
-        }
-    }
-
-    private func loopStrategyName(_ strategy: String) -> String {
-        switch strategy {
-        case "auto": "Automatic"
-        case "fixedVariant": "Fixed variant"
-        case "themeSpecificExact": "Theme-specific exact"
-        default: strategy
         }
     }
 
@@ -911,14 +950,6 @@ public struct LiveWorkspaceView: View {
     ) {
         guard let revision = state.content?.stateRevision else { return }
         onSessionCommand(request(revision))
-    }
-
-    private var simulationSummary: String {
-        guard let simulation = state.content?.simulation else {
-            return copy.waitingSimulator
-        }
-        let playback = simulation.paused ? copy.paused : copy.playing
-        return "Simulator · \(simulation.speed)× · \(playback) · operation \(operationState.uppercased())"
     }
 
     private func selectTheme(_ themeID: UInt64, plan: PlanSnapshot) {
@@ -978,21 +1009,6 @@ public struct LiveWorkspaceView: View {
         }
     }
 
-    private var planConditionLabel: String {
-        guard state.content?.plan != nil else { return copy.loading }
-        return state.condition == .fallback ? copy.fallback : conditionLabel
-    }
-
-    private var deckConditionLabel: String {
-        guard state.content != nil else { return conditionLabel }
-        return providerLabel(state.source.condition)
-    }
-
-    private var deckComponentState: LumiComponentState {
-        guard state.content != nil else { return componentState }
-        return componentState(for: state.source.condition)
-    }
-
     private var componentState: LumiComponentState {
         switch state.condition {
         case .empty: .empty
@@ -1002,10 +1018,6 @@ public struct LiveWorkspaceView: View {
         case .stale: .stale
         case .error: .error
         }
-    }
-
-    private var planComponentState: LumiComponentState {
-        state.content?.plan == nil ? .loading : componentState
     }
 
     private func componentState(for condition: ProviderCondition) -> LumiComponentState {

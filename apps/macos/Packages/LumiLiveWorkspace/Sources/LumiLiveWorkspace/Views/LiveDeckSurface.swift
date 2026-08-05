@@ -1,11 +1,26 @@
 import LumiDesignSystem
 import SwiftUI
 
-struct LiveDeckSurface: View {
+struct LiveDeckSurface<Details: View>: View {
     let deck: DeckSnapshot
     let isMaster: Bool
     let plan: PlanSnapshot?
     let musicalKey: String
+    private let details: Details
+
+    init(
+        deck: DeckSnapshot,
+        isMaster: Bool,
+        plan: PlanSnapshot?,
+        musicalKey: String,
+        @ViewBuilder details: () -> Details
+    ) {
+        self.deck = deck
+        self.isMaster = isMaster
+        self.plan = plan
+        self.musicalKey = musicalKey
+        self.details = details()
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -14,6 +29,7 @@ struct LiveDeckSurface: View {
             waveform
             phraseBand
             planSummary
+            details
         }
         .background(Color.black)
         .clipShape(RoundedRectangle(cornerRadius: LumiRadius.panel))

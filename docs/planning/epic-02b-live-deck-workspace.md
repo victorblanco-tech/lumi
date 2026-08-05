@@ -69,6 +69,21 @@ Build the first visible vertical slice using the simulator:
 - specify portrait stacking and landscape dual-deck behavior;
 - defer discovery, pairing and native iOS implementation to the iPhone epic.
 
+### [E2B-06 – Beat Link Trigger simulated-deck MIDI PoC](https://github.com/victorblanco-tech/lumi/issues/87)
+
+- publish a dedicated Lumi virtual MIDI destination for deck-source input;
+- configure two Beat Link Trigger simulation decks to send a documented,
+  versioned MIDI mapping to that destination;
+- decode the messages in an experimental provider behind `DeckSourceProvider`;
+- prove two stable deck identities, load/play state, master switches, BPM and
+  beat timing without leaking MIDI concepts into engine state or SwiftUI;
+- measure latency, loss, ordering and reconnect behavior and explicitly record
+  which metadata cannot be transported safely over MIDI;
+- keep waveform resolution outside the MIDI mapping and use E2B-02 for local or
+  Beat Link waveform data;
+- deliver a go/no-go decision for MIDI as an initial BLT adapter transport, not
+  an assumption that it becomes the production integration.
+
 ## Exit criteria
 
 - Master switches are reproducible without moving the Deck A/B surfaces.

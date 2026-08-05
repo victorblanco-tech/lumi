@@ -2,7 +2,7 @@
   "sourceLanguage" : "en",
   "strings" : {
     "app.title" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Lumi" } } } },
-    "workspace.subtitle" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Plan the next track before the transition" } } } },
+    "workspace.subtitle" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Deck-aware lighting plan" } } } },
     "navigation.live" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Live" } } } },
     "navigation.plans" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Plans" } } } },
     "navigation.library" : { "localizations" : { "en" : { "stringUnit" : { "state" : "translated", "value" : "Library" } } } },

@@ -51,6 +51,14 @@ Publishing and editing a retained plan for future phrases of the current master
 is E2B-03; the first slice therefore shows its active phrase as locked but keeps
 the established next-plan editor as the only mutation surface.
 
+E2B-04 moves this behavior into the accepted show layout: provider health and
+recent engine events are available from one compact `Tech` popover, simulator
+controls live in a `Demo` menu, and the separate next-plan workspace is folded
+into the stable non-master deck. The master deck presents the current phrase and
+selectable remaining phrases in the same surface. Until E2B-03 publishes the
+retained active plan, its future Theme and AutoLoop fields remain authoritative
+read-only placeholders rather than optimistic client state.
+
 ## Headless visual evidence
 
 Generate the review matrix with:
