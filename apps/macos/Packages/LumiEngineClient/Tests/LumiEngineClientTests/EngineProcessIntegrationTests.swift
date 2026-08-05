@@ -64,6 +64,27 @@ func launchesRealEngine() async throws {
         #expect(autoloopCatalogRevision(snapshot) == 1)
         #expect(autoloopThemeNames(snapshot).count == 4)
         #expect(autoloopVariantCount(snapshot, roleID: "synth") == 4)
+        #expect(midiPocState(snapshot) == "stopped")
+        #expect(midiPocPulseCount(snapshot) == 0)
+
+        snapshot = try await supervisor.send(
+            .publishMidiPocSource,
+            messageID: "swift-publish-midi-poc-source"
+        )
+        #expect(midiPocState(snapshot) == "ready")
+        #expect(midiPocSourceName(snapshot) == "Lumi Virtual MIDI")
+
+        snapshot = try await supervisor.send(
+            .sendMidiPocLearnPulse,
+            messageID: "swift-send-midi-poc-learn-pulse"
+        )
+        #expect(midiPocPulseCount(snapshot) == 1)
+
+        snapshot = try await supervisor.send(
+            .stopMidiPocSource,
+            messageID: "swift-stop-midi-poc-source"
+        )
+        #expect(midiPocState(snapshot) == "stopped")
 
         let renamedRole = try await supervisor.send(
             .mutatePhraseRoleCatalog(
@@ -793,6 +814,30 @@ private func simulationSpeed(_ envelope: MessageEnvelope) -> UInt64? {
 private func outputRecordCount(_ envelope: MessageEnvelope) -> UInt64? {
     guard case let .object(output) = envelope.payload["outputProvider"],
           case let .number(count) = output["recordCount"] else {
+        return nil
+    }
+    return UInt64(count)
+}
+
+private func midiPocState(_ envelope: MessageEnvelope) -> String? {
+    guard case let .object(midi) = envelope.payload["midiPoc"],
+          case let .string(state) = midi["state"] else {
+        return nil
+    }
+    return state
+}
+
+private func midiPocSourceName(_ envelope: MessageEnvelope) -> String? {
+    guard case let .object(midi) = envelope.payload["midiPoc"],
+          case let .string(sourceName) = midi["sourceName"] else {
+        return nil
+    }
+    return sourceName
+}
+
+private func midiPocPulseCount(_ envelope: MessageEnvelope) -> UInt64? {
+    guard case let .object(midi) = envelope.payload["midiPoc"],
+          case let .number(count) = midi["sentPulseCount"] else {
         return nil
     }
     return UInt64(count)

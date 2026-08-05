@@ -16,7 +16,10 @@
     "selectScene",
     "setCueLock",
     "regeneratePlan",
-    "resetDemoSession"
+    "resetDemoSession",
+    "publishMidiPocSource",
+    "stopMidiPocSource",
+    "sendMidiPocLearnPulse"
   ],
   "eventKinds": [
     "engineReady",

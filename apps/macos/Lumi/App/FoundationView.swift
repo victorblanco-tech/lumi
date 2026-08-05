@@ -71,15 +71,26 @@ struct FoundationView: View {
                     PhraseRoleSettingsView(
                         settings: engineStatus.libraryState.phraseRoleSettings,
                         autoloopCatalog: engineStatus.libraryState.autoloopCatalog,
+                        midiPoc: engineStatus.libraryState.midiPoc,
                         appearance: $preferences.appearance,
                         keyNotation: $preferences.keyNotation,
                         feedback: engineStatus.phraseRoleFeedback,
                         autoloopFeedback: engineStatus.autoloopCatalogFeedback,
+                        midiPocFeedback: engineStatus.midiPocFeedback,
                         onMutation: { request in
                             Task { await engineStatus.mutatePhraseRoles(request) }
                         },
                         onAutoloopMutation: { request in
                             Task { await engineStatus.mutateAutoloopCatalog(request) }
+                        },
+                        onPublishMidiPoc: {
+                            Task { await engineStatus.publishMidiPocSource() }
+                        },
+                        onStopMidiPoc: {
+                            Task { await engineStatus.stopMidiPocSource() }
+                        },
+                        onSendMidiPocLearnPulse: {
+                            Task { await engineStatus.sendMidiPocLearnPulse() }
                         }
                     )
                 }

@@ -306,6 +306,9 @@ public enum EngineCommand: Equatable, Sendable {
         expectedAutoloopCatalogRevision: UInt64,
         mutation: EngineAutoloopCatalogMutation
     )
+    case publishMidiPocSource
+    case stopMidiPocSource
+    case sendMidiPocLearnPulse
     case loadLibraryTrackOnSimulatorDeck(
         trackID: UInt64,
         deckID: UInt64,
@@ -408,6 +411,12 @@ public enum EngineCommand: Equatable, Sendable {
             payload["kind"] = .string("mutateAutoloopCatalog")
             payload["expectedAutoloopCatalogRevision"] = .number(Double(expectedRevision))
             return payload
+        case .publishMidiPocSource:
+            return ["kind": .string("publishMidiPocSource")]
+        case .stopMidiPocSource:
+            return ["kind": .string("stopMidiPocSource")]
+        case .sendMidiPocLearnPulse:
+            return ["kind": .string("sendMidiPocLearnPulse")]
         case let .loadLibraryTrackOnSimulatorDeck(
             trackID,
             deckID,

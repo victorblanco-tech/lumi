@@ -13,6 +13,8 @@ lumi-library = { path = "../lumi-library" }
 lumi-library-demo = { path = "../lumi-library-demo" }
 lumi-library-source = { path = "../lumi-library-source" }
 lumi-library-sqlite = { path = "../lumi-library-sqlite" }
+lumi-midi-coremidi = { path = "../lumi-midi-coremidi" }
+lumi-midi-output = { path = "../lumi-midi-output" }
 lumi-output-dry-run = { path = "../lumi-output-dry-run" }
 lumi-planner = { path = "../lumi-planner" }
 lumi-protocol = { path = "../lumi-protocol" }

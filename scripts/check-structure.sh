@@ -11,6 +11,8 @@ required_paths=(
   "engine/crates/lumi-deck-source"
   "engine/crates/lumi-engine"
   "engine/crates/lumi-lighting-output"
+  "engine/crates/lumi-midi-output"
+  "engine/crates/lumi-midi-coremidi"
   "engine/crates/lumi-library"
   "engine/crates/lumi-library-source"
   "engine/crates/lumi-library-demo"
@@ -73,6 +75,12 @@ done
 
 if grep -Eq 'tokio|serde|tracing' "$repository_root/engine/crates/lumi-domain/Cargo.toml"; then
   echo "ERROR: lumi-domain may not depend on runtime, wire, or observability crates." >&2
+  exit 1
+fi
+
+if ! grep -Fq 'coremidi-rs' \
+  "$repository_root/engine/crates/lumi-midi-coremidi/Cargo.toml"; then
+  echo "ERROR: the macOS MIDI adapter must use the audited safe CoreMIDI wrapper." >&2
   exit 1
 fi
 

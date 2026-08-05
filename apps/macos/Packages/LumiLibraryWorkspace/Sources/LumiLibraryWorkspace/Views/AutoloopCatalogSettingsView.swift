@@ -10,10 +10,15 @@ public struct AutoloopCatalogSettingsView: View {
     }
 
     private let catalog: AutoloopCatalogState?
+    private let midiPoc: MidiPocState?
     private let profile = SoundSwitchOutputProfileState.builtIn
     private let feedback: String?
+    private let midiPocFeedback: String?
     private let rendersInteractiveControls: Bool
     private let onMutation: @Sendable (AutoloopCatalogMutationRequest) -> Void
+    private let onPublishMidiPoc: @Sendable () -> Void
+    private let onStopMidiPoc: @Sendable () -> Void
+    private let onSendMidiPocLearnPulse: @Sendable () -> Void
 
     @State private var section: ProfileSection = .banks
     @State private var selectedBankID: UInt64?
@@ -24,14 +29,24 @@ public struct AutoloopCatalogSettingsView: View {
 
     public init(
         catalog: AutoloopCatalogState?,
+        midiPoc: MidiPocState? = nil,
         feedback: String? = nil,
+        midiPocFeedback: String? = nil,
         rendersInteractiveControls: Bool = true,
-        onMutation: @escaping @Sendable (AutoloopCatalogMutationRequest) -> Void = { _ in }
+        onMutation: @escaping @Sendable (AutoloopCatalogMutationRequest) -> Void = { _ in },
+        onPublishMidiPoc: @escaping @Sendable () -> Void = {},
+        onStopMidiPoc: @escaping @Sendable () -> Void = {},
+        onSendMidiPocLearnPulse: @escaping @Sendable () -> Void = {}
     ) {
         self.catalog = catalog
+        self.midiPoc = midiPoc
         self.feedback = feedback
+        self.midiPocFeedback = midiPocFeedback
         self.rendersInteractiveControls = rendersInteractiveControls
         self.onMutation = onMutation
+        self.onPublishMidiPoc = onPublishMidiPoc
+        self.onStopMidiPoc = onStopMidiPoc
+        self.onSendMidiPocLearnPulse = onSendMidiPocLearnPulse
         let firstBank = catalog?.themes.first
         let firstSlot = catalog.flatMap { value in
             firstBank.flatMap {
@@ -57,7 +72,7 @@ public struct AutoloopCatalogSettingsView: View {
                     switch section {
                     case .banks: banksAndAutoloops(catalog)
                     case .controller: virtualController(catalog)
-                    case .midi: midiPreparation(catalog)
+                    case .midi: midiPreparation
                     }
                     if let feedback {
                         Label(feedback, systemImage: "checkmark.circle")
@@ -376,42 +391,76 @@ public struct AutoloopCatalogSettingsView: View {
         }
     }
 
-    private func midiPreparation(_ catalog: AutoloopCatalogState) -> some View {
+    private var midiPreparation: some View {
         HStack(alignment: .top, spacing: LumiSpacing.medium) {
             LumiPanel {
                 VStack(alignment: .leading, spacing: LumiSpacing.large) {
                     Text("MIDI Transport").font(LumiTypography.cardTitle)
-                    inspectorValue("Output Device", "Lumi Virtual MIDI → SoundSwitch")
+                    HStack {
+                        Circle()
+                            .fill(midiPoc?.isReady == true ? LumiColor.success : LumiColor.textSecondary)
+                            .frame(width: 9, height: 9)
+                        Text(midiPoc?.isReady == true ? "PUBLISHED" : "STOPPED")
+                            .font(LumiTypography.technical.weight(.bold))
+                            .foregroundStyle(
+                                midiPoc?.isReady == true ? LumiColor.success : LumiColor.textSecondary
+                            )
+                    }
+                    inspectorValue("Output Device", midiPoc?.sourceName ?? "Lumi Virtual MIDI")
+                    inspectorValue("Protocol", midiPoc?.midiProtocol ?? "MIDI 1.0 UMP")
                     inspectorValue("Configured Surface", "4 banks · 32 AutoLoops")
                     inspectorValue("Timing", "Ableton Link → SoundSwitch")
-                    inspectorValue("Bank Switch Delay", "Measure in POC")
+                    HStack {
+                        if midiPoc?.isReady == true {
+                            Button("Stop Virtual Source", action: onStopMidiPoc)
+                        } else {
+                            Button("Publish Virtual Source", action: onPublishMidiPoc)
+                                .buttonStyle(.borderedProminent)
+                                .tint(LumiColor.accent)
+                        }
+                    }
+                    Text(midiPoc?.lastEvent ?? "No MIDI is sent when the source is published.")
+                        .font(LumiTypography.caption)
+                        .foregroundStyle(LumiColor.textSecondary)
                     Spacer(minLength: 0)
                 }
             }
             LumiPanel {
                 VStack(alignment: .leading, spacing: LumiSpacing.large) {
                     Text("POC Acceptance").font(LumiTypography.cardTitle)
-                    pocRequirement("SoundSwitch discovers Lumi's virtual MIDI device")
+                    pocRequirement(
+                        "SoundSwitch discovers Lumi's virtual MIDI device",
+                        complete: midiPoc?.isReady == true
+                    )
                     pocRequirement("Configured Bank and AutoLoop buttons respond deterministically")
                     pocRequirement("Physical Control One remains usable in parallel")
                     pocRequirement("DMX output through Control One visibly drives fixtures")
                     pocRequirement("Disconnect and reconnect remain fail-silent")
                     Divider()
-                    Text("SELECT BANK 1\nTRIGGER BUTTON 1")
+                    Text("SAFE LEARN SIGNAL\nCHANNEL 16 · NOTE 60")
                         .font(LumiTypography.technical)
                         .foregroundStyle(LumiColor.accent)
                         .padding(LumiSpacing.medium)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .background(LumiColor.surfaceElevated)
                         .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
-                    HStack {
-                        Button("Dry Run") {}
-                        Button("Send Test") {}
-                            .buttonStyle(.borderedProminent)
-                            .tint(LumiColor.accent)
+                    Button("Send MIDI Learn Pulse", action: onSendMidiPocLearnPulse)
+                        .buttonStyle(.borderedProminent)
+                        .tint(LumiColor.accent)
+                        .disabled(midiPoc?.isReady != true)
+                    Text("One Note On and its Note Off. Never sent automatically.")
+                        .font(LumiTypography.technical)
+                        .foregroundStyle(LumiColor.textSecondary)
+                    if let midiPocFeedback {
+                        Text(midiPocFeedback)
+                            .font(LumiTypography.caption)
+                            .foregroundStyle(
+                                midiPocFeedback.lowercased().contains("could not")
+                                    ? LumiColor.warning
+                                    : LumiColor.success
+                            )
                     }
-                    .disabled(true)
-                    Text("Enabled by the MIDI POC story.")
+                    Text("Pulses sent: \(midiPoc?.sentPulseCount ?? 0)")
                         .font(LumiTypography.technical)
                         .foregroundStyle(LumiColor.textSecondary)
                     Spacer(minLength: 0)
@@ -431,10 +480,10 @@ public struct AutoloopCatalogSettingsView: View {
         .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
     }
 
-    private func pocRequirement(_ text: String) -> some View {
-        Label(text, systemImage: "circle.dashed")
+    private func pocRequirement(_ text: String, complete: Bool = false) -> some View {
+        Label(text, systemImage: complete ? "checkmark.circle.fill" : "circle.dashed")
             .font(LumiTypography.body)
-            .foregroundStyle(LumiColor.textSecondary)
+            .foregroundStyle(complete ? LumiColor.success : LumiColor.textSecondary)
     }
 
     private func slots(_ catalog: AutoloopCatalogState) -> [SoundSwitchAutoloopSlotState] {

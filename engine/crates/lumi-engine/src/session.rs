@@ -15,6 +15,8 @@ use lumi_domain::{
     UserCommandEnvelope, WorkerId,
 };
 use lumi_lighting_output::LightingOutputProvider as _;
+use lumi_midi_coremidi::CoreMidiSourceProvider;
+use lumi_midi_output::{MidiPocController, MidiSourceState};
 use lumi_output_dry_run::{DryRunLightingOutputProvider, DryRunOutputError};
 use lumi_planner::{
     DeterministicPlanner, PlanMutationError, PlannerError, PlannerTrack, PlanningInput,
@@ -214,6 +216,7 @@ struct EngineRuntime {
     planning_worker: PlanningWorker,
     output_worker: OutputWorker,
     library_worker: LibraryWorker,
+    midi_poc: MidiPocController<CoreMidiSourceProvider>,
     operation_sequence: u64,
 }
 
@@ -249,6 +252,7 @@ fn initialized_runtime_with_clock(clock: ManualClock) -> Result<EngineRuntime, E
         planning_worker,
         output_worker,
         library_worker,
+        midi_poc: MidiPocController::new(CoreMidiSourceProvider::new()),
         operation_sequence: 0,
     })
 }
@@ -637,6 +641,24 @@ fn apply_command(
                 .mutate_autoloop_catalog(expected_revision, mutation)?;
             return Ok(());
         }
+        SessionCommand::PublishMidiPocSource => {
+            runtime
+                .midi_poc
+                .publish()
+                .map_err(|error| CommandApplicationError::Midi(error.to_string()))?;
+            return Ok(());
+        }
+        SessionCommand::StopMidiPocSource => {
+            runtime.midi_poc.stop();
+            return Ok(());
+        }
+        SessionCommand::SendMidiPocLearnPulse => {
+            runtime
+                .midi_poc
+                .send_learn_pulse()
+                .map_err(|error| CommandApplicationError::Midi(error.to_string()))?;
+            return Ok(());
+        }
         SessionCommand::LoadLibraryTrackOnSimulatorDeck {
             track_id,
             deck_id,
@@ -766,6 +788,9 @@ fn apply_command(
         | SessionCommand::RestoreLibraryTimelineRevision { .. }
         | SessionCommand::MutatePhraseRoleCatalog { .. }
         | SessionCommand::MutateAutoloopCatalog { .. }
+        | SessionCommand::PublishMidiPocSource
+        | SessionCommand::StopMidiPocSource
+        | SessionCommand::SendMidiPocLearnPulse
         | SessionCommand::LoadLibraryTrackOnSimulatorDeck { .. }
         | SessionCommand::LoadDemoSession { .. }
         | SessionCommand::SetOperationState { .. }
@@ -1010,6 +1035,7 @@ fn application_error_envelope(
         | CommandApplicationError::OperationSequenceOverflow
         | CommandApplicationError::ClockOverflow
         | CommandApplicationError::Engine(_)
+        | CommandApplicationError::Midi(_)
         | CommandApplicationError::Library(_)
         | CommandApplicationError::Simulator(_) => error_envelope(
             sequence,
@@ -1085,6 +1111,8 @@ enum CommandApplicationError {
     Simulator(#[from] SimulatorError),
     #[error("library command failed: {0}")]
     Library(#[from] LibraryWorkerError),
+    #[error("MIDI POC command failed: {0}")]
+    Midi(String),
     #[error("engine failed while accepting a plan revision: {0}")]
     Engine(EngineError),
 }
@@ -1133,6 +1161,20 @@ fn snapshot_envelope(
         json!({
             "speed": runtime.deck_source.speed().multiplier(),
             "paused": runtime.deck_source.is_paused(),
+        }),
+    );
+    let midi_poc = runtime.midi_poc.status();
+    payload.insert(
+        "midiPoc".to_owned(),
+        json!({
+            "state": match midi_poc.state {
+                MidiSourceState::Stopped => "stopped",
+                MidiSourceState::Ready => "ready",
+            },
+            "sourceName": midi_poc.source_name,
+            "protocol": "MIDI 1.0 UMP",
+            "sentPulseCount": midi_poc.sent_pulse_count,
+            "lastEvent": midi_poc.last_event,
         }),
     );
     payload.insert(

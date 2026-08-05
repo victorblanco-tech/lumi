@@ -48,6 +48,14 @@ reject_dependency \
   'lumi-(engine|simulator|planner|output-dry-run|protocol)' \
   "the output port may not depend on adapters or application orchestration."
 reject_dependency \
+  "engine/crates/lumi-midi-output/Cargo.toml" \
+  'lumi-(engine|simulator|planner|protocol|midi-coremidi)' \
+  "the MIDI output port may not depend on adapters or application orchestration."
+reject_dependency \
+  "engine/crates/lumi-midi-coremidi/Cargo.toml" \
+  'lumi-(engine|simulator|planner|protocol|domain|library)' \
+  "the CoreMIDI adapter may depend only on the provider-neutral MIDI output port."
+reject_dependency \
   "engine/crates/lumi-library/Cargo.toml" \
   'lumi-(engine|simulator|planner|protocol|deck-source|lighting-output|output-dry-run|library-source|library-demo|library-sqlite)' \
   "the canonical library model and repository port may depend inward on the domain only."

@@ -11,6 +11,7 @@ final class EngineStatusModel: ObservableObject {
     @Published private(set) var timelineEditFeedback: String?
     @Published private(set) var phraseRoleFeedback: String?
     @Published private(set) var autoloopCatalogFeedback: String?
+    @Published private(set) var midiPocFeedback: String?
     @Published private(set) var simulatorLoadFeedback: String?
     @Published private(set) var simulatorLoadFeedbackIsError = false
 
@@ -47,6 +48,7 @@ final class EngineStatusModel: ObservableObject {
         timelineEditFeedback = nil
         phraseRoleFeedback = nil
         autoloopCatalogFeedback = nil
+        midiPocFeedback = nil
         simulatorLoadFeedback = nil
         simulatorLoadFeedbackIsError = false
 
@@ -119,6 +121,7 @@ final class EngineStatusModel: ObservableObject {
         libraryState = .importing()
         phraseRoleFeedback = nil
         autoloopCatalogFeedback = nil
+        midiPocFeedback = nil
         simulatorLoadFeedback = nil
         simulatorLoadFeedbackIsError = false
     }
@@ -242,6 +245,27 @@ final class EngineStatusModel: ObservableObject {
             success = "Revision \(revision) restored as a new revision."
         }
         await exchangeTimelineCommand(command, success: success)
+    }
+
+    func publishMidiPocSource() async {
+        await exchangeMidiPocCommand(
+            .publishMidiPocSource,
+            success: "Lumi Virtual MIDI is published. No MIDI was sent."
+        )
+    }
+
+    func stopMidiPocSource() async {
+        await exchangeMidiPocCommand(
+            .stopMidiPocSource,
+            success: "Lumi Virtual MIDI stopped."
+        )
+    }
+
+    func sendMidiPocLearnPulse() async {
+        await exchangeMidiPocCommand(
+            .sendMidiPocLearnPulse,
+            success: "Learn pulse sent on Channel 16, Note 60, with Note Off."
+        )
     }
 
     func reconcileLibrarySource(_ request: TrackSourceReconcileRequest) async {
@@ -555,6 +579,36 @@ final class EngineStatusModel: ObservableObject {
                 libraryState = .failed(message)
             }
             return false
+        }
+    }
+
+    private func exchangeMidiPocCommand(_ command: EngineCommand, success: String) async {
+        midiPocFeedback = nil
+        guard lifecycle == .ready,
+              let endpointDescription,
+              let protocolVersion,
+              await acquireInteractiveExchange() else {
+            midiPocFeedback = "The MIDI POC command could not run because the engine is not ready."
+            return
+        }
+        defer { isExchangingCommand = false }
+        do {
+            let envelope = try await supervisor.send(command)
+            if let failure = EngineCommandFailure(envelope) {
+                midiPocFeedback = "The MIDI POC command could not run: \(failure.message)"
+                return
+            }
+            let snapshot = try snapshotDecoder.decode(
+                envelope,
+                endpointDescription: endpointDescription,
+                protocolVersion: protocolVersion
+            )
+            latestSnapshot = snapshot
+            workspaceState = LiveWorkspacePresenter.ready(snapshot)
+            libraryState = try libraryDecoder.decode(envelope)
+            midiPocFeedback = success
+        } catch {
+            midiPocFeedback = "The MIDI POC command could not run: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
         }
     }
 

@@ -13,13 +13,18 @@ public enum PhraseRoleSettingsSection: String, CaseIterable, Identifiable, Senda
 public struct PhraseRoleSettingsView: View {
     private let settings: PhraseRoleSettingsState?
     private let autoloopCatalog: AutoloopCatalogState?
+    private let midiPoc: MidiPocState?
     @Binding private var appearance: AppearancePreference
     @Binding private var keyNotation: KeyNotationPreference
     private let feedback: String?
     private let autoloopFeedback: String?
+    private let midiPocFeedback: String?
     private let rendersInteractiveControls: Bool
     private let onMutation: @Sendable (PhraseRoleMutationRequest) -> Void
     private let onAutoloopMutation: @Sendable (AutoloopCatalogMutationRequest) -> Void
+    private let onPublishMidiPoc: @Sendable () -> Void
+    private let onStopMidiPoc: @Sendable () -> Void
+    private let onSendMidiPocLearnPulse: @Sendable () -> Void
 
     @State private var section: PhraseRoleSettingsSection
     @State private var selectedRoleID: String?
@@ -31,24 +36,34 @@ public struct PhraseRoleSettingsView: View {
     public init(
         settings: PhraseRoleSettingsState?,
         autoloopCatalog: AutoloopCatalogState? = nil,
+        midiPoc: MidiPocState? = nil,
         appearance: Binding<AppearancePreference>,
         keyNotation: Binding<KeyNotationPreference>,
         initialSection: PhraseRoleSettingsSection = .phraseRoles,
         feedback: String? = nil,
         autoloopFeedback: String? = nil,
+        midiPocFeedback: String? = nil,
         rendersInteractiveControls: Bool = true,
         onMutation: @escaping @Sendable (PhraseRoleMutationRequest) -> Void = { _ in },
-        onAutoloopMutation: @escaping @Sendable (AutoloopCatalogMutationRequest) -> Void = { _ in }
+        onAutoloopMutation: @escaping @Sendable (AutoloopCatalogMutationRequest) -> Void = { _ in },
+        onPublishMidiPoc: @escaping @Sendable () -> Void = {},
+        onStopMidiPoc: @escaping @Sendable () -> Void = {},
+        onSendMidiPocLearnPulse: @escaping @Sendable () -> Void = {}
     ) {
         self.settings = settings
         self.autoloopCatalog = autoloopCatalog
+        self.midiPoc = midiPoc
         _appearance = appearance
         _keyNotation = keyNotation
         self.feedback = feedback
         self.autoloopFeedback = autoloopFeedback
+        self.midiPocFeedback = midiPocFeedback
         self.rendersInteractiveControls = rendersInteractiveControls
         self.onMutation = onMutation
         self.onAutoloopMutation = onAutoloopMutation
+        self.onPublishMidiPoc = onPublishMidiPoc
+        self.onStopMidiPoc = onStopMidiPoc
+        self.onSendMidiPocLearnPulse = onSendMidiPocLearnPulse
         _section = State(initialValue: initialSection)
         _selectedRoleID = State(initialValue: settings?.roles.first?.id)
         _selectedProviderKind = State(initialValue: settings?.mappingProfiles.first?.providerKind)
@@ -155,9 +170,14 @@ public struct PhraseRoleSettingsView: View {
         case .autoloopMatrix:
             AutoloopCatalogSettingsView(
                 catalog: autoloopCatalog,
+                midiPoc: midiPoc,
                 feedback: autoloopFeedback,
+                midiPocFeedback: midiPocFeedback,
                 rendersInteractiveControls: rendersInteractiveControls,
-                onMutation: onAutoloopMutation
+                onMutation: onAutoloopMutation,
+                onPublishMidiPoc: onPublishMidiPoc,
+                onStopMidiPoc: onStopMidiPoc,
+                onSendMidiPocLearnPulse: onSendMidiPocLearnPulse
             )
         }
     }

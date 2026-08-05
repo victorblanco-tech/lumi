@@ -8,6 +8,8 @@ members = [
     "engine/crates/lumi-library-source",
     "engine/crates/lumi-library-sqlite",
     "engine/crates/lumi-lighting-output",
+    "engine/crates/lumi-midi-coremidi",
+    "engine/crates/lumi-midi-output",
     "engine/crates/lumi-output-dry-run",
     "engine/crates/lumi-planner",
     "engine/crates/lumi-protocol",

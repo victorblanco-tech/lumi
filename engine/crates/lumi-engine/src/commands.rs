@@ -74,6 +74,9 @@ pub enum SessionCommand {
         expected_revision: u64,
         mutation: AutoloopCatalogMutation,
     },
+    PublishMidiPocSource,
+    StopMidiPocSource,
+    SendMidiPocLearnPulse,
     LoadLibraryTrackOnSimulatorDeck {
         track_id: u64,
         deck_id: DeckId,
@@ -150,6 +153,9 @@ impl SessionCommand {
             | Self::RestoreLibraryTimelineRevision { .. }
             | Self::MutatePhraseRoleCatalog { .. }
             | Self::MutateAutoloopCatalog { .. }
+            | Self::PublishMidiPocSource
+            | Self::StopMidiPocSource
+            | Self::SendMidiPocLearnPulse
             | Self::LoadLibraryTrackOnSimulatorDeck { .. }
             | Self::LoadDemoSession { .. }
             | Self::SetOperationState { .. }
@@ -232,6 +238,9 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
             )?,
             mutation: autoloop_catalog_mutation(&envelope.payload)?,
         }),
+        "publishMidiPocSource" => Ok(SessionCommand::PublishMidiPocSource),
+        "stopMidiPocSource" => Ok(SessionCommand::StopMidiPocSource),
+        "sendMidiPocLearnPulse" => Ok(SessionCommand::SendMidiPocLearnPulse),
         "loadLibraryTrackOnSimulatorDeck" => Ok(SessionCommand::LoadLibraryTrackOnSimulatorDeck {
             track_id: positive_unsigned(&envelope.payload, "trackId")?,
             deck_id: DeckId::new(

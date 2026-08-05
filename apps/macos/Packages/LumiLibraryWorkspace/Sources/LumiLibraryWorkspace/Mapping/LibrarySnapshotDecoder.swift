@@ -60,7 +60,26 @@ public struct LibrarySnapshotDecoder: Sendable {
             ),
             editor: try decodeEditor(library["editor"]),
             phraseRoleSettings: try decodePhraseRoleSettings(library["phraseRoleSettings"]),
-            autoloopCatalog: try decodeAutoloopCatalog(library["autoloopCatalog"])
+            autoloopCatalog: try decodeAutoloopCatalog(library["autoloopCatalog"]),
+            midiPoc: try decodeMidiPoc(envelope.payload["midiPoc"])
+        )
+    }
+
+    private func decodeMidiPoc(_ value: JSONValue?) throws -> MidiPocState? {
+        guard let value, value != .null else { return nil }
+        guard case let .object(midi) = value else {
+            throw LibrarySnapshotError.invalidObject
+        }
+        let state = try string(midi, "state")
+        guard state == "stopped" || state == "ready" else {
+            throw LibrarySnapshotError.invalidObject
+        }
+        return MidiPocState(
+            state: state,
+            sourceName: try string(midi, "sourceName"),
+            midiProtocol: try string(midi, "protocol"),
+            sentPulseCount: try unsigned(midi, "sentPulseCount"),
+            lastEvent: optionalString(midi, "lastEvent")
         )
     }
 
