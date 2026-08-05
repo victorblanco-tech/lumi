@@ -465,7 +465,7 @@ public struct AutoloopCatalogSettingsView: View {
                     .foregroundStyle(LumiColor.textSecondary)
             }
             LazyVGrid(columns: columns, spacing: 7) {
-                ForEach(slots(catalog)) { slot in
+                ForEach(controllerGridSlots(catalog)) { slot in
                     Button {
                         onSendMidiPocAddressLearnPulse("autoloop", slot.number)
                     } label: {
@@ -601,6 +601,16 @@ public struct AutoloopCatalogSettingsView: View {
     private func slots(_ catalog: AutoloopCatalogState) -> [SoundSwitchAutoloopSlotState] {
         guard let bank = selectedBank(catalog) else { return [] }
         return SoundSwitchOutputProfileProjection.slots(for: bank.id, catalog: catalog)
+    }
+
+    private func controllerGridSlots(
+        _ catalog: AutoloopCatalogState
+    ) -> [SoundSwitchAutoloopSlotState] {
+        guard let bank = selectedBank(catalog) else { return [] }
+        return SoundSwitchOutputProfileProjection.controllerGridSlots(
+            for: bank.id,
+            catalog: catalog
+        )
     }
 
     private func selectedBank(_ catalog: AutoloopCatalogState) -> AutoloopThemeState? {

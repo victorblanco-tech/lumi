@@ -178,6 +178,22 @@ struct LibraryWorkspaceTests {
         #expect(banks[3][0].roleID == "intro-outro")
         #expect(banks.flatMap { $0 }.allSatisfy { $0.status == .mapped })
         #expect(banks.flatMap { $0 }.count == 128)
+        #expect(
+            SoundSwitchOutputProfileProjection.controllerGridSlots(
+                for: 1,
+                catalog: catalog
+            ).map(\.number)
+                == [
+                    1, 9, 17, 25,
+                    2, 10, 18, 26,
+                    3, 11, 19, 27,
+                    4, 12, 20, 28,
+                    5, 13, 21, 29,
+                    6, 14, 22, 30,
+                    7, 15, 23, 31,
+                    8, 16, 24, 32
+                ]
+        )
     }
 
     @Test("The same SoundSwitch button may use a different Phrase Type in each bank")
