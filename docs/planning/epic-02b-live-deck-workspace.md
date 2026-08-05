@@ -1,6 +1,6 @@
 # Epic 2B – Live deck intelligence and rolling plans
 
-Status: **Refined; E2B-01 in progress**
+Status: **Refined; E2B-01 complete, E2B-02 ready**
 
 Target milestone: **0.2.0 – Deck Intelligence**
 
