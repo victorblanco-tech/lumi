@@ -377,20 +377,33 @@ public struct LiveWorkspaceView: View {
                 HStack(alignment: .top, spacing: LumiSpacing.medium) {
                     ForEach(content.decks) { deck in
                         let isMaster = deck.deckID == content.leaderDeckID
-                        let plan = content.plan?.deckID == deck.deckID ? content.plan : nil
+                        let plan = isMaster ? content.livePlan : content.plan
+                        let selectedIndex = selectedPhraseIndex(
+                            deck: deck,
+                            plan: plan,
+                            isMaster: isMaster
+                        )
                         LiveDeckSurface(
                             deck: deck,
                             isMaster: isMaster,
                             plan: plan,
-                            musicalKey: musicalKey(for: deck)
+                            musicalKey: musicalKey(for: deck),
+                            selectedPhraseIndex: selectedIndex,
+                            onSelectPhrase: { phraseIndex in
+                                if isMaster {
+                                    selectedLivePhrase = phraseIndex
+                                } else {
+                                    selectedPhrase = phraseIndex
+                                }
+                            }
                         ) {
-                            if isMaster {
-                                remainingLiveTrackPlan(deck: deck)
-                            } else if let plan {
-                                nextTrackPlan(
+                            if let plan {
+                                phraseEditor(
                                     plan: plan,
                                     deck: deck,
-                                    options: content.planningOptions
+                                    options: content.planningOptions,
+                                    isLive: isMaster,
+                                    selectedIndex: selectedIndex
                                 )
                             } else {
                                 waitingDeckPlan
@@ -406,159 +419,36 @@ public struct LiveWorkspaceView: View {
         }
     }
 
-    private func remainingLiveTrackPlan(deck: DeckSnapshot) -> some View {
-        let activeIndex = deck.phraseIndex
-        let selected = selectedLivePhrase.flatMap { selectedIndex in
-            deck.phrases.first(where: { $0.index == selectedIndex })
-        } ?? deck.phrases.first(where: { phrase in
-            guard let activeIndex else { return true }
-            return phrase.index > activeIndex
-        })
-
-        return VStack(alignment: .leading, spacing: LumiSpacing.small) {
-            HStack {
-                Text(verbatim: "Remaining live-track plan")
-                    .font(LumiTypography.metadata.weight(.semibold))
-                    .foregroundStyle(Color.white)
-                Spacer()
-                Text(verbatim: "Future phrases")
-                    .font(LumiTypography.technical)
-                    .foregroundStyle(LumiColor.accent)
-            }
-
-            ForEach(deck.phrases) { phrase in
-                let isActive = phrase.index == activeIndex
-                let isPast = activeIndex.map { phrase.index < $0 } ?? false
-                let isFuture = activeIndex.map { phrase.index > $0 } ?? true
-                Button {
-                    if isFuture { selectedLivePhrase = phrase.index }
-                } label: {
-                    HStack(spacing: LumiSpacing.small) {
-                        Text(verbatim: phrase.kind.capitalized)
-                            .font(LumiTypography.metadata.weight(.semibold))
-                            .frame(width: 82, alignment: .leading)
-                        Text(verbatim: isActive ? "Current output plan" : "Auto-select at boundary")
-                            .font(LumiTypography.metadata)
-                            .foregroundStyle(Color.white.opacity(isPast ? 0.38 : 0.76))
-                            .lineLimit(1)
-                        Spacer()
-                        Text(verbatim: livePhraseStatus(
-                            phrase: phrase,
-                            activeIndex: activeIndex,
-                            currentBeat: deck.beat
-                        ))
-                        .font(LumiTypography.technical.weight(.semibold))
-                        .foregroundStyle(isActive ? LumiColor.destructive : Color.white.opacity(0.55))
-                    }
-                    .padding(.horizontal, LumiSpacing.small)
-                    .frame(minHeight: 34)
-                    .background {
-                        RoundedRectangle(cornerRadius: LumiRadius.compact)
-                            .fill(
-                                selected?.index == phrase.index
-                                    ? LumiColor.accent.opacity(0.14)
-                                    : isActive
-                                        ? LumiColor.destructive.opacity(0.12)
-                                        : Color.white.opacity(0.035)
-                            )
-                    }
-                    .overlay {
-                        RoundedRectangle(cornerRadius: LumiRadius.compact)
-                            .stroke(
-                                selected?.index == phrase.index
-                                    ? LumiColor.accent.opacity(0.72)
-                                    : Color.white.opacity(0.08),
-                                lineWidth: 1
-                            )
-                    }
-                }
-                .buttonStyle(.plain)
-                .disabled(!isFuture)
-            }
-
-            if let selected {
-                HStack(spacing: LumiSpacing.small) {
-                    compactPlanField(
-                        label: "THEME FROM \(selected.kind.uppercased())",
-                        value: "Auto-select"
-                    )
-                    compactPlanField(label: "AUTOLOOP", value: "Auto-select")
-                    compactPlanField(label: "APPLY", value: "At phrase start")
-                }
-                Text(verbatim: "The current phrase stays live; planned changes apply at the selected boundary.")
-                    .font(LumiTypography.technical)
-                    .foregroundStyle(Color.white.opacity(0.46))
-            }
-        }
-        .padding(LumiSpacing.medium)
-        .background(Color.white.opacity(0.025))
-        .overlay(alignment: .top) { Divider().overlay(Color.white.opacity(0.1)) }
-        .accessibilityIdentifier("lumi.live.remainingPlan")
-    }
-
-    private func nextTrackPlan(
+    private func phraseEditor(
         plan: PlanSnapshot,
         deck: DeckSnapshot,
-        options: PlanningOptionsSnapshot
+        options: PlanningOptionsSnapshot,
+        isLive: Bool,
+        selectedIndex: UInt64?
     ) -> some View {
-        let cue = selectedCue(in: plan)
+        let cue = selectedIndex.flatMap { index in
+            plan.cues.first(where: { $0.phraseIndex == index })
+        }
+        let hasStarted = isLive && cue.map { selectedCue in
+            deck.phraseIndex.map { selectedCue.phraseIndex <= $0 } ?? false
+        } == true
+        let editable = canEdit(plan) && !hasStarted
         return VStack(alignment: .leading, spacing: LumiSpacing.small) {
             HStack {
-                Text(verbatim: "Next-track plan")
+                Text(verbatim: isLive ? "Live phrase plan" : "Next-track phrase plan")
                     .font(LumiTypography.metadata.weight(.semibold))
                     .foregroundStyle(Color.white)
                 Spacer()
-                Text(verbatim: "Editable until transition")
+                Text(verbatim: hasStarted ? "STARTED · LOCKED" : "EDITABLE UNTIL PHRASE START")
                     .font(LumiTypography.technical)
-                    .foregroundStyle(LumiColor.success)
-            }
-
-            ForEach(plan.cues) { planCue in
-                Button {
-                    selectedPhrase = planCue.phraseIndex
-                } label: {
-                    HStack(spacing: LumiSpacing.small) {
-                        Text(verbatim: phraseTitle(planCue))
-                            .font(LumiTypography.metadata.weight(.semibold))
-                            .frame(width: 92, alignment: .leading)
-                        Text(verbatim: cueSummary(planCue))
-                            .font(LumiTypography.metadata)
-                            .foregroundStyle(Color.white.opacity(0.76))
-                            .lineLimit(1)
-                        Spacer()
-                        Text(verbatim: planCue.locked ? "LOCKED" : "AUTO")
-                            .font(LumiTypography.technical.weight(.semibold))
-                            .foregroundStyle(
-                                planCue.locked ? LumiColor.accent : Color.white.opacity(0.48)
-                            )
-                    }
-                    .padding(.horizontal, LumiSpacing.small)
-                    .frame(minHeight: 34)
-                    .background(
-                        selectedPhrase == planCue.phraseIndex
-                            ? LumiColor.accent.opacity(0.14)
-                            : Color.white.opacity(0.035)
-                    )
-                    .clipShape(RoundedRectangle(cornerRadius: LumiRadius.compact))
-                    .overlay {
-                        RoundedRectangle(cornerRadius: LumiRadius.compact)
-                            .stroke(
-                                selectedPhrase == planCue.phraseIndex
-                                    ? LumiColor.accent.opacity(0.72)
-                                    : Color.white.opacity(0.08),
-                                lineWidth: 1
-                            )
-                    }
-                }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("lumi.plan.phrase.\(planCue.phraseIndex)")
+                    .foregroundStyle(hasStarted ? LumiColor.destructive : LumiColor.success)
             }
 
             if let cue {
                 VStack(alignment: .leading, spacing: LumiSpacing.small) {
                     HStack(spacing: LumiSpacing.small) {
                         VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-                            Text(verbatim: "THEME")
+                            Text(verbatim: "THEME FROM \(phraseTitle(cue).uppercased())")
                                 .font(LumiTypography.technical)
                                 .foregroundStyle(Color.white.opacity(0.46))
                             PlanSelectionControl(
@@ -567,8 +457,8 @@ public struct LiveWorkspaceView: View {
                                 choices: options.themes.map {
                                     PlanSelectionChoice(id: $0.id, name: $0.name)
                                 },
-                                isEnabled: canEdit(plan) && themeID(cue) != nil,
-                                onSelect: { selectTheme($0, plan: plan) }
+                                isEnabled: editable && themeID(cue) != nil,
+                                onSelect: { selectThemeFromPhrase($0, cue: cue, plan: plan) }
                             )
                         }
                         VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
@@ -576,18 +466,18 @@ public struct LiveWorkspaceView: View {
                                 .font(LumiTypography.technical)
                                 .foregroundStyle(Color.white.opacity(0.46))
                             PlanSelectionControl(
-                                value: sceneName(cue),
+                                value: autoloopName(cue),
                                 selectedID: sceneID(cue),
                                 choices: compatibleScenes(for: cue, options: options).map {
                                     PlanSelectionChoice(id: $0.id, name: $0.name)
                                 },
-                                isEnabled: canEdit(plan) && sceneID(cue) != nil,
+                                isEnabled: editable && sceneID(cue) != nil,
                                 onSelect: { selectScene($0, cue: cue, plan: plan) }
                             )
                         }
                     }
                     HStack(spacing: LumiSpacing.small) {
-                        Text(verbatim: "Selected: \(phraseTitle(cue)) · \(timeRange(cue, bpmMilli: deck.bpmMilli))")
+                        Text(verbatim: "Selected: \(phraseTitle(cue)) · \(timeRange(cue, bpmMilli: deck.bpmMilli)) · applies on the phrase boundary")
                             .font(LumiTypography.technical)
                             .foregroundStyle(Color.white.opacity(0.54))
                         Spacer()
@@ -606,14 +496,16 @@ public struct LiveWorkspaceView: View {
                             )
                         }
                         .buttonStyle(.bordered)
-                        .disabled(!canEdit(plan) || themeID(cue) == nil)
-                        Button {
-                            onPlanMutation(.regeneratePlan(context: mutationContext(for: plan)))
-                        } label: {
-                            Label(copy.regenerate, systemImage: "arrow.clockwise")
+                        .disabled(!editable || themeID(cue) == nil)
+                        if !isLive {
+                            Button {
+                                onPlanMutation(.regeneratePlan(context: mutationContext(for: plan)))
+                            } label: {
+                                Label(copy.regenerate, systemImage: "arrow.clockwise")
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(!canEdit(plan))
                         }
-                        .buttonStyle(.bordered)
-                        .disabled(!canEdit(plan))
                     }
                 }
                 .padding(LumiSpacing.small)
@@ -628,7 +520,23 @@ public struct LiveWorkspaceView: View {
         .padding(LumiSpacing.medium)
         .background(Color.white.opacity(0.025))
         .overlay(alignment: .top) { Divider().overlay(Color.white.opacity(0.1)) }
-        .accessibilityIdentifier("lumi.next.plan")
+        .accessibilityIdentifier(isLive ? "lumi.live.phraseEditor" : "lumi.next.phraseEditor")
+    }
+
+    private func selectedPhraseIndex(
+        deck: DeckSnapshot,
+        plan: PlanSnapshot?,
+        isMaster: Bool
+    ) -> UInt64? {
+        guard let plan else { return nil }
+        let requested: UInt64? = isMaster ? selectedLivePhrase : selectedPhrase
+        if let requested, plan.cues.contains(where: { $0.phraseIndex == requested }) {
+            return requested
+        }
+        if isMaster, let current = deck.phraseIndex {
+            return plan.cues.first(where: { $0.phraseIndex > current })?.phraseIndex ?? current
+        }
+        return plan.cues.first?.phraseIndex
     }
 
     private var waitingDeckPlan: some View {
@@ -638,36 +546,6 @@ public struct LiveWorkspaceView: View {
             .padding(LumiSpacing.medium)
             .frame(maxWidth: .infinity, alignment: .leading)
             .overlay(alignment: .top) { Divider().overlay(Color.white.opacity(0.1)) }
-    }
-
-    private func compactPlanField(label: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-            Text(verbatim: label)
-                .font(LumiTypography.technical)
-                .foregroundStyle(Color.white.opacity(0.44))
-                .lineLimit(1)
-            Text(verbatim: value)
-                .font(LumiTypography.metadata.weight(.semibold))
-                .foregroundStyle(Color.white.opacity(0.84))
-                .lineLimit(1)
-        }
-        .padding(LumiSpacing.small)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.04))
-        .clipShape(RoundedRectangle(cornerRadius: LumiRadius.compact))
-    }
-
-    private func livePhraseStatus(
-        phrase: DeckPhraseSnapshot,
-        activeIndex: UInt64?,
-        currentBeat: UInt64
-    ) -> String {
-        guard let activeIndex else {
-            return "in \(phrase.startBeat) beats"
-        }
-        if phrase.index < activeIndex { return "PAST" }
-        if phrase.index == activeIndex { return "LIVE · LOCKED" }
-        return "in \(phrase.startBeat > currentBeat ? phrase.startBeat - currentBeat : 0) beats"
     }
 
     private func navigationRow(
@@ -902,6 +780,10 @@ public struct LiveWorkspaceView: View {
         }
     }
 
+    private func autoloopName(_ cue: PlanCueSnapshot) -> String {
+        cue.libraryResolution?.entryName ?? sceneName(cue)
+    }
+
     private func mutationContext(for plan: PlanSnapshot) -> PlanMutationContext {
         PlanMutationContext(
             planID: plan.planID,
@@ -955,6 +837,20 @@ public struct LiveWorkspaceView: View {
     private func selectTheme(_ themeID: UInt64, plan: PlanSnapshot) {
         onPlanMutation(
             .selectTheme(context: mutationContext(for: plan), themeID: themeID)
+        )
+    }
+
+    private func selectThemeFromPhrase(
+        _ themeID: UInt64,
+        cue: PlanCueSnapshot,
+        plan: PlanSnapshot
+    ) {
+        onPlanMutation(
+            .selectThemeFromPhrase(
+                context: mutationContext(for: plan),
+                phraseIndex: cue.phraseIndex,
+                themeID: themeID
+            )
         )
     }
 

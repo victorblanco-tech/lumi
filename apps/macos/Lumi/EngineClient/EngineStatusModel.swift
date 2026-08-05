@@ -673,10 +673,14 @@ final class EngineStatusModel: ObservableObject {
                 protocolVersion: protocolVersion
             )
             latestSnapshot = snapshot
+            let savedRevision = [snapshot.livePlan, snapshot.nextPlan]
+                .compactMap { $0 }
+                .first(where: { $0.planID == request.context.planID })?
+                .revision
             workspaceState = LiveWorkspacePresenter.ready(
                 snapshot,
                 planInteraction: .succeeded(
-                    "Plan revision \(snapshot.nextPlan?.revision ?? 0) saved."
+                    "Plan revision \(savedRevision ?? 0) saved."
                 )
             )
         } catch {
@@ -764,6 +768,12 @@ final class EngineStatusModel: ObservableObject {
         switch request {
         case let .selectTheme(context, themeID):
             .selectTheme(context: engineContext(context), themeID: themeID)
+        case let .selectThemeFromPhrase(context, phraseIndex, themeID):
+            .selectThemeFromPhrase(
+                context: engineContext(context),
+                phraseIndex: phraseIndex,
+                themeID: themeID
+            )
         case let .selectScene(context, phraseIndex, sceneID):
             .selectScene(
                 context: engineContext(context),
@@ -854,6 +864,7 @@ final class EngineStatusModel: ObservableObject {
               !isExchangingCommand,
               pendingInteractiveExchanges == 0,
               let current = latestSnapshot,
+              current.deckSource.providerKind == "simulator",
               !current.simulation.paused,
               let endpointDescription,
               let protocolVersion else {

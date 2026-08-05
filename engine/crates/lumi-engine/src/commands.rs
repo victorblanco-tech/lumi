@@ -117,6 +117,11 @@ pub enum SessionCommand {
         context: PlanCommandContext,
         theme_id: ThemeId,
     },
+    SelectThemeFromPhrase {
+        context: PlanCommandContext,
+        phrase_index: u16,
+        theme_id: ThemeId,
+    },
     SelectScene {
         context: PlanCommandContext,
         phrase_index: u16,
@@ -175,6 +180,7 @@ impl SessionCommand {
             | Self::AdvanceToNextTrack { .. }
             | Self::ResetDemoSession { .. } => None,
             Self::SelectTheme { context, .. }
+            | Self::SelectThemeFromPhrase { context, .. }
             | Self::SelectScene { context, .. }
             | Self::SetCueLock { context, .. }
             | Self::RegeneratePlan { context } => Some(*context),
@@ -298,6 +304,11 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
         }),
         "selectTheme" => Ok(SessionCommand::SelectTheme {
             context: context(envelope)?,
+            theme_id: ThemeId::new(unsigned(&envelope.payload, "themeId")?),
+        }),
+        "selectThemeFromPhrase" => Ok(SessionCommand::SelectThemeFromPhrase {
+            context: context(envelope)?,
+            phrase_index: phrase_index(envelope)?,
             theme_id: ThemeId::new(unsigned(&envelope.payload, "themeId")?),
         }),
         "selectScene" => Ok(SessionCommand::SelectScene {

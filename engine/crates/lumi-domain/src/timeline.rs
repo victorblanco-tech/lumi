@@ -40,6 +40,7 @@ impl TimelineEntry {
                     crate::DeckObservation::SourceStatusChanged { .. } => "sourceStatusChanged",
                     crate::DeckObservation::TrackLoaded { .. } => "trackLoaded",
                     crate::DeckObservation::PlaybackPosition { .. } => "playbackPosition",
+                    crate::DeckObservation::PlaybackStateChanged { .. } => "playbackStateChanged",
                     crate::DeckObservation::TrackUnloaded { .. } => "trackUnloaded",
                     crate::DeckObservation::PhraseChanged { .. } => "phraseChanged",
                     crate::DeckObservation::LeaderChanged { .. } => "leaderChanged",

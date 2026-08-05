@@ -13,6 +13,7 @@ public struct EngineSnapshot: Equatable, Sendable {
     public let outputProvider: OutputProviderSnapshot
     public let leaderDeckID: UInt64
     public let decks: [DeckSnapshot]
+    public let livePlan: PlanSnapshot?
     public let nextPlan: PlanSnapshot?
     public let planningOptions: PlanningOptionsSnapshot
     public let timeline: [TimelineEntrySnapshot]
@@ -34,6 +35,7 @@ public struct EngineSnapshot: Equatable, Sendable {
         ),
         leaderDeckID: UInt64,
         decks: [DeckSnapshot],
+        livePlan: PlanSnapshot? = nil,
         nextPlan: PlanSnapshot?,
         planningOptions: PlanningOptionsSnapshot,
         timeline: [TimelineEntrySnapshot] = []
@@ -50,6 +52,7 @@ public struct EngineSnapshot: Equatable, Sendable {
         self.outputProvider = outputProvider
         self.leaderDeckID = leaderDeckID
         self.decks = decks
+        self.livePlan = livePlan
         self.nextPlan = nextPlan
         self.planningOptions = planningOptions
         self.timeline = timeline
@@ -150,6 +153,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
     public let pitchClass: String
     public let keyMode: String
     public let beat: UInt64
+    public let playing: Bool
     public let phraseIndex: UInt64?
     public let durationBeats: UInt64
     public let phrases: [DeckPhraseSnapshot]
@@ -167,6 +171,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
         pitchClass: String,
         keyMode: String,
         beat: UInt64,
+        playing: Bool = false,
         phraseIndex: UInt64?,
         durationBeats: UInt64 = 0,
         phrases: [DeckPhraseSnapshot] = [],
@@ -181,6 +186,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
         self.pitchClass = pitchClass
         self.keyMode = keyMode
         self.beat = beat
+        self.playing = playing
         self.phraseIndex = phraseIndex
         self.durationBeats = durationBeats
         self.phrases = phrases
@@ -351,6 +357,8 @@ public struct PlanCueLibraryResolutionSnapshot: Equatable, Sendable {
     public let resolutionReason: String
     public let entryID: String
     public let entryName: String
+    public let bankNumber: UInt64?
+    public let autoloopNumber: UInt64?
 
     public init(
         roleID: String,
@@ -360,7 +368,9 @@ public struct PlanCueLibraryResolutionSnapshot: Equatable, Sendable {
         catalogRevision: UInt64,
         resolutionReason: String,
         entryID: String,
-        entryName: String
+        entryName: String,
+        bankNumber: UInt64? = nil,
+        autoloopNumber: UInt64? = nil
     ) {
         self.roleID = roleID
         self.roleName = roleName
@@ -370,6 +380,8 @@ public struct PlanCueLibraryResolutionSnapshot: Equatable, Sendable {
         self.resolutionReason = resolutionReason
         self.entryID = entryID
         self.entryName = entryName
+        self.bankNumber = bankNumber
+        self.autoloopNumber = autoloopNumber
     }
 }
 

@@ -35,6 +35,7 @@ public enum LiveWorkspaceFixtures {
                 pitchClass: "a",
                 keyMode: "minor",
                 beat: 24,
+                playing: true,
                 phraseIndex: 0,
                 durationBeats: 128,
                 phrases: deckPhrases(second: "verse"),
@@ -56,6 +57,27 @@ public enum LiveWorkspaceFixtures {
                 waveformPreview: waveform(seed: 202)
             )
         ],
+        livePlan: PlanSnapshot(
+            planID: "8411348566426143282",
+            deckID: 1,
+            trackLoadID: 1_001,
+            trackDurationBeats: 128,
+            revision: 1,
+            configurationRevision: 1,
+            status: "ready",
+            themeDecision: ThemeDecisionSnapshot(
+                themeID: 3,
+                themeName: "Solar Flare",
+                reason: "colorPrefer",
+                matchedColorRGB: 12_273_790
+            ),
+            cues: [
+                cue(0, 0, 32, "intro", "ambient", 1, "Soft Motion", 1, 1, 3, "Solar Flare"),
+                cue(1, 32, 64, "verse", "groove", 3, "Neon Motion", 2, 1, 3, "Solar Flare"),
+                cue(2, 64, 96, "build", "build", 6, "Velocity Build", 3, 2, 3, "Solar Flare"),
+                cue(3, 96, 128, "drop", "impact", 7, "Full Energy", 4, 1, 3, "Solar Flare")
+            ]
+        ),
         nextPlan: PlanSnapshot(
             planID: "14113485664261432828",
             deckID: 2,
@@ -189,6 +211,7 @@ public enum LiveWorkspaceFixtures {
             outputProvider: readySnapshot.outputProvider,
             leaderDeckID: readySnapshot.leaderDeckID,
             decks: [readySnapshot.decks[0], nextDeck],
+            livePlan: readySnapshot.livePlan,
             nextPlan: plan,
             planningOptions: readySnapshot.planningOptions,
             timeline: readySnapshot.timeline
@@ -245,6 +268,7 @@ public enum LiveWorkspaceFixtures {
             outputProvider: readySnapshot.outputProvider,
             leaderDeckID: readySnapshot.leaderDeckID,
             decks: readySnapshot.decks,
+            livePlan: readySnapshot.livePlan,
             nextPlan: plan,
             planningOptions: readySnapshot.planningOptions,
             timeline: readySnapshot.timeline
@@ -285,6 +309,7 @@ public enum LiveWorkspaceFixtures {
             outputProvider: readySnapshot.outputProvider,
             leaderDeckID: readySnapshot.leaderDeckID,
             decks: readySnapshot.decks,
+            livePlan: readySnapshot.livePlan,
             nextPlan: plan,
             planningOptions: readySnapshot.planningOptions,
             timeline: readySnapshot.timeline
@@ -311,6 +336,7 @@ public enum LiveWorkspaceFixtures {
             outputProvider: snapshot.outputProvider,
             leaderDeckID: snapshot.leaderDeckID,
             decks: snapshot.decks,
+            livePlan: snapshot.livePlan,
             nextPlan: snapshot.nextPlan,
             planningOptions: snapshot.planningOptions,
             timeline: snapshot.timeline
@@ -326,7 +352,9 @@ public enum LiveWorkspaceFixtures {
         _ sceneID: UInt64,
         _ scene: String,
         _ bank: UInt64,
-        _ slot: UInt64
+        _ slot: UInt64,
+        _ themeID: UInt64 = 2,
+        _ themeName: String = "Deep Ocean"
     ) -> PlanCueSnapshot {
         PlanCueSnapshot(
             phraseIndex: index,
@@ -336,8 +364,8 @@ public enum LiveWorkspaceFixtures {
             locked: false,
             reason: .phraseCategoryMatched(phraseKind: phrase, category: category),
             action: .applyLook(
-                themeID: 2,
-                themeName: "Deep Ocean",
+                themeID: themeID,
+                themeName: themeName,
                 sceneID: sceneID,
                 sceneName: scene,
                 category: category,

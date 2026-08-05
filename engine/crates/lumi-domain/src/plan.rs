@@ -392,7 +392,7 @@ impl LightingPlan {
             _ => {}
         }
         if let Some(decision) = theme_decision.as_ref()
-            && cues.iter().any(|cue| match cue.action() {
+            && cues.first().is_some_and(|cue| match cue.action() {
                 SemanticLightingAction::ApplyLook(look) => {
                     look.theme_id() != decision.theme_id()
                         || look.theme_name() != decision.theme_name()
@@ -561,7 +561,7 @@ impl fmt::Display for PlanValidationError {
                 formatter.write_str("a fallback plan may not contain a Theme decision")
             }
             Self::InconsistentThemeDecision => {
-                formatter.write_str("every concrete cue must match the plan Theme decision")
+                formatter.write_str("the starting cue must match the plan Theme decision")
             }
             Self::RevisionOverflow => formatter.write_str("plan revision overflow"),
         }

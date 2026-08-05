@@ -52,6 +52,7 @@ struct SimulatedDeck {
     metadata: TrackMetadata,
     beat: u32,
     phrase_index: u16,
+    playing: bool,
 }
 
 pub struct SimulatorDeckSourceProvider<C: MonotonicClock> {
@@ -76,7 +77,8 @@ impl<C: MonotonicClock> SimulatorDeckSourceProvider<C> {
     pub fn from_fixture_json(input: &str, clock: C) -> Result<Self, SimulatorError> {
         let fixture = parse(input)?;
         let now = clock.now();
-        let decks = fixture
+        let initial_leader_deck_id = fixture.initial_leader_deck_id;
+        let mut decks: BTreeMap<DeckId, SimulatedDeck> = fixture
             .decks
             .into_iter()
             .map(|deck| {
@@ -87,15 +89,19 @@ impl<C: MonotonicClock> SimulatorDeckSourceProvider<C> {
                         metadata: deck.metadata,
                         beat: 0,
                         phrase_index: 0,
+                        playing: false,
                     },
                 )
             })
             .collect();
+        if let Some(leader) = decks.get_mut(&initial_leader_deck_id) {
+            leader.playing = true;
+        }
         let mut provider = Self {
             clock,
             source_id: fixture.source_id,
-            initial_leader_deck_id: fixture.initial_leader_deck_id,
-            leader_deck_id: fixture.initial_leader_deck_id,
+            initial_leader_deck_id,
+            leader_deck_id: initial_leader_deck_id,
             decks,
             sequence: 0,
             last_clock: now,
@@ -132,10 +138,12 @@ impl<C: MonotonicClock> SimulatorDeckSourceProvider<C> {
             SimulationControl::Pause => {
                 self.update_to_clock()?;
                 self.paused = true;
+                self.set_leader_playing(false)?;
             }
             SimulationControl::Resume => {
                 self.last_clock = self.clock.now();
                 self.paused = false;
+                self.set_leader_playing(true)?;
             }
             SimulationControl::Reset => self.reset()?,
             SimulationControl::AdvanceLeader => {
@@ -173,6 +181,7 @@ impl<C: MonotonicClock> SimulatorDeckSourceProvider<C> {
                 metadata: metadata.clone(),
                 beat: 0,
                 phrase_index: 0,
+                playing: false,
             },
         );
         if deck_id == self.leader_deck_id {
@@ -242,6 +251,8 @@ impl<C: MonotonicClock> SimulatorDeckSourceProvider<C> {
         };
         for _ in 0..beats_to_emit {
             if !self.advance_one_beat(now)? {
+                self.paused = true;
+                self.set_leader_playing(false)?;
                 break;
             }
         }
@@ -252,13 +263,17 @@ impl<C: MonotonicClock> SimulatorDeckSourceProvider<C> {
         self.pending_events.clear();
         self.leader_deck_id = self.initial_leader_deck_id;
         self.speed = SimulationSpeed::One;
-        self.paused = false;
         self.beat_remainder = 0;
         self.last_clock = self.clock.now();
         for deck in self.decks.values_mut() {
             deck.beat = 0;
             deck.phrase_index = 0;
+            deck.playing = false;
         }
+        if let Some(leader) = self.decks.get_mut(&self.initial_leader_deck_id) {
+            leader.playing = true;
+        }
+        self.paused = false;
         self.queue_initial_events()
     }
 
@@ -328,10 +343,19 @@ impl<C: MonotonicClock> SimulatorDeckSourceProvider<C> {
                 track_load_id: leader.track_load_id,
                 phrase_index: leader.phrase_index,
             },
+        )?;
+        self.emit(
+            now,
+            DeckObservation::PlaybackStateChanged {
+                deck_id: self.leader_deck_id,
+                track_load_id: leader.track_load_id,
+                playing: true,
+            },
         )
     }
 
     fn advance_leader(&mut self) -> Result<(), SimulatorError> {
+        self.set_leader_playing(false)?;
         let Some(next_deck_id) = self
             .decks
             .keys()
@@ -344,6 +368,9 @@ impl<C: MonotonicClock> SimulatorDeckSourceProvider<C> {
         self.beat_remainder = 0;
         let now = self.clock.now();
         let leader = self.leader_snapshot()?;
+        if !self.paused {
+            self.set_leader_playing(true)?;
+        }
         self.emit(
             now,
             DeckObservation::LeaderChanged {
@@ -409,6 +436,26 @@ impl<C: MonotonicClock> SimulatorDeckSourceProvider<C> {
             )?;
         }
         Ok(true)
+    }
+
+    fn set_leader_playing(&mut self, playing: bool) -> Result<(), SimulatorError> {
+        let now = self.clock.now();
+        let Some(deck) = self.decks.get_mut(&self.leader_deck_id) else {
+            return Err(SimulatorError::LeaderDeckMissing);
+        };
+        if deck.playing == playing {
+            return Ok(());
+        }
+        deck.playing = playing;
+        let track_load_id = deck.track_load_id;
+        self.emit(
+            now,
+            DeckObservation::PlaybackStateChanged {
+                deck_id: self.leader_deck_id,
+                track_load_id,
+                playing,
+            },
+        )
     }
 
     fn leader_snapshot(&self) -> Result<LeaderSnapshot, SimulatorError> {

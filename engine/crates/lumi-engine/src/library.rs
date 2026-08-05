@@ -83,6 +83,8 @@ pub struct ResolvedLibraryCue {
     pub variant_id: String,
     pub entry_id: String,
     pub entry_name: String,
+    pub bank_number: u64,
+    pub autoloop_number: Option<u16>,
     pub catalog_revision: u64,
     pub resolution_reason: String,
 }
@@ -122,6 +124,12 @@ impl LibraryPlanContext {
                     variant_id: resolution.variant_id().as_str().to_owned(),
                     entry_id: resolution.entry_id().as_str().to_owned(),
                     entry_name: resolution.display_name().to_owned(),
+                    bank_number: theme_id.value(),
+                    autoloop_number: resolution
+                        .variant_id()
+                        .as_str()
+                        .strip_prefix("mapping-")
+                        .and_then(|value| value.parse::<u16>().ok()),
                     catalog_revision: resolution.catalog_revision(),
                     resolution_reason: autoloop_resolution_reason_name(resolution.reason()),
                 })

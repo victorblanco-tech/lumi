@@ -1,6 +1,6 @@
 # Epic 2B – Live deck intelligence and rolling plans
 
-Status: **Refined; E2B-01 complete, E2B-02 ready**
+Status: **In delivery; E2B-01, E2B-03, and E2B-04 complete; E2B-02 and E2B-06 ready**
 
 Target milestone: **0.2.0 – Deck Intelligence**
 
@@ -48,6 +48,8 @@ Build the first visible vertical slice using the simulator:
 
 ### [E2B-03 – Promote and retain the rolling Live plan](https://github.com/victorblanco-tech/lumi/issues/83)
 
+Status: **Complete and locally verified**
+
 - publish full plan snapshots for the current and next track;
 - retain the next plan when its deck becomes master;
 - expose current phrase and future editability per cue;
@@ -56,11 +58,25 @@ Build the first visible vertical slice using the simulator:
 
 ### [E2B-04 – Live planning interaction and diagnostics](https://github.com/victorblanco-tech/lumi/issues/85)
 
+Status: **Complete and locally verified**
+
 - integrate the remaining-Live-track editor into the master deck surface;
 - keep next-track planning available alongside it;
 - collapse engine, source, planner, timing and MIDI health behind compact status;
 - preserve explicit degraded, disconnected and revision-conflict feedback;
 - keep simulator/test controls available without dominating the show view.
+
+Delivered behavior also makes the deck source authoritative for transport:
+`playing` and the current beat enter through the provider event contract, the
+playhead never advances independently in SwiftUI, and a stopped track does not
+wrap back to its beginning. Selecting a phrase band opens its Theme and AutoLoop
+controls directly beneath the waveform. Started phrases fail closed; future
+Live phrases commit revision-safe changes to the retained active plan.
+
+The first real-output slice maps the small demo Theme/AutoLoop vocabulary to
+SoundSwitch bank and button MIDI pulses at phrase execution. The full persisted
+four-bank/32-button output-profile mapping remains part of the SoundSwitch
+integration work and is not duplicated in the Live view.
 
 ### [E2B-05 – Companion presentation contract](https://github.com/victorblanco-tech/lumi/issues/82)
 

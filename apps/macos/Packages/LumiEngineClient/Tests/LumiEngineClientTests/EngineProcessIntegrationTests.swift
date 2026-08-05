@@ -516,6 +516,101 @@ func loadsLibraryTrackIntoSimulator() async throws {
     }
 }
 
+@Test("Live transport and future phrase edits stay authoritative through the real engine")
+func editsFutureLivePhraseAndTracksPlaybackState() async throws {
+    let environment = ProcessInfo.processInfo.environment
+    guard let executablePath = environment["LUMI_ENGINE_TEST_EXECUTABLE"] else {
+        Issue.record("LUMI_ENGINE_TEST_EXECUTABLE is required")
+        return
+    }
+    let supervisor = EngineProcessSupervisor()
+    let databaseURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("lumi-swift-live-workspace-\(UUID().uuidString).sqlite")
+    defer {
+        try? FileManager.default.removeItem(at: databaseURL)
+        try? FileManager.default.removeItem(atPath: databaseURL.path + "-wal")
+        try? FileManager.default.removeItem(atPath: databaseURL.path + "-shm")
+    }
+    do {
+        let endpoint = try await supervisor.launch(
+            engineExecutable: URL(fileURLWithPath: executablePath),
+            libraryDatabaseURL: databaseURL
+        )
+        let initial = try await supervisor.connect(to: endpoint)
+        guard let livePlan = plan(initial, field: "livePlan"),
+              case let .string(planID) = livePlan["planId"],
+              case let .number(trackLoadID) = livePlan["trackLoadId"],
+              case let .number(revision) = livePlan["revision"] else {
+            Issue.record("Initial snapshot must expose the active Live plan")
+            await supervisor.stop()
+            return
+        }
+        #expect(leaderDeckPlaying(initial) == true)
+        let originalFirstTheme = cueThemeID(livePlan, phraseIndex: 0)
+        let futureThemeID: UInt64 = originalFirstTheme == 4 ? 1 : 4
+        let context = EnginePlanCommandContext(
+            planID: planID,
+            trackLoadID: UInt64(trackLoadID),
+            expectedPlanRevision: UInt64(revision)
+        )
+        let revised = try await supervisor.send(
+            .selectThemeFromPhrase(
+                context: context,
+                phraseIndex: 1,
+                themeID: futureThemeID
+            ),
+            messageID: "swift-live-future-theme"
+        )
+        #expect(planRevision(revised, field: "livePlan") == UInt64(revision) + 1)
+        #expect(cueThemeID(plan(revised, field: "livePlan"), phraseIndex: 0) == originalFirstTheme)
+        #expect(
+            cueThemeID(plan(revised, field: "livePlan"), phraseIndex: 1) == futureThemeID
+        )
+
+        let startedContext = EnginePlanCommandContext(
+            planID: planID,
+            trackLoadID: UInt64(trackLoadID),
+            expectedPlanRevision: UInt64(revision) + 1
+        )
+        let rejected = try await supervisor.send(
+            .selectThemeFromPhrase(context: startedContext, phraseIndex: 0, themeID: 4),
+            messageID: "swift-live-started-theme"
+        )
+        #expect(EngineCommandFailure(rejected)?.code == "startedLivePhraseNotEditable")
+
+        let paused = try await supervisor.send(
+            .setSimulationPlayback(false, expectedStateRevision: requiredStateRevision(revised))
+        )
+        let pausedBeat = leaderDeckBeat(paused)
+        #expect(leaderDeckPlaying(paused) == false)
+        let advancedWhilePaused = try await supervisor.send(
+            .advanceSimulation(
+                elapsedTicks: 1_000,
+                expectedStateRevision: requiredStateRevision(paused)
+            )
+        )
+        #expect(leaderDeckBeat(advancedWhilePaused) == pausedBeat)
+        let resumed = try await supervisor.send(
+            .setSimulationPlayback(
+                true,
+                expectedStateRevision: requiredStateRevision(advancedWhilePaused)
+            )
+        )
+        #expect(leaderDeckPlaying(resumed) == true)
+        let advanced = try await supervisor.send(
+            .advanceSimulation(
+                elapsedTicks: 1_000,
+                expectedStateRevision: requiredStateRevision(resumed)
+            )
+        )
+        #expect((leaderDeckBeat(advanced) ?? 0) > (pausedBeat ?? 0))
+        await supervisor.stop()
+    } catch {
+        await supervisor.stop()
+        throw error
+    }
+}
+
 private func stateRevision(_ envelope: MessageEnvelope) -> UInt64? {
     guard case let .number(revision) = envelope.payload["stateRevision"] else {
         return nil
@@ -526,6 +621,53 @@ private func stateRevision(_ envelope: MessageEnvelope) -> UInt64? {
 private func nextPlan(_ envelope: MessageEnvelope) -> [String: JSONValue]? {
     guard case let .object(plan) = envelope.payload["nextPlan"] else { return nil }
     return plan
+}
+
+private func plan(_ envelope: MessageEnvelope, field: String) -> [String: JSONValue]? {
+    guard case let .object(plan) = envelope.payload[field] else { return nil }
+    return plan
+}
+
+private func planRevision(_ envelope: MessageEnvelope, field: String) -> UInt64? {
+    guard let plan = plan(envelope, field: field),
+          case let .number(revision) = plan["revision"] else { return nil }
+    return UInt64(revision)
+}
+
+private func cueThemeID(_ plan: [String: JSONValue]?, phraseIndex: UInt64) -> UInt64? {
+    guard let plan, case let .array(cues) = plan["cues"] else { return nil }
+    for cueValue in cues {
+        guard case let .object(cue) = cueValue,
+              cue["phraseIndex"] == .number(Double(phraseIndex)),
+              case let .object(action) = cue["action"],
+              case let .number(themeID) = action["themeId"] else { continue }
+        return UInt64(themeID)
+    }
+    return nil
+}
+
+private func leaderDeckPlaying(_ envelope: MessageEnvelope) -> Bool? {
+    guard case let .number(leaderID) = envelope.payload["leaderDeckId"],
+          case let .array(decks) = envelope.payload["decks"] else { return nil }
+    for value in decks {
+        guard case let .object(deck) = value,
+              deck["deckId"] == .number(leaderID),
+              case let .boolean(playing) = deck["playing"] else { continue }
+        return playing
+    }
+    return nil
+}
+
+private func leaderDeckBeat(_ envelope: MessageEnvelope) -> UInt64? {
+    guard case let .number(leaderID) = envelope.payload["leaderDeckId"],
+          case let .array(decks) = envelope.payload["decks"] else { return nil }
+    for value in decks {
+        guard case let .object(deck) = value,
+              deck["deckId"] == .number(leaderID),
+              case let .number(beat) = deck["beat"] else { continue }
+        return UInt64(beat)
+    }
+    return nil
 }
 
 private func nextPlanCueCount(_ envelope: MessageEnvelope) -> Int {

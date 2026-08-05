@@ -97,12 +97,12 @@
   },
   "scenarioVersion": 1,
   "simulation": {
-    "paused": false,
+    "paused": true,
     "speed": 64
   },
   "timeline": {
-    "entryCount": 153,
-    "lastSequence": 153,
+    "entryCount": 160,
+    "lastSequence": 160,
     "simulatedOutputEntries": 4
   }
 }

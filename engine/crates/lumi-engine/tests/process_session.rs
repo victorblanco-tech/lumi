@@ -74,7 +74,10 @@ fn real_engine_process_serves_authenticated_snapshot_on_loopback() {
 
     assert_eq!(snapshot.message_type, MessageType::Snapshot);
     assert_eq!(snapshot.sequence, 1);
-    assert_eq!(snapshot.payload.get("stateRevision"), Some(&Value::from(8)));
+    assert_eq!(
+        snapshot.payload.get("stateRevision"),
+        Some(&Value::from(10))
+    );
     assert_eq!(
         snapshot
             .payload
@@ -97,7 +100,7 @@ fn real_engine_process_serves_authenticated_snapshot_on_loopback() {
             .get("runtimeCore")
             .and_then(Value::as_object)
             .and_then(|runtime| runtime.get("processedEvents")),
-        Some(&Value::from(8))
+        Some(&Value::from(10))
     );
     assert_eq!(
         snapshot

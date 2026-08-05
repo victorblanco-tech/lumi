@@ -125,6 +125,47 @@ fn theme_override_matches_the_reviewed_golden_plan_diff() {
 }
 
 #[test]
+fn theme_override_from_a_future_phrase_preserves_the_earlier_live_cues() {
+    let planner = DeterministicPlanner::epic_one();
+    let original = generate(&planner, &demo_input());
+    let revised = mutate(planner.select_theme_from_phrase(&original, 2, ThemeId::new(4)));
+
+    assert_eq!(revised.revision(), PlanRevision::new(2));
+    assert_eq!(&revised.cues()[..2], &original.cues()[..2]);
+    for cue in &revised.cues()[2..] {
+        let SemanticLightingAction::ApplyLook(look) = cue.action() else {
+            panic!("future cue must remain a concrete look");
+        };
+        assert_eq!(look.theme_id(), ThemeId::new(4));
+        assert_eq!(cue.origin(), CueOrigin::User);
+    }
+    assert_eq!(
+        revised.theme_decision().map(|decision| decision.theme_id()),
+        original
+            .theme_decision()
+            .map(|decision| decision.theme_id())
+    );
+}
+
+#[test]
+fn theme_override_from_the_first_phrase_updates_the_plan_decision() {
+    let planner = DeterministicPlanner::epic_one();
+    let original = generate(&planner, &demo_input());
+    let revised = mutate(planner.select_theme_from_phrase(&original, 0, ThemeId::new(4)));
+
+    assert!(revised.cues().iter().all(|cue| {
+        matches!(
+            cue.action(),
+            SemanticLightingAction::ApplyLook(look) if look.theme_id() == ThemeId::new(4)
+        )
+    }));
+    assert_eq!(
+        revised.theme_decision().map(|decision| decision.theme_id()),
+        Some(ThemeId::new(4))
+    );
+}
+
+#[test]
 fn each_accepted_edit_creates_exactly_one_revision() {
     let planner = DeterministicPlanner::epic_one();
     let original = generate(&planner, &demo_input());

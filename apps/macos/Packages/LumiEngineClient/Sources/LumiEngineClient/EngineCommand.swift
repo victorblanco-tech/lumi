@@ -324,6 +324,11 @@ public enum EngineCommand: Equatable, Sendable {
     case advanceSimulation(elapsedTicks: UInt64, expectedStateRevision: UInt64)
     case advanceToNextTrack(expectedStateRevision: UInt64)
     case selectTheme(context: EnginePlanCommandContext, themeID: UInt64)
+    case selectThemeFromPhrase(
+        context: EnginePlanCommandContext,
+        phraseIndex: UInt64,
+        themeID: UInt64
+    )
     case selectScene(
         context: EnginePlanCommandContext,
         phraseIndex: UInt64,
@@ -479,6 +484,15 @@ public enum EngineCommand: Equatable, Sendable {
                 "selectTheme",
                 context: context,
                 additional: ["themeId": .number(Double(themeID))]
+            )
+        case let .selectThemeFromPhrase(context, phraseIndex, themeID):
+            return planPayload(
+                "selectThemeFromPhrase",
+                context: context,
+                additional: [
+                    "phraseIndex": .number(Double(phraseIndex)),
+                    "themeId": .number(Double(themeID))
+                ]
             )
         case let .selectScene(context, phraseIndex, sceneID):
             return planPayload(

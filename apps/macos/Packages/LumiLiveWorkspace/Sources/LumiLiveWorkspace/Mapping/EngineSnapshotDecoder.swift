@@ -71,6 +71,18 @@ public struct EngineSnapshotDecoder: Sendable {
             }
         }
 
+        let livePlan: PlanSnapshot?
+        if envelope.payload["livePlan"] == nil || envelope.payload["livePlan"] == .null {
+            livePlan = nil
+        } else {
+            livePlan = try decodePlan(envelope.payload["livePlan"])
+            guard let liveDeck = decks.first(where: { $0.deckID == leaderDeckID }),
+                  livePlan?.deckID == liveDeck.deckID,
+                  livePlan?.trackLoadID == liveDeck.trackLoadID else {
+                throw EngineSnapshotDecodingError.invalidSnapshot
+            }
+        }
+
         return EngineSnapshot(
             endpoint: endpointDescription,
             engineVersion: engineVersion,
@@ -101,6 +113,7 @@ public struct EngineSnapshotDecoder: Sendable {
             ),
             leaderDeckID: leaderDeckID,
             decks: decks,
+            livePlan: livePlan,
             nextPlan: nextPlan,
             planningOptions: try decodePlanningOptions(optionsPayload),
             timeline: timeline
@@ -186,13 +199,13 @@ public struct EngineSnapshotDecoder: Sendable {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
         if let themeDecision {
-            guard cues.allSatisfy({ cue in
+            guard cues.first.map({ cue in
                 if case let .applyLook(themeID, themeName, _, _, _, _, _) = cue.action {
                     return themeID == themeDecision.themeID
                         && themeName == themeDecision.themeName
                 }
                 return false
-            }) else {
+            }) == true else {
                 throw EngineSnapshotDecodingError.invalidSnapshot
             }
         }
@@ -333,7 +346,9 @@ public struct EngineSnapshotDecoder: Sendable {
             catalogRevision: catalogRevision,
             resolutionReason: resolutionReason,
             entryID: entryID,
-            entryName: entryName
+            entryName: entryName,
+            bankNumber: unsignedInteger(resolution["bankNumber"]),
+            autoloopNumber: unsignedInteger(resolution["autoloopNumber"])
         )
     }
 
@@ -433,6 +448,7 @@ public struct EngineSnapshotDecoder: Sendable {
               let deckID = unsignedInteger(deck["deckId"]),
               let trackLoadID = unsignedInteger(deck["trackLoadId"]),
               let beat = unsignedInteger(deck["beat"]),
+              case let .boolean(playing) = deck["playing"],
               case let .object(track) = deck["track"],
               case let .string(title) = track["title"],
               case let .string(artist) = track["artist"],
@@ -490,6 +506,7 @@ public struct EngineSnapshotDecoder: Sendable {
             pitchClass: pitchClass,
             keyMode: keyMode,
             beat: beat,
+            playing: playing,
             phraseIndex: phraseIndex,
             durationBeats: durationBeats,
             phrases: phrases,

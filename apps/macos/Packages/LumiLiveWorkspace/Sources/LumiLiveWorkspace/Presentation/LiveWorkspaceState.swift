@@ -72,6 +72,7 @@ public struct LiveWorkspaceContent: Equatable, Sendable {
     public let nextDeck: DeckSnapshot
     public let decks: [DeckSnapshot]
     public let leaderDeckID: UInt64
+    public let livePlan: PlanSnapshot?
     public let plan: PlanSnapshot?
     public let sourceName: String
     public let stateRevision: UInt64
@@ -85,6 +86,7 @@ public struct LiveWorkspaceContent: Equatable, Sendable {
         nextDeck: DeckSnapshot,
         decks: [DeckSnapshot],
         leaderDeckID: UInt64,
+        livePlan: PlanSnapshot? = nil,
         plan: PlanSnapshot?,
         sourceName: String,
         stateRevision: UInt64,
@@ -97,6 +99,7 @@ public struct LiveWorkspaceContent: Equatable, Sendable {
         self.nextDeck = nextDeck
         self.decks = decks
         self.leaderDeckID = leaderDeckID
+        self.livePlan = livePlan
         self.plan = plan
         self.sourceName = sourceName
         self.stateRevision = stateRevision
@@ -144,6 +147,11 @@ public struct PlanMutationContext: Equatable, Sendable {
 
 public enum PlanMutationRequest: Equatable, Sendable {
     case selectTheme(context: PlanMutationContext, themeID: UInt64)
+    case selectThemeFromPhrase(
+        context: PlanMutationContext,
+        phraseIndex: UInt64,
+        themeID: UInt64
+    )
     case selectScene(
         context: PlanMutationContext,
         phraseIndex: UInt64,
@@ -155,6 +163,17 @@ public enum PlanMutationRequest: Equatable, Sendable {
         locked: Bool
     )
     case regeneratePlan(context: PlanMutationContext)
+
+    public var context: PlanMutationContext {
+        switch self {
+        case let .selectTheme(context, _),
+             let .selectThemeFromPhrase(context, _, _),
+             let .selectScene(context, _, _),
+             let .setCueLock(context, _, _),
+             let .regeneratePlan(context):
+            context
+        }
+    }
 }
 
 public enum LiveWorkspacePresenter {
@@ -286,6 +305,7 @@ public enum LiveWorkspacePresenter {
             nextDeck: nextDeck,
             decks: snapshot.decks.sorted { $0.deckID < $1.deckID },
             leaderDeckID: snapshot.leaderDeckID,
+            livePlan: snapshot.livePlan,
             plan: snapshot.nextPlan,
             sourceName: snapshot.deckSource.providerKind.capitalized,
             stateRevision: snapshot.stateRevision,

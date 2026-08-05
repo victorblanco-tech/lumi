@@ -161,7 +161,7 @@ struct LiveWorkspacePresenterTests {
         }
     }
 
-    @Test("Decoder rejects a Theme decision that does not match every resolved cue")
+    @Test("Decoder rejects a Theme decision that does not match the plan's starting Theme")
     func decoderRejectsInconsistentThemeDecision() throws {
         let recorded = try recordedEnvelope()
         var payload = recorded.payload
@@ -191,6 +191,50 @@ struct LiveWorkspacePresenterTests {
                 protocolVersion: 1
             )
         }
+    }
+
+    @Test("Decoder accepts a user-selected Theme from a future phrase")
+    func decoderAcceptsFuturePhraseThemeOverride() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case var .object(plan) = payload["nextPlan"],
+              case var .array(cues) = plan["cues"],
+              cues.count > 1,
+              case var .object(futureCue) = cues[1],
+              case var .object(action) = futureCue["action"] else {
+            Issue.record("Recorded fixture has no future editable cue")
+            return
+        }
+        action["themeId"] = .number(4)
+        action["themeName"] = .string("Ultraviolet")
+        futureCue["action"] = .object(action)
+        cues[1] = .object(futureCue)
+        plan["cues"] = .array(cues)
+        payload["nextPlan"] = .object(plan)
+        let revised = MessageEnvelope(
+            protocolVersion: recorded.protocolVersion,
+            messageType: recorded.messageType,
+            messageId: recorded.messageId,
+            sequence: recorded.sequence,
+            correlationId: recorded.correlationId,
+            sentAt: recorded.sentAt,
+            payload: payload
+        )
+
+        let snapshot = try EngineSnapshotDecoder().decode(
+            revised,
+            endpointDescription: "127.0.0.1:52841",
+            protocolVersion: 1
+        )
+        #expect(snapshot.nextPlan?.cues[1].action == .applyLook(
+            themeID: 4,
+            themeName: "Ultraviolet",
+            sceneID: 10,
+            sceneName: "Slow Wave",
+            category: "break",
+            loopBank: 5,
+            loopSlot: 2
+        ))
     }
 
     private func recordedEnvelope() throws -> MessageEnvelope {

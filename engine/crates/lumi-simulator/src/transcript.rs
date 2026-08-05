@@ -24,6 +24,8 @@ struct RecordedEvent {
     #[serde(skip_serializing_if = "Option::is_none")]
     beat: Option<u32>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    playing: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     phrase_index: Option<u16>,
 }
 
@@ -66,6 +68,7 @@ pub fn canonical_transcript(events: &[DomainEvent]) -> Result<Vec<u8>, Simulator
             track_load_id: None,
             track: None,
             beat: None,
+            playing: None,
             phrase_index: None,
         };
         match &envelope.observation {
@@ -89,6 +92,15 @@ pub fn canonical_transcript(events: &[DomainEvent]) -> Result<Vec<u8>, Simulator
                 recorded.deck_id = Some(deck_id.value());
                 recorded.track_load_id = Some(track_load_id.value());
                 recorded.beat = Some(*beat);
+            }
+            DeckObservation::PlaybackStateChanged {
+                deck_id,
+                track_load_id,
+                playing,
+            } => {
+                recorded.deck_id = Some(deck_id.value());
+                recorded.track_load_id = Some(track_load_id.value());
+                recorded.playing = Some(*playing);
             }
             DeckObservation::TrackUnloaded {
                 deck_id,
@@ -123,6 +135,7 @@ const fn observation_kind(observation: &DeckObservation) -> &'static str {
         DeckObservation::SourceStatusChanged { .. } => "sourceStatusChanged",
         DeckObservation::TrackLoaded { .. } => "trackLoaded",
         DeckObservation::PlaybackPosition { .. } => "playbackPosition",
+        DeckObservation::PlaybackStateChanged { .. } => "playbackStateChanged",
         DeckObservation::TrackUnloaded { .. } => "trackUnloaded",
         DeckObservation::PhraseChanged { .. } => "phraseChanged",
         DeckObservation::LeaderChanged { .. } => "leaderChanged",

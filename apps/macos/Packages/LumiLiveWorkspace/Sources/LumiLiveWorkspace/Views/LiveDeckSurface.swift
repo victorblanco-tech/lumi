@@ -6,6 +6,8 @@ struct LiveDeckSurface<Details: View>: View {
     let isMaster: Bool
     let plan: PlanSnapshot?
     let musicalKey: String
+    let selectedPhraseIndex: UInt64?
+    let onSelectPhrase: (UInt64) -> Void
     private let details: Details
 
     init(
@@ -13,12 +15,16 @@ struct LiveDeckSurface<Details: View>: View {
         isMaster: Bool,
         plan: PlanSnapshot?,
         musicalKey: String,
+        selectedPhraseIndex: UInt64?,
+        onSelectPhrase: @escaping (UInt64) -> Void,
         @ViewBuilder details: () -> Details
     ) {
         self.deck = deck
         self.isMaster = isMaster
         self.plan = plan
         self.musicalKey = musicalKey
+        self.selectedPhraseIndex = selectedPhraseIndex
+        self.onSelectPhrase = onSelectPhrase
         self.details = details()
     }
 
@@ -28,7 +34,6 @@ struct LiveDeckSurface<Details: View>: View {
             metadata
             waveform
             phraseBand
-            planSummary
             details
         }
         .background(Color.black)
@@ -121,6 +126,7 @@ struct LiveDeckSurface<Details: View>: View {
             ))
             metadataValue("KEY", value: musicalKey)
             metadataValue("BEAT", value: "\(deck.beat)")
+            metadataValue("TRANSPORT", value: deck.playing ? "PLAYING" : "PAUSED")
             metadataValue("PHRASE", value: activePhraseName)
         }
         .background(Color.white.opacity(0.035))
@@ -173,59 +179,36 @@ struct LiveDeckSurface<Details: View>: View {
         GeometryReader { proxy in
             HStack(spacing: 2) {
                 ForEach(deck.phrases) { phrase in
-                    Text(verbatim: phrase.kind.capitalized)
-                        .font(LumiTypography.caption)
-                        .foregroundStyle(Color.white)
-                        .lineLimit(1)
-                        .frame(
-                            width: phraseWidth(phrase, totalWidth: proxy.size.width),
-                            height: 22
-                        )
-                        .background(phraseColor(phrase.kind))
-                        .overlay {
-                            if phrase.index == deck.phraseIndex {
-                                Rectangle().strokeBorder(Color.white, lineWidth: 2)
+                    Button {
+                        onSelectPhrase(phrase.index)
+                    } label: {
+                        Text(verbatim: phrase.kind.capitalized)
+                            .font(LumiTypography.caption.weight(.semibold))
+                            .foregroundStyle(Color.white)
+                            .lineLimit(1)
+                            .frame(
+                                width: phraseWidth(phrase, totalWidth: proxy.size.width),
+                                height: 28
+                            )
+                            .background(phraseColor(phrase.kind))
+                            .overlay {
+                                if phrase.index == selectedPhraseIndex {
+                                    Rectangle().strokeBorder(LumiColor.accent, lineWidth: 3)
+                                } else if phrase.index == deck.phraseIndex {
+                                    Rectangle().strokeBorder(Color.white, lineWidth: 2)
+                                }
                             }
-                        }
+                    }
+                    .buttonStyle(.plain)
+                    .contentShape(Rectangle())
+                    .accessibilityIdentifier("lumi.deck.\(deck.deckID).phrase.\(phrase.index)")
                 }
             }
         }
-        .frame(height: 22)
+        .frame(height: 28)
         .padding(.horizontal, LumiSpacing.small)
         .padding(.bottom, LumiSpacing.small)
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel("Track phrases. Active phrase: \(activePhraseName)")
-    }
-
-    private var planSummary: some View {
-        HStack(spacing: LumiSpacing.large) {
-            if isMaster {
-                summaryValue("ACTIVE", value: activePhraseName)
-                summaryValue("STATUS", value: "Locked live")
-                summaryValue("FUTURE", value: "Rolling plan follows")
-            } else if let plan {
-                summaryValue("THEME", value: plan.themeDecision?.themeName ?? "Automatic")
-                summaryValue("PLAN", value: "\(plan.cues.count) phrases")
-                summaryValue("REVISION", value: "R\(plan.revision)")
-            } else {
-                summaryValue("PLAN", value: "Preparing…")
-            }
-        }
-        .padding(LumiSpacing.medium)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Color.white.opacity(0.035))
-    }
-
-    private func summaryValue(_ label: String, value: String) -> some View {
-        VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-            Text(verbatim: label)
-                .font(LumiTypography.caption)
-                .foregroundStyle(Color.white.opacity(0.46))
-            Text(verbatim: value)
-                .font(LumiTypography.technical.weight(.semibold))
-                .foregroundStyle(Color.white.opacity(0.9))
-                .lineLimit(1)
-        }
+        .accessibilityElement(children: .contain)
     }
 
     private var deckName: String {
