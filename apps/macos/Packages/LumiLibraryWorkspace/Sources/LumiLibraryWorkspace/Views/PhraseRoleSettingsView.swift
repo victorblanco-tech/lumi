@@ -24,7 +24,7 @@ public struct PhraseRoleSettingsView: View {
     private let onAutoloopMutation: @Sendable (AutoloopCatalogMutationRequest) -> Void
     private let onPublishMidiPoc: @Sendable () -> Void
     private let onStopMidiPoc: @Sendable () -> Void
-    private let onSendMidiPocLearnPulse: @Sendable () -> Void
+    private let onSendMidiPocAddressLearnPulse: @Sendable (String, UInt16) -> Void
 
     @State private var section: PhraseRoleSettingsSection
     @State private var selectedRoleID: String?
@@ -48,7 +48,7 @@ public struct PhraseRoleSettingsView: View {
         onAutoloopMutation: @escaping @Sendable (AutoloopCatalogMutationRequest) -> Void = { _ in },
         onPublishMidiPoc: @escaping @Sendable () -> Void = {},
         onStopMidiPoc: @escaping @Sendable () -> Void = {},
-        onSendMidiPocLearnPulse: @escaping @Sendable () -> Void = {}
+        onSendMidiPocAddressLearnPulse: @escaping @Sendable (String, UInt16) -> Void = { _, _ in }
     ) {
         self.settings = settings
         self.autoloopCatalog = autoloopCatalog
@@ -63,7 +63,7 @@ public struct PhraseRoleSettingsView: View {
         self.onAutoloopMutation = onAutoloopMutation
         self.onPublishMidiPoc = onPublishMidiPoc
         self.onStopMidiPoc = onStopMidiPoc
-        self.onSendMidiPocLearnPulse = onSendMidiPocLearnPulse
+        self.onSendMidiPocAddressLearnPulse = onSendMidiPocAddressLearnPulse
         _section = State(initialValue: initialSection)
         _selectedRoleID = State(initialValue: settings?.roles.first?.id)
         _selectedProviderKind = State(initialValue: settings?.mappingProfiles.first?.providerKind)
@@ -177,7 +177,7 @@ public struct PhraseRoleSettingsView: View {
                 onMutation: onAutoloopMutation,
                 onPublishMidiPoc: onPublishMidiPoc,
                 onStopMidiPoc: onStopMidiPoc,
-                onSendMidiPocLearnPulse: onSendMidiPocLearnPulse
+                onSendMidiPocAddressLearnPulse: onSendMidiPocAddressLearnPulse
             )
         }
     }

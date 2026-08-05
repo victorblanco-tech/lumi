@@ -659,6 +659,13 @@ fn apply_command(
                 .map_err(|error| CommandApplicationError::Midi(error.to_string()))?;
             return Ok(());
         }
+        SessionCommand::SendMidiPocAddressLearnPulse { address } => {
+            runtime
+                .midi_poc
+                .send_address_learn_pulse(address)
+                .map_err(|error| CommandApplicationError::Midi(error.to_string()))?;
+            return Ok(());
+        }
         SessionCommand::LoadLibraryTrackOnSimulatorDeck {
             track_id,
             deck_id,
@@ -791,6 +798,7 @@ fn apply_command(
         | SessionCommand::PublishMidiPocSource
         | SessionCommand::StopMidiPocSource
         | SessionCommand::SendMidiPocLearnPulse
+        | SessionCommand::SendMidiPocAddressLearnPulse { .. }
         | SessionCommand::LoadLibraryTrackOnSimulatorDeck { .. }
         | SessionCommand::LoadDemoSession { .. }
         | SessionCommand::SetOperationState { .. }

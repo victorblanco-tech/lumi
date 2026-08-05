@@ -81,6 +81,14 @@ func launchesRealEngine() async throws {
         #expect(midiPocPulseCount(snapshot) == 1)
 
         snapshot = try await supervisor.send(
+            .sendMidiPocAddressLearnPulse(targetKind: "autoloop", targetNumber: 32),
+            messageID: "swift-send-midi-poc-autoloop-32-learn-pulse"
+        )
+        #expect(midiPocPulseCount(snapshot) == 2)
+        #expect(midiPocLastEvent(snapshot)?.contains("AutoLoop 32") == true)
+        #expect(midiPocLastEvent(snapshot)?.contains("Note 95") == true)
+
+        snapshot = try await supervisor.send(
             .stopMidiPocSource,
             messageID: "swift-stop-midi-poc-source"
         )
@@ -841,6 +849,14 @@ private func midiPocPulseCount(_ envelope: MessageEnvelope) -> UInt64? {
         return nil
     }
     return UInt64(count)
+}
+
+private func midiPocLastEvent(_ envelope: MessageEnvelope) -> String? {
+    guard case let .object(midi) = envelope.payload["midiPoc"],
+          case let .string(lastEvent) = midi["lastEvent"] else {
+        return nil
+    }
+    return lastEvent
 }
 
 private func timelineContainsSimulatedOutput(_ envelope: MessageEnvelope) -> Bool {

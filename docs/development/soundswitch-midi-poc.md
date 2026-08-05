@@ -21,10 +21,21 @@ The output port is provider-neutral. CoreMIDI is the first adapter; a later Wind
 
 ## Physical checkpoints
 
-1. Publish `Lumi Virtual MIDI` and confirm SoundSwitch discovers it.
+1. Publish `Lumi Virtual MIDI` and confirm SoundSwitch discovers it. **Passed 2026-08-05:** SoundSwitch learned channel 16, note 60 from Lumi.
 2. Put one harmless SoundSwitch control into MIDI Learn and send one learn pulse.
 3. Learn four bank actions and 32 AutoLoop actions, then validate bank/wait/slot sequences.
 4. Connect Control One and DMX fixtures; prove Lumi and Control One work in parallel.
 5. Disconnect and reconnect each component and verify fail-silent recovery.
 
 The POC branch must not merge into `dev` until the relevant physical checkpoint has passed.
+
+## Canonical POC learn addresses
+
+All actions use MIDI channel 16. These addresses describe the logical SoundSwitch surface and do not depend on Control One.
+
+| Target | MIDI notes |
+| --- | --- |
+| Bank 1–4 | 60–63 |
+| AutoLoop 1–32 | 64–95 |
+
+The Test Controller emits one learn pulse at a time. It does not yet send the runtime bank-delay-AutoLoop sequence.

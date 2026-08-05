@@ -3,6 +3,67 @@
 #![forbid(unsafe_code)]
 
 pub const POC_SOURCE_NAME: &str = "Lumi Virtual MIDI";
+pub const POC_MIDI_CHANNEL: u8 = 16;
+const POC_MIDI_CHANNEL_ZERO_BASED: u8 = POC_MIDI_CHANNEL - 1;
+const BANK_NOTE_BASE: u8 = 60;
+const AUTOLOOP_NOTE_BASE: u8 = 64;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum MidiPocAddressKind {
+    Bank,
+    Autoloop,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MidiPocAddress {
+    kind: MidiPocAddressKind,
+    number: u8,
+    note: u8,
+}
+
+impl MidiPocAddress {
+    pub const BANK_ONE: Self = Self {
+        kind: MidiPocAddressKind::Bank,
+        number: 1,
+        note: BANK_NOTE_BASE,
+    };
+
+    pub const fn bank(number: u8) -> Option<Self> {
+        if number >= 1 && number <= 4 {
+            Some(Self {
+                kind: MidiPocAddressKind::Bank,
+                number,
+                note: BANK_NOTE_BASE + number - 1,
+            })
+        } else {
+            None
+        }
+    }
+
+    pub const fn autoloop(number: u8) -> Option<Self> {
+        if number >= 1 && number <= 32 {
+            Some(Self {
+                kind: MidiPocAddressKind::Autoloop,
+                number,
+                note: AUTOLOOP_NOTE_BASE + number - 1,
+            })
+        } else {
+            None
+        }
+    }
+
+    pub const fn kind(self) -> MidiPocAddressKind {
+        self.kind
+    }
+
+    pub const fn number(self) -> u8 {
+        self.number
+    }
+
+    pub const fn note(self) -> u8 {
+        self.note
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct MidiMessage([u8; 3]);
@@ -103,11 +164,20 @@ where
     }
 
     pub fn send_learn_pulse(&mut self) -> Result<(), MidiPocError<P::Error>> {
+        self.send_address_learn_pulse(MidiPocAddress::BANK_ONE)
+    }
+
+    pub fn send_address_learn_pulse(
+        &mut self,
+        address: MidiPocAddress,
+    ) -> Result<(), MidiPocError<P::Error>> {
         if self.state != MidiSourceState::Ready {
             return Err(MidiPocError::SourceNotPublished);
         }
-        let note_on = MidiMessage::note_on(15, 60, 100).ok_or(MidiPocError::SourceNotPublished)?;
-        let note_off = MidiMessage::note_off(15, 60).ok_or(MidiPocError::SourceNotPublished)?;
+        let note_on = MidiMessage::note_on(POC_MIDI_CHANNEL_ZERO_BASED, address.note(), 100)
+            .ok_or(MidiPocError::SourceNotPublished)?;
+        let note_off = MidiMessage::note_off(POC_MIDI_CHANNEL_ZERO_BASED, address.note())
+            .ok_or(MidiPocError::SourceNotPublished)?;
         let next_count = self
             .sent_pulse_count
             .checked_add(1)
@@ -116,7 +186,16 @@ where
             .send(&[note_on, note_off])
             .map_err(MidiPocError::Provider)?;
         self.sent_pulse_count = next_count;
-        self.last_event = Some("Learn pulse sent · Ch 16 · Note 60 · Note Off included".to_owned());
+        let target = match address.kind() {
+            MidiPocAddressKind::Bank => "Bank",
+            MidiPocAddressKind::Autoloop => "AutoLoop",
+        };
+        self.last_event = Some(format!(
+            "{target} {} learn pulse sent · Ch {} · Note {} · Note Off included",
+            address.number(),
+            POC_MIDI_CHANNEL,
+            address.note()
+        ));
         Ok(())
     }
 
@@ -183,5 +262,35 @@ mod tests {
         assert_eq!(controller.provider.messages[0].bytes(), [0x9f, 60, 100]);
         assert_eq!(controller.provider.messages[1].bytes(), [0x8f, 60, 0]);
         assert_eq!(controller.status().sent_pulse_count, 1);
+    }
+
+    #[test]
+    fn four_banks_and_thirty_two_autoloops_have_stable_unique_notes() {
+        let bank_notes = (1..=4)
+            .filter_map(MidiPocAddress::bank)
+            .map(MidiPocAddress::note)
+            .collect::<Vec<_>>();
+        let autoloop_notes = (1..=32)
+            .filter_map(MidiPocAddress::autoloop)
+            .map(MidiPocAddress::note)
+            .collect::<Vec<_>>();
+
+        assert_eq!(bank_notes, [60, 61, 62, 63]);
+        assert_eq!(autoloop_notes.first(), Some(&64));
+        assert_eq!(autoloop_notes.last(), Some(&95));
+        assert!(bank_notes.iter().all(|note| !autoloop_notes.contains(note)));
+    }
+
+    #[test]
+    fn address_learn_pulse_uses_the_requested_autoloop_note() {
+        let mut controller = MidiPocController::new(RecordingProvider::default());
+        assert!(controller.publish().is_ok());
+        let Some(address) = MidiPocAddress::autoloop(32) else {
+            panic!("AutoLoop 32 must have a POC address");
+        };
+        assert!(controller.send_address_learn_pulse(address).is_ok());
+
+        assert_eq!(controller.provider.messages[0].bytes(), [0x9f, 95, 100]);
+        assert_eq!(controller.provider.messages[1].bytes(), [0x8f, 95, 0]);
     }
 }

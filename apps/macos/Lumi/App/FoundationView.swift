@@ -89,8 +89,13 @@ struct FoundationView: View {
                         onStopMidiPoc: {
                             Task { await engineStatus.stopMidiPocSource() }
                         },
-                        onSendMidiPocLearnPulse: {
-                            Task { await engineStatus.sendMidiPocLearnPulse() }
+                        onSendMidiPocAddressLearnPulse: { targetKind, targetNumber in
+                            Task {
+                                await engineStatus.sendMidiPocAddressLearnPulse(
+                                    targetKind: targetKind,
+                                    targetNumber: targetNumber
+                                )
+                            }
                         }
                     )
                 }

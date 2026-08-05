@@ -268,6 +268,18 @@ final class EngineStatusModel: ObservableObject {
         )
     }
 
+    func sendMidiPocAddressLearnPulse(targetKind: String, targetNumber: UInt16) async {
+        let label = targetKind == "bank" ? "Bank" : "AutoLoop"
+        let note = targetKind == "bank" ? 59 + targetNumber : 63 + targetNumber
+        await exchangeMidiPocCommand(
+            .sendMidiPocAddressLearnPulse(
+                targetKind: targetKind,
+                targetNumber: targetNumber
+            ),
+            success: "\(label) \(targetNumber) learn pulse sent on Channel 16, Note \(note)."
+        )
+    }
+
     func reconcileLibrarySource(_ request: TrackSourceReconcileRequest) async {
         guard let editor = libraryState.editor else { return }
         let command: EngineCommand

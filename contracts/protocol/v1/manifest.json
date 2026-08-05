@@ -19,7 +19,8 @@
     "resetDemoSession",
     "publishMidiPocSource",
     "stopMidiPocSource",
-    "sendMidiPocLearnPulse"
+    "sendMidiPocLearnPulse",
+    "sendMidiPocAddressLearnPulse"
   ],
   "eventKinds": [
     "engineReady",

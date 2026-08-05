@@ -309,6 +309,7 @@ public enum EngineCommand: Equatable, Sendable {
     case publishMidiPocSource
     case stopMidiPocSource
     case sendMidiPocLearnPulse
+    case sendMidiPocAddressLearnPulse(targetKind: String, targetNumber: UInt16)
     case loadLibraryTrackOnSimulatorDeck(
         trackID: UInt64,
         deckID: UInt64,
@@ -417,6 +418,12 @@ public enum EngineCommand: Equatable, Sendable {
             return ["kind": .string("stopMidiPocSource")]
         case .sendMidiPocLearnPulse:
             return ["kind": .string("sendMidiPocLearnPulse")]
+        case let .sendMidiPocAddressLearnPulse(targetKind, targetNumber):
+            return [
+                "kind": .string("sendMidiPocAddressLearnPulse"),
+                "targetKind": .string(targetKind),
+                "targetNumber": .number(Double(targetNumber))
+            ]
         case let .loadLibraryTrackOnSimulatorDeck(
             trackID,
             deckID,

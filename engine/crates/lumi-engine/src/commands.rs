@@ -9,6 +9,7 @@ use lumi_library::{
     PhraseRoleMove, ReconcileSide, ReconcileStrategy, ThemeSpecificVariant, TimelineEditCommand,
     VariantId,
 };
+use lumi_midi_output::MidiPocAddress;
 use lumi_protocol::{MessageEnvelope, MessageType};
 use lumi_simulator::SimulationSpeed;
 use serde_json::Value;
@@ -77,6 +78,9 @@ pub enum SessionCommand {
     PublishMidiPocSource,
     StopMidiPocSource,
     SendMidiPocLearnPulse,
+    SendMidiPocAddressLearnPulse {
+        address: MidiPocAddress,
+    },
     LoadLibraryTrackOnSimulatorDeck {
         track_id: u64,
         deck_id: DeckId,
@@ -156,6 +160,7 @@ impl SessionCommand {
             | Self::PublishMidiPocSource
             | Self::StopMidiPocSource
             | Self::SendMidiPocLearnPulse
+            | Self::SendMidiPocAddressLearnPulse { .. }
             | Self::LoadLibraryTrackOnSimulatorDeck { .. }
             | Self::LoadDemoSession { .. }
             | Self::SetOperationState { .. }
@@ -241,6 +246,9 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
         "publishMidiPocSource" => Ok(SessionCommand::PublishMidiPocSource),
         "stopMidiPocSource" => Ok(SessionCommand::StopMidiPocSource),
         "sendMidiPocLearnPulse" => Ok(SessionCommand::SendMidiPocLearnPulse),
+        "sendMidiPocAddressLearnPulse" => Ok(SessionCommand::SendMidiPocAddressLearnPulse {
+            address: midi_poc_address(&envelope.payload)?,
+        }),
         "loadLibraryTrackOnSimulatorDeck" => Ok(SessionCommand::LoadLibraryTrackOnSimulatorDeck {
             track_id: positive_unsigned(&envelope.payload, "trackId")?,
             deck_id: DeckId::new(
@@ -297,6 +305,19 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
         }),
         _ => Err(CommandDecodeError::UnsupportedKind),
     }
+}
+
+fn midi_poc_address(
+    payload: &serde_json::Map<String, Value>,
+) -> Result<MidiPocAddress, CommandDecodeError> {
+    let number = u8::try_from(positive_unsigned(payload, "targetNumber")?)
+        .map_err(|_| CommandDecodeError::InvalidField("targetNumber"))?;
+    match string(payload, "targetKind")? {
+        "bank" => MidiPocAddress::bank(number),
+        "autoloop" => MidiPocAddress::autoloop(number),
+        _ => return Err(CommandDecodeError::InvalidField("targetKind")),
+    }
+    .ok_or(CommandDecodeError::InvalidField("targetNumber"))
 }
 
 fn reconcile_strategy(
