@@ -2,11 +2,14 @@
 
 #![forbid(unsafe_code)]
 
+use std::time::Duration;
+
 pub const POC_SOURCE_NAME: &str = "Lumi Virtual MIDI";
 pub const POC_MIDI_CHANNEL: u8 = 16;
 const POC_MIDI_CHANNEL_ZERO_BASED: u8 = POC_MIDI_CHANNEL - 1;
 const BANK_NOTE_BASE: u8 = 60;
 const AUTOLOOP_NOTE_BASE: u8 = 64;
+pub const POC_BANK_SETTLE_DELAY: Duration = Duration::from_millis(50);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MidiPocAddressKind {
@@ -121,6 +124,8 @@ where
     SourceNotPublished,
     #[error("the MIDI pulse counter overflowed")]
     PulseCounterOverflow,
+    #[error("the requested bank or AutoLoop address is invalid")]
+    InvalidAddress,
     #[error("the MIDI provider failed: {0}")]
     Provider(E),
 }
@@ -171,6 +176,60 @@ where
         &mut self,
         address: MidiPocAddress,
     ) -> Result<(), MidiPocError<P::Error>> {
+        self.send_address_pulse(address)?;
+        let target = match address.kind() {
+            MidiPocAddressKind::Bank => "Bank",
+            MidiPocAddressKind::Autoloop => "AutoLoop",
+        };
+        self.last_event = Some(format!(
+            "{target} {} learn pulse sent · Ch {} · Note {} · Note Off included",
+            address.number(),
+            POC_MIDI_CHANNEL,
+            address.note()
+        ));
+        Ok(())
+    }
+
+    pub fn trigger_autoloop(
+        &mut self,
+        bank_number: u8,
+        autoloop_number: u8,
+    ) -> Result<(), MidiPocError<P::Error>> {
+        self.trigger_autoloop_with_wait(bank_number, autoloop_number, std::thread::sleep)
+    }
+
+    fn trigger_autoloop_with_wait<F>(
+        &mut self,
+        bank_number: u8,
+        autoloop_number: u8,
+        wait: F,
+    ) -> Result<(), MidiPocError<P::Error>>
+    where
+        F: FnOnce(Duration),
+    {
+        let bank = MidiPocAddress::bank(bank_number).ok_or(MidiPocError::InvalidAddress)?;
+        let autoloop =
+            MidiPocAddress::autoloop(autoloop_number).ok_or(MidiPocError::InvalidAddress)?;
+        self.send_address_pulse(bank)?;
+        self.last_event = Some(format!(
+            "Bank {bank_number} selected · waiting {} ms for SoundSwitch",
+            POC_BANK_SETTLE_DELAY.as_millis()
+        ));
+        wait(POC_BANK_SETTLE_DELAY);
+        self.send_address_pulse(autoloop)?;
+        self.last_event = Some(format!(
+            "Triggered Bank {bank_number} → AutoLoop {autoloop_number} · Ch {POC_MIDI_CHANNEL} · Notes {} → {} · {} ms gap",
+            bank.note(),
+            autoloop.note(),
+            POC_BANK_SETTLE_DELAY.as_millis()
+        ));
+        Ok(())
+    }
+
+    fn send_address_pulse(
+        &mut self,
+        address: MidiPocAddress,
+    ) -> Result<(), MidiPocError<P::Error>> {
         if self.state != MidiSourceState::Ready {
             return Err(MidiPocError::SourceNotPublished);
         }
@@ -186,16 +245,6 @@ where
             .send(&[note_on, note_off])
             .map_err(MidiPocError::Provider)?;
         self.sent_pulse_count = next_count;
-        let target = match address.kind() {
-            MidiPocAddressKind::Bank => "Bank",
-            MidiPocAddressKind::Autoloop => "AutoLoop",
-        };
-        self.last_event = Some(format!(
-            "{target} {} learn pulse sent · Ch {} · Note {} · Note Off included",
-            address.number(),
-            POC_MIDI_CHANNEL,
-            address.note()
-        ));
         Ok(())
     }
 
@@ -292,5 +341,45 @@ mod tests {
 
         assert_eq!(controller.provider.messages[0].bytes(), [0x9f, 95, 100]);
         assert_eq!(controller.provider.messages[1].bytes(), [0x8f, 95, 0]);
+    }
+
+    #[test]
+    fn runtime_trigger_selects_bank_then_autoloop_after_settle_delay() {
+        let mut controller = MidiPocController::new(RecordingProvider::default());
+        assert!(controller.publish().is_ok());
+        let mut observed_delay = None;
+
+        assert!(
+            controller
+                .trigger_autoloop_with_wait(1, 1, |delay| observed_delay = Some(delay))
+                .is_ok()
+        );
+
+        assert_eq!(observed_delay, Some(POC_BANK_SETTLE_DELAY));
+        assert_eq!(controller.provider.messages.len(), 4);
+        assert_eq!(controller.provider.messages[0].bytes(), [0x9f, 60, 100]);
+        assert_eq!(controller.provider.messages[1].bytes(), [0x8f, 60, 0]);
+        assert_eq!(controller.provider.messages[2].bytes(), [0x9f, 64, 100]);
+        assert_eq!(controller.provider.messages[3].bytes(), [0x8f, 64, 0]);
+        assert_eq!(controller.status().sent_pulse_count, 2);
+        assert!(
+            controller
+                .status()
+                .last_event
+                .as_deref()
+                .is_some_and(|event| event.contains("Bank 1 → AutoLoop 1"))
+        );
+    }
+
+    #[test]
+    fn runtime_trigger_is_fail_silent_until_source_is_published() {
+        let mut controller = MidiPocController::new(RecordingProvider::default());
+
+        assert!(matches!(
+            controller.trigger_autoloop_with_wait(1, 1, |_| {}),
+            Err(MidiPocError::SourceNotPublished)
+        ));
+        assert!(controller.provider.messages.is_empty());
+        assert_eq!(controller.status().sent_pulse_count, 0);
     }
 }

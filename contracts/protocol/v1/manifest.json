@@ -20,7 +20,8 @@
     "publishMidiPocSource",
     "stopMidiPocSource",
     "sendMidiPocLearnPulse",
-    "sendMidiPocAddressLearnPulse"
+    "sendMidiPocAddressLearnPulse",
+    "triggerMidiPocAutoloop"
   ],
   "eventKinds": [
     "engineReady",

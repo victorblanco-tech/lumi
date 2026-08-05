@@ -310,6 +310,7 @@ public enum EngineCommand: Equatable, Sendable {
     case stopMidiPocSource
     case sendMidiPocLearnPulse
     case sendMidiPocAddressLearnPulse(targetKind: String, targetNumber: UInt16)
+    case triggerMidiPocAutoloop(bankNumber: UInt16, autoloopNumber: UInt16)
     case loadLibraryTrackOnSimulatorDeck(
         trackID: UInt64,
         deckID: UInt64,
@@ -423,6 +424,12 @@ public enum EngineCommand: Equatable, Sendable {
                 "kind": .string("sendMidiPocAddressLearnPulse"),
                 "targetKind": .string(targetKind),
                 "targetNumber": .number(Double(targetNumber))
+            ]
+        case let .triggerMidiPocAutoloop(bankNumber, autoloopNumber):
+            return [
+                "kind": .string("triggerMidiPocAutoloop"),
+                "bankNumber": .number(Double(bankNumber)),
+                "autoloopNumber": .number(Double(autoloopNumber))
             ]
         case let .loadLibraryTrackOnSimulatorDeck(
             trackID,

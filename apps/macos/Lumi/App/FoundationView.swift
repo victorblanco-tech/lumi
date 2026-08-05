@@ -96,6 +96,14 @@ struct FoundationView: View {
                                     targetNumber: targetNumber
                                 )
                             }
+                        },
+                        onTriggerMidiPocAutoloop: { bankNumber, autoloopNumber in
+                            Task {
+                                await engineStatus.triggerMidiPocAutoloop(
+                                    bankNumber: bankNumber,
+                                    autoloopNumber: autoloopNumber
+                                )
+                            }
                         }
                     )
                 }

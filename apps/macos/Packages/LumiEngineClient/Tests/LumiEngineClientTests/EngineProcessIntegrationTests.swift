@@ -89,6 +89,14 @@ func launchesRealEngine() async throws {
         #expect(midiPocLastEvent(snapshot)?.contains("Note 95") == true)
 
         snapshot = try await supervisor.send(
+            .triggerMidiPocAutoloop(bankNumber: 1, autoloopNumber: 1),
+            messageID: "swift-trigger-midi-poc-bank-1-autoloop-1"
+        )
+        #expect(midiPocPulseCount(snapshot) == 4)
+        #expect(midiPocLastEvent(snapshot)?.contains("Bank 1 → AutoLoop 1") == true)
+        #expect(midiPocLastEvent(snapshot)?.contains("50 ms gap") == true)
+
+        snapshot = try await supervisor.send(
             .stopMidiPocSource,
             messageID: "swift-stop-midi-poc-source"
         )

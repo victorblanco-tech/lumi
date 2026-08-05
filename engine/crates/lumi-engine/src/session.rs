@@ -666,6 +666,16 @@ fn apply_command(
                 .map_err(|error| CommandApplicationError::Midi(error.to_string()))?;
             return Ok(());
         }
+        SessionCommand::TriggerMidiPocAutoloop {
+            bank_number,
+            autoloop_number,
+        } => {
+            runtime
+                .midi_poc
+                .trigger_autoloop(bank_number, autoloop_number)
+                .map_err(|error| CommandApplicationError::Midi(error.to_string()))?;
+            return Ok(());
+        }
         SessionCommand::LoadLibraryTrackOnSimulatorDeck {
             track_id,
             deck_id,
@@ -799,6 +809,7 @@ fn apply_command(
         | SessionCommand::StopMidiPocSource
         | SessionCommand::SendMidiPocLearnPulse
         | SessionCommand::SendMidiPocAddressLearnPulse { .. }
+        | SessionCommand::TriggerMidiPocAutoloop { .. }
         | SessionCommand::LoadLibraryTrackOnSimulatorDeck { .. }
         | SessionCommand::LoadDemoSession { .. }
         | SessionCommand::SetOperationState { .. }

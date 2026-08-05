@@ -19,6 +19,7 @@ public struct AutoloopCatalogSettingsView: View {
     private let onPublishMidiPoc: @Sendable () -> Void
     private let onStopMidiPoc: @Sendable () -> Void
     private let onSendMidiPocAddressLearnPulse: @Sendable (String, UInt16) -> Void
+    private let onTriggerMidiPocAutoloop: @Sendable (UInt16, UInt16) -> Void
 
     @State private var section: ProfileSection = .banks
     @State private var selectedBankID: UInt64?
@@ -36,7 +37,8 @@ public struct AutoloopCatalogSettingsView: View {
         onMutation: @escaping @Sendable (AutoloopCatalogMutationRequest) -> Void = { _ in },
         onPublishMidiPoc: @escaping @Sendable () -> Void = {},
         onStopMidiPoc: @escaping @Sendable () -> Void = {},
-        onSendMidiPocAddressLearnPulse: @escaping @Sendable (String, UInt16) -> Void = { _, _ in }
+        onSendMidiPocAddressLearnPulse: @escaping @Sendable (String, UInt16) -> Void = { _, _ in },
+        onTriggerMidiPocAutoloop: @escaping @Sendable (UInt16, UInt16) -> Void = { _, _ in }
     ) {
         self.catalog = catalog
         self.midiPoc = midiPoc
@@ -47,6 +49,7 @@ public struct AutoloopCatalogSettingsView: View {
         self.onPublishMidiPoc = onPublishMidiPoc
         self.onStopMidiPoc = onStopMidiPoc
         self.onSendMidiPocAddressLearnPulse = onSendMidiPocAddressLearnPulse
+        self.onTriggerMidiPocAutoloop = onTriggerMidiPocAutoloop
         let firstBank = catalog?.themes.first
         let firstSlot = catalog.flatMap { value in
             firstBank.flatMap {
@@ -378,7 +381,7 @@ public struct AutoloopCatalogSettingsView: View {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
                     Text("MIDI Learn Controller").font(LumiTypography.cardTitle)
-                    Text("Each action sends one address pulse only. Runtime bank + AutoLoop sequences come after this mapping checkpoint.")
+                    Text("Learn actions send one address pulse. The Runtime POC below sends the tested bank + AutoLoop sequence.")
                         .font(LumiTypography.caption)
                         .foregroundStyle(LumiColor.textSecondary)
                 }
@@ -391,6 +394,7 @@ public struct AutoloopCatalogSettingsView: View {
                 .foregroundStyle(midiPoc?.isReady == true ? LumiColor.success : LumiColor.warning)
             }
             bankSelector(catalog)
+            runtimePocTrigger
             if let bank = selectedBank(catalog) {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
@@ -423,6 +427,30 @@ public struct AutoloopCatalogSettingsView: View {
                     )
             }
         }
+    }
+
+    private var runtimePocTrigger: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("RUNTIME POC · BANK 1 → AUTOLOOP 1")
+                    .font(LumiTypography.technical.weight(.bold))
+                Text("Channel 16 · Notes 60 → 64 · 50 ms bank settle delay")
+                    .font(LumiTypography.caption)
+                    .foregroundStyle(LumiColor.textSecondary)
+            }
+            Spacer()
+            Button("Trigger Bank 1 → AutoLoop 1") {
+                onTriggerMidiPocAutoloop(1, 1)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(LumiColor.accent)
+            .disabled(midiPoc?.isReady != true)
+            .accessibilityIdentifier("lumi.settings.outputProfiles.runtimePoc.bank1.autoloop1")
+        }
+        .padding(LumiSpacing.medium)
+        .background(LumiColor.accent.opacity(0.10))
+        .overlay { RoundedRectangle(cornerRadius: LumiRadius.control).stroke(LumiColor.accent) }
+        .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
     }
 
     private func autoloopLearnGrid(_ catalog: AutoloopCatalogState) -> some View {

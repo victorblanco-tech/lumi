@@ -81,6 +81,10 @@ pub enum SessionCommand {
     SendMidiPocAddressLearnPulse {
         address: MidiPocAddress,
     },
+    TriggerMidiPocAutoloop {
+        bank_number: u8,
+        autoloop_number: u8,
+    },
     LoadLibraryTrackOnSimulatorDeck {
         track_id: u64,
         deck_id: DeckId,
@@ -161,6 +165,7 @@ impl SessionCommand {
             | Self::StopMidiPocSource
             | Self::SendMidiPocLearnPulse
             | Self::SendMidiPocAddressLearnPulse { .. }
+            | Self::TriggerMidiPocAutoloop { .. }
             | Self::LoadLibraryTrackOnSimulatorDeck { .. }
             | Self::LoadDemoSession { .. }
             | Self::SetOperationState { .. }
@@ -249,6 +254,14 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
         "sendMidiPocAddressLearnPulse" => Ok(SessionCommand::SendMidiPocAddressLearnPulse {
             address: midi_poc_address(&envelope.payload)?,
         }),
+        "triggerMidiPocAutoloop" => {
+            let bank_number = midi_poc_number(&envelope.payload, "bankNumber", 4)?;
+            let autoloop_number = midi_poc_number(&envelope.payload, "autoloopNumber", 32)?;
+            Ok(SessionCommand::TriggerMidiPocAutoloop {
+                bank_number,
+                autoloop_number,
+            })
+        }
         "loadLibraryTrackOnSimulatorDeck" => Ok(SessionCommand::LoadLibraryTrackOnSimulatorDeck {
             track_id: positive_unsigned(&envelope.payload, "trackId")?,
             deck_id: DeckId::new(
@@ -318,6 +331,20 @@ fn midi_poc_address(
         _ => return Err(CommandDecodeError::InvalidField("targetKind")),
     }
     .ok_or(CommandDecodeError::InvalidField("targetNumber"))
+}
+
+fn midi_poc_number(
+    payload: &serde_json::Map<String, Value>,
+    field: &'static str,
+    maximum: u8,
+) -> Result<u8, CommandDecodeError> {
+    let number = u8::try_from(positive_unsigned(payload, field)?)
+        .map_err(|_| CommandDecodeError::InvalidField(field))?;
+    if number <= maximum {
+        Ok(number)
+    } else {
+        Err(CommandDecodeError::InvalidField(field))
+    }
 }
 
 fn reconcile_strategy(

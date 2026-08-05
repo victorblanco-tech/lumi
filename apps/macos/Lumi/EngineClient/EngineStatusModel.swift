@@ -280,6 +280,16 @@ final class EngineStatusModel: ObservableObject {
         )
     }
 
+    func triggerMidiPocAutoloop(bankNumber: UInt16, autoloopNumber: UInt16) async {
+        await exchangeMidiPocCommand(
+            .triggerMidiPocAutoloop(
+                bankNumber: bankNumber,
+                autoloopNumber: autoloopNumber
+            ),
+            success: "Triggered Bank \(bankNumber) → AutoLoop \(autoloopNumber) with a 50 ms settle delay."
+        )
+    }
+
     func reconcileLibrarySource(_ request: TrackSourceReconcileRequest) async {
         guard let editor = libraryState.editor else { return }
         let command: EngineCommand
