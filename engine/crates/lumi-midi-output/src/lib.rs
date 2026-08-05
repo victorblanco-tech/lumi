@@ -1,32 +1,32 @@
-//! Provider-neutral MIDI source control and fail-silent POC sequencing.
+//! Provider-neutral MIDI source control and fail-silent SoundSwitch sequencing.
 
 #![forbid(unsafe_code)]
 
 use std::time::Duration;
 
-pub const POC_SOURCE_NAME: &str = "Lumi Virtual MIDI";
-pub const POC_MIDI_CHANNEL: u8 = 16;
-const POC_MIDI_CHANNEL_ZERO_BASED: u8 = POC_MIDI_CHANNEL - 1;
+pub const MIDI_SOURCE_NAME: &str = "Lumi Virtual MIDI";
+pub const MIDI_CHANNEL: u8 = 16;
+const MIDI_CHANNEL_ZERO_BASED: u8 = MIDI_CHANNEL - 1;
 const BANK_NOTE_BASE: u8 = 60;
 const AUTOLOOP_NOTE_BASE: u8 = 64;
-pub const POC_BANK_SETTLE_DELAY: Duration = Duration::from_millis(50);
+pub const BANK_SETTLE_DELAY: Duration = Duration::from_millis(50);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum MidiPocAddressKind {
+pub enum MidiAddressKind {
     Bank,
     Autoloop,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct MidiPocAddress {
-    kind: MidiPocAddressKind,
+pub struct MidiAddress {
+    kind: MidiAddressKind,
     number: u8,
     note: u8,
 }
 
-impl MidiPocAddress {
+impl MidiAddress {
     pub const BANK_ONE: Self = Self {
-        kind: MidiPocAddressKind::Bank,
+        kind: MidiAddressKind::Bank,
         number: 1,
         note: BANK_NOTE_BASE,
     };
@@ -34,7 +34,7 @@ impl MidiPocAddress {
     pub const fn bank(number: u8) -> Option<Self> {
         if number >= 1 && number <= 4 {
             Some(Self {
-                kind: MidiPocAddressKind::Bank,
+                kind: MidiAddressKind::Bank,
                 number,
                 note: BANK_NOTE_BASE + number - 1,
             })
@@ -46,7 +46,7 @@ impl MidiPocAddress {
     pub const fn autoloop(number: u8) -> Option<Self> {
         if number >= 1 && number <= 32 {
             Some(Self {
-                kind: MidiPocAddressKind::Autoloop,
+                kind: MidiAddressKind::Autoloop,
                 number,
                 note: AUTOLOOP_NOTE_BASE + number - 1,
             })
@@ -55,7 +55,7 @@ impl MidiPocAddress {
         }
     }
 
-    pub const fn kind(self) -> MidiPocAddressKind {
+    pub const fn kind(self) -> MidiAddressKind {
         self.kind
     }
 
@@ -116,7 +116,7 @@ pub trait MidiSourceProvider {
 }
 
 #[derive(Debug, thiserror::Error)]
-pub enum MidiPocError<E>
+pub enum MidiOutputError<E>
 where
     E: std::error::Error + Send + Sync + 'static,
 {
@@ -130,7 +130,7 @@ where
     Provider(E),
 }
 
-pub struct MidiPocController<P>
+pub struct MidiOutputController<P>
 where
     P: MidiSourceProvider,
 {
@@ -140,7 +140,7 @@ where
     last_event: Option<String>,
 }
 
-impl<P> MidiPocController<P>
+impl<P> MidiOutputController<P>
 where
     P: MidiSourceProvider,
 {
@@ -153,10 +153,10 @@ where
         }
     }
 
-    pub fn publish(&mut self) -> Result<(), MidiPocError<P::Error>> {
+    pub fn publish(&mut self) -> Result<(), MidiOutputError<P::Error>> {
         self.provider
-            .publish(POC_SOURCE_NAME)
-            .map_err(MidiPocError::Provider)?;
+            .publish(MIDI_SOURCE_NAME)
+            .map_err(MidiOutputError::Provider)?;
         self.state = MidiSourceState::Ready;
         self.last_event = Some("Virtual MIDI source published; no MIDI sent".to_owned());
         Ok(())
@@ -168,23 +168,23 @@ where
         self.last_event = Some("Virtual MIDI source stopped".to_owned());
     }
 
-    pub fn send_learn_pulse(&mut self) -> Result<(), MidiPocError<P::Error>> {
-        self.send_address_learn_pulse(MidiPocAddress::BANK_ONE)
+    pub fn send_learn_pulse(&mut self) -> Result<(), MidiOutputError<P::Error>> {
+        self.send_address_learn_pulse(MidiAddress::BANK_ONE)
     }
 
     pub fn send_address_learn_pulse(
         &mut self,
-        address: MidiPocAddress,
-    ) -> Result<(), MidiPocError<P::Error>> {
+        address: MidiAddress,
+    ) -> Result<(), MidiOutputError<P::Error>> {
         self.send_address_pulse(address)?;
         let target = match address.kind() {
-            MidiPocAddressKind::Bank => "Bank",
-            MidiPocAddressKind::Autoloop => "AutoLoop",
+            MidiAddressKind::Bank => "Bank",
+            MidiAddressKind::Autoloop => "AutoLoop",
         };
         self.last_event = Some(format!(
             "{target} {} learn pulse sent · Ch {} · Note {} · Note Off included",
             address.number(),
-            POC_MIDI_CHANNEL,
+            MIDI_CHANNEL,
             address.note()
         ));
         Ok(())
@@ -194,7 +194,7 @@ where
         &mut self,
         bank_number: u8,
         autoloop_number: u8,
-    ) -> Result<(), MidiPocError<P::Error>> {
+    ) -> Result<(), MidiOutputError<P::Error>> {
         self.trigger_autoloop_with_wait(bank_number, autoloop_number, std::thread::sleep)
     }
 
@@ -203,47 +203,47 @@ where
         bank_number: u8,
         autoloop_number: u8,
         wait: F,
-    ) -> Result<(), MidiPocError<P::Error>>
+    ) -> Result<(), MidiOutputError<P::Error>>
     where
         F: FnOnce(Duration),
     {
-        let bank = MidiPocAddress::bank(bank_number).ok_or(MidiPocError::InvalidAddress)?;
+        let bank = MidiAddress::bank(bank_number).ok_or(MidiOutputError::InvalidAddress)?;
         let autoloop =
-            MidiPocAddress::autoloop(autoloop_number).ok_or(MidiPocError::InvalidAddress)?;
+            MidiAddress::autoloop(autoloop_number).ok_or(MidiOutputError::InvalidAddress)?;
         self.send_address_pulse(bank)?;
         self.last_event = Some(format!(
             "Bank {bank_number} selected · waiting {} ms for SoundSwitch",
-            POC_BANK_SETTLE_DELAY.as_millis()
+            BANK_SETTLE_DELAY.as_millis()
         ));
-        wait(POC_BANK_SETTLE_DELAY);
+        wait(BANK_SETTLE_DELAY);
         self.send_address_pulse(autoloop)?;
         self.last_event = Some(format!(
-            "Triggered Bank {bank_number} → AutoLoop {autoloop_number} · Ch {POC_MIDI_CHANNEL} · Notes {} → {} · {} ms gap",
+            "Triggered Bank {bank_number} → AutoLoop {autoloop_number} · Ch {MIDI_CHANNEL} · Notes {} → {} · {} ms gap",
             bank.note(),
             autoloop.note(),
-            POC_BANK_SETTLE_DELAY.as_millis()
+            BANK_SETTLE_DELAY.as_millis()
         ));
         Ok(())
     }
 
     fn send_address_pulse(
         &mut self,
-        address: MidiPocAddress,
-    ) -> Result<(), MidiPocError<P::Error>> {
+        address: MidiAddress,
+    ) -> Result<(), MidiOutputError<P::Error>> {
         if self.state != MidiSourceState::Ready {
-            return Err(MidiPocError::SourceNotPublished);
+            return Err(MidiOutputError::SourceNotPublished);
         }
-        let note_on = MidiMessage::note_on(POC_MIDI_CHANNEL_ZERO_BASED, address.note(), 100)
-            .ok_or(MidiPocError::SourceNotPublished)?;
-        let note_off = MidiMessage::note_off(POC_MIDI_CHANNEL_ZERO_BASED, address.note())
-            .ok_or(MidiPocError::SourceNotPublished)?;
+        let note_on = MidiMessage::note_on(MIDI_CHANNEL_ZERO_BASED, address.note(), 100)
+            .ok_or(MidiOutputError::SourceNotPublished)?;
+        let note_off = MidiMessage::note_off(MIDI_CHANNEL_ZERO_BASED, address.note())
+            .ok_or(MidiOutputError::SourceNotPublished)?;
         let next_count = self
             .sent_pulse_count
             .checked_add(1)
-            .ok_or(MidiPocError::PulseCounterOverflow)?;
+            .ok_or(MidiOutputError::PulseCounterOverflow)?;
         self.provider
             .send(&[note_on, note_off])
-            .map_err(MidiPocError::Provider)?;
+            .map_err(MidiOutputError::Provider)?;
         self.sent_pulse_count = next_count;
         Ok(())
     }
@@ -251,7 +251,7 @@ where
     pub fn status(&self) -> MidiSourceStatus {
         MidiSourceStatus {
             state: self.state,
-            source_name: POC_SOURCE_NAME,
+            source_name: MIDI_SOURCE_NAME,
             sent_pulse_count: self.sent_pulse_count,
             last_event: self.last_event.clone(),
         }
@@ -276,7 +276,7 @@ mod tests {
         type Error = RecordingError;
 
         fn publish(&mut self, source_name: &str) -> Result<(), Self::Error> {
-            self.published = source_name == POC_SOURCE_NAME;
+            self.published = source_name == MIDI_SOURCE_NAME;
             Ok(())
         }
 
@@ -292,18 +292,18 @@ mod tests {
 
     #[test]
     fn learn_pulse_is_fail_silent_until_published() {
-        let mut controller = MidiPocController::new(RecordingProvider::default());
+        let mut controller = MidiOutputController::new(RecordingProvider::default());
 
         assert!(matches!(
             controller.send_learn_pulse(),
-            Err(MidiPocError::SourceNotPublished)
+            Err(MidiOutputError::SourceNotPublished)
         ));
         assert_eq!(controller.status().sent_pulse_count, 0);
     }
 
     #[test]
     fn learn_pulse_always_contains_note_on_and_note_off() {
-        let mut controller = MidiPocController::new(RecordingProvider::default());
+        let mut controller = MidiOutputController::new(RecordingProvider::default());
         assert!(controller.publish().is_ok());
         assert!(controller.send_learn_pulse().is_ok());
 
@@ -316,12 +316,12 @@ mod tests {
     #[test]
     fn four_banks_and_thirty_two_autoloops_have_stable_unique_notes() {
         let bank_notes = (1..=4)
-            .filter_map(MidiPocAddress::bank)
-            .map(MidiPocAddress::note)
+            .filter_map(MidiAddress::bank)
+            .map(MidiAddress::note)
             .collect::<Vec<_>>();
         let autoloop_notes = (1..=32)
-            .filter_map(MidiPocAddress::autoloop)
-            .map(MidiPocAddress::note)
+            .filter_map(MidiAddress::autoloop)
+            .map(MidiAddress::note)
             .collect::<Vec<_>>();
 
         assert_eq!(bank_notes, [60, 61, 62, 63]);
@@ -332,10 +332,10 @@ mod tests {
 
     #[test]
     fn address_learn_pulse_uses_the_requested_autoloop_note() {
-        let mut controller = MidiPocController::new(RecordingProvider::default());
+        let mut controller = MidiOutputController::new(RecordingProvider::default());
         assert!(controller.publish().is_ok());
-        let Some(address) = MidiPocAddress::autoloop(32) else {
-            panic!("AutoLoop 32 must have a POC address");
+        let Some(address) = MidiAddress::autoloop(32) else {
+            panic!("AutoLoop 32 must have a MIDI address");
         };
         assert!(controller.send_address_learn_pulse(address).is_ok());
 
@@ -345,7 +345,7 @@ mod tests {
 
     #[test]
     fn runtime_trigger_selects_bank_then_autoloop_after_settle_delay() {
-        let mut controller = MidiPocController::new(RecordingProvider::default());
+        let mut controller = MidiOutputController::new(RecordingProvider::default());
         assert!(controller.publish().is_ok());
         let mut observed_delay = None;
 
@@ -355,7 +355,7 @@ mod tests {
                 .is_ok()
         );
 
-        assert_eq!(observed_delay, Some(POC_BANK_SETTLE_DELAY));
+        assert_eq!(observed_delay, Some(BANK_SETTLE_DELAY));
         assert_eq!(controller.provider.messages.len(), 4);
         assert_eq!(controller.provider.messages[0].bytes(), [0x9f, 60, 100]);
         assert_eq!(controller.provider.messages[1].bytes(), [0x8f, 60, 0]);
@@ -373,11 +373,11 @@ mod tests {
 
     #[test]
     fn runtime_trigger_is_fail_silent_until_source_is_published() {
-        let mut controller = MidiPocController::new(RecordingProvider::default());
+        let mut controller = MidiOutputController::new(RecordingProvider::default());
 
         assert!(matches!(
             controller.trigger_autoloop_with_wait(1, 1, |_| {}),
-            Err(MidiPocError::SourceNotPublished)
+            Err(MidiOutputError::SourceNotPublished)
         ));
         assert!(controller.provider.messages.is_empty());
         assert_eq!(controller.status().sent_pulse_count, 0);

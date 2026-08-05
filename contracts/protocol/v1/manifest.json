@@ -17,11 +17,11 @@
     "setCueLock",
     "regeneratePlan",
     "resetDemoSession",
-    "publishMidiPocSource",
-    "stopMidiPocSource",
-    "sendMidiPocLearnPulse",
-    "sendMidiPocAddressLearnPulse",
-    "triggerMidiPocAutoloop"
+    "publishMidiSource",
+    "stopMidiSource",
+    "sendMidiLearnPulse",
+    "sendMidiAddressLearnPulse",
+    "triggerMidiAutoloop"
   ],
   "eventKinds": [
     "engineReady",

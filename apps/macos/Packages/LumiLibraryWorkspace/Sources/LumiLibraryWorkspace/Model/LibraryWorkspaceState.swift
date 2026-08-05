@@ -173,7 +173,7 @@ public struct LibraryPage: Equatable, Sendable {
     }
 }
 
-public struct MidiPocState: Equatable, Sendable {
+public struct MidiIntegrationState: Equatable, Sendable {
     public let state: String
     public let sourceName: String
     public let midiProtocol: String
@@ -209,7 +209,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
     public let editor: TrackEditorAnalysis?
     public let phraseRoleSettings: PhraseRoleSettingsState?
     public let autoloopCatalog: AutoloopCatalogState?
-    public let midiPoc: MidiPocState?
+    public let midiIntegration: MidiIntegrationState?
     public let diagnostic: String?
 
     public init(
@@ -224,7 +224,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
         editor: TrackEditorAnalysis? = nil,
         phraseRoleSettings: PhraseRoleSettingsState? = nil,
         autoloopCatalog: AutoloopCatalogState? = nil,
-        midiPoc: MidiPocState? = nil,
+        midiIntegration: MidiIntegrationState? = nil,
         diagnostic: String? = nil
     ) {
         self.condition = condition
@@ -238,7 +238,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
         self.editor = editor
         self.phraseRoleSettings = phraseRoleSettings
         self.autoloopCatalog = autoloopCatalog
-        self.midiPoc = midiPoc
+        self.midiIntegration = midiIntegration
         self.diagnostic = diagnostic
     }
 

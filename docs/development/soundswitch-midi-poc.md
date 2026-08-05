@@ -38,6 +38,6 @@ All actions use MIDI channel 16. These addresses describe the logical SoundSwitc
 | Bank 1–4 | 60–63 |
 | AutoLoop 1–32 | 64–95 |
 
-The Test Controller emits one learn pulse at a time for mapping. Its separate Runtime POC action sends Bank 1 first, waits 50 ms for SoundSwitch to apply the bank selection, and then sends AutoLoop 1. Each address includes its Note On and Note Off pair. This fixed trigger deliberately proves runtime selection and visible DMX output before the sequence is generalized across all mapped buttons.
+The Test Controller emits one learn pulse at a time for mapping. Its separate Runtime Test action sends Bank 1 first, waits 50 ms for SoundSwitch to apply the bank selection, and then sends AutoLoop 1. Each address includes its Note On and Note Off pair. This fixed trigger deliberately proves runtime selection and visible DMX output before the sequence is generalized across all mapped buttons.
 
 The virtual Test Controller mirrors SoundSwitch's visual order: AutoLoops 1–8 run from top to bottom in the first column, 9–16 in the second, 17–24 in the third, and 25–32 in the fourth. This is presentation order only; canonical MIDI notes and persisted button numbers remain unchanged.

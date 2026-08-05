@@ -64,43 +64,43 @@ func launchesRealEngine() async throws {
         #expect(autoloopCatalogRevision(snapshot) == 1)
         #expect(autoloopThemeNames(snapshot).count == 4)
         #expect(autoloopVariantCount(snapshot, roleID: "synth") == 4)
-        #expect(midiPocState(snapshot) == "stopped")
-        #expect(midiPocPulseCount(snapshot) == 0)
+        #expect(midiIntegrationState(snapshot) == "stopped")
+        #expect(midiIntegrationPulseCount(snapshot) == 0)
 
         snapshot = try await supervisor.send(
-            .publishMidiPocSource,
-            messageID: "swift-publish-midi-poc-source"
+            .publishMidiSource,
+            messageID: "swift-publish-midi-source"
         )
-        #expect(midiPocState(snapshot) == "ready")
-        #expect(midiPocSourceName(snapshot) == "Lumi Virtual MIDI")
+        #expect(midiIntegrationState(snapshot) == "ready")
+        #expect(midiIntegrationSourceName(snapshot) == "Lumi Virtual MIDI")
 
         snapshot = try await supervisor.send(
-            .sendMidiPocLearnPulse,
-            messageID: "swift-send-midi-poc-learn-pulse"
+            .sendMidiLearnPulse,
+            messageID: "swift-send-midi-learn-pulse"
         )
-        #expect(midiPocPulseCount(snapshot) == 1)
+        #expect(midiIntegrationPulseCount(snapshot) == 1)
 
         snapshot = try await supervisor.send(
-            .sendMidiPocAddressLearnPulse(targetKind: "autoloop", targetNumber: 32),
-            messageID: "swift-send-midi-poc-autoloop-32-learn-pulse"
+            .sendMidiAddressLearnPulse(targetKind: "autoloop", targetNumber: 32),
+            messageID: "swift-send-midi-autoloop-32-learn-pulse"
         )
-        #expect(midiPocPulseCount(snapshot) == 2)
-        #expect(midiPocLastEvent(snapshot)?.contains("AutoLoop 32") == true)
-        #expect(midiPocLastEvent(snapshot)?.contains("Note 95") == true)
+        #expect(midiIntegrationPulseCount(snapshot) == 2)
+        #expect(midiIntegrationLastEvent(snapshot)?.contains("AutoLoop 32") == true)
+        #expect(midiIntegrationLastEvent(snapshot)?.contains("Note 95") == true)
 
         snapshot = try await supervisor.send(
-            .triggerMidiPocAutoloop(bankNumber: 1, autoloopNumber: 1),
-            messageID: "swift-trigger-midi-poc-bank-1-autoloop-1"
+            .triggerMidiAutoloop(bankNumber: 1, autoloopNumber: 1),
+            messageID: "swift-trigger-midi-bank-1-autoloop-1"
         )
-        #expect(midiPocPulseCount(snapshot) == 4)
-        #expect(midiPocLastEvent(snapshot)?.contains("Bank 1 → AutoLoop 1") == true)
-        #expect(midiPocLastEvent(snapshot)?.contains("50 ms gap") == true)
+        #expect(midiIntegrationPulseCount(snapshot) == 4)
+        #expect(midiIntegrationLastEvent(snapshot)?.contains("Bank 1 → AutoLoop 1") == true)
+        #expect(midiIntegrationLastEvent(snapshot)?.contains("50 ms gap") == true)
 
         snapshot = try await supervisor.send(
-            .stopMidiPocSource,
-            messageID: "swift-stop-midi-poc-source"
+            .stopMidiSource,
+            messageID: "swift-stop-midi-source"
         )
-        #expect(midiPocState(snapshot) == "stopped")
+        #expect(midiIntegrationState(snapshot) == "stopped")
 
         let renamedRole = try await supervisor.send(
             .mutatePhraseRoleCatalog(
@@ -835,32 +835,32 @@ private func outputRecordCount(_ envelope: MessageEnvelope) -> UInt64? {
     return UInt64(count)
 }
 
-private func midiPocState(_ envelope: MessageEnvelope) -> String? {
-    guard case let .object(midi) = envelope.payload["midiPoc"],
+private func midiIntegrationState(_ envelope: MessageEnvelope) -> String? {
+    guard case let .object(midi) = envelope.payload["midiIntegration"],
           case let .string(state) = midi["state"] else {
         return nil
     }
     return state
 }
 
-private func midiPocSourceName(_ envelope: MessageEnvelope) -> String? {
-    guard case let .object(midi) = envelope.payload["midiPoc"],
+private func midiIntegrationSourceName(_ envelope: MessageEnvelope) -> String? {
+    guard case let .object(midi) = envelope.payload["midiIntegration"],
           case let .string(sourceName) = midi["sourceName"] else {
         return nil
     }
     return sourceName
 }
 
-private func midiPocPulseCount(_ envelope: MessageEnvelope) -> UInt64? {
-    guard case let .object(midi) = envelope.payload["midiPoc"],
+private func midiIntegrationPulseCount(_ envelope: MessageEnvelope) -> UInt64? {
+    guard case let .object(midi) = envelope.payload["midiIntegration"],
           case let .number(count) = midi["sentPulseCount"] else {
         return nil
     }
     return UInt64(count)
 }
 
-private func midiPocLastEvent(_ envelope: MessageEnvelope) -> String? {
-    guard case let .object(midi) = envelope.payload["midiPoc"],
+private func midiIntegrationLastEvent(_ envelope: MessageEnvelope) -> String? {
+    guard case let .object(midi) = envelope.payload["midiIntegration"],
           case let .string(lastEvent) = midi["lastEvent"] else {
         return nil
     }

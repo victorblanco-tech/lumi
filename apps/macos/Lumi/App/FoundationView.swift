@@ -71,35 +71,35 @@ struct FoundationView: View {
                     PhraseRoleSettingsView(
                         settings: engineStatus.libraryState.phraseRoleSettings,
                         autoloopCatalog: engineStatus.libraryState.autoloopCatalog,
-                        midiPoc: engineStatus.libraryState.midiPoc,
+                        midiIntegration: engineStatus.libraryState.midiIntegration,
                         appearance: $preferences.appearance,
                         keyNotation: $preferences.keyNotation,
                         feedback: engineStatus.phraseRoleFeedback,
                         autoloopFeedback: engineStatus.autoloopCatalogFeedback,
-                        midiPocFeedback: engineStatus.midiPocFeedback,
+                        midiIntegrationFeedback: engineStatus.midiIntegrationFeedback,
                         onMutation: { request in
                             Task { await engineStatus.mutatePhraseRoles(request) }
                         },
                         onAutoloopMutation: { request in
                             Task { await engineStatus.mutateAutoloopCatalog(request) }
                         },
-                        onPublishMidiPoc: {
-                            Task { await engineStatus.publishMidiPocSource() }
+                        onPublishMidi: {
+                            Task { await engineStatus.publishMidiSource() }
                         },
-                        onStopMidiPoc: {
-                            Task { await engineStatus.stopMidiPocSource() }
+                        onStopMidi: {
+                            Task { await engineStatus.stopMidiSource() }
                         },
-                        onSendMidiPocAddressLearnPulse: { targetKind, targetNumber in
+                        onSendMidiAddressLearnPulse: { targetKind, targetNumber in
                             Task {
-                                await engineStatus.sendMidiPocAddressLearnPulse(
+                                await engineStatus.sendMidiAddressLearnPulse(
                                     targetKind: targetKind,
                                     targetNumber: targetNumber
                                 )
                             }
                         },
-                        onTriggerMidiPocAutoloop: { bankNumber, autoloopNumber in
+                        onTriggerMidiAutoloop: { bankNumber, autoloopNumber in
                             Task {
-                                await engineStatus.triggerMidiPocAutoloop(
+                                await engineStatus.triggerMidiAutoloop(
                                     bankNumber: bankNumber,
                                     autoloopNumber: autoloopNumber
                                 )

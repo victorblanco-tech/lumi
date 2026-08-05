@@ -9,7 +9,7 @@ use lumi_library::{
     PhraseRoleMove, ReconcileSide, ReconcileStrategy, ThemeSpecificVariant, TimelineEditCommand,
     VariantId,
 };
-use lumi_midi_output::MidiPocAddress;
+use lumi_midi_output::MidiAddress;
 use lumi_protocol::{MessageEnvelope, MessageType};
 use lumi_simulator::SimulationSpeed;
 use serde_json::Value;
@@ -75,13 +75,13 @@ pub enum SessionCommand {
         expected_revision: u64,
         mutation: AutoloopCatalogMutation,
     },
-    PublishMidiPocSource,
-    StopMidiPocSource,
-    SendMidiPocLearnPulse,
-    SendMidiPocAddressLearnPulse {
-        address: MidiPocAddress,
+    PublishMidiSource,
+    StopMidiSource,
+    SendMidiLearnPulse,
+    SendMidiAddressLearnPulse {
+        address: MidiAddress,
     },
-    TriggerMidiPocAutoloop {
+    TriggerMidiAutoloop {
         bank_number: u8,
         autoloop_number: u8,
     },
@@ -161,11 +161,11 @@ impl SessionCommand {
             | Self::RestoreLibraryTimelineRevision { .. }
             | Self::MutatePhraseRoleCatalog { .. }
             | Self::MutateAutoloopCatalog { .. }
-            | Self::PublishMidiPocSource
-            | Self::StopMidiPocSource
-            | Self::SendMidiPocLearnPulse
-            | Self::SendMidiPocAddressLearnPulse { .. }
-            | Self::TriggerMidiPocAutoloop { .. }
+            | Self::PublishMidiSource
+            | Self::StopMidiSource
+            | Self::SendMidiLearnPulse
+            | Self::SendMidiAddressLearnPulse { .. }
+            | Self::TriggerMidiAutoloop { .. }
             | Self::LoadLibraryTrackOnSimulatorDeck { .. }
             | Self::LoadDemoSession { .. }
             | Self::SetOperationState { .. }
@@ -248,16 +248,16 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
             )?,
             mutation: autoloop_catalog_mutation(&envelope.payload)?,
         }),
-        "publishMidiPocSource" => Ok(SessionCommand::PublishMidiPocSource),
-        "stopMidiPocSource" => Ok(SessionCommand::StopMidiPocSource),
-        "sendMidiPocLearnPulse" => Ok(SessionCommand::SendMidiPocLearnPulse),
-        "sendMidiPocAddressLearnPulse" => Ok(SessionCommand::SendMidiPocAddressLearnPulse {
-            address: midi_poc_address(&envelope.payload)?,
+        "publishMidiSource" => Ok(SessionCommand::PublishMidiSource),
+        "stopMidiSource" => Ok(SessionCommand::StopMidiSource),
+        "sendMidiLearnPulse" => Ok(SessionCommand::SendMidiLearnPulse),
+        "sendMidiAddressLearnPulse" => Ok(SessionCommand::SendMidiAddressLearnPulse {
+            address: midi_address(&envelope.payload)?,
         }),
-        "triggerMidiPocAutoloop" => {
-            let bank_number = midi_poc_number(&envelope.payload, "bankNumber", 4)?;
-            let autoloop_number = midi_poc_number(&envelope.payload, "autoloopNumber", 32)?;
-            Ok(SessionCommand::TriggerMidiPocAutoloop {
+        "triggerMidiAutoloop" => {
+            let bank_number = midi_number(&envelope.payload, "bankNumber", 4)?;
+            let autoloop_number = midi_number(&envelope.payload, "autoloopNumber", 32)?;
+            Ok(SessionCommand::TriggerMidiAutoloop {
                 bank_number,
                 autoloop_number,
             })
@@ -320,20 +320,20 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
     }
 }
 
-fn midi_poc_address(
+fn midi_address(
     payload: &serde_json::Map<String, Value>,
-) -> Result<MidiPocAddress, CommandDecodeError> {
+) -> Result<MidiAddress, CommandDecodeError> {
     let number = u8::try_from(positive_unsigned(payload, "targetNumber")?)
         .map_err(|_| CommandDecodeError::InvalidField("targetNumber"))?;
     match string(payload, "targetKind")? {
-        "bank" => MidiPocAddress::bank(number),
-        "autoloop" => MidiPocAddress::autoloop(number),
+        "bank" => MidiAddress::bank(number),
+        "autoloop" => MidiAddress::autoloop(number),
         _ => return Err(CommandDecodeError::InvalidField("targetKind")),
     }
     .ok_or(CommandDecodeError::InvalidField("targetNumber"))
 }
 
-fn midi_poc_number(
+fn midi_number(
     payload: &serde_json::Map<String, Value>,
     field: &'static str,
     maximum: u8,

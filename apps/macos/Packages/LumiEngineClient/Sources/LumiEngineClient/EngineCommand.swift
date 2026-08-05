@@ -306,11 +306,11 @@ public enum EngineCommand: Equatable, Sendable {
         expectedAutoloopCatalogRevision: UInt64,
         mutation: EngineAutoloopCatalogMutation
     )
-    case publishMidiPocSource
-    case stopMidiPocSource
-    case sendMidiPocLearnPulse
-    case sendMidiPocAddressLearnPulse(targetKind: String, targetNumber: UInt16)
-    case triggerMidiPocAutoloop(bankNumber: UInt16, autoloopNumber: UInt16)
+    case publishMidiSource
+    case stopMidiSource
+    case sendMidiLearnPulse
+    case sendMidiAddressLearnPulse(targetKind: String, targetNumber: UInt16)
+    case triggerMidiAutoloop(bankNumber: UInt16, autoloopNumber: UInt16)
     case loadLibraryTrackOnSimulatorDeck(
         trackID: UInt64,
         deckID: UInt64,
@@ -413,21 +413,21 @@ public enum EngineCommand: Equatable, Sendable {
             payload["kind"] = .string("mutateAutoloopCatalog")
             payload["expectedAutoloopCatalogRevision"] = .number(Double(expectedRevision))
             return payload
-        case .publishMidiPocSource:
-            return ["kind": .string("publishMidiPocSource")]
-        case .stopMidiPocSource:
-            return ["kind": .string("stopMidiPocSource")]
-        case .sendMidiPocLearnPulse:
-            return ["kind": .string("sendMidiPocLearnPulse")]
-        case let .sendMidiPocAddressLearnPulse(targetKind, targetNumber):
+        case .publishMidiSource:
+            return ["kind": .string("publishMidiSource")]
+        case .stopMidiSource:
+            return ["kind": .string("stopMidiSource")]
+        case .sendMidiLearnPulse:
+            return ["kind": .string("sendMidiLearnPulse")]
+        case let .sendMidiAddressLearnPulse(targetKind, targetNumber):
             return [
-                "kind": .string("sendMidiPocAddressLearnPulse"),
+                "kind": .string("sendMidiAddressLearnPulse"),
                 "targetKind": .string(targetKind),
                 "targetNumber": .number(Double(targetNumber))
             ]
-        case let .triggerMidiPocAutoloop(bankNumber, autoloopNumber):
+        case let .triggerMidiAutoloop(bankNumber, autoloopNumber):
             return [
-                "kind": .string("triggerMidiPocAutoloop"),
+                "kind": .string("triggerMidiAutoloop"),
                 "bankNumber": .number(Double(bankNumber)),
                 "autoloopNumber": .number(Double(autoloopNumber))
             ]

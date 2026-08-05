@@ -18,8 +18,8 @@ struct LibraryWorkspaceTests {
         #expect(state.page.tracks.first?.missingCapabilities == [])
     }
 
-    @Test("MIDI POC state decodes independently from the library catalog")
-    func decodesMidiPocState() throws {
+    @Test("MIDI integration state decodes independently from the library catalog")
+    func decodesMidiIntegrationState() throws {
         let midi: JSONValue = .object([
             "state": .string("ready"),
             "sourceName": .string("Lumi Virtual MIDI"),
@@ -28,12 +28,12 @@ struct LibraryWorkspaceTests {
             "lastEvent": .string("Learn pulse sent")
         ])
         let state = try LibrarySnapshotDecoder().decode(
-            envelope(trackValues: [trackValue()], midiPoc: midi)
+            envelope(trackValues: [trackValue()], midiIntegration: midi)
         )
 
-        #expect(state.midiPoc?.isReady == true)
-        #expect(state.midiPoc?.sourceName == "Lumi Virtual MIDI")
-        #expect(state.midiPoc?.sentPulseCount == 1)
+        #expect(state.midiIntegration?.isReady == true)
+        #expect(state.midiIntegration?.sourceName == "Lumi Virtual MIDI")
+        #expect(state.midiIntegration?.sentPulseCount == 1)
     }
 
     @Test("Wire pages over 200 tracks are rejected before presentation")
@@ -562,7 +562,7 @@ private func envelope(
     editorValue: JSONValue = .null,
     phraseRoleSettings: JSONValue = .null,
     autoloopCatalog: JSONValue = .null,
-    midiPoc: JSONValue = .null
+    midiIntegration: JSONValue = .null
 ) -> MessageEnvelope {
     MessageEnvelope(
         protocolVersion: 1,
@@ -572,7 +572,7 @@ private func envelope(
         correlationId: "test",
         sentAt: "2026-08-03T00:00:00Z",
         payload: [
-            "midiPoc": midiPoc,
+            "midiIntegration": midiIntegration,
             "library": .object([
                 "condition": .string("ready"),
                 "providerKind": .string("demo"),

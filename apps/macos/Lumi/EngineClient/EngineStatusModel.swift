@@ -11,7 +11,7 @@ final class EngineStatusModel: ObservableObject {
     @Published private(set) var timelineEditFeedback: String?
     @Published private(set) var phraseRoleFeedback: String?
     @Published private(set) var autoloopCatalogFeedback: String?
-    @Published private(set) var midiPocFeedback: String?
+    @Published private(set) var midiIntegrationFeedback: String?
     @Published private(set) var simulatorLoadFeedback: String?
     @Published private(set) var simulatorLoadFeedbackIsError = false
 
@@ -48,7 +48,7 @@ final class EngineStatusModel: ObservableObject {
         timelineEditFeedback = nil
         phraseRoleFeedback = nil
         autoloopCatalogFeedback = nil
-        midiPocFeedback = nil
+        midiIntegrationFeedback = nil
         simulatorLoadFeedback = nil
         simulatorLoadFeedbackIsError = false
 
@@ -121,7 +121,7 @@ final class EngineStatusModel: ObservableObject {
         libraryState = .importing()
         phraseRoleFeedback = nil
         autoloopCatalogFeedback = nil
-        midiPocFeedback = nil
+        midiIntegrationFeedback = nil
         simulatorLoadFeedback = nil
         simulatorLoadFeedbackIsError = false
     }
@@ -247,32 +247,32 @@ final class EngineStatusModel: ObservableObject {
         await exchangeTimelineCommand(command, success: success)
     }
 
-    func publishMidiPocSource() async {
-        await exchangeMidiPocCommand(
-            .publishMidiPocSource,
+    func publishMidiSource() async {
+        await exchangeMidiCommand(
+            .publishMidiSource,
             success: "Lumi Virtual MIDI is published. No MIDI was sent."
         )
     }
 
-    func stopMidiPocSource() async {
-        await exchangeMidiPocCommand(
-            .stopMidiPocSource,
+    func stopMidiSource() async {
+        await exchangeMidiCommand(
+            .stopMidiSource,
             success: "Lumi Virtual MIDI stopped."
         )
     }
 
-    func sendMidiPocLearnPulse() async {
-        await exchangeMidiPocCommand(
-            .sendMidiPocLearnPulse,
+    func sendMidiLearnPulse() async {
+        await exchangeMidiCommand(
+            .sendMidiLearnPulse,
             success: "Learn pulse sent on Channel 16, Note 60, with Note Off."
         )
     }
 
-    func sendMidiPocAddressLearnPulse(targetKind: String, targetNumber: UInt16) async {
+    func sendMidiAddressLearnPulse(targetKind: String, targetNumber: UInt16) async {
         let label = targetKind == "bank" ? "Bank" : "AutoLoop"
         let note = targetKind == "bank" ? 59 + targetNumber : 63 + targetNumber
-        await exchangeMidiPocCommand(
-            .sendMidiPocAddressLearnPulse(
+        await exchangeMidiCommand(
+            .sendMidiAddressLearnPulse(
                 targetKind: targetKind,
                 targetNumber: targetNumber
             ),
@@ -280,9 +280,9 @@ final class EngineStatusModel: ObservableObject {
         )
     }
 
-    func triggerMidiPocAutoloop(bankNumber: UInt16, autoloopNumber: UInt16) async {
-        await exchangeMidiPocCommand(
-            .triggerMidiPocAutoloop(
+    func triggerMidiAutoloop(bankNumber: UInt16, autoloopNumber: UInt16) async {
+        await exchangeMidiCommand(
+            .triggerMidiAutoloop(
                 bankNumber: bankNumber,
                 autoloopNumber: autoloopNumber
             ),
@@ -604,20 +604,20 @@ final class EngineStatusModel: ObservableObject {
         }
     }
 
-    private func exchangeMidiPocCommand(_ command: EngineCommand, success: String) async {
-        midiPocFeedback = nil
+    private func exchangeMidiCommand(_ command: EngineCommand, success: String) async {
+        midiIntegrationFeedback = nil
         guard lifecycle == .ready,
               let endpointDescription,
               let protocolVersion,
               await acquireInteractiveExchange() else {
-            midiPocFeedback = "The MIDI POC command could not run because the engine is not ready."
+            midiIntegrationFeedback = "The MIDI command could not run because the engine is not ready."
             return
         }
         defer { isExchangingCommand = false }
         do {
             let envelope = try await supervisor.send(command)
             if let failure = EngineCommandFailure(envelope) {
-                midiPocFeedback = "The MIDI POC command could not run: \(failure.message)"
+                midiIntegrationFeedback = "The MIDI command could not run: \(failure.message)"
                 return
             }
             let snapshot = try snapshotDecoder.decode(
@@ -628,9 +628,9 @@ final class EngineStatusModel: ObservableObject {
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
             libraryState = try libraryDecoder.decode(envelope)
-            midiPocFeedback = success
+            midiIntegrationFeedback = success
         } catch {
-            midiPocFeedback = "The MIDI POC command could not run: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
+            midiIntegrationFeedback = "The MIDI command could not run: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
         }
     }
 

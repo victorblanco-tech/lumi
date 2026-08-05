@@ -58,8 +58,8 @@ buiten deze epic.
 - simulatorintegratie met echte geïmporteerde tracks;
 - diff, rebase, merge en replace bij sourcewijzigingen;
 - contract-, parser-, persistence-, UI-, golden-, performance- en end-to-endtests.
-- demo-data Output Profiles voor SoundSwitch met Banks & Autoloops, Virtual
-  Controller en MIDI & POC readiness, zonder live MIDI te versturen.
+- demo-data Output Profiles voor SoundSwitch met Banks & Autoloops, Test
+  Controller en MIDI Status.
 
 ### Buiten scope
 

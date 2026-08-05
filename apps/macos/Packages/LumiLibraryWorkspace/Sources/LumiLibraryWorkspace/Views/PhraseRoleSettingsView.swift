@@ -13,19 +13,19 @@ public enum PhraseRoleSettingsSection: String, CaseIterable, Identifiable, Senda
 public struct PhraseRoleSettingsView: View {
     private let settings: PhraseRoleSettingsState?
     private let autoloopCatalog: AutoloopCatalogState?
-    private let midiPoc: MidiPocState?
+    private let midiIntegration: MidiIntegrationState?
     @Binding private var appearance: AppearancePreference
     @Binding private var keyNotation: KeyNotationPreference
     private let feedback: String?
     private let autoloopFeedback: String?
-    private let midiPocFeedback: String?
+    private let midiIntegrationFeedback: String?
     private let rendersInteractiveControls: Bool
     private let onMutation: @Sendable (PhraseRoleMutationRequest) -> Void
     private let onAutoloopMutation: @Sendable (AutoloopCatalogMutationRequest) -> Void
-    private let onPublishMidiPoc: @Sendable () -> Void
-    private let onStopMidiPoc: @Sendable () -> Void
-    private let onSendMidiPocAddressLearnPulse: @Sendable (String, UInt16) -> Void
-    private let onTriggerMidiPocAutoloop: @Sendable (UInt16, UInt16) -> Void
+    private let onPublishMidi: @Sendable () -> Void
+    private let onStopMidi: @Sendable () -> Void
+    private let onSendMidiAddressLearnPulse: @Sendable (String, UInt16) -> Void
+    private let onTriggerMidiAutoloop: @Sendable (UInt16, UInt16) -> Void
 
     @State private var section: PhraseRoleSettingsSection
     @State private var selectedRoleID: String?
@@ -37,36 +37,36 @@ public struct PhraseRoleSettingsView: View {
     public init(
         settings: PhraseRoleSettingsState?,
         autoloopCatalog: AutoloopCatalogState? = nil,
-        midiPoc: MidiPocState? = nil,
+        midiIntegration: MidiIntegrationState? = nil,
         appearance: Binding<AppearancePreference>,
         keyNotation: Binding<KeyNotationPreference>,
         initialSection: PhraseRoleSettingsSection = .phraseRoles,
         feedback: String? = nil,
         autoloopFeedback: String? = nil,
-        midiPocFeedback: String? = nil,
+        midiIntegrationFeedback: String? = nil,
         rendersInteractiveControls: Bool = true,
         onMutation: @escaping @Sendable (PhraseRoleMutationRequest) -> Void = { _ in },
         onAutoloopMutation: @escaping @Sendable (AutoloopCatalogMutationRequest) -> Void = { _ in },
-        onPublishMidiPoc: @escaping @Sendable () -> Void = {},
-        onStopMidiPoc: @escaping @Sendable () -> Void = {},
-        onSendMidiPocAddressLearnPulse: @escaping @Sendable (String, UInt16) -> Void = { _, _ in },
-        onTriggerMidiPocAutoloop: @escaping @Sendable (UInt16, UInt16) -> Void = { _, _ in }
+        onPublishMidi: @escaping @Sendable () -> Void = {},
+        onStopMidi: @escaping @Sendable () -> Void = {},
+        onSendMidiAddressLearnPulse: @escaping @Sendable (String, UInt16) -> Void = { _, _ in },
+        onTriggerMidiAutoloop: @escaping @Sendable (UInt16, UInt16) -> Void = { _, _ in }
     ) {
         self.settings = settings
         self.autoloopCatalog = autoloopCatalog
-        self.midiPoc = midiPoc
+        self.midiIntegration = midiIntegration
         _appearance = appearance
         _keyNotation = keyNotation
         self.feedback = feedback
         self.autoloopFeedback = autoloopFeedback
-        self.midiPocFeedback = midiPocFeedback
+        self.midiIntegrationFeedback = midiIntegrationFeedback
         self.rendersInteractiveControls = rendersInteractiveControls
         self.onMutation = onMutation
         self.onAutoloopMutation = onAutoloopMutation
-        self.onPublishMidiPoc = onPublishMidiPoc
-        self.onStopMidiPoc = onStopMidiPoc
-        self.onSendMidiPocAddressLearnPulse = onSendMidiPocAddressLearnPulse
-        self.onTriggerMidiPocAutoloop = onTriggerMidiPocAutoloop
+        self.onPublishMidi = onPublishMidi
+        self.onStopMidi = onStopMidi
+        self.onSendMidiAddressLearnPulse = onSendMidiAddressLearnPulse
+        self.onTriggerMidiAutoloop = onTriggerMidiAutoloop
         _section = State(initialValue: initialSection)
         _selectedRoleID = State(initialValue: settings?.roles.first?.id)
         _selectedProviderKind = State(initialValue: settings?.mappingProfiles.first?.providerKind)
@@ -173,15 +173,15 @@ public struct PhraseRoleSettingsView: View {
         case .autoloopMatrix:
             AutoloopCatalogSettingsView(
                 catalog: autoloopCatalog,
-                midiPoc: midiPoc,
+                midiIntegration: midiIntegration,
                 feedback: autoloopFeedback,
-                midiPocFeedback: midiPocFeedback,
+                midiIntegrationFeedback: midiIntegrationFeedback,
                 rendersInteractiveControls: rendersInteractiveControls,
                 onMutation: onAutoloopMutation,
-                onPublishMidiPoc: onPublishMidiPoc,
-                onStopMidiPoc: onStopMidiPoc,
-                onSendMidiPocAddressLearnPulse: onSendMidiPocAddressLearnPulse,
-                onTriggerMidiPocAutoloop: onTriggerMidiPocAutoloop
+                onPublishMidi: onPublishMidi,
+                onStopMidi: onStopMidi,
+                onSendMidiAddressLearnPulse: onSendMidiAddressLearnPulse,
+                onTriggerMidiAutoloop: onTriggerMidiAutoloop
             )
         }
     }
