@@ -4,6 +4,7 @@ use std::io::{self, Write as _};
 use std::net::Ipv4Addr;
 use std::time::Duration;
 
+use lumi_blt_midi::{BltMidiDeckSourceProvider, BltMidiError};
 use lumi_deck_source::DeckSourceProvider as _;
 use lumi_domain::{
     ClientId, CommandSequence, CueOrigin, CueReason, DecisionReason, DeckObservation,
@@ -16,7 +17,13 @@ use lumi_domain::{
 };
 use lumi_lighting_output::LightingOutputProvider as _;
 use lumi_local_playback::{LocalPlaybackDeckSourceProvider, LocalPlaybackError};
-use lumi_midi_coremidi::CoreMidiSourceProvider;
+#[cfg(not(test))]
+use lumi_midi_coremidi::DECK_INPUT_DESTINATION_NAME;
+#[cfg(test)]
+use lumi_midi_coremidi::MidiChannelVoiceMessage;
+use lumi_midi_coremidi::{
+    CoreMidiDestinationProvider, CoreMidiSourceProvider, MidiDestinationState,
+};
 use lumi_midi_output::{MidiOutputController, MidiSourceState};
 use lumi_output_dry_run::{DryRunLightingOutputProvider, DryRunOutputError};
 use lumi_planner::{
@@ -46,6 +53,8 @@ use crate::commands::{DeckSourceSelection, SessionCommand, decode_command};
 use crate::library::{LibraryPlanContext, LibraryWorker, LibraryWorkerError, ResolvedLibraryCue};
 
 const SESSION_TOKEN_ENVIRONMENT_KEY: &str = "LUMI_SESSION_TOKEN";
+#[cfg(not(test))]
+const DECK_INPUT_NAME_ENVIRONMENT_KEY: &str = "LUMI_DECK_INPUT_DESTINATION_NAME";
 const MINIMUM_SESSION_TOKEN_BYTES: usize = 32;
 const MAXIMUM_SESSION_TOKEN_BYTES: usize = 256;
 const MAXIMUM_AUTHENTICATION_BYTES: usize = 512;
@@ -215,9 +224,11 @@ struct EngineRuntime {
     clock: ManualClock,
     deck_source: SimulatorDeckSourceProvider<ManualClock>,
     local_deck_source: LocalPlaybackDeckSourceProvider,
+    connected_deck_source: BltMidiDeckSourceProvider,
     deck_source_mode: DeckSourceMode,
     planning_worker: PlanningWorker,
     output_worker: OutputWorker,
+    deck_input: CoreMidiDestinationProvider,
     library_worker: LibraryWorker,
     operation_sequence: u64,
 }
@@ -240,7 +251,7 @@ impl EngineRuntime {
 
     fn leader_deck_id(&self) -> Option<lumi_domain::DeckId> {
         match self.deck_source_mode {
-            DeckSourceMode::ConnectedDecks => None,
+            DeckSourceMode::ConnectedDecks => self.connected_deck_source.leader_deck_id(),
             DeckSourceMode::LocalPlayback => self.local_deck_source.leader_deck_id(),
             DeckSourceMode::Simulator => Some(self.deck_source.leader_deck_id()),
         }
@@ -273,11 +284,32 @@ fn initialized_runtime_for_mode(
     )?;
     let mut deck_source = SimulatorDeckSourceProvider::demo(clock.clone())?;
     let mut local_deck_source = LocalPlaybackDeckSourceProvider::new(clock.now())?;
+    let mut connected_deck_source = BltMidiDeckSourceProvider::new(clock.now())?;
     let mut planning_worker = PlanningWorker::new();
     let mut output_worker = OutputWorker::new();
+    #[cfg(not(test))]
+    let mut deck_input = CoreMidiDestinationProvider::new();
+    #[cfg(test)]
+    let deck_input = CoreMidiDestinationProvider::new();
+    #[cfg(not(test))]
+    deck_input
+        .publish(
+            &env::var(DECK_INPUT_NAME_ENVIRONMENT_KEY)
+                .unwrap_or_else(|_| DECK_INPUT_DESTINATION_NAME.to_owned()),
+        )
+        .map_err(|error| EngineError::Midi(error.to_string()))?;
     let library_worker = LibraryWorker::demo()?;
     match deck_source_mode {
-        DeckSourceMode::ConnectedDecks => {}
+        DeckSourceMode::ConnectedDecks => {
+            for event in connected_deck_source.drain_events()? {
+                planning_worker.process_source_event(
+                    &mut runtime,
+                    &mut output_worker,
+                    event,
+                    connected_deck_source.leader_deck_id(),
+                )?;
+            }
+        }
         DeckSourceMode::LocalPlayback => {
             for event in local_deck_source.drain_events()? {
                 planning_worker.process_source_event(
@@ -304,9 +336,11 @@ fn initialized_runtime_for_mode(
         clock,
         deck_source,
         local_deck_source,
+        connected_deck_source,
         deck_source_mode,
         planning_worker,
         output_worker,
+        deck_input,
         library_worker,
         operation_sequence: 0,
     })
@@ -315,7 +349,16 @@ fn initialized_runtime_for_mode(
 fn process_pending_source_events(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
     let leader_deck_id = runtime.leader_deck_id();
     match runtime.deck_source_mode {
-        DeckSourceMode::ConnectedDecks => {}
+        DeckSourceMode::ConnectedDecks => {
+            for event in runtime.connected_deck_source.drain_events()? {
+                runtime.planning_worker.process_source_event(
+                    &mut runtime.state,
+                    &mut runtime.output_worker,
+                    event,
+                    leader_deck_id,
+                )?;
+            }
+        }
         DeckSourceMode::LocalPlayback => {
             for event in runtime.local_deck_source.drain_events()? {
                 runtime.planning_worker.process_source_event(
@@ -434,11 +477,15 @@ impl PlanningWorker {
                     deck_id,
                     metadata,
                     track_load_id,
-                } => Some(PlanningInput {
-                    deck_id: *deck_id,
-                    track_load_id: *track_load_id,
-                    track: planner_track(metadata),
-                }),
+                } if !metadata.phrases().is_empty()
+                    || self.library_context(*track_load_id).is_some() =>
+                {
+                    Some(PlanningInput {
+                        deck_id: *deck_id,
+                        track_load_id: *track_load_id,
+                        track: planner_track(metadata),
+                    })
+                }
                 _ => None,
             },
             _ => None,
@@ -639,6 +686,7 @@ fn handle_command(
     envelope: &MessageEnvelope,
     response_sequence: u64,
 ) -> Result<MessageEnvelope, EngineError> {
+    process_deck_input_messages(runtime)?;
     let command = match decode_command(envelope) {
         Ok(command) => command,
         Err(error) => {
@@ -669,6 +717,22 @@ fn handle_command(
         );
     }
     snapshot_envelope(runtime, response_sequence, &envelope.message_id)
+}
+
+fn process_deck_input_messages(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
+    let messages = runtime.deck_input.drain_messages();
+    if messages.is_empty() {
+        return Ok(());
+    }
+    if runtime.deck_source_mode != DeckSourceMode::ConnectedDecks {
+        return Ok(());
+    }
+    let at = runtime.clock.now();
+    for message in messages {
+        runtime.connected_deck_source.ingest(message, at)?;
+    }
+    process_pending_source_events(runtime)?;
+    Ok(())
 }
 
 fn apply_command(
@@ -919,8 +983,17 @@ fn apply_command(
                     runtime.local_deck_source.clear(at)?;
                     process_pending_source_events(runtime)
                         .map_err(CommandApplicationError::Engine)?;
+                } else if runtime.deck_source_mode == DeckSourceMode::ConnectedDecks {
+                    let at = runtime
+                        .clock
+                        .advance(1)
+                        .ok_or(CommandApplicationError::ClockOverflow)?;
+                    runtime.connected_deck_source.clear(at)?;
+                    process_pending_source_events(runtime)
+                        .map_err(CommandApplicationError::Engine)?;
                 }
                 runtime.deck_source_mode = target;
+                process_pending_source_events(runtime).map_err(CommandApplicationError::Engine)?;
             }
             return Ok(());
         }
@@ -1378,6 +1451,7 @@ fn application_error_envelope(
         | CommandApplicationError::Midi(_)
         | CommandApplicationError::Library(_)
         | CommandApplicationError::LocalPlayback(_)
+        | CommandApplicationError::BltMidi(_)
         | CommandApplicationError::WrongDeckSourceMode
         | CommandApplicationError::Simulator(_) => error_envelope(
             sequence,
@@ -1457,6 +1531,8 @@ enum CommandApplicationError {
     Simulator(#[from] SimulatorError),
     #[error("local playback failed: {0}")]
     LocalPlayback(#[from] LocalPlaybackError),
+    #[error("Beat Link Trigger MIDI input failed: {0}")]
+    BltMidi(#[from] BltMidiError),
     #[error("the command is not valid for the active deck source")]
     WrongDeckSourceMode,
     #[error("library command failed: {0}")]
@@ -1510,7 +1586,11 @@ fn snapshot_envelope(
                 DeckSourceMode::Simulator => "Internal Test Source",
             },
             "status": if runtime.deck_source_mode == DeckSourceMode::ConnectedDecks {
-                "disconnected"
+                if runtime.connected_deck_source.diagnostics().committed_frame_count > 0 {
+                    "ready"
+                } else {
+                    "disconnected"
+                }
             } else {
                 state
                     .source_statuses()
@@ -1541,6 +1621,33 @@ fn snapshot_envelope(
             "protocol": "MIDI 1.0 UMP",
             "sentPulseCount": midi_output.sent_pulse_count,
             "lastEvent": midi_output.last_event,
+        }),
+    );
+    let deck_input = runtime.deck_input.status();
+    let blt_diagnostics = runtime.connected_deck_source.diagnostics();
+    payload.insert(
+        "deckInputIntegration".to_owned(),
+        json!({
+            "state": match deck_input.state {
+                MidiDestinationState::Stopped => "stopped",
+                MidiDestinationState::Ready => "ready",
+            },
+            "destinationName": deck_input.destination_name,
+            "protocol": lumi_blt_midi::PROTOCOL_NAME,
+            "protocolVersion": lumi_blt_midi::PROTOCOL_VERSION,
+            "receivedMessageCount": deck_input.received_message_count,
+            "invalidWordCount": deck_input.invalid_word_count,
+            "lastMessage": deck_input.last_message.map(|message| json!({
+                "status": message.status,
+                "channel": message.channel,
+                "dataOne": message.data_one,
+                "dataTwo": message.data_two,
+            })),
+            "committedFrameCount": blt_diagnostics.committed_frame_count,
+            "ignoredMessageCount": blt_diagnostics.ignored_message_count,
+            "duplicateFrameCount": blt_diagnostics.duplicate_frame_count,
+            "lastDeckId": blt_diagnostics.last_deck_id.map(lumi_domain::DeckId::value),
+            "lastFrameSequence": blt_diagnostics.last_frame_sequence,
         }),
     );
     payload.insert(
@@ -1597,6 +1704,8 @@ fn snapshot_envelope(
                     "key": {
                         "pitchClass": pitch_class_name(metadata.musical_key().pitch_class()),
                         "mode": key_mode_name(metadata.musical_key().mode()),
+                        "known": library_context.is_some()
+                            || deck_source_kind != "beatLinkTriggerMidi",
                     },
                     "durationBeats": metadata.duration_beats(),
                     "waveformPreview": waveform_preview,
@@ -2124,6 +2233,8 @@ pub enum EngineError {
     Simulator(#[from] SimulatorError),
     #[error("local playback initialization failed: {0}")]
     LocalPlayback(#[from] LocalPlaybackError),
+    #[error("Beat Link Trigger MIDI adapter failed: {0}")]
+    BltMidi(#[from] BltMidiError),
     #[error("planner failed: {0}")]
     Planner(#[from] PlannerError),
     #[error("a Library plan could not be materialized: {0}")]
@@ -2888,6 +2999,79 @@ mod tests {
         assert_eq!(
             runtime.output_worker.provider.records().count(),
             records_before_fault
+        );
+    }
+
+    #[test]
+    fn committed_blt_midi_frame_enters_the_product_deck_source_port() {
+        let mut runtime =
+            match initialized_runtime_for_mode(ManualClock::new(0), DeckSourceMode::ConnectedDecks)
+            {
+                Ok(runtime) => runtime,
+                Err(error) => panic!("connected test engine must initialize: {error}"),
+            };
+        let fields = [
+            (16, 15),
+            (17, 42),
+            (18, 0),
+            (19, 0),
+            (20, 0),
+            (21, 2),
+            (22, 1),
+            (23, 80),
+            (24, 119),
+            (25, 7),
+            (26, 80),
+            (27, 0),
+            (28, 0),
+            (29, 58),
+            (30, 1),
+            (31, 0),
+            (32, 7),
+            (119, 1),
+        ];
+        for (controller, value) in fields {
+            if let Err(error) = runtime.connected_deck_source.ingest(
+                MidiChannelVoiceMessage {
+                    status: 0xb,
+                    channel: 2,
+                    data_one: controller,
+                    data_two: value,
+                },
+                MonotonicTime::new(1),
+            ) {
+                panic!("BLT frame must ingest: {error}");
+            }
+        }
+        if let Err(error) = process_pending_source_events(&mut runtime) {
+            panic!("BLT events must enter the engine: {error}");
+        }
+        assert_eq!(
+            runtime.state.state().leader_deck(),
+            Some(lumi_domain::DeckId::new(2))
+        );
+        let deck = runtime
+            .state
+            .state()
+            .deck(lumi_domain::DeckId::new(2))
+            .unwrap_or_else(|| panic!("BLT Deck 2 must be loaded"));
+        assert_eq!(deck.metadata().title(), "External track 42");
+        assert_eq!(deck.beat(), 80);
+        assert!(deck.is_playing());
+        assert!(
+            runtime
+                .state
+                .state()
+                .plan(lumi_domain::DeckId::new(2))
+                .is_none()
+        );
+        assert_eq!(runtime.output_worker.provider.records().count(), 0);
+        assert_eq!(
+            runtime
+                .connected_deck_source
+                .diagnostics()
+                .committed_frame_count,
+            1
         );
     }
 

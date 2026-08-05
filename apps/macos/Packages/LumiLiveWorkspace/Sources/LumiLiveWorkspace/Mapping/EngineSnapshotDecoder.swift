@@ -62,6 +62,9 @@ public struct EngineSnapshotDecoder: Sendable {
             }
             simulation = SimulationSnapshot(speed: speed, paused: paused)
         }
+        let deckInputIntegration = try decodeDeckInputIntegration(
+            envelope.payload["deckInputIntegration"]
+        )
         let decks = try deckPayloads.map(decodeDeck)
         let timeline = try timelinePayloads.map(decodeTimelineEntry)
         let deckIDs = Set(decks.map(\.deckID))
@@ -125,6 +128,7 @@ public struct EngineSnapshotDecoder: Sendable {
                 displayName: sourceDisplayName,
                 status: sourceStatus
             ),
+            deckInputIntegration: deckInputIntegration,
             simulation: simulation,
             outputProvider: OutputProviderSnapshot(
                 providerKind: outputProviderKind,
@@ -137,6 +141,49 @@ public struct EngineSnapshotDecoder: Sendable {
             nextPlan: nextPlan,
             planningOptions: try decodePlanningOptions(optionsPayload),
             timeline: timeline
+        )
+    }
+
+    private func decodeDeckInputIntegration(
+        _ value: JSONValue?
+    ) throws -> DeckInputIntegrationSnapshot? {
+        if value == nil || value == .null {
+            return nil
+        }
+        guard case let .object(input) = value,
+              case let .string(state) = input["state"],
+              ["stopped", "ready"].contains(state),
+              case let .string(protocolName) = input["protocol"],
+              !protocolName.isEmpty,
+              let protocolVersion = unsignedInteger(input["protocolVersion"]),
+              protocolVersion > 0,
+              let receivedMessageCount = unsignedInteger(input["receivedMessageCount"]),
+              let invalidWordCount = unsignedInteger(input["invalidWordCount"]),
+              let committedFrameCount = unsignedInteger(input["committedFrameCount"]),
+              let ignoredMessageCount = unsignedInteger(input["ignoredMessageCount"]),
+              let duplicateFrameCount = unsignedInteger(input["duplicateFrameCount"]) else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        let destinationName = try optionalString(input["destinationName"])
+        let lastDeckID = try optionalUnsignedInteger(input["lastDeckId"])
+        let lastFrameSequence = try optionalUnsignedInteger(input["lastFrameSequence"])
+        guard destinationName?.isEmpty != true,
+              lastDeckID.map({ [1, 2].contains($0) }) ?? true,
+              lastFrameSequence.map({ $0 <= 127 }) ?? true else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        return DeckInputIntegrationSnapshot(
+            state: state,
+            destinationName: destinationName,
+            protocolName: protocolName,
+            protocolVersion: protocolVersion,
+            receivedMessageCount: receivedMessageCount,
+            invalidWordCount: invalidWordCount,
+            committedFrameCount: committedFrameCount,
+            ignoredMessageCount: ignoredMessageCount,
+            duplicateFrameCount: duplicateFrameCount,
+            lastDeckID: lastDeckID,
+            lastFrameSequence: lastFrameSequence
         )
     }
 
@@ -576,6 +623,16 @@ public struct EngineSnapshotDecoder: Sendable {
             waveformPreview = try decodeWaveformPreview(track["waveformPreview"])
         }
 
+        let keyKnown: Bool
+        if key["known"] == nil {
+            keyKnown = true
+        } else {
+            guard case let .boolean(value) = key["known"] else {
+                throw EngineSnapshotDecodingError.invalidSnapshot
+            }
+            keyKnown = value
+        }
+
         return DeckSnapshot(
             deckID: deckID,
             trackLoadID: trackLoadID,
@@ -585,6 +642,7 @@ public struct EngineSnapshotDecoder: Sendable {
             colorRGB: colorRGB,
             pitchClass: pitchClass,
             keyMode: keyMode,
+            keyKnown: keyKnown,
             beat: beat,
             playing: playing,
             phraseIndex: phraseIndex,
@@ -669,5 +727,25 @@ public struct EngineSnapshotDecoder: Sendable {
             return nil
         }
         return UInt64(number)
+    }
+
+    private func optionalUnsignedInteger(_ value: JSONValue?) throws -> UInt64? {
+        if value == nil || value == .null {
+            return nil
+        }
+        guard let decoded = unsignedInteger(value) else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        return decoded
+    }
+
+    private func optionalString(_ value: JSONValue?) throws -> String? {
+        if value == nil || value == .null {
+            return nil
+        }
+        guard case let .string(string) = value else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        return string
     }
 }

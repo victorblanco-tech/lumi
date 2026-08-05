@@ -24,6 +24,7 @@ Decision Records (ADR's) die de belangrijkste besluiten vastleggen.
 - [ADR-0015: SoundSwitch Autoloop-surface en virtuele MIDI-controller](adr/0015-soundswitch-autoloop-surface-en-virtuele-midi-controller.md)
 - [ADR-0016: Stable deck identity, rolling Live plans and waveform sources](adr/0016-stable-deck-identity-rolling-live-plans-and-waveforms.md)
 - [ADR-0017: Product deck sources, Local Playback and safe unmatched tracks](adr/0017-product-deck-sources-local-playback-and-safe-unmatched-tracks.md)
+- [ADR-0018: BLT MIDI deck frames and separate CoreMIDI routes](adr/0018-blt-midi-deck-frames-and-separate-coremidi-routes.md)
 
 Release- en deploymentmanagement staat in [`docs/release`](../release/README.md).
 

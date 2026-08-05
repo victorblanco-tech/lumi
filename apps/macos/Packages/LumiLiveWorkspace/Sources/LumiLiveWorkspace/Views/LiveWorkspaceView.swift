@@ -767,7 +767,8 @@ public struct LiveWorkspaceView: View {
     }
 
     private func musicalKey(for deck: DeckSnapshot) -> String {
-        guard let pitchClass = pitchClass(named: deck.pitchClass),
+        guard deck.keyKnown,
+              let pitchClass = pitchClass(named: deck.pitchClass),
               let mode = KeyMode(rawValue: deck.keyMode) else {
             return "—"
         }

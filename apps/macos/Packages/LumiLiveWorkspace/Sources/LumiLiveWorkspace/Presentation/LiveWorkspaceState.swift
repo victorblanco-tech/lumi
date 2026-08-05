@@ -285,7 +285,7 @@ public enum LiveWorkspacePresenter {
                 condition: runtime.health == "ready" ? healthyProviderCondition : .degraded
             ),
             source: ProviderPresentation(
-                detail: snapshot.deckSource.displayName,
+                detail: deckSourceDetail(snapshot),
                 condition: snapshot.deckSource.status == "ready" ? healthyProviderCondition : .degraded
             ),
             planner: ProviderPresentation(
@@ -301,6 +301,16 @@ public enum LiveWorkspacePresenter {
             planInteraction: planInteraction,
             sessionInteraction: sessionInteraction
         )
+    }
+
+    private static func deckSourceDetail(_ snapshot: EngineSnapshot) -> String {
+        guard snapshot.deckSource.mode == "connectedDecks",
+              let input = snapshot.deckInputIntegration else {
+            return snapshot.deckSource.displayName
+        }
+        let endpoint = input.destinationName ?? "MIDI input unavailable"
+        let lastDeck = input.lastDeckID.map { " · last deck \($0)" } ?? ""
+        return "\(snapshot.deckSource.displayName) · \(endpoint) · \(input.receivedMessageCount) MIDI messages · \(input.committedFrameCount) frames\(lastDeck)"
     }
 
     private static func plannerDetail(_ snapshot: EngineSnapshot) -> String {

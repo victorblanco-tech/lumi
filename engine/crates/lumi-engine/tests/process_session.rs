@@ -14,6 +14,10 @@ const TEST_SESSION_TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcd
 fn real_engine_process_starts_empty_and_serves_authenticated_product_state() {
     let mut child = match Command::new(env!("CARGO_BIN_EXE_lumi-engine"))
         .env("LUMI_SESSION_TOKEN", TEST_SESSION_TOKEN)
+        .env(
+            "LUMI_DECK_INPUT_DESTINATION_NAME",
+            format!("Lumi Deck Input Process Test {}", std::process::id()),
+        )
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()

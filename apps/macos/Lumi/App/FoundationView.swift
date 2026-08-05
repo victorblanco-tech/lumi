@@ -75,6 +75,7 @@ struct FoundationView: View {
                         settings: engineStatus.libraryState.phraseRoleSettings,
                         autoloopCatalog: engineStatus.libraryState.autoloopCatalog,
                         midiIntegration: engineStatus.libraryState.midiIntegration,
+                        deckInputIntegration: engineStatus.libraryState.deckInputIntegration,
                         appearance: $preferences.appearance,
                         keyNotation: $preferences.keyNotation,
                         feedback: engineStatus.phraseRoleFeedback,

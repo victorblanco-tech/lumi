@@ -56,6 +56,10 @@ reject_dependency \
   'lumi-(engine|simulator|planner|protocol|domain|library)' \
   "the CoreMIDI adapter may depend only on the provider-neutral MIDI output port."
 reject_dependency \
+  "engine/crates/lumi-blt-midi/Cargo.toml" \
+  'lumi-(engine|simulator|planner|protocol|library|lighting-output|midi-output)' \
+  "the Beat Link Trigger adapter may depend only on deck-source/domain ports and raw CoreMIDI messages."
+reject_dependency \
   "engine/crates/lumi-library/Cargo.toml" \
   'lumi-(engine|simulator|planner|protocol|deck-source|lighting-output|output-dry-run|library-source|library-demo|library-sqlite)' \
   "the canonical library model and repository port may depend inward on the domain only."

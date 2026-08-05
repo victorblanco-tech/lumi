@@ -9,6 +9,7 @@ public struct EngineSnapshot: Equatable, Sendable {
     public let operationState: String
     public let runtime: RuntimeSnapshot
     public let deckSource: DeckSourceSnapshot
+    public let deckInputIntegration: DeckInputIntegrationSnapshot?
     public let simulation: SimulationSnapshot?
     public let outputProvider: OutputProviderSnapshot
     public let leaderDeckID: UInt64?
@@ -27,6 +28,7 @@ public struct EngineSnapshot: Equatable, Sendable {
         operationState: String = "off",
         runtime: RuntimeSnapshot,
         deckSource: DeckSourceSnapshot,
+        deckInputIntegration: DeckInputIntegrationSnapshot? = nil,
         simulation: SimulationSnapshot? = nil,
         outputProvider: OutputProviderSnapshot = .init(
             providerKind: "dryRun",
@@ -48,6 +50,7 @@ public struct EngineSnapshot: Equatable, Sendable {
         self.operationState = operationState
         self.runtime = runtime
         self.deckSource = deckSource
+        self.deckInputIntegration = deckInputIntegration
         self.simulation = simulation
         self.outputProvider = outputProvider
         self.leaderDeckID = leaderDeckID
@@ -56,6 +59,46 @@ public struct EngineSnapshot: Equatable, Sendable {
         self.nextPlan = nextPlan
         self.planningOptions = planningOptions
         self.timeline = timeline
+    }
+}
+
+public struct DeckInputIntegrationSnapshot: Equatable, Sendable {
+    public let state: String
+    public let destinationName: String?
+    public let protocolName: String
+    public let protocolVersion: UInt64
+    public let receivedMessageCount: UInt64
+    public let invalidWordCount: UInt64
+    public let committedFrameCount: UInt64
+    public let ignoredMessageCount: UInt64
+    public let duplicateFrameCount: UInt64
+    public let lastDeckID: UInt64?
+    public let lastFrameSequence: UInt64?
+
+    public init(
+        state: String,
+        destinationName: String?,
+        protocolName: String,
+        protocolVersion: UInt64,
+        receivedMessageCount: UInt64,
+        invalidWordCount: UInt64,
+        committedFrameCount: UInt64,
+        ignoredMessageCount: UInt64,
+        duplicateFrameCount: UInt64,
+        lastDeckID: UInt64?,
+        lastFrameSequence: UInt64?
+    ) {
+        self.state = state
+        self.destinationName = destinationName
+        self.protocolName = protocolName
+        self.protocolVersion = protocolVersion
+        self.receivedMessageCount = receivedMessageCount
+        self.invalidWordCount = invalidWordCount
+        self.committedFrameCount = committedFrameCount
+        self.ignoredMessageCount = ignoredMessageCount
+        self.duplicateFrameCount = duplicateFrameCount
+        self.lastDeckID = lastDeckID
+        self.lastFrameSequence = lastFrameSequence
     }
 }
 
@@ -177,6 +220,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
     public let colorRGB: UInt64?
     public let pitchClass: String
     public let keyMode: String
+    public let keyKnown: Bool
     public let beat: UInt64
     public let playing: Bool
     public let phraseIndex: UInt64?
@@ -197,6 +241,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
         colorRGB: UInt64? = nil,
         pitchClass: String,
         keyMode: String,
+        keyKnown: Bool = true,
         beat: UInt64,
         playing: Bool = false,
         phraseIndex: UInt64?,
@@ -214,6 +259,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
         self.colorRGB = colorRGB
         self.pitchClass = pitchClass
         self.keyMode = keyMode
+        self.keyKnown = keyKnown
         self.beat = beat
         self.playing = playing
         self.phraseIndex = phraseIndex

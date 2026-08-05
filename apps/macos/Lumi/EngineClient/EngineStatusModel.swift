@@ -1002,17 +1002,46 @@ final class EngineStatusModel: ObservableObject {
 
     private func startMonitoring() {
         monitoringTask = Task { [weak self] in
+            var healthTick = 0
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1))
+                try? await Task.sleep(for: .milliseconds(250))
                 guard !Task.isCancelled, let self else {
                     return
                 }
-                if await !self.supervisor.isRunning() {
+                healthTick = (healthTick + 1) % 4
+                if healthTick == 0, await !self.supervisor.isRunning() {
                     self.lifecycle = .disconnected
                     self.workspaceState = LiveWorkspacePresenter.disconnected()
                     self.libraryState = .failed("The local Lumi engine disconnected.")
                     return
                 }
+                guard self.lifecycle == .ready,
+                      !self.isExchangingCommand,
+                      self.pendingInteractiveExchanges == 0,
+                      let endpointDescription = self.endpointDescription,
+                      let protocolVersion = self.protocolVersion else {
+                    continue
+                }
+                let connectedDecks = self.latestSnapshot?.deckSource.mode == "connectedDecks"
+                guard connectedDecks || healthTick == 0 else { continue }
+                self.isExchangingCommand = true
+                do {
+                    let envelope = try await self.supervisor.getSnapshot()
+                    let snapshot = try self.snapshotDecoder.decode(
+                        envelope,
+                        endpointDescription: endpointDescription,
+                        protocolVersion: protocolVersion
+                    )
+                    self.latestSnapshot = snapshot
+                    self.workspaceState = LiveWorkspacePresenter.ready(snapshot)
+                    if healthTick == 0 {
+                        self.libraryState = try self.libraryDecoder.decode(envelope)
+                    }
+                } catch {
+                    // The one-second process health check owns disconnect state.
+                    // A single missed polling frame must not disturb Live UI.
+                }
+                self.isExchangingCommand = false
             }
         }
     }

@@ -9,6 +9,7 @@ required_paths=(
   "Cargo.toml"
   "engine/crates/lumi-domain"
   "engine/crates/lumi-deck-source"
+  "engine/crates/lumi-blt-midi"
   "engine/crates/lumi-engine"
   "engine/crates/lumi-lighting-output"
   "engine/crates/lumi-midi-output"

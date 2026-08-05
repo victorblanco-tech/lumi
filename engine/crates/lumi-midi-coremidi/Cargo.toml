@@ -10,7 +10,7 @@ lumi-midi-output = { path = "../lumi-midi-output" }
 thiserror = "2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-coremidi = { package = "coremidi-rs", version = "0.5.4" }
+coremidi = { package = "coremidi-rs", version = "0.5.4", features = ["async"] }
 
 [lints]
 workspace = true

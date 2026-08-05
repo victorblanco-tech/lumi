@@ -104,6 +104,33 @@ struct LibraryWorkspaceTests {
         #expect(settings.mappingProfiles.first?.mappings.first?.roleID == "intro-outro")
     }
 
+    @Test("BLT MIDI input diagnostics decode independently from SoundSwitch output")
+    func decodesDeckInputIntegration() throws {
+        let state = try LibrarySnapshotDecoder().decode(
+            envelope(
+                trackValues: [trackValue()],
+                deckInputIntegration: .object([
+                    "state": .string("ready"),
+                    "destinationName": .string("Lumi Deck Input"),
+                    "protocol": .string("BLT MIDI Deck Frame"),
+                    "protocolVersion": .number(1),
+                    "receivedMessageCount": .number(48),
+                    "invalidWordCount": .number(0),
+                    "committedFrameCount": .number(3),
+                    "ignoredMessageCount": .number(1),
+                    "duplicateFrameCount": .number(0),
+                    "lastDeckId": .number(2),
+                    "lastFrameSequence": .number(7)
+                ])
+            )
+        )
+        let input = try #require(state.deckInputIntegration)
+        #expect(input.destinationName == "Lumi Deck Input")
+        #expect(input.isReceiving)
+        #expect(input.lastDeckID == 2)
+        #expect(state.midiIntegration == nil)
+    }
+
     @Test("Duplicate stable role IDs are rejected before Settings renders")
     func rejectsDuplicatePhraseRoleIDs() {
         var settings = phraseRoleSettingsValue()
@@ -562,7 +589,8 @@ private func envelope(
     editorValue: JSONValue = .null,
     phraseRoleSettings: JSONValue = .null,
     autoloopCatalog: JSONValue = .null,
-    midiIntegration: JSONValue = .null
+    midiIntegration: JSONValue = .null,
+    deckInputIntegration: JSONValue = .null
 ) -> MessageEnvelope {
     MessageEnvelope(
         protocolVersion: 1,
@@ -573,6 +601,7 @@ private func envelope(
         sentAt: "2026-08-03T00:00:00Z",
         payload: [
             "midiIntegration": midiIntegration,
+            "deckInputIntegration": deckInputIntegration,
             "library": .object([
                 "condition": .string("ready"),
                 "providerKind": .string("demo"),

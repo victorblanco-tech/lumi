@@ -52,6 +52,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "91da4578ffc797266b015947f3e39655550ba27b1838044be08fd89bb1f91fc6"
 dependencies = [
  "apple-cf",
+ "doom-fish-utils",
  "libc",
  "serde",
  "serde_json",
@@ -196,6 +197,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "lumi-blt-midi"
+version = "0.1.0-dev"
+dependencies = [
+ "lumi-deck-source",
+ "lumi-domain",
+ "lumi-midi-coremidi",
+ "thiserror",
+]
+
+[[package]]
 name = "lumi-deck-source"
 version = "0.1.0-dev"
 dependencies = [
@@ -210,6 +221,7 @@ version = "0.1.0-dev"
 name = "lumi-engine"
 version = "0.1.0-dev"
 dependencies = [
+ "lumi-blt-midi",
  "lumi-deck-source",
  "lumi-domain",
  "lumi-library",

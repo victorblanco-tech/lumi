@@ -210,6 +210,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
     public let phraseRoleSettings: PhraseRoleSettingsState?
     public let autoloopCatalog: AutoloopCatalogState?
     public let midiIntegration: MidiIntegrationState?
+    public let deckInputIntegration: DeckInputIntegrationState?
     public let diagnostic: String?
 
     public init(
@@ -225,6 +226,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
         phraseRoleSettings: PhraseRoleSettingsState? = nil,
         autoloopCatalog: AutoloopCatalogState? = nil,
         midiIntegration: MidiIntegrationState? = nil,
+        deckInputIntegration: DeckInputIntegrationState? = nil,
         diagnostic: String? = nil
     ) {
         self.condition = condition
@@ -239,6 +241,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
         self.phraseRoleSettings = phraseRoleSettings
         self.autoloopCatalog = autoloopCatalog
         self.midiIntegration = midiIntegration
+        self.deckInputIntegration = deckInputIntegration
         self.diagnostic = diagnostic
     }
 
@@ -266,6 +269,23 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
             diagnostic: diagnostic
         )
     }
+}
+
+public struct DeckInputIntegrationState: Equatable, Sendable {
+    public let state: String
+    public let destinationName: String?
+    public let protocolName: String
+    public let protocolVersion: UInt64
+    public let receivedMessageCount: UInt64
+    public let invalidWordCount: UInt64
+    public let committedFrameCount: UInt64
+    public let ignoredMessageCount: UInt64
+    public let duplicateFrameCount: UInt64
+    public let lastDeckID: UInt64?
+    public let lastFrameSequence: UInt64?
+
+    public var isReady: Bool { state == "ready" }
+    public var isReceiving: Bool { committedFrameCount > 0 }
 }
 
 public enum LibraryWorkspacePresenter {

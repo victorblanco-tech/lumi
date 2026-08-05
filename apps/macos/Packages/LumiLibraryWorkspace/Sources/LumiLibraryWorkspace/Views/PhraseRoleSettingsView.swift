@@ -5,6 +5,7 @@ public enum PhraseRoleSettingsSection: String, CaseIterable, Identifiable, Senda
     case general
     case phraseRoles
     case sourceMapping
+    case integrations
     case autoloopMatrix
 
     public var id: String { rawValue }
@@ -14,6 +15,7 @@ public struct PhraseRoleSettingsView: View {
     private let settings: PhraseRoleSettingsState?
     private let autoloopCatalog: AutoloopCatalogState?
     private let midiIntegration: MidiIntegrationState?
+    private let deckInputIntegration: DeckInputIntegrationState?
     @Binding private var appearance: AppearancePreference
     @Binding private var keyNotation: KeyNotationPreference
     private let feedback: String?
@@ -38,6 +40,7 @@ public struct PhraseRoleSettingsView: View {
         settings: PhraseRoleSettingsState?,
         autoloopCatalog: AutoloopCatalogState? = nil,
         midiIntegration: MidiIntegrationState? = nil,
+        deckInputIntegration: DeckInputIntegrationState? = nil,
         appearance: Binding<AppearancePreference>,
         keyNotation: Binding<KeyNotationPreference>,
         initialSection: PhraseRoleSettingsSection = .phraseRoles,
@@ -55,6 +58,7 @@ public struct PhraseRoleSettingsView: View {
         self.settings = settings
         self.autoloopCatalog = autoloopCatalog
         self.midiIntegration = midiIntegration
+        self.deckInputIntegration = deckInputIntegration
         _appearance = appearance
         _keyNotation = keyNotation
         self.feedback = feedback
@@ -130,15 +134,38 @@ public struct PhraseRoleSettingsView: View {
 
     private var sectionNavigation: some View {
         VStack(alignment: .leading, spacing: LumiSpacing.small) {
-            settingsSectionButton(.general, title: copy("settings.general"), icon: "slider.horizontal.3")
-            settingsSectionButton(.phraseRoles, title: copy("settings.phraseRoles"), icon: "text.badge.checkmark")
-            settingsSectionButton(.sourceMapping, title: copy("settings.sourceMapping"), icon: "arrow.triangle.branch")
-            settingsSectionButton(.autoloopMatrix, title: copy("settings.outputProfiles"), icon: "hifispeaker.2.fill")
+            ForEach(PhraseRoleSettingsSection.allCases) { value in
+                settingsSectionButton(
+                    value,
+                    title: sectionTitle(value),
+                    icon: sectionIcon(value)
+                )
+            }
             Spacer()
         }
         .padding(LumiSpacing.large)
         .frame(width: 210)
         .background(LumiColor.surface)
+    }
+
+    private func sectionTitle(_ value: PhraseRoleSettingsSection) -> String {
+        switch value {
+        case .general: copy("settings.general")
+        case .phraseRoles: copy("settings.phraseRoles")
+        case .sourceMapping: copy("settings.sourceMapping")
+        case .integrations: "Integrations"
+        case .autoloopMatrix: copy("settings.outputProfiles")
+        }
+    }
+
+    private func sectionIcon(_ value: PhraseRoleSettingsSection) -> String {
+        switch value {
+        case .general: "slider.horizontal.3"
+        case .phraseRoles: "text.badge.checkmark"
+        case .sourceMapping: "arrow.triangle.branch"
+        case .integrations: "cable.connector.horizontal"
+        case .autoloopMatrix: "hifispeaker.2.fill"
+        }
     }
 
     private func settingsSectionButton(
@@ -170,6 +197,8 @@ public struct PhraseRoleSettingsView: View {
             phraseRoleSettings
         case .sourceMapping:
             sourceMappingSettings
+        case .integrations:
+            BeatLinkTriggerIntegrationView(integration: deckInputIntegration)
         case .autoloopMatrix:
             AutoloopCatalogSettingsView(
                 catalog: autoloopCatalog,

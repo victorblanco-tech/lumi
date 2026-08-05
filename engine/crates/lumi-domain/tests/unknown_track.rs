@@ -10,7 +10,9 @@ fn an_unmatched_live_track_is_valid_without_fabricated_phrases() {
         MusicalKey::new(PitchClass::A, KeyMode::Minor),
         256,
     )
-    .expect("provider facts should be valid without phrase analysis");
+    .unwrap_or_else(|error| {
+        panic!("provider facts should be valid without phrase analysis: {error}")
+    });
 
     assert!(track.phrases().is_empty());
     assert!(track.identity_facts().is_none());

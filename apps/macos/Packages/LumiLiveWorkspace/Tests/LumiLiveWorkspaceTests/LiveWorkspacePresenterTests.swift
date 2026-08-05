@@ -144,6 +144,11 @@ struct LiveWorkspacePresenterTests {
             return
         }
         track["phrases"] = .array([])
+        track["key"] = .object([
+            "pitchClass": .string("c"),
+            "mode": .string("minor"),
+            "known": .boolean(false)
+        ])
         deck["track"] = .object(track)
         deck["phraseIndex"] = .null
         deck["planEligibility"] = .string("autoHeld")
@@ -169,7 +174,82 @@ struct LiveWorkspacePresenterTests {
 
         #expect(snapshot.decks[0].planEligibility == .autoHeld)
         #expect(snapshot.decks[0].phrases.isEmpty)
+        #expect(snapshot.decks[0].keyKnown == false)
         #expect(snapshot.livePlan == nil)
+    }
+
+    @Test("BLT input diagnostics decode as a separate connected-deck integration")
+    func deckInputDiagnosticsDecode() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        payload["deckInputIntegration"] = .object([
+            "state": .string("ready"),
+            "destinationName": .string("Lumi Deck Input"),
+            "protocol": .string("BLT MIDI Deck Frame"),
+            "protocolVersion": .number(1),
+            "receivedMessageCount": .number(34),
+            "invalidWordCount": .number(0),
+            "committedFrameCount": .number(2),
+            "ignoredMessageCount": .number(1),
+            "duplicateFrameCount": .number(0),
+            "lastDeckId": .number(2),
+            "lastFrameSequence": .number(9)
+        ])
+        let envelope = MessageEnvelope(
+            protocolVersion: recorded.protocolVersion,
+            messageType: recorded.messageType,
+            messageId: recorded.messageId,
+            sequence: recorded.sequence,
+            correlationId: recorded.correlationId,
+            sentAt: recorded.sentAt,
+            payload: payload
+        )
+
+        let snapshot = try EngineSnapshotDecoder().decode(
+            envelope,
+            endpointDescription: "127.0.0.1:52841",
+            protocolVersion: 1
+        )
+
+        #expect(snapshot.deckInputIntegration?.destinationName == "Lumi Deck Input")
+        #expect(snapshot.deckInputIntegration?.committedFrameCount == 2)
+        #expect(snapshot.deckInputIntegration?.lastDeckID == 2)
+    }
+
+    @Test("Malformed optional BLT diagnostics fail strict decoding")
+    func malformedDeckInputDiagnosticsFailStrictly() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        payload["deckInputIntegration"] = .object([
+            "state": .string("ready"),
+            "destinationName": .number(4),
+            "protocol": .string("BLT MIDI Deck Frame"),
+            "protocolVersion": .number(1),
+            "receivedMessageCount": .number(0),
+            "invalidWordCount": .number(0),
+            "committedFrameCount": .number(0),
+            "ignoredMessageCount": .number(0),
+            "duplicateFrameCount": .number(0),
+            "lastDeckId": .null,
+            "lastFrameSequence": .null
+        ])
+        let envelope = MessageEnvelope(
+            protocolVersion: recorded.protocolVersion,
+            messageType: recorded.messageType,
+            messageId: recorded.messageId,
+            sequence: recorded.sequence,
+            correlationId: recorded.correlationId,
+            sentAt: recorded.sentAt,
+            payload: payload
+        )
+
+        #expect(throws: EngineSnapshotDecodingError.invalidSnapshot) {
+            try EngineSnapshotDecoder().decode(
+                envelope,
+                endpointDescription: "127.0.0.1:52841",
+                protocolVersion: 1
+            )
+        }
     }
 
     @Test("Decoder rejects a plan that targets the live deck")

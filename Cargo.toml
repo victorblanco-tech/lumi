@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "engine/crates/lumi-blt-midi",
     "engine/crates/lumi-deck-source",
     "engine/crates/lumi-domain",
     "engine/crates/lumi-engine",
