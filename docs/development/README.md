@@ -51,8 +51,11 @@ Run all local foundation checks and builds with:
 ./scripts/verify.sh
 ```
 
-CI preserves that same complete gate while assigning work to the least costly
-correct platform. `./scripts/verify-rust.sh` is portable and owns Rust lint,
+During the solo POC phase this local command is the required feature and PR
+gate. GitHub's `Foundation` workflow runs only on explicit manual dispatch and
+after a merge to `main`; it does not duplicate local validation for every PR or
+`dev` merge. The workflow assigns work to the least costly correct platform.
+`./scripts/verify-rust.sh` is portable and owns Rust lint,
 tests, migrations, contracts, and release benchmarks on Linux.
 `./scripts/verify-apple.sh` owns Swift tests, the real Swift-to-Rust process,
 the unsigned arm64 app, and deterministic visual evidence on macOS. Dependency

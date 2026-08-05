@@ -146,7 +146,6 @@ struct LibraryWorkspaceTests {
         let catalog = AutoloopCatalogFixtures.incomplete
         #expect(SoundSwitchOutputProfileState.builtIn.bankCount == 4)
         #expect(SoundSwitchOutputProfileState.builtIn.slotsPerBank == 32)
-        #expect(SoundSwitchOutputProfileState.builtIn.pageCount == 4)
         let projectedBanks = SoundSwitchOutputProfileProjection.banks(catalog: catalog)
         #expect(projectedBanks.map(\.number) == [1, 2, 3, 4])
         #expect(projectedBanks.allSatisfy { $0.organization == .theme })

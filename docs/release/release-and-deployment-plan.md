@@ -67,8 +67,9 @@ stap.
 - force-push en branch deletion zijn niet toegestaan;
 - directe pushes worden tijdens de vroege solo-fase technisch toegestaan, maar
   PR's blijven de standaardwerkwijze;
-- zodra de volledige CI bestaat, wordt ook voor `dev` een geslaagde PR-check
-  verplicht.
+- tijdens de solo POC-fase is `./scripts/verify.sh` de verplichte lokale gate;
+  hosted PR-checks worden pas opnieuw verplicht wanneer een team of externe
+  contributors daar aantoonbaar baat bij hebben.
 
 ### 3.3 Werkbranches
 
@@ -195,16 +196,19 @@ GitHub-generated release notes vullen dit aan met gekoppelde PR's en auteurs.
 
 | Channel | Bron | Doel | Automatisch? |
 |---|---|---|---:|
-| PR validation | iedere PR | checks en unsigned testbuilds | ja |
-| Development | `dev` | tijdelijke CI-artefacten | ja |
+| PR validation | iedere PR | volledige lokale `./scripts/verify.sh` | lokaal |
+| Development | `dev` | geen dubbele hosted build in de solo POC-fase | nee |
 | Internal beta | handmatige run op `dev`/RC | TestFlight internal + macOS beta | bewust gestart |
 | Release candidate | releasecommit | signed kandidaten en acceptatietest | bewust gestart |
 | Production | tag `vX.Y.Z` op `main` | GitHub Release + App Store | na goedkeuring |
 
 ## 8. CI-pipeline
 
-De concrete workflows worden toegevoegd zodra de betreffende projecttargets
-bestaan. De beoogde checks zijn:
+De checks bestaan als lokale scripts en blijven gelijk aan de hosted release-
+workflow. Tijdens de solo POC-fase draait de volledige hosted workflow alleen
+handmatig of na een merge naar `main`; onderstaande PR-checks worden lokaal
+uitgevoerd. Bij teamontwikkeling kunnen ze opnieuw als hosted required checks
+worden geactiveerd.
 
 ### 8.1 Snelle PR-checks
 

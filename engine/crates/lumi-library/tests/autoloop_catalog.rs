@@ -170,8 +170,8 @@ fn an_output_mapping_atomically_owns_its_entry_name_and_phrase_role()
     let mapped = fixture()?.set_mapping(
         ThemeId::new(1),
         VariantId::try_new("mapping-1")?,
-        PhraseRoleId::try_new("drop")?,
-        Some("DROP BLUE PINK - NEW 1".to_owned()),
+        PhraseRoleId::try_new("pre-drop")?,
+        Some("PRE-DROP BLUE PINK".to_owned()),
     )?;
     let cell = mapped
         .cells()
@@ -180,14 +180,14 @@ fn an_output_mapping_atomically_owns_its_entry_name_and_phrase_role()
             cell.theme_id() == ThemeId::new(1) && cell.variant_id().as_str() == "mapping-1"
         })
         .ok_or("button mapping is missing")?;
-    assert_eq!(cell.role_id().as_str(), "drop");
-    assert_eq!(cell.display_name(), "DROP BLUE PINK - NEW 1");
+    assert_eq!(cell.role_id().as_str(), "pre-drop");
+    assert_eq!(cell.display_name(), "PRE-DROP BLUE PINK");
 
     let reassigned = mapped.set_mapping(
         ThemeId::new(1),
         VariantId::try_new("mapping-1")?,
-        PhraseRoleId::try_new("synth")?,
-        Some("SYNTH BLUE PINK".to_owned()),
+        PhraseRoleId::try_new("drop")?,
+        Some("DROP BLUE PINK - NEW 1".to_owned()),
     )?;
     let button_cells = reassigned
         .cells()
@@ -197,8 +197,45 @@ fn an_output_mapping_atomically_owns_its_entry_name_and_phrase_role()
         })
         .collect::<Vec<_>>();
     assert_eq!(button_cells.len(), 1);
-    assert_eq!(button_cells[0].role_id().as_str(), "synth");
+    assert_eq!(button_cells[0].role_id().as_str(), "drop");
+    assert_eq!(button_cells[0].display_name(), "DROP BLUE PINK - NEW 1");
     assert_eq!(button_cells[0].entry_id().as_str(), "theme-1--mapping-1");
+    Ok(())
+}
+
+#[test]
+fn clearing_one_bank_button_preserves_the_same_button_in_other_banks()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mapping_id = VariantId::try_new("mapping-1")?;
+    let catalog = fixture()?
+        .set_mapping(
+            ThemeId::new(1),
+            mapping_id.clone(),
+            PhraseRoleId::try_new("drop")?,
+            Some("BANK 1 DROP".to_owned()),
+        )?
+        .set_mapping(
+            ThemeId::new(2),
+            mapping_id.clone(),
+            PhraseRoleId::try_new("synth")?,
+            Some("BANK 2 SYNTH".to_owned()),
+        )?;
+
+    let cleared = catalog.clear_mapping(ThemeId::new(1), &mapping_id)?;
+
+    assert!(
+        !cleared
+            .cells()
+            .iter()
+            .any(|cell| { cell.theme_id() == ThemeId::new(1) && cell.variant_id() == &mapping_id })
+    );
+    let bank_two = cleared
+        .cells()
+        .iter()
+        .find(|cell| cell.theme_id() == ThemeId::new(2) && cell.variant_id() == &mapping_id)
+        .ok_or("bank 2 mapping must remain")?;
+    assert_eq!(bank_two.display_name(), "BANK 2 SYNTH");
+    assert_eq!(bank_two.role_id().as_str(), "synth");
     Ok(())
 }
 

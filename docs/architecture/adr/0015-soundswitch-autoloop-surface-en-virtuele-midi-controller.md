@@ -27,8 +27,8 @@ De eerste ingebouwde outputpresentatie heet `SoundSwitch Autoloops`.
 - SoundSwitch bezit de lichtuitvoer en gebruikt de gekozen hardware-interface
   voor DMX. Dat kan Control One zijn; Lumi kent deze downstream hardware niet.
 - De ingebouwde surface projecteert vier banks met ieder 32 AutoLoop-posities:
-  128 mappings totaal. Acht fysieke buttons zijn per pagina zichtbaar; vier
-  pagina's ontsluiten alle posities in een bank.
+  128 mappings totaal. De gekozen bank toont zijn 32 unieke posities zonder
+  extra pagina- of rangeconcept.
 - Een outputbank heeft een eigen naam en organisatievorm: `Theme`, `Genre`,
   `Function` of `Custom`.
 - Een buttonbinding bevat de bank, stabiele buttonpositie, de exacte
@@ -38,9 +38,8 @@ De eerste ingebouwde outputpresentatie heet `SoundSwitch Autoloops`.
   track-specifieke keuze, maar blijft implementatiedetail.
 - De eerste demo-projectie gebruikt één Theme-group per bank. Dat is een preset,
   geen invariant van het generieke outputprofielmodel.
-- De `Test Controller` spiegelt exact dezelfde vier banks, vier pagina's en
-  acht fysieke buttons per pagina en introduceert geen tweede mappingmodel. Zij
-  heet niet `Virtual Control One`.
+- De `Test Controller` spiegelt exact dezelfde bankselectie en 32 posities en
+  introduceert geen tweede mappingmodel. Zij heet niet `Virtual Control One`.
 
 ```text
 Beat Link Trigger ── Ableton Link ───────────────> SoundSwitch timing

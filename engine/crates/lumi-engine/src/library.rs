@@ -191,6 +191,10 @@ pub enum AutoloopCatalogMutation {
         role_id: PhraseRoleId,
         display_name: Option<String>,
     },
+    ClearButton {
+        theme_id: ThemeId,
+        button_number: u16,
+    },
 }
 
 impl LibraryWorker {
@@ -637,6 +641,18 @@ impl LibraryWorker {
                     VariantId::try_new(format!("mapping-{button_number}"))?,
                     role_id,
                     display_name,
+                )?
+            }
+            AutoloopCatalogMutation::ClearButton {
+                theme_id,
+                button_number,
+            } => {
+                if !(1..=32).contains(&button_number) {
+                    return Err(AutoloopCatalogError::IdentifierOverflow.into());
+                }
+                catalog.clear_mapping(
+                    theme_id,
+                    &VariantId::try_new(format!("mapping-{button_number}"))?,
                 )?
             }
         };
