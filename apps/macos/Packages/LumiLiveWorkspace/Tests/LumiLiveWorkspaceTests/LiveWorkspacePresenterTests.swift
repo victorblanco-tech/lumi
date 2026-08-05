@@ -21,6 +21,10 @@ struct LiveWorkspacePresenterTests {
         #expect(state.content?.liveDeck.title == "Aurora Signal")
         #expect(state.content?.nextDeck.deckID == 2)
         #expect(state.content?.nextDeck.title == "Neon Horizon")
+        #expect(state.content?.decks.map(\.deckID) == [1, 2])
+        #expect(state.content?.leaderDeckID == 1)
+        #expect(state.content?.liveDeck.durationBeats == 128)
+        #expect(state.content?.liveDeck.phrases.map(\.kind) == ["intro", "verse", "build", "drop"])
         #expect(state.content?.plan?.deckID == state.content?.nextDeck.deckID)
         #expect(state.content?.plan?.cues.count == 4)
         #expect(state.content?.plan?.planID == "14113485664261432828")
@@ -36,6 +40,44 @@ struct LiveWorkspacePresenterTests {
         #expect(state.content?.timeline.count == 1)
         #expect(state.output.condition == .ready)
         #expect(state.planner.condition == .ready)
+    }
+
+    @Test("Physical Deck A and B ordering remains stable when Deck B becomes master")
+    func stableDeckOrderingSurvivesMasterChange() {
+        let snapshot = LiveWorkspaceFixtures.readySnapshot
+        let deckBMaster = EngineSnapshot(
+            endpoint: snapshot.endpoint,
+            engineVersion: snapshot.engineVersion,
+            protocolVersion: snapshot.protocolVersion,
+            snapshotSequence: snapshot.snapshotSequence + 1,
+            stateRevision: snapshot.stateRevision + 1,
+            operationState: snapshot.operationState,
+            runtime: snapshot.runtime,
+            deckSource: snapshot.deckSource,
+            simulation: snapshot.simulation,
+            outputProvider: snapshot.outputProvider,
+            leaderDeckID: 2,
+            decks: Array(snapshot.decks.reversed()),
+            nextPlan: nil,
+            planningOptions: snapshot.planningOptions,
+            timeline: snapshot.timeline
+        )
+
+        let state = LiveWorkspacePresenter.ready(deckBMaster)
+
+        #expect(state.content?.decks.map(\.deckID) == [1, 2])
+        #expect(state.content?.leaderDeckID == 2)
+        #expect(state.content?.liveDeck.deckID == 2)
+        #expect(state.content?.nextDeck.deckID == 1)
+    }
+
+    @Test("Simulator fixture exposes provider-neutral RGB waveform data")
+    func simulatorWaveformIsExplicit() {
+        let previews = LiveWorkspaceFixtures.readySnapshot.decks.compactMap(\.waveformPreview)
+
+        #expect(previews.count == 2)
+        #expect(previews.allSatisfy { $0.source == "simulator" && $0.style == "rgb" })
+        #expect(previews.allSatisfy { $0.points.count == 192 })
     }
 
     @Test("Plan interaction feedback retains the authoritative snapshot")

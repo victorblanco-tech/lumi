@@ -1200,10 +1200,16 @@ fn snapshot_envelope(
         "leaderDeckId".to_owned(),
         json!(state.leader_deck().map(|deck_id| deck_id.value())),
     );
+    let deck_source_kind = runtime.deck_source.provider_kind();
     let decks = state
         .decks()
         .map(|(deck_id, deck)| {
             let metadata = deck.metadata();
+            let waveform_preview = if deck_source_kind == "simulator" {
+                simulator_waveform_preview(metadata.id().value())
+            } else {
+                Value::Null
+            };
             json!({
                 "deckId": deck_id.value(),
                 "trackLoadId": deck.track_load_id().value(),
@@ -1220,6 +1226,7 @@ fn snapshot_envelope(
                         "mode": key_mode_name(metadata.musical_key().mode()),
                     },
                     "durationBeats": metadata.duration_beats(),
+                    "waveformPreview": waveform_preview,
                     "identityFacts": metadata.identity_facts().map(|identity| json!({
                         "matchStatus": "exact",
                         "providerKind": identity.provider_kind(),
@@ -1310,6 +1317,25 @@ fn snapshot_envelope(
         correlation_id: correlation_id.to_owned(),
         sent_at: OffsetDateTime::now_utc().format(&Rfc3339)?,
         payload,
+    })
+}
+
+fn simulator_waveform_preview(track_id: u64) -> Value {
+    let points = (0_u64..192)
+        .map(|index| {
+            let mixed = track_id
+                .wrapping_mul(6_364_136_223_846_793_005)
+                .wrapping_add(index.wrapping_mul(1_442_695_040_888_963_407));
+            let low = 4 + mixed % 28;
+            let mid = 3 + mixed.rotate_left(17) % 29;
+            let high = 2 + mixed.rotate_left(37) % 30;
+            json!({ "low": low, "mid": mid, "high": high })
+        })
+        .collect::<Vec<_>>();
+    json!({
+        "source": "simulator",
+        "style": "rgb",
+        "points": points,
     })
 }
 
@@ -1731,6 +1757,25 @@ mod tests {
             ) {
                 panic!("test source event must process: {error}");
             }
+        }
+    }
+
+    #[test]
+    fn simulator_snapshot_exposes_normalized_rgb_waveforms_for_both_decks() {
+        let runtime = initialized_runtime()
+            .unwrap_or_else(|error| panic!("test engine must initialize: {error}"));
+        let snapshot = snapshot_envelope(&runtime, 1, "waveform-contract")
+            .unwrap_or_else(|error| panic!("snapshot must encode: {error}"));
+        let decks = snapshot.payload["decks"]
+            .as_array()
+            .unwrap_or_else(|| panic!("snapshot must contain decks"));
+
+        assert_eq!(decks.len(), 2);
+        for deck in decks {
+            let waveform = &deck["track"]["waveformPreview"];
+            assert_eq!(waveform["source"], "simulator");
+            assert_eq!(waveform["style"], "rgb");
+            assert_eq!(waveform["points"].as_array().map(Vec::len), Some(192));
         }
     }
 

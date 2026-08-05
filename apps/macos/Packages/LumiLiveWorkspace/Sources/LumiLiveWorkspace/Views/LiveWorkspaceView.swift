@@ -404,8 +404,18 @@ public struct LiveWorkspaceView: View {
 
             if let content = state.content {
                 HStack(alignment: .top, spacing: LumiSpacing.large) {
-                    deckCard(content.liveDeck, label: copy.liveDeck, identifier: "lumi.deck.live")
-                    deckCard(content.nextDeck, label: copy.nextDeck, identifier: "lumi.deck.next")
+                    ForEach(content.decks) { deck in
+                        LiveDeckSurface(
+                            deck: deck,
+                            isMaster: deck.deckID == content.leaderDeckID,
+                            plan: content.plan?.deckID == deck.deckID ? content.plan : nil,
+                            musicalKey: musicalKey(for: deck)
+                        )
+                        .frame(maxWidth: .infinity)
+                        .accessibilityIdentifier(
+                            deck.deckID == 1 ? "lumi.deck.a" : "lumi.deck.b"
+                        )
+                    }
                 }
             } else {
                 placeholder(copy.waitingDecks, systemImage: "waveform.badge.magnifyingglass")
@@ -643,30 +653,6 @@ public struct LiveWorkspaceView: View {
             )
         }
         .accessibilityElement(children: .combine)
-    }
-
-    private func deckCard(
-        _ deck: DeckSnapshot,
-        label: String,
-        identifier: String
-    ) -> some View {
-        DeckCard(
-            deckLabel: key(label),
-            title: deck.title,
-            artist: deck.artist,
-            bpm: String(
-                format: "%.1f",
-                locale: Locale(identifier: "en_US_POSIX"),
-                Double(deck.bpmMilli) / 1_000
-            ),
-            musicalKey: musicalKey(for: deck),
-            bpmLabel: key(copy.bpm),
-            keyLabel: key(copy.key),
-            stateLabel: key(deckConditionLabel),
-            state: deckComponentState
-        )
-        .frame(maxWidth: .infinity)
-        .accessibilityIdentifier(identifier)
     }
 
     private func placeholder(_ message: String, systemImage: String) -> some View {

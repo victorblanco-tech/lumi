@@ -151,6 +151,9 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
     public let keyMode: String
     public let beat: UInt64
     public let phraseIndex: UInt64?
+    public let durationBeats: UInt64
+    public let phrases: [DeckPhraseSnapshot]
+    public let waveformPreview: DeckWaveformPreviewSnapshot?
 
     public var id: UInt64 { deckID }
 
@@ -164,7 +167,10 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
         pitchClass: String,
         keyMode: String,
         beat: UInt64,
-        phraseIndex: UInt64?
+        phraseIndex: UInt64?,
+        durationBeats: UInt64 = 0,
+        phrases: [DeckPhraseSnapshot] = [],
+        waveformPreview: DeckWaveformPreviewSnapshot? = nil
     ) {
         self.deckID = deckID
         self.trackLoadID = trackLoadID
@@ -176,6 +182,49 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
         self.keyMode = keyMode
         self.beat = beat
         self.phraseIndex = phraseIndex
+        self.durationBeats = durationBeats
+        self.phrases = phrases
+        self.waveformPreview = waveformPreview
+    }
+}
+
+public struct DeckPhraseSnapshot: Equatable, Identifiable, Sendable {
+    public let index: UInt64
+    public let startBeat: UInt64
+    public let endBeat: UInt64
+    public let kind: String
+
+    public var id: UInt64 { index }
+
+    public init(index: UInt64, startBeat: UInt64, endBeat: UInt64, kind: String) {
+        self.index = index
+        self.startBeat = startBeat
+        self.endBeat = endBeat
+        self.kind = kind
+    }
+}
+
+public struct DeckWaveformPreviewSnapshot: Equatable, Sendable {
+    public let source: String
+    public let style: String
+    public let points: [DeckWaveformPointSnapshot]
+
+    public init(source: String, style: String, points: [DeckWaveformPointSnapshot]) {
+        self.source = source
+        self.style = style
+        self.points = points
+    }
+}
+
+public struct DeckWaveformPointSnapshot: Equatable, Sendable {
+    public let low: UInt8
+    public let mid: UInt8
+    public let high: UInt8
+
+    public init(low: UInt8, mid: UInt8, high: UInt8) {
+        self.low = low
+        self.mid = mid
+        self.high = high
     }
 }
 

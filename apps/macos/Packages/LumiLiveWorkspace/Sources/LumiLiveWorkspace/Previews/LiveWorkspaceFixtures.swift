@@ -35,7 +35,10 @@ public enum LiveWorkspaceFixtures {
                 pitchClass: "a",
                 keyMode: "minor",
                 beat: 24,
-                phraseIndex: 0
+                phraseIndex: 0,
+                durationBeats: 128,
+                phrases: deckPhrases(second: "verse"),
+                waveformPreview: waveform(seed: 101)
             ),
             DeckSnapshot(
                 deckID: 2,
@@ -47,7 +50,10 @@ public enum LiveWorkspaceFixtures {
                 pitchClass: "c",
                 keyMode: "major",
                 beat: 0,
-                phraseIndex: nil
+                phraseIndex: nil,
+                durationBeats: 128,
+                phrases: deckPhrases(second: "breakdown"),
+                waveformPreview: waveform(seed: 202)
             )
         ],
         nextPlan: PlanSnapshot(
@@ -123,7 +129,10 @@ public enum LiveWorkspaceFixtures {
             pitchClass: "c",
             keyMode: "major",
             beat: 0,
-            phraseIndex: nil
+            phraseIndex: nil,
+            durationBeats: 128,
+            phrases: deckPhrases(second: "breakdown"),
+            waveformPreview: waveform(seed: 303)
         )
         let roles = ["Intro / Outro", "Breakdown 1", "Buildup 1", "Drop"]
         let roleIDs = ["intro-outro", "breakdown-1", "buildup-1", "drop"]
@@ -338,6 +347,28 @@ public enum LiveWorkspaceFixtures {
         )
     }
 
+    private static func deckPhrases(second: String) -> [DeckPhraseSnapshot] {
+        [
+            DeckPhraseSnapshot(index: 0, startBeat: 0, endBeat: 32, kind: "intro"),
+            DeckPhraseSnapshot(index: 1, startBeat: 32, endBeat: 64, kind: second),
+            DeckPhraseSnapshot(index: 2, startBeat: 64, endBeat: 96, kind: "build"),
+            DeckPhraseSnapshot(index: 3, startBeat: 96, endBeat: 128, kind: "drop")
+        ]
+    }
+
+    private static func waveform(seed: UInt64) -> DeckWaveformPreviewSnapshot {
+        let points = (0..<192).map { index in
+            let mixed = seed &* 6_364_136_223_846_793_005
+                &+ UInt64(index) &* 1_442_695_040_888_963_407
+            return DeckWaveformPointSnapshot(
+                low: UInt8(4 + mixed % 28),
+                mid: UInt8(3 + mixed.rotatedLeft(17) % 29),
+                high: UInt8(2 + mixed.rotatedLeft(37) % 30)
+            )
+        }
+        return DeckWaveformPreviewSnapshot(source: "simulator", style: "rgb", points: points)
+    }
+
     private static let planningOptions = PlanningOptionsSnapshot(
         themes: [
             ThemeOptionSnapshot(id: 1, name: "Electric Bloom"),
@@ -358,4 +389,11 @@ public enum LiveWorkspaceFixtures {
             SceneOptionSnapshot(id: 10, name: "Slow Wave", category: "break", loopBank: 5, loopSlot: 2)
         ]
     )
+}
+
+private extension UInt64 {
+    func rotatedLeft(_ amount: UInt64) -> UInt64 {
+        let shift = amount % 64
+        return (self << shift) | (self >> ((64 - shift) % 64))
+    }
 }

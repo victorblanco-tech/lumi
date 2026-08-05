@@ -118,7 +118,7 @@ DJ-hardware en draait in CI. De technische uitwerking staat in
 De fase bestaat uit drie opeenvolgende verticale epics:
 
 1. [Epic 2A – Music Library and Track Lighting Editor](epic-02a-library-track-lighting-editor.md);
-2. PRO DJ LINK ingest en dual-deck state;
+2. [Epic 2B – Live deck intelligence and rolling plans](epic-02b-live-deck-workspace.md);
 3. de production-ready preplanned next-track planner.
 
 Exit: echte librarytracks hebben een duurzame, bewerkbare Lumi-timeline en vóór

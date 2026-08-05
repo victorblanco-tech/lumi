@@ -27,6 +27,30 @@ workspace sends revisioned commands for load, reset, speed, playback, leader,
 OFF, ARMED, LIVE, and PAUSED. Provider health and the latest bounded engine
 timeline are decoded from snapshots; neither is inferred from button presses.
 
+## Fixed deck surfaces and RGB preview contract
+
+E2B-01 keeps normalized physical deck identity separate from the lighting
+leader role:
+
+- snapshot decks are ordered by `deckId`, so Deck A remains left and Deck B
+  remains right;
+- `leaderDeckId` controls only the `MASTER · LIVE NOW` treatment;
+- duration and contiguous track phrases are validated at the Swift mapping
+  boundary before presentation;
+- an optional `track.waveformPreview` contains explicit provenance, `rgb` style
+  and bounded low/mid/high sample values;
+- the Swift renderer composites those values into one RGB waveform, overlays a
+  normalized beatgrid and authoritative playhead, and renders the validated
+  phrase band directly below it;
+- absent waveform data produces an explicit unavailable state rather than a
+  client-generated substitute.
+
+The simulator is the first waveform provider and marks its deterministic samples
+as `simulator`. Production local-library and Beat Link resolution is E2B-02.
+Publishing and editing a retained plan for future phrases of the current master
+is E2B-03; the first slice therefore shows its active phrase as locked but keeps
+the established next-plan editor as the only mutation surface.
+
 ## Headless visual evidence
 
 Generate the review matrix with:
@@ -41,7 +65,7 @@ appearance, and key notation. Rendering therefore works while the login session
 is locked and does not require an active app window.
 
 The full repository verification also renders the matrix and fails unless all
-eight non-empty PNGs are produced. The matrix includes a successful locked cue
+nine non-empty PNGs are produced. The matrix includes a successful locked cue
 edit and revision-conflict feedback. Visual review remains necessary for layout,
 contrast, truncation, and semantic state use.
 

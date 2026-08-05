@@ -439,6 +439,9 @@ public struct EngineSnapshotDecoder: Sendable {
               let bpmMilli = unsignedInteger(track["bpmMilli"]),
               let colorRGB = unsignedInteger(track["colorRgb"]),
               colorRGB <= 0x00FF_FFFF,
+              let durationBeats = unsignedInteger(track["durationBeats"]),
+              durationBeats > 0,
+              case let .array(phrasePayloads) = track["phrases"],
               case let .object(key) = track["key"],
               case let .string(pitchClass) = key["pitchClass"],
               case let .string(keyMode) = key["mode"] else {
@@ -455,6 +458,28 @@ public struct EngineSnapshotDecoder: Sendable {
             phraseIndex = value
         }
 
+        let phrases = try phrasePayloads.map(decodeDeckPhrase)
+        guard !phrases.isEmpty,
+              phrases.count <= 512,
+              phrases.first?.startBeat == 0,
+              phrases.last?.endBeat == durationBeats,
+              phrases.enumerated().allSatisfy({ offset, phrase in
+                  phrase.index == UInt64(offset)
+                      && phrase.startBeat < phrase.endBeat
+                      && phrase.endBeat <= durationBeats
+                      && (offset == 0 || phrases[offset - 1].endBeat == phrase.startBeat)
+              }),
+              phraseIndex.map({ index in phrases.contains { $0.index == index } }) ?? true else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+
+        let waveformPreview: DeckWaveformPreviewSnapshot?
+        if track["waveformPreview"] == nil || track["waveformPreview"] == .null {
+            waveformPreview = nil
+        } else {
+            waveformPreview = try decodeWaveformPreview(track["waveformPreview"])
+        }
+
         return DeckSnapshot(
             deckID: deckID,
             trackLoadID: trackLoadID,
@@ -465,8 +490,57 @@ public struct EngineSnapshotDecoder: Sendable {
             pitchClass: pitchClass,
             keyMode: keyMode,
             beat: beat,
-            phraseIndex: phraseIndex
+            phraseIndex: phraseIndex,
+            durationBeats: durationBeats,
+            phrases: phrases,
+            waveformPreview: waveformPreview
         )
+    }
+
+    private func decodeDeckPhrase(_ value: JSONValue) throws -> DeckPhraseSnapshot {
+        guard case let .object(phrase) = value,
+              let index = unsignedInteger(phrase["index"]),
+              let startBeat = unsignedInteger(phrase["startBeat"]),
+              let endBeat = unsignedInteger(phrase["endBeat"]),
+              case let .string(kind) = phrase["kind"],
+              ["intro", "verse", "breakdown", "build", "drop", "outro"].contains(kind) else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        return DeckPhraseSnapshot(
+            index: index,
+            startBeat: startBeat,
+            endBeat: endBeat,
+            kind: kind
+        )
+    }
+
+    private func decodeWaveformPreview(_ value: JSONValue?) throws -> DeckWaveformPreviewSnapshot {
+        guard let value,
+              case let .object(preview) = value,
+              case let .string(source) = preview["source"],
+              !source.isEmpty,
+              preview["style"] == .string("rgb"),
+              case let .array(pointPayloads) = preview["points"],
+              (16...4_096).contains(pointPayloads.count) else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        let points = try pointPayloads.map { value in
+            guard case let .object(point) = value,
+                  let low = unsignedInteger(point["low"]),
+                  let mid = unsignedInteger(point["mid"]),
+                  let high = unsignedInteger(point["high"]),
+                  low <= 31,
+                  mid <= 31,
+                  high <= 31 else {
+                throw EngineSnapshotDecodingError.invalidSnapshot
+            }
+            return DeckWaveformPointSnapshot(
+                low: UInt8(low),
+                mid: UInt8(mid),
+                high: UInt8(high)
+            )
+        }
+        return DeckWaveformPreviewSnapshot(source: source, style: "rgb", points: points)
     }
 
     private func unsignedInteger(_ value: JSONValue?) -> UInt64? {

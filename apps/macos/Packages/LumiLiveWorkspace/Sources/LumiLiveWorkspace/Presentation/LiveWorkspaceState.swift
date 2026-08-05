@@ -70,6 +70,8 @@ public struct LiveWorkspaceState: Equatable, Sendable {
 public struct LiveWorkspaceContent: Equatable, Sendable {
     public let liveDeck: DeckSnapshot
     public let nextDeck: DeckSnapshot
+    public let decks: [DeckSnapshot]
+    public let leaderDeckID: UInt64
     public let plan: PlanSnapshot?
     public let sourceName: String
     public let stateRevision: UInt64
@@ -81,6 +83,8 @@ public struct LiveWorkspaceContent: Equatable, Sendable {
     public init(
         liveDeck: DeckSnapshot,
         nextDeck: DeckSnapshot,
+        decks: [DeckSnapshot],
+        leaderDeckID: UInt64,
         plan: PlanSnapshot?,
         sourceName: String,
         stateRevision: UInt64,
@@ -91,6 +95,8 @@ public struct LiveWorkspaceContent: Equatable, Sendable {
     ) {
         self.liveDeck = liveDeck
         self.nextDeck = nextDeck
+        self.decks = decks
+        self.leaderDeckID = leaderDeckID
         self.plan = plan
         self.sourceName = sourceName
         self.stateRevision = stateRevision
@@ -278,6 +284,8 @@ public enum LiveWorkspacePresenter {
         return LiveWorkspaceContent(
             liveDeck: liveDeck,
             nextDeck: nextDeck,
+            decks: snapshot.decks.sorted { $0.deckID < $1.deckID },
+            leaderDeckID: snapshot.leaderDeckID,
             plan: snapshot.nextPlan,
             sourceName: snapshot.deckSource.providerKind.capitalized,
             stateRevision: snapshot.stateRevision,
