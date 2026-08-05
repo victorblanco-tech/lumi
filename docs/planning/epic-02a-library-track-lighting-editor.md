@@ -23,7 +23,7 @@ voorbereidingsomgeving. Zonder decks of SoundSwitch-koppeling kan de gebruiker:
 8. een echte librarytrack in de bestaande dual-deck simulator testen;
 9. bronwijzigingen vergelijken zonder Lumi-edits te verliezen;
 10. het ingebouwde SoundSwitch-outputprofiel beheren als vier banks met ieder
-    acht buttons, een exacte AutoLoop Name en één Phrase Type per button.
+    32 AutoLoop-posities, een exacte AutoLoop Name en één Phrase Type per positie.
 
 Dit levert een zichtbare vertical slice over import, persistence, native UI,
 editing en planning. De echte SoundSwitch-project- en bank/slotbinding valt
@@ -317,7 +317,7 @@ E2A-18 gecorrigeerd naar de echte SoundSwitch-surface.
 
 Status: **implemented and locally verified**. Het ontwerp staat in
 [`docs/design/output-profiles`](../design/output-profiles/soundswitch-autoloops.md),
-de controllergrens in ADR-0015 en de volgende POC in
+de controllergrens in ADR-0015 en het fysieke integratiebewijs in
 [`soundswitch-coremidi-poc.md`](soundswitch-coremidi-poc.md).
 
 ### E2A-18 – Map the real 4×32 SoundSwitch AutoLoop surface
@@ -330,7 +330,10 @@ opgeslagen; interne mapping-ID's worden niet als Variant Name getoond. Een
 range- of pagina-indeling is bewust afwezig; de inspector vervangt de gekozen
 bank niet. De
 Test Controller spiegelt dezelfde 4×32-configuratie en blijft send-disabled tot
-de CoreMIDI-POC.
+de virtuele MIDI-bron expliciet wordt gepubliceerd. De permanente `MIDI Status`-
+pagina toont bronstatus, protocol, configured surface, laatste event, pulsteller,
+integratiechecks en handmatige testacties. De Test Controller gebruikt dezelfde
+SoundSwitch-volgorde: 1–8 verticaal, gevolgd door 9–16, 17–24 en 25–32.
 
 ## 6.1 Bouwvolgorde zonder Rekordbox-developmentlibrary
 
@@ -390,8 +393,11 @@ De demo-provider blijft daarna bestaan voor CI, screenshots en foutscenario's.
   geïsoleerd macOS-account met wegwerp-library beschikbaar is. De productie-
   library wordt nooit als ontwikkelbron gebruikt.
 - `E2A-15`: verdere CDJ/Rekordbox RGB-pixelfidelity wordt later hervat.
-- De eerstvolgende actieve slice is de timeboxed SoundSwitch/CoreMIDI-POC uit
-  ADR-0015; deze is geen stilzwijgende live-outputimplementatie.
+- `E3-00`: de fysieke SoundSwitch/CoreMIDI-keten uit ADR-0015 is bewezen voor
+  virtual MIDI discovery, Bank 1 → AutoLoop 1, parallel Control One-gebruik en
+  zichtbare DMX-output. Repetition en disconnect/reconnect blijven open.
+- `E3-01`: generaliseer de bewezen bank-delay-slotsequentie naar iedere bank en
+  AutoLoop en verbind die later met de operationele live-execution.
 
 ## 8. Afhankelijkheden en risico's
 

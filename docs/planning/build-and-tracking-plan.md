@@ -126,6 +126,11 @@ de transitie bestaat een volledig, uitlegbaar en aanpasbaar plan.
 
 ### Fase 3 – SoundSwitch Live MVP (`0.3.0`)
 
+- [E3-00](https://github.com/victorblanco-tech/lumi/issues/75): de fysieke
+  virtual-MIDI/Control One/DMX-keten is bewezen; repetition en reconnect blijven
+  open;
+- [E3-01](https://github.com/victorblanco-tech/lumi/issues/81): generaliseer de
+  bewezen bank-delay-AutoLoopsequentie naar iedere geconfigureerde target;
 - generieke MIDI-output;
 - OFF, ARMED, LIVE en PAUSED;
 - phrase-boundary execution;
