@@ -411,6 +411,8 @@ final class EngineStatusModel: ObservableObject {
                 roleID: roleID,
                 displayName: displayName
             )
+        case let .clearButton(themeID, buttonNumber):
+            .clearButton(themeID: themeID, buttonNumber: buttonNumber)
         }
     }
 

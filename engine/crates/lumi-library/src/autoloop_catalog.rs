@@ -809,6 +809,27 @@ impl AutoloopCatalog {
         self.revised(self.themes.clone(), variants, cells)
     }
 
+    pub fn clear_mapping(
+        &self,
+        theme_id: ThemeId,
+        mapping_id: &VariantId,
+    ) -> Result<Self, AutoloopCatalogError> {
+        if !self.themes.iter().any(|theme| theme.id() == theme_id) {
+            return Err(AutoloopCatalogError::UnknownTheme);
+        }
+        let mut cells = self.cells.clone();
+        let Some(index) = cells
+            .iter()
+            .position(|cell| cell.theme_id() == theme_id && cell.variant_id() == mapping_id)
+        else {
+            return Err(AutoloopCatalogError::NoChange);
+        };
+        cells.remove(index);
+        let variants = prune_unused_variants(self.variants.clone(), &cells)?;
+        sort_cells(&mut cells, &self.themes, &variants);
+        self.revised(self.themes.clone(), variants, cells)
+    }
+
     fn cell(
         &self,
         theme_id: ThemeId,

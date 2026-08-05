@@ -377,6 +377,11 @@ fn autoloop_catalog_mutation(
             role_id: phrase_role_id(payload)?,
             display_name: optional_string(payload, "displayName").map(str::to_owned),
         }),
+        "clearButton" => Ok(AutoloopCatalogMutation::ClearButton {
+            theme_id: ThemeId::new(positive_unsigned(payload, "themeId")?),
+            button_number: u16::try_from(positive_unsigned(payload, "buttonNumber")?)
+                .map_err(|_| CommandDecodeError::InvalidField("buttonNumber"))?,
+        }),
         _ => Err(CommandDecodeError::InvalidField("operation")),
     }
 }

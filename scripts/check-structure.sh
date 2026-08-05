@@ -84,6 +84,12 @@ if grep -REq '\.font\(\.[A-Za-z]|Color\.(red|green|orange|blue|purple|pink)' \
 fi
 
 foundation_workflow="$repository_root/.github/workflows/foundation.yml"
+if ! grep -Fq 'workflow_dispatch:' "$foundation_workflow" \
+  || grep -Fq 'pull_request:' "$foundation_workflow" \
+  || grep -Fq '      - dev' "$foundation_workflow"; then
+  echo "ERROR: costly Foundation CI must remain manual and main-release-only during local-first development." >&2
+  exit 1
+fi
 if ! grep -Fq 'runs-on: ubuntu-24.04' "$foundation_workflow" \
   || ! grep -Fq 'run: ./scripts/verify-rust.sh' "$foundation_workflow"; then
   echo "ERROR: portable Rust verification must run on the Linux CI job." >&2

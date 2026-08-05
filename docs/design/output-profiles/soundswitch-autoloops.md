@@ -18,10 +18,9 @@ controller. The UI never suggests that Lumi controls or depends on Control One.
 - four clearly numbered and named banks;
 - organization prepared for Theme, Genre, Function, and Custom;
 - 32 stable AutoLoop positions per bank, 128 total;
-- four pages of eight physically recognizable buttons;
 - mapped and available states;
-- a primary mapping surface that mirrors the recognizable SoundSwitch/Control
-  One four-column layout instead of reducing it to a technical list;
+- a bank-first mapping surface with four bank selectors and all 32 positions of
+  the selected bank visible together;
 - direct button selection with a selected bank and AutoLoop inspector;
 - editable Bank Name and exact SoundSwitch AutoLoop Name;
 - editable Lumi Phrase Type per button;
@@ -31,18 +30,15 @@ Each button is one atomic mapping: `Bank + Button + AutoLoop Name + Phrase Type`
 The same button number may use a different Phrase Type in another bank. Internal
 mapping identifiers are never presented as editable Variant names.
 
-The spatial layout is part of the product contract: four bank columns remain
-visible together and each column contains eight vertically ordered physical
-buttons for the selected page, as in SoundSwitch AutoLoops and the corresponding
-Control One mental model. Pages `1–8`, `9–16`, `17–24`, and `25–32` expose all
-32 positions in each bank. The inspector augments that surface; it never
+The spatial layout is part of the product contract: selecting Bank 1, 2, 3, or
+4 replaces the grid with that bank's 32 unique positions. No page, range, or
+shared slot state is presented. The inspector augments that surface; it never
 replaces it.
 
 ### Test Controller
 
 - `Lumi Virtual MIDI Controller` identity;
-- four bank columns with eight physical buttons for the selected page;
-- four pages expose all 32 AutoLoops in each bank;
+- the same bank selector and 32 positions for the selected bank;
 - the exact same names and Phrase Types as the Banks view;
 - no second configuration model;
 - live test disabled until the CoreMIDI POC.

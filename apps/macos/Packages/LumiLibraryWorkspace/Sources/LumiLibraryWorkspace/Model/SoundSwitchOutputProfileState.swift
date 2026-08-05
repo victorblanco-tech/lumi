@@ -5,8 +5,7 @@ public struct SoundSwitchOutputProfileState: Equatable, Sendable {
         targetName: "SoundSwitch",
         controllerName: "Lumi Virtual MIDI Controller",
         bankCount: 4,
-        slotsPerBank: 32,
-        slotsPerPage: 8
+        slotsPerBank: 32
     )
 
     public let id: String
@@ -15,7 +14,6 @@ public struct SoundSwitchOutputProfileState: Equatable, Sendable {
     public let controllerName: String
     public let bankCount: UInt16
     public let slotsPerBank: UInt16
-    public let slotsPerPage: UInt16
 
     public init(
         id: String,
@@ -23,8 +21,7 @@ public struct SoundSwitchOutputProfileState: Equatable, Sendable {
         targetName: String,
         controllerName: String,
         bankCount: UInt16,
-        slotsPerBank: UInt16,
-        slotsPerPage: UInt16
+        slotsPerBank: UInt16
     ) {
         self.id = id
         self.name = name
@@ -32,11 +29,6 @@ public struct SoundSwitchOutputProfileState: Equatable, Sendable {
         self.controllerName = controllerName
         self.bankCount = bankCount
         self.slotsPerBank = slotsPerBank
-        self.slotsPerPage = slotsPerPage
-    }
-
-    public var pageCount: UInt16 {
-        slotsPerBank / slotsPerPage
     }
 }
 
@@ -134,15 +126,24 @@ public enum SoundSwitchOutputProfileProjection {
         catalog: AutoloopCatalogState,
         profile: SoundSwitchOutputProfileState = .builtIn
     ) -> [SoundSwitchAutoloopSlotState] {
+        var mappings: [UInt16: (
+            role: AutoloopRoleMatrixState,
+            variant: AutoloopVariantState,
+            cell: AutoloopCellState
+        )] = [:]
+        for role in catalog.roles where !role.archived {
+            for variant in role.variants where !variant.archived {
+                for cell in variant.cells where cell.themeID == bankID && !cell.isMissing {
+                    guard let buttonNumber = cell.buttonNumber ?? mappingNumber(variant.id),
+                          (1...profile.slotsPerBank).contains(buttonNumber) else {
+                        continue
+                    }
+                    mappings[buttonNumber] = (role, variant, cell)
+                }
+            }
+        }
         return (1...profile.slotsPerBank).map { slotNumber in
-            let mapping = catalog.roles.lazy.compactMap { role in
-                role.variants.lazy.compactMap { variant in
-                    variant.cells.first {
-                        $0.themeID == bankID && $0.buttonNumber == slotNumber && !$0.isMissing
-                    }.map { (role, variant, $0) }
-                }.first
-            }.first
-            guard let (role, variant, cell) = mapping else {
+            guard let mapping = mappings[slotNumber] else {
                 return SoundSwitchAutoloopSlotState(
                     number: slotNumber,
                     roleID: nil,
@@ -156,12 +157,12 @@ public enum SoundSwitchOutputProfileProjection {
             }
             return SoundSwitchAutoloopSlotState(
                 number: slotNumber,
-                roleID: role.id,
-                roleName: role.name,
-                variantID: variant.id,
-                variantName: variant.name,
-                entryID: cell.entryID,
-                entryName: cell.name,
+                roleID: mapping.role.id,
+                roleName: mapping.role.name,
+                variantID: mapping.variant.id,
+                variantName: mapping.variant.name,
+                entryID: mapping.cell.entryID,
+                entryName: mapping.cell.name,
                 status: .mapped
             )
         }
@@ -175,5 +176,10 @@ public enum SoundSwitchOutputProfileProjection {
         slots(for: bankID, catalog: catalog, profile: profile)
             .filter { $0.status == .mapped }
             .count
+    }
+
+    private static func mappingNumber(_ variantID: String) -> UInt16? {
+        guard variantID.hasPrefix("mapping-") else { return nil }
+        return UInt16(variantID.dropFirst("mapping-".count))
     }
 }

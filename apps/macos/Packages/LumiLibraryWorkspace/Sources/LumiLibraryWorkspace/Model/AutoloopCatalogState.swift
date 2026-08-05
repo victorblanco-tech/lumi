@@ -152,4 +152,5 @@ public enum AutoloopCatalogMutationRequest: Equatable, Sendable {
     case restoreVariant(roleID: String, variantID: String)
     case setCell(themeID: UInt64, roleID: String, variantID: String, displayName: String?)
     case setButton(themeID: UInt64, buttonNumber: UInt16, roleID: String, displayName: String?)
+    case clearButton(themeID: UInt64, buttonNumber: UInt16)
 }
