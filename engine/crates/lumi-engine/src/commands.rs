@@ -23,6 +23,12 @@ pub struct PlanCommandContext {
     pub expected_revision: PlanRevision,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DeckSourceSelection {
+    ConnectedDecks,
+    LocalPlayback,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SessionCommand {
     GetSnapshot,
@@ -85,10 +91,24 @@ pub enum SessionCommand {
         bank_number: u8,
         autoloop_number: u8,
     },
-    LoadLibraryTrackOnSimulatorDeck {
+    LoadLibraryTrackOnLocalDeck {
         track_id: u64,
         deck_id: DeckId,
         expected_timeline_revision: u64,
+        expected_state_revision: StateRevision,
+    },
+    UpdateLocalPlaybackTransport {
+        deck_id: DeckId,
+        track_load_id: TrackLoadId,
+        position_millis: u64,
+        playing: bool,
+    },
+    SetLocalPlaybackLeader {
+        deck_id: DeckId,
+        expected_state_revision: StateRevision,
+    },
+    SelectDeckSourceMode {
+        mode: DeckSourceSelection,
         expected_state_revision: StateRevision,
     },
     LoadDemoSession {
@@ -171,7 +191,10 @@ impl SessionCommand {
             | Self::SendMidiLearnPulse
             | Self::SendMidiAddressLearnPulse { .. }
             | Self::TriggerMidiAutoloop { .. }
-            | Self::LoadLibraryTrackOnSimulatorDeck { .. }
+            | Self::LoadLibraryTrackOnLocalDeck { .. }
+            | Self::UpdateLocalPlaybackTransport { .. }
+            | Self::SetLocalPlaybackLeader { .. }
+            | Self::SelectDeckSourceMode { .. }
             | Self::LoadDemoSession { .. }
             | Self::SetOperationState { .. }
             | Self::SetSimulationSpeed { .. }
@@ -268,7 +291,7 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
                 autoloop_number,
             })
         }
-        "loadLibraryTrackOnSimulatorDeck" => Ok(SessionCommand::LoadLibraryTrackOnSimulatorDeck {
+        "loadLibraryTrackOnLocalDeck" => Ok(SessionCommand::LoadLibraryTrackOnLocalDeck {
             track_id: positive_unsigned(&envelope.payload, "trackId")?,
             deck_id: DeckId::new(
                 u8::try_from(positive_unsigned(&envelope.payload, "deckId")?)
@@ -278,6 +301,30 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
                 &envelope.payload,
                 "expectedTimelineRevision",
             )?,
+            expected_state_revision: state_revision(envelope)?,
+        }),
+        "updateLocalPlaybackTransport" => Ok(SessionCommand::UpdateLocalPlaybackTransport {
+            deck_id: DeckId::new(
+                u8::try_from(positive_unsigned(&envelope.payload, "deckId")?)
+                    .map_err(|_| CommandDecodeError::InvalidField("deckId"))?,
+            ),
+            track_load_id: TrackLoadId::new(positive_unsigned(&envelope.payload, "trackLoadId")?),
+            position_millis: unsigned(&envelope.payload, "positionMillis")?,
+            playing: boolean(&envelope.payload, "playing")?,
+        }),
+        "setLocalPlaybackLeader" => Ok(SessionCommand::SetLocalPlaybackLeader {
+            deck_id: DeckId::new(
+                u8::try_from(positive_unsigned(&envelope.payload, "deckId")?)
+                    .map_err(|_| CommandDecodeError::InvalidField("deckId"))?,
+            ),
+            expected_state_revision: state_revision(envelope)?,
+        }),
+        "selectDeckSourceMode" => Ok(SessionCommand::SelectDeckSourceMode {
+            mode: match string(&envelope.payload, "mode")? {
+                "connectedDecks" => DeckSourceSelection::ConnectedDecks,
+                "localPlayback" => DeckSourceSelection::LocalPlayback,
+                _ => return Err(CommandDecodeError::InvalidField("mode")),
+            },
             expected_state_revision: state_revision(envelope)?,
         }),
         "loadDemoSession" => Ok(SessionCommand::LoadDemoSession {

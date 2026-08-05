@@ -480,6 +480,27 @@ impl LightingPlan {
         self.revised_with_theme_decision(cues, self.theme_decision.clone())
     }
 
+    /// Replaces adapter-materialized cue actions before a plan is accepted,
+    /// without presenting that normalization as a user-authored revision.
+    pub fn with_materialized_cues(
+        &self,
+        cues: Vec<LightingCue>,
+    ) -> Result<Self, PlanValidationError> {
+        Self::try_new_with_theme_decision(
+            self.id,
+            self.deck_id,
+            self.track_id,
+            self.track_duration_beats,
+            self.track_load_id,
+            self.revision,
+            self.configuration_revision,
+            self.seed,
+            self.status,
+            self.theme_decision.clone(),
+            cues,
+        )
+    }
+
     pub fn revised_with_theme_decision(
         &self,
         cues: Vec<LightingCue>,

@@ -68,31 +68,33 @@ public struct LiveWorkspaceState: Equatable, Sendable {
 }
 
 public struct LiveWorkspaceContent: Equatable, Sendable {
-    public let liveDeck: DeckSnapshot
-    public let nextDeck: DeckSnapshot
+    public let liveDeck: DeckSnapshot?
+    public let nextDeck: DeckSnapshot?
     public let decks: [DeckSnapshot]
-    public let leaderDeckID: UInt64
+    public let leaderDeckID: UInt64?
     public let livePlan: PlanSnapshot?
     public let plan: PlanSnapshot?
     public let sourceName: String
+    public let sourceMode: String
     public let stateRevision: UInt64
     public let planningOptions: PlanningOptionsSnapshot
     public let operationState: String
-    public let simulation: SimulationSnapshot
+    public let simulation: SimulationSnapshot?
     public let timeline: [TimelineEntrySnapshot]
 
     public init(
-        liveDeck: DeckSnapshot,
-        nextDeck: DeckSnapshot,
+        liveDeck: DeckSnapshot?,
+        nextDeck: DeckSnapshot?,
         decks: [DeckSnapshot],
-        leaderDeckID: UInt64,
+        leaderDeckID: UInt64?,
         livePlan: PlanSnapshot? = nil,
         plan: PlanSnapshot?,
         sourceName: String,
+        sourceMode: String = "localPlayback",
         stateRevision: UInt64,
         planningOptions: PlanningOptionsSnapshot,
         operationState: String,
-        simulation: SimulationSnapshot,
+        simulation: SimulationSnapshot? = nil,
         timeline: [TimelineEntrySnapshot]
     ) {
         self.liveDeck = liveDeck
@@ -102,6 +104,7 @@ public struct LiveWorkspaceContent: Equatable, Sendable {
         self.livePlan = livePlan
         self.plan = plan
         self.sourceName = sourceName
+        self.sourceMode = sourceMode
         self.stateRevision = stateRevision
         self.planningOptions = planningOptions
         self.operationState = operationState
@@ -125,12 +128,15 @@ public enum SessionInteractionPresentation: Equatable, Sendable {
 }
 
 public enum SessionCommandRequest: Equatable, Sendable {
-    case loadDemo(expectedStateRevision: UInt64)
     case setOperationState(String, expectedStateRevision: UInt64)
-    case setSimulationSpeed(UInt64, expectedStateRevision: UInt64)
-    case setSimulationPlayback(Bool, expectedStateRevision: UInt64)
-    case advanceToNextTrack(expectedStateRevision: UInt64)
-    case resetDemo(expectedStateRevision: UInt64)
+    case setLocalPlaybackLeader(UInt64, expectedStateRevision: UInt64)
+    case selectDeckSourceMode(String, expectedStateRevision: UInt64)
+}
+
+public enum LocalPlaybackRequest: Equatable, Sendable {
+    case togglePlayback(deckID: UInt64)
+    case stop(deckID: UInt64)
+    case seek(deckID: UInt64, progress: Double)
 }
 
 public struct PlanMutationContext: Equatable, Sendable {
@@ -254,10 +260,13 @@ public enum LiveWorkspacePresenter {
         let derivedCondition: LiveWorkspaceCondition
         if snapshot.runtime.health != "ready" || snapshot.deckSource.status != "ready" {
             derivedCondition = .degraded
-        } else if content?.plan?.status == "fallback" {
+        } else if snapshot.decks.isEmpty {
+            derivedCondition = .empty
+        } else if snapshot.decks.contains(where: { $0.planEligibility == .autoHeld })
+            || [snapshot.livePlan, snapshot.nextPlan]
+                .compactMap({ $0 })
+                .contains(where: { $0.status == "fallback" }) {
             derivedCondition = .fallback
-        } else if content?.plan == nil {
-            derivedCondition = .degraded
         } else {
             derivedCondition = .ready
         }
@@ -276,13 +285,12 @@ public enum LiveWorkspacePresenter {
                 condition: runtime.health == "ready" ? healthyProviderCondition : .degraded
             ),
             source: ProviderPresentation(
-                detail: snapshot.deckSource.providerKind.capitalized,
+                detail: snapshot.deckSource.displayName,
                 condition: snapshot.deckSource.status == "ready" ? healthyProviderCondition : .degraded
             ),
             planner: ProviderPresentation(
-                detail: snapshot.nextPlan.map { "Plan revision \($0.revision) · \($0.status)" }
-                    ?? "No next-track plan",
-                condition: snapshot.nextPlan?.status == "ready" ? healthyProviderCondition : .degraded
+                detail: plannerDetail(snapshot),
+                condition: plannerCondition(snapshot, healthy: healthyProviderCondition)
             ),
             output: ProviderPresentation(
                 detail: "\(snapshot.outputProvider.providerKind) · \(snapshot.outputProvider.recordCount) records",
@@ -295,11 +303,29 @@ public enum LiveWorkspacePresenter {
         )
     }
 
+    private static func plannerDetail(_ snapshot: EngineSnapshot) -> String {
+        let plans = [snapshot.livePlan, snapshot.nextPlan].compactMap { $0 }
+        if snapshot.decks.isEmpty { return "Waiting for a loaded track" }
+        if plans.isEmpty { return "Automatic planning held" }
+        return "\(plans.count) deck plan\(plans.count == 1 ? "" : "s") ready"
+    }
+
+    private static func plannerCondition(
+        _ snapshot: EngineSnapshot,
+        healthy: ProviderCondition
+    ) -> ProviderCondition {
+        if snapshot.decks.isEmpty { return .empty }
+        let plannedDeckIDs = Set([snapshot.livePlan, snapshot.nextPlan].compactMap { $0?.deckID })
+        return snapshot.decks.allSatisfy { deck in
+            deck.planEligibility != .autoHeld && plannedDeckIDs.contains(deck.deckID)
+        } ? healthy : .degraded
+    }
+
     private static func content(from snapshot: EngineSnapshot) -> LiveWorkspaceContent? {
-        guard let liveDeck = snapshot.decks.first(where: { $0.deckID == snapshot.leaderDeckID }),
-              let nextDeck = snapshot.decks.first(where: { $0.deckID != snapshot.leaderDeckID }) else {
-            return nil
+        let liveDeck = snapshot.leaderDeckID.flatMap { leaderDeckID in
+            snapshot.decks.first(where: { $0.deckID == leaderDeckID })
         }
+        let nextDeck = snapshot.decks.first(where: { $0.deckID != snapshot.leaderDeckID })
         return LiveWorkspaceContent(
             liveDeck: liveDeck,
             nextDeck: nextDeck,
@@ -307,7 +333,8 @@ public enum LiveWorkspacePresenter {
             leaderDeckID: snapshot.leaderDeckID,
             livePlan: snapshot.livePlan,
             plan: snapshot.nextPlan,
-            sourceName: snapshot.deckSource.providerKind.capitalized,
+            sourceName: snapshot.deckSource.displayName,
+            sourceMode: snapshot.deckSource.mode,
             stateRevision: snapshot.stateRevision,
             planningOptions: snapshot.planningOptions,
             operationState: snapshot.operationState,

@@ -1,6 +1,6 @@
 # Epic 2B – Live deck intelligence and rolling plans
 
-Status: **In delivery; E2B-01, E2B-03, and E2B-04 complete; E2B-02 and E2B-06 ready**
+Status: **In delivery; product Live completion precedes Beat Link PoC**
 
 Target milestone: **0.2.0 – Deck Intelligence**
 
@@ -17,7 +17,8 @@ current Live track.
 - `MASTER · LIVE NOW` moves between those surfaces without reordering them.
 - The master card is visually dominant; `PLAN READY` is deliberately quieter.
 - Both cards show an RGB waveform, beatgrid, playhead and phrase band.
-- The current phrase is locked; future Live phrases are editable.
+- The current and completed phrases are read-only; future Live phrases are
+  editable. An explicit pinned choice remains distinguishable from time state.
 - A future AutoLoop is phrase-specific. A future Theme choice applies from that
   phrase onward and is committed at its boundary.
 - Technical component health is summarized behind one compact status control.
@@ -26,9 +27,46 @@ current Live track.
 
 ## Story map
 
+### E2B-07 – Replace visible simulation with product deck sources
+
+Status: **Complete and locally verified**
+
+- remove Demo/Simulator state, controls, labels and automatic test playback
+  from production Live;
+- start Live with two empty deck surfaces and an explicit source selector;
+- expose `Connected Decks` and `Local Playback` as the only product modes;
+- keep simulator/replay providers exclusively in automated tests.
+
+### E2B-08 – Local Playback vertical slice
+
+Status: **Complete and locally verified**
+
+- load a ready Lumi Library track on Deck A or B;
+- play the actual local/demo audio, pause, seek and choose the lighting master;
+- publish authoritative normalized position and playback observations;
+- use the exact Lumi timeline, role identity, RGB waveform and AutoLoop
+  resolution through planning and MIDI execution;
+- list only real mapped Autoloops for the selected Theme and Phrase Type;
+- materialize the chosen SoundSwitch bank/button into the executable plan so
+  preview, plan state and emitted MIDI can never disagree;
+- support dry rehearsal through the existing independent operation states.
+
+### E2B-09 – Plan eligibility and unmatched-track safety
+
+Status: **Complete and locally verified**
+
+- resolve exact Library identity before planning a connected deck load;
+- allow complete mapped provider analysis as an explicitly transient plan;
+- represent missing, incomplete, stale and unmapped analysis as `AUTO HELD`;
+- hold the current look without disabling manual MIDI or the other deck;
+- never fabricate a role, phrase timeline, waveform or ready plan.
+
 ### [E2B-01 – Fixed dual-deck Live surface](https://github.com/victorblanco-tech/lumi/issues/84)
 
-Build the first visible vertical slice using the simulator:
+Status: **Complete and locally verified**
+
+Build the first visible vertical slice using a deterministic acceptance source
+(now retained as an internal test fixture only):
 
 - decode normalized track duration, phrases and RGB waveform preview;
 - preserve Deck A/B ordering independently from `leaderDeckId`;
@@ -39,6 +77,8 @@ Build the first visible vertical slice using the simulator:
 - cover decoder validation, stable ordering and master changes with local tests.
 
 ### [E2B-02 – Production waveform resolution](https://github.com/victorblanco-tech/lumi/issues/86)
+
+Status: **Planned after the Beat Link transport PoC**
 
 - extend the deck-source capability contract with preview/detail availability;
 - resolve an exact local-library waveform by stable track identity;
@@ -64,7 +104,7 @@ Status: **Complete and locally verified**
 - keep next-track planning available alongside it;
 - collapse engine, source, planner, timing and MIDI health behind compact status;
 - preserve explicit degraded, disconnected and revision-conflict feedback;
-- keep simulator/test controls available without dominating the show view.
+- keep deterministic source controls out of the product show view.
 
 Delivered behavior also makes the deck source authoritative for transport:
 `playing` and the current beat enter through the provider event contract, the
@@ -80,12 +120,16 @@ integration work and is not duplicated in the Live view.
 
 ### [E2B-05 – Companion presentation contract](https://github.com/victorblanco-tech/lumi/issues/82)
 
+Status: **UX contract accepted; native companion delivery remains planned**
+
 - define a local-client snapshot suitable for the later native iPhone app;
 - keep master, deck, waveform, phrase and plan semantics engine-authoritative;
 - specify portrait stacking and landscape dual-deck behavior;
 - defer discovery, pairing and native iOS implementation to the iPhone epic.
 
 ### [E2B-06 – Beat Link Trigger simulated-deck MIDI PoC](https://github.com/victorblanco-tech/lumi/issues/87)
+
+Status: **Next**
 
 - publish a dedicated Lumi virtual MIDI destination for deck-source input;
 - configure two Beat Link Trigger simulation decks to send a documented,

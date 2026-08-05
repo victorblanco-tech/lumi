@@ -16,7 +16,7 @@ public struct LibraryQueryRequest: Equatable, Sendable {
     }
 }
 
-public struct LibrarySimulatorLoadRequest: Equatable, Sendable {
+public struct LibraryDeckLoadRequest: Equatable, Sendable {
     public let trackID: UInt64
     public let deckID: UInt64
     public let expectedTimelineRevision: UInt64
@@ -35,10 +35,10 @@ public struct LibraryWorkspaceView: View {
     private let onTimelineEdit: @MainActor (TrackTimelineEditRequest) -> Void
     private let onTimelineHistory: @MainActor (TrackTimelineHistoryRequest) -> Void
     private let onSourceReconcile: @MainActor (TrackSourceReconcileRequest) -> Void
-    private let onLoadOnSimulatorDeck: @MainActor (LibrarySimulatorLoadRequest) -> Void
+    private let onLoadOnLocalDeck: @MainActor (LibraryDeckLoadRequest) -> Void
     private let timelineFeedback: String?
-    private let simulatorFeedback: String?
-    private let simulatorFeedbackIsError: Bool
+    private let localPlaybackFeedback: String?
+    private let localPlaybackFeedbackIsError: Bool
     private let rendersInteractiveControls: Bool
     @Binding private var keyNotation: KeyNotationPreference
     @State private var search: String
@@ -58,10 +58,10 @@ public struct LibraryWorkspaceView: View {
         onTimelineEdit: @escaping @MainActor (TrackTimelineEditRequest) -> Void = { _ in },
         onTimelineHistory: @escaping @MainActor (TrackTimelineHistoryRequest) -> Void = { _ in },
         onSourceReconcile: @escaping @MainActor (TrackSourceReconcileRequest) -> Void = { _ in },
-        onLoadOnSimulatorDeck: @escaping @MainActor (LibrarySimulatorLoadRequest) -> Void = { _ in },
+        onLoadOnLocalDeck: @escaping @MainActor (LibraryDeckLoadRequest) -> Void = { _ in },
         timelineFeedback: String? = nil,
-        simulatorFeedback: String? = nil,
-        simulatorFeedbackIsError: Bool = false
+        localPlaybackFeedback: String? = nil,
+        localPlaybackFeedbackIsError: Bool = false
     ) {
         self.state = state
         self.onQuery = onQuery
@@ -69,10 +69,10 @@ public struct LibraryWorkspaceView: View {
         self.onTimelineEdit = onTimelineEdit
         self.onTimelineHistory = onTimelineHistory
         self.onSourceReconcile = onSourceReconcile
-        self.onLoadOnSimulatorDeck = onLoadOnSimulatorDeck
+        self.onLoadOnLocalDeck = onLoadOnLocalDeck
         self.timelineFeedback = timelineFeedback
-        self.simulatorFeedback = simulatorFeedback
-        self.simulatorFeedbackIsError = simulatorFeedbackIsError
+        self.localPlaybackFeedback = localPlaybackFeedback
+        self.localPlaybackFeedbackIsError = localPlaybackFeedbackIsError
         self.rendersInteractiveControls = rendersInteractiveControls
         _keyNotation = keyNotation
         _search = State(initialValue: state.query.search)
@@ -294,18 +294,18 @@ public struct LibraryWorkspaceView: View {
                 .accessibilityIdentifier("lumi.library.readinessFilter")
             }
             if let selectedTrack {
-                if let simulatorFeedback {
+                if let localPlaybackFeedback {
                     Image(
-                        systemName: simulatorFeedbackIsError
+                        systemName: localPlaybackFeedbackIsError
                             ? "exclamationmark.triangle.fill"
                             : "checkmark.circle.fill"
                     )
-                    .foregroundStyle(simulatorFeedbackIsError ? LumiColor.warning : LumiColor.success)
-                    .help(simulatorFeedback)
-                    .accessibilityIdentifier("lumi.library.simulatorFeedback")
+                    .foregroundStyle(localPlaybackFeedbackIsError ? LumiColor.warning : LumiColor.success)
+                    .help(localPlaybackFeedback)
+                    .accessibilityIdentifier("lumi.library.localPlaybackFeedback")
                 }
-                simulatorToolbarButton(selectedTrack, deckID: 1)
-                simulatorToolbarButton(selectedTrack, deckID: 2)
+                localDeckToolbarButton(selectedTrack, deckID: 1)
+                localDeckToolbarButton(selectedTrack, deckID: 2)
             }
         }
         .padding(.horizontal, LumiSpacing.large)
@@ -438,11 +438,11 @@ public struct LibraryWorkspaceView: View {
             }
     }
 
-    private func simulatorToolbarButton(_ track: LibraryTrack, deckID: UInt64) -> some View {
+    private func localDeckToolbarButton(_ track: LibraryTrack, deckID: UInt64) -> some View {
         Button {
             guard let timelineRevision = track.timelineRevision else { return }
-            onLoadOnSimulatorDeck(
-                LibrarySimulatorLoadRequest(
+            onLoadOnLocalDeck(
+                LibraryDeckLoadRequest(
                     trackID: track.id,
                     deckID: deckID,
                     expectedTimelineRevision: timelineRevision

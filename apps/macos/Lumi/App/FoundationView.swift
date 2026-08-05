@@ -39,6 +39,9 @@ struct FoundationView: View {
                         },
                         onSessionCommand: { request in
                             Task { await engineStatus.runSessionCommand(request) }
+                        },
+                        onLocalPlayback: { request in
+                            engineStatus.runLocalPlayback(request)
                         }
                     )
                 case .library:
@@ -60,12 +63,12 @@ struct FoundationView: View {
                         onSourceReconcile: { request in
                             Task { await engineStatus.reconcileLibrarySource(request) }
                         },
-                        onLoadOnSimulatorDeck: { request in
-                            Task { await engineStatus.loadLibraryTrackOnSimulatorDeck(request) }
+                        onLoadOnLocalDeck: { request in
+                            Task { await engineStatus.loadLibraryTrackOnLocalDeck(request) }
                         },
                         timelineFeedback: engineStatus.timelineEditFeedback,
-                        simulatorFeedback: engineStatus.simulatorLoadFeedback,
-                        simulatorFeedbackIsError: engineStatus.simulatorLoadFeedbackIsError
+                        localPlaybackFeedback: engineStatus.localPlaybackFeedback,
+                        localPlaybackFeedbackIsError: engineStatus.localPlaybackFeedbackIsError
                     )
                 case .settings:
                     PhraseRoleSettingsView(

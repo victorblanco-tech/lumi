@@ -8,13 +8,14 @@ use lumi_deck_source::DeckSourceProvider as _;
 use lumi_domain::{
     ClientId, CommandSequence, CueOrigin, CueReason, DecisionReason, DeckObservation,
     DeckSourceStatus, DomainEvent, EffectId, EffectResult, EffectResultEnvelope, EffectSequence,
-    KeyMode, LightingPlan, MonotonicTime, OperationCommand, OperationState, OutputEffectReason,
-    OutputEffectResult, OutputEffectStatus, OutputExecutionRequest, PhraseKind, PitchClass,
-    PlanRevision, PlanStatus, RuntimeHealth, SceneCategory, SemanticLightingAction,
-    SerializedRuntime, SerializedRuntimeError, TimelineResult, TimelineSource, TrackLoadId,
-    UserCommandEnvelope, WorkerId,
+    KeyMode, LightingLook, LightingPlan, MonotonicTime, OperationCommand, OperationState,
+    OutputEffectReason, OutputEffectResult, OutputEffectStatus, OutputExecutionRequest, PhraseKind,
+    PitchClass, PlanRevision, PlanStatus, PlanValidationError, RuntimeHealth, SceneCategory,
+    SceneId, SemanticLightingAction, SerializedRuntime, SerializedRuntimeError, TimelineResult,
+    TimelineSource, TrackLoadId, TrackMetadata, UserCommandEnvelope, WorkerId,
 };
 use lumi_lighting_output::LightingOutputProvider as _;
+use lumi_local_playback::{LocalPlaybackDeckSourceProvider, LocalPlaybackError};
 use lumi_midi_coremidi::CoreMidiSourceProvider;
 use lumi_midi_output::{MidiOutputController, MidiSourceState};
 use lumi_output_dry_run::{DryRunLightingOutputProvider, DryRunOutputError};
@@ -41,7 +42,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::time::timeout;
 
 use crate::StartupReady;
-use crate::commands::{SessionCommand, decode_command};
+use crate::commands::{DeckSourceSelection, SessionCommand, decode_command};
 use crate::library::{LibraryPlanContext, LibraryWorker, LibraryWorkerError, ResolvedLibraryCue};
 
 const SESSION_TOKEN_ENVIRONMENT_KEY: &str = "LUMI_SESSION_TOKEN";
@@ -65,7 +66,7 @@ pub async fn run() -> Result<(), EngineError> {
     let session_token =
         env::var(SESSION_TOKEN_ENVIRONMENT_KEY).map_err(|_| EngineError::MissingSessionToken)?;
     validate_session_token(&session_token)?;
-    let mut runtime = initialized_runtime()?;
+    let mut runtime = initialized_product_runtime()?;
 
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
     let endpoint = listener.local_addr()?;
@@ -213,10 +214,41 @@ struct EngineRuntime {
     state: SerializedRuntime,
     clock: ManualClock,
     deck_source: SimulatorDeckSourceProvider<ManualClock>,
+    local_deck_source: LocalPlaybackDeckSourceProvider,
+    deck_source_mode: DeckSourceMode,
     planning_worker: PlanningWorker,
     output_worker: OutputWorker,
     library_worker: LibraryWorker,
     operation_sequence: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DeckSourceMode {
+    ConnectedDecks,
+    LocalPlayback,
+    Simulator,
+}
+
+impl EngineRuntime {
+    fn deck_source_kind(&self) -> &'static str {
+        match self.deck_source_mode {
+            DeckSourceMode::ConnectedDecks => "beatLinkTrigger",
+            DeckSourceMode::LocalPlayback => "localPlayback",
+            DeckSourceMode::Simulator => "simulator",
+        }
+    }
+
+    fn leader_deck_id(&self) -> Option<lumi_domain::DeckId> {
+        match self.deck_source_mode {
+            DeckSourceMode::ConnectedDecks => None,
+            DeckSourceMode::LocalPlayback => self.local_deck_source.leader_deck_id(),
+            DeckSourceMode::Simulator => Some(self.deck_source.leader_deck_id()),
+        }
+    }
+}
+
+fn initialized_product_runtime() -> Result<EngineRuntime, EngineError> {
+    initialized_runtime_for_mode(ManualClock::new(0), DeckSourceMode::LocalPlayback)
 }
 
 fn initialized_runtime() -> Result<EngineRuntime, EngineError> {
@@ -224,6 +256,13 @@ fn initialized_runtime() -> Result<EngineRuntime, EngineError> {
 }
 
 fn initialized_runtime_with_clock(clock: ManualClock) -> Result<EngineRuntime, EngineError> {
+    initialized_runtime_for_mode(clock, DeckSourceMode::Simulator)
+}
+
+fn initialized_runtime_for_mode(
+    clock: ManualClock,
+    deck_source_mode: DeckSourceMode,
+) -> Result<EngineRuntime, EngineError> {
     let mut runtime =
         SerializedRuntime::try_new(EVENT_QUEUE_CAPACITY).map_err(SerializedRuntimeError::from)?;
     submit_and_process(
@@ -233,21 +272,39 @@ fn initialized_runtime_with_clock(clock: ManualClock) -> Result<EngineRuntime, E
         },
     )?;
     let mut deck_source = SimulatorDeckSourceProvider::demo(clock.clone())?;
+    let mut local_deck_source = LocalPlaybackDeckSourceProvider::new(clock.now())?;
     let mut planning_worker = PlanningWorker::new();
     let mut output_worker = OutputWorker::new();
     let library_worker = LibraryWorker::demo()?;
-    for event in deck_source.drain_events()? {
-        planning_worker.process_source_event(
-            &mut runtime,
-            &mut output_worker,
-            event,
-            deck_source.leader_deck_id(),
-        )?;
+    match deck_source_mode {
+        DeckSourceMode::ConnectedDecks => {}
+        DeckSourceMode::LocalPlayback => {
+            for event in local_deck_source.drain_events()? {
+                planning_worker.process_source_event(
+                    &mut runtime,
+                    &mut output_worker,
+                    event,
+                    local_deck_source.leader_deck_id(),
+                )?;
+            }
+        }
+        DeckSourceMode::Simulator => {
+            for event in deck_source.drain_events()? {
+                planning_worker.process_source_event(
+                    &mut runtime,
+                    &mut output_worker,
+                    event,
+                    Some(deck_source.leader_deck_id()),
+                )?;
+            }
+        }
     }
     Ok(EngineRuntime {
         state: runtime,
         clock,
         deck_source,
+        local_deck_source,
+        deck_source_mode,
         planning_worker,
         output_worker,
         library_worker,
@@ -256,14 +313,29 @@ fn initialized_runtime_with_clock(clock: ManualClock) -> Result<EngineRuntime, E
 }
 
 fn process_pending_source_events(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
-    let leader_deck_id = runtime.deck_source.leader_deck_id();
-    for event in runtime.deck_source.drain_events()? {
-        runtime.planning_worker.process_source_event(
-            &mut runtime.state,
-            &mut runtime.output_worker,
-            event,
-            leader_deck_id,
-        )?;
+    let leader_deck_id = runtime.leader_deck_id();
+    match runtime.deck_source_mode {
+        DeckSourceMode::ConnectedDecks => {}
+        DeckSourceMode::LocalPlayback => {
+            for event in runtime.local_deck_source.drain_events()? {
+                runtime.planning_worker.process_source_event(
+                    &mut runtime.state,
+                    &mut runtime.output_worker,
+                    event,
+                    leader_deck_id,
+                )?;
+            }
+        }
+        DeckSourceMode::Simulator => {
+            for event in runtime.deck_source.drain_events()? {
+                runtime.planning_worker.process_source_event(
+                    &mut runtime.state,
+                    &mut runtime.output_worker,
+                    event,
+                    leader_deck_id,
+                )?;
+            }
+        }
     }
     Ok(())
 }
@@ -273,6 +345,14 @@ struct PlanningWorker {
     effect_sequence: u64,
     recent_theme_ids: Vec<lumi_domain::ThemeId>,
     library_contexts: BTreeMap<TrackLoadId, LibraryPlanContext>,
+}
+
+fn planner_track(metadata: &TrackMetadata) -> PlannerTrack {
+    if metadata.phrases().is_empty() {
+        PlannerTrack::without_analysis(metadata.id(), metadata.duration_beats())
+    } else {
+        PlannerTrack::analyzed(metadata)
+    }
 }
 
 impl PlanningWorker {
@@ -303,12 +383,50 @@ impl PlanningWorker {
         self.library_contexts.get(&track_load_id)
     }
 
+    fn materialize_library_plan(&self, plan: LightingPlan) -> Result<LightingPlan, EngineError> {
+        let Some(context) = self.library_context(plan.track_load_id()) else {
+            return Ok(plan);
+        };
+        let cues = plan
+            .cues()
+            .iter()
+            .map(|cue| {
+                let SemanticLightingAction::ApplyLook(look) = cue.action() else {
+                    return Ok(cue.clone());
+                };
+                let resolution = context
+                    .resolve(look.theme_id())
+                    .map_err(LibraryWorkerError::from)?
+                    .into_iter()
+                    .find(|candidate| candidate.phrase_index == cue.phrase_index())
+                    .ok_or(EngineError::MissingLibraryAutoloopResolution)?;
+                let autoloop_number = resolution
+                    .autoloop_number
+                    .ok_or(EngineError::MissingLibraryAutoloopAddress)?;
+                let materialized = LightingLook::try_new(
+                    look.theme_id(),
+                    look.theme_name().to_owned(),
+                    SceneId::new(u64::from(autoloop_number)),
+                    resolution.entry_name,
+                    look.category(),
+                    look.loop_selection(),
+                )?;
+                Ok(cue.revised(
+                    SemanticLightingAction::ApplyLook(materialized),
+                    cue.origin(),
+                    cue.locked(),
+                ))
+            })
+            .collect::<Result<Vec<_>, EngineError>>()?;
+        Ok(plan.with_materialized_cues(cues)?)
+    }
+
     fn process_source_event(
         &mut self,
         runtime: &mut SerializedRuntime,
         output_worker: &mut OutputWorker,
         event: DomainEvent,
-        _leader_deck_id: lumi_domain::DeckId,
+        _leader_deck_id: Option<lumi_domain::DeckId>,
     ) -> Result<(), EngineError> {
         let planning_input = match &event {
             DomainEvent::Observation(observation) => match &observation.observation {
@@ -319,7 +437,7 @@ impl PlanningWorker {
                 } => Some(PlanningInput {
                     deck_id: *deck_id,
                     track_load_id: *track_load_id,
-                    track: PlannerTrack::analyzed(metadata),
+                    track: planner_track(metadata),
                 }),
                 _ => None,
             },
@@ -333,7 +451,8 @@ impl PlanningWorker {
                 .checked_add(1)
                 .ok_or(EngineError::PlanningEffectSequenceOverflow)?;
             let context = ThemeSelectionContext::new(self.recent_theme_ids.clone());
-            let plan = self.planner.generate_with_context(&input, &context)?;
+            let generated = self.planner.generate_with_context(&input, &context)?;
+            let plan = self.materialize_library_plan(generated)?;
             if let Some(decision) = plan.theme_decision() {
                 self.recent_theme_ids.push(decision.theme_id());
                 if self.recent_theme_ids.len() > 8 {
@@ -706,7 +825,7 @@ fn apply_command(
                 .map_err(|error| CommandApplicationError::Midi(error.to_string()))?;
             return Ok(());
         }
-        SessionCommand::LoadLibraryTrackOnSimulatorDeck {
+        SessionCommand::LoadLibraryTrackOnLocalDeck {
             track_id,
             deck_id,
             expected_timeline_revision,
@@ -715,13 +834,94 @@ fn apply_command(
             validate_state_revision(runtime, expected_state_revision)?;
             let prepared = runtime
                 .library_worker
-                .simulator_track(track_id, expected_timeline_revision)?;
+                .local_playback_track(track_id, expected_timeline_revision)?;
             let (metadata, context) = prepared.into_parts();
-            let track_load_id = runtime.deck_source.load_track(deck_id, metadata)?;
+            let track_load_id = match runtime.deck_source_mode {
+                DeckSourceMode::ConnectedDecks => {
+                    return Err(CommandApplicationError::WrongDeckSourceMode);
+                }
+                DeckSourceMode::LocalPlayback => {
+                    let at = runtime
+                        .clock
+                        .advance(1)
+                        .ok_or(CommandApplicationError::ClockOverflow)?;
+                    runtime
+                        .local_deck_source
+                        .load_track(deck_id, metadata, at)?
+                }
+                DeckSourceMode::Simulator => runtime.deck_source.load_track(deck_id, metadata)?,
+            };
             runtime
                 .planning_worker
                 .register_library_context(track_load_id, context);
             process_pending_source_events(runtime).map_err(CommandApplicationError::Engine)?;
+            return Ok(());
+        }
+        SessionCommand::UpdateLocalPlaybackTransport {
+            deck_id,
+            track_load_id,
+            position_millis,
+            playing,
+        } => {
+            if runtime.deck_source_mode != DeckSourceMode::LocalPlayback {
+                return Err(CommandApplicationError::WrongDeckSourceMode);
+            }
+            let beat = runtime
+                .planning_worker
+                .library_context(track_load_id)
+                .ok_or(CommandApplicationError::TrackLoadMismatch)?
+                .beat_at_millis(position_millis);
+            let at = runtime
+                .clock
+                .advance(1)
+                .ok_or(CommandApplicationError::ClockOverflow)?;
+            runtime.local_deck_source.update_transport(
+                deck_id,
+                track_load_id,
+                beat,
+                playing,
+                at,
+            )?;
+            process_pending_source_events(runtime).map_err(CommandApplicationError::Engine)?;
+            return Ok(());
+        }
+        SessionCommand::SetLocalPlaybackLeader {
+            deck_id,
+            expected_state_revision,
+        } => {
+            validate_state_revision(runtime, expected_state_revision)?;
+            if runtime.deck_source_mode != DeckSourceMode::LocalPlayback {
+                return Err(CommandApplicationError::WrongDeckSourceMode);
+            }
+            let at = runtime
+                .clock
+                .advance(1)
+                .ok_or(CommandApplicationError::ClockOverflow)?;
+            runtime.local_deck_source.set_leader(deck_id, at)?;
+            process_pending_source_events(runtime).map_err(CommandApplicationError::Engine)?;
+            return Ok(());
+        }
+        SessionCommand::SelectDeckSourceMode {
+            mode,
+            expected_state_revision,
+        } => {
+            validate_state_revision(runtime, expected_state_revision)?;
+            let target = match mode {
+                DeckSourceSelection::ConnectedDecks => DeckSourceMode::ConnectedDecks,
+                DeckSourceSelection::LocalPlayback => DeckSourceMode::LocalPlayback,
+            };
+            if runtime.deck_source_mode != target {
+                if runtime.deck_source_mode == DeckSourceMode::LocalPlayback {
+                    let at = runtime
+                        .clock
+                        .advance(1)
+                        .ok_or(CommandApplicationError::ClockOverflow)?;
+                    runtime.local_deck_source.clear(at)?;
+                    process_pending_source_events(runtime)
+                        .map_err(CommandApplicationError::Engine)?;
+                }
+                runtime.deck_source_mode = target;
+            }
             return Ok(());
         }
         SessionCommand::LoadDemoSession { expected_revision }
@@ -817,7 +1017,7 @@ fn apply_command(
             PlanningInput {
                 deck_id,
                 track_load_id: deck.track_load_id(),
-                track: PlannerTrack::analyzed(deck.metadata()),
+                track: planner_track(deck.metadata()),
             },
         )
     };
@@ -841,7 +1041,10 @@ fn apply_command(
         | SessionCommand::SendMidiLearnPulse
         | SessionCommand::SendMidiAddressLearnPulse { .. }
         | SessionCommand::TriggerMidiAutoloop { .. }
-        | SessionCommand::LoadLibraryTrackOnSimulatorDeck { .. }
+        | SessionCommand::LoadLibraryTrackOnLocalDeck { .. }
+        | SessionCommand::UpdateLocalPlaybackTransport { .. }
+        | SessionCommand::SetLocalPlaybackLeader { .. }
+        | SessionCommand::SelectDeckSourceMode { .. }
         | SessionCommand::LoadDemoSession { .. }
         | SessionCommand::SetOperationState { .. }
         | SessionCommand::SetSimulationSpeed { .. }
@@ -871,10 +1074,41 @@ fn apply_command(
             ..
         } => {
             reject_started_live_phrase(runtime.state.state(), current.deck_id(), phrase_index)?;
-            runtime
+            if runtime
                 .planning_worker
-                .planner
-                .select_scene(&current, phrase_index, scene_id)?
+                .library_context(current.track_load_id())
+                .is_some()
+            {
+                let theme_id = current
+                    .cues()
+                    .get(usize::from(phrase_index))
+                    .and_then(|cue| action_theme_id(cue.action()))
+                    .ok_or(CommandApplicationError::PlanUnavailable)?;
+                let autoloop_number = u16::try_from(scene_id.value())
+                    .map_err(|_| CommandApplicationError::InvalidAutoloopSelection)?;
+                runtime
+                    .planning_worker
+                    .library_contexts
+                    .get_mut(&current.track_load_id())
+                    .ok_or(CommandApplicationError::PlanUnavailable)?
+                    .set_autoloop_override(theme_id, phrase_index, autoloop_number)
+                    .map_err(LibraryWorkerError::from)?;
+                let materialized = runtime
+                    .planning_worker
+                    .materialize_library_plan(current.clone())
+                    .map_err(CommandApplicationError::Engine)?;
+                if materialized.cues() == current.cues() {
+                    return Err(PlanMutationError::NoChange.into());
+                }
+                current
+                    .revised(materialized.cues().to_vec())
+                    .map_err(PlanMutationError::InvalidPlan)?
+            } else {
+                runtime
+                    .planning_worker
+                    .planner
+                    .select_scene(&current, phrase_index, scene_id)?
+            }
         }
         SessionCommand::SetCueLock {
             phrase_index,
@@ -892,6 +1126,10 @@ fn apply_command(
             .planner
             .regenerate(&current, &input)?,
     };
+    let revised = runtime
+        .planning_worker
+        .materialize_library_plan(revised)
+        .map_err(CommandApplicationError::Engine)?;
     runtime
         .planning_worker
         .accept_revised_plan(&mut runtime.state, revised)
@@ -1029,6 +1267,15 @@ fn application_error_envelope(
             false,
             None,
         ),
+        CommandApplicationError::InvalidAutoloopSelection => error_envelope(
+            sequence,
+            correlation_id,
+            "validationFailed",
+            "invalidAutoloopSelection",
+            "The selected Autoloop is not mapped for this Theme and Phrase Type.",
+            false,
+            None,
+        ),
         CommandApplicationError::Mutation(mutation) => error_envelope(
             sequence,
             correlation_id,
@@ -1130,6 +1377,8 @@ fn application_error_envelope(
         | CommandApplicationError::Engine(_)
         | CommandApplicationError::Midi(_)
         | CommandApplicationError::Library(_)
+        | CommandApplicationError::LocalPlayback(_)
+        | CommandApplicationError::WrongDeckSourceMode
         | CommandApplicationError::Simulator(_) => error_envelope(
             sequence,
             correlation_id,
@@ -1200,10 +1449,16 @@ enum CommandApplicationError {
     PlanUnavailable,
     #[error("the selected Live phrase has already started")]
     StartedLivePhraseNotEditable,
+    #[error("the selected Autoloop button is invalid")]
+    InvalidAutoloopSelection,
     #[error("plan mutation failed: {0}")]
     Mutation(#[from] PlanMutationError),
     #[error("simulator control failed: {0}")]
     Simulator(#[from] SimulatorError),
+    #[error("local playback failed: {0}")]
+    LocalPlayback(#[from] LocalPlaybackError),
+    #[error("the command is not valid for the active deck source")]
+    WrongDeckSourceMode,
     #[error("library command failed: {0}")]
     Library(#[from] LibraryWorkerError),
     #[error("MIDI output command failed: {0}")]
@@ -1243,21 +1498,37 @@ fn snapshot_envelope(
     payload.insert(
         "deckSource".to_owned(),
         json!({
-            "providerKind": runtime.deck_source.provider_kind(),
-            "status": state
-                .source_statuses()
-                .next()
-                .map(|(_, status)| deck_source_status_name(status))
-                .unwrap_or("starting"),
+            "providerKind": runtime.deck_source_kind(),
+            "mode": match runtime.deck_source_mode {
+                DeckSourceMode::ConnectedDecks => "connectedDecks",
+                DeckSourceMode::LocalPlayback => "localPlayback",
+                DeckSourceMode::Simulator => "internalTest",
+            },
+            "displayName": match runtime.deck_source_mode {
+                DeckSourceMode::ConnectedDecks => "Connected Decks",
+                DeckSourceMode::LocalPlayback => "Local Playback",
+                DeckSourceMode::Simulator => "Internal Test Source",
+            },
+            "status": if runtime.deck_source_mode == DeckSourceMode::ConnectedDecks {
+                "disconnected"
+            } else {
+                state
+                    .source_statuses()
+                    .next()
+                    .map(|(_, status)| deck_source_status_name(status))
+                    .unwrap_or("starting")
+            },
         }),
     );
-    payload.insert(
-        "simulation".to_owned(),
-        json!({
-            "speed": runtime.deck_source.speed().multiplier(),
-            "paused": runtime.deck_source.is_paused(),
-        }),
-    );
+    if runtime.deck_source_mode == DeckSourceMode::Simulator {
+        payload.insert(
+            "simulation".to_owned(),
+            json!({
+                "speed": runtime.deck_source.speed().multiplier(),
+                "paused": runtime.deck_source.is_paused(),
+            }),
+        );
+    }
     let midi_output = runtime.output_worker.midi_status();
     payload.insert(
         "midiIntegration".to_owned(),
@@ -1276,15 +1547,38 @@ fn snapshot_envelope(
         "leaderDeckId".to_owned(),
         json!(state.leader_deck().map(|deck_id| deck_id.value())),
     );
-    let deck_source_kind = runtime.deck_source.provider_kind();
+    let deck_source_kind = runtime.deck_source_kind();
     let decks = state
         .decks()
         .map(|(deck_id, deck)| {
             let metadata = deck.metadata();
-            let waveform_preview = if deck_source_kind == "simulator" {
-                simulator_waveform_preview(metadata.id().value())
+            let library_context = runtime
+                .planning_worker
+                .library_context(deck.track_load_id());
+            let waveform_preview = library_context.map_or_else(
+                || {
+                    if deck_source_kind == "simulator" {
+                        simulator_waveform_preview(metadata.id().value())
+                    } else {
+                        Value::Null
+                    }
+                },
+                LibraryPlanContext::waveform_preview_json,
+            );
+            let local_playback = if runtime.deck_source_mode == DeckSourceMode::LocalPlayback {
+                library_context.map_or(Value::Null, LibraryPlanContext::local_playback_json)
             } else {
                 Value::Null
+            };
+            let plan_eligibility = if library_context.is_some() {
+                "readyExact"
+            } else if state
+                .plan(deck_id)
+                .is_some_and(|plan| plan.status() == PlanStatus::Ready)
+            {
+                "readyTransient"
+            } else {
+                "autoHeld"
             };
             json!({
                 "deckId": deck_id.value(),
@@ -1292,6 +1586,8 @@ fn snapshot_envelope(
                 "beat": deck.beat(),
                 "playing": deck.is_playing(),
                 "phraseIndex": deck.phrase_index(),
+                "planEligibility": plan_eligibility,
+                "localPlayback": local_playback,
                 "track": {
                     "id": metadata.id().value(),
                     "title": metadata.title(),
@@ -1312,12 +1608,18 @@ fn snapshot_envelope(
                         "analysisRevision": identity.analysis_revision(),
                         "timelineRevision": identity.lumi_timeline_revision(),
                     })),
-                    "phrases": metadata.phrases().iter().map(|phrase| json!({
-                        "index": phrase.index(),
-                        "startBeat": phrase.start_beat(),
-                        "endBeat": phrase.end_beat(),
-                        "kind": phrase_kind_name(phrase.kind()),
-                    })).collect::<Vec<_>>(),
+                    "phrases": metadata.phrases().iter().map(|phrase| {
+                        let role = library_context.map_or(Value::Null, |context| {
+                            context.phrase_role_json(phrase.index())
+                        });
+                        json!({
+                            "index": phrase.index(),
+                            "startBeat": phrase.start_beat(),
+                            "endBeat": phrase.end_beat(),
+                            "kind": phrase_kind_name(phrase.kind()),
+                            "role": role,
+                        })
+                    }).collect::<Vec<_>>(),
                 },
             })
         })
@@ -1467,6 +1769,7 @@ fn plan_json(
     let library_context = planning_worker.library_context(plan.track_load_id());
     let library_track = library_context.map_or(Value::Null, LibraryPlanContext::identity_json);
     let mut library_cues = BTreeMap::new();
+    let mut library_choices = BTreeMap::new();
     if let Some(context) = library_context {
         for cue in plan.cues() {
             let Some(theme_id) = action_theme_id(cue.action()) else {
@@ -1479,6 +1782,10 @@ fn plan_json(
             {
                 library_cues.insert(cue.phrase_index(), resolved);
             }
+            library_choices.insert(
+                cue.phrase_index(),
+                context.autoloop_choices(theme_id, cue.phrase_index()),
+            );
         }
     }
     Ok(json!({
@@ -1508,7 +1815,14 @@ fn plan_json(
             "action": action_json(cue.action()),
             "libraryResolution": library_cues
                 .get(&cue.phrase_index())
-                .map_or(Value::Null, library_resolution_json),
+                .map_or(Value::Null, |resolution| {
+                    library_resolution_with_choices_json(
+                        resolution,
+                        library_choices
+                            .get(&cue.phrase_index())
+                            .map_or(&[], Vec::as_slice),
+                    )
+                }),
         })).collect::<Vec<_>>(),
     }))
 }
@@ -1528,6 +1842,32 @@ fn library_resolution_json(cue: &ResolvedLibraryCue) -> Value {
         "bankNumber": cue.bank_number,
         "autoloopNumber": cue.autoloop_number,
     })
+}
+
+fn library_resolution_with_choices_json(
+    cue: &ResolvedLibraryCue,
+    choices: &[ResolvedLibraryCue],
+) -> Value {
+    let mut value = library_resolution_json(cue);
+    if let Value::Object(ref mut resolution) = value {
+        resolution.insert(
+            "choices".to_owned(),
+            Value::Array(
+                choices
+                    .iter()
+                    .map(|choice| {
+                        json!({
+                            "id": choice.autoloop_number,
+                            "name": choice.entry_name,
+                            "variantId": choice.variant_id,
+                            "bankNumber": choice.bank_number,
+                        })
+                    })
+                    .collect(),
+            ),
+        );
+    }
+    value
 }
 
 fn action_theme_id(action: &SemanticLightingAction) -> Option<lumi_domain::ThemeId> {
@@ -1782,8 +2122,16 @@ pub enum EngineError {
     DomainRuntime(#[from] SerializedRuntimeError),
     #[error("simulator initialization failed: {0}")]
     Simulator(#[from] SimulatorError),
+    #[error("local playback initialization failed: {0}")]
+    LocalPlayback(#[from] LocalPlaybackError),
     #[error("planner failed: {0}")]
     Planner(#[from] PlannerError),
+    #[error("a Library plan could not be materialized: {0}")]
+    PlanMaterialization(#[from] PlanValidationError),
+    #[error("a Library phrase has no resolved Autoloop")]
+    MissingLibraryAutoloopResolution,
+    #[error("a resolved Library Autoloop has no MIDI button address")]
+    MissingLibraryAutoloopAddress,
     #[error("the serialized runtime lost an event after accepting it")]
     SubmittedEventMissing,
     #[error("the planning worker effect sequence overflowed")]
@@ -1849,7 +2197,7 @@ mod tests {
                 &mut runtime,
                 &mut output_worker,
                 event,
-                source.leader_deck_id(),
+                Some(source.leader_deck_id()),
             ) {
                 panic!("test source event must process: {error}");
             }
@@ -1945,7 +2293,7 @@ mod tests {
         let expected_state_revision = runtime.state.state().revision();
         apply_session_command(
             &mut runtime,
-            SessionCommand::LoadLibraryTrackOnSimulatorDeck {
+            SessionCommand::LoadLibraryTrackOnLocalDeck {
                 track_id: 1,
                 deck_id: lumi_domain::DeckId::new(2),
                 expected_timeline_revision: 2,
@@ -1978,6 +2326,10 @@ mod tests {
                 && cue["libraryResolution"]["strategy"].is_string()
                 && cue["libraryResolution"]["variantId"].is_string()
                 && cue["libraryResolution"]["dryRunEntry"]["id"].is_string()
+                && cue["libraryResolution"]["choices"]
+                    .as_array()
+                    .is_some_and(|choices| !choices.is_empty())
+                && cue["action"]["sceneId"] == cue["libraryResolution"]["autoloopNumber"]
         }));
 
         apply_current_session_command(&mut runtime, |expected_revision| {

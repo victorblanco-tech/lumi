@@ -233,6 +233,31 @@ pub struct TrackMetadata {
 }
 
 impl TrackMetadata {
+    /// Creates a provider-normalized track for which Lumi has no usable phrase
+    /// analysis. This is a valid live-deck state: planning must fail closed and
+    /// hold the current look until exact or transient analysis becomes available.
+    pub fn try_new_unanalyzed(
+        id: TrackId,
+        title: String,
+        artist: String,
+        bpm_milli: u32,
+        musical_key: MusicalKey,
+        duration_beats: u32,
+    ) -> Result<Self, TrackValidationError> {
+        validate_track_facts(&title, &artist, bpm_milli, duration_beats)?;
+        Ok(Self {
+            id,
+            title,
+            artist,
+            bpm_milli,
+            musical_key,
+            color: None,
+            duration_beats,
+            phrases: Vec::new(),
+            identity_facts: None,
+        })
+    }
+
     pub fn try_new(
         id: TrackId,
         title: String,
@@ -265,18 +290,7 @@ impl TrackMetadata {
         duration_beats: u32,
         phrases: Vec<TrackPhrase>,
     ) -> Result<Self, TrackValidationError> {
-        if title.trim().is_empty() {
-            return Err(TrackValidationError::EmptyTitle);
-        }
-        if artist.trim().is_empty() {
-            return Err(TrackValidationError::EmptyArtist);
-        }
-        if !(20_000..=300_000).contains(&bpm_milli) {
-            return Err(TrackValidationError::BpmOutOfRange(bpm_milli));
-        }
-        if duration_beats == 0 {
-            return Err(TrackValidationError::EmptyDuration);
-        }
+        validate_track_facts(&title, &artist, bpm_milli, duration_beats)?;
         if phrases.is_empty() {
             return Err(TrackValidationError::EmptyPhrases);
         }
@@ -366,6 +380,27 @@ impl TrackMetadata {
     pub fn phrase(&self, index: u16) -> Option<TrackPhrase> {
         self.phrases.get(usize::from(index)).copied()
     }
+}
+
+fn validate_track_facts(
+    title: &str,
+    artist: &str,
+    bpm_milli: u32,
+    duration_beats: u32,
+) -> Result<(), TrackValidationError> {
+    if title.trim().is_empty() {
+        return Err(TrackValidationError::EmptyTitle);
+    }
+    if artist.trim().is_empty() {
+        return Err(TrackValidationError::EmptyArtist);
+    }
+    if !(20_000..=300_000).contains(&bpm_milli) {
+        return Err(TrackValidationError::BpmOutOfRange(bpm_milli));
+    }
+    if duration_beats == 0 {
+        return Err(TrackValidationError::EmptyDuration);
+    }
+    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

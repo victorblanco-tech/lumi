@@ -9,6 +9,7 @@ license.workspace = true
 lumi-deck-source = { path = "../lumi-deck-source" }
 lumi-domain = { path = "../lumi-domain" }
 lumi-lighting-output = { path = "../lumi-lighting-output" }
+lumi-local-playback = { path = "../lumi-local-playback" }
 lumi-library = { path = "../lumi-library" }
 lumi-library-demo = { path = "../lumi-library-demo" }
 lumi-library-source = { path = "../lumi-library-source" }

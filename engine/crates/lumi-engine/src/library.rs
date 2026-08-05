@@ -42,12 +42,12 @@ pub struct LibraryWorker {
 }
 
 #[derive(Clone, Debug)]
-pub struct LibrarySimulatorTrack {
+pub struct LibraryLocalPlaybackTrack {
     metadata: TrackMetadata,
     context: LibraryPlanContext,
 }
 
-impl LibrarySimulatorTrack {
+impl LibraryLocalPlaybackTrack {
     #[must_use]
     pub fn into_parts(self) -> (TrackMetadata, LibraryPlanContext) {
         (self.metadata, self.context)
@@ -62,8 +62,13 @@ pub struct LibraryPlanContext {
     source_track_id: String,
     analysis_revision: String,
     timeline_revision: u64,
+    audio_uri: String,
+    duration_millis: u64,
+    beat_times_millis: Vec<u64>,
+    waveform: Vec<lumi_library::WaveformPoint>,
     catalog: AutoloopCatalog,
     phrases: Vec<LibraryPhrasePlanContext>,
+    autoloop_overrides: BTreeMap<u16, VariantId>,
 }
 
 #[derive(Clone, Debug)]
@@ -103,6 +108,48 @@ impl LibraryPlanContext {
         })
     }
 
+    #[must_use]
+    pub fn local_playback_json(&self) -> Value {
+        json!({
+            "audioUri": self.audio_uri,
+            "durationMillis": self.duration_millis,
+        })
+    }
+
+    #[must_use]
+    pub fn waveform_preview_json(&self) -> Value {
+        json!({
+            "source": "localLibrary",
+            "style": "rgb",
+            "points": self.waveform.iter().map(|point| json!({
+                "low": point.low() / 8,
+                "mid": point.mid() / 8,
+                "high": point.high() / 8,
+            })).collect::<Vec<_>>(),
+        })
+    }
+
+    #[must_use]
+    pub fn beat_at_millis(&self, position_millis: u64) -> u32 {
+        let index = self
+            .beat_times_millis
+            .partition_point(|marker| *marker <= position_millis);
+        u32::try_from(index.saturating_sub(1)).unwrap_or(u32::MAX)
+    }
+
+    #[must_use]
+    pub fn phrase_role_json(&self, phrase_index: u16) -> Value {
+        self.phrases
+            .iter()
+            .find(|phrase| phrase.phrase_index == phrase_index)
+            .map_or(Value::Null, |phrase| {
+                json!({
+                    "roleId": phrase.role_id.as_str(),
+                    "roleName": phrase.role_name,
+                })
+            })
+    }
+
     pub fn resolve(
         &self,
         theme_id: ThemeId,
@@ -110,17 +157,31 @@ impl LibraryPlanContext {
         self.phrases
             .iter()
             .map(|phrase| {
-                let resolution = self.catalog.resolve_loop_strategy(
-                    theme_id,
-                    &phrase.role_id,
-                    &phrase.strategy,
-                    self.catalog.revision(),
-                )?;
+                let override_variant = self.autoloop_overrides.get(&phrase.phrase_index);
+                let resolution = if let Some(variant_id) = override_variant {
+                    self.catalog.resolve(
+                        theme_id,
+                        &phrase.role_id,
+                        Some(variant_id),
+                        self.catalog.revision(),
+                    )?
+                } else {
+                    self.catalog.resolve_loop_strategy(
+                        theme_id,
+                        &phrase.role_id,
+                        &phrase.strategy,
+                        self.catalog.revision(),
+                    )?
+                };
                 Ok(ResolvedLibraryCue {
                     phrase_index: phrase.phrase_index,
                     role_id: phrase.role_id.as_str().to_owned(),
                     role_name: phrase.role_name.clone(),
-                    strategy: loop_strategy_name(&phrase.strategy),
+                    strategy: if override_variant.is_some() {
+                        "planOverride"
+                    } else {
+                        loop_strategy_name(&phrase.strategy)
+                    },
                     variant_id: resolution.variant_id().as_str().to_owned(),
                     entry_id: resolution.entry_id().as_str().to_owned(),
                     entry_name: resolution.display_name().to_owned(),
@@ -136,6 +197,80 @@ impl LibraryPlanContext {
             })
             .collect()
     }
+
+    pub fn autoloop_choices(
+        &self,
+        theme_id: ThemeId,
+        phrase_index: u16,
+    ) -> Vec<ResolvedLibraryCue> {
+        let Some(phrase) = self
+            .phrases
+            .iter()
+            .find(|phrase| phrase.phrase_index == phrase_index)
+        else {
+            return Vec::new();
+        };
+        let mut choices = self
+            .catalog
+            .cells()
+            .iter()
+            .filter(|cell| cell.theme_id() == theme_id && cell.role_id() == &phrase.role_id)
+            .filter_map(|cell| {
+                let autoloop_number = mapping_number(cell.variant_id())?;
+                Some(ResolvedLibraryCue {
+                    phrase_index,
+                    role_id: phrase.role_id.as_str().to_owned(),
+                    role_name: phrase.role_name.clone(),
+                    strategy: "planOverride",
+                    variant_id: cell.variant_id().as_str().to_owned(),
+                    entry_id: cell.entry_id().as_str().to_owned(),
+                    entry_name: cell.display_name().to_owned(),
+                    bank_number: theme_id.value(),
+                    autoloop_number: Some(autoloop_number),
+                    catalog_revision: self.catalog.revision(),
+                    resolution_reason: "planOverride".to_owned(),
+                })
+            })
+            .collect::<Vec<_>>();
+        choices.sort_by_key(|choice| choice.autoloop_number);
+        choices
+    }
+
+    pub fn set_autoloop_override(
+        &mut self,
+        theme_id: ThemeId,
+        phrase_index: u16,
+        autoloop_number: u16,
+    ) -> Result<(), AutoloopCatalogError> {
+        let Some(phrase) = self
+            .phrases
+            .iter()
+            .find(|phrase| phrase.phrase_index == phrase_index)
+        else {
+            return Err(AutoloopCatalogError::UnknownPhraseRole);
+        };
+        let variant_id = self
+            .catalog
+            .cells()
+            .iter()
+            .find(|cell| {
+                cell.theme_id() == theme_id
+                    && cell.role_id() == &phrase.role_id
+                    && mapping_number(cell.variant_id()) == Some(autoloop_number)
+            })
+            .map(|cell| cell.variant_id().clone())
+            .ok_or(AutoloopCatalogError::MissingExactCell)?;
+        self.autoloop_overrides.insert(phrase_index, variant_id);
+        Ok(())
+    }
+}
+
+fn mapping_number(variant_id: &VariantId) -> Option<u16> {
+    variant_id
+        .as_str()
+        .strip_prefix("mapping-")
+        .and_then(|value| value.parse::<u16>().ok())
+        .filter(|value| (1..=32).contains(value))
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -291,14 +426,14 @@ impl LibraryWorker {
         Ok(())
     }
 
-    /// Builds a simulator load exclusively from the stored track identity and
+    /// Builds a Local Playback load exclusively from the stored track identity and
     /// the exact current Lumi-owned timeline. Raw source phrases are never used
     /// after the initial timeline import.
-    pub fn simulator_track(
+    pub fn local_playback_track(
         &mut self,
         track_id: u64,
         expected_timeline_revision: u64,
-    ) -> Result<LibrarySimulatorTrack, LibraryWorkerError> {
+    ) -> Result<LibraryLocalPlaybackTrack, LibraryWorkerError> {
         let track_id = TrackId::new(track_id);
         self.ensure_timeline(track_id)?;
         let track = self
@@ -346,7 +481,17 @@ impl LibraryWorker {
             source_track_id: track.summary().source_track_id().as_str().to_owned(),
             analysis_revision: track.summary().source_revision().as_str().to_owned(),
             timeline_revision: timeline.revision().value(),
+            audio_uri: track.audio_uri().to_owned(),
+            duration_millis: track.summary().duration_millis(),
+            beat_times_millis: track
+                .beat_grid()
+                .markers()
+                .iter()
+                .map(|marker| marker.time_millis())
+                .collect(),
+            waveform: track.waveform().to_vec(),
             catalog,
+            autoloop_overrides: BTreeMap::new(),
             phrases: timeline
                 .phrases()
                 .iter()
@@ -363,7 +508,16 @@ impl LibraryWorker {
         // selected Theme is therefore validated when the plan is resolved,
         // instead of rejecting a track because an unrelated bank lacks one of
         // its Phrase Types.
-        Ok(LibrarySimulatorTrack { metadata, context })
+        Ok(LibraryLocalPlaybackTrack { metadata, context })
+    }
+
+    #[cfg(test)]
+    pub fn simulator_track(
+        &mut self,
+        track_id: u64,
+        expected_timeline_revision: u64,
+    ) -> Result<LibraryLocalPlaybackTrack, LibraryWorkerError> {
+        self.local_playback_track(track_id, expected_timeline_revision)
     }
 
     pub fn edit_timeline(

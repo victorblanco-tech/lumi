@@ -9,9 +9,9 @@ public struct EngineSnapshot: Equatable, Sendable {
     public let operationState: String
     public let runtime: RuntimeSnapshot
     public let deckSource: DeckSourceSnapshot
-    public let simulation: SimulationSnapshot
+    public let simulation: SimulationSnapshot?
     public let outputProvider: OutputProviderSnapshot
-    public let leaderDeckID: UInt64
+    public let leaderDeckID: UInt64?
     public let decks: [DeckSnapshot]
     public let livePlan: PlanSnapshot?
     public let nextPlan: PlanSnapshot?
@@ -27,13 +27,13 @@ public struct EngineSnapshot: Equatable, Sendable {
         operationState: String = "off",
         runtime: RuntimeSnapshot,
         deckSource: DeckSourceSnapshot,
-        simulation: SimulationSnapshot = .init(speed: 1, paused: false),
+        simulation: SimulationSnapshot? = nil,
         outputProvider: OutputProviderSnapshot = .init(
             providerKind: "dryRun",
             status: "ready",
             recordCount: 0
         ),
-        leaderDeckID: UInt64,
+        leaderDeckID: UInt64?,
         decks: [DeckSnapshot],
         livePlan: PlanSnapshot? = nil,
         nextPlan: PlanSnapshot?,
@@ -135,11 +135,36 @@ public struct RuntimeSnapshot: Equatable, Sendable {
 
 public struct DeckSourceSnapshot: Equatable, Sendable {
     public let providerKind: String
+    public let mode: String
+    public let displayName: String
     public let status: String
 
-    public init(providerKind: String, status: String) {
+    public init(
+        providerKind: String,
+        mode: String = "localPlayback",
+        displayName: String = "Local Playback",
+        status: String
+    ) {
         self.providerKind = providerKind
+        self.mode = mode
+        self.displayName = displayName
         self.status = status
+    }
+}
+
+public enum DeckPlanEligibility: String, Equatable, Sendable {
+    case readyExact
+    case readyTransient
+    case autoHeld
+}
+
+public struct LocalPlaybackTrackSnapshot: Equatable, Sendable {
+    public let audioURI: String
+    public let durationMillis: UInt64
+
+    public init(audioURI: String, durationMillis: UInt64) {
+        self.audioURI = audioURI
+        self.durationMillis = durationMillis
     }
 }
 
@@ -158,6 +183,8 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
     public let durationBeats: UInt64
     public let phrases: [DeckPhraseSnapshot]
     public let waveformPreview: DeckWaveformPreviewSnapshot?
+    public let planEligibility: DeckPlanEligibility
+    public let localPlayback: LocalPlaybackTrackSnapshot?
 
     public var id: UInt64 { deckID }
 
@@ -175,7 +202,9 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
         phraseIndex: UInt64?,
         durationBeats: UInt64 = 0,
         phrases: [DeckPhraseSnapshot] = [],
-        waveformPreview: DeckWaveformPreviewSnapshot? = nil
+        waveformPreview: DeckWaveformPreviewSnapshot? = nil,
+        planEligibility: DeckPlanEligibility = .autoHeld,
+        localPlayback: LocalPlaybackTrackSnapshot? = nil
     ) {
         self.deckID = deckID
         self.trackLoadID = trackLoadID
@@ -191,6 +220,8 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
         self.durationBeats = durationBeats
         self.phrases = phrases
         self.waveformPreview = waveformPreview
+        self.planEligibility = planEligibility
+        self.localPlayback = localPlayback
     }
 }
 
@@ -199,14 +230,25 @@ public struct DeckPhraseSnapshot: Equatable, Identifiable, Sendable {
     public let startBeat: UInt64
     public let endBeat: UInt64
     public let kind: String
+    public let roleID: String?
+    public let roleName: String?
 
     public var id: UInt64 { index }
 
-    public init(index: UInt64, startBeat: UInt64, endBeat: UInt64, kind: String) {
+    public init(
+        index: UInt64,
+        startBeat: UInt64,
+        endBeat: UInt64,
+        kind: String,
+        roleID: String? = nil,
+        roleName: String? = nil
+    ) {
         self.index = index
         self.startBeat = startBeat
         self.endBeat = endBeat
         self.kind = kind
+        self.roleID = roleID
+        self.roleName = roleName
     }
 }
 
@@ -359,6 +401,7 @@ public struct PlanCueLibraryResolutionSnapshot: Equatable, Sendable {
     public let entryName: String
     public let bankNumber: UInt64?
     public let autoloopNumber: UInt64?
+    public let choices: [PlanAutoloopChoiceSnapshot]
 
     public init(
         roleID: String,
@@ -370,7 +413,8 @@ public struct PlanCueLibraryResolutionSnapshot: Equatable, Sendable {
         entryID: String,
         entryName: String,
         bankNumber: UInt64? = nil,
-        autoloopNumber: UInt64? = nil
+        autoloopNumber: UInt64? = nil,
+        choices: [PlanAutoloopChoiceSnapshot] = []
     ) {
         self.roleID = roleID
         self.roleName = roleName
@@ -382,6 +426,21 @@ public struct PlanCueLibraryResolutionSnapshot: Equatable, Sendable {
         self.entryName = entryName
         self.bankNumber = bankNumber
         self.autoloopNumber = autoloopNumber
+        self.choices = choices
+    }
+}
+
+public struct PlanAutoloopChoiceSnapshot: Equatable, Identifiable, Sendable {
+    public let id: UInt64
+    public let name: String
+    public let variantID: String
+    public let bankNumber: UInt64
+
+    public init(id: UInt64, name: String, variantID: String, bankNumber: UInt64) {
+        self.id = id
+        self.name = name
+        self.variantID = variantID
+        self.bankNumber = bankNumber
     }
 }
 

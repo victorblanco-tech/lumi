@@ -9,6 +9,7 @@ public struct LiveWorkspaceView: View {
     private let showsNavigation: Bool
     private let onPlanMutation: @MainActor (PlanMutationRequest) -> Void
     private let onSessionCommand: @MainActor (SessionCommandRequest) -> Void
+    private let onLocalPlayback: @MainActor (LocalPlaybackRequest) -> Void
     @Binding private var appearance: AppearancePreference
     @Binding private var keyNotation: KeyNotationPreference
     @State private var selectedPhrase: UInt64 = 0
@@ -25,7 +26,8 @@ public struct LiveWorkspaceView: View {
         allowsScrolling: Bool = true,
         showsNavigation: Bool = true,
         onPlanMutation: @escaping @MainActor (PlanMutationRequest) -> Void = { _ in },
-        onSessionCommand: @escaping @MainActor (SessionCommandRequest) -> Void = { _ in }
+        onSessionCommand: @escaping @MainActor (SessionCommandRequest) -> Void = { _ in },
+        onLocalPlayback: @escaping @MainActor (LocalPlaybackRequest) -> Void = { _ in }
     ) {
         self.state = state
         self.productVersion = productVersion
@@ -33,6 +35,7 @@ public struct LiveWorkspaceView: View {
         self.showsNavigation = showsNavigation
         self.onPlanMutation = onPlanMutation
         self.onSessionCommand = onSessionCommand
+        self.onLocalPlayback = onLocalPlayback
         _appearance = appearance
         _keyNotation = keyNotation
     }
@@ -143,14 +146,8 @@ public struct LiveWorkspaceView: View {
                     .foregroundStyle(LumiColor.textSecondary)
             }
             Spacer()
+            deckSourceSelector
             technicalStatusButton
-            if state.content?.sourceName.lowercased() == "simulator" {
-                if allowsScrolling {
-                    simulatorMenu
-                } else {
-                    simulatorIndicator
-                }
-            }
             operationControls
             if allowsScrolling {
                 preferenceMenu
@@ -242,62 +239,36 @@ public struct LiveWorkspaceView: View {
         .accessibilityIdentifier("lumi.technicalStatus.popover")
     }
 
-    private var simulatorMenu: some View {
-        Menu {
-            Button(copy.loadDemo) {
-                sendWithRevision { .loadDemo(expectedStateRevision: $0) }
-            }
-            .disabled(!canSendSessionCommand)
-            Menu(copy.speed) {
-                ForEach([UInt64(1), 4, 16, 64], id: \.self) { speed in
-                    Button("\(speed)×") {
-                        sendWithRevision {
-                            .setSimulationSpeed(speed, expectedStateRevision: $0)
-                        }
-                    }
-                    .disabled(
-                        !canSendSessionCommand || state.content?.simulation.speed == speed
-                    )
-                }
-            }
-            Button(
-                state.content?.simulation.paused == true ? copy.resumeDemo : copy.pauseDemo
-            ) {
-                let playing = state.content?.simulation.paused == true
-                sendWithRevision {
-                    .setSimulationPlayback(playing, expectedStateRevision: $0)
-                }
-            }
-            .disabled(!canSendSessionCommand)
-            Divider()
-            Button(copy.nextTrack) {
-                sendWithRevision { .advanceToNextTrack(expectedStateRevision: $0) }
-            }
-            .disabled(!canSendSessionCommand)
-            Button(copy.resetDemo) {
-                sendWithRevision { .resetDemo(expectedStateRevision: $0) }
-            }
-            .disabled(!canSendSessionCommand)
-        } label: {
-            Label("Demo", systemImage: "waveform.path.ecg")
+    private var deckSourceSelector: some View {
+        HStack(spacing: 2) {
+            sourceModeButton("Connected Decks", mode: "connectedDecks", icon: "cable.connector")
+            sourceModeButton("Local Playback", mode: "localPlayback", icon: "macbook.and.iphone")
         }
-        .menuStyle(.borderlessButton)
-        .fixedSize()
-        .accessibilityIdentifier("lumi.simulator.menu")
+        .padding(2)
+        .background(LumiColor.surface)
+        .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
+        .overlay {
+            RoundedRectangle(cornerRadius: LumiRadius.control)
+                .stroke(LumiColor.border, lineWidth: 1)
+        }
+        .accessibilityIdentifier("lumi.deckSource.selector")
     }
 
-    private var simulatorIndicator: some View {
-        Label("Demo", systemImage: "waveform.path.ecg")
-            .font(LumiTypography.metadata.weight(.semibold))
-            .foregroundStyle(LumiColor.textSecondary)
-            .padding(.horizontal, LumiSpacing.medium)
-            .frame(height: LumiControlMetric.standardHeight)
-            .background(LumiColor.surface)
-            .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
-            .overlay {
-                RoundedRectangle(cornerRadius: LumiRadius.control)
-                    .stroke(LumiColor.border, lineWidth: 1)
-            }
+    private func sourceModeButton(_ title: String, mode: String, icon: String) -> some View {
+        let selected = state.content?.sourceMode == mode
+        return Button {
+            sendWithRevision { .selectDeckSourceMode(mode, expectedStateRevision: $0) }
+        } label: {
+            Label(title, systemImage: icon)
+                .font(LumiTypography.metadata.weight(.semibold))
+                .padding(.horizontal, LumiSpacing.small)
+                .frame(height: LumiControlMetric.standardHeight - 4)
+                .background(selected ? LumiColor.accent.opacity(0.18) : Color.clear)
+                .foregroundStyle(selected ? LumiColor.accent : LumiColor.textSecondary)
+                .clipShape(RoundedRectangle(cornerRadius: LumiRadius.compact))
+        }
+        .buttonStyle(.plain)
+        .disabled(selected || !canSendSessionCommand)
     }
 
     private var operationControls: some View {
@@ -375,42 +346,65 @@ public struct LiveWorkspaceView: View {
         Group {
             if let content = state.content {
                 HStack(alignment: .top, spacing: LumiSpacing.medium) {
-                    ForEach(content.decks) { deck in
-                        let isMaster = deck.deckID == content.leaderDeckID
-                        let plan = isMaster ? content.livePlan : content.plan
-                        let selectedIndex = selectedPhraseIndex(
-                            deck: deck,
-                            plan: plan,
-                            isMaster: isMaster
-                        )
-                        LiveDeckSurface(
-                            deck: deck,
-                            isMaster: isMaster,
-                            plan: plan,
-                            musicalKey: musicalKey(for: deck),
-                            selectedPhraseIndex: selectedIndex,
-                            onSelectPhrase: { phraseIndex in
-                                if isMaster {
-                                    selectedLivePhrase = phraseIndex
+                    ForEach([UInt64(1), 2], id: \.self) { deckID in
+                        if let deck = content.decks.first(where: { $0.deckID == deckID }) {
+                            let isMaster = deck.deckID == content.leaderDeckID
+                            let plan = isMaster ? content.livePlan : content.plan
+                            let selectedIndex = selectedPhraseIndex(
+                                deck: deck,
+                                plan: plan,
+                                isMaster: isMaster
+                            )
+                            LiveDeckSurface(
+                                deck: deck,
+                                isMaster: isMaster,
+                                plan: plan,
+                                musicalKey: musicalKey(for: deck),
+                                isLocalPlayback: content.sourceMode == "localPlayback",
+                                selectedPhraseIndex: selectedIndex,
+                                onSelectPhrase: { phraseIndex in
+                                    if isMaster {
+                                        selectedLivePhrase = phraseIndex
+                                    } else {
+                                        selectedPhrase = phraseIndex
+                                    }
+                                },
+                                onTogglePlayback: {
+                                    onLocalPlayback(.togglePlayback(deckID: deck.deckID))
+                                },
+                                onStop: {
+                                    onLocalPlayback(.stop(deckID: deck.deckID))
+                                },
+                                onSeek: { progress in
+                                    onLocalPlayback(.seek(deckID: deck.deckID, progress: progress))
+                                },
+                                onMakeMaster: {
+                                    sendWithRevision {
+                                        .setLocalPlaybackLeader(
+                                            deck.deckID,
+                                            expectedStateRevision: $0
+                                        )
+                                    }
+                                }
+                            ) {
+                                if let plan {
+                                    phraseEditor(
+                                        plan: plan,
+                                        deck: deck,
+                                        options: content.planningOptions,
+                                        isLive: isMaster,
+                                        selectedIndex: selectedIndex
+                                    )
                                 } else {
-                                    selectedPhrase = phraseIndex
+                                    heldDeckPlan(deck)
                                 }
                             }
-                        ) {
-                            if let plan {
-                                phraseEditor(
-                                    plan: plan,
-                                    deck: deck,
-                                    options: content.planningOptions,
-                                    isLive: isMaster,
-                                    selectedIndex: selectedIndex
-                                )
-                            } else {
-                                waitingDeckPlan
-                            }
+                            .frame(maxWidth: .infinity)
+                            .accessibilityIdentifier(deckID == 1 ? "lumi.deck.a" : "lumi.deck.b")
+                        } else {
+                            emptyDeckSurface(deckID: deckID, sourceMode: content.sourceMode)
+                                .frame(maxWidth: .infinity)
                         }
-                        .frame(maxWidth: .infinity)
-                        .accessibilityIdentifier(deck.deckID == 1 ? "lumi.deck.a" : "lumi.deck.b")
                     }
                 }
             } else {
@@ -429,19 +423,17 @@ public struct LiveWorkspaceView: View {
         let cue = selectedIndex.flatMap { index in
             plan.cues.first(where: { $0.phraseIndex == index })
         }
-        let hasStarted = isLive && cue.map { selectedCue in
-            deck.phraseIndex.map { selectedCue.phraseIndex <= $0 } ?? false
-        } == true
-        let editable = canEdit(plan) && !hasStarted
+        let phraseState = phraseState(cue: cue, deck: deck, isLive: isLive)
+        let editable = canEdit(plan) && phraseState == .planned
         return VStack(alignment: .leading, spacing: LumiSpacing.small) {
             HStack {
                 Text(verbatim: isLive ? "Live phrase plan" : "Next-track phrase plan")
                     .font(LumiTypography.metadata.weight(.semibold))
                     .foregroundStyle(Color.white)
                 Spacer()
-                Text(verbatim: hasStarted ? "STARTED · LOCKED" : "EDITABLE UNTIL PHRASE START")
+                Text(verbatim: phraseState.label)
                     .font(LumiTypography.technical)
-                    .foregroundStyle(hasStarted ? LumiColor.destructive : LumiColor.success)
+                    .foregroundStyle(phraseState.color)
             }
 
             if let cue {
@@ -468,9 +460,7 @@ public struct LiveWorkspaceView: View {
                             PlanSelectionControl(
                                 value: autoloopName(cue),
                                 selectedID: sceneID(cue),
-                                choices: compatibleScenes(for: cue, options: options).map {
-                                    PlanSelectionChoice(id: $0.id, name: $0.name)
-                                },
+                                choices: compatibleAutoloops(for: cue, options: options),
                                 isEnabled: editable && sceneID(cue) != nil,
                                 onSelect: { selectScene($0, cue: cue, plan: plan) }
                             )
@@ -491,8 +481,8 @@ public struct LiveWorkspaceView: View {
                             )
                         } label: {
                             Label(
-                                cue.locked ? copy.unlockCue : copy.lockCue,
-                                systemImage: cue.locked ? "lock.open" : "lock"
+                                cue.locked ? "Unpin choice" : "Pin choice",
+                                systemImage: cue.locked ? "pin.slash" : "pin"
                             )
                         }
                         .buttonStyle(.bordered)
@@ -523,6 +513,41 @@ public struct LiveWorkspaceView: View {
         .accessibilityIdentifier(isLive ? "lumi.live.phraseEditor" : "lumi.next.phraseEditor")
     }
 
+    private enum PhrasePlanningState: Equatable {
+        case completed
+        case live
+        case planned
+
+        var label: String {
+            switch self {
+            case .completed: "COMPLETED · READ ONLY"
+            case .live: "LIVE · READ ONLY"
+            case .planned: "PLANNED · EDITABLE UNTIL PHRASE START"
+            }
+        }
+
+        var color: Color {
+            switch self {
+            case .completed: Color.white.opacity(0.46)
+            case .live: LumiColor.warning
+            case .planned: LumiColor.success
+            }
+        }
+    }
+
+    private func phraseState(
+        cue: PlanCueSnapshot?,
+        deck: DeckSnapshot,
+        isLive: Bool
+    ) -> PhrasePlanningState {
+        guard isLive, let cue, let currentPhrase = deck.phraseIndex else {
+            return .planned
+        }
+        if cue.phraseIndex < currentPhrase { return .completed }
+        if cue.phraseIndex == currentPhrase { return .live }
+        return .planned
+    }
+
     private func selectedPhraseIndex(
         deck: DeckSnapshot,
         plan: PlanSnapshot?,
@@ -539,13 +564,49 @@ public struct LiveWorkspaceView: View {
         return plan.cues.first?.phraseIndex
     }
 
-    private var waitingDeckPlan: some View {
-        Text(verbatim: copy.waitingPlan)
-            .font(LumiTypography.metadata)
-            .foregroundStyle(Color.white.opacity(0.54))
-            .padding(LumiSpacing.medium)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .overlay(alignment: .top) { Divider().overlay(Color.white.opacity(0.1)) }
+    private func heldDeckPlan(_ deck: DeckSnapshot) -> some View {
+        HStack(spacing: LumiSpacing.small) {
+            Image(systemName: "pause.circle.fill")
+                .foregroundStyle(LumiColor.warning)
+            VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+                Text(verbatim: deck.planEligibility == .autoHeld ? "AUTO HELD" : copy.waitingPlan)
+                    .font(LumiTypography.metadata.weight(.semibold))
+                    .foregroundStyle(Color.white)
+                Text(verbatim: "No complete mapped Lumi phrase timeline is available. The current look is held; manual MIDI remains available.")
+                    .font(LumiTypography.technical)
+                    .foregroundStyle(Color.white.opacity(0.54))
+            }
+        }
+        .padding(LumiSpacing.medium)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .overlay(alignment: .top) { Divider().overlay(Color.white.opacity(0.1)) }
+    }
+
+    private func emptyDeckSurface(deckID: UInt64, sourceMode: String) -> some View {
+        VStack(spacing: LumiSpacing.medium) {
+            Text(verbatim: deckID == 1 ? "DECK A" : "DECK B")
+                .font(LumiTypography.technical.weight(.semibold))
+                .foregroundStyle(LumiColor.accent)
+            Image(systemName: sourceMode == "localPlayback" ? "music.note.list" : "cable.connector")
+                .font(LumiTypography.screenTitle)
+                .foregroundStyle(LumiColor.textSecondary)
+            Text(verbatim: sourceMode == "localPlayback" ? "No Library track loaded" : "Waiting for connected deck")
+                .font(LumiTypography.cardTitle)
+                .foregroundStyle(Color.white)
+            Text(verbatim: sourceMode == "localPlayback" ? "Load a track onto this deck from Library." : "Beat Link Trigger connection will appear here without changing the Live workflow.")
+                .font(LumiTypography.metadata)
+                .foregroundStyle(Color.white.opacity(0.54))
+                .multilineTextAlignment(.center)
+        }
+        .frame(maxWidth: .infinity, minHeight: 330)
+        .padding(LumiSpacing.large)
+        .background(Color.black)
+        .clipShape(RoundedRectangle(cornerRadius: LumiRadius.panel))
+        .overlay {
+            RoundedRectangle(cornerRadius: LumiRadius.panel)
+                .stroke(LumiColor.border, lineWidth: 1)
+        }
+        .accessibilityIdentifier(deckID == 1 ? "lumi.deck.a.empty" : "lumi.deck.b.empty")
     }
 
     private func navigationRow(
@@ -736,7 +797,10 @@ public struct LiveWorkspaceView: View {
     }
 
     private func phraseTitle(_ cue: PlanCueSnapshot) -> String {
-        switch cue.reason {
+        if let roleName = cue.libraryResolution?.roleName {
+            return roleName
+        }
+        return switch cue.reason {
         case let .phraseCategoryMatched(phraseKind, _): copy.phrase(phraseKind)
         case .missingPhraseAnalysis: copy.fallback
         }
@@ -882,14 +946,19 @@ public struct LiveWorkspaceView: View {
         return nil
     }
 
-    private func compatibleScenes(
+    private func compatibleAutoloops(
         for cue: PlanCueSnapshot,
         options: PlanningOptionsSnapshot
-    ) -> [SceneOptionSnapshot] {
+    ) -> [PlanSelectionChoice] {
+        if let choices = cue.libraryResolution?.choices, !choices.isEmpty {
+            return choices.map { PlanSelectionChoice(id: $0.id, name: $0.name) }
+        }
         guard case let .applyLook(_, _, _, _, category, _, _) = cue.action else {
             return []
         }
-        return options.scenes.filter { $0.category == category }
+        return options.scenes
+            .filter { $0.category == category }
+            .map { PlanSelectionChoice(id: $0.id, name: $0.name) }
     }
 
     private var conditionLabel: String {

@@ -311,12 +311,20 @@ public enum EngineCommand: Equatable, Sendable {
     case sendMidiLearnPulse
     case sendMidiAddressLearnPulse(targetKind: String, targetNumber: UInt16)
     case triggerMidiAutoloop(bankNumber: UInt16, autoloopNumber: UInt16)
-    case loadLibraryTrackOnSimulatorDeck(
+    case loadLibraryTrackOnLocalDeck(
         trackID: UInt64,
         deckID: UInt64,
         expectedTimelineRevision: UInt64,
         expectedStateRevision: UInt64
     )
+    case updateLocalPlaybackTransport(
+        deckID: UInt64,
+        trackLoadID: UInt64,
+        positionMillis: UInt64,
+        playing: Bool
+    )
+    case setLocalPlaybackLeader(deckID: UInt64, expectedStateRevision: UInt64)
+    case selectDeckSourceMode(String, expectedStateRevision: UInt64)
     case loadDemoSession(expectedStateRevision: UInt64)
     case setOperationState(String, expectedStateRevision: UInt64)
     case setSimulationSpeed(UInt64, expectedStateRevision: UInt64)
@@ -436,20 +444,40 @@ public enum EngineCommand: Equatable, Sendable {
                 "bankNumber": .number(Double(bankNumber)),
                 "autoloopNumber": .number(Double(autoloopNumber))
             ]
-        case let .loadLibraryTrackOnSimulatorDeck(
+        case let .loadLibraryTrackOnLocalDeck(
             trackID,
             deckID,
             expectedTimelineRevision,
             expectedStateRevision
         ):
             return statePayload(
-                "loadLibraryTrackOnSimulatorDeck",
+                "loadLibraryTrackOnLocalDeck",
                 expectedRevision: expectedStateRevision,
                 additional: [
                     "trackId": .number(Double(trackID)),
                     "deckId": .number(Double(deckID)),
                     "expectedTimelineRevision": .number(Double(expectedTimelineRevision))
                 ]
+            )
+        case let .updateLocalPlaybackTransport(deckID, trackLoadID, positionMillis, playing):
+            return [
+                "kind": .string("updateLocalPlaybackTransport"),
+                "deckId": .number(Double(deckID)),
+                "trackLoadId": .number(Double(trackLoadID)),
+                "positionMillis": .number(Double(positionMillis)),
+                "playing": .boolean(playing)
+            ]
+        case let .setLocalPlaybackLeader(deckID, expectedRevision):
+            return statePayload(
+                "setLocalPlaybackLeader",
+                expectedRevision: expectedRevision,
+                additional: ["deckId": .number(Double(deckID))]
+            )
+        case let .selectDeckSourceMode(mode, expectedRevision):
+            return statePayload(
+                "selectDeckSourceMode",
+                expectedRevision: expectedRevision,
+                additional: ["mode": .string(mode)]
             )
         case let .loadDemoSession(expectedRevision):
             return statePayload("loadDemoSession", expectedRevision: expectedRevision)

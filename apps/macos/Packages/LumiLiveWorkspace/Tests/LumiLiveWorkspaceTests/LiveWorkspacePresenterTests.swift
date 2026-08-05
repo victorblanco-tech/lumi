@@ -17,26 +17,26 @@ struct LiveWorkspacePresenterTests {
         let state = LiveWorkspacePresenter.ready(snapshot)
 
         #expect(state.condition == .ready)
-        #expect(state.content?.liveDeck.deckID == 1)
-        #expect(state.content?.liveDeck.title == "Aurora Signal")
-        #expect(state.content?.nextDeck.deckID == 2)
-        #expect(state.content?.nextDeck.title == "Neon Horizon")
+        #expect(state.content?.liveDeck?.deckID == 1)
+        #expect(state.content?.liveDeck?.title == "Aurora Signal")
+        #expect(state.content?.nextDeck?.deckID == 2)
+        #expect(state.content?.nextDeck?.title == "Neon Horizon")
         #expect(state.content?.decks.map(\.deckID) == [1, 2])
         #expect(state.content?.leaderDeckID == 1)
-        #expect(state.content?.liveDeck.durationBeats == 128)
-        #expect(state.content?.liveDeck.phrases.map(\.kind) == ["intro", "verse", "build", "drop"])
-        #expect(state.content?.plan?.deckID == state.content?.nextDeck.deckID)
+        #expect(state.content?.liveDeck?.durationBeats == 128)
+        #expect(state.content?.liveDeck?.phrases.map(\.roleID) == ["intro-outro", "bridge", "buildup-1", "drop"])
+        #expect(state.content?.plan?.deckID == state.content?.nextDeck?.deckID)
         #expect(state.content?.plan?.cues.count == 4)
         #expect(state.content?.plan?.planID == "14113485664261432828")
         #expect(state.content?.plan?.cues.allSatisfy { !$0.locked } == true)
         #expect(state.content?.planningOptions.themes.count == 4)
-        #expect(state.content?.nextDeck.colorRGB == 4_747_469)
+        #expect(state.content?.nextDeck?.colorRGB == 4_747_469)
         #expect(state.content?.plan?.themeDecision?.themeName == "Deep Ocean")
         #expect(state.content?.plan?.themeDecision?.reason == "colorPrefer")
         #expect(state.content?.plan?.themeDecision?.matchedColorRGB == 4_747_469)
         #expect(state.content?.planningOptions.scenes.count == 10)
         #expect(state.content?.operationState == "armed")
-        #expect(state.content?.simulation.speed == 1)
+        #expect(state.content?.simulation == nil)
         #expect(state.content?.timeline.count == 1)
         #expect(state.output.condition == .ready)
         #expect(state.planner.condition == .ready)
@@ -67,16 +67,16 @@ struct LiveWorkspacePresenterTests {
 
         #expect(state.content?.decks.map(\.deckID) == [1, 2])
         #expect(state.content?.leaderDeckID == 2)
-        #expect(state.content?.liveDeck.deckID == 2)
-        #expect(state.content?.nextDeck.deckID == 1)
+        #expect(state.content?.liveDeck?.deckID == 2)
+        #expect(state.content?.nextDeck?.deckID == 1)
     }
 
-    @Test("Simulator fixture exposes provider-neutral RGB waveform data")
-    func simulatorWaveformIsExplicit() {
+    @Test("Library playback fixture exposes provider-neutral RGB waveform data")
+    func localLibraryWaveformIsExplicit() {
         let previews = LiveWorkspaceFixtures.readySnapshot.decks.compactMap(\.waveformPreview)
 
         #expect(previews.count == 2)
-        #expect(previews.allSatisfy { $0.source == "simulator" && $0.style == "rgb" })
+        #expect(previews.allSatisfy { $0.source == "library" && $0.style == "rgb" })
         #expect(previews.allSatisfy { $0.points.count == 192 })
     }
 
@@ -119,7 +119,7 @@ struct LiveWorkspacePresenterTests {
         let state = LiveWorkspaceFixtures.stale
 
         #expect(state.condition == .stale)
-        #expect(state.content?.nextDeck.title == "Neon Horizon")
+        #expect(state.content?.nextDeck?.title == "Neon Horizon")
         #expect(state.engine.condition == .stale)
     }
 
@@ -130,6 +130,46 @@ struct LiveWorkspacePresenterTests {
         #expect(state.condition == .disconnected)
         #expect(state.content == nil)
         #expect(state.engine.condition == .error)
+    }
+
+    @Test("An unmatched connected track is shown safely with AUTO HELD")
+    func unmatchedTrackFailsClosedWithoutFabricatedPhrases() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case var .array(decks) = payload["decks"],
+              !decks.isEmpty,
+              case var .object(deck) = decks[0],
+              case var .object(track) = deck["track"] else {
+            Issue.record("Recorded fixture must contain Deck A")
+            return
+        }
+        track["phrases"] = .array([])
+        deck["track"] = .object(track)
+        deck["phraseIndex"] = .null
+        deck["planEligibility"] = .string("autoHeld")
+        decks[0] = .object(deck)
+        payload["decks"] = .array(decks)
+        payload["livePlan"] = .null
+        payload["nextPlan"] = .null
+        let unmatched = MessageEnvelope(
+            protocolVersion: recorded.protocolVersion,
+            messageType: recorded.messageType,
+            messageId: recorded.messageId,
+            sequence: recorded.sequence,
+            correlationId: recorded.correlationId,
+            sentAt: recorded.sentAt,
+            payload: payload
+        )
+
+        let snapshot = try EngineSnapshotDecoder().decode(
+            unmatched,
+            endpointDescription: "127.0.0.1:52841",
+            protocolVersion: 1
+        )
+
+        #expect(snapshot.decks[0].planEligibility == .autoHeld)
+        #expect(snapshot.decks[0].phrases.isEmpty)
+        #expect(snapshot.livePlan == nil)
     }
 
     @Test("Decoder rejects a plan that targets the live deck")

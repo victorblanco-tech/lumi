@@ -95,9 +95,9 @@ The deterministic two-deck source, controllable clock, fixture, and adapter
 boundary are documented in
 [`simulator-deck-source.md`](simulator-deck-source.md).
 
-Library-owned tracks enter that same provider-neutral path through
-[`library-track-simulator.md`](library-track-simulator.md), including exact
-timeline identity and logical Autoloop dry-run evidence.
+Library-owned tracks enter the production Local Playback path through
+[`library-local-playback.md`](library-local-playback.md), including exact
+timeline identity, audio transport, planning, and mapped Autoloop evidence.
 
 Deterministic phrase planning, the minimal catalog, fallback behavior, golden
 plan, and performance budget are documented in

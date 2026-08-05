@@ -19,12 +19,10 @@
       "lastDecision": "phraseChanged"
     },
     "deckSource": {
-      "providerKind": "simulator",
+      "providerKind": "localPlayback",
+      "mode": "localPlayback",
+      "displayName": "Local Playback",
       "status": "ready"
-    },
-    "simulation": {
-      "speed": 1,
-      "paused": false
     },
     "leaderDeckId": 1,
     "decks": [
@@ -34,6 +32,11 @@
         "beat": 0,
         "playing": true,
         "phraseIndex": 0,
+        "planEligibility": "readyExact",
+        "localPlayback": {
+          "audioUri": "lumi-demo://aurora-signal",
+          "durationMillis": 61935
+        },
         "track": {
           "id": 101,
           "title": "Aurora Signal",
@@ -43,10 +46,10 @@
           "key": { "pitchClass": "a", "mode": "minor" },
           "durationBeats": 128,
           "phrases": [
-            { "index": 0, "startBeat": 0, "endBeat": 32, "kind": "intro" },
-            { "index": 1, "startBeat": 32, "endBeat": 64, "kind": "verse" },
-            { "index": 2, "startBeat": 64, "endBeat": 96, "kind": "build" },
-            { "index": 3, "startBeat": 96, "endBeat": 128, "kind": "drop" }
+            { "index": 0, "startBeat": 0, "endBeat": 32, "kind": "intro", "role": { "roleId": "intro-outro", "roleName": "Intro / Outro" } },
+            { "index": 1, "startBeat": 32, "endBeat": 64, "kind": "verse", "role": { "roleId": "bridge", "roleName": "Bridge" } },
+            { "index": 2, "startBeat": 64, "endBeat": 96, "kind": "build", "role": { "roleId": "buildup-1", "roleName": "Buildup 1" } },
+            { "index": 3, "startBeat": 96, "endBeat": 128, "kind": "drop", "role": { "roleId": "drop", "roleName": "Drop" } }
           ]
         }
       },
@@ -56,6 +59,11 @@
         "beat": 0,
         "playing": false,
         "phraseIndex": null,
+        "planEligibility": "readyExact",
+        "localPlayback": {
+          "audioUri": "lumi-demo://neon-horizon",
+          "durationMillis": 60000
+        },
         "track": {
           "id": 202,
           "title": "Neon Horizon",
@@ -65,10 +73,10 @@
           "key": { "pitchClass": "c", "mode": "major" },
           "durationBeats": 128,
           "phrases": [
-            { "index": 0, "startBeat": 0, "endBeat": 32, "kind": "intro" },
-            { "index": 1, "startBeat": 32, "endBeat": 64, "kind": "breakdown" },
-            { "index": 2, "startBeat": 64, "endBeat": 96, "kind": "build" },
-            { "index": 3, "startBeat": 96, "endBeat": 128, "kind": "drop" }
+            { "index": 0, "startBeat": 0, "endBeat": 32, "kind": "intro", "role": { "roleId": "intro-outro", "roleName": "Intro / Outro" } },
+            { "index": 1, "startBeat": 32, "endBeat": 64, "kind": "breakdown", "role": { "roleId": "breakdown-1", "roleName": "Breakdown 1" } },
+            { "index": 2, "startBeat": 64, "endBeat": 96, "kind": "build", "role": { "roleId": "buildup-1", "roleName": "Buildup 1" } },
+            { "index": 3, "startBeat": 96, "endBeat": 128, "kind": "drop", "role": { "roleId": "drop", "roleName": "Drop" } }
           ]
         }
       }
