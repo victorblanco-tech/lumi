@@ -9,7 +9,8 @@ use lumi_library::{
     ImportedLibraryBaseline, ImportedTrackAnalysis, LibraryRepository, LibraryTrackQuery,
     LumiPhraseTimeline, PhraseInstance, PhraseLoopStrategy, PhraseRole, PhraseRoleCatalogError,
     PhraseRoleId, PhraseRoleMove, PlaylistId, ReconcileError, ReconcilePreview, ReconcileStrategy,
-    SourceChangeClass, SourcePhraseMapping, SourceRevision, SourceTrackDiff, TimelineEditCommand,
+    SourceChangeClass, SourceMirrorDiff, SourceMirrorPlaylist, SourceMirrorSnapshot,
+    SourceMirrorTrack, SourcePhraseMapping, SourceRevision, SourceTrackDiff, TimelineEditCommand,
     TimelineEditError, TimelineRevision, TimelineRevisionOrigin, TimelineRevisionReason,
     TimelineRevisionSummary, TrackPageRequest, TrackSummary, VariantId, reconcile_timeline,
 };
@@ -29,6 +30,8 @@ use crate::phrase_role_defaults::{
 
 const DEFAULT_PAGE_LIMIT: u16 = 50;
 const DATABASE_PATH_ENVIRONMENT: &str = "LUMI_LIBRARY_DATABASE_PATH";
+const REKORDBOX_XML_SOURCE_ID: &str = "rekordbox-xml-local";
+const REKORDBOX_XML_SOURCE_KIND: &str = "rekordbox-xml";
 
 pub struct LibraryWorker {
     repository: SqliteLibraryRepository,
@@ -43,6 +46,8 @@ pub struct LibraryWorker {
     editor_track_id: Option<TrackId>,
     pending_source_refresh: Option<ImportedLibraryBaseline>,
     pending_rekordbox_preview: Option<RekordboxXmlMirrorSnapshot>,
+    pending_rekordbox_diff: Option<SourceMirrorDiff>,
+    last_rekordbox_apply: Option<SourceMirrorDiff>,
 }
 
 #[derive(Clone, Debug)]
@@ -403,6 +408,8 @@ impl LibraryWorker {
             editor_track_id: None,
             pending_source_refresh: None,
             pending_rekordbox_preview: None,
+            pending_rekordbox_diff: None,
+            last_rekordbox_apply: None,
         };
         let track_ids = worker
             .repository
@@ -435,7 +442,43 @@ impl LibraryWorker {
             followed_paths,
             include_future_child_playlists,
         )?;
-        self.pending_rekordbox_preview = Some(load_latest_mirror(&request)?);
+        let preview = load_latest_mirror(&request)?;
+        let mirror = rekordbox_mirror_snapshot(&preview)?;
+        self.pending_rekordbox_diff = Some(self.repository.preview_source_mirror(&mirror)?);
+        self.pending_rekordbox_preview = Some(preview);
+        self.last_rekordbox_apply = None;
+        Ok(())
+    }
+
+    pub fn apply_rekordbox_xml_sync(
+        &mut self,
+        folder: String,
+        followed_paths: Vec<String>,
+        include_future_child_playlists: bool,
+        expected_content_sha256: &str,
+    ) -> Result<(), LibraryWorkerError> {
+        let request = RekordboxXmlSyncRequest::try_new(
+            folder,
+            followed_paths,
+            include_future_child_playlists,
+        )?;
+        let fresh = load_latest_mirror(&request)?;
+        let pending = self
+            .pending_rekordbox_preview
+            .as_ref()
+            .ok_or(LibraryWorkerError::NoPendingRekordboxPreview)?;
+        if fresh.content_sha256() != expected_content_sha256
+            || pending.content_sha256() != expected_content_sha256
+            || pending.selection_paths() != fresh.selection_paths()
+            || pending.include_future_child_playlists() != fresh.include_future_child_playlists()
+        {
+            return Err(LibraryWorkerError::RekordboxPreviewChanged);
+        }
+        let mirror = rekordbox_mirror_snapshot(&fresh)?;
+        let applied = self.repository.apply_source_mirror(&mirror)?;
+        self.pending_rekordbox_diff = Some(self.repository.preview_source_mirror(&mirror)?);
+        self.pending_rekordbox_preview = Some(fresh);
+        self.last_rekordbox_apply = Some(applied);
         Ok(())
     }
 
@@ -1088,6 +1131,7 @@ impl LibraryWorker {
             },
             "sourceRefresh": source_refresh,
             "rekordboxSyncPreview": self.rekordbox_sync_preview_json(),
+            "rekordboxMirror": self.rekordbox_mirror_json()?,
             "capabilities": {
                 "playlists": true,
                 "color": true,
@@ -1125,6 +1169,7 @@ impl LibraryWorker {
             return Value::Null;
         };
         let diagnostics = preview.diagnostics();
+        let diff = self.pending_rekordbox_diff.unwrap_or_default();
         json!({
             "exportFileName": preview.export_path().file_name().and_then(|name| name.to_str()),
             "contentSha256": preview.content_sha256(),
@@ -1150,8 +1195,39 @@ impl LibraryWorker {
                 "missingWaveform": diagnostics.missing_waveform,
                 "missingPhrases": diagnostics.missing_phrases,
             },
-            "applyState": "previewOnly",
+            "diff": {
+                "inserted": diff.inserted,
+                "updated": diff.updated,
+                "unchanged": diff.unchanged,
+                "archived": diff.archived,
+                "restored": diff.restored,
+            },
+            "applyState": if self.last_rekordbox_apply.is_some() { "applied" } else { "ready" },
         })
+    }
+
+    fn rekordbox_mirror_json(&self) -> Result<Value, LibraryWorkerError> {
+        let source_id = lumi_library::LibrarySourceId::try_new(REKORDBOX_XML_SOURCE_ID)?;
+        let Some(summary) = self.repository.source_mirror_summary(&source_id)? else {
+            return Ok(Value::Null);
+        };
+        Ok(json!({
+            "sourceId": summary.source_id().as_str(),
+            "sourceKind": summary.source_kind(),
+            "displayName": summary.display_name(),
+            "revision": summary.source_revision().as_str(),
+            "activeTracks": summary.active_tracks(),
+            "archivedTracks": summary.archived_tracks(),
+            "playlists": summary.playlists(),
+            "analysisState": "pending",
+            "lastApply": self.last_rekordbox_apply.map(|diff| json!({
+                "inserted": diff.inserted,
+                "updated": diff.updated,
+                "unchanged": diff.unchanged,
+                "archived": diff.archived,
+                "restored": diff.restored,
+            })),
+        }))
     }
 
     fn phrase_role_settings_json(&self) -> Result<Value, LibraryWorkerError> {
@@ -1700,6 +1776,59 @@ fn track_json(track: &TrackSummary) -> Value {
     })
 }
 
+fn rekordbox_mirror_snapshot(
+    snapshot: &RekordboxXmlMirrorSnapshot,
+) -> Result<SourceMirrorSnapshot, LibraryWorkerError> {
+    let tracks = snapshot
+        .tracks()
+        .iter()
+        .map(|track| {
+            let duration_millis = track
+                .total_time_seconds()
+                .map(|seconds| {
+                    seconds
+                        .checked_mul(1_000)
+                        .ok_or(LibraryWorkerError::RekordboxMirrorOverflow)
+                })
+                .transpose()?;
+            Ok(SourceMirrorTrack::try_new(
+                lumi_library::SourceTrackId::try_new(track.source_track_id())?,
+                track.title(),
+                track.artist().map(str::to_owned),
+                track.average_bpm().map(str::to_owned),
+                track.tonality().map(str::to_owned),
+                duration_millis,
+                track.colour().map(str::to_owned),
+                track.location(),
+            )?)
+        })
+        .collect::<Result<Vec<_>, LibraryWorkerError>>()?;
+    let playlists = snapshot
+        .playlists()
+        .iter()
+        .map(|playlist| {
+            let track_ids = playlist
+                .track_ids()
+                .iter()
+                .map(|track_id| lumi_library::SourceTrackId::try_new(track_id.clone()))
+                .collect::<Result<Vec<_>, _>>()?;
+            Ok(SourceMirrorPlaylist::try_new(
+                playlist.path(),
+                playlist.name(),
+                track_ids,
+            )?)
+        })
+        .collect::<Result<Vec<_>, LibraryWorkerError>>()?;
+    Ok(SourceMirrorSnapshot::try_new(
+        lumi_library::LibrarySourceId::try_new(REKORDBOX_XML_SOURCE_ID)?,
+        REKORDBOX_XML_SOURCE_KIND,
+        "Rekordbox XML",
+        SourceRevision::try_new(format!("sha256:{}", snapshot.content_sha256()))?,
+        tracks,
+        playlists,
+    )?)
+}
+
 fn pitch_class_name(value: PitchClass) -> &'static str {
     match value {
         PitchClass::C => "c",
@@ -1744,6 +1873,14 @@ pub enum LibraryWorkerError {
     AutoloopCatalog(#[from] AutoloopCatalogError),
     #[error("invalid library identifier: {0}")]
     Identifier(#[from] lumi_library::TextIdentifierError),
+    #[error("source mirror is invalid: {0}")]
+    SourceMirror(#[from] lumi_library::SourceMirrorValidationError),
+    #[error("Rekordbox mirror duration overflowed")]
+    RekordboxMirrorOverflow,
+    #[error("there is no Rekordbox XML preview waiting to be applied")]
+    NoPendingRekordboxPreview,
+    #[error("the Rekordbox XML export or selection changed; preview again before Apply")]
+    RekordboxPreviewChanged,
     #[error("timeline edit was rejected: {0}")]
     TimelineEdit(#[from] TimelineEditError),
     #[error("persisted timeline is invalid: {0}")]

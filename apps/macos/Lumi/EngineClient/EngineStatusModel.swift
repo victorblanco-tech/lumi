@@ -395,6 +395,56 @@ final class EngineStatusModel: ObservableObject {
         }
     }
 
+    func applyRekordboxXMLSync(
+        _ request: RekordboxXMLSyncPreviewRequest,
+        expectedContentSHA256: String
+    ) async {
+        sourceImportFeedback = nil
+        sourceImportFeedbackIsError = false
+        guard lifecycle == .ready,
+              let endpointDescription,
+              let protocolVersion,
+              await acquireInteractiveExchange() else {
+            sourceImportFeedback = "Apply Sync could not start because the engine is not ready."
+            sourceImportFeedbackIsError = true
+            return
+        }
+        defer { isExchangingCommand = false }
+        do {
+            let envelope = try await supervisor.send(
+                .applyRekordboxXMLSync(
+                    folder: request.folderPath,
+                    followedPaths: request.followedPaths,
+                    includeFutureChildPlaylists: request.includeFutureChildPlaylists,
+                    expectedContentSHA256: expectedContentSHA256
+                )
+            )
+            if let failure = EngineCommandFailure(envelope) {
+                sourceImportFeedback = failure.message
+                sourceImportFeedbackIsError = true
+                return
+            }
+            let snapshot = try snapshotDecoder.decode(
+                envelope,
+                endpointDescription: endpointDescription,
+                protocolVersion: protocolVersion
+            )
+            latestSnapshot = snapshot
+            workspaceState = LiveWorkspacePresenter.ready(snapshot)
+            libraryState = try libraryDecoder.decode(envelope)
+            guard let mirror = libraryState.rekordboxMirror else {
+                sourceImportFeedback = "The engine applied the sync but returned no mirror status."
+                sourceImportFeedbackIsError = true
+                return
+            }
+            sourceImportFeedback = "Sync applied safely. \(mirror.activeTracks) active tracks in \(mirror.playlists) playlists; \(mirror.archivedTracks) archived tracks retained."
+        } catch {
+            sourceImportFeedback = (error as? LocalizedError)?.errorDescription
+                ?? "The Rekordbox sync could not be applied."
+            sourceImportFeedbackIsError = true
+        }
+    }
+
     func mutatePhraseRoles(_ request: PhraseRoleMutationRequest) async {
         guard let settings = libraryState.phraseRoleSettings,
               lifecycle == .ready,

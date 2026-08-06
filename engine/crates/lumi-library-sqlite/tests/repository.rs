@@ -9,7 +9,8 @@ use lumi_library::{
     AutoloopTheme, AutoloopVariant, ImportedLibraryBaseline, ImportedTrackAnalysis,
     LibraryRepository, LibraryTrackQuery, LumiPhraseTimeline, PHRASE_ROLE_DEFAULTS_VERSION,
     PhraseInstance, PhraseLoopStrategy, PhraseRole, PhraseRoleCatalog, PhraseRoleId,
-    PhraseRoleMove, ReconcileStrategy, SourcePhraseMapping, SourceRevision, TimelineEditCommand,
+    PhraseRoleMove, ReconcileStrategy, SourceMirrorPlaylist, SourceMirrorSnapshot,
+    SourceMirrorTrack, SourcePhraseMapping, SourceRevision, SourceTrackId, TimelineEditCommand,
     TimelineRevision, TimelineRevisionOrigin, TimelineRevisionReason, TrackPageRequest, VariantId,
     reconcile_timeline,
 };
@@ -21,7 +22,7 @@ use rusqlite::Connection;
 #[test]
 fn migrates_an_empty_database() -> Result<(), Box<dyn Error>> {
     let repository = SqliteLibraryRepository::in_memory()?;
-    assert_eq!(repository.schema_version()?, 5);
+    assert_eq!(repository.schema_version()?, 6);
     assert_eq!(
         repository
             .page_tracks(TrackPageRequest::try_new(0, 25)?)?
@@ -68,7 +69,7 @@ fn migrates_version_one_timeline_history_without_losing_rows() -> Result<(), Box
     }
 
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 5);
+    assert_eq!(repository.schema_version()?, 6);
     drop(repository);
     let connection = Connection::open(&path)?;
     let reason: String = connection.query_row(
@@ -125,7 +126,7 @@ fn migrates_version_two_phrase_roles_into_an_unseeded_catalog() -> Result<(), Bo
     }
 
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 5);
+    assert_eq!(repository.schema_version()?, 6);
     let catalog = repository.phrase_role_catalog()?;
     assert_eq!(catalog.revision(), 0);
     assert_eq!(catalog.defaults_version(), 0);
@@ -168,7 +169,7 @@ fn migrates_version_three_into_an_unseeded_autoloop_catalog() -> Result<(), Box<
     }
 
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 5);
+    assert_eq!(repository.schema_version()?, 6);
     let catalog = repository.autoloop_catalog()?;
     assert_eq!(catalog.revision(), 0);
     assert_eq!(catalog.defaults_version(), 0);
@@ -263,6 +264,39 @@ fn import_is_idempotent_and_track_ids_are_stable() -> Result<(), Box<dyn Error>>
     assert!(!stored.waveform().is_empty());
     assert!(!stored.beat_grid().markers().is_empty());
     assert!(!stored.raw_phrases().is_empty());
+    Ok(())
+}
+
+#[test]
+fn source_mirror_apply_archives_and_restores_without_deleting_identity()
+-> Result<(), Box<dyn Error>> {
+    let mut repository = SqliteLibraryRepository::in_memory()?;
+    let first = mirror_snapshot("revision-1", &["one", "two"])?;
+    let preview = repository.preview_source_mirror(&first)?;
+    assert_eq!(preview.inserted, 2);
+    assert_eq!(preview.archived, 0);
+    assert_eq!(repository.apply_source_mirror(&first)?, preview);
+
+    let unchanged = repository.preview_source_mirror(&first)?;
+    assert_eq!(unchanged.unchanged, 2);
+    assert_eq!(unchanged.inserted, 0);
+
+    let second = mirror_snapshot("revision-2", &["two"])?;
+    let removed = repository.apply_source_mirror(&second)?;
+    assert_eq!(removed.archived, 1);
+    assert_eq!(removed.active_tracks, 1);
+    assert_eq!(removed.archived_tracks, 1);
+
+    let third = mirror_snapshot("revision-3", &["one", "two"])?;
+    let restored = repository.apply_source_mirror(&third)?;
+    assert_eq!(restored.restored, 1);
+    assert_eq!(restored.inserted, 0);
+    let summary = repository
+        .source_mirror_summary(first.source_id())?
+        .ok_or("mirror summary")?;
+    assert_eq!(summary.active_tracks(), 2);
+    assert_eq!(summary.archived_tracks(), 0);
+    assert_eq!(summary.playlists(), 1);
     Ok(())
 }
 
@@ -821,6 +855,40 @@ fn source_timeline(
         total_beats,
         TimelineRevisionOrigin::SourceImport,
         phrases,
+    )?)
+}
+
+fn mirror_snapshot(revision: &str, ids: &[&str]) -> Result<SourceMirrorSnapshot, Box<dyn Error>> {
+    let tracks = ids
+        .iter()
+        .map(|id| {
+            Ok(SourceMirrorTrack::try_new(
+                SourceTrackId::try_new(*id)?,
+                format!("Track {id}"),
+                Some("Artist".to_owned()),
+                Some("128.00".to_owned()),
+                Some("Am".to_owned()),
+                Some(180_000),
+                None,
+                format!("file://localhost/{id}.wav"),
+            )?)
+        })
+        .collect::<Result<Vec<_>, Box<dyn Error>>>()?;
+    let playlist = SourceMirrorPlaylist::try_new(
+        "Sets/Test",
+        "Test",
+        tracks
+            .iter()
+            .map(|track| track.source_track_id().clone())
+            .collect(),
+    )?;
+    Ok(SourceMirrorSnapshot::try_new(
+        lumi_library::LibrarySourceId::try_new("test-mirror")?,
+        "test",
+        "Test Mirror",
+        SourceRevision::try_new(revision)?,
+        tracks,
+        vec![playlist],
     )?)
 }
 

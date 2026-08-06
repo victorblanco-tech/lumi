@@ -48,6 +48,12 @@ pub enum SessionCommand {
         followed_paths: Vec<String>,
         include_future_child_playlists: bool,
     },
+    ApplyRekordboxXmlSync {
+        folder: String,
+        followed_paths: Vec<String>,
+        include_future_child_playlists: bool,
+        expected_content_sha256: String,
+    },
     ReconcileLibrarySource {
         track_id: u64,
         expected_revision: u64,
@@ -184,6 +190,7 @@ impl SessionCommand {
             | Self::CloseLibraryTrackEditor
             | Self::PreviewDemoSourceRefresh
             | Self::PreviewRekordboxXmlSync { .. }
+            | Self::ApplyRekordboxXmlSync { .. }
             | Self::ReconcileLibrarySource { .. }
             | Self::EditLibraryTimeline { .. }
             | Self::SetLibraryPhraseLoopStrategy { .. }
@@ -243,6 +250,15 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
                 &envelope.payload,
                 "includeFutureChildPlaylists",
             )?,
+        }),
+        "applyRekordboxXmlSync" => Ok(SessionCommand::ApplyRekordboxXmlSync {
+            folder: string(&envelope.payload, "folder")?.to_owned(),
+            followed_paths: string_array(&envelope.payload, "followedPaths")?,
+            include_future_child_playlists: boolean(
+                &envelope.payload,
+                "includeFutureChildPlaylists",
+            )?,
+            expected_content_sha256: string(&envelope.payload, "expectedContentSha256")?.to_owned(),
         }),
         "reconcileLibrarySource" => Ok(SessionCommand::ReconcileLibrarySource {
             track_id: positive_unsigned(&envelope.payload, "trackId")?,
@@ -859,6 +875,10 @@ mod tests {
     }
 
     fn command_envelope(payload: Value) -> MessageEnvelope {
+        let payload = match payload {
+            Value::Object(payload) => payload,
+            _ => panic!("test payload must be an object"),
+        };
         MessageEnvelope {
             protocol_version: 1,
             message_type: MessageType::Command,
@@ -866,7 +886,7 @@ mod tests {
             sequence: 1,
             correlation_id: "test".to_owned(),
             sent_at: "2026-08-06T00:00:00Z".to_owned(),
-            payload: payload.as_object().expect("test payload").clone(),
+            payload,
         }
     }
 }

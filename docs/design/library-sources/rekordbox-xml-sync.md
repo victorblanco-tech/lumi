@@ -1,6 +1,6 @@
 # Rekordbox XML playlist sync
 
-- Status: **Accepted; engine-owned source-scope preview delivered**
+- Status: **Accepted; archive-safe Apply delivered and ANLZ capability POC proven**
 - Accepted: **2026-08-06**
 - Source mode: **Official XML export, read-only**
 - Stories: [E2A-20](https://github.com/victorblanco-tech/lumi/issues/92), [E2A-21](https://github.com/victorblanco-tech/lumi/issues/91), [E2A-22](https://github.com/victorblanco-tech/lumi/issues/90)
@@ -77,7 +77,41 @@ newest XML export using the bounded Rust adapter and returns:
 - missing metadata, beatgrid, color, waveform and phrase capabilities;
 - the number of duplicate Rekordbox playlist references normalized by Lumi.
 
-The result is held in memory as `previewOnly`. It does not mutate the SQLite
-library, does not replace the demo provider, and cannot be applied from the UI.
-Changing the selected paths, future-child setting or newest export makes the
-visible preview inapplicable until it is recalculated.
+The result is held in memory as a hash-bound apply plan. `Apply Sync` atomically
+stores the provider-neutral mirror, archive/restores absent or returning source
+identities and retains all Lumi-owned work. It does not replace the active demo
+provider or fabricate analysis. Changing the selected paths, future-child
+setting or newest export makes the visible preview inapplicable until it is
+recalculated.
+
+## Persistent mirror and analysis enrichment
+
+Apply stores the validated XML selection in a separate provider-neutral source
+mirror. New and changed identities are upserted, identities absent from every
+followed playlist are archived, and reappearing identities are restored. The
+transaction does not create placeholder waveforms or phrases and does not touch
+existing Lumi-owned timelines.
+
+The applied mirror is enriched separately by the read-only Rekordbox Analysis
+Provider described in [ADR-0019](../../architecture/adr/0019-rekordbox-xml-analysis-en-lumi-owned-enrichment.md).
+Its first POC measures matching and availability for:
+
+- `PQTZ`: detailed Rekordbox beat grid;
+- `PSSI`: phrase boundaries, Rekordbox mood/type and fill information;
+- `PWV4`/`PWV5`: colored preview and scrolling waveforms;
+- `PWV6`/`PWV7`: newer three-band waveform variants when present.
+
+Mirrored tracks remain visibly `analysisPending` until enough analysis is
+available for editing and live planning. Missing information is never
+fabricated.
+
+The real read-only POC found beatgrids for 675/675 provisionally matched tracks,
+`PSSI` phrases for 674/675 and both colored plus three-band waveform tags for
+675/675. The analysis bytes can therefore drive the desired RGB editor
+waveform. Exact Rekordbox pixels are not promised because Lumi supplies its own
+renderer.
+
+The POC also found stale `PPTH` audio roots. Its opt-in unique-filename fallback
+is evidence-only and disabled by default; ambiguous identities are rejected.
+No production enrichment is applied until a stronger identity resolver is
+accepted. See ADR-0019 for the measured coverage and safety boundary.

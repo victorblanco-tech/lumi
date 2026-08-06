@@ -160,10 +160,15 @@ Engelse localization resources en de configureerbare Camelot/Classic-keynotatie.
 
 ### E2A-00 – Prove safe Rekordbox 7 analysis extraction
 
-Timeboxed research naar detectie, consistente snapshot, trackidentiteit,
-waveform, beatgrid, kleur en raw phrases op de daadwerkelijk geïnstalleerde
-Rekordbox 7-versie in een geïsoleerd developmentaccount. Levert fixtures,
-parserproof en een go/no-go-besluit; de productie-library wordt niet gebruikt.
+Status: **POC completed; parser go, production identity resolver gated**.
+Bounded detectie, consistente snapshot, waveform, beatgrid en raw phrases zijn
+op de daadwerkelijk geïnstalleerde Rekordbox 7-versie bewezen terwijl
+Rekordbox gesloten was. De parser gebruikt synthetische regressie-fixtures en
+de bron bleef volledig read-only. De echte scope bewees beatgrid voor 675/675
+provisional matches, phrases voor 674/675 en color plus three-band waveform voor
+675/675. `PPTH` bevat echter verouderde roots; de unieke-bestandsnaamfallback is
+uitsluitend POC-evidence en staat standaard uit. Een autoritatieve identity-
+resolver is de resterende go/no-go-gate voor productimport.
 
 ### E2A-01 – Persist the canonical Lumi music library
 
@@ -360,21 +365,22 @@ toekomstige child-playlists meenemen; deze optie staat standaard aan.
 
 ### [E2A-21 – Mirror followed Rekordbox playlists without losing Lumi edits](https://github.com/victorblanco-tech/lumi/issues/91)
 
-Status: **in progress; read-only mirror normalization delivered**. De engine
+Status: **delivered and locally verified**. De engine
 resolveert nu uitsluitend gevolgde folders/playlists, dedupliceert tracks over
 playlists en normaliseert dubbele memberships binnen één Rekordbox-playlist
 zichtbaar en deterministisch. De echte gekozen export is lokaal gevalideerd op
-52 playlists en 684 unieke tracks. Persistente import, volgorde, archive en
-restore volgen voordat deze story gereed is.
+52 playlists en 684 unieke tracks. De provider-neutrale mirror bewaart stabiele
+identiteiten en playlistmembership transactioneel; afwezige tracks worden
+archive-safe verborgen en later met dezelfde identiteit hersteld.
 
 ### [E2A-22 – Preview and apply Rekordbox XML sync changes](https://github.com/victorblanco-tech/lumi/issues/90)
 
-Status: **in progress; source-scope preview delivered**. `Preview Sync` leest de
+Status: **delivered and locally verified**. `Preview Sync` leest de
 nieuwste export opnieuw in de Rust engine, bindt de uitkomst aan SHA-256 en toont
-playlist-, unieke-track-, collection- en capabilitydiagnostiek zonder enige
-librarywrite. `Apply Sync` blijft disabled tot persistente mirror-, archive- en
-diffsemantiek gereed zijn. Daarna volgen de hash-gebonden diffpreview en atomaire
-Apply Sync met aantallen voor add, update, remove, archive, restore en fouten. De
+playlist-, unieke-track-, collection-, diff- en capabilitydiagnostiek zonder
+enige librarywrite. `Apply Sync` is alleen beschikbaar voor exact dezelfde hash
+en selectie en voert één atomaire mirrortransactie uit met add, update,
+unchanged, archive en restore. Analyse blijft daarna expliciet pending. De
 volledige beslissing staat in
 [`rekordbox-xml-sync.md`](../design/library-sources/rekordbox-xml-sync.md).
 

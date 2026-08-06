@@ -776,6 +776,20 @@ fn apply_command(
             )?;
             return Ok(());
         }
+        SessionCommand::ApplyRekordboxXmlSync {
+            folder,
+            followed_paths,
+            include_future_child_playlists,
+            expected_content_sha256,
+        } => {
+            runtime.library_worker.apply_rekordbox_xml_sync(
+                folder,
+                followed_paths,
+                include_future_child_playlists,
+                &expected_content_sha256,
+            )?;
+            return Ok(());
+        }
         SessionCommand::ReconcileLibrarySource {
             track_id,
             expected_revision,
@@ -1114,6 +1128,7 @@ fn apply_command(
         | SessionCommand::CloseLibraryTrackEditor
         | SessionCommand::PreviewDemoSourceRefresh
         | SessionCommand::PreviewRekordboxXmlSync { .. }
+        | SessionCommand::ApplyRekordboxXmlSync { .. }
         | SessionCommand::ReconcileLibrarySource { .. }
         | SessionCommand::EditLibraryTimeline { .. }
         | SessionCommand::SetLibraryPhraseLoopStrategy { .. }

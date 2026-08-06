@@ -12,16 +12,16 @@ use lumi_library::{
     ImportedTrackAnalysis, LibraryRepository, LibraryTrackQuery, LumiPhraseTimeline,
     PhraseInstance, PhraseLoopStrategy, PhraseRole, PhraseRoleCatalog, PhraseRoleCatalogError,
     PhraseRoleId, PhraseRoleTrackUsage, PhraseRoleUsage, PlaylistId, PlaylistPage, PlaylistSummary,
-    RawPhraseObservation, SourcePhraseMapping, SourcePlaylistId, SourceRevision, SourceTrackId,
-    StoredTrack, TextIdentifierError, ThemeSpecificVariant, TimelineRevision,
-    TimelineRevisionOrigin, TimelineRevisionPage, TimelineRevisionReason, TimelineRevisionSummary,
-    TrackColor, TrackPage, TrackPageRequest, TrackSummary, VariantId, WaveformPoint,
-    normalize_source_label,
+    RawPhraseObservation, SourceMirrorDiff, SourceMirrorSnapshot, SourceMirrorSummary,
+    SourcePhraseMapping, SourcePlaylistId, SourceRevision, SourceTrackId, StoredTrack,
+    TextIdentifierError, ThemeSpecificVariant, TimelineRevision, TimelineRevisionOrigin,
+    TimelineRevisionPage, TimelineRevisionReason, TimelineRevisionSummary, TrackColor, TrackPage,
+    TrackPageRequest, TrackSummary, VariantId, WaveformPoint, normalize_source_label,
 };
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 use thiserror::Error;
 
-const SCHEMA_VERSION: u32 = 5;
+const SCHEMA_VERSION: u32 = 6;
 const DEFAULTS_VERSION_KEY: &str = "phrase-role-defaults-version";
 const CATALOG_REVISION_KEY: &str = "phrase-role-catalog-revision";
 const AUTOLOOP_DEFAULTS_VERSION_KEY: &str = "autoloop-catalog-defaults-version";
@@ -204,7 +204,57 @@ impl SqliteLibraryRepository {
                     FOREIGN KEY(track_id, revision)
                         REFERENCES timeline_revisions(track_id, revision)
                 );
-                PRAGMA user_version = 5;
+                CREATE TABLE source_mirrors (
+                    source_id TEXT PRIMARY KEY,
+                    source_kind TEXT NOT NULL,
+                    display_name TEXT NOT NULL,
+                    source_revision TEXT NOT NULL
+                );
+                CREATE TABLE source_mirror_tracks (
+                    source_id TEXT NOT NULL REFERENCES source_mirrors(source_id),
+                    source_track_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    artist TEXT,
+                    average_bpm TEXT,
+                    musical_key TEXT,
+                    duration_millis INTEGER,
+                    color TEXT,
+                    audio_uri TEXT NOT NULL,
+                    archived INTEGER NOT NULL,
+                    last_seen_revision TEXT NOT NULL,
+                    PRIMARY KEY(source_id, source_track_id)
+                );
+                CREATE INDEX source_mirror_tracks_active
+                    ON source_mirror_tracks(source_id, archived, source_track_id);
+                CREATE TABLE source_mirror_playlists (
+                    source_id TEXT NOT NULL REFERENCES source_mirrors(source_id),
+                    source_playlist_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    PRIMARY KEY(source_id, source_playlist_id)
+                );
+                CREATE TABLE source_mirror_playlist_tracks (
+                    source_id TEXT NOT NULL,
+                    source_playlist_id TEXT NOT NULL,
+                    source_track_id TEXT NOT NULL,
+                    position INTEGER NOT NULL,
+                    PRIMARY KEY(source_id, source_playlist_id, position),
+                    UNIQUE(source_id, source_playlist_id, source_track_id),
+                    FOREIGN KEY(source_id, source_playlist_id)
+                        REFERENCES source_mirror_playlists(source_id, source_playlist_id)
+                        ON DELETE CASCADE,
+                    FOREIGN KEY(source_id, source_track_id)
+                        REFERENCES source_mirror_tracks(source_id, source_track_id)
+                );
+                CREATE TABLE source_mirror_revisions (
+                    source_id TEXT NOT NULL,
+                    source_revision TEXT NOT NULL,
+                    applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    active_track_count INTEGER NOT NULL,
+                    archived_track_count INTEGER NOT NULL,
+                    playlist_count INTEGER NOT NULL,
+                    PRIMARY KEY(source_id, source_revision)
+                );
+                PRAGMA user_version = 6;
                 COMMIT;
                 ",
             )?;
@@ -323,6 +373,66 @@ impl SqliteLibraryRepository {
             } else {
                 self.connection.execute_batch("PRAGMA user_version = 5;")?;
             }
+            current = 5;
+        }
+        if current == 5 {
+            self.connection.execute_batch(
+                "
+                BEGIN IMMEDIATE;
+                CREATE TABLE source_mirrors (
+                    source_id TEXT PRIMARY KEY,
+                    source_kind TEXT NOT NULL,
+                    display_name TEXT NOT NULL,
+                    source_revision TEXT NOT NULL
+                );
+                CREATE TABLE source_mirror_tracks (
+                    source_id TEXT NOT NULL REFERENCES source_mirrors(source_id),
+                    source_track_id TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    artist TEXT,
+                    average_bpm TEXT,
+                    musical_key TEXT,
+                    duration_millis INTEGER,
+                    color TEXT,
+                    audio_uri TEXT NOT NULL,
+                    archived INTEGER NOT NULL,
+                    last_seen_revision TEXT NOT NULL,
+                    PRIMARY KEY(source_id, source_track_id)
+                );
+                CREATE INDEX source_mirror_tracks_active
+                    ON source_mirror_tracks(source_id, archived, source_track_id);
+                CREATE TABLE source_mirror_playlists (
+                    source_id TEXT NOT NULL REFERENCES source_mirrors(source_id),
+                    source_playlist_id TEXT NOT NULL,
+                    name TEXT NOT NULL,
+                    PRIMARY KEY(source_id, source_playlist_id)
+                );
+                CREATE TABLE source_mirror_playlist_tracks (
+                    source_id TEXT NOT NULL,
+                    source_playlist_id TEXT NOT NULL,
+                    source_track_id TEXT NOT NULL,
+                    position INTEGER NOT NULL,
+                    PRIMARY KEY(source_id, source_playlist_id, position),
+                    UNIQUE(source_id, source_playlist_id, source_track_id),
+                    FOREIGN KEY(source_id, source_playlist_id)
+                        REFERENCES source_mirror_playlists(source_id, source_playlist_id)
+                        ON DELETE CASCADE,
+                    FOREIGN KEY(source_id, source_track_id)
+                        REFERENCES source_mirror_tracks(source_id, source_track_id)
+                );
+                CREATE TABLE source_mirror_revisions (
+                    source_id TEXT NOT NULL,
+                    source_revision TEXT NOT NULL,
+                    applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    active_track_count INTEGER NOT NULL,
+                    archived_track_count INTEGER NOT NULL,
+                    playlist_count INTEGER NOT NULL,
+                    PRIMARY KEY(source_id, source_revision)
+                );
+                PRAGMA user_version = 6;
+                COMMIT;
+                ",
+            )?;
         }
         Ok(())
     }
@@ -598,6 +708,156 @@ impl LibraryRepository for SqliteLibraryRepository {
             updated,
             unchanged,
         })
+    }
+
+    fn preview_source_mirror(
+        &self,
+        snapshot: &SourceMirrorSnapshot,
+    ) -> Result<SourceMirrorDiff, Self::Error> {
+        calculate_source_mirror_diff(&self.connection, snapshot)
+    }
+
+    fn apply_source_mirror(
+        &mut self,
+        snapshot: &SourceMirrorSnapshot,
+    ) -> Result<SourceMirrorDiff, Self::Error> {
+        let transaction = self.connection.transaction()?;
+        let diff = calculate_source_mirror_diff(&transaction, snapshot)?;
+        transaction.execute(
+            "INSERT INTO source_mirrors(source_id, source_kind, display_name, source_revision)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(source_id) DO UPDATE SET
+               source_kind = excluded.source_kind,
+               display_name = excluded.display_name,
+               source_revision = excluded.source_revision",
+            params![
+                snapshot.source_id().as_str(),
+                snapshot.source_kind(),
+                snapshot.display_name(),
+                snapshot.source_revision().as_str(),
+            ],
+        )?;
+        transaction.execute(
+            "UPDATE source_mirror_tracks SET archived = 1 WHERE source_id = ?1",
+            [snapshot.source_id().as_str()],
+        )?;
+        {
+            let mut statement = transaction.prepare(
+                "INSERT INTO source_mirror_tracks
+                 (source_id, source_track_id, title, artist, average_bpm, musical_key,
+                  duration_millis, color, audio_uri, archived, last_seen_revision)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 0, ?10)
+                 ON CONFLICT(source_id, source_track_id) DO UPDATE SET
+                   title = excluded.title,
+                   artist = excluded.artist,
+                   average_bpm = excluded.average_bpm,
+                   musical_key = excluded.musical_key,
+                   duration_millis = excluded.duration_millis,
+                   color = excluded.color,
+                   audio_uri = excluded.audio_uri,
+                   archived = 0,
+                   last_seen_revision = excluded.last_seen_revision",
+            )?;
+            for track in snapshot.tracks() {
+                statement.execute(params![
+                    snapshot.source_id().as_str(),
+                    track.source_track_id().as_str(),
+                    track.title(),
+                    track.artist(),
+                    track.average_bpm(),
+                    track.musical_key(),
+                    track.duration_millis().map(to_i64).transpose()?,
+                    track.color(),
+                    track.audio_uri(),
+                    snapshot.source_revision().as_str(),
+                ])?;
+            }
+        }
+        transaction.execute(
+            "DELETE FROM source_mirror_playlists WHERE source_id = ?1",
+            [snapshot.source_id().as_str()],
+        )?;
+        for playlist in snapshot.playlists() {
+            transaction.execute(
+                "INSERT INTO source_mirror_playlists(source_id, source_playlist_id, name)
+                 VALUES (?1, ?2, ?3)",
+                params![
+                    snapshot.source_id().as_str(),
+                    playlist.source_playlist_id(),
+                    playlist.name(),
+                ],
+            )?;
+            let mut statement = transaction.prepare(
+                "INSERT INTO source_mirror_playlist_tracks
+                 (source_id, source_playlist_id, source_track_id, position)
+                 VALUES (?1, ?2, ?3, ?4)",
+            )?;
+            for (position, track_id) in playlist.track_ids().iter().enumerate() {
+                statement.execute(params![
+                    snapshot.source_id().as_str(),
+                    playlist.source_playlist_id(),
+                    track_id.as_str(),
+                    usize_to_i64(position)?,
+                ])?;
+            }
+        }
+        transaction.execute(
+            "INSERT INTO source_mirror_revisions
+             (source_id, source_revision, active_track_count, archived_track_count, playlist_count)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(source_id, source_revision) DO NOTHING",
+            params![
+                snapshot.source_id().as_str(),
+                snapshot.source_revision().as_str(),
+                i64::from(diff.active_tracks),
+                i64::from(diff.archived_tracks),
+                i64::from(diff.playlists),
+            ],
+        )?;
+        transaction.commit()?;
+        Ok(diff)
+    }
+
+    fn source_mirror_summary(
+        &self,
+        id: &lumi_library::LibrarySourceId,
+    ) -> Result<Option<SourceMirrorSummary>, Self::Error> {
+        self.connection
+            .query_row(
+                "SELECT m.source_kind, m.display_name, m.source_revision,
+                        SUM(CASE WHEN t.archived = 0 THEN 1 ELSE 0 END),
+                        SUM(CASE WHEN t.archived = 1 THEN 1 ELSE 0 END),
+                        (SELECT COUNT(*) FROM source_mirror_playlists p
+                          WHERE p.source_id = m.source_id)
+                   FROM source_mirrors m
+                   LEFT JOIN source_mirror_tracks t ON t.source_id = m.source_id
+                  WHERE m.source_id = ?1
+                  GROUP BY m.source_id, m.source_kind, m.display_name, m.source_revision",
+                [id.as_str()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)?,
+                        row.get::<_, i64>(4)?,
+                        row.get::<_, i64>(5)?,
+                    ))
+                },
+            )
+            .optional()?
+            .map(|(kind, name, revision, active, archived, playlists)| {
+                Ok(SourceMirrorSummary::new(
+                    id.clone(),
+                    kind,
+                    name,
+                    SourceRevision::try_new(revision)?,
+                    i64_to_u32(active, "active source mirror tracks")?,
+                    i64_to_u32(archived, "archived source mirror tracks")?,
+                    i64_to_u32(playlists, "source mirror playlists")?,
+                ))
+            })
+            .transpose()
     }
 
     fn library_source(
@@ -1673,6 +1933,121 @@ fn replace_mapping_rows(
     Ok(())
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct StoredMirrorTrack {
+    title: String,
+    artist: Option<String>,
+    average_bpm: Option<String>,
+    musical_key: Option<String>,
+    duration_millis: Option<u64>,
+    color: Option<String>,
+    audio_uri: String,
+    archived: bool,
+}
+
+fn calculate_source_mirror_diff(
+    connection: &Connection,
+    snapshot: &SourceMirrorSnapshot,
+) -> Result<SourceMirrorDiff, SqliteLibraryError> {
+    let mut statement = connection.prepare(
+        "SELECT source_track_id, title, artist, average_bpm, musical_key,
+                duration_millis, color, audio_uri, archived
+           FROM source_mirror_tracks WHERE source_id = ?1",
+    )?;
+    let existing = statement
+        .query_map([snapshot.source_id().as_str()], |row| {
+            let duration = row
+                .get::<_, Option<i64>>(5)?
+                .map(|value| {
+                    u64::try_from(value).map_err(|error| {
+                        rusqlite::Error::FromSqlConversionFailure(
+                            5,
+                            rusqlite::types::Type::Integer,
+                            Box::new(error),
+                        )
+                    })
+                })
+                .transpose()?;
+            Ok((
+                row.get::<_, String>(0)?,
+                StoredMirrorTrack {
+                    title: row.get(1)?,
+                    artist: row.get(2)?,
+                    average_bpm: row.get(3)?,
+                    musical_key: row.get(4)?,
+                    duration_millis: duration,
+                    color: row.get(6)?,
+                    audio_uri: row.get(7)?,
+                    archived: row.get(8)?,
+                },
+            ))
+        })?
+        .collect::<Result<BTreeMap<_, _>, _>>()?;
+    let incoming_ids = snapshot
+        .tracks()
+        .iter()
+        .map(|track| track.source_track_id().as_str())
+        .collect::<std::collections::BTreeSet<_>>();
+    let mut diff = SourceMirrorDiff {
+        active_tracks: usize_to_u32(snapshot.tracks().len())?,
+        archived_tracks: usize_to_u32(
+            existing
+                .keys()
+                .filter(|track_id| !incoming_ids.contains(track_id.as_str()))
+                .count(),
+        )?,
+        playlists: usize_to_u32(snapshot.playlists().len())?,
+        ..SourceMirrorDiff::default()
+    };
+    for track in snapshot.tracks() {
+        let Some(stored) = existing.get(track.source_track_id().as_str()) else {
+            diff.inserted = diff
+                .inserted
+                .checked_add(1)
+                .ok_or(SqliteLibraryError::ArithmeticOverflow)?;
+            continue;
+        };
+        if stored.archived {
+            diff.restored = diff
+                .restored
+                .checked_add(1)
+                .ok_or(SqliteLibraryError::ArithmeticOverflow)?;
+        } else if mirror_track_matches(stored, track) {
+            diff.unchanged = diff
+                .unchanged
+                .checked_add(1)
+                .ok_or(SqliteLibraryError::ArithmeticOverflow)?;
+        } else {
+            diff.updated = diff
+                .updated
+                .checked_add(1)
+                .ok_or(SqliteLibraryError::ArithmeticOverflow)?;
+        }
+    }
+    diff.archived = usize_to_u32(
+        existing
+            .iter()
+            .filter(|(track_id, track)| {
+                !track.archived && !incoming_ids.contains(track_id.as_str())
+            })
+            .count(),
+    )?;
+    Ok(diff)
+}
+
+fn mirror_track_matches(
+    stored: &StoredMirrorTrack,
+    incoming: &lumi_library::SourceMirrorTrack,
+) -> bool {
+    stored.title == incoming.title()
+        && stored.artist.as_deref() == incoming.artist()
+        && stored.average_bpm.as_deref() == incoming.average_bpm()
+        && stored.musical_key.as_deref() == incoming.musical_key()
+        && stored.duration_millis == incoming.duration_millis()
+        && stored.color.as_deref() == incoming.color()
+        && stored.audio_uri == incoming.audio_uri()
+}
+
 fn sync_playlists(
     transaction: &Transaction<'_>,
     baseline: &ImportedLibraryBaseline,
@@ -2130,6 +2505,14 @@ fn to_i64(value: u64) -> Result<i64, SqliteLibraryError> {
 
 fn usize_to_i64(value: usize) -> Result<i64, SqliteLibraryError> {
     i64::try_from(value).map_err(|_| SqliteLibraryError::ArithmeticOverflow)
+}
+
+fn usize_to_u32(value: usize) -> Result<u32, SqliteLibraryError> {
+    u32::try_from(value).map_err(|_| SqliteLibraryError::ArithmeticOverflow)
+}
+
+fn i64_to_u32(value: i64, label: &str) -> Result<u32, SqliteLibraryError> {
+    u32::try_from(value).map_err(|_| SqliteLibraryError::CorruptData(format!("invalid {label}")))
 }
 
 fn from_positive_i64(value: i64, label: &str) -> Result<u64, SqliteLibraryError> {

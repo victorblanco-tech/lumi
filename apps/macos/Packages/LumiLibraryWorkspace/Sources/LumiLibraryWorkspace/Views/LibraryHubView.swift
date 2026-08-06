@@ -25,6 +25,7 @@ public struct LibraryHubView: View {
     private let onLoadOnLocalDeck: @MainActor (LibraryDeckLoadRequest) -> Void
     private let onPhraseRoleMutation: @Sendable (PhraseRoleMutationRequest) -> Void
     private let onRekordboxSyncPreview: @Sendable (RekordboxXMLSyncPreviewRequest) -> Void
+    private let onRekordboxSyncApply: @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void
 
     @Binding private var section: LibraryHubSection
 
@@ -45,7 +46,8 @@ public struct LibraryHubView: View {
         onSourceReconcile: @escaping @MainActor (TrackSourceReconcileRequest) -> Void = { _ in },
         onLoadOnLocalDeck: @escaping @MainActor (LibraryDeckLoadRequest) -> Void = { _ in },
         onPhraseRoleMutation: @escaping @Sendable (PhraseRoleMutationRequest) -> Void = { _ in },
-        onRekordboxSyncPreview: @escaping @Sendable (RekordboxXMLSyncPreviewRequest) -> Void = { _ in }
+        onRekordboxSyncPreview: @escaping @Sendable (RekordboxXMLSyncPreviewRequest) -> Void = { _ in },
+        onRekordboxSyncApply: @escaping @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void = { _, _ in }
     ) {
         self.state = state
         _keyNotation = keyNotation
@@ -64,6 +66,7 @@ public struct LibraryHubView: View {
         self.onLoadOnLocalDeck = onLoadOnLocalDeck
         self.onPhraseRoleMutation = onPhraseRoleMutation
         self.onRekordboxSyncPreview = onRekordboxSyncPreview
+        self.onRekordboxSyncApply = onRekordboxSyncApply
     }
 
     public var body: some View {
@@ -94,7 +97,8 @@ public struct LibraryHubView: View {
                         syncFeedback: sourceImportFeedback,
                         syncFeedbackIsError: sourceImportFeedbackIsError,
                         onMutation: onPhraseRoleMutation,
-                        onSyncPreview: onRekordboxSyncPreview
+                        onSyncPreview: onRekordboxSyncPreview,
+                        onSyncApply: onRekordboxSyncApply
                     )
                 }
             }

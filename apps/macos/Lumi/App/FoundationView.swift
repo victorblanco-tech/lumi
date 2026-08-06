@@ -80,6 +80,14 @@ struct FoundationView: View {
                         },
                         onRekordboxSyncPreview: { request in
                             Task { await engineStatus.previewRekordboxXMLSync(request) }
+                        },
+                        onRekordboxSyncApply: { request, expectedContentSHA256 in
+                            Task {
+                                await engineStatus.applyRekordboxXMLSync(
+                                    request,
+                                    expectedContentSHA256: expectedContentSHA256
+                                )
+                            }
                         }
                     )
                 case .integrations:

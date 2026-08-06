@@ -8,6 +8,7 @@
 mod autoloop_catalog;
 mod baseline;
 mod identifiers;
+mod mirror;
 mod phrase_roles;
 mod reconciliation;
 mod repository;
@@ -26,6 +27,10 @@ pub use baseline::{
 pub use identifiers::{
     AutoloopEntryId, LibrarySourceId, PhraseRoleId, PlaylistId, SourcePlaylistId, SourceRevision,
     SourceTrackId, TextIdentifierError, TimelineRevision, VariantId,
+};
+pub use mirror::{
+    SourceMirrorDiff, SourceMirrorPlaylist, SourceMirrorSnapshot, SourceMirrorSummary,
+    SourceMirrorTrack, SourceMirrorValidationError,
 };
 pub use phrase_roles::{
     PHRASE_ROLE_DEFAULTS_VERSION, PhraseRole, PhraseRoleCatalog, PhraseRoleCatalogError,

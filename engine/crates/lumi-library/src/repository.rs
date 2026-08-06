@@ -4,9 +4,9 @@ use lumi_domain::{MusicalKey, TrackId};
 
 use crate::{
     AutoloopCatalog, BeatGrid, ImportedLibraryBaseline, LibrarySourceId, LumiPhraseTimeline,
-    PhraseRoleCatalog, PhraseRoleUsage, PlaylistId, RawPhraseObservation, SourcePlaylistId,
-    SourceRevision, SourceTrackId, TimelineRevision, TimelineRevisionOrigin, TrackColor,
-    WaveformPoint,
+    PhraseRoleCatalog, PhraseRoleUsage, PlaylistId, RawPhraseObservation, SourceMirrorDiff,
+    SourceMirrorSnapshot, SourceMirrorSummary, SourcePlaylistId, SourceRevision, SourceTrackId,
+    TimelineRevision, TimelineRevisionOrigin, TrackColor, WaveformPoint,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -503,6 +503,18 @@ pub trait LibraryRepository {
         &mut self,
         baseline: &ImportedLibraryBaseline,
     ) -> Result<ImportResult, Self::Error>;
+    fn preview_source_mirror(
+        &self,
+        snapshot: &SourceMirrorSnapshot,
+    ) -> Result<SourceMirrorDiff, Self::Error>;
+    fn apply_source_mirror(
+        &mut self,
+        snapshot: &SourceMirrorSnapshot,
+    ) -> Result<SourceMirrorDiff, Self::Error>;
+    fn source_mirror_summary(
+        &self,
+        id: &LibrarySourceId,
+    ) -> Result<Option<SourceMirrorSummary>, Self::Error>;
     fn library_source(
         &self,
         id: &LibrarySourceId,

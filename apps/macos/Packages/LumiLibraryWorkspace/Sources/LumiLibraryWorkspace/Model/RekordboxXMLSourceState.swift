@@ -107,6 +107,7 @@ public struct RekordboxXMLSyncPreview: Equatable, Sendable {
     public let includeFutureChildPlaylists: Bool
     public let playlists: [RekordboxXMLSyncPlaylist]
     public let diagnostics: RekordboxXMLSyncDiagnostics
+    public let diff: RekordboxXMLSyncDiff
     public let applyState: String
 
     public init(
@@ -120,6 +121,7 @@ public struct RekordboxXMLSyncPreview: Equatable, Sendable {
         includeFutureChildPlaylists: Bool,
         playlists: [RekordboxXMLSyncPlaylist],
         diagnostics: RekordboxXMLSyncDiagnostics,
+        diff: RekordboxXMLSyncDiff,
         applyState: String
     ) {
         self.exportFileName = exportFileName
@@ -132,7 +134,52 @@ public struct RekordboxXMLSyncPreview: Equatable, Sendable {
         self.includeFutureChildPlaylists = includeFutureChildPlaylists
         self.playlists = playlists
         self.diagnostics = diagnostics
+        self.diff = diff
         self.applyState = applyState
+    }
+}
+
+public struct RekordboxXMLSyncDiff: Equatable, Sendable {
+    public let inserted: UInt64
+    public let updated: UInt64
+    public let unchanged: UInt64
+    public let archived: UInt64
+    public let restored: UInt64
+
+    public init(
+        inserted: UInt64,
+        updated: UInt64,
+        unchanged: UInt64,
+        archived: UInt64,
+        restored: UInt64
+    ) {
+        self.inserted = inserted
+        self.updated = updated
+        self.unchanged = unchanged
+        self.archived = archived
+        self.restored = restored
+    }
+}
+
+public struct RekordboxMirrorState: Equatable, Sendable {
+    public let revision: String
+    public let activeTracks: UInt64
+    public let archivedTracks: UInt64
+    public let playlists: UInt64
+    public let analysisState: String
+
+    public init(
+        revision: String,
+        activeTracks: UInt64,
+        archivedTracks: UInt64,
+        playlists: UInt64,
+        analysisState: String
+    ) {
+        self.revision = revision
+        self.activeTracks = activeTracks
+        self.archivedTracks = archivedTracks
+        self.playlists = playlists
+        self.analysisState = analysisState
     }
 }
 

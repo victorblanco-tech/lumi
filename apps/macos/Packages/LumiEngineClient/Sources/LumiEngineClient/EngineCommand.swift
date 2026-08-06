@@ -279,6 +279,12 @@ public enum EngineCommand: Equatable, Sendable {
         followedPaths: [String],
         includeFutureChildPlaylists: Bool
     )
+    case applyRekordboxXMLSync(
+        folder: String,
+        followedPaths: [String],
+        includeFutureChildPlaylists: Bool,
+        expectedContentSHA256: String
+    )
     case reconcileLibrarySource(
         trackID: UInt64,
         expectedTimelineRevision: UInt64,
@@ -385,6 +391,19 @@ public enum EngineCommand: Equatable, Sendable {
                 "folder": .string(folder),
                 "followedPaths": .array(followedPaths.map(JSONValue.string)),
                 "includeFutureChildPlaylists": .boolean(includeFutureChildPlaylists)
+            ]
+        case let .applyRekordboxXMLSync(
+            folder,
+            followedPaths,
+            includeFutureChildPlaylists,
+            expectedContentSHA256
+        ):
+            return [
+                "kind": .string("applyRekordboxXmlSync"),
+                "folder": .string(folder),
+                "followedPaths": .array(followedPaths.map(JSONValue.string)),
+                "includeFutureChildPlaylists": .boolean(includeFutureChildPlaylists),
+                "expectedContentSha256": .string(expectedContentSHA256)
             ]
         case let .reconcileLibrarySource(trackID, expectedRevision, strategy):
             var payload = strategy.payload

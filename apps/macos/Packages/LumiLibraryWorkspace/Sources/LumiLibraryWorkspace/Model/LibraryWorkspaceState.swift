@@ -212,6 +212,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
     public let midiIntegration: MidiIntegrationState?
     public let deckInputIntegration: DeckInputIntegrationState?
     public let rekordboxSyncPreview: RekordboxXMLSyncPreview?
+    public let rekordboxMirror: RekordboxMirrorState?
     public let diagnostic: String?
 
     public init(
@@ -229,6 +230,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
         midiIntegration: MidiIntegrationState? = nil,
         deckInputIntegration: DeckInputIntegrationState? = nil,
         rekordboxSyncPreview: RekordboxXMLSyncPreview? = nil,
+        rekordboxMirror: RekordboxMirrorState? = nil,
         diagnostic: String? = nil
     ) {
         self.condition = condition
@@ -245,6 +247,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
         self.midiIntegration = midiIntegration
         self.deckInputIntegration = deckInputIntegration
         self.rekordboxSyncPreview = rekordboxSyncPreview
+        self.rekordboxMirror = rekordboxMirror
         self.diagnostic = diagnostic
     }
 

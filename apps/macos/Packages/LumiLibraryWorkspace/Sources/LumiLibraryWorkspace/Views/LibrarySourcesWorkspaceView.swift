@@ -12,6 +12,7 @@ public struct LibrarySourcesWorkspaceView: View {
     private let rendersInteractiveControls: Bool
     private let onMutation: @Sendable (PhraseRoleMutationRequest) -> Void
     private let onSyncPreview: @Sendable (RekordboxXMLSyncPreviewRequest) -> Void
+    private let onSyncApply: @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void
 
     @AppStorage("nl.blancoservices.lumi.rekordboxXML.folder")
     private var rekordboxFolderPath = ""
@@ -36,7 +37,8 @@ public struct LibrarySourcesWorkspaceView: View {
         syncFeedbackIsError: Bool = false,
         rendersInteractiveControls: Bool = true,
         onMutation: @escaping @Sendable (PhraseRoleMutationRequest) -> Void = { _ in },
-        onSyncPreview: @escaping @Sendable (RekordboxXMLSyncPreviewRequest) -> Void = { _ in }
+        onSyncPreview: @escaping @Sendable (RekordboxXMLSyncPreviewRequest) -> Void = { _ in },
+        onSyncApply: @escaping @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void = { _, _ in }
     ) {
         self.library = library
         self.settings = settings
@@ -46,6 +48,7 @@ public struct LibrarySourcesWorkspaceView: View {
         self.rendersInteractiveControls = rendersInteractiveControls
         self.onMutation = onMutation
         self.onSyncPreview = onSyncPreview
+        self.onSyncApply = onSyncApply
         _selectedProviderKind = State(initialValue: settings?.mappingProfiles.first?.providerKind)
     }
 
@@ -57,6 +60,7 @@ public struct LibrarySourcesWorkspaceView: View {
                 rekordboxSourceSettings
                 rekordboxPlaylistSelection
                 rekordboxSyncPreview
+                appliedRekordboxMirror
                 activeSource
                 sourceMappings
             }
@@ -264,7 +268,7 @@ public struct LibrarySourcesWorkspaceView: View {
                             .foregroundStyle(LumiColor.textSecondary)
                     }
                     Spacer()
-                    StatusBadge("PREVIEW ONLY", state: .ready)
+                    StatusBadge(preview.applyState == "applied" ? "APPLIED" : "READY", state: .ready)
                 }
                 LumiPanel {
                     VStack(alignment: .leading, spacing: LumiSpacing.large) {
@@ -284,6 +288,13 @@ public struct LibrarySourcesWorkspaceView: View {
                                 value: preview.collectionTrackCount,
                                 systemImage: "shippingbox.fill"
                             )
+                        }
+                        Divider()
+                        HStack(spacing: LumiSpacing.medium) {
+                            previewMetric("Add", value: preview.diff.inserted, systemImage: "plus.circle.fill")
+                            previewMetric("Update", value: preview.diff.updated, systemImage: "arrow.clockwise.circle.fill")
+                            previewMetric("Archive", value: preview.diff.archived, systemImage: "archivebox.fill")
+                            previewMetric("Restore", value: preview.diff.restored, systemImage: "arrow.uturn.backward.circle.fill")
                         }
                         Divider()
                         VStack(alignment: .leading, spacing: LumiSpacing.small) {
@@ -339,10 +350,26 @@ public struct LibrarySourcesWorkspaceView: View {
                                     .foregroundStyle(LumiColor.textSecondary)
                             }
                             Spacer()
-                            Button("Apply Sync") {}
+                            Button(preview.applyState == "applied" ? "Applied" : "Apply Sync") {
+                                onSyncApply(
+                                    RekordboxXMLSyncPreviewRequest(
+                                        folderPath: rekordboxFolderPath,
+                                        followedPaths: followedPaths.sorted(),
+                                        includeFutureChildPlaylists: includeFutureChildPlaylists
+                                    ),
+                                    preview.contentSHA256
+                                )
+                            }
                                 .buttonStyle(.borderedProminent)
-                                .disabled(true)
-                                .help("Apply becomes available after the archive-safe persistence step")
+                                .disabled(
+                                    preview.applyState == "applied"
+                                        || !rendersInteractiveControls
+                                )
+                                .help("Atomically mirror this exact SHA-256-bound preview; missing tracks are archived, never deleted")
+                                .accessibilityLabel(
+                                    preview.applyState == "applied" ? "Applied" : "Apply Sync"
+                                )
+                                .accessibilityIdentifier("lumi.library.sources.rekordbox.applySync")
                         }
                     }
                 }
@@ -357,6 +384,32 @@ public struct LibrarySourcesWorkspaceView: View {
             Label(syncFeedback, systemImage: "exclamationmark.triangle.fill")
                 .font(LumiTypography.caption)
                 .foregroundStyle(LumiColor.warning)
+        }
+    }
+
+    @ViewBuilder
+    private var appliedRekordboxMirror: some View {
+        if let mirror = library.rekordboxMirror {
+            LumiPanel {
+                HStack(alignment: .top, spacing: LumiSpacing.large) {
+                    sourceIcon("archivebox.fill", state: .ready)
+                    VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+                        HStack {
+                            Text("Rekordbox Mirror")
+                                .font(LumiTypography.cardTitle)
+                            StatusBadge("PERSISTED", state: .ready)
+                        }
+                        Text("\(mirror.activeTracks) active tracks · \(mirror.archivedTracks) archived · \(mirror.playlists) playlists")
+                            .font(LumiTypography.technical)
+                            .foregroundStyle(LumiColor.textSecondary)
+                        Text("Metadata and playlist membership are stored safely. Beatgrid, waveform and phrases remain analysis pending; no placeholder analysis was created.")
+                            .font(LumiTypography.caption)
+                            .foregroundStyle(LumiColor.textSecondary)
+                    }
+                    Spacer()
+                    StatusBadge("ANALYSIS PENDING", state: .degraded)
+                }
+            }
         }
     }
 

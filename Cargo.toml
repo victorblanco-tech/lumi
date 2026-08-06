@@ -15,6 +15,7 @@ members = [
     "engine/crates/lumi-output-dry-run",
     "engine/crates/lumi-planner",
     "engine/crates/lumi-protocol",
+    "engine/crates/lumi-rekordbox-analysis",
     "engine/crates/lumi-rekordbox-xml",
     "engine/crates/lumi-simulator",
 ]

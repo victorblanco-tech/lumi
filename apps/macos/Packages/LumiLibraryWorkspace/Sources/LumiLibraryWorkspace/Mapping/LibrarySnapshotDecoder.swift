@@ -67,7 +67,8 @@ public struct LibrarySnapshotDecoder: Sendable {
             ),
             rekordboxSyncPreview: try decodeRekordboxSyncPreview(
                 library["rekordboxSyncPreview"]
-            )
+            ),
+            rekordboxMirror: try decodeRekordboxMirror(library["rekordboxMirror"])
         )
     }
 
@@ -93,6 +94,7 @@ public struct LibrarySnapshotDecoder: Sendable {
             )
         }
         let diagnostics = try object(preview, "diagnostics")
+        let diff = try object(preview, "diff")
         let followedPlaylistCount = try unsigned(preview, "followedPlaylistCount")
         let contentSHA256 = try string(preview, "contentSha256")
         let selectionPaths = try strings(preview, "selectionPaths")
@@ -104,7 +106,7 @@ public struct LibrarySnapshotDecoder: Sendable {
               !selectionPaths.isEmpty,
               selectionPaths.count <= 20_000,
               Set(selectionPaths).count == selectionPaths.count,
-              applyState == "previewOnly" else {
+              ["ready", "applied"].contains(applyState) else {
             throw LibrarySnapshotError.invalidRekordboxSyncPreview
         }
         return RekordboxXMLSyncPreview(
@@ -134,7 +136,32 @@ public struct LibrarySnapshotDecoder: Sendable {
                 missingWaveform: try unsigned(diagnostics, "missingWaveform"),
                 missingPhrases: try unsigned(diagnostics, "missingPhrases")
             ),
+            diff: RekordboxXMLSyncDiff(
+                inserted: try unsigned(diff, "inserted"),
+                updated: try unsigned(diff, "updated"),
+                unchanged: try unsigned(diff, "unchanged"),
+                archived: try unsigned(diff, "archived"),
+                restored: try unsigned(diff, "restored")
+            ),
             applyState: applyState
+        )
+    }
+
+    private func decodeRekordboxMirror(_ value: JSONValue?) throws -> RekordboxMirrorState? {
+        guard let value, value != .null else { return nil }
+        guard case let .object(mirror) = value else {
+            throw LibrarySnapshotError.invalidObject
+        }
+        let analysisState = try string(mirror, "analysisState")
+        guard analysisState == "pending" else {
+            throw LibrarySnapshotError.invalidObject
+        }
+        return RekordboxMirrorState(
+            revision: try string(mirror, "revision"),
+            activeTracks: try unsigned(mirror, "activeTracks"),
+            archivedTracks: try unsigned(mirror, "archivedTracks"),
+            playlists: try unsigned(mirror, "playlists"),
+            analysisState: analysisState
         )
     }
 

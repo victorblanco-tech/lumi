@@ -47,7 +47,7 @@ struct LibraryWorkspaceTests {
         #expect(state.midiIntegration?.sentPulseCount == 1)
     }
 
-    @Test("Rekordbox sync preview decodes as bounded preview-only state")
+    @Test("Rekordbox sync preview decodes a bounded, hash-bound apply plan")
     func decodesRekordboxSyncPreview() throws {
         let state = try LibrarySnapshotDecoder().decode(
             envelope(
@@ -79,7 +79,14 @@ struct LibraryWorkspaceTests {
                         "missingWaveform": .number(42),
                         "missingPhrases": .number(42)
                     ]),
-                    "applyState": .string("previewOnly")
+                    "diff": .object([
+                        "inserted": .number(40),
+                        "updated": .number(1),
+                        "unchanged": .number(1),
+                        "archived": .number(2),
+                        "restored": .number(0)
+                    ]),
+                    "applyState": .string("ready")
                 ])
             )
         )
@@ -88,7 +95,9 @@ struct LibraryWorkspaceTests {
         #expect(preview.uniqueTrackCount == 42)
         #expect(preview.playlists.map(\.path) == ["Sets/Beach Set"])
         #expect(preview.diagnostics.missingWaveform == 42)
-        #expect(preview.applyState == "previewOnly")
+        #expect(preview.diff.inserted == 40)
+        #expect(preview.diff.archived == 2)
+        #expect(preview.applyState == "ready")
     }
 
     @Test("Wire pages over 200 tracks are rejected before presentation")

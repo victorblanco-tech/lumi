@@ -27,6 +27,10 @@ Lumi gebruikt [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Archive-safe Rekordbox XML Apply Sync met hash-gebonden diff, stabiele
+  source-identiteiten, playlistmirror en reversibele archive/restore, plus een
+  bounded read-only ANLZ POC-parser voor beatgrid, PSSI en RGB/three-band
+  waveforms vanuit een Lumi-owned snapshot.
 - Een bounded, read-only Rekordbox XML engine-adapter en native `Preview Sync`
   die gevolgde folders/playlists normaliseert, gedeelde tracks dedupliceert,
   source capabilities en SHA-256-identiteit toont en nog geen librarydata
