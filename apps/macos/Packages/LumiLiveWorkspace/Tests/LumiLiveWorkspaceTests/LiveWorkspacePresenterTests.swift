@@ -80,6 +80,37 @@ struct LiveWorkspacePresenterTests {
         #expect(previews.allSatisfy { $0.points.count == 192 })
     }
 
+    @Test("Live AutoLoop plan exposes active, next, and future status with output details")
+    func liveAutoloopStatusIsExplicit() throws {
+        let content = try #require(LiveWorkspaceFixtures.ready.content)
+        let deck = try #require(content.liveDeck)
+        let items = PlannedAutoloopPresenter.items(
+            deck: deck,
+            plan: content.livePlan,
+            isMaster: true
+        )
+
+        #expect(items.map(\.status) == [.active, .next, .planned, .planned])
+        #expect(items.first?.bankNumber == 1)
+        #expect(items.first?.slotNumber == 1)
+        #expect(items.first?.autoloopName == "Soft Motion")
+    }
+
+    @Test("Next deck AutoLoop plan marks only its first item as next")
+    func nextAutoloopStatusIsExplicit() throws {
+        let content = try #require(LiveWorkspaceFixtures.libraryBacked.content)
+        let deck = try #require(content.nextDeck)
+        let items = PlannedAutoloopPresenter.items(
+            deck: deck,
+            plan: content.plan,
+            isMaster: false
+        )
+
+        #expect(items.map(\.status) == [.next, .planned, .planned, .planned])
+        #expect(items[1].phraseName == "Breakdown 1")
+        #expect(items[1].autoloopName.contains("Variant 2"))
+    }
+
     @Test("A transport-neutral snapshot sequence does not invalidate the Live presentation")
     func snapshotSequenceDoesNotForceARelayout() {
         let snapshot = LiveWorkspaceFixtures.readySnapshot

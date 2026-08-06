@@ -46,17 +46,6 @@ struct FoundationView: View {
                         onLocalPlayback: { request in
                             engineStatus.runLocalPlayback(request)
                         },
-                        onLibraryTrackDrop: { transfer, deckID in
-                            Task {
-                                await engineStatus.loadLibraryTrackOnLocalDeck(
-                                    LibraryDeckLoadRequest(
-                                        trackID: transfer.trackID,
-                                        deckID: deckID,
-                                        expectedTimelineRevision: transfer.timelineRevision
-                                    )
-                                )
-                            }
-                        },
                         localPlaybackBrowser: AnyView(
                             LocalPlaybackLibraryBrowserView(
                                 state: engineStatus.libraryState,

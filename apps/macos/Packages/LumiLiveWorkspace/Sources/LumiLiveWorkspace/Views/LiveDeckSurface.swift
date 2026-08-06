@@ -65,6 +65,7 @@ struct LiveDeckSurface<Details: View>: View {
             if deck.waveformPreview?.points.isEmpty == false { waveformToolbar }
             waveform
             phraseBand
+            plannedAutoloops
             details
         }
         .background(Color.black)
@@ -397,6 +398,128 @@ struct LiveDeckSurface<Details: View>: View {
         .padding(.horizontal, LumiSpacing.small)
         .padding(.bottom, LumiSpacing.small)
         .accessibilityElement(children: .contain)
+    }
+
+    @ViewBuilder
+    private var plannedAutoloops: some View {
+        let items = PlannedAutoloopPresenter.items(
+            deck: deck,
+            plan: plan,
+            isMaster: isMaster
+        )
+        if !items.isEmpty {
+            VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+                HStack(spacing: LumiSpacing.small) {
+                    Text(verbatim: "AUTOLOOP PLAN")
+                        .font(LumiTypography.caption.weight(.semibold))
+                        .foregroundStyle(Color.white.opacity(0.52))
+                    Text(verbatim: "\(items.count) PHRASES")
+                        .font(LumiTypography.technical)
+                        .foregroundStyle(Color.white.opacity(0.36))
+                    Spacer()
+                    Text(verbatim: "Click an item to edit")
+                        .font(LumiTypography.technical)
+                        .foregroundStyle(Color.white.opacity(0.36))
+                }
+                ScrollView(.horizontal) {
+                    HStack(spacing: LumiSpacing.xSmall) {
+                        ForEach(items) { item in
+                            plannedAutoloopCard(item)
+                        }
+                    }
+                    .fixedSize(horizontal: true, vertical: false)
+                }
+                .scrollIndicators(.hidden)
+                .frame(height: 82)
+            }
+            .padding(.horizontal, LumiSpacing.small)
+            .padding(.vertical, LumiSpacing.small)
+            .background(Color.white.opacity(0.025))
+            .overlay(alignment: .top) { Divider().overlay(Color.white.opacity(0.1)) }
+            .accessibilityIdentifier("lumi.deck.\(deck.deckID).autoloopPlan")
+        }
+    }
+
+    private func plannedAutoloopCard(
+        _ item: PlannedAutoloopPresentation
+    ) -> some View {
+        Button {
+            onSelectPhrase(item.phraseIndex)
+        } label: {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(autoloopStatusColor(item.status))
+                        .frame(width: 6, height: 6)
+                    Text(verbatim: autoloopStatusLabel(item.status))
+                        .font(LumiTypography.technical.weight(.semibold))
+                        .foregroundStyle(autoloopStatusColor(item.status))
+                    Spacer(minLength: 2)
+                    if item.locked {
+                        Image(systemName: "pin.fill")
+                            .font(LumiTypography.caption)
+                            .foregroundStyle(LumiColor.warning)
+                    }
+                }
+                Text(verbatim: item.phraseName.uppercased())
+                    .font(LumiTypography.caption.weight(.semibold))
+                    .foregroundStyle(Color.white.opacity(0.58))
+                    .lineLimit(1)
+                Text(verbatim: item.autoloopName)
+                    .font(LumiTypography.metadata.weight(.semibold))
+                    .foregroundStyle(Color.white)
+                    .lineLimit(1)
+                HStack(spacing: 4) {
+                    if let bank = item.bankNumber, let slot = item.slotNumber {
+                        Text(verbatim: "BANK \(bank) · LOOP \(slot)")
+                    } else if item.holdsCurrentLook {
+                        Text(verbatim: "NO MIDI CHANGE")
+                    }
+                }
+                .font(LumiTypography.technical)
+                .foregroundStyle(Color.white.opacity(0.42))
+            }
+            .padding(LumiSpacing.small)
+            .frame(width: 140, height: 82, alignment: .topLeading)
+            .background(autoloopStatusColor(item.status).opacity(0.09))
+            .overlay {
+                RoundedRectangle(cornerRadius: LumiRadius.compact)
+                    .strokeBorder(
+                        item.phraseIndex == selectedPhraseIndex
+                            ? LumiColor.accent
+                            : autoloopStatusColor(item.status).opacity(0.3),
+                        lineWidth: item.phraseIndex == selectedPhraseIndex ? 2 : 1
+                    )
+            }
+            .clipShape(RoundedRectangle(cornerRadius: LumiRadius.compact))
+            .opacity(item.status == .completed ? 0.52 : 1)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(
+            "\(item.phraseName), \(item.autoloopName), \(autoloopStatusLabel(item.status))"
+        )
+        .accessibilityIdentifier(
+            "lumi.deck.\(deck.deckID).autoloop.\(item.phraseIndex)"
+        )
+    }
+
+    private func autoloopStatusLabel(_ status: PlannedAutoloopStatus) -> String {
+        switch status {
+        case .active: "ACTIVE"
+        case .next: "NEXT"
+        case .planned: "PLANNED"
+        case .completed: "DONE"
+        }
+    }
+
+    private func autoloopStatusColor(_ status: PlannedAutoloopStatus) -> Color {
+        switch status {
+        case .active: LumiColor.destructive
+        case .next: LumiColor.accent
+        case .planned: Color.white.opacity(0.62)
+        case .completed: LumiColor.success
+        }
     }
 
     private var deckName: String {

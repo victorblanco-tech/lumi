@@ -1,12 +1,10 @@
 import AppKit
 import LumiDesignSystem
-import LumiProtocol
 import SwiftUI
-import UniformTypeIdentifiers
 
 /// Native AppKit table used by Local Playback. `NSTableView` owns row
-/// selection and dragging together, avoiding the competing SwiftUI gestures
-/// that made playlist refreshes and row clicks unreliable.
+/// selection, avoiding the competing SwiftUI gestures that made playlist
+/// refreshes and row clicks unreliable.
 struct LocalPlaybackTrackTable: NSViewRepresentable {
     let tracks: [LibraryTrack]
     let keyNotation: KeyNotationPreference
@@ -29,7 +27,6 @@ struct LocalPlaybackTrackTable: NSViewRepresentable {
         table.allowsColumnReordering = true
         table.allowsColumnResizing = true
         table.columnAutoresizingStyle = .lastColumnOnlyAutoresizingStyle
-        table.setDraggingSourceOperationMask(.copy, forLocal: true)
         table.autosaveName = "LumiLocalPlaybackTrackTable"
         table.autosaveTableColumns = true
         table.setAccessibilityIdentifier("lumi.localPlayback.trackTable")
@@ -88,7 +85,6 @@ struct LocalPlaybackTrackTable: NSViewRepresentable {
         private var tracks: [LibraryTrack] = []
         private var keyNotation: KeyNotationPreference = .camelot
         private var isApplyingSelection = false
-        private let transferType = NSPasteboard.PasteboardType(UTType.lumiLibraryTrack.identifier)
 
         init(selection: Binding<UInt64?>) {
             self.selection = selection
@@ -167,25 +163,6 @@ struct LocalPlaybackTrackTable: NSViewRepresentable {
             selection.wrappedValue = tracks[tableView.selectedRow].id
         }
 
-        func tableView(
-            _ tableView: NSTableView,
-            pasteboardWriterForRow row: Int
-        ) -> NSPasteboardWriting? {
-            guard tracks.indices.contains(row),
-                  let revision = tracks[row].timelineRevision,
-                  let data = try? JSONEncoder().encode(
-                    LibraryTrackTransfer(
-                        trackID: tracks[row].id,
-                        timelineRevision: revision
-                    )
-                  ) else {
-                return nil
-            }
-            let item = NSPasteboardItem()
-            item.setData(data, forType: transferType)
-            return item
-        }
-
         private func applySelection(_ selectedID: UInt64?, to tableView: NSTableView) {
             isApplyingSelection = true
             defer { isApplyingSelection = false }
@@ -245,16 +222,11 @@ struct LocalPlaybackTrackTable: NSViewRepresentable {
 }
 
 private final class TrackTitleCellView: NSTableCellView {
-    private let dragImage = NSImageView()
     private let swatch = NSView()
     private let label = NSTextField(labelWithString: "")
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
-
-        dragImage.image = NSImage(systemSymbolName: "line.3.horizontal", accessibilityDescription: nil)
-        dragImage.contentTintColor = .secondaryLabelColor
-        dragImage.translatesAutoresizingMaskIntoConstraints = false
 
         swatch.wantsLayer = true
         swatch.layer?.cornerRadius = 2
@@ -265,15 +237,10 @@ private final class TrackTitleCellView: NSTableCellView {
         label.translatesAutoresizingMaskIntoConstraints = false
         textField = label
 
-        addSubview(dragImage)
         addSubview(swatch)
         addSubview(label)
         NSLayoutConstraint.activate([
-            dragImage.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
-            dragImage.centerYAnchor.constraint(equalTo: centerYAnchor),
-            dragImage.widthAnchor.constraint(equalToConstant: 14),
-            dragImage.heightAnchor.constraint(equalToConstant: 14),
-            swatch.leadingAnchor.constraint(equalTo: dragImage.trailingAnchor, constant: 8),
+            swatch.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
             swatch.centerYAnchor.constraint(equalTo: centerYAnchor),
             swatch.widthAnchor.constraint(equalToConstant: 6),
             swatch.heightAnchor.constraint(equalToConstant: 18),
@@ -290,9 +257,6 @@ private final class TrackTitleCellView: NSTableCellView {
 
     func configure(_ track: LibraryTrack) {
         label.stringValue = track.title
-        dragImage.contentTintColor = track.timelineRevision == nil
-            ? NSColor.tertiaryLabelColor
-            : NSColor.secondaryLabelColor
         if let rgb = track.colorRGB {
             swatch.layer?.backgroundColor = NSColor(
                 srgbRed: CGFloat((rgb >> 16) & 0xFF) / 255,

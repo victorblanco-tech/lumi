@@ -3,12 +3,11 @@ import Foundation
 import LumiProtocol
 import SwiftUI
 import Testing
-import UniformTypeIdentifiers
 @testable import LumiLibraryWorkspace
 
 @Suite("Library workspace")
 struct LibraryWorkspaceTests {
-    @Test("Native Local Playback rows select and export the exact timeline drag payload")
+    @Test("Native Local Playback rows select the exact library track")
     @MainActor
     func nativeLocalPlaybackRowInteraction() throws {
         var value = trackValue()
@@ -50,14 +49,6 @@ struct LibraryWorkspaceTests {
             Notification(name: NSTableView.selectionDidChangeNotification, object: table)
         )
         #expect(selectedTrackID == track.id)
-
-        let item = try #require(
-            coordinator.tableView(table, pasteboardWriterForRow: 0) as? NSPasteboardItem
-        )
-        let pasteboardType = NSPasteboard.PasteboardType(UTType.lumiLibraryTrack.identifier)
-        let data = try #require(item.data(forType: pasteboardType))
-        let transfer = try JSONDecoder().decode(LibraryTrackTransfer.self, from: data)
-        #expect(transfer == LibraryTrackTransfer(trackID: track.id, timelineRevision: 7))
     }
 
     @Test("Task-oriented navigation keeps provider configuration out of Settings")

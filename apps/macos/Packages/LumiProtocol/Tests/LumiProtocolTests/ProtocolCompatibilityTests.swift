@@ -77,16 +77,6 @@ func ignoresDuplicateSequence() {
     #expect(tracker.observe(42) == .duplicate)
 }
 
-@Test("A Library track drag keeps exact track and timeline identity")
-func libraryTrackTransferRoundTrip() throws {
-    let transfer = LibraryTrackTransfer(trackID: 42, timelineRevision: 8)
-
-    let data = try JSONEncoder().encode(transfer)
-    let decoded = try JSONDecoder().decode(LibraryTrackTransfer.self, from: data)
-
-    #expect(decoded == transfer)
-}
-
 @Test("Unsupported protocol versions fail safely")
 func rejectsUnsupportedProtocolVersion() throws {
     let input = Data("""
