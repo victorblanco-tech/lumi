@@ -183,7 +183,11 @@ worden gebouwd.
 Bouwt detectie, read-only snapshot, incremental import, providerstatus en een
 zichtbare import/refreshflow in de macOS-app. De snapshot- en resolverkern is
 geleverd; het resterende werk is persistence van de geparseerde analyse,
-source-status/progress en de expliciete import/refreshactie in de app.
+source-status/progress en de expliciete import/refreshactie in de app. De
+sourcepagina gebruikt één standaard ingeklapte XML-export met de playlistkeuze
+erin, één gecombineerde reload/previewactie bovenaan en een compacte
+hash-bound review met de Apply-knop in de header. De stagingstatus benoemt
+expliciet waarom een track nog niet in de canonieke Library zichtbaar is.
 
 ### E2A-03 – Browse and inspect imported tracks
 

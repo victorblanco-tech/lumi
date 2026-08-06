@@ -28,7 +28,8 @@ public struct LibrarySourcesWorkspaceView: View {
     @State private var sourceError: String?
     @State private var isScanning = false
     @State private var didInitializeSource = false
-    @State private var isPlaylistSelectionExpanded = false
+    @State private var isRekordboxExportExpanded = false
+    @State private var isSyncPreviewDetailsExpanded = false
     @State private var isPhraseMappingExpanded = false
 
     public init(
@@ -59,8 +60,6 @@ public struct LibrarySourcesWorkspaceView: View {
             VStack(alignment: .leading, spacing: LumiSpacing.xLarge) {
                 header
                 rekordboxSource
-                rekordboxSourceSettings
-                rekordboxPlaylistSelection
                 rekordboxSyncPreview
                 appliedRekordboxMirror
                 activeSource
@@ -92,105 +91,104 @@ public struct LibrarySourcesWorkspaceView: View {
 
     private var rekordboxSource: some View {
         LumiPanel {
-            HStack(alignment: .top, spacing: LumiSpacing.large) {
-                sourceIcon("r.square.fill", state: .empty)
-                VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-                    HStack {
-                        Text("Rekordbox XML")
-                            .font(LumiTypography.cardTitle)
-                        Text("LOCAL · READ ONLY")
-                            .font(LumiTypography.technical)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(LumiColor.surfaceElevated)
-                            .clipShape(Capsule())
-                    }
-                    Text(rekordboxSourceStatus)
-                        .font(LumiTypography.technical)
-                        .foregroundStyle(sourceError == nil ? LumiColor.textSecondary : LumiColor.warning)
-                    Text("Lumi watches a folder you choose and reads its newest XML export. The source files are never modified or deleted.")
-                        .font(LumiTypography.caption)
-                        .foregroundStyle(LumiColor.textSecondary)
-                    if let sourceError {
-                        Label(sourceError, systemImage: "exclamationmark.triangle.fill")
-                            .font(LumiTypography.caption)
-                            .foregroundStyle(LumiColor.warning)
-                    }
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: LumiSpacing.small) {
-                    Button(rekordboxFolderPath.isEmpty ? "Choose Import Folder…" : "Change Folder…") {
-                        chooseImportFolder()
-                    }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!rendersInteractiveControls)
-                    .accessibilityIdentifier("lumi.library.sources.rekordbox.chooseFolder")
-                    Button(isScanning ? "Scanning…" : "Scan Now") {
-                        scanImportFolder()
-                    }
-                    .buttonStyle(.bordered)
-                    .disabled(rekordboxFolderPath.isEmpty || isScanning || !rendersInteractiveControls)
-                    .accessibilityIdentifier("lumi.library.sources.rekordbox.scan")
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var rekordboxSourceSettings: some View {
-        if !rekordboxFolderPath.isEmpty {
             VStack(alignment: .leading, spacing: LumiSpacing.large) {
-                VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-                    Text("Rekordbox Source Settings")
-                        .font(LumiTypography.cardTitle)
-                    Text("These settings belong to this source and define how followed playlist folders behave during future syncs.")
-                        .font(LumiTypography.body)
-                        .foregroundStyle(LumiColor.textSecondary)
+                HStack(alignment: .top, spacing: LumiSpacing.large) {
+                    sourceIcon("r.square.fill", state: discovery == nil ? .empty : .ready)
+                    VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+                        HStack {
+                            Text("Rekordbox")
+                                .font(LumiTypography.cardTitle)
+                            Text("LOCAL · READ ONLY")
+                                .font(LumiTypography.technical)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(LumiColor.surfaceElevated)
+                                .clipShape(Capsule())
+                        }
+                        Text(rekordboxSourceStatus)
+                            .font(LumiTypography.technical)
+                            .foregroundStyle(sourceError == nil ? LumiColor.textSecondary : LumiColor.warning)
+                        Text("Lumi reads the newest XML export for playlist scope. Rekordbox source files are never modified or deleted.")
+                            .font(LumiTypography.caption)
+                            .foregroundStyle(LumiColor.textSecondary)
+                        if let sourceError {
+                            Label(sourceError, systemImage: "exclamationmark.triangle.fill")
+                                .font(LumiTypography.caption)
+                                .foregroundStyle(LumiColor.warning)
+                        }
+                    }
+                    Spacer()
+                    HStack(spacing: LumiSpacing.small) {
+                        Button(rekordboxFolderPath.isEmpty ? "Choose Folder…" : "Change Folder…") {
+                            chooseImportFolder()
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!rendersInteractiveControls)
+                        .accessibilityIdentifier("lumi.library.sources.rekordbox.chooseFolder")
+                        if discovery != nil {
+                            Button(isScanning ? "Reading…" : primarySyncActionTitle) {
+                                scanImportFolder(previewAfterScan: true)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(!canPreviewSync)
+                            .help("Reload the newest XML export and calculate changes without modifying the Lumi library")
+                            .accessibilityIdentifier("lumi.library.sources.rekordbox.previewSync")
+                        }
+                    }
                 }
-                LumiPanel {
-                    VStack(alignment: .leading, spacing: LumiSpacing.medium) {
-                        sourceSettingRow(
-                            title: "XML import folder",
-                            detail: rekordboxFolderPath,
-                            systemImage: "folder.fill"
-                        )
-                        Divider()
-                        Toggle(isOn: $includeFutureChildPlaylists) {
-                            VStack(alignment: .leading, spacing: 3) {
-                                Text("Include future playlists inside followed folders")
+                if let discovery {
+                    Divider()
+                    DisclosureGroup(isExpanded: $isRekordboxExportExpanded) {
+                        VStack(alignment: .leading, spacing: LumiSpacing.medium) {
+                            HStack {
+                                Text("Follow playlists")
                                     .font(LumiTypography.body.weight(.semibold))
-                                Text("When you add a playlist to a followed Rekordbox folder, Lumi will include it on the next sync preview.")
-                                    .font(LumiTypography.caption)
+                                Spacer()
+                                Text("\(discovery.folderCount) folders · \(discovery.playlistCount) playlists")
+                                    .font(LumiTypography.technical)
                                     .foregroundStyle(LumiColor.textSecondary)
                             }
+                            VStack(alignment: .leading, spacing: 4) {
+                                ForEach(discovery.roots) { node in
+                                    RekordboxPlaylistTreeRow(
+                                        node: node,
+                                        followedPaths: $followedPaths,
+                                        isInteractive: rendersInteractiveControls,
+                                        onChange: persistFollowedPaths
+                                    )
+                                }
+                            }
+                            Divider()
+                            Toggle(isOn: $includeFutureChildPlaylists) {
+                                VStack(alignment: .leading, spacing: 3) {
+                                    Text("Include future playlists inside followed folders")
+                                        .font(LumiTypography.body.weight(.semibold))
+                                    Text("New playlists inside a followed folder are included automatically on the next check.")
+                                        .font(LumiTypography.caption)
+                                        .foregroundStyle(LumiColor.textSecondary)
+                                }
+                            }
+                            .toggleStyle(.switch)
+                            .disabled(!rendersInteractiveControls)
+                            Divider()
+                            HStack(spacing: LumiSpacing.large) {
+                                sourceSettingRow(
+                                    title: "Mirror membership",
+                                    detail: "Additions and removals are reviewed before apply",
+                                    systemImage: "arrow.triangle.2.circlepath"
+                                )
+                                sourceSettingRow(
+                                    title: "Removed tracks",
+                                    detail: "Archived so Lumi-owned edits remain recoverable",
+                                    systemImage: "archivebox.fill"
+                                )
+                            }
                         }
-                        .toggleStyle(.switch)
-                        .disabled(!rendersInteractiveControls)
-                        Divider()
-                        sourceSettingRow(
-                            title: "Mirror playlist membership",
-                            detail: "Enabled · additions and removals are included in the sync preview",
-                            systemImage: "arrow.triangle.2.circlepath"
-                        )
-                        Divider()
-                        sourceSettingRow(
-                            title: "Archive removed tracks",
-                            detail: "Required · Lumi-owned phrases and plans remain recoverable",
-                            systemImage: "archivebox.fill"
-                        )
-                    }
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private var rekordboxPlaylistSelection: some View {
-        if let discovery {
-            DisclosureGroup(isExpanded: $isPlaylistSelectionExpanded) {
-                LumiPanel {
-                    VStack(alignment: .leading, spacing: LumiSpacing.medium) {
-                        HStack {
+                        .padding(.top, LumiSpacing.medium)
+                    } label: {
+                        HStack(alignment: .center, spacing: LumiSpacing.medium) {
+                            Image(systemName: "doc.text.fill")
+                                .foregroundStyle(LumiColor.accent)
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(discovery.export.fileName)
                                     .font(LumiTypography.body.weight(.semibold))
@@ -199,63 +197,35 @@ public struct LibrarySourcesWorkspaceView: View {
                                     .foregroundStyle(LumiColor.textSecondary)
                             }
                             Spacer()
-                            StatusBadge("READ ONLY", state: .ready)
-                        }
-                        Divider()
-                        VStack(alignment: .leading, spacing: 4) {
-                            ForEach(discovery.roots) { node in
-                                RekordboxPlaylistTreeRow(
-                                    node: node,
-                                    followedPaths: $followedPaths,
-                                    isInteractive: rendersInteractiveControls,
-                                    onChange: persistFollowedPaths
-                                )
+                            VStack(alignment: .trailing, spacing: 3) {
+                                Text(selectionSummary(discovery))
+                                    .font(LumiTypography.caption)
+                                    .foregroundStyle(followedPaths.isEmpty ? LumiColor.textSecondary : LumiColor.accent)
+                                Text("Expand to choose playlists")
+                                    .font(LumiTypography.technical)
+                                    .foregroundStyle(LumiColor.textSecondary)
                             }
                         }
-                        Divider()
-                        HStack {
-                            Label(selectionSummary(discovery), systemImage: "checkmark.circle.fill")
-                                .font(LumiTypography.caption)
-                                .foregroundStyle(followedPaths.isEmpty ? LumiColor.textSecondary : LumiColor.accent)
-                            Spacer()
-                            Button("Preview Sync") {
-                                onSyncPreview(
-                                    RekordboxXMLSyncPreviewRequest(
-                                        folderPath: rekordboxFolderPath,
-                                        followedPaths: followedPaths.sorted(),
-                                        includeFutureChildPlaylists: includeFutureChildPlaylists
-                                    )
-                                )
-                            }
-                                .buttonStyle(.borderedProminent)
-                                .disabled(
-                                    followedPaths.isEmpty
-                                        || isScanning
-                                        || !rendersInteractiveControls
-                                )
-                                .help("Read the selected playlists and calculate a mirror preview without changing the Lumi library")
-                                .accessibilityIdentifier("lumi.library.sources.rekordbox.previewSync")
+                    }
+                    .tint(LumiColor.accent)
+                    .accessibilityIdentifier("lumi.library.sources.rekordbox.exportDisclosure")
+                } else if !rekordboxFolderPath.isEmpty {
+                    Divider()
+                    HStack {
+                        sourceSettingRow(
+                            title: "XML import folder",
+                            detail: rekordboxFolderPath,
+                            systemImage: "folder.fill"
+                        )
+                        Spacer()
+                        Button(isScanning ? "Reading…" : "Read Folder") {
+                            scanImportFolder()
                         }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(isScanning || !rendersInteractiveControls)
                     }
-                }
-                .padding(.top, LumiSpacing.medium)
-            } label: {
-                HStack(alignment: .center, spacing: LumiSpacing.medium) {
-                    VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-                        Text("Follow Playlists")
-                            .font(LumiTypography.cardTitle)
-                        Text(selectionSummary(discovery))
-                            .font(LumiTypography.caption)
-                            .foregroundStyle(LumiColor.textSecondary)
-                    }
-                    Spacer()
-                    Text("\(discovery.folderCount) folders · \(discovery.playlistCount) playlists")
-                        .font(LumiTypography.technical)
-                        .foregroundStyle(LumiColor.textSecondary)
                 }
             }
-            .tint(LumiColor.accent)
-            .accessibilityIdentifier("lumi.library.sources.rekordbox.playlistsDisclosure")
         }
     }
 
@@ -264,125 +234,108 @@ public struct LibrarySourcesWorkspaceView: View {
         if !syncFeedbackIsError,
            let preview = library.rekordboxSyncPreview,
            previewMatchesCurrentConfiguration(preview) {
-            VStack(alignment: .leading, spacing: LumiSpacing.large) {
-                HStack(alignment: .bottom) {
-                    VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-                        Text("Sync Preview")
-                            .font(LumiTypography.cardTitle)
-                        Text("Engine-validated mirror scope. This preview has not written tracks, playlists, phrases or analysis to Lumi.")
-                            .font(LumiTypography.body)
-                            .foregroundStyle(LumiColor.textSecondary)
-                    }
-                    Spacer()
-                    StatusBadge(preview.applyState == "applied" ? "APPLIED" : "READY", state: .ready)
-                }
-                LumiPanel {
-                    VStack(alignment: .leading, spacing: LumiSpacing.large) {
-                        HStack(spacing: LumiSpacing.medium) {
-                            previewMetric(
-                                "Playlists",
-                                value: preview.followedPlaylistCount,
-                                systemImage: "music.note.list"
-                            )
-                            previewMetric(
-                                "Unique tracks",
-                                value: preview.uniqueTrackCount,
-                                systemImage: "music.note"
-                            )
-                            previewMetric(
-                                "Collection tracks",
-                                value: preview.collectionTrackCount,
-                                systemImage: "shippingbox.fill"
-                            )
-                        }
-                        Divider()
-                        HStack(spacing: LumiSpacing.medium) {
-                            previewMetric("Add", value: preview.diff.inserted, systemImage: "plus.circle.fill")
-                            previewMetric("Update", value: preview.diff.updated, systemImage: "arrow.clockwise.circle.fill")
-                            previewMetric("Archive", value: preview.diff.archived, systemImage: "archivebox.fill")
-                            previewMetric("Restore", value: preview.diff.restored, systemImage: "arrow.uturn.backward.circle.fill")
-                        }
-                        Divider()
-                        VStack(alignment: .leading, spacing: LumiSpacing.small) {
-                            Text("Selected mirror")
-                                .font(LumiTypography.caption.weight(.semibold))
+            LumiPanel {
+                VStack(alignment: .leading, spacing: LumiSpacing.large) {
+                    HStack(alignment: .center, spacing: LumiSpacing.large) {
+                        sourceIcon(
+                            preview.applyState == "applied" || !previewHasChanges(preview)
+                                ? "checkmark.shield.fill"
+                                : "arrow.triangle.2.circlepath",
+                            state: .ready
+                        )
+                        VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+                            HStack {
+                                Text(syncPreviewTitle(preview))
+                                    .font(LumiTypography.cardTitle)
+                                StatusBadge(syncPreviewBadge(preview), state: .ready)
+                            }
+                            Text(syncPreviewSummary(preview))
+                                .font(LumiTypography.caption)
                                 .foregroundStyle(LumiColor.textSecondary)
-                            ForEach(preview.playlists.prefix(8)) { playlist in
-                                HStack {
-                                    Label(playlist.path, systemImage: "music.note.list")
-                                        .lineLimit(1)
-                                    Spacer()
-                                    Text("\(playlist.trackCount) tracks")
-                                        .font(LumiTypography.technical)
+                        }
+                        Spacer()
+                        Button(syncApplyButtonTitle(preview)) {
+                            onSyncApply(
+                                currentSyncRequest,
+                                preview.contentSHA256
+                            )
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(
+                            preview.applyState == "applied"
+                                || !previewHasChanges(preview)
+                                || !rendersInteractiveControls
+                        )
+                        .help("Atomically stage this exact SHA-256-bound preview; missing tracks are archived, never deleted")
+                        .accessibilityLabel(syncApplyButtonTitle(preview))
+                        .accessibilityIdentifier("lumi.library.sources.rekordbox.applySync")
+                    }
+                    HStack(spacing: LumiSpacing.medium) {
+                        previewMetric("Playlists", value: preview.followedPlaylistCount, systemImage: "music.note.list")
+                        previewMetric("Tracks", value: preview.uniqueTrackCount, systemImage: "music.note")
+                        previewMetric("Add", value: preview.diff.inserted, systemImage: "plus.circle.fill")
+                        previewMetric("Update", value: preview.diff.updated, systemImage: "arrow.clockwise.circle.fill")
+                        previewMetric("Archive", value: preview.diff.archived, systemImage: "archivebox.fill")
+                    }
+                    DisclosureGroup(isExpanded: $isSyncPreviewDetailsExpanded) {
+                        VStack(alignment: .leading, spacing: LumiSpacing.large) {
+                            Divider()
+                            VStack(alignment: .leading, spacing: LumiSpacing.small) {
+                                Text("Selected playlists")
+                                    .font(LumiTypography.caption.weight(.semibold))
+                                    .foregroundStyle(LumiColor.textSecondary)
+                                ForEach(preview.playlists.prefix(8)) { playlist in
+                                    HStack {
+                                        Label(playlist.path, systemImage: "music.note.list")
+                                            .lineLimit(1)
+                                        Spacer()
+                                        Text("\(playlist.trackCount) tracks")
+                                            .font(LumiTypography.technical)
+                                            .foregroundStyle(LumiColor.textSecondary)
+                                    }
+                                    .font(LumiTypography.body)
+                                }
+                                if preview.playlists.count > 8 {
+                                    Text("+ \(preview.playlists.count - 8) more playlists")
+                                        .font(LumiTypography.caption)
                                         .foregroundStyle(LumiColor.textSecondary)
                                 }
-                                .font(LumiTypography.body)
                             }
-                            if preview.playlists.count > 8 {
-                                Text("+ \(preview.playlists.count - 8) more playlists")
-                                    .font(LumiTypography.caption)
+                            Divider()
+                            VStack(alignment: .leading, spacing: LumiSpacing.small) {
+                                Text("XML diagnostics")
+                                    .font(LumiTypography.caption.weight(.semibold))
                                     .foregroundStyle(LumiColor.textSecondary)
+                                HStack(spacing: LumiSpacing.large) {
+                                    diagnosticLabel("Duplicate references", preview.diagnostics.duplicatePlaylistReferences)
+                                    diagnosticLabel("No beat grid", preview.diagnostics.missingBeatGrid)
+                                    diagnosticLabel("No key", preview.diagnostics.missingKey)
+                                    diagnosticLabel("No duration", preview.diagnostics.missingDuration)
+                                    diagnosticLabel("No colour", preview.diagnostics.missingColour)
+                                }
                             }
-                        }
-                        Divider()
-                        VStack(alignment: .leading, spacing: LumiSpacing.small) {
-                            Text("Source analysis")
-                                .font(LumiTypography.caption.weight(.semibold))
-                                .foregroundStyle(LumiColor.textSecondary)
-                            HStack(spacing: LumiSpacing.large) {
-                                diagnosticLabel(
-                                    "Duplicate references merged",
-                                    preview.diagnostics.duplicatePlaylistReferences
-                                )
-                                diagnosticLabel("No beat grid", preview.diagnostics.missingBeatGrid)
-                                diagnosticLabel("No key", preview.diagnostics.missingKey)
-                                diagnosticLabel("No duration", preview.diagnostics.missingDuration)
-                                diagnosticLabel("No colour", preview.diagnostics.missingColour)
-                            }
-                            Label(
-                                "Rekordbox XML does not contain RGB waveform or phrase data. Lumi will keep those capabilities explicitly missing until a later analysis source provides them.",
-                                systemImage: "info.circle.fill"
-                            )
-                            .font(LumiTypography.caption)
-                            .foregroundStyle(LumiColor.textSecondary)
-                        }
-                        Divider()
-                        HStack {
-                            VStack(alignment: .leading, spacing: 3) {
+                            Divider()
+                            HStack {
                                 Text(preview.exportFileName)
                                     .font(LumiTypography.body.weight(.semibold))
+                                Spacer()
                                 Text("SHA-256 \(preview.contentSHA256.prefix(12))… · Rekordbox \(preview.productVersion)")
                                     .font(LumiTypography.technical)
                                     .foregroundStyle(LumiColor.textSecondary)
                             }
-                            Spacer()
-                            Button(preview.applyState == "applied" ? "Applied" : "Apply Sync") {
-                                onSyncApply(
-                                    RekordboxXMLSyncPreviewRequest(
-                                        folderPath: rekordboxFolderPath,
-                                        followedPaths: followedPaths.sorted(),
-                                        includeFutureChildPlaylists: includeFutureChildPlaylists
-                                    ),
-                                    preview.contentSHA256
-                                )
-                            }
-                                .buttonStyle(.borderedProminent)
-                                .disabled(
-                                    preview.applyState == "applied"
-                                        || !rendersInteractiveControls
-                                )
-                                .help("Atomically mirror this exact SHA-256-bound preview; missing tracks are archived, never deleted")
-                                .accessibilityLabel(
-                                    preview.applyState == "applied" ? "Applied" : "Apply Sync"
-                                )
-                                .accessibilityIdentifier("lumi.library.sources.rekordbox.applySync")
                         }
+                        .padding(.top, LumiSpacing.medium)
+                    } label: {
+                        Text("Review playlists, diagnostics and source fingerprint")
+                            .font(LumiTypography.caption.weight(.semibold))
                     }
-                }
-                if let syncFeedback {
-                    Label(syncFeedback, systemImage: "checkmark.shield.fill")
-                        .font(LumiTypography.caption)
-                        .foregroundStyle(LumiColor.success)
+                    .tint(LumiColor.accent)
+                    .accessibilityIdentifier("lumi.library.sources.rekordbox.previewDetailsDisclosure")
+                    if let syncFeedback {
+                        Label(syncFeedback, systemImage: "checkmark.shield.fill")
+                            .font(LumiTypography.caption)
+                            .foregroundStyle(LumiColor.success)
+                    }
                 }
             }
             .accessibilityIdentifier("lumi.library.sources.rekordbox.syncPreview")
@@ -403,17 +356,17 @@ public struct LibrarySourcesWorkspaceView: View {
                         HStack {
                             Text("Rekordbox Mirror")
                                 .font(LumiTypography.cardTitle)
-                            StatusBadge("PERSISTED", state: .ready)
+                            StatusBadge("METADATA STAGED", state: .ready)
                         }
                         Text("\(mirror.activeTracks) active tracks · \(mirror.archivedTracks) archived · \(mirror.playlists) playlists")
                             .font(LumiTypography.technical)
                             .foregroundStyle(LumiColor.textSecondary)
-                        Text("Metadata and playlist membership are stored safely. Beatgrid, waveform and phrases remain analysis pending; no placeholder analysis was created.")
+                        Text("Playlist scope and metadata are stored safely, but these tracks are not in Tracks yet. Lumi must attach beatgrid, waveform and phrases before publishing them to the library.")
                             .font(LumiTypography.caption)
                             .foregroundStyle(LumiColor.textSecondary)
                     }
                     Spacer()
-                    StatusBadge("ANALYSIS PENDING", state: .degraded)
+                    StatusBadge("NOT LIBRARY READY", state: .degraded)
                 }
             }
         }
@@ -464,7 +417,9 @@ public struct LibrarySourcesWorkspaceView: View {
                         Text("\(library.collectionTotal) tracks · revision \(source.revision)")
                             .font(LumiTypography.technical)
                             .foregroundStyle(LumiColor.textSecondary)
-                        Text("The local demo source remains available for dry-running Library, Local Play and planning while Rekordbox import is being built.")
+                        Text(library.rekordboxMirror == nil
+                            ? "The local demo source remains available for dry-running Library, Local Play and planning."
+                            : "Tracks currently shows this source. The staged Rekordbox mirror will replace it after its analysis has been imported successfully.")
                             .font(LumiTypography.caption)
                             .foregroundStyle(LumiColor.textSecondary)
                     }
@@ -625,6 +580,62 @@ public struct LibrarySourcesWorkspaceView: View {
         return "Ready · \(discovery.export.fileName) · \(availableExportCount) XML export\(availableExportCount == 1 ? "" : "s") found"
     }
 
+    private var currentSyncRequest: RekordboxXMLSyncPreviewRequest {
+        RekordboxXMLSyncPreviewRequest(
+            folderPath: rekordboxFolderPath,
+            followedPaths: followedPaths.sorted(),
+            includeFutureChildPlaylists: includeFutureChildPlaylists
+        )
+    }
+
+    private var canPreviewSync: Bool {
+        discovery != nil
+            && !followedPaths.isEmpty
+            && !isScanning
+            && rendersInteractiveControls
+    }
+
+    private var primarySyncActionTitle: String {
+        library.rekordboxMirror == nil ? "Preview Import" : "Check for Changes"
+    }
+
+    private func syncPreviewSummary(_ preview: RekordboxXMLSyncPreview) -> String {
+        if preview.applyState == "applied" {
+            return "Metadata for \(preview.uniqueTrackCount) tracks is safely staged. Analysis import is the remaining step before the tracks appear in Library."
+        }
+        let changed = syncChangeCount(preview)
+        if changed == 0 {
+            return "The staged metadata matches the newest XML export for all \(preview.uniqueTrackCount) selected tracks."
+        }
+        return "\(changed) change\(changed == 1 ? "" : "s") across \(preview.uniqueTrackCount) tracks. Applying stages metadata; it does not publish incomplete tracks."
+    }
+
+    private func syncChangeCount(_ preview: RekordboxXMLSyncPreview) -> UInt64 {
+        preview.diff.inserted
+            + preview.diff.updated
+            + preview.diff.archived
+            + preview.diff.restored
+    }
+
+    private func previewHasChanges(_ preview: RekordboxXMLSyncPreview) -> Bool {
+        syncChangeCount(preview) > 0
+    }
+
+    private func syncPreviewTitle(_ preview: RekordboxXMLSyncPreview) -> String {
+        if preview.applyState == "applied" { return "Sync Applied" }
+        return previewHasChanges(preview) ? "Changes Ready to Apply" : "Rekordbox Metadata Is Up to Date"
+    }
+
+    private func syncPreviewBadge(_ preview: RekordboxXMLSyncPreview) -> LocalizedStringKey {
+        if preview.applyState == "applied" { return "STAGED" }
+        return previewHasChanges(preview) ? "REVIEWED" : "UP TO DATE"
+    }
+
+    private func syncApplyButtonTitle(_ preview: RekordboxXMLSyncPreview) -> String {
+        if preview.applyState == "applied" { return "Applied" }
+        return previewHasChanges(preview) ? "Apply Changes" : "Up to Date"
+    }
+
     private func sourceSettingRow(title: String, detail: String, systemImage: String) -> some View {
         HStack(alignment: .top, spacing: LumiSpacing.medium) {
             Image(systemName: systemImage)
@@ -661,7 +672,7 @@ public struct LibrarySourcesWorkspaceView: View {
         scanImportFolder()
     }
 
-    private func scanImportFolder() {
+    private func scanImportFolder(previewAfterScan: Bool = false) {
         guard !rekordboxFolderPath.isEmpty, !isScanning else { return }
         let path = rekordboxFolderPath
         isScanning = true
@@ -679,6 +690,8 @@ public struct LibrarySourcesWorkspaceView: View {
                 discovery = scan.1
                 if scan.1 == nil {
                     sourceError = "No XML exports found in this folder"
+                } else if previewAfterScan, !followedPaths.isEmpty {
+                    onSyncPreview(currentSyncRequest)
                 }
             } catch {
                 availableExportCount = 0
@@ -730,7 +743,7 @@ private struct RekordboxPlaylistTreeRow: View {
     let isInteractive: Bool
     let onChange: () -> Void
 
-    @State private var isExpanded = true
+    @State private var isExpanded = false
 
     var body: some View {
         if node.kind == .folder {

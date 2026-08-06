@@ -23,9 +23,21 @@ under `Library > Sources & Import`, not in global Settings.
 - no writes, moves or deletes in Rekordbox; the live database is never queried,
   and SQL runs only against a verified Lumi-owned snapshot.
 
-`Follow Playlists` and `Initial Phrase Mapping` are independent disclosures and
-start collapsed. Their current selection/mapping purpose remains visible in the
-summary so the page stays operationally scannable without hiding configuration.
+The selected XML export is the disclosure boundary and starts collapsed. Its
+summary always shows the exact filename and current followed scope; expanding
+it reveals the playlist tree and source-specific behavior. `Initial Phrase
+Mapping` remains a separate collapsed disclosure. Playlist selection is not a
+top-level page section because it belongs to the concrete XML export.
+Playlist folders themselves also start collapsed and expand independently, so
+opening a large export does not immediately render its complete hierarchy.
+
+The source card keeps its primary action above the potentially long playlist
+tree. `Preview Import`/`Check for Changes` first reloads the newest XML and then
+calculates one hash-bound preview. A reviewed preview keeps `Apply Changes` in
+its header while detailed playlists, diagnostics and fingerprint are collapsed.
+Folder selection is setup; reload plus preview is one normal operating action.
+A zero-diff preview reports `Up to date` and disables Apply instead of asking
+the user to repeat a no-op transaction.
 
 Settings are modeled as source behavior so future adapters can expose their own
 capabilities without adding unrelated switches to global application Settings.
@@ -82,7 +94,7 @@ newest XML export using the bounded Rust adapter and returns:
 - missing metadata, beatgrid, color, waveform and phrase capabilities;
 - the number of duplicate Rekordbox playlist references normalized by Lumi.
 
-The result is held in memory as a hash-bound apply plan. `Apply Sync` atomically
+The result is held in memory as a hash-bound apply plan. `Apply Changes` atomically
 stores the provider-neutral mirror, archive/restores absent or returning source
 identities and retains all Lumi-owned work. It does not replace the active demo
 provider or fabricate analysis. Changing the selected paths, future-child
@@ -109,6 +121,12 @@ Its first POC measures matching and availability for:
 Mirrored tracks remain visibly `analysisPending` until enough analysis is
 available for editing and live planning. Missing information is never
 fabricated.
+
+The UI calls this state **Metadata staged**, never merely **Persisted**. It also
+states that staged identities are not published in `Library > Tracks` until the
+authoritative beatgrid, waveform and phrase enrichment succeeds. This avoids a
+false implication that the import is already usable while preserving the
+fail-closed canonical track model.
 
 The real read-only POC found beatgrids for 675/675 provisionally matched tracks,
 `PSSI` phrases for 674/675 and both colored plus three-band waveform tags for
