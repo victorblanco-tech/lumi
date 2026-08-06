@@ -1,70 +1,7 @@
 import Foundation
+import LumiDesignSystem
 
-/// A continuous beat-space viewport. Navigation is deliberately independent
-/// of bar boundaries; only phrase mutations are quantized to whole beats.
-public struct TrackEditorViewport: Equatable, Sendable {
-    public let startBeat: Double
-    public let visibleBeats: Double
-    public let totalBeats: UInt32
-    public let beatsPerBar: UInt8
-
-    public init(startBeat: Double, visibleBeats: Double, totalBeats: UInt32, beatsPerBar: UInt8) {
-        let safeTotal = max(1, totalBeats)
-        let safeVisible = min(max(1, visibleBeats), Double(safeTotal))
-        self.startBeat = min(max(0, startBeat), Double(safeTotal) - safeVisible)
-        self.visibleBeats = safeVisible
-        self.totalBeats = safeTotal
-        self.beatsPerBar = max(1, beatsPerBar)
-    }
-
-    public var endBeat: Double { startBeat + visibleBeats }
-    public var visibleBars: Double { visibleBeats / Double(beatsPerBar) }
-
-    public func x(forBeat beat: Double, width: Double) -> Double {
-        (beat - startBeat) / visibleBeats * max(0, width)
-    }
-
-    public func beat(atX x: Double, width: Double) -> Double {
-        guard width > 0 else { return startBeat }
-        return startBeat + min(max(0, x / width), 1) * visibleBeats
-    }
-
-    public func moving(byBeats delta: Double) -> Self {
-        Self(
-            startBeat: startBeat + delta,
-            visibleBeats: visibleBeats,
-            totalBeats: totalBeats,
-            beatsPerBar: beatsPerBar
-        )
-    }
-
-    /// Converts a native horizontal scroll gesture into a beat-space pan.
-    /// Positive scroll deltas reveal later beats, matching an AppKit scroll view.
-    public func panned(byPixels delta: Double, width: Double) -> Self {
-        guard width > 0 else { return self }
-        return moving(byBeats: delta / width * visibleBeats)
-    }
-
-    public func centered(onBeat beat: Double) -> Self {
-        Self(
-            startBeat: beat - visibleBeats / 2,
-            visibleBeats: visibleBeats,
-            totalBeats: totalBeats,
-            beatsPerBar: beatsPerBar
-        )
-    }
-
-    public func zoomed(to beats: Double, aroundBeat beat: Double) -> Self {
-        let anchor = visibleBeats > 0 ? (beat - startBeat) / visibleBeats : 0.5
-        let boundedAnchor = min(max(0, anchor), 1)
-        return Self(
-            startBeat: beat - boundedAnchor * beats,
-            visibleBeats: beats,
-            totalBeats: totalBeats,
-            beatsPerBar: beatsPerBar
-        )
-    }
-}
+public typealias TrackEditorViewport = LumiWaveformViewport
 
 public enum TrackEditorCoordinateMapper {
     public static func beat(atTimeMillis time: UInt64, beats: [TrackEditorBeat]) -> Double {

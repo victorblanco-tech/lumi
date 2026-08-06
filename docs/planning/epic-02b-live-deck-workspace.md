@@ -17,6 +17,10 @@ current Live track.
 - `MASTER · LIVE NOW` moves between those surfaces without reordering them.
 - The master card is visually dominant; `PLAN READY` is deliberately quieter.
 - Both cards show an RGB waveform, beatgrid, playhead and phrase band.
+- Editor and Live share one continuous beat-space interaction model: slider,
+  vertical wheel/pinch zoom, horizontal pan, mouse/playhead zoom anchor and
+  optional reversed horizontal scrolling. Phrase bands stay aligned while
+  zooming and no redundant `1–4` beat labels are rendered.
 - The current and completed phrases are read-only; future Live phrases are
   editable. An explicit pinned choice remains distinguishable from time state.
 - A future AutoLoop is phrase-specific. A future Theme choice applies from that
@@ -44,9 +48,13 @@ Status: **Complete and locally verified**
 - load a ready Lumi Library track on Deck A or B;
 - browse Collection and imported playlists directly below the fixed deck
   surfaces, with search, native row selection and bounded pagination;
+- let that browser consume all vertical space left beneath the fixed decks;
 - keep the selected playlist independently scrollable and make the complete
   row and Load Deck A/B controls reliable click targets;
+- drag a ready track by its Library row/handle onto either loaded or empty deck;
 - play the actual local/demo audio, pause, seek and choose the lighting master;
+- toggle the master Local deck with Space while keeping normal spaces available
+  to text fields; the Track Editor uses the same shortcut contract;
 - publish authoritative normalized position and playback observations;
 - use the exact Lumi timeline, role identity, RGB waveform and AutoLoop
   resolution through planning and MIDI execution;
@@ -60,6 +68,8 @@ Loading a full Rekordbox-derived analysis no longer duplicates its complete
 16,384-point waveform in the authenticated snapshot. The editor retains full
 detail while each deck receives a peak-preserving preview of at most 1,024
 points, keeping real track loads below the bounded protocol message size.
+Deck loads, playback position and master state remain engine-authoritative when
+the user navigates between Live, Library, Integrations and Settings.
 
 ### E2B-09 – Plan eligibility and unmatched-track safety
 

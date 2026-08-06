@@ -35,6 +35,7 @@ struct FoundationView: View {
                         productVersion: productVersion,
                         appearance: $preferences.appearance,
                         keyNotation: $preferences.keyNotation,
+                        allowsScrolling: false,
                         showsNavigation: false,
                         onPlanMutation: { request in
                             Task { await engineStatus.mutatePlan(request) }
@@ -44,6 +45,17 @@ struct FoundationView: View {
                         },
                         onLocalPlayback: { request in
                             engineStatus.runLocalPlayback(request)
+                        },
+                        onLibraryTrackDrop: { transfer, deckID in
+                            Task {
+                                await engineStatus.loadLibraryTrackOnLocalDeck(
+                                    LibraryDeckLoadRequest(
+                                        trackID: transfer.trackID,
+                                        deckID: deckID,
+                                        expectedTimelineRevision: transfer.timelineRevision
+                                    )
+                                )
+                            }
                         },
                         localPlaybackBrowser: AnyView(
                             LocalPlaybackLibraryBrowserView(

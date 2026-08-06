@@ -14,6 +14,12 @@ struct LiveDeckSurface<Details: View>: View {
     let onSeek: (Double) -> Void
     let onMakeMaster: () -> Void
     private let details: Details
+    @State private var viewport: LumiWaveformViewport
+    @State private var magnificationAnchorBeats: Double?
+    @AppStorage("nl.blancoservices.lumi.waveform.zoom-anchor")
+    private var waveformZoomAnchorRaw = LumiWaveformZoomAnchor.mouse.rawValue
+    @AppStorage("nl.blancoservices.lumi.waveform.reverse-horizontal-scroll")
+    private var reversesHorizontalScroll = false
 
     init(
         deck: DeckSnapshot,
@@ -41,6 +47,13 @@ struct LiveDeckSurface<Details: View>: View {
         self.onSeek = onSeek
         self.onMakeMaster = onMakeMaster
         self.details = details()
+        _viewport = State(
+            initialValue: LumiWaveformViewport(
+                startBeat: 0,
+                visibleBeats: Double(max(1, deck.durationBeats)),
+                totalBeats: max(1, deck.durationBeats)
+            )
+        )
     }
 
     var body: some View {
@@ -48,6 +61,7 @@ struct LiveDeckSurface<Details: View>: View {
             header
             metadata
             if isLocalPlayback { transportControls }
+            if deck.waveformPreview?.points.isEmpty == false { waveformToolbar }
             waveform
             phraseBand
             details
@@ -66,6 +80,14 @@ struct LiveDeckSurface<Details: View>: View {
             radius: 14
         )
         .accessibilityElement(children: .contain)
+        .onChange(of: deck.trackLoadID) { _, _ in resetViewport() }
+        .onChange(of: deck.beat) { _, beat in
+            guard deck.playing else { return }
+            let value = Double(beat)
+            if value < viewport.startBeat || value >= viewport.endBeat {
+                viewport = viewport.centered(onBeat: value)
+            }
+        }
     }
 
     private var header: some View {
@@ -199,6 +221,27 @@ struct LiveDeckSurface<Details: View>: View {
         }
     }
 
+    private var waveformToolbar: some View {
+        HStack {
+            Text("WAVEFORM")
+                .font(LumiTypography.caption.weight(.semibold))
+                .foregroundStyle(Color.white.opacity(0.48))
+            Spacer()
+            LumiWaveformZoomControls(
+                zoom: zoomSliderBinding,
+                visibleBars: viewport.visibleBars,
+                zoomAnchor: waveformZoomAnchorBinding,
+                reversesHorizontalScroll: $reversesHorizontalScroll,
+                sliderWidth: 96,
+                accessibilityPrefix: "lumi.deck.\(deck.deckID)"
+            )
+        }
+        .padding(.horizontal, LumiSpacing.small)
+        .frame(height: 34)
+        .foregroundStyle(Color.white)
+        .background(Color.white.opacity(0.025))
+    }
+
     private func metadataValue(_ label: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
             Text(verbatim: label)
@@ -221,7 +264,8 @@ struct LiveDeckSurface<Details: View>: View {
                 RGBDeckWaveform(
                     points: preview.points,
                     durationBeats: deck.durationBeats,
-                    progress: playbackProgress
+                    playheadBeat: Double(deck.beat),
+                    viewport: viewport
                 )
                 Text(verbatim: "RGB · \(preview.source.uppercased())")
                     .font(LumiTypography.technical)
@@ -242,12 +286,42 @@ struct LiveDeckSurface<Details: View>: View {
             GeometryReader { proxy in
                 Color.clear
                     .contentShape(Rectangle())
+                    .overlay {
+                        LumiWaveformInteractionMonitor(
+                            onScroll: { deltaX in
+                                let direction = reversesHorizontalScroll ? -1.0 : 1.0
+                                viewport = viewport.panned(
+                                    byPixels: deltaX * direction,
+                                    width: proxy.size.width
+                                )
+                            },
+                            onZoom: { delta, pointerFraction in
+                                zoomFromScroll(delta, pointerFraction: pointerFraction)
+                            }
+                        )
+                    }
                     .gesture(
                         DragGesture(minimumDistance: 0)
                             .onEnded { value in
                                 guard isLocalPlayback else { return }
-                                onSeek(min(max(0, value.location.x / max(1, proxy.size.width)), 1))
+                                let beat = viewport.beat(
+                                    atX: value.location.x,
+                                    width: proxy.size.width
+                                )
+                                onSeek(min(max(0, beat / Double(max(1, deck.durationBeats))), 1))
                             }
+                    )
+                    .simultaneousGesture(
+                        MagnifyGesture()
+                            .onChanged { value in
+                                let baseline = magnificationAnchorBeats ?? viewport.visibleBeats
+                                magnificationAnchorBeats = baseline
+                                viewport = viewport.zoomed(
+                                    to: baseline / max(0.05, value.magnification),
+                                    aroundBeat: Double(deck.beat)
+                                )
+                            }
+                            .onEnded { _ in magnificationAnchorBeats = nil }
                     )
             }
         }
@@ -257,8 +331,8 @@ struct LiveDeckSurface<Details: View>: View {
 
     private var phraseBand: some View {
         GeometryReader { proxy in
-            HStack(spacing: 2) {
-                ForEach(deck.phrases) { phrase in
+            ZStack(alignment: .leading) {
+                ForEach(visiblePhrases) { phrase in
                     Button {
                         onSelectPhrase(phrase.index)
                     } label: {
@@ -287,6 +361,7 @@ struct LiveDeckSurface<Details: View>: View {
                     }
                     .buttonStyle(.plain)
                     .contentShape(Rectangle())
+                    .offset(x: phraseOffset(phrase, totalWidth: proxy.size.width))
                     .accessibilityIdentifier("lumi.deck.\(deck.deckID).phrase.\(phrase.index)")
                 }
             }
@@ -313,17 +388,71 @@ struct LiveDeckSurface<Details: View>: View {
         return phraseDisplayName(phrase)
     }
 
-    private var playbackProgress: Double {
-        guard deck.durationBeats > 0 else { return 0 }
-        return min(1, Double(deck.beat) / Double(deck.durationBeats))
+    private var visiblePhrases: [DeckPhraseSnapshot] {
+        deck.phrases.filter {
+            Double($0.endBeat) > viewport.startBeat
+                && Double($0.startBeat) < viewport.endBeat
+        }
     }
 
     private func phraseWidth(_ phrase: DeckPhraseSnapshot, totalWidth: CGFloat) -> CGFloat {
-        guard deck.durationBeats > 0 else { return 0 }
-        let gaps = CGFloat(max(0, deck.phrases.count - 1)) * 2
-        let available = max(0, totalWidth - gaps)
-        let duration = phrase.endBeat - phrase.startBeat
-        return available * CGFloat(Double(duration) / Double(deck.durationBeats))
+        let start = max(Double(phrase.startBeat), viewport.startBeat)
+        let end = min(Double(phrase.endBeat), viewport.endBeat)
+        return max(1, totalWidth * CGFloat(max(0, end - start) / viewport.visibleBeats) - 1)
+    }
+
+    private func phraseOffset(_ phrase: DeckPhraseSnapshot, totalWidth: CGFloat) -> CGFloat {
+        let start = max(Double(phrase.startBeat), viewport.startBeat)
+        return totalWidth * CGFloat((start - viewport.startBeat) / viewport.visibleBeats)
+    }
+
+    private var zoomSliderBinding: Binding<Double> {
+        Binding(
+            get: {
+                let total = Double(max(1, deck.durationBeats))
+                guard total > 1 else { return 1 }
+                return min(max(0, log(total / viewport.visibleBeats) / log(total)), 1)
+            },
+            set: { value in
+                let total = Double(max(1, deck.durationBeats))
+                let visible = total / pow(total, min(max(0, value), 1))
+                viewport = viewport.zoomed(to: visible, aroundBeat: Double(deck.beat))
+            }
+        )
+    }
+
+    private var waveformZoomAnchor: LumiWaveformZoomAnchor {
+        LumiWaveformZoomAnchor(rawValue: waveformZoomAnchorRaw) ?? .mouse
+    }
+
+    private var waveformZoomAnchorBinding: Binding<LumiWaveformZoomAnchor> {
+        Binding(
+            get: { waveformZoomAnchor },
+            set: { waveformZoomAnchorRaw = $0.rawValue }
+        )
+    }
+
+    private func zoomFromScroll(_ delta: Double, pointerFraction: Double) {
+        let boundedDelta = min(max(delta, -24), 24)
+        let factor = exp(-boundedDelta * 0.025)
+        let anchorBeat = switch waveformZoomAnchor {
+        case .mouse:
+            viewport.startBeat + viewport.visibleBeats * pointerFraction
+        case .playhead:
+            Double(deck.beat)
+        }
+        viewport = viewport.zoomed(
+            to: viewport.visibleBeats * factor,
+            aroundBeat: anchorBeat
+        )
+    }
+
+    private func resetViewport() {
+        viewport = LumiWaveformViewport(
+            startBeat: 0,
+            visibleBeats: Double(max(1, deck.durationBeats)),
+            totalBeats: max(1, deck.durationBeats)
+        )
     }
 
     private func phraseColor(_ role: String) -> Color {
@@ -351,7 +480,8 @@ struct LiveDeckSurface<Details: View>: View {
 private struct RGBDeckWaveform: View {
     let points: [DeckWaveformPointSnapshot]
     let durationBeats: UInt64
-    let progress: Double
+    let playheadBeat: Double
+    let viewport: LumiWaveformViewport
 
     var body: some View {
         Canvas { context, size in
@@ -362,18 +492,21 @@ private struct RGBDeckWaveform: View {
     }
 
     private func drawBeatGrid(context: inout GraphicsContext, size: CGSize) {
-        let barCount = max(1, Int(ceil(Double(max(1, durationBeats)) / 4)))
-        let visibleBarCapacity = max(1, Int(size.width / 5))
-        let stride = max(1, Int(ceil(Double(barCount) / Double(visibleBarCapacity))))
-        for bar in Swift.stride(from: 0, through: barCount, by: stride) {
-            let x = size.width * CGFloat(bar) / CGFloat(barCount)
+        let maximumLines = max(1, Int(size.width / 4))
+        let beatStride = max(1, Int(ceil(viewport.visibleBeats / Double(maximumLines))))
+        let firstBeat = Int(floor(viewport.startBeat / Double(beatStride))) * beatStride
+        let lastBeat = Int(ceil(viewport.endBeat))
+        for beat in Swift.stride(from: firstBeat, through: lastBeat, by: beatStride) {
+            let x = viewport.x(forBeat: Double(beat), width: size.width)
+            guard x >= 0, x <= size.width else { continue }
+            let isBar = beat.isMultiple(of: Int(viewport.beatsPerBar))
             var path = Path()
             path.move(to: CGPoint(x: x, y: 0))
             path.addLine(to: CGPoint(x: x, y: size.height))
             context.stroke(
                 path,
-                with: .color(Color.white.opacity(bar.isMultiple(of: 4) ? 0.24 : 0.09)),
-                lineWidth: bar.isMultiple(of: 4) ? 1.1 : 0.6
+                with: .color(Color.white.opacity(isBar ? 0.24 : 0.09)),
+                lineWidth: isBar ? 1.1 : 0.6
             )
         }
     }
@@ -384,15 +517,17 @@ private struct RGBDeckWaveform: View {
         let maximumAmplitude = Double(size.height) * 0.43
         let width = max(1, Int(size.width.rounded(.up)))
         for pixel in 0..<width {
-            let progress = Double(pixel) / Double(max(1, width - 1))
-            let position = progress * Double(max(0, points.count - 1))
+            let fraction = Double(pixel) / Double(max(1, width - 1))
+            let beat = viewport.startBeat + fraction * viewport.visibleBeats
+            let trackProgress = beat / Double(max(1, durationBeats))
+            let position = min(max(0, trackProgress), 1) * Double(max(0, points.count - 1))
             let lower = Int(position.rounded(.down))
             let upper = min(points.count - 1, lower + 1)
-            let fraction = position - Double(lower)
+            let sampleFraction = position - Double(lower)
             let a = points[lower]
             let b = points[upper]
             func mix(_ lhs: UInt8, _ rhs: UInt8) -> Double {
-                (Double(lhs) + (Double(rhs) - Double(lhs)) * fraction) / 31
+                (Double(lhs) + (Double(rhs) - Double(lhs)) * sampleFraction) / 31
             }
             let low = mix(a.low, b.low)
             let mid = mix(a.mid, b.mid)
@@ -416,7 +551,8 @@ private struct RGBDeckWaveform: View {
     }
 
     private func drawPlayhead(context: inout GraphicsContext, size: CGSize) {
-        let x = size.width * CGFloat(min(1, max(0, progress)))
+        guard playheadBeat >= viewport.startBeat, playheadBeat <= viewport.endBeat else { return }
+        let x = viewport.x(forBeat: playheadBeat, width: size.width)
         var path = Path()
         path.move(to: CGPoint(x: x, y: 0))
         path.addLine(to: CGPoint(x: x, y: size.height))

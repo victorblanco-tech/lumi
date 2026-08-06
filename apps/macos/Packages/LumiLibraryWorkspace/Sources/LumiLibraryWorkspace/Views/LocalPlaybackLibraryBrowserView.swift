@@ -1,4 +1,5 @@
 import LumiDesignSystem
+import LumiProtocol
 import SwiftUI
 
 /// Compact Library browser embedded in Live when Local Playback owns the decks.
@@ -45,7 +46,7 @@ public struct LocalPlaybackLibraryBrowserView: View {
                 trackBrowser
             }
         }
-        .frame(minHeight: 250, idealHeight: 290, maxHeight: 340)
+        .frame(minHeight: 250, maxHeight: .infinity)
         .background(LumiColor.canvas)
         .clipShape(RoundedRectangle(cornerRadius: LumiRadius.panel))
         .overlay {
@@ -189,12 +190,7 @@ public struct LocalPlaybackLibraryBrowserView: View {
             } else {
                 Table(state.page.tracks, selection: $selectedTrackID) {
                     TableColumn("Track Title") { track in
-                        HStack(spacing: LumiSpacing.small) {
-                            colorSwatch(track.colorRGB)
-                            Text(track.title)
-                                .font(LumiTypography.body.weight(.semibold))
-                                .lineLimit(1)
-                        }
+                        draggableTrackTitle(track)
                     }
                     .width(min: 180, ideal: 300)
 
@@ -283,6 +279,40 @@ public struct LocalPlaybackLibraryBrowserView: View {
                 )
             } ?? LumiColor.surfaceElevated)
             .frame(width: 8, height: 18)
+    }
+
+    @ViewBuilder
+    private func draggableTrackTitle(_ track: LibraryTrack) -> some View {
+        let title = HStack(spacing: LumiSpacing.small) {
+            Image(systemName: "line.3.horizontal")
+                .font(LumiTypography.caption)
+                .foregroundStyle(LumiColor.textSecondary)
+                .accessibilityHidden(true)
+            colorSwatch(track.colorRGB)
+            Text(track.title)
+                .font(LumiTypography.body.weight(.semibold))
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .contentShape(Rectangle())
+
+        if let revision = track.timelineRevision {
+            title
+                .draggable(
+                    LibraryTrackTransfer(
+                        trackID: track.id,
+                        timelineRevision: revision
+                    )
+                ) {
+                    Label(track.title, systemImage: "music.note")
+                        .padding(LumiSpacing.medium)
+                        .background(LumiColor.surfaceElevated)
+                        .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
+                }
+                .help("Drag to Deck A or Deck B")
+        } else {
+            title
+        }
     }
 
     private var selectedTrack: LibraryTrack? {

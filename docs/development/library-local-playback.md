@@ -9,7 +9,10 @@ will later be driven by Live Decks.
 1. Live embeds a compact, independently scrollable Library browser beneath the
    two decks. Collection, imported playlists, search and pagination lead to
    **Load Deck A** and **Load Deck B** for a track with a Lumi timeline. The
-   full Library screen exposes the same engine-authoritative workflow.
+   full Library screen exposes the same engine-authoritative workflow. The
+   embedded browser expands into all remaining window height; a ready row can
+   also be dragged onto either empty or loaded deck using an exact typed
+   track/revision transfer.
 2. The command carries the exact library track ID, target deck, expected
    timeline revision, and expected runtime state revision.
 3. `LibraryWorker` resolves that track and revision and provides the original
@@ -34,6 +37,10 @@ will later be driven by Live Decks.
 
 - Deck A stays left and Deck B stays right. Changing master changes status; it
   never reorders the surfaces.
+- Space toggles the Local Playback master deck and the Track Editor preview.
+  A focused text field retains the key, so search terms can contain spaces.
+- Live and Editor use the same continuous waveform viewport and persisted
+  mouse/trackpad preferences. A zoomed phrase band follows the visible waveform.
 - Finished and current phrases are read-only. Future phrases are editable and
   may optionally be pinned.
 - The same source selector offers **Live Decks** and **Local Playback**.
@@ -51,6 +58,9 @@ will later be driven by Live Decks.
 - Missing audio fails closed for playback while analysis remains available.
 - Source switching clears stale deck state rather than presenting Local
   Playback data as if it came from Live Decks.
+- Ordinary app-screen navigation does not switch the deck source. Loaded deck
+  identity, transport position, plan and master remain in the engine and are
+  restored when Live is shown again.
 - Full editor analysis remains available for deep zoom. A deck snapshot carries
   at most 1,024 peak-preserving RGB preview points so two real imported tracks
   remain safely below the authenticated one-megabyte protocol bound.

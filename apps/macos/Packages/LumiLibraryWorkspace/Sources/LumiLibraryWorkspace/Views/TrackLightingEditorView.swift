@@ -2,20 +2,6 @@ import AppKit
 import LumiDesignSystem
 import SwiftUI
 
-private enum WaveformZoomAnchor: String, CaseIterable, Identifiable {
-    case mouse
-    case playhead
-
-    var id: String { rawValue }
-
-    var title: String {
-        switch self {
-        case .mouse: "Mouse pointer"
-        case .playhead: "Playhead"
-        }
-    }
-}
-
 public struct TrackLightingEditorView: View {
     private let analysis: TrackEditorAnalysis
     private let autoloopCatalog: AutoloopCatalogState?
@@ -38,9 +24,9 @@ public struct TrackLightingEditorView: View {
     @State private var hoveredBoundaryAfterPhraseIndex: UInt16?
     @State private var pendingBoundaryBeat: UInt32?
     @State private var conflictSides: [UInt16: TrackSourceConflictSide]
-    @AppStorage("nl.blancoservices.lumi.track-editor.zoom-anchor")
-    private var waveformZoomAnchorRaw = WaveformZoomAnchor.mouse.rawValue
-    @AppStorage("nl.blancoservices.lumi.track-editor.reverse-horizontal-scroll")
+    @AppStorage("nl.blancoservices.lumi.waveform.zoom-anchor")
+    private var waveformZoomAnchorRaw = LumiWaveformZoomAnchor.mouse.rawValue
+    @AppStorage("nl.blancoservices.lumi.waveform.reverse-horizontal-scroll")
     private var reversesHorizontalScroll = false
     @Environment(\.dismiss) private var dismiss
 
@@ -75,7 +61,7 @@ public struct TrackLightingEditorView: View {
             initialValue: TrackEditorViewport(
                 startBeat: 0,
                 visibleBeats: Double(max(1, analysis.totalBeats)),
-                totalBeats: analysis.totalBeats,
+                totalBeats: UInt64(analysis.totalBeats),
                 beatsPerBar: analysis.beatsPerBar
             )
         )
@@ -123,10 +109,7 @@ public struct TrackLightingEditorView: View {
         .accessibilityIdentifier("lumi.trackEditor")
         .focusable()
         .focusEffectDisabled()
-        .onKeyPress(.space) {
-            audio.togglePlayback()
-            return .handled
-        }
+        .overlay { LumiSpacebarMonitor { audio.togglePlayback() } }
         .onKeyPress(keys: [.leftArrow, .rightArrow], phases: .down) { press in
             let direction = press.key == .leftArrow ? -1 : 1
             if press.modifiers.contains(.shift) {
@@ -353,34 +336,13 @@ public struct TrackLightingEditorView: View {
                 .accessibilityLabel(editorCopy("editor.volume"))
                 .accessibilityIdentifier("lumi.trackEditor.volume")
 
-            HStack(spacing: 8) {
-                Image(systemName: "magnifyingglass")
-                    .foregroundStyle(secondary)
-                Slider(value: zoomSliderBinding, in: 0...1)
-                    .frame(width: 150)
-                    .accessibilityLabel("Waveform zoom")
-                    .accessibilityValue(String(format: "Visible %.1f bars", viewport.visibleBars))
-                Text(String(format: "%.1f bars", viewport.visibleBars))
-                    .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .frame(width: 58, alignment: .trailing)
-                Menu {
-                    Picker("Zoom around", selection: waveformZoomAnchorBinding) {
-                        ForEach(WaveformZoomAnchor.allCases) { anchor in
-                            Text(anchor.title).tag(anchor)
-                        }
-                    }
-                    Divider()
-                    Toggle("Reverse horizontal scroll", isOn: $reversesHorizontalScroll)
-                } label: {
-                    Image(systemName: "slider.horizontal.3")
-                }
-                .menuStyle(.borderlessButton)
-                .fixedSize()
-                .help("Waveform mouse and trackpad settings")
-                .accessibilityLabel("Waveform interaction settings")
-                .accessibilityIdentifier("lumi.trackEditor.interactionSettings")
-            }
-            .accessibilityIdentifier("lumi.trackEditor.zoom")
+            LumiWaveformZoomControls(
+                zoom: zoomSliderBinding,
+                visibleBars: viewport.visibleBars,
+                zoomAnchor: waveformZoomAnchorBinding,
+                reversesHorizontalScroll: $reversesHorizontalScroll,
+                accessibilityPrefix: "lumi.trackEditor"
+            )
         }
         .padding(.horizontal, 20)
         .frame(height: 58)
@@ -603,7 +565,7 @@ public struct TrackLightingEditorView: View {
             }
             .contentShape(Rectangle())
             .overlay {
-                HorizontalScrollMonitor(
+                LumiWaveformInteractionMonitor(
                     onScroll: { deltaX in
                         let direction = reversesHorizontalScroll ? -1.0 : 1.0
                         viewport = viewport.panned(byPixels: deltaX * direction, width: proxy.size.width)
@@ -1351,11 +1313,11 @@ public struct TrackLightingEditorView: View {
         )
     }
 
-    private var waveformZoomAnchor: WaveformZoomAnchor {
-        WaveformZoomAnchor(rawValue: waveformZoomAnchorRaw) ?? .mouse
+    private var waveformZoomAnchor: LumiWaveformZoomAnchor {
+        LumiWaveformZoomAnchor(rawValue: waveformZoomAnchorRaw) ?? .mouse
     }
 
-    private var waveformZoomAnchorBinding: Binding<WaveformZoomAnchor> {
+    private var waveformZoomAnchorBinding: Binding<LumiWaveformZoomAnchor> {
         Binding(
             get: { waveformZoomAnchor },
             set: { waveformZoomAnchorRaw = $0.rawValue }
