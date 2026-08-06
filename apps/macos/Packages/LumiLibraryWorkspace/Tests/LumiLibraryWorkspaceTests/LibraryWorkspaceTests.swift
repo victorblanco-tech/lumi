@@ -1,10 +1,65 @@
+import AppKit
 import Foundation
 import LumiProtocol
+import SwiftUI
 import Testing
+import UniformTypeIdentifiers
 @testable import LumiLibraryWorkspace
 
 @Suite("Library workspace")
 struct LibraryWorkspaceTests {
+    @Test("Native Local Playback rows select and export the exact timeline drag payload")
+    @MainActor
+    func nativeLocalPlaybackRowInteraction() throws {
+        var value = trackValue()
+        guard case let .object(fields) = value else {
+            Issue.record("Track fixture must be an object")
+            return
+        }
+        var readyFields = fields
+        readyFields["timelineRevision"] = .number(7)
+        value = .object(readyFields)
+        let track = try #require(
+            LibrarySnapshotDecoder()
+                .decode(envelope(trackValues: [value]))
+                .page.tracks.first
+        )
+
+        var selectedTrackID: UInt64?
+        let coordinator = LocalPlaybackTrackTable.Coordinator(
+            selection: Binding(
+                get: { selectedTrackID },
+                set: { selectedTrackID = $0 }
+            )
+        )
+        let table = NSTableView()
+        table.delegate = coordinator
+        table.dataSource = coordinator
+        table.addTableColumn(
+            NSTableColumn(identifier: NSUserInterfaceItemIdentifier("title"))
+        )
+        coordinator.tableView = table
+        coordinator.update(
+            tracks: [track],
+            keyNotation: .camelot,
+            selection: nil
+        )
+
+        table.selectRowIndexes(IndexSet(integer: 0), byExtendingSelection: false)
+        coordinator.tableViewSelectionDidChange(
+            Notification(name: NSTableView.selectionDidChangeNotification, object: table)
+        )
+        #expect(selectedTrackID == track.id)
+
+        let item = try #require(
+            coordinator.tableView(table, pasteboardWriterForRow: 0) as? NSPasteboardItem
+        )
+        let pasteboardType = NSPasteboard.PasteboardType(UTType.lumiLibraryTrack.identifier)
+        let data = try #require(item.data(forType: pasteboardType))
+        let transfer = try JSONDecoder().decode(LibraryTrackTransfer.self, from: data)
+        #expect(transfer == LibraryTrackTransfer(trackID: track.id, timelineRevision: 7))
+    }
+
     @Test("Task-oriented navigation keeps provider configuration out of Settings")
     func taskOrientedNavigationBoundaries() {
         #expect(PhraseRoleSettingsSection.allCases.map(\.rawValue) == [

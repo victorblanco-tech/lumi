@@ -38,6 +38,9 @@ final class EngineStatusModel: ObservableObject {
     private var localTransportDrainTask: Task<Void, Never>?
     private var isExchangingCommand = false
     private var pendingInteractiveExchanges = 0
+    private var pendingLibraryQuery: (generation: UInt64, request: LibraryQueryRequest)?
+    private var libraryQueryGeneration: UInt64 = 0
+    private var isDrainingLibraryQueries = false
     private var latestSnapshot: EngineSnapshot?
     private var endpointDescription: String?
     private var protocolVersion: Int?
@@ -121,6 +124,9 @@ final class EngineStatusModel: ObservableObject {
         localTransportDrainTask = nil
         pendingLocalTransports.removeAll()
         pendingLocalTransportDecks.removeAll()
+        pendingLibraryQuery = nil
+        libraryQueryGeneration &+= 1
+        isDrainingLibraryQueries = false
         localAudioControllers.values.forEach { $0.shutdown() }
         localAudioControllers.removeAll()
         isExchangingCommand = false
@@ -141,6 +147,26 @@ final class EngineStatusModel: ObservableObject {
     }
 
     func queryLibrary(_ request: LibraryQueryRequest) async {
+        libraryQueryGeneration &+= 1
+        pendingLibraryQuery = (libraryQueryGeneration, request)
+        guard !isDrainingLibraryQueries else { return }
+
+        isDrainingLibraryQueries = true
+        defer { isDrainingLibraryQueries = false }
+
+        while let pending = pendingLibraryQuery, lifecycle == .ready {
+            pendingLibraryQuery = nil
+            await performLibraryQuery(
+                pending.request,
+                generation: pending.generation
+            )
+        }
+    }
+
+    private func performLibraryQuery(
+        _ request: LibraryQueryRequest,
+        generation: UInt64
+    ) async {
         guard lifecycle == .ready,
               let endpointDescription,
               let protocolVersion,
@@ -158,7 +184,9 @@ final class EngineStatusModel: ObservableObject {
                 )
             )
             if let failure = EngineCommandFailure(envelope) {
-                libraryState = .failed(failure.message)
+                if generation == libraryQueryGeneration {
+                    libraryState = .failed(failure.message)
+                }
                 return
             }
             let snapshot = try snapshotDecoder.decode(
@@ -166,10 +194,12 @@ final class EngineStatusModel: ObservableObject {
                 endpointDescription: endpointDescription,
                 protocolVersion: protocolVersion
             )
+            guard generation == libraryQueryGeneration else { return }
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
             libraryState = try libraryDecoder.decode(envelope)
         } catch {
+            guard generation == libraryQueryGeneration else { return }
             libraryState = .failed(
                 (error as? LocalizedError)?.errorDescription
                     ?? "The library query could not be completed."

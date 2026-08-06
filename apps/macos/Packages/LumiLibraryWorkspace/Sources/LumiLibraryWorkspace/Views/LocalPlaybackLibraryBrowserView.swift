@@ -1,5 +1,4 @@
 import LumiDesignSystem
-import LumiProtocol
 import SwiftUI
 
 /// Compact Library browser embedded in Live when Local Playback owns the decks.
@@ -188,40 +187,11 @@ public struct LocalPlaybackLibraryBrowserView: View {
                     description: Text("Choose another playlist or search term.")
                 )
             } else {
-                Table(state.page.tracks, selection: $selectedTrackID) {
-                    TableColumn("Track Title") { track in
-                        draggableTrackTitle(track)
-                    }
-                    .width(min: 180, ideal: 300)
-
-                    TableColumn("Artist") { track in
-                        Text(track.artist).lineLimit(1)
-                    }
-                    .width(min: 120, ideal: 200)
-
-                    TableColumn("BPM") { track in
-                        Text(String(format: "%.1f", Double(track.bpmMilli) / 1_000))
-                            .font(LumiTypography.technical)
-                    }
-                    .width(min: 55, ideal: 64, max: 80)
-
-                    TableColumn("Key") { track in
-                        Text(KeyNotationFormatter(notation: keyNotation).string(from: track.musicalKey))
-                            .font(LumiTypography.technical)
-                    }
-                    .width(min: 44, ideal: 54, max: 70)
-
-                    TableColumn("Lumi") { track in
-                        Text(track.timelineRevision.map { "R\($0)" } ?? "—")
-                            .font(LumiTypography.technical)
-                            .foregroundStyle(track.timelineRevision == nil ? LumiColor.warning : LumiColor.success)
-                    }
-                    .width(min: 48, ideal: 58, max: 72)
-                }
-                .tableStyle(.inset(alternatesRowBackgrounds: true))
-                .scrollContentBackground(.hidden)
-                .background(LumiColor.canvas)
-                .accessibilityIdentifier("lumi.localPlayback.trackTable")
+                LocalPlaybackTrackTable(
+                    tracks: state.page.tracks,
+                    keyNotation: keyNotation,
+                    selection: $selectedTrackID
+                )
             }
 
             pagination
@@ -267,52 +237,6 @@ public struct LocalPlaybackLibraryBrowserView: View {
         .disabled(selectedTrack?.timelineRevision == nil)
         .help(selectedTrack?.timelineRevision == nil ? "This track has no ready Lumi timeline." : "Load the selected track on \(name)")
         .accessibilityIdentifier("lumi.localPlayback.loadDeck\(deckID)")
-    }
-
-    private func colorSwatch(_ rgb: UInt32?) -> some View {
-        RoundedRectangle(cornerRadius: 2)
-            .fill(rgb.map {
-                Color(
-                    red: Double(($0 >> 16) & 0xFF) / 255,
-                    green: Double(($0 >> 8) & 0xFF) / 255,
-                    blue: Double($0 & 0xFF) / 255
-                )
-            } ?? LumiColor.surfaceElevated)
-            .frame(width: 8, height: 18)
-    }
-
-    @ViewBuilder
-    private func draggableTrackTitle(_ track: LibraryTrack) -> some View {
-        let title = HStack(spacing: LumiSpacing.small) {
-            Image(systemName: "line.3.horizontal")
-                .font(LumiTypography.caption)
-                .foregroundStyle(LumiColor.textSecondary)
-                .accessibilityHidden(true)
-            colorSwatch(track.colorRGB)
-            Text(track.title)
-                .font(LumiTypography.body.weight(.semibold))
-                .lineLimit(1)
-            Spacer(minLength: 0)
-        }
-        .contentShape(Rectangle())
-
-        if let revision = track.timelineRevision {
-            title
-                .draggable(
-                    LibraryTrackTransfer(
-                        trackID: track.id,
-                        timelineRevision: revision
-                    )
-                ) {
-                    Label(track.title, systemImage: "music.note")
-                        .padding(LumiSpacing.medium)
-                        .background(LumiColor.surfaceElevated)
-                        .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
-                }
-                .help("Drag to Deck A or Deck B")
-        } else {
-            title
-        }
     }
 
     private var selectedTrack: LibraryTrack? {
