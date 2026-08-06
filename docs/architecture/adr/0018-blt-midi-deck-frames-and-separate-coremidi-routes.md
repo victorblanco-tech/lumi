@@ -33,14 +33,14 @@ pitch-adjusted effective BPM remains live deck state.
 
 - The CoreMIDI receive callback writes to a bounded 256-packet buffer.
 - The single-writer engine drains input at authenticated command boundaries.
-- Connected Decks polls snapshots every 250 ms. Other modes poll once per
+- Live Decks polls snapshots every 250 ms. Other modes poll once per
   second for process health and raw integration diagnostics, but discard deck
-  frames until Connected Decks is selected.
+  frames until Live Decks is selected.
 - Foreign channels, non-CC messages, unknown protocol versions, partial frames
   and duplicate sequence numbers are ignored and counted.
 - Unknown external tracks are represented as transient, unanalyzed loads and
   remain `AUTO HELD`; Lumi sends no automatic lighting change for them.
-- Switching away from Connected Decks unloads its transient deck state.
+- Switching away from Live Decks unloads its transient deck state.
 - A physical controller and SoundSwitch can remain active in parallel because
   input and output use different endpoints and channels.
 

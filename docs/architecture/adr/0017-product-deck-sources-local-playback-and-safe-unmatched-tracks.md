@@ -23,7 +23,7 @@ must never crash Lumi or create confident but fabricated light changes.
 
 Exactly one authoritative deck source remains active per session:
 
-1. **Connected Decks** receives normalized transport and track observations
+1. **Live Decks** receives normalized transport and track observations
    from the selected live adapter, initially Beat Link Trigger.
 2. **Local Playback** exposes two application-owned decks. Tracks are loaded
    from the Lumi Library and played through local native audio. Play, pause,
@@ -37,6 +37,13 @@ supports both dry rehearsal and real SoundSwitch output.
 The deterministic simulator and replay providers remain internal test adapters.
 They are not selectable, named, badged or controlled from production Live UI.
 Demo Library tracks remain valid product-visible local content.
+
+Local Playback embeds a bounded Library browser in the Live workspace so a DJ
+can select Collection or a playlist and load either fixed deck without leaving
+the performance context. The detailed Track Editor analysis and the deck
+waveform are separate projections: the editor retains the complete analysis,
+while a peak-preserving preview is capped at 1,024 RGB points for the bounded
+authenticated runtime protocol.
 
 ### Canonical phrase identity
 

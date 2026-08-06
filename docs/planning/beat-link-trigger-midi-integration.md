@@ -3,7 +3,7 @@
 ## Goal
 
 Prove and ship the first live Deck A/Deck B adapter without coupling Lumi to BLT
-or SoundSwitch internals. The result must update the existing Connected Decks
+or SoundSwitch internals. The result must update the existing Live Decks
 Live workspace and fail silent when a frame is incomplete or unsupported.
 
 ## BLT setup

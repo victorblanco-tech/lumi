@@ -34,7 +34,7 @@ Status: **Complete and locally verified**
 - remove Demo/Simulator state, controls, labels and automatic test playback
   from production Live;
 - start Live with two empty deck surfaces and an explicit source selector;
-- expose `Connected Decks` and `Local Playback` as the only product modes;
+- expose `Live Decks` and `Local Playback` as the only product modes;
 - keep simulator/replay providers exclusively in automated tests.
 
 ### E2B-08 – Local Playback vertical slice
@@ -42,6 +42,10 @@ Status: **Complete and locally verified**
 Status: **Complete and locally verified**
 
 - load a ready Lumi Library track on Deck A or B;
+- browse Collection and imported playlists directly below the fixed deck
+  surfaces, with search, native row selection and bounded pagination;
+- keep the selected playlist independently scrollable and make the complete
+  row and Load Deck A/B controls reliable click targets;
 - play the actual local/demo audio, pause, seek and choose the lighting master;
 - publish authoritative normalized position and playback observations;
 - use the exact Lumi timeline, role identity, RGB waveform and AutoLoop
@@ -50,6 +54,12 @@ Status: **Complete and locally verified**
 - materialize the chosen SoundSwitch bank/button into the executable plan so
   preview, plan state and emitted MIDI can never disagree;
 - support dry rehearsal through the existing independent operation states.
+
+The Live-embedded Library is now the primary Local Playback loading workflow.
+Loading a full Rekordbox-derived analysis no longer duplicates its complete
+16,384-point waveform in the authenticated snapshot. The editor retains full
+detail while each deck receives a peak-preserving preview of at most 1,024
+points, keeping real track loads below the bounded protocol message size.
 
 ### E2B-09 – Plan eligibility and unmatched-track safety
 
@@ -78,10 +88,11 @@ Build the first visible vertical slice using a deterministic acceptance source
 
 ### [E2B-02 – Production waveform resolution](https://github.com/victorblanco-tech/lumi/issues/86)
 
-Status: **Planned after the Beat Link transport PoC**
+Status: **Local-library slice complete; richer connected metadata remains planned**
 
 - extend the deck-source capability contract with preview/detail availability;
-- resolve an exact local-library waveform by stable track identity;
+- resolve an exact local-library waveform by stable track identity and render
+  it through the same RGB deck presentation in both source modes;
 - accept Beat Link preview/detail data behind the same normalized contract;
 - cache immutable waveform analysis locally and overlay live transport state;
 - show explicit unavailable/stale provenance without fabricated data.

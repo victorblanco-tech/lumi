@@ -47,6 +47,7 @@ const REKORDBOX_XML_SOURCE_KIND: &str = "rekordbox-xml";
 const REKORDBOX_CANONICAL_SOURCE_ID: &str = "rekordbox7-local";
 const REKORDBOX_CANONICAL_SOURCE_KIND: &str = "rekordbox7";
 const MAX_IMPORTED_WAVEFORM_POINTS: usize = 16_384;
+const MAX_DECK_WAVEFORM_PREVIEW_POINTS: usize = 1_024;
 
 pub struct LibraryWorker {
     repository: SqliteLibraryRepository,
@@ -142,13 +143,14 @@ impl LibraryPlanContext {
 
     #[must_use]
     pub fn waveform_preview_json(&self) -> Value {
+        let points = deck_waveform_preview_points(&self.waveform, MAX_DECK_WAVEFORM_PREVIEW_POINTS);
         json!({
             "source": "localLibrary",
             "style": "rgb",
-            "points": self.waveform.iter().map(|point| json!({
-                "low": point.low() / 8,
-                "mid": point.mid() / 8,
-                "high": point.high() / 8,
+            "points": points.iter().map(|point| json!({
+                "low": point[0] / 8,
+                "mid": point[1] / 8,
+                "high": point[2] / 8,
             })).collect::<Vec<_>>(),
         })
     }
@@ -287,6 +289,25 @@ impl LibraryPlanContext {
         self.autoloop_overrides.insert(phrase_index, variant_id);
         Ok(())
     }
+}
+
+fn deck_waveform_preview_points(points: &[WaveformPoint], maximum: usize) -> Vec<[u8; 3]> {
+    if points.is_empty() || maximum == 0 {
+        return Vec::new();
+    }
+    let chunk_size = points.len().div_ceil(maximum);
+    points
+        .chunks(chunk_size)
+        .map(|chunk| {
+            chunk.iter().fold([0_u8; 3], |peak, point| {
+                [
+                    peak[0].max(point.low()),
+                    peak[1].max(point.mid()),
+                    peak[2].max(point.high()),
+                ]
+            })
+        })
+        .collect()
 }
 
 fn mapping_number(variant_id: &VariantId) -> Option<u16> {
@@ -2547,7 +2568,7 @@ mod tests {
     use lumi_domain::{PhraseKind, ThemeId};
     use lumi_library::{
         LibraryRepository as _, PhraseLoopStrategy, PhraseRoleId, ReconcileStrategy,
-        TimelineEditCommand, TrackPageRequest, VariantId,
+        TimelineEditCommand, TrackPageRequest, VariantId, WaveformPoint,
     };
     use lumi_library_demo::{DemoLibraryRevision, DemoLibrarySourceProvider};
     use lumi_library_source::MusicLibrarySourceProvider as _;
@@ -2555,7 +2576,21 @@ mod tests {
 
     use super::{
         AutoloopCatalogMutation, LibraryWorker, LibraryWorkerError, PhraseRoleCatalogMutation,
+        deck_waveform_preview_points,
     };
+
+    #[test]
+    fn deck_waveform_preview_is_bounded_and_peak_preserving() {
+        let mut waveform = (0..16_384)
+            .map(|_| WaveformPoint::new(8, 16, 24))
+            .collect::<Vec<_>>();
+        waveform[8_191] = WaveformPoint::new(255, 254, 253);
+
+        let preview = deck_waveform_preview_points(&waveform, 1_024);
+
+        assert_eq!(preview.len(), 1_024);
+        assert!(preview.contains(&[255, 254, 253]));
+    }
 
     #[test]
     fn collection_total_is_independent_from_the_active_playlist()

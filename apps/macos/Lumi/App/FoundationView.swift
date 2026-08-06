@@ -44,7 +44,21 @@ struct FoundationView: View {
                         },
                         onLocalPlayback: { request in
                             engineStatus.runLocalPlayback(request)
-                        }
+                        },
+                        localPlaybackBrowser: AnyView(
+                            LocalPlaybackLibraryBrowserView(
+                                state: engineStatus.libraryState,
+                                keyNotation: $preferences.keyNotation,
+                                feedback: engineStatus.localPlaybackFeedback,
+                                feedbackIsError: engineStatus.localPlaybackFeedbackIsError,
+                                onQuery: { request in
+                                    Task { await engineStatus.queryLibrary(request) }
+                                },
+                                onLoadOnLocalDeck: { request in
+                                    Task { await engineStatus.loadLibraryTrackOnLocalDeck(request) }
+                                }
+                            )
+                        )
                     )
                 case .library:
                     LibraryHubView(

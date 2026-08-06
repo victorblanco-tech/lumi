@@ -2,12 +2,14 @@
 
 Local Playback is a product deck source, not a demo or simulator. It lets a DJ
 prepare and dry-test the same Lumi-owned phrase timeline and lighting plan that
-will later be driven by Connected Decks.
+will later be driven by Live Decks.
 
 ## Runtime flow
 
-1. Library exposes **Load on Deck A** and **Load on Deck B** for a track with a
-   Lumi timeline.
+1. Live embeds a compact, independently scrollable Library browser beneath the
+   two decks. Collection, imported playlists, search and pagination lead to
+   **Load Deck A** and **Load Deck B** for a track with a Lumi timeline. The
+   full Library screen exposes the same engine-authoritative workflow.
 2. The command carries the exact library track ID, target deck, expected
    timeline revision, and expected runtime state revision.
 3. `LibraryWorker` resolves that track and revision and provides the original
@@ -15,7 +17,7 @@ will later be driven by Connected Decks.
    stable track identity.
 4. `LocalPlaybackDeckSourceProvider` owns the two product deck slots, absolute
    playback position, play/pause state, and leader selection. It emits the same
-   provider-neutral observations that a Connected Decks adapter will emit.
+   provider-neutral observations that a Live Decks adapter will emit.
 5. The Swift audio controller plays the selected local source and reports its
    measured position to the engine. The Live playhead therefore follows actual
    playback and never an autonomous UI timer.
@@ -34,7 +36,7 @@ will later be driven by Connected Decks.
   never reorders the surfaces.
 - Finished and current phrases are read-only. Future phrases are editable and
   may optionally be pinned.
-- The same source selector offers **Connected Decks** and **Local Playback**.
+- The same source selector offers **Live Decks** and **Local Playback**.
   Internal simulator/replay providers never appear as product modes.
 - A connected track with an exact Lumi library identity is `READY_EXACT`.
 - An unmatched track may be displayed as `READY_TRANSIENT` when a provider
@@ -48,7 +50,10 @@ will later be driven by Connected Decks.
   cannot silently select a Library row.
 - Missing audio fails closed for playback while analysis remains available.
 - Source switching clears stale deck state rather than presenting Local
-  Playback data as if it came from Connected Decks.
+  Playback data as if it came from Live Decks.
+- Full editor analysis remains available for deep zoom. A deck snapshot carries
+  at most 1,024 peak-preserving RGB preview points so two real imported tracks
+  remain safely below the authenticated one-megabyte protocol bound.
 - The planning worker retains at most 256 library contexts.
 - No network, DJ hardware, Rekordbox process/database, SoundSwitch process, or
   MIDI target is required to use Local Playback.

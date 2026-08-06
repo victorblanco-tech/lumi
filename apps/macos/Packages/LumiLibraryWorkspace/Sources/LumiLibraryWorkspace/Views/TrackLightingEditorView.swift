@@ -926,12 +926,6 @@ public struct TrackLightingEditorView: View {
                     .foregroundColor(primary)
                 context.draw(label, at: CGPoint(x: x + 5, y: 13), anchor: .topLeading)
             }
-            if Double(beat) < viewport.endBeat {
-                let beatLabel = Text("\(beat % Int(analysis.beatsPerBar) + 1)")
-                    .font(.system(size: 8, weight: .medium, design: .monospaced))
-                    .foregroundColor(secondary)
-                context.draw(beatLabel, at: CGPoint(x: x + 3, y: 31), anchor: .topLeading)
-            }
         }
 
         for pixel in 0..<max(1, Int(width.rounded(.up))) {

@@ -10,6 +10,7 @@ public struct LiveWorkspaceView: View {
     private let onPlanMutation: @MainActor (PlanMutationRequest) -> Void
     private let onSessionCommand: @MainActor (SessionCommandRequest) -> Void
     private let onLocalPlayback: @MainActor (LocalPlaybackRequest) -> Void
+    private let localPlaybackBrowser: AnyView?
     @Binding private var appearance: AppearancePreference
     @Binding private var keyNotation: KeyNotationPreference
     @State private var selectedPhrase: UInt64 = 0
@@ -27,7 +28,8 @@ public struct LiveWorkspaceView: View {
         showsNavigation: Bool = true,
         onPlanMutation: @escaping @MainActor (PlanMutationRequest) -> Void = { _ in },
         onSessionCommand: @escaping @MainActor (SessionCommandRequest) -> Void = { _ in },
-        onLocalPlayback: @escaping @MainActor (LocalPlaybackRequest) -> Void = { _ in }
+        onLocalPlayback: @escaping @MainActor (LocalPlaybackRequest) -> Void = { _ in },
+        localPlaybackBrowser: AnyView? = nil
     ) {
         self.state = state
         self.productVersion = productVersion
@@ -36,6 +38,7 @@ public struct LiveWorkspaceView: View {
         self.onPlanMutation = onPlanMutation
         self.onSessionCommand = onSessionCommand
         self.onLocalPlayback = onLocalPlayback
+        self.localPlaybackBrowser = localPlaybackBrowser
         _appearance = appearance
         _keyNotation = keyNotation
     }
@@ -241,7 +244,7 @@ public struct LiveWorkspaceView: View {
 
     private var deckSourceSelector: some View {
         HStack(spacing: 2) {
-            sourceModeButton("Connected Decks", mode: "connectedDecks", icon: "cable.connector")
+            sourceModeButton("Live Decks", mode: "connectedDecks", icon: "cable.connector")
             sourceModeButton("Local Playback", mode: "localPlayback", icon: "macbook.and.iphone")
         }
         .padding(2)
@@ -345,66 +348,71 @@ public struct LiveWorkspaceView: View {
     private var deckWorkspace: some View {
         Group {
             if let content = state.content {
-                HStack(alignment: .top, spacing: LumiSpacing.medium) {
-                    ForEach([UInt64(1), 2], id: \.self) { deckID in
-                        if let deck = content.decks.first(where: { $0.deckID == deckID }) {
-                            let isMaster = deck.deckID == content.leaderDeckID
-                            let plan = isMaster ? content.livePlan : content.plan
-                            let selectedIndex = selectedPhraseIndex(
-                                deck: deck,
-                                plan: plan,
-                                isMaster: isMaster
-                            )
-                            LiveDeckSurface(
-                                deck: deck,
-                                isMaster: isMaster,
-                                plan: plan,
-                                musicalKey: musicalKey(for: deck),
-                                isLocalPlayback: content.sourceMode == "localPlayback",
-                                selectedPhraseIndex: selectedIndex,
-                                onSelectPhrase: { phraseIndex in
-                                    if isMaster {
-                                        selectedLivePhrase = phraseIndex
-                                    } else {
-                                        selectedPhrase = phraseIndex
+                VStack(spacing: LumiSpacing.medium) {
+                    HStack(alignment: .top, spacing: LumiSpacing.medium) {
+                        ForEach([UInt64(1), 2], id: \.self) { deckID in
+                            if let deck = content.decks.first(where: { $0.deckID == deckID }) {
+                                let isMaster = deck.deckID == content.leaderDeckID
+                                let plan = isMaster ? content.livePlan : content.plan
+                                let selectedIndex = selectedPhraseIndex(
+                                    deck: deck,
+                                    plan: plan,
+                                    isMaster: isMaster
+                                )
+                                LiveDeckSurface(
+                                    deck: deck,
+                                    isMaster: isMaster,
+                                    plan: plan,
+                                    musicalKey: musicalKey(for: deck),
+                                    isLocalPlayback: content.sourceMode == "localPlayback",
+                                    selectedPhraseIndex: selectedIndex,
+                                    onSelectPhrase: { phraseIndex in
+                                        if isMaster {
+                                            selectedLivePhrase = phraseIndex
+                                        } else {
+                                            selectedPhrase = phraseIndex
+                                        }
+                                    },
+                                    onTogglePlayback: {
+                                        onLocalPlayback(.togglePlayback(deckID: deck.deckID))
+                                    },
+                                    onStop: {
+                                        onLocalPlayback(.stop(deckID: deck.deckID))
+                                    },
+                                    onSeek: { progress in
+                                        onLocalPlayback(.seek(deckID: deck.deckID, progress: progress))
+                                    },
+                                    onMakeMaster: {
+                                        sendWithRevision {
+                                            .setLocalPlaybackLeader(
+                                                deck.deckID,
+                                                expectedStateRevision: $0
+                                            )
+                                        }
                                     }
-                                },
-                                onTogglePlayback: {
-                                    onLocalPlayback(.togglePlayback(deckID: deck.deckID))
-                                },
-                                onStop: {
-                                    onLocalPlayback(.stop(deckID: deck.deckID))
-                                },
-                                onSeek: { progress in
-                                    onLocalPlayback(.seek(deckID: deck.deckID, progress: progress))
-                                },
-                                onMakeMaster: {
-                                    sendWithRevision {
-                                        .setLocalPlaybackLeader(
-                                            deck.deckID,
-                                            expectedStateRevision: $0
+                                ) {
+                                    if let plan {
+                                        phraseEditor(
+                                            plan: plan,
+                                            deck: deck,
+                                            options: content.planningOptions,
+                                            isLive: isMaster,
+                                            selectedIndex: selectedIndex
                                         )
+                                    } else {
+                                        heldDeckPlan(deck)
                                     }
                                 }
-                            ) {
-                                if let plan {
-                                    phraseEditor(
-                                        plan: plan,
-                                        deck: deck,
-                                        options: content.planningOptions,
-                                        isLive: isMaster,
-                                        selectedIndex: selectedIndex
-                                    )
-                                } else {
-                                    heldDeckPlan(deck)
-                                }
-                            }
-                            .frame(maxWidth: .infinity)
-                            .accessibilityIdentifier(deckID == 1 ? "lumi.deck.a" : "lumi.deck.b")
-                        } else {
-                            emptyDeckSurface(deckID: deckID, sourceMode: content.sourceMode)
                                 .frame(maxWidth: .infinity)
+                                .accessibilityIdentifier(deckID == 1 ? "lumi.deck.a" : "lumi.deck.b")
+                            } else {
+                                emptyDeckSurface(deckID: deckID, sourceMode: content.sourceMode)
+                                    .frame(maxWidth: .infinity)
+                            }
                         }
+                    }
+                    if content.sourceMode == "localPlayback", let localPlaybackBrowser {
+                        localPlaybackBrowser
                     }
                 }
             } else {

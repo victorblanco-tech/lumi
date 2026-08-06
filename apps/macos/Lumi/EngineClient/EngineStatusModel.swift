@@ -189,9 +189,28 @@ final class EngineStatusModel: ObservableObject {
     }
 
     func loadLibraryTrackOnLocalDeck(_ request: LibraryDeckLoadRequest) async {
-        guard let snapshot = latestSnapshot else { return }
+        guard var snapshot = latestSnapshot else { return }
         localPlaybackFeedback = nil
         localPlaybackFeedbackIsError = false
+
+        if snapshot.deckSource.mode != "localPlayback" {
+            let switched = await exchangeLibraryCommand(
+                .selectDeckSourceMode(
+                    "localPlayback",
+                    expectedStateRevision: snapshot.stateRevision
+                ),
+                preservesLibraryOnFailure: true,
+                retryOnStateRevisionConflict: { actualRevision in
+                    .selectDeckSourceMode(
+                        "localPlayback",
+                        expectedStateRevision: actualRevision
+                    )
+                }
+            )
+            guard switched, let refreshed = latestSnapshot else { return }
+            snapshot = refreshed
+        }
+
         let loaded = await exchangeLibraryCommand(
             .loadLibraryTrackOnLocalDeck(
                 trackID: request.trackID,
@@ -199,7 +218,15 @@ final class EngineStatusModel: ObservableObject {
                 expectedTimelineRevision: request.expectedTimelineRevision,
                 expectedStateRevision: snapshot.stateRevision
             ),
-            preservesLibraryOnFailure: true
+            preservesLibraryOnFailure: true,
+            retryOnStateRevisionConflict: { actualRevision in
+                .loadLibraryTrackOnLocalDeck(
+                    trackID: request.trackID,
+                    deckID: request.deckID,
+                    expectedTimelineRevision: request.expectedTimelineRevision,
+                    expectedStateRevision: actualRevision
+                )
+            }
         )
         if loaded {
             localPlaybackFeedback = "Loaded exact Lumi timeline r\(request.expectedTimelineRevision) on Local Deck \(request.deckID)."
@@ -717,7 +744,8 @@ final class EngineStatusModel: ObservableObject {
     @discardableResult
     private func exchangeLibraryCommand(
         _ command: EngineCommand,
-        preservesLibraryOnFailure: Bool = false
+        preservesLibraryOnFailure: Bool = false,
+        retryOnStateRevisionConflict: ((UInt64) -> EngineCommand)? = nil
     ) async -> Bool {
         guard lifecycle == .ready,
               let endpointDescription,
@@ -727,7 +755,15 @@ final class EngineStatusModel: ObservableObject {
         }
         defer { isExchangingCommand = false }
         do {
-            let envelope = try await supervisor.send(command)
+            var envelope = try await supervisor.send(command)
+            if let failure = EngineCommandFailure(envelope),
+               failure.kind == "revisionConflict",
+               let actualRevision = failure.actualStateRevision,
+               let retryOnStateRevisionConflict {
+                envelope = try await supervisor.send(
+                    retryOnStateRevisionConflict(actualRevision)
+                )
+            }
             if let failure = EngineCommandFailure(envelope) {
                 if preservesLibraryOnFailure {
                     localPlaybackFeedback = failure.message
@@ -882,7 +918,14 @@ final class EngineStatusModel: ObservableObject {
             sessionInteraction: .submitting
         )
         do {
-            let envelope = try await supervisor.send(engineCommand(for: request))
+            var envelope = try await supervisor.send(engineCommand(for: request))
+            if let failure = EngineCommandFailure(envelope),
+               failure.kind == "revisionConflict",
+               let actualRevision = failure.actualStateRevision {
+                envelope = try await supervisor.send(
+                    engineCommand(for: request.withStateRevision(actualRevision))
+                )
+            }
             if let failure = EngineCommandFailure(envelope) {
                 if failure.kind == "revisionConflict" {
                     try await refreshSessionAfterConflict(
@@ -994,7 +1037,7 @@ final class EngineStatusModel: ObservableObject {
         case let .setOperationState(state, _): "Operation state is now \(state.uppercased())."
         case let .setLocalPlaybackLeader(deckID, _): "Local Deck \(deckID) is now Live."
         case let .selectDeckSourceMode(mode, _):
-            mode == "localPlayback" ? "Local Playback selected." : "Connected Decks selected."
+            mode == "localPlayback" ? "Local Playback selected." : "Live Decks selected."
         }
     }
 
@@ -1190,6 +1233,19 @@ final class EngineStatusModel: ObservableObject {
                 }
                 self.isExchangingCommand = false
             }
+        }
+    }
+}
+
+private extension SessionCommandRequest {
+    func withStateRevision(_ revision: UInt64) -> Self {
+        switch self {
+        case let .setOperationState(state, _):
+            .setOperationState(state, expectedStateRevision: revision)
+        case let .setLocalPlaybackLeader(deckID, _):
+            .setLocalPlaybackLeader(deckID, expectedStateRevision: revision)
+        case let .selectDeckSourceMode(mode, _):
+            .selectDeckSourceMode(mode, expectedStateRevision: revision)
         }
     }
 }
