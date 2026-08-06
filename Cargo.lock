@@ -401,6 +401,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "lumi-rekordbox-resolver"
+version = "0.1.0-dev"
+dependencies = [
+ "lumi-rekordbox-analysis",
+ "lumi-rekordbox-xml",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
 name = "lumi-rekordbox-xml"
 version = "0.1.0-dev"
 dependencies = [

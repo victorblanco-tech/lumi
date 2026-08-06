@@ -1,0 +1,17 @@
+[package]
+name = "lumi-rekordbox-resolver"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+sha2 = "0.10.9"
+thiserror = "2"
+
+[dev-dependencies]
+lumi-rekordbox-analysis = { path = "../lumi-rekordbox-analysis" }
+lumi-rekordbox-xml = { path = "../lumi-rekordbox-xml" }
+
+[lints]
+workspace = true

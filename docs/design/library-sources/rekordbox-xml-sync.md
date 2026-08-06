@@ -1,8 +1,8 @@
 # Rekordbox XML playlist sync
 
-- Status: **Accepted; archive-safe Apply delivered and ANLZ capability POC proven**
+- Status: **Accepted; Apply delivered and authoritative analysis resolution proven**
 - Accepted: **2026-08-06**
-- Source mode: **Official XML export, read-only**
+- Source mode: **XML playlist scope plus closed local analysis snapshot, read-only**
 - Stories: [E2A-20](https://github.com/victorblanco-tech/lumi/issues/92), [E2A-21](https://github.com/victorblanco-tech/lumi/issues/91), [E2A-22](https://github.com/victorblanco-tech/lumi/issues/90)
 
 ## Product outcome
@@ -20,7 +20,12 @@ under `Library > Sources & Import`, not in global Settings.
 - `Include future child playlists` per followed folder, enabled by default;
 - `Mirror playlist membership`, enabled for the first provider version;
 - `Archive tracks removed from all followed playlists`, mandatory and visible;
-- no automatic writes, moves, deletes, exports, or Rekordbox database access.
+- no writes, moves or deletes in Rekordbox; the live database is never queried,
+  and SQL runs only against a verified Lumi-owned snapshot.
+
+`Follow Playlists` and `Initial Phrase Mapping` are independent disclosures and
+start collapsed. Their current selection/mapping purpose remains visible in the
+summary so the page stays operationally scannable without hiding configuration.
 
 Settings are modeled as source behavior so future adapters can expose their own
 capabilities without adding unrelated switches to global application Settings.
@@ -111,7 +116,8 @@ The real read-only POC found beatgrids for 675/675 provisionally matched tracks,
 waveform. Exact Rekordbox pixels are not promised because Lumi supplies its own
 renderer.
 
-The POC also found stale `PPTH` audio roots. Its opt-in unique-filename fallback
-is evidence-only and disabled by default; ambiguous identities are rejected.
-No production enrichment is applied until a stronger identity resolver is
-accepted. See ADR-0019 for the measured coverage and safety boundary.
+The first POC found stale `PPTH` roots. The accepted closed-database resolver now
+maps XML `TrackID` to the current `AnalysisDataPath` from a Lumi-owned SQLCipher
+snapshot. The configured 684-track scope resolved 684/684 without a filename
+fallback; all had beatgrid and colored waveforms and 683 had source phrases.
+See [ADR-0020](../../architecture/adr/0020-closed-rekordbox-snapshot-identity-resolver.md).

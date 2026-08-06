@@ -28,6 +28,8 @@ public struct LibrarySourcesWorkspaceView: View {
     @State private var sourceError: String?
     @State private var isScanning = false
     @State private var didInitializeSource = false
+    @State private var isPlaylistSelectionExpanded = false
+    @State private var isPhraseMappingExpanded = false
 
     public init(
         library: LibraryWorkspaceState,
@@ -185,20 +187,7 @@ public struct LibrarySourcesWorkspaceView: View {
     @ViewBuilder
     private var rekordboxPlaylistSelection: some View {
         if let discovery {
-            VStack(alignment: .leading, spacing: LumiSpacing.large) {
-                HStack(alignment: .bottom) {
-                    VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-                        Text("Follow Playlists")
-                            .font(LumiTypography.cardTitle)
-                        Text("Choose individual playlists or an entire folder. Folder selections can automatically include playlists you add later.")
-                            .font(LumiTypography.body)
-                            .foregroundStyle(LumiColor.textSecondary)
-                    }
-                    Spacer()
-                    Text("\(discovery.folderCount) folders · \(discovery.playlistCount) playlists")
-                        .font(LumiTypography.technical)
-                        .foregroundStyle(LumiColor.textSecondary)
-                }
+            DisclosureGroup(isExpanded: $isPlaylistSelectionExpanded) {
                 LumiPanel {
                     VStack(alignment: .leading, spacing: LumiSpacing.medium) {
                         HStack {
@@ -249,7 +238,24 @@ public struct LibrarySourcesWorkspaceView: View {
                         }
                     }
                 }
+                .padding(.top, LumiSpacing.medium)
+            } label: {
+                HStack(alignment: .center, spacing: LumiSpacing.medium) {
+                    VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+                        Text("Follow Playlists")
+                            .font(LumiTypography.cardTitle)
+                        Text(selectionSummary(discovery))
+                            .font(LumiTypography.caption)
+                            .foregroundStyle(LumiColor.textSecondary)
+                    }
+                    Spacer()
+                    Text("\(discovery.folderCount) folders · \(discovery.playlistCount) playlists")
+                        .font(LumiTypography.technical)
+                        .foregroundStyle(LumiColor.textSecondary)
+                }
             }
+            .tint(LumiColor.accent)
+            .accessibilityIdentifier("lumi.library.sources.rekordbox.playlistsDisclosure")
         }
     }
 
@@ -471,29 +477,35 @@ public struct LibrarySourcesWorkspaceView: View {
     @ViewBuilder
     private var sourceMappings: some View {
         if let settings, !settings.mappingProfiles.isEmpty {
-            VStack(alignment: .leading, spacing: LumiSpacing.large) {
+            DisclosureGroup(isExpanded: $isPhraseMappingExpanded) {
+                VStack(alignment: .leading, spacing: LumiSpacing.large) {
+                    providerTabs(settings)
+                    mappingTable(settings)
+                    Label(settings.mappingPolicy, systemImage: "lock.shield")
+                        .font(LumiTypography.caption)
+                        .foregroundStyle(LumiColor.textSecondary)
+                    if let feedback {
+                        Label(feedback, systemImage: "checkmark.circle")
+                            .font(LumiTypography.caption)
+                            .foregroundStyle(
+                                feedback.lowercased().contains("could not")
+                                    ? LumiColor.warning
+                                    : LumiColor.success
+                            )
+                    }
+                }
+                .padding(.top, LumiSpacing.medium)
+            } label: {
                 VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
                     Text("Initial Phrase Mapping")
                         .font(LumiTypography.cardTitle)
-                    Text("Map source phrases once during import. After import, Lumi-owned phrases evolve independently in the Track Editor.")
-                        .font(LumiTypography.body)
+                    Text("Map imported source phrases once; later edits remain Lumi-owned.")
+                        .font(LumiTypography.caption)
                         .foregroundStyle(LumiColor.textSecondary)
                 }
-                providerTabs(settings)
-                mappingTable(settings)
-                Label(settings.mappingPolicy, systemImage: "lock.shield")
-                    .font(LumiTypography.caption)
-                    .foregroundStyle(LumiColor.textSecondary)
-                if let feedback {
-                    Label(feedback, systemImage: "checkmark.circle")
-                        .font(LumiTypography.caption)
-                        .foregroundStyle(
-                            feedback.lowercased().contains("could not")
-                                ? LumiColor.warning
-                                : LumiColor.success
-                        )
-                }
             }
+            .tint(LumiColor.accent)
+            .accessibilityIdentifier("lumi.library.sources.phraseMappingDisclosure")
         }
     }
 

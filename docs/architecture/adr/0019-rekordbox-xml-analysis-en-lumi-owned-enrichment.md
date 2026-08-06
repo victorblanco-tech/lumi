@@ -36,12 +36,13 @@ The analysis provider:
 
 - discovers only bounded `ANLZ*.DAT`, `ANLZ*.EXT` and `ANLZ*.2EX` files below an
   explicitly approved Rekordbox analysis root;
-- reads `PPTH` only to match an analysis set to the normalized audio location
-  from the XML mirror;
+- initially used `PPTH` to measure analysis availability; production identity
+  is now resolved through the closed-database snapshot in
+  [ADR-0020](0020-closed-rekordbox-snapshot-identity-resolver.md);
 - copies matched analysis files to an application-owned snapshot before full
   parsing;
-- opens source files read-only and never opens or mutates `master.db` in the
-  first implementation;
+- never queries or mutates the production `master.db`; the accepted resolver
+  copies it byte-for-byte and queries only the Lumi-owned snapshot;
 - exposes raw capabilities and source provenance instead of Rekordbox-specific
   objects to the rest of the application;
 - fails closed on malformed lengths, unknown required structures, excessive
@@ -72,9 +73,17 @@ audio roots for this migrated library, so no exact normalized path match is
 possible. The coverage run therefore used an explicitly opt-in, unique-
 filename-only POC fallback. That fallback is disabled by default, never treats
 an ambiguous name as a match and is not approved as persistent product
-identity. Production enrichment remains gated on an authoritative resolver,
-most likely a read-only Rekordbox identity/path lookup or a user-confirmed
-relocation mapping.
+identity. That gate is now passed by ADR-0020: XML `TrackID` resolves directly
+to `djmdContent.ID` and its current `AnalysisDataPath` in a closed, Lumi-owned
+database snapshot.
+
+## Authoritative resolver evidence (2026-08-06)
+
+The complete XML Collection matched 2,954/2,954 active database identities. In
+the followed-playlist scope, 684/684 tracks resolved to existing analysis sets,
+with beatgrid and colored waveform data on all 684 and PSSI observations on
+683. No filename fallback was enabled. See ADR-0020 for the snapshot, secret,
+path-confinement and read-only invariants.
 
 Rekordbox `PSSI` labels remain raw source observations. A configurable mapping
 creates the initial Lumi timeline. Once created, the timeline and all later
@@ -107,8 +116,8 @@ and confidence and is never presented as Rekordbox analysis.
 - The same underlying RGB/three-band samples needed for a Rekordbox-like
   waveform are available. Lumi still owns rendering; pixel parity is a
   separate visual implementation and verification task.
-- Analysis enrichment cannot be enabled in the app until the stale-`PPTH`
-  identity gap has an accepted, stronger solution.
+- Analysis enrichment may now use the accepted TrackID-to-AnalysisDataPath
+  resolver; persistence and user-facing progress remain separate delivery work.
 
 ## Rejected alternatives
 

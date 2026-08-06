@@ -158,17 +158,18 @@ Engelse localization resources en de configureerbare Camelot/Classic-keynotatie.
 
 ## 6. Story map
 
-### E2A-00 – Prove safe Rekordbox 7 analysis extraction
+### [E2A-00 – Prove safe Rekordbox 7 analysis extraction](https://github.com/victorblanco-tech/lumi/issues/36)
 
-Status: **POC completed; parser go, production identity resolver gated**.
+Status: **implemented and real-library verified; product workflow next**.
 Bounded detectie, consistente snapshot, waveform, beatgrid en raw phrases zijn
 op de daadwerkelijk geïnstalleerde Rekordbox 7-versie bewezen terwijl
 Rekordbox gesloten was. De parser gebruikt synthetische regressie-fixtures en
-de bron bleef volledig read-only. De echte scope bewees beatgrid voor 675/675
-provisional matches, phrases voor 674/675 en color plus three-band waveform voor
-675/675. `PPTH` bevat echter verouderde roots; de unieke-bestandsnaamfallback is
-uitsluitend POC-evidence en staat standaard uit. Een autoritatieve identity-
-resolver is de resterende go/no-go-gate voor productimport.
+de bron bleef volledig read-only. De autoritatieve resolver maakt eerst een
+byte-identieke Lumi-owned `master.db`-snapshot en koppelt daarna XML TrackID aan
+`djmdContent.ID/AnalysisDataPath` onder SQLCipher read-only en `query_only`.
+De gekozen scope bewees 684/684 matches, beatgrids en color/three-band waveforms,
+plus phrases voor 683/684. De bestandsnaamfallback is niet gebruikt en blijft
+uitsluitend opt-in POC-code. ADR-0020 legt de volledige veiligheidsgrens vast.
 
 ### E2A-01 – Persist the canonical Lumi music library
 
@@ -177,10 +178,12 @@ migraties, importbaselines en revision-safe transacties. Levert tevens de
 deterministische demo-provider waarmee de rest van de epic zonder Rekordbox kan
 worden gebouwd.
 
-### E2A-02 – Import a closed local Rekordbox 7 library
+### [E2A-02 – Import a closed local Rekordbox 7 library](https://github.com/victorblanco-tech/lumi/issues/38)
 
 Bouwt detectie, read-only snapshot, incremental import, providerstatus en een
-zichtbare import/refreshflow in de macOS-app.
+zichtbare import/refreshflow in de macOS-app. De snapshot- en resolverkern is
+geleverd; het resterende werk is persistence van de geparseerde analyse,
+source-status/progress en de expliciete import/refreshactie in de app.
 
 ### E2A-03 – Browse and inspect imported tracks
 
@@ -256,8 +259,9 @@ Status: **demo-data proof in verification**. De golden Library/editor/restart/
 refreshflow, vier-Theme-resolutie, Library→Simulator-evidence, expliciete
 10.000-trackbudgetten, faultmatrix, visual manifest en demo/limitations guide
 zijn onderdeel van de vaste repositorygate. Definitieve afronding wacht bewust
-op E2A-00/E2A-02 met een geïsoleerde wegwerp-Rekordbox-7-library; de productie-
-library wordt niet als ontwikkelbewijs gebruikt.
+op de zichtbare import- en persistenceflow van E2A-02. E2A-00 is veilig bewezen
+tegen een byte-identieke, read-only snapshot van de gesloten productie-library;
+productiegegevens worden niet in fixtures, logs of de repository opgenomen.
 
 ### E2A-13 – Align the Track Editor with Rekordbox/CDJ phrase-point workflow
 
@@ -384,7 +388,7 @@ unchanged, archive en restore. Analyse blijft daarna expliciet pending. De
 volledige beslissing staat in
 [`rekordbox-xml-sync.md`](../design/library-sources/rekordbox-xml-sync.md).
 
-## 6.1 Bouwvolgorde zonder Rekordbox-developmentlibrary
+## 6.1 Provider-neutrale bouwvolgorde
 
 De Rekordbox-spike is alleen een harde gate voor `E2A-02`, niet voor de
 provider-neutrale Library- en editorfunctionaliteit. De aanbevolen eerste slice
@@ -397,9 +401,9 @@ is:
 5. `E2A-06`: Settings > Phrase Model, Library Sources-mapping en editorintegratie;
 6. `E2A-07` en `E2A-08`: vier Theme-banks, flexibele variants en loopstrategieën.
 
-`E2A-00` kan parallel starten zodra het geïsoleerde macOS-account met een
-wegwerp-Rekordbox-library beschikbaar is. Pas na een go-besluit start `E2A-02`.
-De demo-provider blijft daarna bestaan voor CI, screenshots en foutscenario's.
+`E2A-00` is afgerond met een gesloten-bronsnapshot en geeft groen licht voor de
+resterende productflow in `E2A-02`. De demo-provider blijft bestaan voor CI,
+screenshots en foutscenario's; echte Rekordbox-data wordt nooit testfixture.
 
 ## 7. Exitcriteria
 
@@ -438,9 +442,9 @@ De demo-provider blijft daarna bestaan voor CI, screenshots en foutscenario's.
 
 ## 7.1 Geparkeerd na de demo-scope
 
-- `E2A-00` en `E2A-02`: directe Rekordbox 7-import is het eerstvolgende
-  werkpakket, maar blijft hard gated op een geïsoleerd macOS-account met
-  wegwerp-library. De productie-library wordt nooit als ontwikkelbron gebruikt.
+- `E2A-02`: integreer de bewezen gesloten snapshot/resolver in de zichtbare
+  import/refreshflow. De productie-library blijft read-only; parsing en tests
+  gebruiken uitsluitend Lumi-owned snapshots en synthetische fixtures.
 - `E2A-15`: verdere CDJ/Rekordbox RGB-pixelfidelity wordt later hervat.
 - `E3-00`: de fysieke SoundSwitch/CoreMIDI-keten uit ADR-0015 is bewezen voor
   virtual MIDI discovery, Bank 1 → AutoLoop 1, parallel Control One-gebruik en
@@ -450,8 +454,8 @@ De demo-provider blijft daarna bestaan voor CI, screenshots en foutscenario's.
 
 ## 8. Afhankelijkheden en risico's
 
-- Rekordbox 7-opslag is geen publieke stabiele API; E2A-00 is een harde
-  go/no-go-gate voor de directe adapter.
+- Rekordbox 7-opslag is geen publieke stabiele API; versie- en
+  capabilityvalidatie van de resolver blijft daarom fail-closed.
 - Phrase- en waveformformats kunnen per Rekordbox-update wijzigen; capability-
   en versievalidatie moeten fail-closed zijn.
 - Trackmatching met latere USB/live-identiteiten moet al in identities en

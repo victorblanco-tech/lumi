@@ -164,6 +164,90 @@ pub struct AnalysisScanResult {
     pub tracks: BTreeMap<String, TrackAnalysisCoverage>,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResolvedAnalysisTrack {
+    identity: String,
+    dat_path: PathBuf,
+}
+
+impl ResolvedAnalysisTrack {
+    pub fn try_new(
+        identity: impl Into<String>,
+        dat_path: impl Into<PathBuf>,
+    ) -> Result<Self, AnalysisError> {
+        let identity = identity.into();
+        let dat_path = dat_path.into();
+        if identity.trim().is_empty() {
+            return Err(AnalysisError::InvalidResolvedIdentity);
+        }
+        Ok(Self { identity, dat_path })
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResolvedAnalysisRequest {
+    analysis_root: PathBuf,
+    snapshot_root: PathBuf,
+    tracks: Vec<ResolvedAnalysisTrack>,
+    limits: AnalysisScanLimits,
+}
+
+impl ResolvedAnalysisRequest {
+    pub fn try_new(
+        analysis_root: impl Into<PathBuf>,
+        snapshot_root: impl Into<PathBuf>,
+        tracks: impl IntoIterator<Item = ResolvedAnalysisTrack>,
+    ) -> Result<Self, AnalysisError> {
+        let analysis_root = analysis_root.into();
+        let snapshot_root = snapshot_root.into();
+        let tracks = tracks.into_iter().collect::<Vec<_>>();
+        if tracks.is_empty() || tracks.len() > MAX_REQUESTED_TRACKS {
+            return Err(AnalysisError::InvalidRequestedTrackCount(tracks.len()));
+        }
+        if tracks
+            .iter()
+            .map(|track| track.identity.as_str())
+            .collect::<BTreeSet<_>>()
+            .len()
+            != tracks.len()
+        {
+            return Err(AnalysisError::DuplicateResolvedIdentity);
+        }
+        if !analysis_root.is_dir() {
+            return Err(AnalysisError::InvalidAnalysisRoot);
+        }
+        if snapshot_root.exists() {
+            let mut entries = fs::read_dir(&snapshot_root)?;
+            if entries.next().transpose()?.is_some() {
+                return Err(AnalysisError::SnapshotRootNotEmpty);
+            }
+        }
+        let canonical_analysis = fs::canonicalize(&analysis_root)?;
+        let canonical_snapshot_parent = canonical_existing_ancestor(&snapshot_root)?;
+        if canonical_snapshot_parent.starts_with(&canonical_analysis) {
+            return Err(AnalysisError::SnapshotInsideAnalysisRoot);
+        }
+        for track in &tracks {
+            let canonical = fs::canonicalize(&track.dat_path)?;
+            if !canonical.starts_with(&canonical_analysis) || !is_analysis_dat(&canonical) {
+                return Err(AnalysisError::ResolvedFileOutsideAnalysisRoot);
+            }
+        }
+        Ok(Self {
+            analysis_root: canonical_analysis,
+            snapshot_root,
+            tracks,
+            limits: AnalysisScanLimits::default(),
+        })
+    }
+
+    #[must_use]
+    pub const fn with_limits(mut self, limits: AnalysisScanLimits) -> Self {
+        self.limits = limits;
+        self
+    }
+}
+
 /// Scans only `ANLZ*.DAT` files, matches their `PPTH` audio location to the
 /// requested XML locations, and parses copied companions from a Lumi-owned snapshot.
 pub fn scan_and_snapshot(
@@ -348,6 +432,43 @@ pub fn scan_and_snapshot(
     Ok(AnalysisScanResult { report, tracks })
 }
 
+/// Snapshots and parses database-resolved analysis sets. No path or filename
+/// matching is performed: the caller supplies the authoritative source ID → DAT mapping.
+pub fn snapshot_resolved_analysis(
+    request: &ResolvedAnalysisRequest,
+) -> Result<AnalysisScanResult, AnalysisError> {
+    fs::create_dir_all(&request.snapshot_root)?;
+    let mut report = AnalysisCoverageReport {
+        requested_tracks: request.tracks.len(),
+        ..AnalysisCoverageReport::default()
+    };
+    let mut tracks = BTreeMap::new();
+    for track in &request.tracks {
+        let dat_path = fs::canonicalize(&track.dat_path)?;
+        if !dat_path.starts_with(&request.analysis_root) || !is_analysis_dat(&dat_path) {
+            return Err(AnalysisError::ResolvedFileOutsideAnalysisRoot);
+        }
+        let snapshot_directory = request
+            .snapshot_root
+            .join(sha256_hex(track.identity.as_bytes()));
+        fs::create_dir(&snapshot_directory)?;
+        let copied = copy_analysis_set(&dat_path, &snapshot_directory)?;
+        report.snapshot_files += copied.len();
+        let mut coverage = TrackAnalysisCoverage::default();
+        for copied_path in copied {
+            let bytes = read_bounded(&copied_path, request.limits.maximum_file_bytes)?;
+            let parsed = parse_analysis_file(&bytes)?;
+            coverage.beat_grid_entries = coverage.beat_grid_entries.max(parsed.beat_grid_entries);
+            coverage.phrase_entries = coverage.phrase_entries.max(parsed.phrase_entries);
+            coverage.waveform.merge(parsed.waveform);
+        }
+        accumulate_coverage(&mut report, coverage);
+        tracks.insert(track.identity.clone(), coverage);
+    }
+    report.matched_tracks = tracks.len();
+    Ok(AnalysisScanResult { report, tracks })
+}
+
 #[derive(Debug)]
 struct AnalysisCandidate {
     dat_path: PathBuf,
@@ -369,6 +490,16 @@ fn location_filename(location: &str) -> Option<String> {
     Path::new(location)
         .file_name()
         .map(|name| name.to_string_lossy().into_owned())
+}
+
+fn is_analysis_dat(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| extension.eq_ignore_ascii_case("DAT"))
+        && path
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .is_some_and(|stem| stem.starts_with("ANLZ"))
 }
 
 fn accumulate_coverage(report: &mut AnalysisCoverageReport, coverage: TrackAnalysisCoverage) {
@@ -775,11 +906,54 @@ pub enum AnalysisError {
     MalformedAnalysisFile,
     #[error("analysis source changed while its snapshot was copied")]
     SourceChangedDuringSnapshot,
+    #[error("resolved analysis identity is empty")]
+    InvalidResolvedIdentity,
+    #[error("resolved analysis identities must be unique")]
+    DuplicateResolvedIdentity,
+    #[error("resolved analysis file is outside the approved root or is not ANLZ DAT")]
+    ResolvedFileOutsideAnalysisRoot,
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn authoritative_resolved_set_is_snapshotted_without_path_matching()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let test_root = unique_test_root("resolved")?;
+        let analysis_root = test_root.join("source");
+        let set_root = analysis_root.join("P001");
+        let snapshot_root = test_root.join("snapshot");
+        fs::create_dir_all(&set_root)?;
+        let dat_path = set_root.join("ANLZ0000.DAT");
+        let ext_path = set_root.join("ANLZ0000.EXT");
+        fs::write(&dat_path, analysis_file(&[tag(*b"PQTZ", fixed_body(8, 8))]))?;
+        fs::write(
+            &ext_path,
+            analysis_file(&[
+                tag(*b"PWV5", declared_body(2, 32)),
+                tag(*b"PSSI", phrase_body(3, false)),
+            ]),
+        )?;
+
+        let request = ResolvedAnalysisRequest::try_new(
+            &analysis_root,
+            &snapshot_root,
+            [ResolvedAnalysisTrack::try_new("83110744", &dat_path)?],
+        )?;
+        let result = snapshot_resolved_analysis(&request)?;
+
+        assert_eq!(result.report.requested_tracks, 1);
+        assert_eq!(result.report.matched_tracks, 1);
+        assert_eq!(result.report.snapshot_files, 2);
+        assert_eq!(result.report.tracks_with_beat_grid, 1);
+        assert_eq!(result.report.tracks_with_phrases, 1);
+        assert_eq!(result.report.tracks_with_color_waveform, 1);
+        assert!(result.tracks.contains_key("83110744"));
+        fs::remove_dir_all(test_root)?;
+        Ok(())
+    }
 
     #[test]
     fn matched_set_is_copied_then_parsed_without_mutating_source()
