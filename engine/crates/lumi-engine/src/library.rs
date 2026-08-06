@@ -417,7 +417,7 @@ impl LibraryWorker {
                     .ok_or(LibraryWorkerError::MissingLibrarySource)?
             }
         };
-        seed_default_role_catalog(&mut repository)?;
+        let phrase_mapping_defaults_upgraded = seed_default_role_catalog(&mut repository)?;
         seed_default_autoloop_catalog(&mut repository)?;
         let mut worker = Self {
             repository,
@@ -436,6 +436,9 @@ impl LibraryWorker {
             last_rekordbox_apply: None,
         };
         worker.ensure_imported_timelines()?;
+        if phrase_mapping_defaults_upgraded {
+            worker.remap_untouched_source_timelines()?;
+        }
         Ok(worker)
     }
 
@@ -1080,6 +1083,75 @@ impl LibraryWorker {
         Ok(())
     }
 
+    /// Applies newly added provider defaults only to pristine source-import
+    /// timelines. Any track with a user or reconciliation revision is left
+    /// untouched, so a defaults upgrade can never overwrite editing work.
+    fn remap_untouched_source_timelines(&mut self) -> Result<(), LibraryWorkerError> {
+        let mut offset = 0_u32;
+        loop {
+            let page = self
+                .repository
+                .page_tracks(TrackPageRequest::try_new(offset, 200)?)?;
+            if page.tracks().is_empty() {
+                break;
+            }
+            let track_ids = page
+                .tracks()
+                .iter()
+                .map(TrackSummary::id)
+                .collect::<Vec<_>>();
+            for track_id in track_ids {
+                let Some(head) = self.repository.timeline_head(track_id)? else {
+                    continue;
+                };
+                if head.revision() != TimelineRevision::initial()
+                    || head.origin() != TimelineRevisionOrigin::SourceImport
+                    || head.reason() != TimelineRevisionReason::InitialSourceMapping
+                {
+                    continue;
+                }
+                let track = self
+                    .repository
+                    .track(track_id)?
+                    .ok_or(LibraryWorkerError::UnknownTrack(track_id.value()))?;
+                let (total_beats, phrases) = self.map_source_phrases_from_parts(
+                    track.beat_grid().beats_per_bar(),
+                    track.beat_grid().markers().len(),
+                    track.raw_phrases(),
+                )?;
+                if head.phrases() == phrases {
+                    continue;
+                }
+                let revision = head
+                    .revision()
+                    .checked_next()
+                    .ok_or(LibraryWorkerError::HistoryOverflow)?;
+                let remapped = LumiPhraseTimeline::try_new_with_history(
+                    track_id,
+                    revision,
+                    head.baseline_revision().clone(),
+                    total_beats,
+                    TimelineRevisionOrigin::SourceReconcile,
+                    TimelineRevisionReason::SourceReconcile,
+                    Some(head.revision()),
+                    None,
+                    phrases,
+                )?;
+                self.repository
+                    .append_timeline_revision(&remapped, Some(head.revision()))?;
+            }
+            let consumed = u32::try_from(page.tracks().len())
+                .map_err(|_| LibraryWorkerError::RekordboxImportOverflow)?;
+            offset = offset
+                .checked_add(consumed)
+                .ok_or(LibraryWorkerError::RekordboxImportOverflow)?;
+            if u64::from(offset) >= page.total() {
+                break;
+            }
+        }
+        Ok(())
+    }
+
     fn map_source_phrases(
         &self,
         track: &ImportedTrackAnalysis,
@@ -1676,14 +1748,18 @@ impl TimelineHistory {
 
 fn seed_default_role_catalog(
     repository: &mut SqliteLibraryRepository,
-) -> Result<(), LibraryWorkerError> {
+) -> Result<bool, LibraryWorkerError> {
     let existing = repository.phrase_role_catalog()?;
     if existing.defaults_version() >= lumi_library::PHRASE_ROLE_DEFAULTS_VERSION {
-        return Ok(());
+        return Ok(false);
     }
     let seeded = seeded_phrase_role_catalog(&existing)?;
-    repository.initialize_phrase_role_catalog(&seeded)?;
-    Ok(())
+    if existing.revision() == 0 {
+        repository.initialize_phrase_role_catalog(&seeded)?;
+    } else {
+        repository.replace_phrase_role_catalog(&seeded, existing.revision())?;
+    }
+    Ok(true)
 }
 
 fn seed_default_autoloop_catalog(
@@ -2017,7 +2093,7 @@ fn rekordbox_canonical_baseline(
     database_sha256: &str,
 ) -> Result<ImportedLibraryBaseline, LibraryWorkerError> {
     let source_revision = SourceRevision::try_new(format!(
-        "xml:{}-db:{}",
+        "xml:{}-db:{}-anlz2",
         &snapshot.content_sha256()[..16],
         &database_sha256[..16]
     ))?;

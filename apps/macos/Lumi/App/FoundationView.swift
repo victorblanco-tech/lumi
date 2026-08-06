@@ -193,6 +193,7 @@ struct FoundationView: View {
                 .foregroundStyle(destination == value ? LumiColor.accent : LumiColor.textPrimary)
                 .background(destination == value ? LumiColor.accent.opacity(0.14) : Color.clear)
                 .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("lumi.navigation.\(value.rawValue)")

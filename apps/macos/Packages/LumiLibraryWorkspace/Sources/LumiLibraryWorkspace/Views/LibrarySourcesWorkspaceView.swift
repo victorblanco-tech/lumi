@@ -374,16 +374,16 @@ public struct LibrarySourcesWorkspaceView: View {
                             .foregroundStyle(LumiColor.textSecondary)
                     }
                     Spacer()
-                    if canonicalRekordboxIsActive {
-                        StatusBadge("PUBLISHED", state: .ready)
-                    } else if let preview = library.rekordboxSyncPreview {
-                        Button("Import Analysis") {
+                    if let preview = library.rekordboxSyncPreview {
+                        Button(canonicalRekordboxIsActive ? "Refresh Analysis" : "Import Analysis") {
                             onAnalysisImport(currentSyncRequest, preview.contentSHA256)
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(!rendersInteractiveControls)
-                        .help("Rekordbox must be closed. Lumi reads verified snapshots and publishes only after the complete import succeeds.")
+                        .help("Rekordbox must be closed. Lumi reads verified snapshots and publishes or refreshes only after the complete import succeeds.")
                         .accessibilityIdentifier("lumi.library.sources.rekordbox.importAnalysis")
+                    } else if canonicalRekordboxIsActive {
+                        StatusBadge("PUBLISHED", state: .ready)
                     } else {
                         StatusBadge("CHECK FOR CHANGES FIRST", state: .degraded)
                     }

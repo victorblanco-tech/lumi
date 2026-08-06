@@ -760,9 +760,9 @@ fn parse_analysis_file(bytes: &[u8]) -> Result<ParsedAnalysisFile, AnalysisError
             b"PWV5" => {
                 parsed.waveform_coverage.color_detailed_points = parse_declared_entries(body, 2)?;
                 let waveform = parse_color_detailed_waveform(body)?;
-                if parsed.waveform_priority < 3 {
+                if parsed.waveform_priority < 4 {
                     parsed.waveform = waveform;
-                    parsed.waveform_priority = 3;
+                    parsed.waveform_priority = 4;
                 }
             }
             b"PWV6" => {
@@ -777,8 +777,10 @@ fn parse_analysis_file(bytes: &[u8]) -> Result<ParsedAnalysisFile, AnalysisError
             b"PWV7" => {
                 parsed.waveform_coverage.three_band_detailed_points =
                     parse_declared_entries(body, 3)?;
-                parsed.waveform = parse_three_band_waveform(body, 12)?;
-                parsed.waveform_priority = 4;
+                if parsed.waveform_priority < 3 {
+                    parsed.waveform = parse_three_band_waveform(body, 12)?;
+                    parsed.waveform_priority = 3;
+                }
             }
             b"PSSI" => parsed.phrases = parse_phrases(body)?,
             _ => {}
@@ -1228,6 +1230,26 @@ mod tests {
             (0, 1)
         );
         fs::remove_dir_all(test_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn rgb_detail_is_preferred_over_three_band_for_lumi_waveforms()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut rgb = declared_body(2, 1);
+        rgb[12..14].copy_from_slice(&0xE07C_u16.to_be_bytes());
+        let mut three_band = declared_body(3, 1);
+        three_band[12..15].copy_from_slice(&[127, 0, 0]);
+
+        let parsed = parse_analysis_file(&analysis_file(&[
+            tag(*b"PWV5", rgb),
+            tag(*b"PWV7", three_band),
+        ]))?;
+
+        assert_eq!(parsed.waveform.len(), 1);
+        assert_eq!(parsed.waveform[0].high, 255);
+        assert_eq!(parsed.waveform[0].mid, 0);
+        assert_eq!(parsed.waveform[0].low, 0);
         Ok(())
     }
 

@@ -4,7 +4,7 @@ use lumi_domain::TrackId;
 
 use crate::PhraseRoleId;
 
-pub const PHRASE_ROLE_DEFAULTS_VERSION: u16 = 1;
+pub const PHRASE_ROLE_DEFAULTS_VERSION: u16 = 2;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PhraseRole {

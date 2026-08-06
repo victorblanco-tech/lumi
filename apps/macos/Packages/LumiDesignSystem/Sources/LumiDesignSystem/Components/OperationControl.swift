@@ -40,6 +40,7 @@ public struct OperationControl: View {
                 .font(LumiTypography.metadata.weight(.semibold))
                 .frame(minHeight: LumiControlMetric.standardHeight)
                 .padding(.horizontal, LumiSpacing.small)
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .foregroundStyle(isSelected ? LumiColor.accent : LumiColor.textPrimary)

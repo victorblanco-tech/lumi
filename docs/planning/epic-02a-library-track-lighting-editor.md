@@ -196,6 +196,15 @@ in de CDJ-geïnspireerde editor. De 1 MiB authenticated-loopback message bound
 houdt de gedetailleerde editorpayload expliciet begrensd; bron- en tijdelijke
 snapshotbestanden zijn na de import niet achtergebleven.
 
+De native follow-up op dezelfde datum corrigeerde de initiële Rekordbox
+phrasevariantmapping: `Intro 1/2`, `Outro 1/2`, `Verse 1–6` en `Chorus 1/2`
+worden nu expliciet gemapt in plaats van via de Bridge-wildcard. Alleen 336
+onaangeraakte source-importtimelines zijn revisioned naar R2; 57 al correcte
+timelines bleven R1 en iedere bestaande user/reconcile-revision wordt door de
+migratie uitgesloten. De gecontroleerde verdeling over 6.615 phrases is 2.611
+Drop, 1.652 Buildup 1, 911 Intro/Outro, 770 Breakdown 1, 567 Bridge en 104
+Buildup 2.
+
 ### E2A-03 – Browse and inspect imported tracks
 
 Activeert de Library-workspace met playlists, search, filters, metadata,
@@ -298,6 +307,11 @@ Points tonen expliciete resize-handles en blijven bij slepen op hele beats
 quantizen. De Swift wire-validator accepteert daarbij iedere geldige hele beat,
 niet alleen maatgrenzen, zodat opgeslagen edits na herstart heropenen.
 
+De interaction follow-up voegt verticale scrollzoom rond de pointer toe, maakt
+zoom via een continue slider bedienbaar, begrenst phrase-boundary dragging tot
+de phrase-lane en vergroot generieke hitgebieden. De embedded editor wordt
+geclipt op zijn splitpaneel en toont geen macOS-focusring over de Library UI.
+
 Status: **implemented; local package and native application verification pass**.
 De geaccepteerde layout- en interactieregels zijn toegevoegd aan het Track
 Editor design. Verdere CDJ/Rekordbox RGB-pixelfidelity blijft een aparte
@@ -309,9 +323,12 @@ en verandert deze UX-contracten niet.
 Verbetert spectral weighting, compositing, transientdetail en zoomdensity zonder
 de geaccepteerde editorinteracties of phrasegeometrie te wijzigen.
 
-Status: **parked by product decision on 2026-08-04**. De huidige provider-
-neutrale RGB-renderer blijft bruikbaar voor de demo. Pixel-fidelity wordt later
-opgepakt zodat de huidige ontwikkelcapaciteit naar de SoundSwitch/MIDI-kern gaat.
+Status: **first real-data fidelity pass delivered; fine tuning remains open**.
+De renderer kiest Rekordbox PWV5 RGB-detail nu vóór 3-band fallback, behoudt
+RGB-hue los van amplitude en gebruikt non-lineaire helderheidsnormalisatie. De
+393-trackbaseline is expliciet ververst naar analysis revision `anlz2` en native
+geverifieerd. Verdere pixel-fidelity tegenover specifieke CDJ-generaties blijft
+optionele verfijning binnen issue 70.
 
 ### E2A-16 – Make the persistent editor and native track table the Library baseline
 
@@ -456,7 +473,8 @@ screenshots en foutscenario's; echte Rekordbox-data wordt nooit testfixture.
 - `E2A-02`: integreer de bewezen gesloten snapshot/resolver in de zichtbare
   import/refreshflow. De productie-library blijft read-only; parsing en tests
   gebruiken uitsluitend Lumi-owned snapshots en synthetische fixtures.
-- `E2A-15`: verdere CDJ/Rekordbox RGB-pixelfidelity wordt later hervat.
+- `E2A-15`: de echte RGB-datakeuze en helderheid zijn geleverd; alleen verdere
+  CDJ/Rekordbox pixel-finetuning blijft open.
 - `E3-00`: de fysieke SoundSwitch/CoreMIDI-keten uit ADR-0015 is bewezen voor
   virtual MIDI discovery, Bank 1 → AutoLoop 1, parallel Control One-gebruik en
   zichtbare DMX-output. Repetition en disconnect/reconnect blijven open.

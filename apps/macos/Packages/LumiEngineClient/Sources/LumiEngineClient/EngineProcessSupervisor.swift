@@ -158,7 +158,10 @@ public actor EngineProcessSupervisor {
                 }
             }
             group.addTask {
-                try await Task.sleep(for: .seconds(5))
+                // A large persistent library can briefly be held by the
+                // previous helper during an immediate development restart.
+                // Keep startup bounded, but allow that clean handover.
+                try await Task.sleep(for: .seconds(15))
                 throw EngineClientError.startupTimedOut
             }
 

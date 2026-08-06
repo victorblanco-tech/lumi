@@ -104,6 +104,7 @@ public struct TrackLightingEditorView: View {
         .preferredColorScheme(.dark)
         .accessibilityIdentifier("lumi.trackEditor")
         .focusable()
+        .focusEffectDisabled()
         .onKeyPress(.space) {
             audio.togglePlayback()
             return .handled
@@ -334,28 +335,24 @@ public struct TrackLightingEditorView: View {
                 .accessibilityLabel(editorCopy("editor.volume"))
                 .accessibilityIdentifier("lumi.trackEditor.volume")
 
-            HStack(spacing: 6) {
-                Button { zoom(by: 1) } label: {
-                    Image(systemName: "minus.magnifyingglass")
-                }
-                .disabled(viewport.visibleBeats >= Double(analysis.totalBeats))
+            HStack(spacing: 8) {
+                Image(systemName: "magnifyingglass")
+                    .foregroundStyle(secondary)
+                Slider(value: zoomSliderBinding, in: 0...1)
+                    .frame(width: 150)
+                    .accessibilityLabel("Waveform zoom")
+                    .accessibilityValue(String(format: "Visible %.1f bars", viewport.visibleBars))
                 Text(String(format: "%.1f bars", viewport.visibleBars))
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
-                    .frame(width: 48)
-                Button { zoom(by: -1) } label: {
-                    Image(systemName: "plus.magnifyingglass")
-                }
-                .disabled(viewport.visibleBeats <= 1.01)
+                    .frame(width: 58, alignment: .trailing)
             }
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel(
-                String(format: "Visible %.1f bars", viewport.visibleBars)
-            )
             .accessibilityIdentifier("lumi.trackEditor.zoom")
         }
         .padding(.horizontal, 20)
         .frame(height: 58)
         .background(background)
+        .buttonStyle(.bordered)
+        .controlSize(.regular)
     }
 
     private var editToolbar: some View {
@@ -450,7 +447,7 @@ public struct TrackLightingEditorView: View {
             .accessibilityIdentifier("lumi.trackEditor.savedRevision")
         }
         .buttonStyle(.bordered)
-        .controlSize(.small)
+        .controlSize(.regular)
         .padding(.horizontal, 20)
         .frame(height: 44)
         .background(panel.opacity(0.72))
@@ -572,18 +569,24 @@ public struct TrackLightingEditorView: View {
             }
             .contentShape(Rectangle())
             .overlay {
-                HorizontalScrollMonitor { deltaX in
-                    viewport = viewport.panned(byPixels: deltaX, width: proxy.size.width)
-                }
+                HorizontalScrollMonitor(
+                    onScroll: { deltaX in
+                        viewport = viewport.panned(byPixels: deltaX, width: proxy.size.width)
+                    },
+                    onZoom: { delta, pointerFraction in
+                        zoomFromScroll(delta, pointerFraction: pointerFraction)
+                    }
+                )
             }
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
                         if draggingBoundaryAfterPhraseIndex == nil,
+                           value.startLocation.y >= phraseLaneTop(height: proxy.size.height),
                            let boundary = boundaryIndex(
                                atX: value.startLocation.x,
                                width: proxy.size.width,
-                               tolerance: 12
+                               tolerance: 8
                            ) {
                             draggingBoundaryAfterPhraseIndex = boundary
                         }
@@ -630,11 +633,9 @@ public struct TrackLightingEditorView: View {
             .onContinuousHover { phase in
                 switch phase {
                 case .active(let location):
-                    let boundary = boundaryIndex(
-                        atX: location.x,
-                        width: proxy.size.width,
-                        tolerance: 12
-                    )
+                    let boundary = location.y >= phraseLaneTop(height: proxy.size.height)
+                        ? boundaryIndex(atX: location.x, width: proxy.size.width, tolerance: 8)
+                        : nil
                     hoveredBoundaryAfterPhraseIndex = boundary
                     (boundary == nil ? NSCursor.arrow : NSCursor.resizeLeftRight).set()
                 case .ended:
@@ -1306,9 +1307,29 @@ public struct TrackLightingEditorView: View {
         revealPlayhead()
     }
 
-    private func zoom(by delta: Int) {
-        let factor = delta > 0 ? 1.35 : 1 / 1.35
-        viewport = viewport.zoomed(to: viewport.visibleBeats * factor, aroundBeat: currentBeat)
+    private var zoomSliderBinding: Binding<Double> {
+        Binding(
+            get: {
+                let total = Double(max(1, analysis.totalBeats))
+                guard total > 1 else { return 1 }
+                return min(max(0, log(total / viewport.visibleBeats) / log(total)), 1)
+            },
+            set: { value in
+                let total = Double(max(1, analysis.totalBeats))
+                let visible = total / pow(total, min(max(0, value), 1))
+                viewport = viewport.zoomed(to: visible, aroundBeat: currentBeat)
+            }
+        )
+    }
+
+    private func zoomFromScroll(_ delta: Double, pointerFraction: Double) {
+        let boundedDelta = min(max(delta, -24), 24)
+        let factor = exp(-boundedDelta * 0.025)
+        let anchorBeat = viewport.startBeat + viewport.visibleBeats * pointerFraction
+        viewport = viewport.zoomed(
+            to: viewport.visibleBeats * factor,
+            aroundBeat: anchorBeat
+        )
     }
 
     private func revealPlayhead() {
@@ -1355,14 +1376,22 @@ public struct TrackLightingEditorView: View {
         maximumAmplitude: Double,
         point: (low: Double, mid: Double, high: Double)
     ) {
-        let amplitude = max(point.low, max(point.mid, point.high)) * maximumAmplitude
+        let peak = max(point.low, max(point.mid, point.high))
+        guard peak > 0.000_1 else { return }
+        let amplitude = pow(peak, 0.58) * maximumAmplitude
+        // Rekordbox PWV5 packs hue and height into the same channels. Height
+        // controls geometry; normalizing the hue prevents quiet samples from
+        // being dimmed a second time while preserving their RGB character.
+        let red = pow(point.high / peak, 0.72)
+        let green = pow(point.mid / peak, 0.72)
+        let blue = pow(point.low / peak, 0.72)
         var line = Path()
         line.move(to: CGPoint(x: x, y: center - amplitude))
         line.addLine(to: CGPoint(x: x, y: center + amplitude))
         context.stroke(
             line,
             with: .color(
-                Color(red: point.high, green: point.mid, blue: point.low).opacity(0.96)
+                Color(red: red, green: green, blue: blue).opacity(0.98)
             ),
             lineWidth: 1
         )
@@ -1370,7 +1399,7 @@ public struct TrackLightingEditorView: View {
 
     private func phraseColor(_ role: String) -> Color {
         switch role.lowercased() {
-        case "intro", "outro": Color(red: 0.25, green: 0.55, blue: 0.95)
+        case "intro", "outro", "intro / outro": Color(red: 0.25, green: 0.55, blue: 0.95)
         case "bridge": Color(red: 0.37, green: 0.42, blue: 0.78)
         case "breakdown", "breakdown 1", "breakdown 2", "breakdown 3": Color(red: 0.48, green: 0.28, blue: 0.83)
         case "synth": Color(red: 0.82, green: 0.24, blue: 0.72)

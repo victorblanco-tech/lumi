@@ -99,7 +99,8 @@ public struct LibraryWorkspaceView: View {
                         editorPlaceholder
                     }
                 }
-                .frame(minHeight: 580, idealHeight: 680)
+                .frame(minHeight: 620, idealHeight: 680)
+                .clipped()
 
                 libraryBrowser
                     .frame(minHeight: 130, idealHeight: 280)
@@ -248,6 +249,7 @@ public struct LibraryWorkspaceView: View {
         .foregroundStyle(selected ? LumiColor.accent : LumiColor.textPrimary)
         .padding(.horizontal, LumiSpacing.small)
         .frame(height: LumiControlMetric.standardHeight)
+        .contentShape(Rectangle())
         .background(selected ? LumiColor.accent.opacity(0.14) : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
     }

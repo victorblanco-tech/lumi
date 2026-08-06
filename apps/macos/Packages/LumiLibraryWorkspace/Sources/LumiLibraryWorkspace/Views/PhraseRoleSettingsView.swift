@@ -143,6 +143,7 @@ public struct PhraseRoleSettingsView: View {
                 .foregroundStyle(section == value ? LumiColor.accent : LumiColor.textPrimary)
                 .background(section == value ? LumiColor.accent.opacity(0.14) : Color.clear)
                 .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
+                .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("lumi.settings.section.\(value.rawValue)")
