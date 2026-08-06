@@ -25,7 +25,7 @@ required_visuals=(
   "phrase-source-mapping-light.png"
   "autoloop-matrix-dark.png"
   "library-conflict-dark.png"
-  "library-simulator-next-dark-camelot.png"
+  "local-playback-library-next-dark-camelot.png"
 )
 
 for visual in "${required_visuals[@]}"; do

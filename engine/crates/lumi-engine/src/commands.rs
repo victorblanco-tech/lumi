@@ -9,6 +9,7 @@ use lumi_library::{
     PhraseRoleMove, ReconcileSide, ReconcileStrategy, ThemeSpecificVariant, TimelineEditCommand,
     VariantId,
 };
+use lumi_midi_output::MidiAddress;
 use lumi_protocol::{MessageEnvelope, MessageType};
 use lumi_simulator::SimulationSpeed;
 use serde_json::Value;
@@ -20,6 +21,12 @@ pub struct PlanCommandContext {
     pub plan_id: PlanId,
     pub track_load_id: TrackLoadId,
     pub expected_revision: PlanRevision,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DeckSourceSelection {
+    ConnectedDecks,
+    LocalPlayback,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -74,10 +81,34 @@ pub enum SessionCommand {
         expected_revision: u64,
         mutation: AutoloopCatalogMutation,
     },
-    LoadLibraryTrackOnSimulatorDeck {
+    PublishMidiSource,
+    StopMidiSource,
+    SendMidiLearnPulse,
+    SendMidiAddressLearnPulse {
+        address: MidiAddress,
+    },
+    TriggerMidiAutoloop {
+        bank_number: u8,
+        autoloop_number: u8,
+    },
+    LoadLibraryTrackOnLocalDeck {
         track_id: u64,
         deck_id: DeckId,
         expected_timeline_revision: u64,
+        expected_state_revision: StateRevision,
+    },
+    UpdateLocalPlaybackTransport {
+        deck_id: DeckId,
+        track_load_id: TrackLoadId,
+        position_millis: u64,
+        playing: bool,
+    },
+    SetLocalPlaybackLeader {
+        deck_id: DeckId,
+        expected_state_revision: StateRevision,
+    },
+    SelectDeckSourceMode {
+        mode: DeckSourceSelection,
         expected_state_revision: StateRevision,
     },
     LoadDemoSession {
@@ -104,6 +135,11 @@ pub enum SessionCommand {
     },
     SelectTheme {
         context: PlanCommandContext,
+        theme_id: ThemeId,
+    },
+    SelectThemeFromPhrase {
+        context: PlanCommandContext,
+        phrase_index: u16,
         theme_id: ThemeId,
     },
     SelectScene {
@@ -150,7 +186,15 @@ impl SessionCommand {
             | Self::RestoreLibraryTimelineRevision { .. }
             | Self::MutatePhraseRoleCatalog { .. }
             | Self::MutateAutoloopCatalog { .. }
-            | Self::LoadLibraryTrackOnSimulatorDeck { .. }
+            | Self::PublishMidiSource
+            | Self::StopMidiSource
+            | Self::SendMidiLearnPulse
+            | Self::SendMidiAddressLearnPulse { .. }
+            | Self::TriggerMidiAutoloop { .. }
+            | Self::LoadLibraryTrackOnLocalDeck { .. }
+            | Self::UpdateLocalPlaybackTransport { .. }
+            | Self::SetLocalPlaybackLeader { .. }
+            | Self::SelectDeckSourceMode { .. }
             | Self::LoadDemoSession { .. }
             | Self::SetOperationState { .. }
             | Self::SetSimulationSpeed { .. }
@@ -159,6 +203,7 @@ impl SessionCommand {
             | Self::AdvanceToNextTrack { .. }
             | Self::ResetDemoSession { .. } => None,
             Self::SelectTheme { context, .. }
+            | Self::SelectThemeFromPhrase { context, .. }
             | Self::SelectScene { context, .. }
             | Self::SetCueLock { context, .. }
             | Self::RegeneratePlan { context } => Some(*context),
@@ -232,7 +277,21 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
             )?,
             mutation: autoloop_catalog_mutation(&envelope.payload)?,
         }),
-        "loadLibraryTrackOnSimulatorDeck" => Ok(SessionCommand::LoadLibraryTrackOnSimulatorDeck {
+        "publishMidiSource" => Ok(SessionCommand::PublishMidiSource),
+        "stopMidiSource" => Ok(SessionCommand::StopMidiSource),
+        "sendMidiLearnPulse" => Ok(SessionCommand::SendMidiLearnPulse),
+        "sendMidiAddressLearnPulse" => Ok(SessionCommand::SendMidiAddressLearnPulse {
+            address: midi_address(&envelope.payload)?,
+        }),
+        "triggerMidiAutoloop" => {
+            let bank_number = midi_number(&envelope.payload, "bankNumber", 4)?;
+            let autoloop_number = midi_number(&envelope.payload, "autoloopNumber", 32)?;
+            Ok(SessionCommand::TriggerMidiAutoloop {
+                bank_number,
+                autoloop_number,
+            })
+        }
+        "loadLibraryTrackOnLocalDeck" => Ok(SessionCommand::LoadLibraryTrackOnLocalDeck {
             track_id: positive_unsigned(&envelope.payload, "trackId")?,
             deck_id: DeckId::new(
                 u8::try_from(positive_unsigned(&envelope.payload, "deckId")?)
@@ -242,6 +301,30 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
                 &envelope.payload,
                 "expectedTimelineRevision",
             )?,
+            expected_state_revision: state_revision(envelope)?,
+        }),
+        "updateLocalPlaybackTransport" => Ok(SessionCommand::UpdateLocalPlaybackTransport {
+            deck_id: DeckId::new(
+                u8::try_from(positive_unsigned(&envelope.payload, "deckId")?)
+                    .map_err(|_| CommandDecodeError::InvalidField("deckId"))?,
+            ),
+            track_load_id: TrackLoadId::new(positive_unsigned(&envelope.payload, "trackLoadId")?),
+            position_millis: unsigned(&envelope.payload, "positionMillis")?,
+            playing: boolean(&envelope.payload, "playing")?,
+        }),
+        "setLocalPlaybackLeader" => Ok(SessionCommand::SetLocalPlaybackLeader {
+            deck_id: DeckId::new(
+                u8::try_from(positive_unsigned(&envelope.payload, "deckId")?)
+                    .map_err(|_| CommandDecodeError::InvalidField("deckId"))?,
+            ),
+            expected_state_revision: state_revision(envelope)?,
+        }),
+        "selectDeckSourceMode" => Ok(SessionCommand::SelectDeckSourceMode {
+            mode: match string(&envelope.payload, "mode")? {
+                "connectedDecks" => DeckSourceSelection::ConnectedDecks,
+                "localPlayback" => DeckSourceSelection::LocalPlayback,
+                _ => return Err(CommandDecodeError::InvalidField("mode")),
+            },
             expected_state_revision: state_revision(envelope)?,
         }),
         "loadDemoSession" => Ok(SessionCommand::LoadDemoSession {
@@ -270,6 +353,11 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
             context: context(envelope)?,
             theme_id: ThemeId::new(unsigned(&envelope.payload, "themeId")?),
         }),
+        "selectThemeFromPhrase" => Ok(SessionCommand::SelectThemeFromPhrase {
+            context: context(envelope)?,
+            phrase_index: phrase_index(envelope)?,
+            theme_id: ThemeId::new(unsigned(&envelope.payload, "themeId")?),
+        }),
         "selectScene" => Ok(SessionCommand::SelectScene {
             context: context(envelope)?,
             phrase_index: phrase_index(envelope)?,
@@ -287,6 +375,33 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
             expected_revision: state_revision(envelope)?,
         }),
         _ => Err(CommandDecodeError::UnsupportedKind),
+    }
+}
+
+fn midi_address(
+    payload: &serde_json::Map<String, Value>,
+) -> Result<MidiAddress, CommandDecodeError> {
+    let number = u8::try_from(positive_unsigned(payload, "targetNumber")?)
+        .map_err(|_| CommandDecodeError::InvalidField("targetNumber"))?;
+    match string(payload, "targetKind")? {
+        "bank" => MidiAddress::bank(number),
+        "autoloop" => MidiAddress::autoloop(number),
+        _ => return Err(CommandDecodeError::InvalidField("targetKind")),
+    }
+    .ok_or(CommandDecodeError::InvalidField("targetNumber"))
+}
+
+fn midi_number(
+    payload: &serde_json::Map<String, Value>,
+    field: &'static str,
+    maximum: u8,
+) -> Result<u8, CommandDecodeError> {
+    let number = u8::try_from(positive_unsigned(payload, field)?)
+        .map_err(|_| CommandDecodeError::InvalidField(field))?;
+    if number <= maximum {
+        Ok(number)
+    } else {
+        Err(CommandDecodeError::InvalidField(field))
     }
 }
 

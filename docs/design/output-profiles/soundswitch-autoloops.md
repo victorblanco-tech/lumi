@@ -7,7 +7,7 @@
 
 ## Product outcome
 
-Settings presents SoundSwitch Autoloops as a bank-first surface. Lumi is shown
+`Integrations > Lighting Outputs` presents SoundSwitch Autoloops as a bank-first surface. Lumi is shown
 as the virtual MIDI controller at the same level as an optional physical
 controller. The UI never suggests that Lumi controls or depends on Control One.
 
@@ -41,16 +41,16 @@ replaces it.
 - the same bank selector and 32 positions for the selected bank;
 - the exact same names and Phrase Types as the Banks view;
 - no second configuration model;
-- live test disabled until the CoreMIDI POC.
+- explicit learn and runtime-test actions that never run automatically.
 
-### MIDI & POC
+### MIDI Status
 
-- planned `Lumi Virtual MIDI → SoundSwitch` route;
+- active `Lumi Virtual MIDI → SoundSwitch` route and source status;
 - CoreMIDI transport and a separate Ableton Link timing route;
-- bank-switch delay explicitly marked as a measurement;
+- the validated bank-switch delay;
 - catalog preflight separate from MIDI-address preflight;
-- POC acceptance including parallel Control One use and DMX output through it;
-- no live MIDI send before the POC gate passes.
+- integration checks including parallel Control One use and DMX output through it;
+- explicit publish, stop, learn and trigger controls for diagnostics.
 
 ## Model boundary
 
@@ -62,5 +62,6 @@ Library phrase
   -> SoundSwitch
 ```
 
-The demo projection does not persist concrete MIDI addresses. The POC determines
-real mapping and sequencing before those fields become production configuration.
+The built-in profile owns the canonical MIDI addresses and validated sequencing.
+Future output profiles persist their provider-specific mapping without changing
+the generic controller and status-page model.

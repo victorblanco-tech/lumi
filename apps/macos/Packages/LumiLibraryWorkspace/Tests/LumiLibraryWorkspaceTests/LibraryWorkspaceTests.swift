@@ -5,6 +5,17 @@ import Testing
 
 @Suite("Library workspace")
 struct LibraryWorkspaceTests {
+    @Test("Task-oriented navigation keeps provider configuration out of Settings")
+    func taskOrientedNavigationBoundaries() {
+        #expect(PhraseRoleSettingsSection.allCases.map(\.rawValue) == [
+            "general", "phraseModel", "planningDefaults"
+        ])
+        #expect(LibraryHubSection.allCases.map(\.rawValue) == ["tracks", "sources"])
+        #expect(IntegrationsWorkspaceSection.allCases.map(\.rawValue) == [
+            "overview", "deckInputs", "lightingOutputs", "diagnostics"
+        ])
+    }
+
     @Test("Authoritative engine library metadata decodes into a bounded page")
     func decodesLibrarySnapshot() throws {
         let state = try LibrarySnapshotDecoder().decode(envelope(trackValues: [trackValue()]))
@@ -16,6 +27,24 @@ struct LibraryWorkspaceTests {
         #expect(state.page.tracks.first?.title == "Horizon Lines")
         #expect(state.page.tracks.first?.readiness == .ready)
         #expect(state.page.tracks.first?.missingCapabilities == [])
+    }
+
+    @Test("MIDI integration state decodes independently from the library catalog")
+    func decodesMidiIntegrationState() throws {
+        let midi: JSONValue = .object([
+            "state": .string("ready"),
+            "sourceName": .string("Lumi Virtual MIDI"),
+            "protocol": .string("MIDI 1.0 UMP"),
+            "sentPulseCount": .number(1),
+            "lastEvent": .string("Learn pulse sent")
+        ])
+        let state = try LibrarySnapshotDecoder().decode(
+            envelope(trackValues: [trackValue()], midiIntegration: midi)
+        )
+
+        #expect(state.midiIntegration?.isReady == true)
+        #expect(state.midiIntegration?.sourceName == "Lumi Virtual MIDI")
+        #expect(state.midiIntegration?.sentPulseCount == 1)
     }
 
     @Test("Wire pages over 200 tracks are rejected before presentation")
@@ -84,6 +113,45 @@ struct LibraryWorkspaceTests {
         #expect(settings.mappingProfiles.first?.providerKind == "rekordbox7")
         #expect(settings.mappingProfiles.first?.mappings.first?.rawLabel == "Intro")
         #expect(settings.mappingProfiles.first?.mappings.first?.roleID == "intro-outro")
+    }
+
+    @Test("BLT MIDI input diagnostics decode independently from SoundSwitch output")
+    func decodesDeckInputIntegration() throws {
+        let state = try LibrarySnapshotDecoder().decode(
+            envelope(
+                trackValues: [trackValue()],
+                deckInputIntegration: .object([
+                    "state": .string("ready"),
+                    "destinationName": .string("Lumi Deck Input"),
+                    "protocol": .string("BLT MIDI Deck Frame"),
+                    "protocolVersion": .number(2),
+                    "receivedMessageCount": .number(48),
+                    "invalidWordCount": .number(0),
+                    "committedFrameCount": .number(3),
+                    "ignoredMessageCount": .number(1),
+                    "duplicateFrameCount": .number(0),
+                    "lastDeckId": .number(2),
+                    "lastFrameSequence": .number(7)
+                ])
+            )
+        )
+        let input = try #require(state.deckInputIntegration)
+        #expect(input.destinationName == "Lumi Deck Input")
+        #expect(input.isReceiving)
+        #expect(input.lastDeckID == 2)
+        #expect(state.midiIntegration == nil)
+    }
+
+    @Test("BLT expression corrects the Shallow Playback Simulator without changing real deck tempo")
+    @MainActor
+    func bltExpressionHasSeparateSimulatorAndHardwareTempoPaths() {
+        let expression = BeatLinkTriggerIntegrationView.trackedUpdateExpression
+
+        #expect(expression.contains("simulating? (some? util/*simulating*)"))
+        #expect(expression.contains("(/ (* raw-track-bpm 10.0) pitch-scale)"))
+        #expect(expression.contains("(* raw-track-bpm 10.0)"))
+        #expect(expression.contains("(or effective-tempo 0.0)"))
+        #expect(expression.contains("[119 2]"))
     }
 
     @Test("Duplicate stable role IDs are rejected before Settings renders")
@@ -160,6 +228,22 @@ struct LibraryWorkspaceTests {
         #expect(banks[3][0].roleID == "intro-outro")
         #expect(banks.flatMap { $0 }.allSatisfy { $0.status == .mapped })
         #expect(banks.flatMap { $0 }.count == 128)
+        #expect(
+            SoundSwitchOutputProfileProjection.controllerGridSlots(
+                for: 1,
+                catalog: catalog
+            ).map(\.number)
+                == [
+                    1, 9, 17, 25,
+                    2, 10, 18, 26,
+                    3, 11, 19, 27,
+                    4, 12, 20, 28,
+                    5, 13, 21, 29,
+                    6, 14, 22, 30,
+                    7, 15, 23, 31,
+                    8, 16, 24, 32
+                ]
+        )
     }
 
     @Test("The same SoundSwitch button may use a different Phrase Type in each bank")
@@ -527,7 +611,9 @@ private func envelope(
     trackValues: [JSONValue],
     editorValue: JSONValue = .null,
     phraseRoleSettings: JSONValue = .null,
-    autoloopCatalog: JSONValue = .null
+    autoloopCatalog: JSONValue = .null,
+    midiIntegration: JSONValue = .null,
+    deckInputIntegration: JSONValue = .null
 ) -> MessageEnvelope {
     MessageEnvelope(
         protocolVersion: 1,
@@ -537,6 +623,8 @@ private func envelope(
         correlationId: "test",
         sentAt: "2026-08-03T00:00:00Z",
         payload: [
+            "midiIntegration": midiIntegration,
+            "deckInputIntegration": deckInputIntegration,
             "library": .object([
                 "condition": .string("ready"),
                 "providerKind": .string("demo"),

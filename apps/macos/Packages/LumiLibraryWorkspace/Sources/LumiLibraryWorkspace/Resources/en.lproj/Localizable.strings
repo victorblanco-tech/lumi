@@ -101,7 +101,7 @@
 "editor.noSourcePhrase" = "No overlapping source phrase";
 "editor.archived" = "Archived";
 "settings.title" = "Settings";
-"settings.subtitle" = "Manage global preferences, Lumi phrase roles, and initial source mappings.";
+"settings.subtitle" = "Manage global preferences, the Lumi-owned phrase model, and planning defaults.";
 "settings.general" = "General";
 "settings.generalDetail" = "Presentation preferences apply consistently across every Lumi workspace.";
 "settings.phraseRoles" = "Phrase Roles";

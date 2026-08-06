@@ -27,7 +27,7 @@ struct LumiVisualEvidenceCommand {
 
         let variants = [
             Variant(
-                name: "library-simulator-next-dark-camelot",
+                name: "local-playback-library-next-dark-camelot",
                 state: LiveWorkspaceFixtures.libraryBacked,
                 appearance: .dark,
                 keyNotation: .camelot,

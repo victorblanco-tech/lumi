@@ -2,7 +2,7 @@
   "protocolVersion": 1,
   "encoding": "utf-8",
   "framing": "newline-delimited-json",
-  "maxMessageBytes": 65536,
+  "maxMessageBytes": 131072,
   "unknownFields": "ignore",
   "commandKinds": [
     "getSnapshot",
@@ -16,7 +16,12 @@
     "selectScene",
     "setCueLock",
     "regeneratePlan",
-    "resetDemoSession"
+    "resetDemoSession",
+    "publishMidiSource",
+    "stopMidiSource",
+    "sendMidiLearnPulse",
+    "sendMidiAddressLearnPulse",
+    "triggerMidiAutoloop"
   ],
   "eventKinds": [
     "engineReady",

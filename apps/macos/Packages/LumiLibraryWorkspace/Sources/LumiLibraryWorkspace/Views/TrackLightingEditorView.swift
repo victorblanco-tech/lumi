@@ -898,24 +898,17 @@ public struct TrackLightingEditorView: View {
             }
         }
 
-        context.blendMode = .plusLighter
         for pixel in 0..<max(1, Int(width.rounded(.up))) {
             let x = Double(pixel)
             let point = interpolatedWaveformPoint(atBeat: viewport.beat(atX: x, width: width))
-            drawWaveformChannel(
-                context: &context, x: x, center: center,
-                amplitude: point.low * amplitude, color: .red.opacity(0.76)
-            )
-            drawWaveformChannel(
-                context: &context, x: x, center: center,
-                amplitude: point.mid * amplitude * 0.9, color: .green.opacity(0.72)
-            )
-            drawWaveformChannel(
-                context: &context, x: x, center: center,
-                amplitude: point.high * amplitude * 0.78, color: .blue.opacity(0.88)
+            drawRGBWaveformSample(
+                context: &context,
+                x: x,
+                center: center,
+                maximumAmplitude: amplitude,
+                point: point
             )
         }
-        context.blendMode = .normal
 
         for phrase in analysis.phrases where Double(phrase.endBeat) > viewport.startBeat && Double(phrase.startBeat) < viewport.endBeat {
             let start = viewport.x(forBeat: Double(phrase.startBeat), width: width)
@@ -1012,16 +1005,18 @@ public struct TrackLightingEditorView: View {
         let waveformBottom = Double(size.height) - 18
         let center = waveformBottom / 2
         let amplitude = max(4, center - 3)
-        context.blendMode = .plusLighter
         for pixel in 0..<max(1, Int(width.rounded(.up))) {
             let x = Double(pixel)
             let beat = x / max(1, width) * Double(analysis.totalBeats)
             let point = interpolatedWaveformPoint(atBeat: beat)
-            drawWaveformChannel(context: &context, x: x, center: center, amplitude: point.low * amplitude, color: .red.opacity(0.72))
-            drawWaveformChannel(context: &context, x: x, center: center, amplitude: point.mid * amplitude * 0.9, color: .green.opacity(0.68))
-            drawWaveformChannel(context: &context, x: x, center: center, amplitude: point.high * amplitude * 0.78, color: .blue.opacity(0.80))
+            drawRGBWaveformSample(
+                context: &context,
+                x: x,
+                center: center,
+                maximumAmplitude: amplitude,
+                point: point
+            )
         }
-        context.blendMode = .normal
         for phrase in analysis.phrases {
             let start = Double(phrase.startBeat) / Double(max(1, analysis.totalBeats)) * width
             let end = Double(phrase.endBeat) / Double(max(1, analysis.totalBeats)) * width
@@ -1353,17 +1348,24 @@ public struct TrackLightingEditorView: View {
         return (mix(a.low, b.low), mix(a.mid, b.mid), mix(a.high, b.high))
     }
 
-    private func drawWaveformChannel(
+    private func drawRGBWaveformSample(
         context: inout GraphicsContext,
         x: Double,
         center: Double,
-        amplitude: Double,
-        color: Color
+        maximumAmplitude: Double,
+        point: (low: Double, mid: Double, high: Double)
     ) {
+        let amplitude = max(point.low, max(point.mid, point.high)) * maximumAmplitude
         var line = Path()
         line.move(to: CGPoint(x: x, y: center - amplitude))
         line.addLine(to: CGPoint(x: x, y: center + amplitude))
-        context.stroke(line, with: .color(color), lineWidth: 1)
+        context.stroke(
+            line,
+            with: .color(
+                Color(red: point.high, green: point.mid, blue: point.low).opacity(0.96)
+            ),
+            lineWidth: 1
+        )
     }
 
     private func phraseColor(_ role: String) -> Color {

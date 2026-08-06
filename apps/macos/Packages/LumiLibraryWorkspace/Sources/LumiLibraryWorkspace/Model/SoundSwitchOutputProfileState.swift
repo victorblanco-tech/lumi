@@ -178,6 +178,18 @@ public enum SoundSwitchOutputProfileProjection {
             .count
     }
 
+    public static func controllerGridSlots(
+        for bankID: UInt64,
+        catalog: AutoloopCatalogState,
+        profile: SoundSwitchOutputProfileState = .builtIn
+    ) -> [SoundSwitchAutoloopSlotState] {
+        let source = slots(for: bankID, catalog: catalog, profile: profile)
+        let rowsPerColumn = 8
+        return (0..<rowsPerColumn).flatMap { row in
+            stride(from: row, to: source.count, by: rowsPerColumn).map { source[$0] }
+        }
+    }
+
     private static func mappingNumber(_ variantID: String) -> UInt16? {
         guard variantID.hasPrefix("mapping-") else { return nil }
         return UInt16(variantID.dropFirst("mapping-".count))

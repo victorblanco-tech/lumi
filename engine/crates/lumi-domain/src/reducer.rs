@@ -13,6 +13,8 @@ pub enum DecisionReason {
     SourceStatusAccepted,
     TrackLoadAccepted,
     PositionAdvanced,
+    PlaybackTempoChanged,
+    PlaybackStateChanged,
     PhraseChanged,
     LeaderChanged,
     PlanActivated,
@@ -216,6 +218,33 @@ fn reduce_observation(
             }
             None => DecisionReason::TrackLoadMismatch,
         },
+        DeckObservation::PlaybackTempoChanged {
+            deck_id,
+            track_load_id,
+            bpm_milli,
+        } => match state.decks.get_mut(deck_id) {
+            Some(deck)
+                if deck.track_load_id() == *track_load_id
+                    && (20_000..=300_000).contains(bpm_milli) =>
+            {
+                deck.effective_bpm_milli = *bpm_milli;
+                deck.last_observed_at = event.observed_at;
+                DecisionReason::PlaybackTempoChanged
+            }
+            _ => DecisionReason::TrackLoadMismatch,
+        },
+        DeckObservation::PlaybackStateChanged {
+            deck_id,
+            track_load_id,
+            playing,
+        } => match state.decks.get_mut(deck_id) {
+            Some(deck) if deck.track_load_id() == *track_load_id => {
+                deck.playing = *playing;
+                deck.last_observed_at = event.observed_at;
+                DecisionReason::PlaybackStateChanged
+            }
+            _ => DecisionReason::TrackLoadMismatch,
+        },
         DeckObservation::TrackUnloaded {
             deck_id,
             track_load_id,
@@ -303,6 +332,8 @@ fn reduce_observation(
         DecisionReason::SourceStatusAccepted
             | DecisionReason::TrackLoadAccepted
             | DecisionReason::PositionAdvanced
+            | DecisionReason::PlaybackTempoChanged
+            | DecisionReason::PlaybackStateChanged
             | DecisionReason::TrackUnloaded
             | DecisionReason::PhraseChanged
             | DecisionReason::PlanActivated
@@ -455,6 +486,9 @@ fn reduce_effect_result(
             }
 
             state.plans.insert(plan.deck_id(), plan.clone());
+            if state.leader_deck == Some(plan.deck_id()) {
+                state.active_plan = Some(plan.clone());
+            }
             Ok((DecisionReason::PlanAccepted, Vec::new(), true))
         }
         EffectResult::OutputEffectRecorded(result) => {

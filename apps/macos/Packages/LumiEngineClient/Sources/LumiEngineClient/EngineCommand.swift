@@ -306,12 +306,25 @@ public enum EngineCommand: Equatable, Sendable {
         expectedAutoloopCatalogRevision: UInt64,
         mutation: EngineAutoloopCatalogMutation
     )
-    case loadLibraryTrackOnSimulatorDeck(
+    case publishMidiSource
+    case stopMidiSource
+    case sendMidiLearnPulse
+    case sendMidiAddressLearnPulse(targetKind: String, targetNumber: UInt16)
+    case triggerMidiAutoloop(bankNumber: UInt16, autoloopNumber: UInt16)
+    case loadLibraryTrackOnLocalDeck(
         trackID: UInt64,
         deckID: UInt64,
         expectedTimelineRevision: UInt64,
         expectedStateRevision: UInt64
     )
+    case updateLocalPlaybackTransport(
+        deckID: UInt64,
+        trackLoadID: UInt64,
+        positionMillis: UInt64,
+        playing: Bool
+    )
+    case setLocalPlaybackLeader(deckID: UInt64, expectedStateRevision: UInt64)
+    case selectDeckSourceMode(String, expectedStateRevision: UInt64)
     case loadDemoSession(expectedStateRevision: UInt64)
     case setOperationState(String, expectedStateRevision: UInt64)
     case setSimulationSpeed(UInt64, expectedStateRevision: UInt64)
@@ -319,6 +332,11 @@ public enum EngineCommand: Equatable, Sendable {
     case advanceSimulation(elapsedTicks: UInt64, expectedStateRevision: UInt64)
     case advanceToNextTrack(expectedStateRevision: UInt64)
     case selectTheme(context: EnginePlanCommandContext, themeID: UInt64)
+    case selectThemeFromPhrase(
+        context: EnginePlanCommandContext,
+        phraseIndex: UInt64,
+        themeID: UInt64
+    )
     case selectScene(
         context: EnginePlanCommandContext,
         phraseIndex: UInt64,
@@ -408,20 +426,58 @@ public enum EngineCommand: Equatable, Sendable {
             payload["kind"] = .string("mutateAutoloopCatalog")
             payload["expectedAutoloopCatalogRevision"] = .number(Double(expectedRevision))
             return payload
-        case let .loadLibraryTrackOnSimulatorDeck(
+        case .publishMidiSource:
+            return ["kind": .string("publishMidiSource")]
+        case .stopMidiSource:
+            return ["kind": .string("stopMidiSource")]
+        case .sendMidiLearnPulse:
+            return ["kind": .string("sendMidiLearnPulse")]
+        case let .sendMidiAddressLearnPulse(targetKind, targetNumber):
+            return [
+                "kind": .string("sendMidiAddressLearnPulse"),
+                "targetKind": .string(targetKind),
+                "targetNumber": .number(Double(targetNumber))
+            ]
+        case let .triggerMidiAutoloop(bankNumber, autoloopNumber):
+            return [
+                "kind": .string("triggerMidiAutoloop"),
+                "bankNumber": .number(Double(bankNumber)),
+                "autoloopNumber": .number(Double(autoloopNumber))
+            ]
+        case let .loadLibraryTrackOnLocalDeck(
             trackID,
             deckID,
             expectedTimelineRevision,
             expectedStateRevision
         ):
             return statePayload(
-                "loadLibraryTrackOnSimulatorDeck",
+                "loadLibraryTrackOnLocalDeck",
                 expectedRevision: expectedStateRevision,
                 additional: [
                     "trackId": .number(Double(trackID)),
                     "deckId": .number(Double(deckID)),
                     "expectedTimelineRevision": .number(Double(expectedTimelineRevision))
                 ]
+            )
+        case let .updateLocalPlaybackTransport(deckID, trackLoadID, positionMillis, playing):
+            return [
+                "kind": .string("updateLocalPlaybackTransport"),
+                "deckId": .number(Double(deckID)),
+                "trackLoadId": .number(Double(trackLoadID)),
+                "positionMillis": .number(Double(positionMillis)),
+                "playing": .boolean(playing)
+            ]
+        case let .setLocalPlaybackLeader(deckID, expectedRevision):
+            return statePayload(
+                "setLocalPlaybackLeader",
+                expectedRevision: expectedRevision,
+                additional: ["deckId": .number(Double(deckID))]
+            )
+        case let .selectDeckSourceMode(mode, expectedRevision):
+            return statePayload(
+                "selectDeckSourceMode",
+                expectedRevision: expectedRevision,
+                additional: ["mode": .string(mode)]
             )
         case let .loadDemoSession(expectedRevision):
             return statePayload("loadDemoSession", expectedRevision: expectedRevision)
@@ -456,6 +512,15 @@ public enum EngineCommand: Equatable, Sendable {
                 "selectTheme",
                 context: context,
                 additional: ["themeId": .number(Double(themeID))]
+            )
+        case let .selectThemeFromPhrase(context, phraseIndex, themeID):
+            return planPayload(
+                "selectThemeFromPhrase",
+                context: context,
+                additional: [
+                    "phraseIndex": .number(Double(phraseIndex)),
+                    "themeId": .number(Double(themeID))
+                ]
             )
         case let .selectScene(context, phraseIndex, sceneID):
             return planPayload(

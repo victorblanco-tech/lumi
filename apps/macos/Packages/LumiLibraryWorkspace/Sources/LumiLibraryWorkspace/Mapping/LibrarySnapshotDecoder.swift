@@ -60,7 +60,61 @@ public struct LibrarySnapshotDecoder: Sendable {
             ),
             editor: try decodeEditor(library["editor"]),
             phraseRoleSettings: try decodePhraseRoleSettings(library["phraseRoleSettings"]),
-            autoloopCatalog: try decodeAutoloopCatalog(library["autoloopCatalog"])
+            autoloopCatalog: try decodeAutoloopCatalog(library["autoloopCatalog"]),
+            midiIntegration: try decodeMidiIntegration(envelope.payload["midiIntegration"]),
+            deckInputIntegration: try decodeDeckInputIntegration(
+                envelope.payload["deckInputIntegration"]
+            )
+        )
+    }
+
+    private func decodeDeckInputIntegration(
+        _ value: JSONValue?
+    ) throws -> DeckInputIntegrationState? {
+        guard let value, value != .null else { return nil }
+        guard case let .object(input) = value else {
+            throw LibrarySnapshotError.invalidObject
+        }
+        let state = try string(input, "state")
+        guard state == "stopped" || state == "ready" else {
+            throw LibrarySnapshotError.invalidObject
+        }
+        let lastDeckID = try strictOptionalUnsigned(input, "lastDeckId")
+        let lastFrameSequence = try strictOptionalUnsigned(input, "lastFrameSequence")
+        guard lastDeckID.map({ [1, 2].contains($0) }) ?? true,
+              lastFrameSequence.map({ $0 <= 127 }) ?? true else {
+            throw LibrarySnapshotError.invalidObject
+        }
+        return DeckInputIntegrationState(
+            state: state,
+            destinationName: try strictOptionalString(input, "destinationName"),
+            protocolName: try string(input, "protocol"),
+            protocolVersion: try unsigned(input, "protocolVersion"),
+            receivedMessageCount: try unsigned(input, "receivedMessageCount"),
+            invalidWordCount: try unsigned(input, "invalidWordCount"),
+            committedFrameCount: try unsigned(input, "committedFrameCount"),
+            ignoredMessageCount: try unsigned(input, "ignoredMessageCount"),
+            duplicateFrameCount: try unsigned(input, "duplicateFrameCount"),
+            lastDeckID: lastDeckID,
+            lastFrameSequence: lastFrameSequence
+        )
+    }
+
+    private func decodeMidiIntegration(_ value: JSONValue?) throws -> MidiIntegrationState? {
+        guard let value, value != .null else { return nil }
+        guard case let .object(midi) = value else {
+            throw LibrarySnapshotError.invalidObject
+        }
+        let state = try string(midi, "state")
+        guard state == "stopped" || state == "ready" else {
+            throw LibrarySnapshotError.invalidObject
+        }
+        return MidiIntegrationState(
+            state: state,
+            sourceName: try string(midi, "sourceName"),
+            midiProtocol: try string(midi, "protocol"),
+            sentPulseCount: try unsigned(midi, "sentPulseCount"),
+            lastEvent: optionalString(midi, "lastEvent")
         )
     }
 
@@ -753,6 +807,17 @@ public struct LibrarySnapshotDecoder: Sendable {
         return UInt64(exactly: value)
     }
 
+    private func strictOptionalUnsigned(
+        _ values: [String: JSONValue],
+        _ key: String
+    ) throws -> UInt64? {
+        guard let value = values[key], value != .null else { return nil }
+        guard let decoded = optionalUnsigned(values, key) else {
+            throw LibrarySnapshotError.invalidNumber(key)
+        }
+        return decoded
+    }
+
     private func boolean(_ values: [String: JSONValue], _ key: String) throws -> Bool {
         guard case let .boolean(value)? = values[key] else {
             throw LibrarySnapshotError.missingField(key)
@@ -768,6 +833,17 @@ public struct LibrarySnapshotDecoder: Sendable {
     private func optionalString(_ values: [String: JSONValue], _ key: String) -> String? {
         guard case let .string(value)? = values[key], !value.isEmpty else { return nil }
         return value
+    }
+
+    private func strictOptionalString(
+        _ values: [String: JSONValue],
+        _ key: String
+    ) throws -> String? {
+        guard let value = values[key], value != .null else { return nil }
+        guard let decoded = optionalString(values, key) else {
+            throw LibrarySnapshotError.invalidObject
+        }
+        return decoded
     }
 
     private func strings(_ values: [String: JSONValue], _ key: String) throws -> [String] {

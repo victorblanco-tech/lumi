@@ -1,0 +1,15 @@
+[package]
+name = "lumi-blt-midi"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+lumi-deck-source = { path = "../lumi-deck-source" }
+lumi-domain = { path = "../lumi-domain" }
+lumi-midi-coremidi = { path = "../lumi-midi-coremidi" }
+thiserror = "2"
+
+[lints]
+workspace = true

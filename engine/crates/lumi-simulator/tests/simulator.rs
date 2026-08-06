@@ -198,7 +198,12 @@ fn pause_resume_speed_and_leader_controls_are_deterministic() {
     assert!(provider.apply_control(SimulationControl::Pause).is_ok());
     assert!(clock.advance(10_000).is_some());
     assert!(provider.update_to_clock().is_ok());
-    assert!(drain(&mut provider).is_empty());
+    let paused_events = drain(&mut provider);
+    assert_eq!(paused_events.len(), 1);
+    assert!(matches!(
+        observation(&paused_events[0]),
+        DeckObservation::PlaybackStateChanged { playing: false, .. }
+    ));
 
     assert!(provider.apply_control(SimulationControl::Resume).is_ok());
     assert!(
@@ -217,10 +222,10 @@ fn pause_resume_speed_and_leader_controls_are_deterministic() {
     );
     let leader_events = drain(&mut provider);
     assert_eq!(provider.leader_deck_id(), DeckId::new(2));
-    assert!(matches!(
-        observation(&leader_events[0]),
+    assert!(leader_events.iter().any(|event| matches!(
+        observation(event),
         DeckObservation::LeaderChanged { deck_id, .. } if *deck_id == DeckId::new(2)
-    ));
+    )));
 }
 
 #[test]

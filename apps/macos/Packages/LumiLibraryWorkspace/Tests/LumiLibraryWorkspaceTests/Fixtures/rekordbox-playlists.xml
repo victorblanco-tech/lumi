@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<DJ_PLAYLISTS Version="1.0.0">
+  <PRODUCT Name="rekordbox" Version="7.2.14" Company="AlphaTheta"/>
+  <COLLECTION Entries="3">
+    <TRACK TrackID="1" Name="Northern Pulse" Artist="Lumi Fixture" Location="file://localhost/Music/Northern%20Pulse.wav"/>
+    <TRACK TrackID="2" Name="Horizon Lines" Artist="Lumi Fixture" Location="file://localhost/Music/Horizon%20Lines.wav"/>
+    <TRACK TrackID="3" Name="Ocean Signal" Artist="Lumi Fixture" Location="file://localhost/Music/Ocean%20Signal.wav"/>
+  </COLLECTION>
+  <PLAYLISTS>
+    <NODE Type="0" Name="ROOT" Count="2">
+      <NODE Type="0" Name="Sets" Count="2">
+        <NODE Type="1" Name="Beach Set" KeyType="0" Entries="2">
+          <TRACK Key="1"/>
+          <TRACK Key="2"/>
+        </NODE>
+        <NODE Type="1" Name="Night Set" KeyType="0" Entries="1">
+          <TRACK Key="3"/>
+        </NODE>
+      </NODE>
+      <NODE Type="1" Name="Preparation" KeyType="0" Entries="1">
+        <TRACK Key="2"/>
+      </NODE>
+    </NODE>
+  </PLAYLISTS>
+</DJ_PLAYLISTS>

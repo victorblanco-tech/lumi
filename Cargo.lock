@@ -3,6 +3,15 @@
 version = 4
 
 [[package]]
+name = "apple-cf"
+version = "0.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7fd680cd0f3f02ee717b2014b26d18985c57b784384ba47213fcf8791e8c250"
+dependencies = [
+ "doom-fish-utils",
+]
+
+[[package]]
 name = "bitflags"
 version = "2.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -37,10 +46,48 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9330f8b2ff13f34540b44e946ef35111825727b38d33286ef986142615121801"
 
 [[package]]
+name = "coremidi-rs"
+version = "0.5.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91da4578ffc797266b015947f3e39655550ba27b1838044be08fd89bb1f91fc6"
+dependencies = [
+ "apple-cf",
+ "doom-fish-utils",
+ "libc",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "crossbeam-queue"
+version = "0.3.13"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "803d13fb3b09d88be9f4dbc29062c66b19bf7170867ceb746d2a8689bf6c7a26"
+dependencies = [
+ "crossbeam-utils",
+]
+
+[[package]]
+name = "crossbeam-utils"
+version = "0.8.22"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61803da095bee82a81bb1a452ecc25d3b2f1416d1897eb86430c6159ef717c17"
+
+[[package]]
 name = "deranged"
 version = "0.5.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7cd812cc2bc1d69d4764bd80df88b4317eaef9e773c75226407d9bc0876b211c"
+
+[[package]]
+name = "doom-fish-utils"
+version = "0.3.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c801f6c2a0db1a1909d89fc395b9dccc594de9ef599659fbde9bb3b55ef67f9f"
+dependencies = [
+ "crossbeam-queue",
+ "futures-util",
+]
 
 [[package]]
 name = "fallible-iterator"
@@ -65,6 +112,29 @@ name = "foldhash"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "77ce24cb58228fbb8aa041425bb1050850ac19177686ea6e0f41a70416f56fdb"
+
+[[package]]
+name = "futures-core"
+version = "0.3.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2cd50c473c80f6d7c3670a752354b8e569b1a7cbfdc0419ec88e5edad85e0dc7"
+
+[[package]]
+name = "futures-task"
+version = "0.3.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b231ed28831efb4a61a08580c4bc233ec56bc009f4cd8f52da2c3cb97df0c109"
+
+[[package]]
+name = "futures-util"
+version = "0.3.33"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a77a90a256fce34da66415271e30f94ee91c57b04b8a2c042d9cf3220179deaa"
+dependencies = [
+ "futures-core",
+ "futures-task",
+ "pin-project-lite",
+]
 
 [[package]]
 name = "hashbrown"
@@ -127,6 +197,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "lumi-blt-midi"
+version = "0.1.0-dev"
+dependencies = [
+ "lumi-deck-source",
+ "lumi-domain",
+ "lumi-midi-coremidi",
+ "thiserror",
+]
+
+[[package]]
 name = "lumi-deck-source"
 version = "0.1.0-dev"
 dependencies = [
@@ -141,6 +221,7 @@ version = "0.1.0-dev"
 name = "lumi-engine"
 version = "0.1.0-dev"
 dependencies = [
+ "lumi-blt-midi",
  "lumi-deck-source",
  "lumi-domain",
  "lumi-library",
@@ -148,6 +229,9 @@ dependencies = [
  "lumi-library-source",
  "lumi-library-sqlite",
  "lumi-lighting-output",
+ "lumi-local-playback",
+ "lumi-midi-coremidi",
+ "lumi-midi-output",
  "lumi-output-dry-run",
  "lumi-planner",
  "lumi-protocol",
@@ -204,6 +288,31 @@ name = "lumi-lighting-output"
 version = "0.1.0-dev"
 dependencies = [
  "lumi-domain",
+]
+
+[[package]]
+name = "lumi-local-playback"
+version = "0.1.0-dev"
+dependencies = [
+ "lumi-deck-source",
+ "lumi-domain",
+ "thiserror",
+]
+
+[[package]]
+name = "lumi-midi-coremidi"
+version = "0.1.0-dev"
+dependencies = [
+ "coremidi-rs",
+ "lumi-midi-output",
+ "thiserror",
+]
+
+[[package]]
+name = "lumi-midi-output"
+version = "0.1.0-dev"
+dependencies = [
+ "thiserror",
 ]
 
 [[package]]

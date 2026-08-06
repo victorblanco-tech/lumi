@@ -16,8 +16,12 @@ public enum LiveWorkspaceFixtures {
             processedEvents: 8,
             lastDecision: "phraseChanged"
         ),
-        deckSource: DeckSourceSnapshot(providerKind: "simulator", status: "ready"),
-        simulation: SimulationSnapshot(speed: 64, paused: false),
+        deckSource: DeckSourceSnapshot(
+            providerKind: "localPlayback",
+            mode: "localPlayback",
+            displayName: "Local Playback",
+            status: "ready"
+        ),
         outputProvider: OutputProviderSnapshot(
             providerKind: "dryRun",
             status: "ready",
@@ -35,7 +39,16 @@ public enum LiveWorkspaceFixtures {
                 pitchClass: "a",
                 keyMode: "minor",
                 beat: 24,
-                phraseIndex: 0
+                playing: true,
+                phraseIndex: 0,
+                durationBeats: 128,
+                phrases: deckPhrases(second: "verse"),
+                waveformPreview: waveform(seed: 101),
+                planEligibility: .readyExact,
+                localPlayback: LocalPlaybackTrackSnapshot(
+                    audioURI: "lumi-demo://aurora-signal",
+                    durationMillis: 61_935
+                )
             ),
             DeckSnapshot(
                 deckID: 2,
@@ -47,9 +60,38 @@ public enum LiveWorkspaceFixtures {
                 pitchClass: "c",
                 keyMode: "major",
                 beat: 0,
-                phraseIndex: nil
+                phraseIndex: nil,
+                durationBeats: 128,
+                phrases: deckPhrases(second: "breakdown"),
+                waveformPreview: waveform(seed: 202),
+                planEligibility: .readyExact,
+                localPlayback: LocalPlaybackTrackSnapshot(
+                    audioURI: "lumi-demo://neon-horizon",
+                    durationMillis: 60_000
+                )
             )
         ],
+        livePlan: PlanSnapshot(
+            planID: "8411348566426143282",
+            deckID: 1,
+            trackLoadID: 1_001,
+            trackDurationBeats: 128,
+            revision: 1,
+            configurationRevision: 1,
+            status: "ready",
+            themeDecision: ThemeDecisionSnapshot(
+                themeID: 3,
+                themeName: "Solar Flare",
+                reason: "colorPrefer",
+                matchedColorRGB: 12_273_790
+            ),
+            cues: [
+                cue(0, 0, 32, "intro", "ambient", 1, "Soft Motion", 1, 1, 3, "Solar Flare"),
+                cue(1, 32, 64, "verse", "groove", 3, "Neon Motion", 2, 1, 3, "Solar Flare"),
+                cue(2, 64, 96, "build", "build", 6, "Velocity Build", 3, 2, 3, "Solar Flare"),
+                cue(3, 96, 128, "drop", "impact", 7, "Full Energy", 4, 1, 3, "Solar Flare")
+            ]
+        ),
         nextPlan: PlanSnapshot(
             planID: "14113485664261432828",
             deckID: 2,
@@ -86,7 +128,7 @@ public enum LiveWorkspaceFixtures {
                 occurredAt: 1_000,
                 source: "output",
                 type: "outputEffectRecorded",
-                result: "simulated",
+                result: "recorded",
                 reason: "outputEffectRecorded"
             )
         ]
@@ -123,7 +165,15 @@ public enum LiveWorkspaceFixtures {
             pitchClass: "c",
             keyMode: "major",
             beat: 0,
-            phraseIndex: nil
+            phraseIndex: nil,
+            durationBeats: 128,
+            phrases: deckPhrases(second: "breakdown"),
+            waveformPreview: waveform(seed: 303),
+            planEligibility: .readyExact,
+            localPlayback: LocalPlaybackTrackSnapshot(
+                audioURI: "lumi-demo://horizon-lines",
+                durationMillis: 60_000
+            )
         )
         let roles = ["Intro / Outro", "Breakdown 1", "Buildup 1", "Drop"]
         let roleIDs = ["intro-outro", "breakdown-1", "buildup-1", "drop"]
@@ -180,6 +230,7 @@ public enum LiveWorkspaceFixtures {
             outputProvider: readySnapshot.outputProvider,
             leaderDeckID: readySnapshot.leaderDeckID,
             decks: [readySnapshot.decks[0], nextDeck],
+            livePlan: readySnapshot.livePlan,
             nextPlan: plan,
             planningOptions: readySnapshot.planningOptions,
             timeline: readySnapshot.timeline
@@ -236,6 +287,7 @@ public enum LiveWorkspaceFixtures {
             outputProvider: readySnapshot.outputProvider,
             leaderDeckID: readySnapshot.leaderDeckID,
             decks: readySnapshot.decks,
+            livePlan: readySnapshot.livePlan,
             nextPlan: plan,
             planningOptions: readySnapshot.planningOptions,
             timeline: readySnapshot.timeline
@@ -276,6 +328,7 @@ public enum LiveWorkspaceFixtures {
             outputProvider: readySnapshot.outputProvider,
             leaderDeckID: readySnapshot.leaderDeckID,
             decks: readySnapshot.decks,
+            livePlan: readySnapshot.livePlan,
             nextPlan: plan,
             planningOptions: readySnapshot.planningOptions,
             timeline: readySnapshot.timeline
@@ -296,12 +349,15 @@ public enum LiveWorkspaceFixtures {
             runtime: snapshot.runtime,
             deckSource: DeckSourceSnapshot(
                 providerKind: snapshot.deckSource.providerKind,
+                mode: snapshot.deckSource.mode,
+                displayName: snapshot.deckSource.displayName,
                 status: status
             ),
             simulation: snapshot.simulation,
             outputProvider: snapshot.outputProvider,
             leaderDeckID: snapshot.leaderDeckID,
             decks: snapshot.decks,
+            livePlan: snapshot.livePlan,
             nextPlan: snapshot.nextPlan,
             planningOptions: snapshot.planningOptions,
             timeline: snapshot.timeline
@@ -317,9 +373,19 @@ public enum LiveWorkspaceFixtures {
         _ sceneID: UInt64,
         _ scene: String,
         _ bank: UInt64,
-        _ slot: UInt64
+        _ slot: UInt64,
+        _ themeID: UInt64 = 2,
+        _ themeName: String = "Deep Ocean"
     ) -> PlanCueSnapshot {
-        PlanCueSnapshot(
+        let role: (id: String, name: String) = switch phrase {
+        case "intro": ("intro-outro", "Intro / Outro")
+        case "verse": ("bridge", "Bridge")
+        case "breakdown": ("breakdown-1", "Breakdown 1")
+        case "build": ("buildup-1", "Buildup 1")
+        case "drop": ("drop", "Drop")
+        default: (phrase, phrase.capitalized)
+        }
+        return PlanCueSnapshot(
             phraseIndex: index,
             startBeat: start,
             endBeat: end,
@@ -327,15 +393,77 @@ public enum LiveWorkspaceFixtures {
             locked: false,
             reason: .phraseCategoryMatched(phraseKind: phrase, category: category),
             action: .applyLook(
-                themeID: 2,
-                themeName: "Deep Ocean",
+                themeID: themeID,
+                themeName: themeName,
                 sceneID: sceneID,
                 sceneName: scene,
                 category: category,
                 loopBank: bank,
                 loopSlot: slot
+            ),
+            libraryResolution: PlanCueLibraryResolutionSnapshot(
+                roleID: role.id,
+                roleName: role.name,
+                strategy: "auto",
+                variantID: "variant-1",
+                catalogRevision: 1,
+                resolutionReason: "automatic",
+                entryID: "theme-\(themeID)--\(role.id)--variant-1",
+                entryName: scene,
+                bankNumber: bank,
+                autoloopNumber: slot
             )
         )
+    }
+
+    private static func deckPhrases(second: String) -> [DeckPhraseSnapshot] {
+        [
+            DeckPhraseSnapshot(
+                index: 0,
+                startBeat: 0,
+                endBeat: 32,
+                kind: "intro",
+                roleID: "intro-outro",
+                roleName: "Intro / Outro"
+            ),
+            DeckPhraseSnapshot(
+                index: 1,
+                startBeat: 32,
+                endBeat: 64,
+                kind: second,
+                roleID: second == "breakdown" ? "breakdown-1" : "bridge",
+                roleName: second == "breakdown" ? "Breakdown 1" : "Bridge"
+            ),
+            DeckPhraseSnapshot(
+                index: 2,
+                startBeat: 64,
+                endBeat: 96,
+                kind: "build",
+                roleID: "buildup-1",
+                roleName: "Buildup 1"
+            ),
+            DeckPhraseSnapshot(
+                index: 3,
+                startBeat: 96,
+                endBeat: 128,
+                kind: "drop",
+                roleID: "drop",
+                roleName: "Drop"
+            )
+        ]
+    }
+
+    private static func waveform(seed: UInt64) -> DeckWaveformPreviewSnapshot {
+        let points = (0..<192).map { index in
+            let mixed = seed &* 6_364_136_223_846_793_005
+                &+ UInt64(index) &* 1_442_695_040_888_963_407
+            return DeckWaveformPointSnapshot(
+                low: UInt8(4 + mixed % 28),
+                mid: UInt8(3 + mixed.rotatedLeft(17) % 29),
+                high: UInt8(2 + mixed.rotatedLeft(37) % 30)
+            )
+        }
+        return DeckWaveformPreviewSnapshot(source: "library", style: "rgb", points: points)
     }
 
     private static let planningOptions = PlanningOptionsSnapshot(
@@ -358,4 +486,11 @@ public enum LiveWorkspaceFixtures {
             SceneOptionSnapshot(id: 10, name: "Slow Wave", category: "break", loopBank: 5, loopSlot: 2)
         ]
     )
+}
+
+private extension UInt64 {
+    func rotatedLeft(_ amount: UInt64) -> UInt64 {
+        let shift = amount % 64
+        return (self << shift) | (self >> ((64 - shift) % 64))
+    }
 }

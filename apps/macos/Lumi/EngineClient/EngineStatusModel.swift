@@ -1,3 +1,4 @@
+import AVFoundation
 import Combine
 import Foundation
 import LumiEngineClient
@@ -11,8 +12,9 @@ final class EngineStatusModel: ObservableObject {
     @Published private(set) var timelineEditFeedback: String?
     @Published private(set) var phraseRoleFeedback: String?
     @Published private(set) var autoloopCatalogFeedback: String?
-    @Published private(set) var simulatorLoadFeedback: String?
-    @Published private(set) var simulatorLoadFeedbackIsError = false
+    @Published private(set) var midiIntegrationFeedback: String?
+    @Published private(set) var localPlaybackFeedback: String?
+    @Published private(set) var localPlaybackFeedbackIsError = false
 
     private enum Lifecycle: Equatable {
         case stopped
@@ -28,7 +30,10 @@ final class EngineStatusModel: ObservableObject {
     private let libraryDecoder = LibrarySnapshotDecoder()
     private var lifecycle: Lifecycle = .stopped
     private var monitoringTask: Task<Void, Never>?
-    private var playbackTask: Task<Void, Never>?
+    private var localAudioControllers: [UInt64: LocalDeckAudioController] = [:]
+    private var pendingLocalTransports: [UInt64: LocalDeckTransportSnapshot] = [:]
+    private var pendingLocalTransportDecks: [UInt64] = []
+    private var localTransportDrainTask: Task<Void, Never>?
     private var isExchangingCommand = false
     private var pendingInteractiveExchanges = 0
     private var latestSnapshot: EngineSnapshot?
@@ -47,8 +52,9 @@ final class EngineStatusModel: ObservableObject {
         timelineEditFeedback = nil
         phraseRoleFeedback = nil
         autoloopCatalogFeedback = nil
-        simulatorLoadFeedback = nil
-        simulatorLoadFeedbackIsError = false
+        midiIntegrationFeedback = nil
+        localPlaybackFeedback = nil
+        localPlaybackFeedbackIsError = false
 
         do {
             let executable = try engineExecutable()
@@ -73,7 +79,7 @@ final class EngineStatusModel: ObservableObject {
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
             startMonitoring()
-            ensurePlaybackTask()
+            synchronizeLocalAudio(with: snapshot)
         } catch {
             await supervisor.stop()
             lifecycle = .failed
@@ -107,8 +113,12 @@ final class EngineStatusModel: ObservableObject {
     func stop() async {
         monitoringTask?.cancel()
         monitoringTask = nil
-        playbackTask?.cancel()
-        playbackTask = nil
+        localTransportDrainTask?.cancel()
+        localTransportDrainTask = nil
+        pendingLocalTransports.removeAll()
+        pendingLocalTransportDecks.removeAll()
+        localAudioControllers.values.forEach { $0.shutdown() }
+        localAudioControllers.removeAll()
         isExchangingCommand = false
         await supervisor.stop()
         lifecycle = .stopped
@@ -119,8 +129,9 @@ final class EngineStatusModel: ObservableObject {
         libraryState = .importing()
         phraseRoleFeedback = nil
         autoloopCatalogFeedback = nil
-        simulatorLoadFeedback = nil
-        simulatorLoadFeedbackIsError = false
+        midiIntegrationFeedback = nil
+        localPlaybackFeedback = nil
+        localPlaybackFeedbackIsError = false
     }
 
     func queryLibrary(_ request: LibraryQueryRequest) async {
@@ -171,12 +182,12 @@ final class EngineStatusModel: ObservableObject {
         timelineEditFeedback = nil
     }
 
-    func loadLibraryTrackOnSimulatorDeck(_ request: LibrarySimulatorLoadRequest) async {
+    func loadLibraryTrackOnLocalDeck(_ request: LibraryDeckLoadRequest) async {
         guard let snapshot = latestSnapshot else { return }
-        simulatorLoadFeedback = nil
-        simulatorLoadFeedbackIsError = false
+        localPlaybackFeedback = nil
+        localPlaybackFeedbackIsError = false
         let loaded = await exchangeLibraryCommand(
-            .loadLibraryTrackOnSimulatorDeck(
+            .loadLibraryTrackOnLocalDeck(
                 trackID: request.trackID,
                 deckID: request.deckID,
                 expectedTimelineRevision: request.expectedTimelineRevision,
@@ -185,8 +196,8 @@ final class EngineStatusModel: ObservableObject {
             preservesLibraryOnFailure: true
         )
         if loaded {
-            simulatorLoadFeedback = "Loaded exact Lumi timeline r\(request.expectedTimelineRevision) on Deck \(request.deckID)."
-            simulatorLoadFeedbackIsError = false
+            localPlaybackFeedback = "Loaded exact Lumi timeline r\(request.expectedTimelineRevision) on Local Deck \(request.deckID)."
+            localPlaybackFeedbackIsError = false
         }
     }
 
@@ -242,6 +253,49 @@ final class EngineStatusModel: ObservableObject {
             success = "Revision \(revision) restored as a new revision."
         }
         await exchangeTimelineCommand(command, success: success)
+    }
+
+    func publishMidiSource() async {
+        await exchangeMidiCommand(
+            .publishMidiSource,
+            success: "Lumi Virtual MIDI is published. No MIDI was sent."
+        )
+    }
+
+    func stopMidiSource() async {
+        await exchangeMidiCommand(
+            .stopMidiSource,
+            success: "Lumi Virtual MIDI stopped."
+        )
+    }
+
+    func sendMidiLearnPulse() async {
+        await exchangeMidiCommand(
+            .sendMidiLearnPulse,
+            success: "Learn pulse sent on Channel 16, Note 60, with Note Off."
+        )
+    }
+
+    func sendMidiAddressLearnPulse(targetKind: String, targetNumber: UInt16) async {
+        let label = targetKind == "bank" ? "Bank" : "AutoLoop"
+        let note = targetKind == "bank" ? 59 + targetNumber : 63 + targetNumber
+        await exchangeMidiCommand(
+            .sendMidiAddressLearnPulse(
+                targetKind: targetKind,
+                targetNumber: targetNumber
+            ),
+            success: "\(label) \(targetNumber) learn pulse sent on Channel 16, Note \(note)."
+        )
+    }
+
+    func triggerMidiAutoloop(bankNumber: UInt16, autoloopNumber: UInt16) async {
+        await exchangeMidiCommand(
+            .triggerMidiAutoloop(
+                bankNumber: bankNumber,
+                autoloopNumber: autoloopNumber
+            ),
+            success: "Triggered Bank \(bankNumber) → AutoLoop \(autoloopNumber) with a 50 ms settle delay."
+        )
     }
 
     func reconcileLibrarySource(_ request: TrackSourceReconcileRequest) async {
@@ -529,8 +583,8 @@ final class EngineStatusModel: ObservableObject {
             let envelope = try await supervisor.send(command)
             if let failure = EngineCommandFailure(envelope) {
                 if preservesLibraryOnFailure {
-                    simulatorLoadFeedback = failure.message
-                    simulatorLoadFeedbackIsError = true
+                    localPlaybackFeedback = failure.message
+                    localPlaybackFeedbackIsError = true
                 } else {
                     libraryState = .failed(failure.message)
                 }
@@ -544,17 +598,48 @@ final class EngineStatusModel: ObservableObject {
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
             libraryState = try libraryDecoder.decode(envelope)
+            synchronizeLocalAudio(with: snapshot)
             return true
         } catch {
             let message = (error as? LocalizedError)?.errorDescription
                 ?? "The track editor could not be updated."
             if preservesLibraryOnFailure {
-                simulatorLoadFeedback = message
-                simulatorLoadFeedbackIsError = true
+                localPlaybackFeedback = message
+                localPlaybackFeedbackIsError = true
             } else {
                 libraryState = .failed(message)
             }
             return false
+        }
+    }
+
+    private func exchangeMidiCommand(_ command: EngineCommand, success: String) async {
+        midiIntegrationFeedback = nil
+        guard lifecycle == .ready,
+              let endpointDescription,
+              let protocolVersion,
+              await acquireInteractiveExchange() else {
+            midiIntegrationFeedback = "The MIDI command could not run because the engine is not ready."
+            return
+        }
+        defer { isExchangingCommand = false }
+        do {
+            let envelope = try await supervisor.send(command)
+            if let failure = EngineCommandFailure(envelope) {
+                midiIntegrationFeedback = "The MIDI command could not run: \(failure.message)"
+                return
+            }
+            let snapshot = try snapshotDecoder.decode(
+                envelope,
+                endpointDescription: endpointDescription,
+                protocolVersion: protocolVersion
+            )
+            latestSnapshot = snapshot
+            workspaceState = LiveWorkspacePresenter.ready(snapshot)
+            libraryState = try libraryDecoder.decode(envelope)
+            midiIntegrationFeedback = success
+        } catch {
+            midiIntegrationFeedback = "The MIDI command could not run: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
         }
     }
 
@@ -597,10 +682,14 @@ final class EngineStatusModel: ObservableObject {
                 protocolVersion: protocolVersion
             )
             latestSnapshot = snapshot
+            let savedRevision = [snapshot.livePlan, snapshot.nextPlan]
+                .compactMap { $0 }
+                .first(where: { $0.planID == request.context.planID })?
+                .revision
             workspaceState = LiveWorkspacePresenter.ready(
                 snapshot,
                 planInteraction: .succeeded(
-                    "Plan revision \(snapshot.nextPlan?.revision ?? 0) saved."
+                    "Plan revision \(savedRevision ?? 0) saved."
                 )
             )
         } catch {
@@ -672,7 +761,7 @@ final class EngineStatusModel: ObservableObject {
                 snapshot,
                 sessionInteraction: .succeeded(sessionSuccessMessage(request))
             )
-            ensurePlaybackTask()
+            synchronizeLocalAudio(with: snapshot)
         } catch {
             workspaceState = LiveWorkspacePresenter.ready(
                 latestSnapshot ?? current,
@@ -688,6 +777,12 @@ final class EngineStatusModel: ObservableObject {
         switch request {
         case let .selectTheme(context, themeID):
             .selectTheme(context: engineContext(context), themeID: themeID)
+        case let .selectThemeFromPhrase(context, phraseIndex, themeID):
+            .selectThemeFromPhrase(
+                context: engineContext(context),
+                phraseIndex: phraseIndex,
+                themeID: themeID
+            )
         case let .selectScene(context, phraseIndex, sceneID):
             .selectScene(
                 context: engineContext(context),
@@ -725,18 +820,15 @@ final class EngineStatusModel: ObservableObject {
 
     private func engineCommand(for request: SessionCommandRequest) -> EngineCommand {
         switch request {
-        case let .loadDemo(expectedRevision):
-            .loadDemoSession(expectedStateRevision: expectedRevision)
         case let .setOperationState(state, expectedRevision):
             .setOperationState(state, expectedStateRevision: expectedRevision)
-        case let .setSimulationSpeed(speed, expectedRevision):
-            .setSimulationSpeed(speed, expectedStateRevision: expectedRevision)
-        case let .setSimulationPlayback(playing, expectedRevision):
-            .setSimulationPlayback(playing, expectedStateRevision: expectedRevision)
-        case let .advanceToNextTrack(expectedRevision):
-            .advanceToNextTrack(expectedStateRevision: expectedRevision)
-        case let .resetDemo(expectedRevision):
-            .resetDemoSession(expectedStateRevision: expectedRevision)
+        case let .setLocalPlaybackLeader(deckID, expectedRevision):
+            .setLocalPlaybackLeader(
+                deckID: deckID,
+                expectedStateRevision: expectedRevision
+            )
+        case let .selectDeckSourceMode(mode, expectedRevision):
+            .selectDeckSourceMode(mode, expectedStateRevision: expectedRevision)
         }
     }
 
@@ -752,33 +844,103 @@ final class EngineStatusModel: ObservableObject {
 
     private func sessionSuccessMessage(_ request: SessionCommandRequest) -> String {
         switch request {
-        case .loadDemo: "Demo session loaded."
         case let .setOperationState(state, _): "Operation state is now \(state.uppercased())."
-        case let .setSimulationSpeed(speed, _): "Simulation speed is now \(speed)×."
-        case let .setSimulationPlayback(playing, _):
-            playing ? "Simulation resumed." : "Simulation paused."
-        case .advanceToNextTrack: "Next deck is now Live."
-        case .resetDemo: "Demo session reset to its canonical start."
+        case let .setLocalPlaybackLeader(deckID, _): "Local Deck \(deckID) is now Live."
+        case let .selectDeckSourceMode(mode, _):
+            mode == "localPlayback" ? "Local Playback selected." : "Connected Decks selected."
         }
     }
 
-    private func ensurePlaybackTask() {
-        guard playbackTask == nil else { return }
-        playbackTask = Task { [weak self] in
-            while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(250))
-                guard !Task.isCancelled, let self else { return }
-                await self.tickSimulation()
+    func runLocalPlayback(_ request: LocalPlaybackRequest) {
+        let deckID: UInt64
+        switch request {
+        case let .togglePlayback(value), let .stop(value), let .seek(value, _):
+            deckID = value
+        }
+        guard latestSnapshot?.deckSource.mode == "localPlayback",
+              let controller = localAudioControllers[deckID] else {
+            return
+        }
+        switch request {
+        case .togglePlayback:
+            controller.togglePlayback()
+        case .stop:
+            controller.stop()
+        case let .seek(_, progress):
+            controller.seek(progress: progress)
+        }
+        publishLocalTransport(controller.snapshot)
+    }
+
+    private func synchronizeLocalAudio(with snapshot: EngineSnapshot) {
+        guard snapshot.deckSource.mode == "localPlayback" else {
+            localAudioControllers.values.forEach { $0.shutdown() }
+            localAudioControllers.removeAll()
+            return
+        }
+        let expectedDecks = Set(snapshot.decks.compactMap { deck in
+            deck.localPlayback == nil ? nil : deck.deckID
+        })
+        for deckID in Array(localAudioControllers.keys) where !expectedDecks.contains(deckID) {
+            localAudioControllers.removeValue(forKey: deckID)?.shutdown()
+        }
+        for deck in snapshot.decks {
+            guard let playback = deck.localPlayback else { continue }
+            if let existing = localAudioControllers[deck.deckID],
+               existing.trackLoadID == deck.trackLoadID {
+                continue
             }
+            localAudioControllers.removeValue(forKey: deck.deckID)?.shutdown()
+            let controller = LocalDeckAudioController(
+                deckID: deck.deckID,
+                trackLoadID: deck.trackLoadID,
+                audioURI: playback.audioURI,
+                durationMillis: playback.durationMillis
+            )
+            controller.onTransport = { [weak self, weak controller] in
+                guard let self, let controller else { return }
+                self.publishLocalTransport(controller.snapshot)
+            }
+            localAudioControllers[deck.deckID] = controller
         }
     }
 
-    private func tickSimulation() async {
+    private func publishLocalTransport(_ transport: LocalDeckTransportSnapshot) {
+        if pendingLocalTransports[transport.deckID] == nil {
+            pendingLocalTransportDecks.append(transport.deckID)
+        }
+        pendingLocalTransports[transport.deckID] = transport
+        guard localTransportDrainTask == nil else { return }
+        localTransportDrainTask = Task { [weak self] in
+            await self?.drainLocalTransports()
+        }
+    }
+
+    private func drainLocalTransports() async {
+        defer { localTransportDrainTask = nil }
+        while lifecycle == .ready, !Task.isCancelled {
+            while isExchangingCommand || pendingInteractiveExchanges > 0 {
+                do {
+                    try await Task.sleep(for: .milliseconds(5))
+                } catch {
+                    return
+                }
+                guard lifecycle == .ready else { return }
+            }
+            guard !pendingLocalTransportDecks.isEmpty else { return }
+            let deckID = pendingLocalTransportDecks.removeFirst()
+            guard
+                  let transport = pendingLocalTransports.removeValue(forKey: deckID) else {
+                continue
+            }
+            await exchangeLocalTransport(transport)
+        }
+    }
+
+    private func exchangeLocalTransport(_ transport: LocalDeckTransportSnapshot) async {
         guard lifecycle == .ready,
               !isExchangingCommand,
               pendingInteractiveExchanges == 0,
-              let current = latestSnapshot,
-              !current.simulation.paused,
               let endpointDescription,
               let protocolVersion else {
             return
@@ -787,24 +949,14 @@ final class EngineStatusModel: ObservableObject {
         defer { isExchangingCommand = false }
         do {
             let envelope = try await supervisor.send(
-                .advanceSimulation(
-                    elapsedTicks: 250,
-                    expectedStateRevision: current.stateRevision
+                .updateLocalPlaybackTransport(
+                    deckID: transport.deckID,
+                    trackLoadID: transport.trackLoadID,
+                    positionMillis: transport.positionMillis,
+                    playing: transport.playing
                 )
             )
-            if let failure = EngineCommandFailure(envelope) {
-                if failure.kind == "revisionConflict" {
-                    let refreshed = try await supervisor.getSnapshot()
-                    let snapshot = try snapshotDecoder.decode(
-                        refreshed,
-                        endpointDescription: endpointDescription,
-                        protocolVersion: protocolVersion
-                    )
-                    latestSnapshot = snapshot
-                    workspaceState = LiveWorkspacePresenter.ready(snapshot)
-                }
-                return
-            }
+            guard EngineCommandFailure(envelope) == nil else { return }
             let snapshot = try snapshotDecoder.decode(
                 envelope,
                 endpointDescription: endpointDescription,
@@ -813,7 +965,8 @@ final class EngineStatusModel: ObservableObject {
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
         } catch {
-            // The process monitor owns disconnect presentation; a later tick can recover.
+            // The process monitor owns connection failure presentation. Audio
+            // remains local and the next transport sample retries safely.
         }
     }
 
@@ -849,18 +1002,291 @@ final class EngineStatusModel: ObservableObject {
 
     private func startMonitoring() {
         monitoringTask = Task { [weak self] in
+            var healthTick = 0
             while !Task.isCancelled {
-                try? await Task.sleep(for: .seconds(1))
+                try? await Task.sleep(for: .milliseconds(250))
                 guard !Task.isCancelled, let self else {
                     return
                 }
-                if await !self.supervisor.isRunning() {
+                healthTick = (healthTick + 1) % 4
+                if healthTick == 0, await !self.supervisor.isRunning() {
                     self.lifecycle = .disconnected
                     self.workspaceState = LiveWorkspacePresenter.disconnected()
                     self.libraryState = .failed("The local Lumi engine disconnected.")
                     return
                 }
+                guard self.lifecycle == .ready,
+                      !self.isExchangingCommand,
+                      self.pendingInteractiveExchanges == 0,
+                      let endpointDescription = self.endpointDescription,
+                      let protocolVersion = self.protocolVersion else {
+                    continue
+                }
+                let connectedDecks = self.latestSnapshot?.deckSource.mode == "connectedDecks"
+                guard connectedDecks || healthTick == 0 else { continue }
+                self.isExchangingCommand = true
+                do {
+                    let envelope = try await self.supervisor.getSnapshot()
+                    let snapshot = try self.snapshotDecoder.decode(
+                        envelope,
+                        endpointDescription: endpointDescription,
+                        protocolVersion: protocolVersion
+                    )
+                    self.latestSnapshot = snapshot
+                    self.workspaceState = LiveWorkspacePresenter.ready(snapshot)
+                    if healthTick == 0 {
+                        self.libraryState = try self.libraryDecoder.decode(envelope)
+                    }
+                } catch {
+                    // The one-second process health check owns disconnect state.
+                    // A single missed polling frame must not disturb Live UI.
+                }
+                self.isExchangingCommand = false
             }
         }
+    }
+}
+
+private struct LocalDeckTransportSnapshot: Equatable, Sendable {
+    let deckID: UInt64
+    let trackLoadID: UInt64
+    let positionMillis: UInt64
+    let playing: Bool
+}
+
+@MainActor
+private final class LocalDeckAudioController {
+    let deckID: UInt64
+    let trackLoadID: UInt64
+    var onTransport: (() -> Void)?
+
+    private let durationMillis: UInt64
+    private var positionMillis: UInt64 = 0
+    private var isPlaying = false
+    private var engine: AVAudioEngine?
+    private var player: AVAudioPlayerNode?
+    private var buffer: AVAudioPCMBuffer?
+    private var updateTask: Task<Void, Never>?
+    private var scheduledStartFrame: AVAudioFramePosition = 0
+    private var scheduledFrameCount: AVAudioFrameCount = 0
+    private var generation: UInt64 = 0
+
+    var snapshot: LocalDeckTransportSnapshot {
+        LocalDeckTransportSnapshot(
+            deckID: deckID,
+            trackLoadID: trackLoadID,
+            positionMillis: positionMillis,
+            playing: isPlaying
+        )
+    }
+
+    init(
+        deckID: UInt64,
+        trackLoadID: UInt64,
+        audioURI: String,
+        durationMillis: UInt64
+    ) {
+        self.deckID = deckID
+        self.trackLoadID = trackLoadID
+        self.durationMillis = durationMillis
+        buffer = try? Self.loadBuffer(audioURI: audioURI, durationMillis: durationMillis)
+    }
+
+    func togglePlayback() {
+        isPlaying ? pause() : play()
+    }
+
+    func play() {
+        guard let buffer else { return }
+        do {
+            let (engine, player) = prepareEngine(buffer: buffer)
+            if !engine.isRunning { try engine.start() }
+            generation &+= 1
+            let activeGeneration = generation
+            player.stop()
+            if positionMillis >= durationMillis { positionMillis = 0 }
+            let sampleRate = buffer.format.sampleRate
+            let requestedFrame = AVAudioFramePosition(
+                Double(positionMillis) / 1_000 * sampleRate
+            )
+            let startFrame = min(requestedFrame, max(0, AVAudioFramePosition(buffer.frameLength) - 1))
+            guard let slice = Self.slice(
+                buffer,
+                start: startFrame,
+                end: AVAudioFramePosition(buffer.frameLength)
+            ) else { return }
+            scheduledStartFrame = startFrame
+            scheduledFrameCount = slice.frameLength
+            player.scheduleBuffer(slice) { [weak self] in
+                Task { @MainActor [weak self] in
+                    guard let self, self.generation == activeGeneration else { return }
+                    self.positionMillis = self.durationMillis
+                    self.isPlaying = false
+                    self.updateTask?.cancel()
+                    self.updateTask = nil
+                    self.onTransport?()
+                }
+            }
+            player.play()
+            isPlaying = true
+            startUpdates()
+        } catch {
+            isPlaying = false
+        }
+    }
+
+    func pause() {
+        refreshPosition()
+        generation &+= 1
+        player?.pause()
+        isPlaying = false
+        updateTask?.cancel()
+        updateTask = nil
+    }
+
+    func stop() {
+        generation &+= 1
+        player?.stop()
+        positionMillis = 0
+        isPlaying = false
+        updateTask?.cancel()
+        updateTask = nil
+    }
+
+    func seek(progress: Double) {
+        let shouldResume = isPlaying
+        generation &+= 1
+        player?.stop()
+        positionMillis = UInt64(
+            (min(max(0, progress), 1) * Double(durationMillis)).rounded()
+        )
+        isPlaying = false
+        updateTask?.cancel()
+        updateTask = nil
+        if shouldResume { play() }
+    }
+
+    func shutdown() {
+        stop()
+        engine?.stop()
+        if let player { engine?.detach(player) }
+        player = nil
+        engine = nil
+        buffer = nil
+    }
+
+    private func prepareEngine(buffer: AVAudioPCMBuffer) -> (AVAudioEngine, AVAudioPlayerNode) {
+        if let engine, let player { return (engine, player) }
+        let engine = AVAudioEngine()
+        let player = AVAudioPlayerNode()
+        engine.attach(player)
+        engine.connect(player, to: engine.mainMixerNode, format: buffer.format)
+        player.volume = 0.75
+        self.engine = engine
+        self.player = player
+        return (engine, player)
+    }
+
+    private func startUpdates() {
+        updateTask?.cancel()
+        updateTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(100))
+                guard let self, self.isPlaying else { return }
+                self.refreshPosition()
+                self.onTransport?()
+            }
+        }
+    }
+
+    private func refreshPosition() {
+        guard let buffer, let player,
+              let renderTime = player.lastRenderTime,
+              let playerTime = player.playerTime(forNodeTime: renderTime) else { return }
+        let elapsed = max(0, playerTime.sampleTime)
+        let frame = scheduledStartFrame + min(
+            elapsed,
+            AVAudioFramePosition(scheduledFrameCount)
+        )
+        positionMillis = min(
+            durationMillis,
+            UInt64(Double(frame) / buffer.format.sampleRate * 1_000)
+        )
+    }
+
+    private static func loadBuffer(
+        audioURI: String,
+        durationMillis: UInt64
+    ) throws -> AVAudioPCMBuffer {
+        if audioURI.hasPrefix("lumi-demo://") {
+            return try syntheticBuffer(seed: audioURI, durationMillis: durationMillis)
+        }
+        let url: URL
+        if audioURI.hasPrefix("/") {
+            url = URL(fileURLWithPath: audioURI)
+        } else if let candidate = URL(string: audioURI), candidate.isFileURL {
+            url = candidate
+        } else {
+            throw CocoaError(.fileReadUnsupportedScheme)
+        }
+        let file = try AVAudioFile(forReading: url)
+        guard file.length > 0,
+              file.length <= AVAudioFramePosition(UInt32.max),
+              let buffer = AVAudioPCMBuffer(
+                pcmFormat: file.processingFormat,
+                frameCapacity: AVAudioFrameCount(file.length)
+              ) else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        try file.read(into: buffer)
+        return buffer
+    }
+
+    private static func syntheticBuffer(
+        seed: String,
+        durationMillis: UInt64
+    ) throws -> AVAudioPCMBuffer {
+        let sampleRate = 44_100.0
+        let frameCount64 = durationMillis * 44_100 / 1_000
+        guard frameCount64 > 0,
+              frameCount64 <= UInt64(UInt32.max),
+              let format = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1),
+              let buffer = AVAudioPCMBuffer(
+                pcmFormat: format,
+                frameCapacity: AVAudioFrameCount(frameCount64)
+              ),
+              let samples = buffer.floatChannelData?[0] else {
+            throw CocoaError(.fileReadCorruptFile)
+        }
+        buffer.frameLength = AVAudioFrameCount(frameCount64)
+        let hash = seed.utf8.reduce(UInt32(2_166_136_261)) { ($0 ^ UInt32($1)) &* 16_777_619 }
+        let frequency = 110.0 + Double(hash % 220)
+        for frame in 0..<Int(frameCount64) {
+            let time = Double(frame) / sampleRate
+            let saw = Float((time * frequency).truncatingRemainder(dividingBy: 1) * 2 - 1)
+            let pulse = Float(exp(-18 * time.truncatingRemainder(dividingBy: 0.5)))
+            samples[frame] = saw * 0.12 + pulse * 0.08
+        }
+        return buffer
+    }
+
+    private static func slice(
+        _ source: AVAudioPCMBuffer,
+        start: AVAudioFramePosition,
+        end: AVAudioFramePosition
+    ) -> AVAudioPCMBuffer? {
+        let count = AVAudioFrameCount(end - start)
+        guard count > 0,
+              let result = AVAudioPCMBuffer(pcmFormat: source.format, frameCapacity: count),
+              let sourceChannels = source.floatChannelData,
+              let resultChannels = result.floatChannelData else { return nil }
+        result.frameLength = count
+        for channel in 0..<Int(source.format.channelCount) {
+            resultChannels[channel].update(
+                from: sourceChannels[channel].advanced(by: Int(start)),
+                count: Int(count)
+            )
+        }
+        return result
     }
 }

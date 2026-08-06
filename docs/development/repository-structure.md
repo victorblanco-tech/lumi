@@ -42,9 +42,10 @@ into Lumi's model.
 
 `lumi-deck-source` owns the application-facing deck observation port.
 `lumi-simulator` is one adapter for that port and maps a license-safe fixture
-into domain events. Future Beat Link or direct Pro DJ Link adapters implement
-the same port; neither the domain nor the client wire model imports their
-provider-specific types.
+into domain events. `lumi-blt-midi` is the first connected-deck adapter: it
+decodes versioned, atomic Beat Link Trigger MIDI frames into the same port.
+CoreMIDI owns only endpoint transport and raw channel messages. A future direct
+Pro DJ Link adapter can replace BLT without changing the domain or Live UI.
 
 `lumi-planner` owns deterministic creative selection and canonical plan
 evidence. It depends only on `lumi-domain`; it knows no simulator, transport,

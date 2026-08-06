@@ -64,6 +64,43 @@ func launchesRealEngine() async throws {
         #expect(autoloopCatalogRevision(snapshot) == 1)
         #expect(autoloopThemeNames(snapshot).count == 4)
         #expect(autoloopVariantCount(snapshot, roleID: "synth") == 4)
+        #expect(midiIntegrationState(snapshot) == "stopped")
+        #expect(midiIntegrationPulseCount(snapshot) == 0)
+
+        snapshot = try await supervisor.send(
+            .publishMidiSource,
+            messageID: "swift-publish-midi-source"
+        )
+        #expect(midiIntegrationState(snapshot) == "ready")
+        #expect(midiIntegrationSourceName(snapshot) == "Lumi Virtual MIDI")
+
+        snapshot = try await supervisor.send(
+            .sendMidiLearnPulse,
+            messageID: "swift-send-midi-learn-pulse"
+        )
+        #expect(midiIntegrationPulseCount(snapshot) == 1)
+
+        snapshot = try await supervisor.send(
+            .sendMidiAddressLearnPulse(targetKind: "autoloop", targetNumber: 32),
+            messageID: "swift-send-midi-autoloop-32-learn-pulse"
+        )
+        #expect(midiIntegrationPulseCount(snapshot) == 2)
+        #expect(midiIntegrationLastEvent(snapshot)?.contains("AutoLoop 32") == true)
+        #expect(midiIntegrationLastEvent(snapshot)?.contains("Note 95") == true)
+
+        snapshot = try await supervisor.send(
+            .triggerMidiAutoloop(bankNumber: 1, autoloopNumber: 1),
+            messageID: "swift-trigger-midi-bank-1-autoloop-1"
+        )
+        #expect(midiIntegrationPulseCount(snapshot) == 4)
+        #expect(midiIntegrationLastEvent(snapshot)?.contains("Bank 1 → AutoLoop 1") == true)
+        #expect(midiIntegrationLastEvent(snapshot)?.contains("50 ms gap") == true)
+
+        snapshot = try await supervisor.send(
+            .stopMidiSource,
+            messageID: "swift-stop-midi-source"
+        )
+        #expect(midiIntegrationState(snapshot) == "stopped")
 
         let renamedRole = try await supervisor.send(
             .mutatePhraseRoleCatalog(
@@ -294,20 +331,39 @@ func launchesRealEngine() async throws {
         )
         #expect(EngineCommandFailure(unknownEditor)?.kind == "commandFailed")
 
-        #expect(planThemeName(snapshot) == "Deep Ocean")
-        #expect(planThemeReason(snapshot) == "colorPrefer")
-        #expect(planMatchedColorRGB(snapshot) == 4_747_469)
-        #expect(planCueThemeIDs(snapshot) == [2])
+        snapshot = try await supervisor.send(
+            .loadLibraryTrackOnLocalDeck(
+                trackID: requiredFirstLibraryTrackID(snapshot),
+                deckID: 1,
+                expectedTimelineRevision: 6,
+                expectedStateRevision: requiredStateRevision(snapshot)
+            ),
+            messageID: "swift-local-playback-deck-1"
+        )
+        snapshot = try await supervisor.send(
+            .loadLibraryTrackOnLocalDeck(
+                trackID: requiredFirstLibraryTrackID(snapshot),
+                deckID: 2,
+                expectedTimelineRevision: 6,
+                expectedStateRevision: requiredStateRevision(snapshot)
+            ),
+            messageID: "swift-local-playback-deck-2"
+        )
+        #expect(deckSourceMode(snapshot) == "localPlayback")
+        #expect(deckCount(snapshot) == 2)
+        #expect(planThemeName(snapshot) != nil)
+        #expect(!planCueThemeIDs(snapshot).isEmpty)
 
         guard case let .object(plan) = snapshot.payload["nextPlan"],
-              case let .string(planID) = plan["planId"] else {
-            Issue.record("Initial snapshot must contain a plan ID")
+              case let .string(planID) = plan["planId"],
+              case let .number(nextTrackLoadID) = plan["trackLoadId"] else {
+            Issue.record("Two Local Playback decks must expose the Next plan")
             await supervisor.stop()
             return
         }
         let context = EnginePlanCommandContext(
             planID: planID,
-            trackLoadID: 2_001,
+            trackLoadID: UInt64(nextTrackLoadID),
             expectedPlanRevision: 1
         )
         let command = EngineCommand.selectTheme(context: context, themeID: 1)
@@ -338,14 +394,10 @@ func launchesRealEngine() async throws {
             await supervisor.stop()
             return
         }
-        let speed = try await supervisor.send(
-            .setSimulationSpeed(64, expectedStateRevision: initialStateRevision)
-        )
-        #expect(simulationSpeed(speed) == 64)
         let armed = try await supervisor.send(
             .setOperationState(
                 "armed",
-                expectedStateRevision: requiredStateRevision(speed)
+                expectedStateRevision: initialStateRevision
             )
         )
         #expect(operationState(armed) == "armed")
@@ -356,19 +408,15 @@ func launchesRealEngine() async throws {
             )
         )
         #expect(operationState(live) == "live")
-        let leaderAdvanced = try await supervisor.send(
-            .advanceToNextTrack(
-                expectedStateRevision: requiredStateRevision(live)
-            )
-        )
         let played = try await supervisor.send(
-            .advanceSimulation(
-                elapsedTicks: 1_000,
-                expectedStateRevision: requiredStateRevision(leaderAdvanced)
+            .updateLocalPlaybackTransport(
+                deckID: 2,
+                trackLoadID: UInt64(nextTrackLoadID),
+                positionMillis: 10_000,
+                playing: true
             )
         )
-        #expect(outputRecordCount(played) == 4)
-        #expect(timelineContainsSimulatedOutput(played))
+        #expect(deckIsPlaying(played, deckID: 2))
 
         let staleState = try await supervisor.send(
             .setOperationState("armed", expectedStateRevision: 0)
@@ -379,14 +427,14 @@ func launchesRealEngine() async throws {
                 == requiredStateRevision(played)
         )
 
-        let reset = try await supervisor.send(
-            .resetDemoSession(
+        let connected = try await supervisor.send(
+            .selectDeckSourceMode(
+                "connectedDecks",
                 expectedStateRevision: requiredStateRevision(played)
             )
         )
-        #expect(operationState(reset) == "off")
-        #expect(simulationSpeed(reset) == 1)
-        #expect(outputRecordCount(reset) == 0)
+        #expect(deckSourceMode(connected) == "connectedDecks")
+        #expect(deckCount(connected) == 0)
         #expect(await supervisor.isRunning())
         await supervisor.stop()
         #expect(await !supervisor.isRunning())
@@ -405,8 +453,8 @@ func launchesRealEngine() async throws {
     }
 }
 
-@Test("A library track keeps its exact Lumi identity through Next and dry-run output")
-func loadsLibraryTrackIntoSimulator() async throws {
+@Test("A library track keeps its exact Lumi identity through Local Playback and output planning")
+func loadsLibraryTrackIntoLocalPlayback() async throws {
     let environment = ProcessInfo.processInfo.environment
     guard let executablePath = environment["LUMI_ENGINE_TEST_EXECUTABLE"] else {
         Issue.record("LUMI_ENGINE_TEST_EXECUTABLE is required")
@@ -414,7 +462,7 @@ func loadsLibraryTrackIntoSimulator() async throws {
     }
     let supervisor = EngineProcessSupervisor()
     let databaseURL = FileManager.default.temporaryDirectory
-        .appendingPathComponent("lumi-swift-library-simulator-\(UUID().uuidString).sqlite")
+        .appendingPathComponent("lumi-swift-library-local-playback-\(UUID().uuidString).sqlite")
     defer {
         try? FileManager.default.removeItem(at: databaseURL)
         try? FileManager.default.removeItem(atPath: databaseURL.path + "-wal")
@@ -426,12 +474,21 @@ func loadsLibraryTrackIntoSimulator() async throws {
             libraryDatabaseURL: databaseURL
         )
         let initial = try await supervisor.connect(to: endpoint)
+        let liveLoaded = try await supervisor.send(
+            .loadLibraryTrackOnLocalDeck(
+                trackID: requiredFirstLibraryTrackID(initial),
+                deckID: 1,
+                expectedTimelineRevision: 1,
+                expectedStateRevision: requiredStateRevision(initial)
+            ),
+            messageID: "swift-load-library-track-deck-1"
+        )
         let loaded = try await supervisor.send(
-            .loadLibraryTrackOnSimulatorDeck(
+            .loadLibraryTrackOnLocalDeck(
                 trackID: requiredFirstLibraryTrackID(initial),
                 deckID: 2,
                 expectedTimelineRevision: 1,
-                expectedStateRevision: requiredStateRevision(initial)
+                expectedStateRevision: requiredStateRevision(liveLoaded)
             ),
             messageID: "swift-load-library-track-deck-2"
         )
@@ -441,7 +498,7 @@ func loadsLibraryTrackIntoSimulator() async throws {
         #expect(nextPlanResolutionFieldsAreComplete(loaded))
 
         let stale = try await supervisor.send(
-            .loadLibraryTrackOnSimulatorDeck(
+            .loadLibraryTrackOnLocalDeck(
                 trackID: requiredFirstLibraryTrackID(initial),
                 deckID: 1,
                 expectedTimelineRevision: 99,
@@ -451,27 +508,149 @@ func loadsLibraryTrackIntoSimulator() async throws {
         )
         #expect(EngineCommandFailure(stale)?.code == "timelineRevisionMismatch")
         #expect(EngineCommandFailure(stale)?.actualTimelineRevision == 1)
+        #expect(deckSourceMode(loaded) == "localPlayback")
+        #expect(deckCount(loaded) == 2)
 
-        let armed = try await supervisor.send(
-            .setOperationState("armed", expectedStateRevision: requiredStateRevision(loaded))
+        guard let next = nextPlan(loaded),
+              case let .string(planID) = next["planId"],
+              case let .number(trackLoadID) = next["trackLoadId"],
+              case let .number(revision) = next["revision"],
+              case let .array(cues) = next["cues"],
+              !cues.isEmpty,
+              case let .object(firstCue) = cues[0],
+              case let .object(resolution) = firstCue["libraryResolution"],
+              case let .number(currentAutoloop) = resolution["autoloopNumber"],
+              case let .array(choices) = resolution["choices"],
+              let alternative = choices.compactMap({ value -> UInt64? in
+                  guard case let .object(choice) = value,
+                        case let .number(id) = choice["id"],
+                        id != currentAutoloop else { return nil }
+                  return UInt64(id)
+              }).first else {
+            Issue.record("Library plan must expose a selectable exact Autoloop alternative")
+            await supervisor.stop()
+            return
+        }
+        let selected = try await supervisor.send(
+            .selectScene(
+                context: EnginePlanCommandContext(
+                    planID: planID,
+                    trackLoadID: UInt64(trackLoadID),
+                    expectedPlanRevision: UInt64(revision)
+                ),
+                phraseIndex: 0,
+                sceneID: alternative
+            ),
+            messageID: "swift-select-exact-library-autoloop"
         )
-        let live = try await supervisor.send(
-            .setOperationState("live", expectedStateRevision: requiredStateRevision(armed))
+        #expect(planRevision(selected) == UInt64(revision) + 1)
+        #expect(nextPlanActionMatchesResolution(selected, phraseIndex: 0))
+        await supervisor.stop()
+    } catch {
+        await supervisor.stop()
+        throw error
+    }
+}
+
+@Test("Live transport and future phrase edits stay authoritative through the real engine")
+func editsFutureLivePhraseAndTracksPlaybackState() async throws {
+    let environment = ProcessInfo.processInfo.environment
+    guard let executablePath = environment["LUMI_ENGINE_TEST_EXECUTABLE"] else {
+        Issue.record("LUMI_ENGINE_TEST_EXECUTABLE is required")
+        return
+    }
+    let supervisor = EngineProcessSupervisor()
+    let databaseURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("lumi-swift-live-workspace-\(UUID().uuidString).sqlite")
+    defer {
+        try? FileManager.default.removeItem(at: databaseURL)
+        try? FileManager.default.removeItem(atPath: databaseURL.path + "-wal")
+        try? FileManager.default.removeItem(atPath: databaseURL.path + "-shm")
+    }
+    do {
+        let endpoint = try await supervisor.launch(
+            engineExecutable: URL(fileURLWithPath: executablePath),
+            libraryDatabaseURL: databaseURL
         )
-        let activated = try await supervisor.send(
-            .advanceToNextTrack(expectedStateRevision: requiredStateRevision(live))
+        let connected = try await supervisor.connect(to: endpoint)
+        let initial = try await supervisor.send(
+            .loadLibraryTrackOnLocalDeck(
+                trackID: requiredFirstLibraryTrackID(connected),
+                deckID: 1,
+                expectedTimelineRevision: 1,
+                expectedStateRevision: requiredStateRevision(connected)
+            ),
+            messageID: "swift-live-load-local-track"
         )
-        let accelerated = try await supervisor.send(
-            .setSimulationSpeed(64, expectedStateRevision: requiredStateRevision(activated))
+        guard let livePlan = plan(initial, field: "livePlan"),
+              case let .string(planID) = livePlan["planId"],
+              case let .number(trackLoadID) = livePlan["trackLoadId"],
+              case let .number(revision) = livePlan["revision"] else {
+            Issue.record("Initial snapshot must expose the active Live plan")
+            await supervisor.stop()
+            return
+        }
+        #expect(leaderDeckPlaying(initial) == false)
+        let originalFirstTheme = cueThemeID(livePlan, phraseIndex: 0)
+        let futureThemeID: UInt64 = originalFirstTheme == 4 ? 1 : 4
+        let context = EnginePlanCommandContext(
+            planID: planID,
+            trackLoadID: UInt64(trackLoadID),
+            expectedPlanRevision: UInt64(revision)
         )
-        let completed = try await supervisor.send(
-            .advanceSimulation(
-                elapsedTicks: 1_000,
-                expectedStateRevision: requiredStateRevision(accelerated)
+        let revised = try await supervisor.send(
+            .selectThemeFromPhrase(
+                context: context,
+                phraseIndex: 1,
+                themeID: futureThemeID
+            ),
+            messageID: "swift-live-future-theme"
+        )
+        #expect(planRevision(revised, field: "livePlan") == UInt64(revision) + 1)
+        #expect(cueThemeID(plan(revised, field: "livePlan"), phraseIndex: 0) == originalFirstTheme)
+        #expect(
+            cueThemeID(plan(revised, field: "livePlan"), phraseIndex: 1) == futureThemeID
+        )
+
+        let startedContext = EnginePlanCommandContext(
+            planID: planID,
+            trackLoadID: UInt64(trackLoadID),
+            expectedPlanRevision: UInt64(revision) + 1
+        )
+        let rejected = try await supervisor.send(
+            .selectThemeFromPhrase(context: startedContext, phraseIndex: 0, themeID: 4),
+            messageID: "swift-live-started-theme"
+        )
+        #expect(EngineCommandFailure(rejected)?.code == "startedLivePhraseNotEditable")
+
+        let paused = try await supervisor.send(
+            .updateLocalPlaybackTransport(
+                deckID: 1,
+                trackLoadID: UInt64(trackLoadID),
+                positionMillis: 0,
+                playing: false
             )
         )
-        #expect(outputRecordCount(completed) == UInt64(nextPlanCueCount(loaded)))
-        #expect(outputResolutionsAreComplete(completed))
+        let pausedBeat = leaderDeckBeat(paused)
+        #expect(leaderDeckPlaying(paused) == false)
+        let resumed = try await supervisor.send(
+            .updateLocalPlaybackTransport(
+                deckID: 1,
+                trackLoadID: UInt64(trackLoadID),
+                positionMillis: 2_000,
+                playing: true
+            )
+        )
+        #expect(leaderDeckPlaying(resumed) == true)
+        let advanced = try await supervisor.send(
+            .updateLocalPlaybackTransport(
+                deckID: 1,
+                trackLoadID: UInt64(trackLoadID),
+                positionMillis: 10_000,
+                playing: true
+            )
+        )
+        #expect((leaderDeckBeat(advanced) ?? 0) > (pausedBeat ?? 0))
         await supervisor.stop()
     } catch {
         await supervisor.stop()
@@ -486,9 +665,93 @@ private func stateRevision(_ envelope: MessageEnvelope) -> UInt64? {
     return UInt64(revision)
 }
 
+private func deckSourceMode(_ envelope: MessageEnvelope) -> String? {
+    guard case let .object(source) = envelope.payload["deckSource"],
+          case let .string(mode) = source["mode"] else { return nil }
+    return mode
+}
+
+private func deckCount(_ envelope: MessageEnvelope) -> Int {
+    guard case let .array(decks) = envelope.payload["decks"] else { return 0 }
+    return decks.count
+}
+
+private func deckIsPlaying(_ envelope: MessageEnvelope, deckID: UInt64) -> Bool {
+    guard case let .array(decks) = envelope.payload["decks"] else { return false }
+    return decks.contains { value in
+        guard case let .object(deck) = value,
+              deck["deckId"] == .number(Double(deckID)),
+              case let .boolean(playing) = deck["playing"] else { return false }
+        return playing
+    }
+}
+
 private func nextPlan(_ envelope: MessageEnvelope) -> [String: JSONValue]? {
     guard case let .object(plan) = envelope.payload["nextPlan"] else { return nil }
     return plan
+}
+
+private func nextPlanActionMatchesResolution(
+    _ envelope: MessageEnvelope,
+    phraseIndex: UInt64
+) -> Bool {
+    guard let plan = nextPlan(envelope), case let .array(cues) = plan["cues"] else {
+        return false
+    }
+    return cues.contains { value in
+        guard case let .object(cue) = value,
+              cue["phraseIndex"] == .number(Double(phraseIndex)),
+              case let .object(action) = cue["action"],
+              case let .object(resolution) = cue["libraryResolution"] else { return false }
+        return action["sceneId"] == resolution["autoloopNumber"]
+    }
+}
+
+private func plan(_ envelope: MessageEnvelope, field: String) -> [String: JSONValue]? {
+    guard case let .object(plan) = envelope.payload[field] else { return nil }
+    return plan
+}
+
+private func planRevision(_ envelope: MessageEnvelope, field: String) -> UInt64? {
+    guard let plan = plan(envelope, field: field),
+          case let .number(revision) = plan["revision"] else { return nil }
+    return UInt64(revision)
+}
+
+private func cueThemeID(_ plan: [String: JSONValue]?, phraseIndex: UInt64) -> UInt64? {
+    guard let plan, case let .array(cues) = plan["cues"] else { return nil }
+    for cueValue in cues {
+        guard case let .object(cue) = cueValue,
+              cue["phraseIndex"] == .number(Double(phraseIndex)),
+              case let .object(action) = cue["action"],
+              case let .number(themeID) = action["themeId"] else { continue }
+        return UInt64(themeID)
+    }
+    return nil
+}
+
+private func leaderDeckPlaying(_ envelope: MessageEnvelope) -> Bool? {
+    guard case let .number(leaderID) = envelope.payload["leaderDeckId"],
+          case let .array(decks) = envelope.payload["decks"] else { return nil }
+    for value in decks {
+        guard case let .object(deck) = value,
+              deck["deckId"] == .number(leaderID),
+              case let .boolean(playing) = deck["playing"] else { continue }
+        return playing
+    }
+    return nil
+}
+
+private func leaderDeckBeat(_ envelope: MessageEnvelope) -> UInt64? {
+    guard case let .number(leaderID) = envelope.payload["leaderDeckId"],
+          case let .array(decks) = envelope.payload["decks"] else { return nil }
+    for value in decks {
+        guard case let .object(deck) = value,
+              deck["deckId"] == .number(leaderID),
+              case let .number(beat) = deck["beat"] else { continue }
+        return UInt64(beat)
+    }
+    return nil
 }
 
 private func nextPlanCueCount(_ envelope: MessageEnvelope) -> Int {
@@ -796,6 +1059,38 @@ private func outputRecordCount(_ envelope: MessageEnvelope) -> UInt64? {
         return nil
     }
     return UInt64(count)
+}
+
+private func midiIntegrationState(_ envelope: MessageEnvelope) -> String? {
+    guard case let .object(midi) = envelope.payload["midiIntegration"],
+          case let .string(state) = midi["state"] else {
+        return nil
+    }
+    return state
+}
+
+private func midiIntegrationSourceName(_ envelope: MessageEnvelope) -> String? {
+    guard case let .object(midi) = envelope.payload["midiIntegration"],
+          case let .string(sourceName) = midi["sourceName"] else {
+        return nil
+    }
+    return sourceName
+}
+
+private func midiIntegrationPulseCount(_ envelope: MessageEnvelope) -> UInt64? {
+    guard case let .object(midi) = envelope.payload["midiIntegration"],
+          case let .number(count) = midi["sentPulseCount"] else {
+        return nil
+    }
+    return UInt64(count)
+}
+
+private func midiIntegrationLastEvent(_ envelope: MessageEnvelope) -> String? {
+    guard case let .object(midi) = envelope.payload["midiIntegration"],
+          case let .string(lastEvent) = midi["lastEvent"] else {
+        return nil
+    }
+    return lastEvent
 }
 
 private func timelineContainsSimulatedOutput(_ envelope: MessageEnvelope) -> Bool {

@@ -3,55 +3,43 @@ import SwiftUI
 
 public enum PhraseRoleSettingsSection: String, CaseIterable, Identifiable, Sendable {
     case general
-    case phraseRoles
-    case sourceMapping
-    case autoloopMatrix
+    case phraseModel
+    case planningDefaults
 
     public var id: String { rawValue }
 }
 
 public struct PhraseRoleSettingsView: View {
     private let settings: PhraseRoleSettingsState?
-    private let autoloopCatalog: AutoloopCatalogState?
     @Binding private var appearance: AppearancePreference
     @Binding private var keyNotation: KeyNotationPreference
     private let feedback: String?
-    private let autoloopFeedback: String?
     private let rendersInteractiveControls: Bool
     private let onMutation: @Sendable (PhraseRoleMutationRequest) -> Void
-    private let onAutoloopMutation: @Sendable (AutoloopCatalogMutationRequest) -> Void
 
     @State private var section: PhraseRoleSettingsSection
     @State private var selectedRoleID: String?
-    @State private var selectedProviderKind: String?
     @State private var renameDraft = ""
     @State private var newRoleName = ""
     @State private var showsAddRole = false
 
     public init(
         settings: PhraseRoleSettingsState?,
-        autoloopCatalog: AutoloopCatalogState? = nil,
         appearance: Binding<AppearancePreference>,
         keyNotation: Binding<KeyNotationPreference>,
-        initialSection: PhraseRoleSettingsSection = .phraseRoles,
+        initialSection: PhraseRoleSettingsSection = .phraseModel,
         feedback: String? = nil,
-        autoloopFeedback: String? = nil,
         rendersInteractiveControls: Bool = true,
-        onMutation: @escaping @Sendable (PhraseRoleMutationRequest) -> Void = { _ in },
-        onAutoloopMutation: @escaping @Sendable (AutoloopCatalogMutationRequest) -> Void = { _ in }
+        onMutation: @escaping @Sendable (PhraseRoleMutationRequest) -> Void = { _ in }
     ) {
         self.settings = settings
-        self.autoloopCatalog = autoloopCatalog
         _appearance = appearance
         _keyNotation = keyNotation
         self.feedback = feedback
-        self.autoloopFeedback = autoloopFeedback
         self.rendersInteractiveControls = rendersInteractiveControls
         self.onMutation = onMutation
-        self.onAutoloopMutation = onAutoloopMutation
         _section = State(initialValue: initialSection)
         _selectedRoleID = State(initialValue: settings?.roles.first?.id)
-        _selectedProviderKind = State(initialValue: settings?.mappingProfiles.first?.providerKind)
         _renameDraft = State(initialValue: settings?.roles.first?.name ?? "")
     }
 
@@ -97,9 +85,7 @@ public struct PhraseRoleSettingsView: View {
                     .foregroundStyle(LumiColor.textSecondary)
             }
             Spacer()
-            if let revision = section == .autoloopMatrix
-                ? autoloopCatalog?.revision
-                : settings?.revision {
+            if let revision = settings?.revision {
                 Label("R\(revision)", systemImage: "checkmark.circle.fill")
                     .font(LumiTypography.technical)
                     .foregroundStyle(LumiColor.success)
@@ -112,15 +98,34 @@ public struct PhraseRoleSettingsView: View {
 
     private var sectionNavigation: some View {
         VStack(alignment: .leading, spacing: LumiSpacing.small) {
-            settingsSectionButton(.general, title: copy("settings.general"), icon: "slider.horizontal.3")
-            settingsSectionButton(.phraseRoles, title: copy("settings.phraseRoles"), icon: "text.badge.checkmark")
-            settingsSectionButton(.sourceMapping, title: copy("settings.sourceMapping"), icon: "arrow.triangle.branch")
-            settingsSectionButton(.autoloopMatrix, title: copy("settings.outputProfiles"), icon: "hifispeaker.2.fill")
+            ForEach(PhraseRoleSettingsSection.allCases) { value in
+                settingsSectionButton(
+                    value,
+                    title: sectionTitle(value),
+                    icon: sectionIcon(value)
+                )
+            }
             Spacer()
         }
         .padding(LumiSpacing.large)
         .frame(width: 210)
         .background(LumiColor.surface)
+    }
+
+    private func sectionTitle(_ value: PhraseRoleSettingsSection) -> String {
+        switch value {
+        case .general: copy("settings.general")
+        case .phraseModel: "Phrase Model"
+        case .planningDefaults: "Planning Defaults"
+        }
+    }
+
+    private func sectionIcon(_ value: PhraseRoleSettingsSection) -> String {
+        switch value {
+        case .general: "slider.horizontal.3"
+        case .phraseModel: "text.badge.checkmark"
+        case .planningDefaults: "point.3.connected.trianglepath.dotted"
+        }
     }
 
     private func settingsSectionButton(
@@ -148,18 +153,20 @@ public struct PhraseRoleSettingsView: View {
         switch section {
         case .general:
             generalSettings
-        case .phraseRoles:
+        case .phraseModel:
             phraseRoleSettings
-        case .sourceMapping:
-            sourceMappingSettings
-        case .autoloopMatrix:
-            AutoloopCatalogSettingsView(
-                catalog: autoloopCatalog,
-                feedback: autoloopFeedback,
-                rendersInteractiveControls: rendersInteractiveControls,
-                onMutation: onAutoloopMutation
-            )
+        case .planningDefaults:
+            planningDefaults
         }
+    }
+
+    private var planningDefaults: some View {
+        ContentUnavailableView(
+            "Planning Defaults",
+            systemImage: "point.3.connected.trianglepath.dotted",
+            description: Text("Default theme-selection and planning policies will be configured here in a later epic.")
+        )
+        .accessibilityIdentifier("lumi.settings.planningDefaults")
     }
 
     private var generalSettings: some View {
@@ -196,7 +203,10 @@ public struct PhraseRoleSettingsView: View {
             if let settings {
                 VStack(alignment: .leading, spacing: LumiSpacing.large) {
                     HStack {
-                        sectionHeading(copy("settings.phraseRoles"), copy("settings.phraseRolesDetail"))
+                        sectionHeading(
+                            "Phrase Model",
+                            "Maintain Lumi-owned phrase types. Display names may change; stable IDs and track references do not."
+                        )
                         Spacer()
                         Button {
                             showsAddRole = true
@@ -376,126 +386,6 @@ public struct PhraseRoleSettingsView: View {
         }
     }
 
-    private var sourceMappingSettings: some View {
-        Group {
-            if let settings, !settings.mappingProfiles.isEmpty {
-                VStack(alignment: .leading, spacing: LumiSpacing.large) {
-                    sectionHeading(copy("settings.sourceMapping"), copy("settings.sourceMappingDetail"))
-                    providerTabs(settings)
-                    mappingTable(settings)
-                    Label(copy("settings.mappingPolicy"), systemImage: "lock.shield")
-                        .font(LumiTypography.caption)
-                        .foregroundStyle(LumiColor.textSecondary)
-                    if let feedback {
-                        feedbackView(feedback)
-                    }
-                }
-                .padding(LumiSpacing.xLarge)
-            } else {
-                unavailableSettings
-            }
-        }
-    }
-
-    private func providerTabs(_ settings: PhraseRoleSettingsState) -> some View {
-        HStack(spacing: LumiSpacing.small) {
-            ForEach(settings.mappingProfiles) { profile in
-                Button(profile.providerName) {
-                    selectedProviderKind = profile.providerKind
-                }
-                .buttonStyle(.bordered)
-                .tint(selectedProviderKind == profile.providerKind ? LumiColor.accent : LumiColor.textSecondary)
-                .accessibilityIdentifier("lumi.settings.mapping.\(profile.providerKind)")
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func mappingTable(_ settings: PhraseRoleSettingsState) -> some View {
-        let profile = settings.mappingProfiles.first { $0.providerKind == selectedProviderKind }
-            ?? settings.mappingProfiles.first
-        if let profile {
-            LumiPanel {
-                VStack(alignment: .leading, spacing: 0) {
-                    HStack {
-                        Text(copy("settings.rawSourcePhrase"))
-                        Spacer()
-                        Text(copy("settings.lumiPhraseRole"))
-                            .frame(width: 250, alignment: .leading)
-                    }
-                    .font(LumiTypography.caption.weight(.semibold))
-                    .foregroundStyle(LumiColor.textSecondary)
-                    .padding(.bottom, LumiSpacing.medium)
-                    Divider()
-                    if rendersInteractiveControls {
-                        ScrollView {
-                            LazyVStack(spacing: 0) {
-                                mappingRows(profile, roles: settings.roles)
-                            }
-                        }
-                    } else {
-                        VStack(spacing: 0) {
-                            mappingRows(profile, roles: settings.roles)
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    @ViewBuilder
-    private func mappingRows(
-        _ profile: SourcePhraseMappingProfile,
-        roles: [PhraseRoleDefinition]
-    ) -> some View {
-        ForEach(profile.mappings) { mapping in
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(mapping.rawLabel == "*" ? copy("settings.otherSourcePhrases") : mapping.rawLabel)
-                        .font(LumiTypography.body.weight(.semibold))
-                    Text(mapping.rawLabel)
-                        .font(LumiTypography.technical)
-                        .foregroundStyle(LumiColor.textSecondary)
-                }
-                Spacer()
-                if rendersInteractiveControls {
-                    Picker("", selection: mappingBinding(mapping, profile: profile)) {
-                        ForEach(roles.filter { !$0.archived || $0.id == mapping.roleID }) { role in
-                            Text(role.archived ? "\(role.name) · Archived" : role.name)
-                                .tag(role.id)
-                        }
-                    }
-                    .labelsHidden()
-                    .frame(width: 250)
-                } else {
-                    staticControl(roles.first { $0.id == mapping.roleID }?.name ?? mapping.roleID)
-                        .frame(width: 250)
-                }
-            }
-            .padding(.vertical, LumiSpacing.small)
-            Divider()
-        }
-    }
-
-    private func mappingBinding(
-        _ mapping: SourcePhraseMapping,
-        profile: SourcePhraseMappingProfile
-    ) -> Binding<String> {
-        Binding(
-            get: { mapping.roleID },
-            set: { roleID in
-                guard roleID != mapping.roleID else { return }
-                onMutation(
-                    .setSourceMapping(
-                        providerKind: profile.providerKind,
-                        rawLabel: mapping.rawLabel,
-                        roleID: roleID
-                    )
-                )
-            }
-        )
-    }
-
     private var unavailableSettings: some View {
         ContentUnavailableView(
             copy("settings.unavailable"),
@@ -602,9 +492,6 @@ public struct PhraseRoleSettingsView: View {
            let first = settings.roles.first {
             selectedRoleID = first.id
             renameDraft = first.name
-        }
-        if !settings.mappingProfiles.contains(where: { $0.providerKind == selectedProviderKind }) {
-            selectedProviderKind = settings.mappingProfiles.first?.providerKind
         }
     }
 }

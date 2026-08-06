@@ -440,6 +440,64 @@ impl<C: ChoiceSource> DeterministicPlanner<C> {
             .map_err(PlanMutationError::InvalidPlan)
     }
 
+    pub fn select_theme_from_phrase(
+        &self,
+        current: &LightingPlan,
+        phrase_index: u16,
+        theme_id: ThemeId,
+    ) -> Result<LightingPlan, PlanMutationError> {
+        if phrase_index == 0 {
+            return self.select_theme(current, theme_id);
+        }
+        ensure_ready(current)?;
+        let theme = self
+            .configuration
+            .themes
+            .iter()
+            .find(|candidate| candidate.id == theme_id)
+            .ok_or(PlanMutationError::UnknownTheme(theme_id))?;
+        if current.cues().get(usize::from(phrase_index)).is_none() {
+            return Err(PlanMutationError::UnknownPhrase(phrase_index));
+        }
+        let mut changed = false;
+        let cues = current
+            .cues()
+            .iter()
+            .map(|cue| {
+                if cue.phrase_index() < phrase_index {
+                    return Ok(cue.clone());
+                }
+                match cue.action() {
+                    SemanticLightingAction::ApplyLook(look) => {
+                        changed |= look.theme_id() != theme.id;
+                        let revised = LightingLook::try_new(
+                            theme.id,
+                            theme.name.to_owned(),
+                            look.scene_id(),
+                            look.scene_name().to_owned(),
+                            look.category(),
+                            look.loop_selection(),
+                        )?;
+                        Ok(cue.revised(
+                            SemanticLightingAction::ApplyLook(revised),
+                            CueOrigin::User,
+                            cue.locked(),
+                        ))
+                    }
+                    SemanticLightingAction::HoldCurrentLook => {
+                        Err(PlanMutationError::FallbackPlanNotEditable)
+                    }
+                }
+            })
+            .collect::<Result<Vec<_>, PlanMutationError>>()?;
+        if !changed {
+            return Err(PlanMutationError::NoChange);
+        }
+        current
+            .revised(cues)
+            .map_err(PlanMutationError::InvalidPlan)
+    }
+
     pub fn select_scene(
         &self,
         current: &LightingPlan,

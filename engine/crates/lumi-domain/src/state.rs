@@ -39,6 +39,8 @@ pub struct DeckState {
     metadata: TrackMetadata,
     track_load_id: TrackLoadId,
     pub(crate) beat: u32,
+    pub(crate) effective_bpm_milli: u32,
+    pub(crate) playing: bool,
     pub(crate) phrase_index: Option<u16>,
     pub(crate) last_observed_at: MonotonicTime,
 }
@@ -62,6 +64,16 @@ impl DeckState {
     #[must_use]
     pub const fn beat(&self) -> u32 {
         self.beat
+    }
+
+    #[must_use]
+    pub const fn effective_bpm_milli(&self) -> u32 {
+        self.effective_bpm_milli
+    }
+
+    #[must_use]
+    pub const fn is_playing(&self) -> bool {
+        self.playing
     }
 
     #[must_use]
@@ -202,12 +214,15 @@ impl RuntimeState {
         track_load_id: TrackLoadId,
         observed_at: MonotonicTime,
     ) {
+        let effective_bpm_milli = metadata.bpm_milli();
         self.decks.insert(
             deck_id,
             DeckState {
                 metadata,
                 track_load_id,
                 beat: 0,
+                effective_bpm_milli,
+                playing: false,
                 phrase_index: None,
                 last_observed_at: observed_at,
             },

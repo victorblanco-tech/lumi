@@ -6,6 +6,7 @@ import SwiftUI
 private enum AppDestination: String, CaseIterable, Identifiable {
     case live
     case library
+    case integrations
     case settings
 
     var id: String { rawValue }
@@ -15,6 +16,7 @@ struct FoundationView: View {
     @ObservedObject var engineStatus: EngineStatusModel
     @Bindable var preferences: LumiPreferences
     @State private var destination: AppDestination = .live
+    @State private var librarySection: LibraryHubSection = .tracks
 
     private var productVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "LumiProductVersion") as? String
@@ -39,12 +41,20 @@ struct FoundationView: View {
                         },
                         onSessionCommand: { request in
                             Task { await engineStatus.runSessionCommand(request) }
+                        },
+                        onLocalPlayback: { request in
+                            engineStatus.runLocalPlayback(request)
                         }
                     )
                 case .library:
-                    LibraryWorkspaceView(
+                    LibraryHubView(
                         state: engineStatus.libraryState,
                         keyNotation: $preferences.keyNotation,
+                        section: $librarySection,
+                        phraseRoleFeedback: engineStatus.phraseRoleFeedback,
+                        timelineFeedback: engineStatus.timelineEditFeedback,
+                        localPlaybackFeedback: engineStatus.localPlaybackFeedback,
+                        localPlaybackFeedbackIsError: engineStatus.localPlaybackFeedbackIsError,
                         onQuery: { request in
                             Task { await engineStatus.queryLibrary(request) }
                         },
@@ -60,26 +70,56 @@ struct FoundationView: View {
                         onSourceReconcile: { request in
                             Task { await engineStatus.reconcileLibrarySource(request) }
                         },
-                        onLoadOnSimulatorDeck: { request in
-                            Task { await engineStatus.loadLibraryTrackOnSimulatorDeck(request) }
+                        onLoadOnLocalDeck: { request in
+                            Task { await engineStatus.loadLibraryTrackOnLocalDeck(request) }
                         },
-                        timelineFeedback: engineStatus.timelineEditFeedback,
-                        simulatorFeedback: engineStatus.simulatorLoadFeedback,
-                        simulatorFeedbackIsError: engineStatus.simulatorLoadFeedbackIsError
+                        onPhraseRoleMutation: { request in
+                            Task { await engineStatus.mutatePhraseRoles(request) }
+                        }
+                    )
+                case .integrations:
+                    IntegrationsWorkspaceView(
+                        library: engineStatus.libraryState,
+                        autoloopFeedback: engineStatus.autoloopCatalogFeedback,
+                        midiIntegrationFeedback: engineStatus.midiIntegrationFeedback,
+                        onOpenLibrarySources: {
+                            librarySection = .sources
+                            destination = .library
+                        },
+                        onAutoloopMutation: { request in
+                            Task { await engineStatus.mutateAutoloopCatalog(request) }
+                        },
+                        onPublishMidi: {
+                            Task { await engineStatus.publishMidiSource() }
+                        },
+                        onStopMidi: {
+                            Task { await engineStatus.stopMidiSource() }
+                        },
+                        onSendMidiAddressLearnPulse: { targetKind, targetNumber in
+                            Task {
+                                await engineStatus.sendMidiAddressLearnPulse(
+                                    targetKind: targetKind,
+                                    targetNumber: targetNumber
+                                )
+                            }
+                        },
+                        onTriggerMidiAutoloop: { bankNumber, autoloopNumber in
+                            Task {
+                                await engineStatus.triggerMidiAutoloop(
+                                    bankNumber: bankNumber,
+                                    autoloopNumber: autoloopNumber
+                                )
+                            }
+                        }
                     )
                 case .settings:
                     PhraseRoleSettingsView(
                         settings: engineStatus.libraryState.phraseRoleSettings,
-                        autoloopCatalog: engineStatus.libraryState.autoloopCatalog,
                         appearance: $preferences.appearance,
                         keyNotation: $preferences.keyNotation,
                         feedback: engineStatus.phraseRoleFeedback,
-                        autoloopFeedback: engineStatus.autoloopCatalogFeedback,
                         onMutation: { request in
                             Task { await engineStatus.mutatePhraseRoles(request) }
-                        },
-                        onAutoloopMutation: { request in
-                            Task { await engineStatus.mutateAutoloopCatalog(request) }
                         }
                     )
                 }
@@ -106,7 +146,7 @@ struct FoundationView: View {
                 destinationButton(.live, title: "Live", systemImage: "waveform")
                 destinationButton(.library, title: "Library", systemImage: "music.note.list")
                 unavailableNavigation("Plans", systemImage: "list.bullet.rectangle")
-                unavailableNavigation("Integrations", systemImage: "cable.connector")
+                destinationButton(.integrations, title: "Integrations", systemImage: "cable.connector")
             }
             Spacer()
             destinationButton(.settings, title: "Settings", systemImage: "gearshape")

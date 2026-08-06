@@ -1,5 +1,6 @@
 [workspace]
 members = [
+    "engine/crates/lumi-blt-midi",
     "engine/crates/lumi-deck-source",
     "engine/crates/lumi-domain",
     "engine/crates/lumi-engine",
@@ -8,6 +9,9 @@ members = [
     "engine/crates/lumi-library-source",
     "engine/crates/lumi-library-sqlite",
     "engine/crates/lumi-lighting-output",
+    "engine/crates/lumi-local-playback",
+    "engine/crates/lumi-midi-coremidi",
+    "engine/crates/lumi-midi-output",
     "engine/crates/lumi-output-dry-run",
     "engine/crates/lumi-planner",
     "engine/crates/lumi-protocol",

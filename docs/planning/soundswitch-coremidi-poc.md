@@ -1,6 +1,6 @@
 # SoundSwitch / CoreMIDI POC
 
-Status: **Prepared – execute after the Library/Settings demo slice**
+Status: **Core path passed physically on 2026-08-05; repetition and reconnect remain**
 
 ## Question
 
@@ -20,6 +20,21 @@ Control One remains usable and continues to provide working DMX output?
 9. disconnect/reconnect Lumi MIDI and Control One independently;
 10. capture MIDI transcript, screenshots, DMX evidence, versions, limitations,
     and a go/no-go decision.
+
+## Evidence status
+
+- **Passed:** SoundSwitch discovers `Lumi Virtual MIDI`.
+- **Passed:** Bank 1 learns channel 16 / note 60 and AutoLoop 1 learns channel
+  16 / note 64.
+- **Passed:** the runtime sequence selects Bank 1, waits 50 ms, then activates
+  AutoLoop 1.
+- **Passed:** Control One can override Lumi and Lumi can take control again.
+- **Passed:** fixtures visibly respond through Control One DMX while Lumi drives
+  SoundSwitch.
+- **Passed:** Test Controller and MIDI Status remain permanent diagnostics.
+- **Pending:** deterministic repetition over at least 100 triggers.
+- **Pending:** independent disconnect/reconnect of Lumi and Control One without
+  unsolicited MIDI or light changes.
 
 ## Safety
 
@@ -44,7 +59,7 @@ Control One remains usable and continues to provide working DMX output?
 ## Explicitly deferred
 
 - generic Output Profile Builder;
-- production binding of all 128 AutoLoop positions;
+- automatic live binding of all 128 logical AutoLoop mappings;
 - ShowNET/laser output;
 - automatic live execution;
 - iPhone controls;

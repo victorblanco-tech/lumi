@@ -4,3 +4,4 @@
 {"sequence":4,"monotonicTicks":0,"sourceId":1,"kind":"leaderChanged","deckId":1,"trackLoadId":1001}
 {"sequence":5,"monotonicTicks":0,"sourceId":1,"kind":"playbackPosition","deckId":1,"trackLoadId":1001,"beat":0}
 {"sequence":6,"monotonicTicks":0,"sourceId":1,"kind":"phraseChanged","deckId":1,"trackLoadId":1001,"phraseIndex":0}
+{"sequence":7,"monotonicTicks":0,"sourceId":1,"kind":"playbackStateChanged","deckId":1,"trackLoadId":1001,"playing":true}

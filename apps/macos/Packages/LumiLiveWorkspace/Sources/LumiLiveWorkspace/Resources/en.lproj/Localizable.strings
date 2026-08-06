@@ -1,5 +1,5 @@
 "app.title" = "Lumi";
-"workspace.subtitle" = "Plan the next track before the transition";
+"workspace.subtitle" = "Deck-aware lighting plan";
 "navigation.live" = "Live";
 "navigation.plans" = "Plans";
 "navigation.library" = "Library";
@@ -39,17 +39,7 @@
 "workspace.applyingCommand" = "Applying session command…";
 "workspace.waitingDecks" = "Waiting for authoritative Live and Next deck data…";
 "workspace.waitingPlan" = "Waiting for a generated next-track plan…";
-"workspace.waitingTimeline" = "Events will appear here as the demo runs.";
-"workspace.waitingSimulator" = "Waiting for the simulator.";
-"simulator.title" = "Demo Session";
-"simulator.load" = "Load Demo";
-"simulator.pause" = "Pause Demo";
-"simulator.resume" = "Resume Demo";
-"simulator.nextTrack" = "Next Track";
-"simulator.reset" = "Reset";
-"simulator.paused" = "paused";
-"simulator.playing" = "playing";
-"simulator.speed" = "Simulation speed";
+"workspace.waitingTimeline" = "Engine events will appear here.";
 "timeline.title" = "Engine Event Timeline";
 "operation.arm" = "Arm";
 "operation.start" = "Start";
@@ -66,9 +56,7 @@
 "value.unavailable" = "Not available";
 "cue.hold" = "Hold current look";
 "phrase.intro" = "Intro";
-"phrase.verse" = "Verse";
 "phrase.breakdown" = "Breakdown";
-"phrase.build" = "Build";
 "phrase.drop" = "Drop";
 "phrase.outro" = "Outro";
 "category.ambient" = "ambient";

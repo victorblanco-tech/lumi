@@ -28,10 +28,11 @@ serialized reducer model, health, bounded ingress, processed-event count, and
 last structured decision reason. It exposes evidence without leaking Rust
 domain types into clients.
 
-The optional `deckSource`, `leaderDeckId`, and `decks` fields expose normalized
-provider-neutral observations. `providerKind` identifies the adapter for
-diagnostics only; clients derive Live and Next from `leaderDeckId` and never
-branch on simulator, Beat Link, or future Pro DJ Link implementation types.
+The `deckSource` object exposes the product mode (`localPlayback` or
+`connectedDecks`), a user-facing display name, provider diagnostics and status.
+`leaderDeckId` and `decks` may be null/empty until a real source loads a track.
+Clients derive Live and Next from `leaderDeckId`; they never branch on a Beat
+Link, Pro DJ Link or future adapter implementation type.
 Track metadata uses integer milli-BPM, canonical pitch class and mode,
 normalized 24-bit sRGB `colorRgb`, and contiguous beat-based phrases so
 snapshots remain deterministic across Rust and Swift. Provider indexes or color
@@ -59,15 +60,23 @@ plan without writing a Theme to library track data. Once a leader change copies
 the prepared revision into `activePlan`, later preview mutations cannot affect
 that active copy or output until a future explicit safe-boundary workflow.
 
+Each deck also reports `planEligibility`: `readyExact`, `readyTransient` or
+`autoHeld`. An unmatched/incomplete connected track may carry an empty phrase
+timeline only when it is `autoHeld`; the engine then holds the current look and
+does not fabricate analysis. Local Playback adds its audio URI and duration,
+while transport updates carry absolute milliseconds and are mapped through the
+stored beatgrid by the engine.
+
 `activePlan` identifies the exact immutable plan revision used for the leader.
 `outputProvider` reports provider-neutral diagnostics, while bounded
 `outputEffects` entries expose scheduled and actual monotonic times, the cue and
 semantic action, and an explicit `simulated`, `rejected`, or `skipped` result.
 These fields are presentation evidence only; execution remains engine-owned.
 
-Demo and operation mutations carry `expectedStateRevision`. The engine accepts
-load/reset, 1x/4x/16x/64x speed, playback pause/resume, bounded deterministic
-clock advancement, leader advancement, and OFF/ARMED/LIVE/PAUSED commands.
-`simulation` contains the authoritative speed and paused state. `timeline`
+Product deck-source, library-load, master-selection and operation mutations
+carry `expectedStateRevision`. High-frequency Local Playback transport updates
+are instead protected by `trackLoadId`; stale updates fail closed. `timeline`
 contains at most 256 ordered engine-owned entries with source, type, monotonic
-time, result, and reducer reason.
+time, result, and reducer reason. Deterministic simulation commands and the
+optional `simulation` payload remain test-only protocol fixtures and are never
+exposed by the production Live workspace.

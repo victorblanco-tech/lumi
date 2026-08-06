@@ -392,7 +392,7 @@ impl LightingPlan {
             _ => {}
         }
         if let Some(decision) = theme_decision.as_ref()
-            && cues.iter().any(|cue| match cue.action() {
+            && cues.first().is_some_and(|cue| match cue.action() {
                 SemanticLightingAction::ApplyLook(look) => {
                     look.theme_id() != decision.theme_id()
                         || look.theme_name() != decision.theme_name()
@@ -480,6 +480,27 @@ impl LightingPlan {
         self.revised_with_theme_decision(cues, self.theme_decision.clone())
     }
 
+    /// Replaces adapter-materialized cue actions before a plan is accepted,
+    /// without presenting that normalization as a user-authored revision.
+    pub fn with_materialized_cues(
+        &self,
+        cues: Vec<LightingCue>,
+    ) -> Result<Self, PlanValidationError> {
+        Self::try_new_with_theme_decision(
+            self.id,
+            self.deck_id,
+            self.track_id,
+            self.track_duration_beats,
+            self.track_load_id,
+            self.revision,
+            self.configuration_revision,
+            self.seed,
+            self.status,
+            self.theme_decision.clone(),
+            cues,
+        )
+    }
+
     pub fn revised_with_theme_decision(
         &self,
         cues: Vec<LightingCue>,
@@ -561,7 +582,7 @@ impl fmt::Display for PlanValidationError {
                 formatter.write_str("a fallback plan may not contain a Theme decision")
             }
             Self::InconsistentThemeDecision => {
-                formatter.write_str("every concrete cue must match the plan Theme decision")
+                formatter.write_str("the starting cue must match the plan Theme decision")
             }
             Self::RevisionOverflow => formatter.write_str("plan revision overflow"),
         }

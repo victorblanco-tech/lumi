@@ -1,6 +1,6 @@
 # Epic 2A – Music Library and Track Lighting Editor
 
-Status: **Demo scope complete through E2A-18; Rekordbox import and RGB pixel-fidelity explicitly parked**
+Status: **Demo scope complete through E2A-19; safe Rekordbox 7 import is the next selected work package**
 
 Doelmilestone: **0.2.0 – Deck Intelligence**
 
@@ -22,8 +22,8 @@ voorbereidingsomgeving. Zonder decks of SoundSwitch-koppeling kan de gebruiker:
    laten resolven;
 8. een echte librarytrack in de bestaande dual-deck simulator testen;
 9. bronwijzigingen vergelijken zonder Lumi-edits te verliezen;
-10. het ingebouwde SoundSwitch-outputprofiel beheren als vier banks met ieder
-    acht buttons, een exacte AutoLoop Name en één Phrase Type per button.
+10. het ingebouwde SoundSwitch-outputprofiel onder `Integrations > Lighting Outputs` beheren als vier banks met ieder
+    32 AutoLoop-posities, een exacte AutoLoop Name en één Phrase Type per positie.
 
 Dit levert een zichtbare vertical slice over import, persistence, native UI,
 editing en planning. De echte SoundSwitch-project- en bank/slotbinding valt
@@ -49,7 +49,8 @@ buiten deze epic.
   phrase-loop zonder de show engine te beïnvloeden;
 - beat-quantized Phrase Point create/move/delete, afgeleide aaneengesloten
   ranges, role change, undo/redo en revision restore;
-- configureerbare phrase roles en Rekordbox-initiële mapping;
+- configureerbare phrase roles in `Settings > Phrase Model` en providergebonden
+  initiële mapping in `Library > Sources & Import`;
 - default roles uit ADR-0013;
 - logische `Theme × Phrase Role × Variant`-matrix met fixtures;
 - `AUTO`, `FIXED_VARIANT` en `THEME_SPECIFIC_EXACT`;
@@ -58,8 +59,10 @@ buiten deze epic.
 - simulatorintegratie met echte geïmporteerde tracks;
 - diff, rebase, merge en replace bij sourcewijzigingen;
 - contract-, parser-, persistence-, UI-, golden-, performance- en end-to-endtests.
-- demo-data Output Profiles voor SoundSwitch met Banks & Autoloops, Virtual
-  Controller en MIDI & POC readiness, zonder live MIDI te versturen.
+- demo-data SoundSwitch Lighting Output met Banks & Autoloops, Test Controller
+  en MIDI Status onder de taakgerichte Integrations-workspace;
+- taakgerichte desktopinformatiearchitectuur met Library Sources, Deck Inputs,
+  Lighting Outputs, Diagnostics en opgeschoonde globale Settings.
 
 ### Buiten scope
 
@@ -194,10 +197,10 @@ revisions en validatie in engine en native UI.
 
 ### E2A-06 – Configure phrase roles and initial source mapping
 
-Levert Settings > Phrase Roles met stabiele IDs, toevoegen, hernoemen, ordenen,
-archiveren/herstellen, usage diagnostics, de afgesproken defaults, provider-
-specifieke initiële mapping en per-phrase role editing. In-use roles worden nooit
-hard verwijderd.
+Levert `Settings > Phrase Model` met stabiele IDs, toevoegen, hernoemen,
+ordenen, archiveren/herstellen, usage diagnostics en de afgesproken defaults.
+Provider-specifieke initiële mapping woont bij de bron in
+`Library > Sources & Import`. In-use roles worden nooit hard verwijderd.
 
 ### E2A-07 – Build the logical Theme/role/variant matrix
 
@@ -317,7 +320,7 @@ E2A-18 gecorrigeerd naar de echte SoundSwitch-surface.
 
 Status: **implemented and locally verified**. Het ontwerp staat in
 [`docs/design/output-profiles`](../design/output-profiles/soundswitch-autoloops.md),
-de controllergrens in ADR-0015 en de volgende POC in
+de controllergrens in ADR-0015 en het fysieke integratiebewijs in
 [`soundswitch-coremidi-poc.md`](soundswitch-coremidi-poc.md).
 
 ### E2A-18 – Map the real 4×32 SoundSwitch AutoLoop surface
@@ -330,7 +333,43 @@ opgeslagen; interne mapping-ID's worden niet als Variant Name getoond. Een
 range- of pagina-indeling is bewust afwezig; de inspector vervangt de gekozen
 bank niet. De
 Test Controller spiegelt dezelfde 4×32-configuratie en blijft send-disabled tot
-de CoreMIDI-POC.
+de virtuele MIDI-bron expliciet wordt gepubliceerd. De permanente `MIDI Status`-
+pagina toont bronstatus, protocol, configured surface, laatste event, pulsteller,
+integratiechecks en handmatige testacties. De Test Controller gebruikt dezelfde
+SoundSwitch-volgorde: 1–8 verticaal, gevolgd door 9–16, 17–24 en 25–32.
+
+### E2A-19 – Reorganize Library, Integrations, and Settings around user tasks
+
+Status: **implemented and locally verified**. De primaire `Integrations`-
+navigatie is actief met Overview, Deck Inputs, Lighting Outputs en Diagnostics.
+De bestaande Beat Link Trigger- en SoundSwitch-schermen zijn zonder duplicatie
+naar hun taakgerichte bestemming verhuisd. `Library` heeft Tracks en
+Sources & Import; Rekordbox 7 staat daar klaar als disabled read-only source en
+de initiële source phrase mapping is met de bron meeverhuisd. Settings bevat
+alleen General, Phrase Model en Planning Defaults. Overview deeplinkt naar de
+eigenaar van ieder component. Een grens-test voorkomt dat providerconfiguratie
+weer in Settings belandt. Het geaccepteerde ontwerp staat in
+[`docs/design/information-architecture`](../design/information-architecture/README.md).
+
+### [E2A-20 – Configure a Rekordbox XML source and discover playlists](https://github.com/victorblanco-tech/lumi/issues/92)
+
+Status: **delivered**. Configureert een read-only XML-importfolder onder
+`Library > Sources & Import`, ontdekt exports en toont de playlist/folderboom
+zonder de volledige Collection te importeren. Een gevolgde folder kan optioneel
+toekomstige child-playlists meenemen; deze optie staat standaard aan.
+
+### [E2A-21 – Mirror followed Rekordbox playlists without losing Lumi edits](https://github.com/victorblanco-tech/lumi/issues/91)
+
+Status: **refined**. Importeert uitsluitend tracks uit gevolgde playlists,
+spiegelt membership en volgorde en archiveert tracks die nergens meer gevolgd
+worden. Re-add herstelt alle Lumi-owned data.
+
+### [E2A-22 – Preview and apply Rekordbox XML sync changes](https://github.com/victorblanco-tech/lumi/issues/90)
+
+Status: **refined**. Levert een hash-gebonden diffpreview en atomaire Apply Sync
+met aantallen voor add, update, remove, archive, restore en fouten. De volledige
+beslissing staat in
+[`rekordbox-xml-sync.md`](../design/library-sources/rekordbox-xml-sync.md).
 
 ## 6.1 Bouwvolgorde zonder Rekordbox-developmentlibrary
 
@@ -342,7 +381,7 @@ is:
 2. `E2A-03`: browse en inspecteer demotracks in de echte native Library UI;
 3. `E2A-04`: CDJ-editorcanvas en volledige lokale audio-preview;
 4. `E2A-05`: bar-aligned phrase editing en revisions;
-5. `E2A-06`: Settings > Phrase Roles en editorintegratie;
+5. `E2A-06`: Settings > Phrase Model, Library Sources-mapping en editorintegratie;
 6. `E2A-07` en `E2A-08`: vier Theme-banks, flexibele variants en loopstrategieën.
 
 `E2A-00` kan parallel starten zodra het geïsoleerde macOS-account met een
@@ -380,18 +419,21 @@ De demo-provider blijft daarna bestaan voor CI, screenshots en foutscenario's.
 - Een deterministische fixture van minimaal 10.000 tracks importeert binnen de
   vastgelegde performancebudgetten en blokkeert de UI niet.
 - Alle verificatie draait lokaal en in CI zonder decks, SoundSwitch of internet.
-- Settings toont SoundSwitch als target en Lumi als eigen virtuele controller;
+- Integrations > Lighting Outputs toont SoundSwitch als target en Lumi als eigen virtuele controller;
   Control One wordt uitsluitend als optionele parallelle controller/DMX-interface
   benoemd.
 
 ## 7.1 Geparkeerd na de demo-scope
 
-- `E2A-00` en `E2A-02`: directe Rekordbox 7-import blijft geparkeerd totdat een
-  geïsoleerd macOS-account met wegwerp-library beschikbaar is. De productie-
-  library wordt nooit als ontwikkelbron gebruikt.
+- `E2A-00` en `E2A-02`: directe Rekordbox 7-import is het eerstvolgende
+  werkpakket, maar blijft hard gated op een geïsoleerd macOS-account met
+  wegwerp-library. De productie-library wordt nooit als ontwikkelbron gebruikt.
 - `E2A-15`: verdere CDJ/Rekordbox RGB-pixelfidelity wordt later hervat.
-- De eerstvolgende actieve slice is de timeboxed SoundSwitch/CoreMIDI-POC uit
-  ADR-0015; deze is geen stilzwijgende live-outputimplementatie.
+- `E3-00`: de fysieke SoundSwitch/CoreMIDI-keten uit ADR-0015 is bewezen voor
+  virtual MIDI discovery, Bank 1 → AutoLoop 1, parallel Control One-gebruik en
+  zichtbare DMX-output. Repetition en disconnect/reconnect blijven open.
+- `E3-01`: generaliseer de bewezen bank-delay-slotsequentie naar iedere bank en
+  AutoLoop en verbind die later met de operationele live-execution.
 
 ## 8. Afhankelijkheden en risico's
 

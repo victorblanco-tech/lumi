@@ -11,9 +11,13 @@ use serde_json::{Value, json};
 const TEST_SESSION_TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef";
 
 #[test]
-fn real_engine_process_serves_authenticated_snapshot_on_loopback() {
+fn real_engine_process_starts_empty_and_serves_authenticated_product_state() {
     let mut child = match Command::new(env!("CARGO_BIN_EXE_lumi-engine"))
         .env("LUMI_SESSION_TOKEN", TEST_SESSION_TOKEN)
+        .env(
+            "LUMI_DECK_INPUT_DESTINATION_NAME",
+            format!("Lumi Deck Input Process Test {}", std::process::id()),
+        )
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -74,7 +78,7 @@ fn real_engine_process_serves_authenticated_snapshot_on_loopback() {
 
     assert_eq!(snapshot.message_type, MessageType::Snapshot);
     assert_eq!(snapshot.sequence, 1);
-    assert_eq!(snapshot.payload.get("stateRevision"), Some(&Value::from(8)));
+    assert_eq!(snapshot.payload.get("stateRevision"), Some(&Value::from(2)));
     assert_eq!(
         snapshot
             .payload
@@ -97,7 +101,7 @@ fn real_engine_process_serves_authenticated_snapshot_on_loopback() {
             .get("runtimeCore")
             .and_then(Value::as_object)
             .and_then(|runtime| runtime.get("processedEvents")),
-        Some(&Value::from(8))
+        Some(&Value::from(2))
     );
     assert_eq!(
         snapshot
@@ -105,167 +109,52 @@ fn real_engine_process_serves_authenticated_snapshot_on_loopback() {
             .get("deckSource")
             .and_then(Value::as_object)
             .and_then(|source| source.get("providerKind")),
-        Some(&Value::String("simulator".to_owned()))
+        Some(&Value::String("localPlayback".to_owned()))
     );
-    assert_eq!(snapshot.payload.get("leaderDeckId"), Some(&Value::from(1)));
+    assert_eq!(
+        snapshot
+            .payload
+            .get("deckSource")
+            .and_then(Value::as_object)
+            .and_then(|source| source.get("mode")),
+        Some(&Value::String("localPlayback".to_owned()))
+    );
+    assert_eq!(snapshot.payload.get("simulation"), None);
+    assert_eq!(snapshot.payload.get("leaderDeckId"), Some(&Value::Null));
     let Some(decks) = snapshot.payload.get("decks").and_then(Value::as_array) else {
         let _ = child.kill();
         panic!("snapshot must contain decks");
     };
-    assert_eq!(decks.len(), 2);
-    assert_eq!(
-        decks[0].get("track").and_then(|track| track.get("title")),
-        Some(&Value::String("Aurora Signal".to_owned()))
-    );
-    assert_eq!(
-        decks[1].get("track").and_then(|track| track.get("title")),
-        Some(&Value::String("Neon Horizon".to_owned()))
-    );
-    let Some(next_plan) = snapshot.payload.get("nextPlan").and_then(Value::as_object) else {
-        let _ = child.kill();
-        panic!("snapshot must contain the next-track plan");
-    };
-    assert_eq!(next_plan.get("deckId"), Some(&Value::from(2)));
-    assert_eq!(
-        next_plan.get("status"),
-        Some(&Value::String("ready".to_owned()))
-    );
-    assert_eq!(next_plan.get("revision"), Some(&Value::from(1)));
-    assert_eq!(
-        next_plan
-            .get("themeDecision")
-            .and_then(|decision| decision.get("themeId")),
-        Some(&Value::from(2))
-    );
-    assert_eq!(
-        next_plan
-            .get("themeDecision")
-            .and_then(|decision| decision.get("reason")),
-        Some(&Value::String("colorPrefer".to_owned()))
-    );
-    assert_eq!(
-        next_plan
-            .get("cues")
-            .and_then(Value::as_array)
-            .map(Vec::len),
-        Some(4)
-    );
+    assert!(decks.is_empty());
+    assert_eq!(snapshot.payload.get("nextPlan"), Some(&Value::Null));
 
-    let Some(plan_id) = next_plan.get("planId").and_then(Value::as_str) else {
-        let _ = child.kill();
-        panic!("planId must be a decimal string");
-    };
-    let theme_command = command(
-        "theme-1",
+    let arm_command = command(
+        "arm-1",
         1,
         json!({
-            "kind": "selectTheme",
-            "planId": plan_id,
-            "trackLoadId": 2001,
-            "themeId": 1,
-            "expectedPlanRevision": 1,
+            "kind": "setOperationState",
+            "operationState": "armed",
+            "expectedStateRevision": 2,
         }),
     );
-    let themed = exchange(&mut connection, &theme_command);
-    assert_eq!(plan_revision(&themed), 2);
+    let armed = exchange(&mut connection, &arm_command);
     assert_eq!(
-        themed
-            .payload
-            .get("nextPlan")
-            .and_then(|plan| plan.get("themeDecision"))
-            .and_then(|decision| decision.get("reason")),
-        Some(&Value::String("planInstanceUserChoice".to_owned()))
+        armed.payload.get("operationState"),
+        Some(&Value::String("armed".to_owned()))
     );
-    assert!(plan_cues(&themed).iter().all(|cue| {
-        cue.get("action").and_then(|action| action.get("themeId")) == Some(&Value::from(1))
-    }));
+    assert_eq!(armed.payload.get("stateRevision"), Some(&Value::from(3)));
 
-    let duplicate = exchange(&mut connection, &theme_command);
-    assert_eq!(plan_revision(&duplicate), 2);
+    let duplicate = exchange(&mut connection, &arm_command);
     assert_eq!(
         duplicate.payload.get("stateRevision"),
-        themed.payload.get("stateRevision")
-    );
-
-    let locked = exchange(
-        &mut connection,
-        &command(
-            "lock-1",
-            2,
-            json!({
-                "kind": "setCueLock",
-                "planId": plan_id,
-                "trackLoadId": 2001,
-                "phraseIndex": 1,
-                "locked": true,
-                "expectedPlanRevision": 2,
-            }),
-        ),
-    );
-    assert_eq!(plan_revision(&locked), 3);
-    assert_eq!(
-        plan_cues(&locked)[1].get("locked"),
-        Some(&Value::Bool(true))
-    );
-
-    let regenerated = exchange(
-        &mut connection,
-        &command(
-            "regenerate-1",
-            3,
-            json!({
-                "kind": "regeneratePlan",
-                "planId": plan_id,
-                "trackLoadId": 2001,
-                "expectedPlanRevision": 3,
-            }),
-        ),
-    );
-    assert_eq!(plan_revision(&regenerated), 4);
-    let regenerated_cues = plan_cues(&regenerated);
-    assert_eq!(regenerated_cues[1].get("locked"), Some(&Value::Bool(true)));
-    assert_eq!(
-        regenerated_cues[1]
-            .get("action")
-            .and_then(|action| action.get("themeId")),
-        Some(&Value::from(1))
-    );
-    assert_eq!(
-        regenerated_cues[0]
-            .get("action")
-            .and_then(|action| action.get("themeId")),
-        Some(&Value::from(1))
-    );
-
-    let conflict = exchange(
-        &mut connection,
-        &command(
-            "stale-theme",
-            4,
-            json!({
-                "kind": "selectTheme",
-                "planId": plan_id,
-                "trackLoadId": 2001,
-                "themeId": 2,
-                "expectedPlanRevision": 1,
-            }),
-        ),
-    );
-    assert_eq!(conflict.message_type, MessageType::Error);
-    assert_eq!(
-        conflict.payload.get("kind"),
-        Some(&Value::String("revisionConflict".to_owned()))
-    );
-    assert_eq!(
-        conflict.payload.get("actualPlanRevision"),
-        Some(&Value::from(4))
+        armed.payload.get("stateRevision")
     );
 
     let stale_state = exchange(
         &mut connection,
         &command(
             "stale-operation",
-            5,
+            2,
             json!({
                 "kind": "setOperationState",
                 "operationState": "armed",
@@ -280,7 +169,7 @@ fn real_engine_process_serves_authenticated_snapshot_on_loopback() {
     );
     assert_eq!(
         stale_state.payload.get("actualStateRevision"),
-        regenerated.payload.get("stateRevision")
+        armed.payload.get("stateRevision")
     );
 
     if let Err(error) = writeln!(connection, "{{\"protocolVersion\":") {
@@ -307,11 +196,11 @@ fn real_engine_process_serves_authenticated_snapshot_on_loopback() {
 
     let after_faults = exchange(
         &mut connection,
-        &command("snapshot-after-faults", 6, json!({ "kind": "getSnapshot" })),
+        &command("snapshot-after-faults", 3, json!({ "kind": "getSnapshot" })),
     );
     assert_eq!(
         after_faults.payload.get("operationState"),
-        Some(&Value::String("off".to_owned()))
+        Some(&Value::String("armed".to_owned()))
     );
     assert_eq!(
         after_faults
@@ -367,31 +256,4 @@ fn exchange(connection: &mut TcpStream, command: &Value) -> MessageEnvelope {
         Ok(response) => response,
         Err(error) => panic!("response must be a valid envelope: {error}"),
     }
-}
-
-fn plan_revision(snapshot: &MessageEnvelope) -> u64 {
-    let Some(revision) = snapshot
-        .payload
-        .get("nextPlan")
-        .and_then(Value::as_object)
-        .and_then(|plan| plan.get("revision"))
-        .and_then(Value::as_u64)
-    else {
-        panic!("snapshot must contain a plan revision");
-    };
-    revision
-}
-
-fn plan_cues(snapshot: &MessageEnvelope) -> &[Value] {
-    let Some(cues) = snapshot
-        .payload
-        .get("nextPlan")
-        .and_then(Value::as_object)
-        .and_then(|plan| plan.get("cues"))
-        .and_then(Value::as_array)
-        .map(Vec::as_slice)
-    else {
-        panic!("snapshot must contain plan cues");
-    };
-    cues
 }

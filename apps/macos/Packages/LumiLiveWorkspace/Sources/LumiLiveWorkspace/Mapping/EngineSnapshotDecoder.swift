@@ -28,28 +28,50 @@ public struct EngineSnapshotDecoder: Sendable {
               case let .string(lastDecision) = runtimePayload["lastDecision"],
               case let .object(sourcePayload) = envelope.payload["deckSource"],
               case let .string(providerKind) = sourcePayload["providerKind"],
+              case let .string(sourceMode) = sourcePayload["mode"],
+              case let .string(sourceDisplayName) = sourcePayload["displayName"],
               case let .string(sourceStatus) = sourcePayload["status"],
-              case let .object(simulationPayload) = envelope.payload["simulation"],
-              let simulationSpeed = unsignedInteger(simulationPayload["speed"]),
-              [1, 4, 16, 64].contains(simulationSpeed),
-              case let .boolean(simulationPaused) = simulationPayload["paused"],
               case let .object(outputPayload) = envelope.payload["outputProvider"],
               case let .string(outputProviderKind) = outputPayload["providerKind"],
               case let .string(outputStatus) = outputPayload["status"],
               let outputRecordCount = unsignedInteger(outputPayload["recordCount"]),
-              let leaderDeckID = unsignedInteger(envelope.payload["leaderDeckId"]),
               case let .array(deckPayloads) = envelope.payload["decks"],
               case let .object(optionsPayload) = envelope.payload["planningOptions"],
               case let .array(timelinePayloads) = envelope.payload["timeline"] else {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
 
+        let leaderDeckID: UInt64?
+        if envelope.payload["leaderDeckId"] == .null {
+            leaderDeckID = nil
+        } else {
+            guard let value = unsignedInteger(envelope.payload["leaderDeckId"]) else {
+                throw EngineSnapshotDecodingError.invalidSnapshot
+            }
+            leaderDeckID = value
+        }
+        let simulation: SimulationSnapshot?
+        if envelope.payload["simulation"] == nil || envelope.payload["simulation"] == .null {
+            simulation = nil
+        } else {
+            guard case let .object(payload) = envelope.payload["simulation"],
+                  let speed = unsignedInteger(payload["speed"]),
+                  [1, 4, 16, 64].contains(speed),
+                  case let .boolean(paused) = payload["paused"] else {
+                throw EngineSnapshotDecodingError.invalidSnapshot
+            }
+            simulation = SimulationSnapshot(speed: speed, paused: paused)
+        }
+        let deckInputIntegration = try decodeDeckInputIntegration(
+            envelope.payload["deckInputIntegration"]
+        )
         let decks = try deckPayloads.map(decodeDeck)
         let timeline = try timelinePayloads.map(decodeTimelineEntry)
         let deckIDs = Set(decks.map(\.deckID))
-        guard decks.count == 2,
+        guard decks.count <= 2,
               deckIDs.count == decks.count,
-              deckIDs.contains(leaderDeckID) else {
+              deckIDs.allSatisfy({ [1, 2].contains($0) }),
+              leaderDeckID.map(deckIDs.contains) ?? decks.isEmpty else {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
         guard timeline.count <= 256,
@@ -64,9 +86,23 @@ public struct EngineSnapshotDecoder: Sendable {
             nextPlan = nil
         } else {
             nextPlan = try decodePlan(envelope.payload["nextPlan"])
-            guard let nextDeck = decks.first(where: { $0.deckID != leaderDeckID }),
+            guard let leaderDeckID,
+                  let nextDeck = decks.first(where: { $0.deckID != leaderDeckID }),
                   nextPlan?.deckID == nextDeck.deckID,
                   nextPlan?.trackLoadID == nextDeck.trackLoadID else {
+                throw EngineSnapshotDecodingError.invalidSnapshot
+            }
+        }
+
+        let livePlan: PlanSnapshot?
+        if envelope.payload["livePlan"] == nil || envelope.payload["livePlan"] == .null {
+            livePlan = nil
+        } else {
+            livePlan = try decodePlan(envelope.payload["livePlan"])
+            guard let leaderDeckID,
+                  let liveDeck = decks.first(where: { $0.deckID == leaderDeckID }),
+                  livePlan?.deckID == liveDeck.deckID,
+                  livePlan?.trackLoadID == liveDeck.trackLoadID else {
                 throw EngineSnapshotDecodingError.invalidSnapshot
             }
         }
@@ -88,12 +124,12 @@ public struct EngineSnapshotDecoder: Sendable {
             ),
             deckSource: DeckSourceSnapshot(
                 providerKind: providerKind,
+                mode: sourceMode,
+                displayName: sourceDisplayName,
                 status: sourceStatus
             ),
-            simulation: SimulationSnapshot(
-                speed: simulationSpeed,
-                paused: simulationPaused
-            ),
+            deckInputIntegration: deckInputIntegration,
+            simulation: simulation,
             outputProvider: OutputProviderSnapshot(
                 providerKind: outputProviderKind,
                 status: outputStatus,
@@ -101,9 +137,53 @@ public struct EngineSnapshotDecoder: Sendable {
             ),
             leaderDeckID: leaderDeckID,
             decks: decks,
+            livePlan: livePlan,
             nextPlan: nextPlan,
             planningOptions: try decodePlanningOptions(optionsPayload),
             timeline: timeline
+        )
+    }
+
+    private func decodeDeckInputIntegration(
+        _ value: JSONValue?
+    ) throws -> DeckInputIntegrationSnapshot? {
+        if value == nil || value == .null {
+            return nil
+        }
+        guard case let .object(input) = value,
+              case let .string(state) = input["state"],
+              ["stopped", "ready"].contains(state),
+              case let .string(protocolName) = input["protocol"],
+              !protocolName.isEmpty,
+              let protocolVersion = unsignedInteger(input["protocolVersion"]),
+              protocolVersion > 0,
+              let receivedMessageCount = unsignedInteger(input["receivedMessageCount"]),
+              let invalidWordCount = unsignedInteger(input["invalidWordCount"]),
+              let committedFrameCount = unsignedInteger(input["committedFrameCount"]),
+              let ignoredMessageCount = unsignedInteger(input["ignoredMessageCount"]),
+              let duplicateFrameCount = unsignedInteger(input["duplicateFrameCount"]) else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        let destinationName = try optionalString(input["destinationName"])
+        let lastDeckID = try optionalUnsignedInteger(input["lastDeckId"])
+        let lastFrameSequence = try optionalUnsignedInteger(input["lastFrameSequence"])
+        guard destinationName?.isEmpty != true,
+              lastDeckID.map({ [1, 2].contains($0) }) ?? true,
+              lastFrameSequence.map({ $0 <= 127 }) ?? true else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        return DeckInputIntegrationSnapshot(
+            state: state,
+            destinationName: destinationName,
+            protocolName: protocolName,
+            protocolVersion: protocolVersion,
+            receivedMessageCount: receivedMessageCount,
+            invalidWordCount: invalidWordCount,
+            committedFrameCount: committedFrameCount,
+            ignoredMessageCount: ignoredMessageCount,
+            duplicateFrameCount: duplicateFrameCount,
+            lastDeckID: lastDeckID,
+            lastFrameSequence: lastFrameSequence
         )
     }
 
@@ -186,13 +266,13 @@ public struct EngineSnapshotDecoder: Sendable {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
         if let themeDecision {
-            guard cues.allSatisfy({ cue in
+            guard cues.first.map({ cue in
                 if case let .applyLook(themeID, themeName, _, _, _, _, _) = cue.action {
                     return themeID == themeDecision.themeID
                         && themeName == themeDecision.themeName
                 }
                 return false
-            }) else {
+            }) == true else {
                 throw EngineSnapshotDecodingError.invalidSnapshot
             }
         }
@@ -311,7 +391,7 @@ public struct EngineSnapshotDecoder: Sendable {
               case let .string(roleName) = resolution["roleName"],
               !roleName.isEmpty,
               case let .string(strategy) = resolution["strategy"],
-              ["auto", "fixedVariant", "themeSpecificExact"].contains(strategy),
+              ["auto", "fixedVariant", "themeSpecificExact", "planOverride"].contains(strategy),
               case let .string(variantID) = resolution["variantId"],
               !variantID.isEmpty,
               let catalogRevision = unsignedInteger(resolution["catalogRevision"]),
@@ -325,6 +405,33 @@ public struct EngineSnapshotDecoder: Sendable {
               !entryName.isEmpty else {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
+        let choices: [PlanAutoloopChoiceSnapshot]
+        if resolution["choices"] == nil || resolution["choices"] == .null {
+            choices = []
+        } else {
+            guard case let .array(values) = resolution["choices"] else {
+                throw EngineSnapshotDecodingError.invalidSnapshot
+            }
+            choices = try values.map { value in
+                guard case let .object(choice) = value,
+                      let id = unsignedInteger(choice["id"]),
+                      (1...32).contains(id),
+                      case let .string(name) = choice["name"],
+                      !name.isEmpty,
+                      case let .string(variantID) = choice["variantId"],
+                      !variantID.isEmpty,
+                      let bankNumber = unsignedInteger(choice["bankNumber"]),
+                      (1...4).contains(bankNumber) else {
+                    throw EngineSnapshotDecodingError.invalidSnapshot
+                }
+                return PlanAutoloopChoiceSnapshot(
+                    id: id,
+                    name: name,
+                    variantID: variantID,
+                    bankNumber: bankNumber
+                )
+            }
+        }
         return PlanCueLibraryResolutionSnapshot(
             roleID: roleID,
             roleName: roleName,
@@ -333,7 +440,10 @@ public struct EngineSnapshotDecoder: Sendable {
             catalogRevision: catalogRevision,
             resolutionReason: resolutionReason,
             entryID: entryID,
-            entryName: entryName
+            entryName: entryName,
+            bankNumber: unsignedInteger(resolution["bankNumber"]),
+            autoloopNumber: unsignedInteger(resolution["autoloopNumber"]),
+            choices: choices
         )
     }
 
@@ -433,16 +543,59 @@ public struct EngineSnapshotDecoder: Sendable {
               let deckID = unsignedInteger(deck["deckId"]),
               let trackLoadID = unsignedInteger(deck["trackLoadId"]),
               let beat = unsignedInteger(deck["beat"]),
+              case let .boolean(playing) = deck["playing"],
               case let .object(track) = deck["track"],
               case let .string(title) = track["title"],
               case let .string(artist) = track["artist"],
-              let bpmMilli = unsignedInteger(track["bpmMilli"]),
-              let colorRGB = unsignedInteger(track["colorRgb"]),
-              colorRGB <= 0x00FF_FFFF,
+              let trackBPMMilli = unsignedInteger(track["bpmMilli"]),
+              let durationBeats = unsignedInteger(track["durationBeats"]),
+              durationBeats > 0,
+              case let .array(phrasePayloads) = track["phrases"],
               case let .object(key) = track["key"],
               case let .string(pitchClass) = key["pitchClass"],
               case let .string(keyMode) = key["mode"] else {
             throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+
+        let bpmMilli: UInt64
+        if deck["effectiveBpmMilli"] == nil {
+            bpmMilli = trackBPMMilli
+        } else {
+            guard let value = unsignedInteger(deck["effectiveBpmMilli"]),
+                  (20_000...300_000).contains(value) else {
+                throw EngineSnapshotDecodingError.invalidSnapshot
+            }
+            bpmMilli = value
+        }
+
+        let colorRGB: UInt64?
+        if track["colorRgb"] == nil || track["colorRgb"] == .null {
+            colorRGB = nil
+        } else {
+            guard let value = unsignedInteger(track["colorRgb"]), value <= 0x00FF_FFFF else {
+                throw EngineSnapshotDecodingError.invalidSnapshot
+            }
+            colorRGB = value
+        }
+        guard case let .string(planEligibilityValue) = deck["planEligibility"],
+              let planEligibility = DeckPlanEligibility(rawValue: planEligibilityValue) else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        let localPlayback: LocalPlaybackTrackSnapshot?
+        if deck["localPlayback"] == nil || deck["localPlayback"] == .null {
+            localPlayback = nil
+        } else {
+            guard case let .object(payload) = deck["localPlayback"],
+                  case let .string(audioURI) = payload["audioUri"],
+                  !audioURI.isEmpty,
+                  let durationMillis = unsignedInteger(payload["durationMillis"]),
+                  durationMillis > 0 else {
+                throw EngineSnapshotDecodingError.invalidSnapshot
+            }
+            localPlayback = LocalPlaybackTrackSnapshot(
+                audioURI: audioURI,
+                durationMillis: durationMillis
+            )
         }
 
         let phraseIndex: UInt64?
@@ -455,6 +608,42 @@ public struct EngineSnapshotDecoder: Sendable {
             phraseIndex = value
         }
 
+        let phrases = try phrasePayloads.map(decodeDeckPhrase)
+        let phraseTimelineIsValid = phrases.isEmpty
+            ? planEligibility == .autoHeld && phraseIndex == nil
+            : phrases.count <= 512
+                && phrases.first?.startBeat == 0
+                && phrases.last?.endBeat == durationBeats
+                && phrases.enumerated().allSatisfy({ offset, phrase in
+                    phrase.index == UInt64(offset)
+                        && phrase.startBeat < phrase.endBeat
+                        && phrase.endBeat <= durationBeats
+                        && (offset == 0 || phrases[offset - 1].endBeat == phrase.startBeat)
+                })
+                && (phraseIndex.map { index in
+                    phrases.contains { $0.index == index }
+                } ?? true)
+        guard phraseTimelineIsValid else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+
+        let waveformPreview: DeckWaveformPreviewSnapshot?
+        if track["waveformPreview"] == nil || track["waveformPreview"] == .null {
+            waveformPreview = nil
+        } else {
+            waveformPreview = try decodeWaveformPreview(track["waveformPreview"])
+        }
+
+        let keyKnown: Bool
+        if key["known"] == nil {
+            keyKnown = true
+        } else {
+            guard case let .boolean(value) = key["known"] else {
+                throw EngineSnapshotDecodingError.invalidSnapshot
+            }
+            keyKnown = value
+        }
+
         return DeckSnapshot(
             deckID: deckID,
             trackLoadID: trackLoadID,
@@ -464,9 +653,80 @@ public struct EngineSnapshotDecoder: Sendable {
             colorRGB: colorRGB,
             pitchClass: pitchClass,
             keyMode: keyMode,
+            keyKnown: keyKnown,
             beat: beat,
-            phraseIndex: phraseIndex
+            playing: playing,
+            phraseIndex: phraseIndex,
+            durationBeats: durationBeats,
+            phrases: phrases,
+            waveformPreview: waveformPreview,
+            planEligibility: planEligibility,
+            localPlayback: localPlayback
         )
+    }
+
+    private func decodeDeckPhrase(_ value: JSONValue) throws -> DeckPhraseSnapshot {
+        guard case let .object(phrase) = value,
+              let index = unsignedInteger(phrase["index"]),
+              let startBeat = unsignedInteger(phrase["startBeat"]),
+              let endBeat = unsignedInteger(phrase["endBeat"]),
+              case let .string(kind) = phrase["kind"],
+              ["intro", "verse", "breakdown", "build", "drop", "outro"].contains(kind) else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        let roleID: String?
+        let roleName: String?
+        if phrase["role"] == nil || phrase["role"] == .null {
+            roleID = nil
+            roleName = nil
+        } else {
+            guard case let .object(role) = phrase["role"],
+                  case let .string(decodedRoleID) = role["roleId"],
+                  !decodedRoleID.isEmpty,
+                  case let .string(decodedRoleName) = role["roleName"],
+                  !decodedRoleName.isEmpty else {
+                throw EngineSnapshotDecodingError.invalidSnapshot
+            }
+            roleID = decodedRoleID
+            roleName = decodedRoleName
+        }
+        return DeckPhraseSnapshot(
+            index: index,
+            startBeat: startBeat,
+            endBeat: endBeat,
+            kind: kind,
+            roleID: roleID,
+            roleName: roleName
+        )
+    }
+
+    private func decodeWaveformPreview(_ value: JSONValue?) throws -> DeckWaveformPreviewSnapshot {
+        guard let value,
+              case let .object(preview) = value,
+              case let .string(source) = preview["source"],
+              !source.isEmpty,
+              preview["style"] == .string("rgb"),
+              case let .array(pointPayloads) = preview["points"],
+              (16...4_096).contains(pointPayloads.count) else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        let points = try pointPayloads.map { value in
+            guard case let .object(point) = value,
+                  let low = unsignedInteger(point["low"]),
+                  let mid = unsignedInteger(point["mid"]),
+                  let high = unsignedInteger(point["high"]),
+                  low <= 31,
+                  mid <= 31,
+                  high <= 31 else {
+                throw EngineSnapshotDecodingError.invalidSnapshot
+            }
+            return DeckWaveformPointSnapshot(
+                low: UInt8(low),
+                mid: UInt8(mid),
+                high: UInt8(high)
+            )
+        }
+        return DeckWaveformPreviewSnapshot(source: source, style: "rgb", points: points)
     }
 
     private func unsignedInteger(_ value: JSONValue?) -> UInt64? {
@@ -478,5 +738,25 @@ public struct EngineSnapshotDecoder: Sendable {
             return nil
         }
         return UInt64(number)
+    }
+
+    private func optionalUnsignedInteger(_ value: JSONValue?) throws -> UInt64? {
+        if value == nil || value == .null {
+            return nil
+        }
+        guard let decoded = unsignedInteger(value) else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        return decoded
+    }
+
+    private func optionalString(_ value: JSONValue?) throws -> String? {
+        if value == nil || value == .null {
+            return nil
+        }
+        guard case let .string(string) = value else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        return string
     }
 }
