@@ -277,11 +277,11 @@ public enum LiveWorkspacePresenter {
         return LiveWorkspaceState(
             condition: condition,
             engine: ProviderPresentation(
-                detail: "\(snapshot.endpoint) · engine \(snapshot.engineVersion) · protocol v\(snapshot.protocolVersion) · snapshot #\(snapshot.snapshotSequence)",
+                detail: "\(snapshot.endpoint) · engine \(snapshot.engineVersion) · protocol v\(snapshot.protocolVersion)",
                 condition: healthyProviderCondition
             ),
             runtime: ProviderPresentation(
-                detail: "Processed events: \(runtime.processedEvents) · queue \(runtime.queueDepth)/\(runtime.queueCapacity) · revision #\(snapshot.stateRevision) · last: \(runtime.lastDecision)",
+                detail: "\(runtime.model) · revision #\(snapshot.stateRevision)",
                 condition: runtime.health == "ready" ? healthyProviderCondition : .degraded
             ),
             source: ProviderPresentation(

@@ -80,6 +80,35 @@ struct LiveWorkspacePresenterTests {
         #expect(previews.allSatisfy { $0.points.count == 192 })
     }
 
+    @Test("A transport-neutral snapshot sequence does not invalidate the Live presentation")
+    func snapshotSequenceDoesNotForceARelayout() {
+        let snapshot = LiveWorkspaceFixtures.readySnapshot
+        let nextSequence = EngineSnapshot(
+            endpoint: snapshot.endpoint,
+            engineVersion: snapshot.engineVersion,
+            protocolVersion: snapshot.protocolVersion,
+            snapshotSequence: snapshot.snapshotSequence + 1,
+            stateRevision: snapshot.stateRevision,
+            operationState: snapshot.operationState,
+            runtime: snapshot.runtime,
+            deckSource: snapshot.deckSource,
+            deckInputIntegration: snapshot.deckInputIntegration,
+            simulation: snapshot.simulation,
+            outputProvider: snapshot.outputProvider,
+            leaderDeckID: snapshot.leaderDeckID,
+            decks: snapshot.decks,
+            livePlan: snapshot.livePlan,
+            nextPlan: snapshot.nextPlan,
+            planningOptions: snapshot.planningOptions,
+            timeline: snapshot.timeline
+        )
+
+        #expect(
+            LiveWorkspacePresenter.ready(snapshot)
+                == LiveWorkspacePresenter.ready(nextSequence)
+        )
+    }
+
     @Test("Plan interaction feedback retains the authoritative snapshot")
     func planInteractionRetainsSnapshot() {
         let state = LiveWorkspacePresenter.ready(

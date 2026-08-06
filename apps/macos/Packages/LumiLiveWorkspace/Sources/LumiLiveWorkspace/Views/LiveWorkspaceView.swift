@@ -2,6 +2,7 @@ import Foundation
 import LumiDesignSystem
 import LumiProtocol
 import SwiftUI
+import UniformTypeIdentifiers
 
 public struct LiveWorkspaceView: View {
     private let state: LiveWorkspaceState
@@ -457,17 +458,47 @@ public struct LiveWorkspaceView: View {
                     )
                     .allowsHitTesting(false)
             }
-            .dropDestination(for: LibraryTrackTransfer.self) { items, _ in
-                guard let transfer = items.first else { return false }
-                onLibraryTrackDrop(transfer, deckID)
-                return true
-            } isTargeted: { targeted in
-                if targeted {
-                    dropTargetDeckID = deckID
-                } else if dropTargetDeckID == deckID {
-                    dropTargetDeckID = nil
-                }
+            .onDrop(
+                of: [UTType.lumiLibraryTrack],
+                isTargeted: Binding(
+                    get: { dropTargetDeckID == deckID },
+                    set: { targeted in
+                        if targeted {
+                            dropTargetDeckID = deckID
+                        } else if dropTargetDeckID == deckID {
+                            dropTargetDeckID = nil
+                        }
+                    }
+                )
+            ) { providers in
+                loadLibraryTrackDrop(from: providers, onto: deckID)
             }
+    }
+
+    private func loadLibraryTrackDrop(
+        from providers: [NSItemProvider],
+        onto deckID: UInt64
+    ) -> Bool {
+        let typeIdentifier = UTType.lumiLibraryTrack.identifier
+        guard let provider = providers.first(where: {
+            $0.hasItemConformingToTypeIdentifier(typeIdentifier)
+        }) else {
+            return false
+        }
+        provider.loadDataRepresentation(forTypeIdentifier: typeIdentifier) { data, _ in
+            guard let data,
+                  let transfer = try? JSONDecoder().decode(
+                    LibraryTrackTransfer.self,
+                    from: data
+                  ) else {
+                return
+            }
+            Task { @MainActor in
+                dropTargetDeckID = nil
+                onLibraryTrackDrop(transfer, deckID)
+            }
+        }
+        return true
     }
 
     private func phraseEditor(

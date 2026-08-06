@@ -7,6 +7,12 @@ import LumiLiveWorkspace
 
 @MainActor
 final class EngineStatusModel: ObservableObject {
+    private enum LibraryCommandFailurePresentation {
+        case library
+        case timeline
+        case localPlayback
+    }
+
     @Published private(set) var workspaceState = LiveWorkspacePresenter.stopped()
     @Published private(set) var libraryState = LibraryWorkspaceState.importing()
     @Published private(set) var timelineEditFeedback: String?
@@ -209,13 +215,21 @@ final class EngineStatusModel: ObservableObject {
 
     func openLibraryTrackEditor(trackID: UInt64) async {
         timelineEditFeedback = nil
-        await exchangeLibraryCommand(.openLibraryTrackEditor(trackID: trackID))
+        await exchangeLibraryCommand(
+            .openLibraryTrackEditor(trackID: trackID),
+            failurePresentation: .timeline
+        )
     }
 
     func closeLibraryTrackEditor() async {
         guard libraryState.editor != nil else { return }
-        await exchangeLibraryCommand(.closeLibraryTrackEditor)
-        timelineEditFeedback = nil
+        let closed = await exchangeLibraryCommand(
+            .closeLibraryTrackEditor,
+            failurePresentation: .timeline
+        )
+        if closed {
+            timelineEditFeedback = nil
+        }
     }
 
     func loadLibraryTrackOnLocalDeck(_ request: LibraryDeckLoadRequest) async {
@@ -229,7 +243,7 @@ final class EngineStatusModel: ObservableObject {
                     "localPlayback",
                     expectedStateRevision: snapshot.stateRevision
                 ),
-                preservesLibraryOnFailure: true,
+                failurePresentation: .localPlayback,
                 retryOnStateRevisionConflict: { actualRevision in
                     .selectDeckSourceMode(
                         "localPlayback",
@@ -248,7 +262,7 @@ final class EngineStatusModel: ObservableObject {
                 expectedTimelineRevision: request.expectedTimelineRevision,
                 expectedStateRevision: snapshot.stateRevision
             ),
-            preservesLibraryOnFailure: true,
+            failurePresentation: .localPlayback,
             retryOnStateRevisionConflict: { actualRevision in
                 .loadLibraryTrackOnLocalDeck(
                     trackID: request.trackID,
@@ -774,7 +788,7 @@ final class EngineStatusModel: ObservableObject {
     @discardableResult
     private func exchangeLibraryCommand(
         _ command: EngineCommand,
-        preservesLibraryOnFailure: Bool = false,
+        failurePresentation: LibraryCommandFailurePresentation = .library,
         retryOnStateRevisionConflict: ((UInt64) -> EngineCommand)? = nil
     ) async -> Bool {
         guard lifecycle == .ready,
@@ -795,12 +809,10 @@ final class EngineStatusModel: ObservableObject {
                 )
             }
             if let failure = EngineCommandFailure(envelope) {
-                if preservesLibraryOnFailure {
-                    localPlaybackFeedback = failure.message
-                    localPlaybackFeedbackIsError = true
-                } else {
-                    libraryState = .failed(failure.message)
-                }
+                presentLibraryCommandFailure(
+                    failure.message,
+                    as: failurePresentation
+                )
                 return false
             }
             let snapshot = try snapshotDecoder.decode(
@@ -816,13 +828,23 @@ final class EngineStatusModel: ObservableObject {
         } catch {
             let message = (error as? LocalizedError)?.errorDescription
                 ?? "The track editor could not be updated."
-            if preservesLibraryOnFailure {
-                localPlaybackFeedback = message
-                localPlaybackFeedbackIsError = true
-            } else {
-                libraryState = .failed(message)
-            }
+            presentLibraryCommandFailure(message, as: failurePresentation)
             return false
+        }
+    }
+
+    private func presentLibraryCommandFailure(
+        _ message: String,
+        as presentation: LibraryCommandFailurePresentation
+    ) {
+        switch presentation {
+        case .library:
+            libraryState = .failed(message)
+        case .timeline:
+            timelineEditFeedback = message
+        case .localPlayback:
+            localPlaybackFeedback = message
+            localPlaybackFeedbackIsError = true
         }
     }
 
@@ -1253,9 +1275,9 @@ final class EngineStatusModel: ObservableObject {
                         protocolVersion: protocolVersion
                     )
                     self.latestSnapshot = snapshot
-                    self.workspaceState = LiveWorkspacePresenter.ready(snapshot)
-                    if healthTick == 0 {
-                        self.libraryState = try self.libraryDecoder.decode(envelope)
+                    let nextWorkspaceState = LiveWorkspacePresenter.ready(snapshot)
+                    if nextWorkspaceState != self.workspaceState {
+                        self.workspaceState = nextWorkspaceState
                     }
                 } catch {
                     // The one-second process health check owns disconnect state.
@@ -1289,6 +1311,25 @@ private struct LocalDeckTransportSnapshot: Equatable, Sendable {
 
 @MainActor
 private final class LocalDeckAudioController {
+    private enum AudioSource {
+        case file(AVAudioFile)
+        case buffer(AVAudioPCMBuffer)
+
+        var format: AVAudioFormat {
+            switch self {
+            case let .file(file): file.processingFormat
+            case let .buffer(buffer): buffer.format
+            }
+        }
+
+        var frameLength: AVAudioFramePosition {
+            switch self {
+            case let .file(file): file.length
+            case let .buffer(buffer): AVAudioFramePosition(buffer.frameLength)
+            }
+        }
+    }
+
     let deckID: UInt64
     let trackLoadID: UInt64
     var onTransport: (() -> Void)?
@@ -1298,7 +1339,7 @@ private final class LocalDeckAudioController {
     private var isPlaying = false
     private var engine: AVAudioEngine?
     private var player: AVAudioPlayerNode?
-    private var buffer: AVAudioPCMBuffer?
+    private var source: AudioSource?
     private var updateTask: Task<Void, Never>?
     private var scheduledStartFrame: AVAudioFramePosition = 0
     private var scheduledFrameCount: AVAudioFrameCount = 0
@@ -1322,7 +1363,7 @@ private final class LocalDeckAudioController {
         self.deckID = deckID
         self.trackLoadID = trackLoadID
         self.durationMillis = durationMillis
-        buffer = try? Self.loadBuffer(audioURI: audioURI, durationMillis: durationMillis)
+        source = try? Self.loadSource(audioURI: audioURI, durationMillis: durationMillis)
     }
 
     func togglePlayback() {
@@ -1330,27 +1371,25 @@ private final class LocalDeckAudioController {
     }
 
     func play() {
-        guard let buffer else { return }
+        guard let source else { return }
         do {
-            let (engine, player) = prepareEngine(buffer: buffer)
+            let (engine, player) = prepareEngine(format: source.format)
             if !engine.isRunning { try engine.start() }
             generation &+= 1
             let activeGeneration = generation
             player.stop()
             if positionMillis >= durationMillis { positionMillis = 0 }
-            let sampleRate = buffer.format.sampleRate
+            let sampleRate = source.format.sampleRate
             let requestedFrame = AVAudioFramePosition(
                 Double(positionMillis) / 1_000 * sampleRate
             )
-            let startFrame = min(requestedFrame, max(0, AVAudioFramePosition(buffer.frameLength) - 1))
-            guard let slice = Self.slice(
-                buffer,
-                start: startFrame,
-                end: AVAudioFramePosition(buffer.frameLength)
-            ) else { return }
+            let startFrame = min(requestedFrame, max(0, source.frameLength - 1))
+            let remainingFrames = source.frameLength - startFrame
+            guard remainingFrames > 0,
+                  remainingFrames <= AVAudioFramePosition(UInt32.max) else { return }
             scheduledStartFrame = startFrame
-            scheduledFrameCount = slice.frameLength
-            player.scheduleBuffer(slice) { [weak self] in
+            scheduledFrameCount = AVAudioFrameCount(remainingFrames)
+            let completion: @Sendable () -> Void = { [weak self] in
                 Task { @MainActor [weak self] in
                     guard let self, self.generation == activeGeneration else { return }
                     self.positionMillis = self.durationMillis
@@ -1359,6 +1398,23 @@ private final class LocalDeckAudioController {
                     self.updateTask = nil
                     self.onTransport?()
                 }
+            }
+            switch source {
+            case let .file(file):
+                player.scheduleSegment(
+                    file,
+                    startingFrame: startFrame,
+                    frameCount: scheduledFrameCount,
+                    at: nil,
+                    completionHandler: completion
+                )
+            case let .buffer(buffer):
+                guard let slice = Self.slice(
+                    buffer,
+                    start: startFrame,
+                    end: source.frameLength
+                ) else { return }
+                player.scheduleBuffer(slice, completionHandler: completion)
             }
             player.play()
             isPlaying = true
@@ -1405,15 +1461,15 @@ private final class LocalDeckAudioController {
         if let player { engine?.detach(player) }
         player = nil
         engine = nil
-        buffer = nil
+        source = nil
     }
 
-    private func prepareEngine(buffer: AVAudioPCMBuffer) -> (AVAudioEngine, AVAudioPlayerNode) {
+    private func prepareEngine(format: AVAudioFormat) -> (AVAudioEngine, AVAudioPlayerNode) {
         if let engine, let player { return (engine, player) }
         let engine = AVAudioEngine()
         let player = AVAudioPlayerNode()
         engine.attach(player)
-        engine.connect(player, to: engine.mainMixerNode, format: buffer.format)
+        engine.connect(player, to: engine.mainMixerNode, format: format)
         player.volume = 0.75
         self.engine = engine
         self.player = player
@@ -1433,7 +1489,7 @@ private final class LocalDeckAudioController {
     }
 
     private func refreshPosition() {
-        guard let buffer, let player,
+        guard let source, let player,
               let renderTime = player.lastRenderTime,
               let playerTime = player.playerTime(forNodeTime: renderTime) else { return }
         let elapsed = max(0, playerTime.sampleTime)
@@ -1443,16 +1499,18 @@ private final class LocalDeckAudioController {
         )
         positionMillis = min(
             durationMillis,
-            UInt64(Double(frame) / buffer.format.sampleRate * 1_000)
+            UInt64(Double(frame) / source.format.sampleRate * 1_000)
         )
     }
 
-    private static func loadBuffer(
+    private static func loadSource(
         audioURI: String,
         durationMillis: UInt64
-    ) throws -> AVAudioPCMBuffer {
+    ) throws -> AudioSource {
         if audioURI.hasPrefix("lumi-demo://") {
-            return try syntheticBuffer(seed: audioURI, durationMillis: durationMillis)
+            return .buffer(
+                try syntheticBuffer(seed: audioURI, durationMillis: durationMillis)
+            )
         }
         let url: URL
         if audioURI.hasPrefix("/") {
@@ -1464,15 +1522,10 @@ private final class LocalDeckAudioController {
         }
         let file = try AVAudioFile(forReading: url)
         guard file.length > 0,
-              file.length <= AVAudioFramePosition(UInt32.max),
-              let buffer = AVAudioPCMBuffer(
-                pcmFormat: file.processingFormat,
-                frameCapacity: AVAudioFrameCount(file.length)
-              ) else {
+              file.length <= AVAudioFramePosition(UInt32.max) else {
             throw CocoaError(.fileReadCorruptFile)
         }
-        try file.read(into: buffer)
-        return buffer
+        return .file(file)
     }
 
     private static func syntheticBuffer(

@@ -16,6 +16,7 @@ struct LiveDeckSurface<Details: View>: View {
     private let details: Details
     @State private var viewport: LumiWaveformViewport
     @State private var magnificationAnchorBeats: Double?
+    @State private var scrubProgress: Double?
     @AppStorage("nl.blancoservices.lumi.waveform.zoom-anchor")
     private var waveformZoomAnchorRaw = LumiWaveformZoomAnchor.mouse.rawValue
     @AppStorage("nl.blancoservices.lumi.waveform.reverse-horizontal-scroll")
@@ -80,9 +81,12 @@ struct LiveDeckSurface<Details: View>: View {
             radius: 14
         )
         .accessibilityElement(children: .contain)
-        .onChange(of: deck.trackLoadID) { _, _ in resetViewport() }
+        .onChange(of: deck.trackLoadID) { _, _ in
+            scrubProgress = nil
+            resetViewport()
+        }
         .onChange(of: deck.beat) { _, beat in
-            guard deck.playing else { return }
+            guard deck.playing, scrubProgress == nil else { return }
             let value = Double(beat)
             if value < viewport.startBeat || value >= viewport.endBeat {
                 viewport = viewport.centered(onBeat: value)
@@ -264,7 +268,7 @@ struct LiveDeckSurface<Details: View>: View {
                 RGBDeckWaveform(
                     points: preview.points,
                     durationBeats: deck.durationBeats,
-                    playheadBeat: Double(deck.beat),
+                    playheadBeat: displayedPlayheadBeat,
                     viewport: viewport
                 )
                 Text(verbatim: "RGB · \(preview.source.uppercased())")
@@ -300,15 +304,23 @@ struct LiveDeckSurface<Details: View>: View {
                             }
                         )
                     }
-                    .gesture(
+                    .highPriorityGesture(
                         DragGesture(minimumDistance: 0)
-                            .onEnded { value in
+                            .onChanged { value in
                                 guard isLocalPlayback else { return }
-                                let beat = viewport.beat(
+                                scrubProgress = seekProgress(
                                     atX: value.location.x,
                                     width: proxy.size.width
                                 )
-                                onSeek(min(max(0, beat / Double(max(1, deck.durationBeats))), 1))
+                            }
+                            .onEnded { value in
+                                guard isLocalPlayback else { return }
+                                let progress = seekProgress(
+                                    atX: value.location.x,
+                                    width: proxy.size.width
+                                )
+                                scrubProgress = nil
+                                onSeek(progress)
                             }
                     )
                     .simultaneousGesture(
@@ -326,7 +338,22 @@ struct LiveDeckSurface<Details: View>: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("RGB waveform for \(deck.title), beat \(deck.beat)")
+        .accessibilityLabel("RGB waveform for \(deck.title), beat \(Int(displayedPlayheadBeat))")
+        .accessibilityHint(
+            isLocalPlayback
+                ? "Click or drag to seek. Playback continues from the selected position."
+                : "Waveform follows the connected deck."
+        )
+    }
+
+    private var displayedPlayheadBeat: Double {
+        guard let scrubProgress else { return Double(deck.beat) }
+        return scrubProgress * Double(max(1, deck.durationBeats))
+    }
+
+    private func seekProgress(atX x: Double, width: Double) -> Double {
+        let beat = viewport.beat(atX: x, width: width)
+        return min(max(0, beat / Double(max(1, deck.durationBeats))), 1)
     }
 
     private var phraseBand: some View {
