@@ -16,6 +16,9 @@ use lumi_library::{
 use lumi_library_demo::{DemoLibraryError, DemoLibraryRevision, DemoLibrarySourceProvider};
 use lumi_library_source::MusicLibrarySourceProvider as _;
 use lumi_library_sqlite::{SqliteLibraryError, SqliteLibraryRepository};
+use lumi_rekordbox_xml::{
+    RekordboxXmlError, RekordboxXmlMirrorSnapshot, RekordboxXmlSyncRequest, load_latest_mirror,
+};
 use serde_json::{Value, json};
 use thiserror::Error;
 
@@ -39,6 +42,7 @@ pub struct LibraryWorker {
     limit: u16,
     editor_track_id: Option<TrackId>,
     pending_source_refresh: Option<ImportedLibraryBaseline>,
+    pending_rekordbox_preview: Option<RekordboxXmlMirrorSnapshot>,
 }
 
 #[derive(Clone, Debug)]
@@ -398,6 +402,7 @@ impl LibraryWorker {
             limit: DEFAULT_PAGE_LIMIT,
             editor_track_id: None,
             pending_source_refresh: None,
+            pending_rekordbox_preview: None,
         };
         let track_ids = worker
             .repository
@@ -417,6 +422,21 @@ impl LibraryWorker {
         self.playlist_id = playlist_id.map(PlaylistId::new);
         self.offset = offset;
         self.limit = limit;
+    }
+
+    pub fn preview_rekordbox_xml_sync(
+        &mut self,
+        folder: String,
+        followed_paths: Vec<String>,
+        include_future_child_playlists: bool,
+    ) -> Result<(), LibraryWorkerError> {
+        let request = RekordboxXmlSyncRequest::try_new(
+            folder,
+            followed_paths,
+            include_future_child_playlists,
+        )?;
+        self.pending_rekordbox_preview = Some(load_latest_mirror(&request)?);
+        Ok(())
     }
 
     pub fn open_editor(&mut self, track_id: u64) -> Result<(), LibraryWorkerError> {
@@ -1067,6 +1087,7 @@ impl LibraryWorker {
                 "status": if self.pending_source_refresh.is_some() { "changesAvailable" } else { "current" },
             },
             "sourceRefresh": source_refresh,
+            "rekordboxSyncPreview": self.rekordbox_sync_preview_json(),
             "capabilities": {
                 "playlists": true,
                 "color": true,
@@ -1097,6 +1118,40 @@ impl LibraryWorker {
             "autoloopCatalog": self.autoloop_catalog_json()?,
             "editor": self.editor_json()?,
         }))
+    }
+
+    fn rekordbox_sync_preview_json(&self) -> Value {
+        let Some(preview) = &self.pending_rekordbox_preview else {
+            return Value::Null;
+        };
+        let diagnostics = preview.diagnostics();
+        json!({
+            "exportFileName": preview.export_path().file_name().and_then(|name| name.to_str()),
+            "contentSha256": preview.content_sha256(),
+            "productVersion": preview.product_version(),
+            "collectionTrackCount": preview.collection_track_count(),
+            "followedPlaylistCount": preview.playlists().len(),
+            "uniqueTrackCount": preview.tracks().len(),
+            "selectionPaths": preview.selection_paths(),
+            "includeFutureChildPlaylists": preview.include_future_child_playlists(),
+            "playlists": preview.playlists().iter().map(|playlist| json!({
+                "path": playlist.path(),
+                "name": playlist.name(),
+                "trackCount": playlist.track_ids().len(),
+            })).collect::<Vec<_>>(),
+            "diagnostics": {
+                "duplicatePlaylistReferences": diagnostics.duplicate_playlist_references,
+                "missingArtist": diagnostics.missing_artist,
+                "missingBpm": diagnostics.missing_bpm,
+                "missingKey": diagnostics.missing_key,
+                "missingDuration": diagnostics.missing_duration,
+                "missingBeatGrid": diagnostics.missing_beat_grid,
+                "missingColour": diagnostics.missing_colour,
+                "missingWaveform": diagnostics.missing_waveform,
+                "missingPhrases": diagnostics.missing_phrases,
+            },
+            "applyState": "previewOnly",
+        })
     }
 
     fn phrase_role_settings_json(&self) -> Result<Value, LibraryWorkerError> {
@@ -1675,6 +1730,8 @@ pub enum LibraryWorkerError {
     Demo(#[from] DemoLibraryError),
     #[error("library persistence failed: {0}")]
     Persistence(#[from] SqliteLibraryError),
+    #[error("Rekordbox XML source failed: {0}")]
+    RekordboxXml(#[from] RekordboxXmlError),
     #[error("library query is invalid: {0}")]
     Query(#[from] lumi_library::TrackPageRequestError),
     #[error("phrase-role defaults failed: {0}")]

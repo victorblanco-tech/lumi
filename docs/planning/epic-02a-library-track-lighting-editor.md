@@ -360,15 +360,22 @@ toekomstige child-playlists meenemen; deze optie staat standaard aan.
 
 ### [E2A-21 – Mirror followed Rekordbox playlists without losing Lumi edits](https://github.com/victorblanco-tech/lumi/issues/91)
 
-Status: **refined**. Importeert uitsluitend tracks uit gevolgde playlists,
-spiegelt membership en volgorde en archiveert tracks die nergens meer gevolgd
-worden. Re-add herstelt alle Lumi-owned data.
+Status: **in progress; read-only mirror normalization delivered**. De engine
+resolveert nu uitsluitend gevolgde folders/playlists, dedupliceert tracks over
+playlists en normaliseert dubbele memberships binnen één Rekordbox-playlist
+zichtbaar en deterministisch. De echte gekozen export is lokaal gevalideerd op
+52 playlists en 684 unieke tracks. Persistente import, volgorde, archive en
+restore volgen voordat deze story gereed is.
 
 ### [E2A-22 – Preview and apply Rekordbox XML sync changes](https://github.com/victorblanco-tech/lumi/issues/90)
 
-Status: **refined**. Levert een hash-gebonden diffpreview en atomaire Apply Sync
-met aantallen voor add, update, remove, archive, restore en fouten. De volledige
-beslissing staat in
+Status: **in progress; source-scope preview delivered**. `Preview Sync` leest de
+nieuwste export opnieuw in de Rust engine, bindt de uitkomst aan SHA-256 en toont
+playlist-, unieke-track-, collection- en capabilitydiagnostiek zonder enige
+librarywrite. `Apply Sync` blijft disabled tot persistente mirror-, archive- en
+diffsemantiek gereed zijn. Daarna volgen de hash-gebonden diffpreview en atomaire
+Apply Sync met aantallen voor add, update, remove, archive, restore en fouten. De
+volledige beslissing staat in
 [`rekordbox-xml-sync.md`](../design/library-sources/rekordbox-xml-sync.md).
 
 ## 6.1 Bouwvolgorde zonder Rekordbox-developmentlibrary

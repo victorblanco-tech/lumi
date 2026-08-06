@@ -274,6 +274,11 @@ public enum EngineCommand: Equatable, Sendable {
     case openLibraryTrackEditor(trackID: UInt64)
     case closeLibraryTrackEditor
     case previewDemoSourceRefresh
+    case previewRekordboxXMLSync(
+        folder: String,
+        followedPaths: [String],
+        includeFutureChildPlaylists: Bool
+    )
     case reconcileLibrarySource(
         trackID: UInt64,
         expectedTimelineRevision: UInt64,
@@ -370,6 +375,17 @@ public enum EngineCommand: Equatable, Sendable {
             return ["kind": .string("closeLibraryTrackEditor")]
         case .previewDemoSourceRefresh:
             return ["kind": .string("previewDemoSourceRefresh")]
+        case let .previewRekordboxXMLSync(
+            folder,
+            followedPaths,
+            includeFutureChildPlaylists
+        ):
+            return [
+                "kind": .string("previewRekordboxXmlSync"),
+                "folder": .string(folder),
+                "followedPaths": .array(followedPaths.map(JSONValue.string)),
+                "includeFutureChildPlaylists": .boolean(includeFutureChildPlaylists)
+            ]
         case let .reconcileLibrarySource(trackID, expectedRevision, strategy):
             var payload = strategy.payload
             payload["kind"] = .string("reconcileLibrarySource")

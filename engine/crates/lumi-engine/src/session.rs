@@ -764,6 +764,18 @@ fn apply_command(
             runtime.library_worker.preview_demo_source_refresh()?;
             return Ok(());
         }
+        SessionCommand::PreviewRekordboxXmlSync {
+            folder,
+            followed_paths,
+            include_future_child_playlists,
+        } => {
+            runtime.library_worker.preview_rekordbox_xml_sync(
+                folder,
+                followed_paths,
+                include_future_child_playlists,
+            )?;
+            return Ok(());
+        }
         SessionCommand::ReconcileLibrarySource {
             track_id,
             expected_revision,
@@ -1101,6 +1113,7 @@ fn apply_command(
         | SessionCommand::OpenLibraryTrackEditor { .. }
         | SessionCommand::CloseLibraryTrackEditor
         | SessionCommand::PreviewDemoSourceRefresh
+        | SessionCommand::PreviewRekordboxXmlSync { .. }
         | SessionCommand::ReconcileLibrarySource { .. }
         | SessionCommand::EditLibraryTimeline { .. }
         | SessionCommand::SetLibraryPhraseLoopStrategy { .. }
@@ -1411,6 +1424,17 @@ fn application_error_envelope(
                 .insert("actualAutoloopCatalogRevision".to_owned(), json!(actual));
             envelope
         }),
+        CommandApplicationError::Library(library_error @ LibraryWorkerError::RekordboxXml(_)) => {
+            error_envelope(
+                sequence,
+                correlation_id,
+                "validationFailed",
+                "rekordboxXmlPreviewRejected",
+                &library_error.to_string(),
+                false,
+                None,
+            )
+        }
         CommandApplicationError::Library(
             library_error @ (LibraryWorkerError::TimelineEdit(_)
             | LibraryWorkerError::NothingToUndo

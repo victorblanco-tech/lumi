@@ -43,6 +43,11 @@ pub enum SessionCommand {
     },
     CloseLibraryTrackEditor,
     PreviewDemoSourceRefresh,
+    PreviewRekordboxXmlSync {
+        folder: String,
+        followed_paths: Vec<String>,
+        include_future_child_playlists: bool,
+    },
     ReconcileLibrarySource {
         track_id: u64,
         expected_revision: u64,
@@ -178,6 +183,7 @@ impl SessionCommand {
             | Self::OpenLibraryTrackEditor { .. }
             | Self::CloseLibraryTrackEditor
             | Self::PreviewDemoSourceRefresh
+            | Self::PreviewRekordboxXmlSync { .. }
             | Self::ReconcileLibrarySource { .. }
             | Self::EditLibraryTimeline { .. }
             | Self::SetLibraryPhraseLoopStrategy { .. }
@@ -230,6 +236,14 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
         }),
         "closeLibraryTrackEditor" => Ok(SessionCommand::CloseLibraryTrackEditor),
         "previewDemoSourceRefresh" => Ok(SessionCommand::PreviewDemoSourceRefresh),
+        "previewRekordboxXmlSync" => Ok(SessionCommand::PreviewRekordboxXmlSync {
+            folder: string(&envelope.payload, "folder")?.to_owned(),
+            followed_paths: string_array(&envelope.payload, "followedPaths")?,
+            include_future_child_playlists: boolean(
+                &envelope.payload,
+                "includeFutureChildPlaylists",
+            )?,
+        }),
         "reconcileLibrarySource" => Ok(SessionCommand::ReconcileLibrarySource {
             track_id: positive_unsigned(&envelope.payload, "trackId")?,
             expected_revision: positive_unsigned(&envelope.payload, "expectedTimelineRevision")?,
@@ -726,6 +740,29 @@ fn boolean(
         .ok_or(CommandDecodeError::InvalidField(field))
 }
 
+fn string_array(
+    payload: &serde_json::Map<String, Value>,
+    field: &'static str,
+) -> Result<Vec<String>, CommandDecodeError> {
+    let values = payload
+        .get(field)
+        .and_then(Value::as_array)
+        .ok_or(CommandDecodeError::InvalidField(field))?;
+    if values.is_empty() || values.len() > 20_000 {
+        return Err(CommandDecodeError::InvalidField(field));
+    }
+    values
+        .iter()
+        .map(|value| {
+            value
+                .as_str()
+                .filter(|text| !text.is_empty() && text.len() <= 2_048)
+                .map(str::to_owned)
+                .ok_or(CommandDecodeError::InvalidField(field))
+        })
+        .collect()
+}
+
 fn optional_string<'a>(
     payload: &'a serde_json::Map<String, Value>,
     field: &str,
@@ -782,3 +819,54 @@ impl fmt::Display for CommandDecodeError {
 }
 
 impl Error for CommandDecodeError {}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn rekordbox_preview_decodes_exact_bounded_selection() {
+        let envelope = command_envelope(serde_json::json!({
+            "kind": "previewRekordboxXmlSync",
+            "folder": "/Music/Rekordbox XML",
+            "followedPaths": ["Sets/Beach Set", "Genre 5 Stars"],
+            "includeFutureChildPlaylists": true,
+        }));
+
+        assert_eq!(
+            decode_command(&envelope),
+            Ok(SessionCommand::PreviewRekordboxXmlSync {
+                folder: "/Music/Rekordbox XML".to_owned(),
+                followed_paths: vec!["Sets/Beach Set".to_owned(), "Genre 5 Stars".to_owned(),],
+                include_future_child_playlists: true,
+            })
+        );
+    }
+
+    #[test]
+    fn rekordbox_preview_rejects_an_empty_selection() {
+        let envelope = command_envelope(serde_json::json!({
+            "kind": "previewRekordboxXmlSync",
+            "folder": "/Music/Rekordbox XML",
+            "followedPaths": [],
+            "includeFutureChildPlaylists": true,
+        }));
+
+        assert_eq!(
+            decode_command(&envelope),
+            Err(CommandDecodeError::InvalidField("followedPaths"))
+        );
+    }
+
+    fn command_envelope(payload: Value) -> MessageEnvelope {
+        MessageEnvelope {
+            protocol_version: 1,
+            message_type: MessageType::Command,
+            message_id: "command-test".to_owned(),
+            sequence: 1,
+            correlation_id: "test".to_owned(),
+            sent_at: "2026-08-06T00:00:00Z".to_owned(),
+            payload: payload.as_object().expect("test payload").clone(),
+        }
+    }
+}

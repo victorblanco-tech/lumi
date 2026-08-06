@@ -15,6 +15,8 @@ final class EngineStatusModel: ObservableObject {
     @Published private(set) var midiIntegrationFeedback: String?
     @Published private(set) var localPlaybackFeedback: String?
     @Published private(set) var localPlaybackFeedbackIsError = false
+    @Published private(set) var sourceImportFeedback: String?
+    @Published private(set) var sourceImportFeedbackIsError = false
 
     private enum Lifecycle: Equatable {
         case stopped
@@ -55,6 +57,8 @@ final class EngineStatusModel: ObservableObject {
         midiIntegrationFeedback = nil
         localPlaybackFeedback = nil
         localPlaybackFeedbackIsError = false
+        sourceImportFeedback = nil
+        sourceImportFeedbackIsError = false
 
         do {
             let executable = try engineExecutable()
@@ -132,6 +136,8 @@ final class EngineStatusModel: ObservableObject {
         midiIntegrationFeedback = nil
         localPlaybackFeedback = nil
         localPlaybackFeedbackIsError = false
+        sourceImportFeedback = nil
+        sourceImportFeedbackIsError = false
     }
 
     func queryLibrary(_ request: LibraryQueryRequest) async {
@@ -341,6 +347,52 @@ final class EngineStatusModel: ObservableObject {
             success = "Source phrases adopted; the previous Lumi revision remains recoverable."
         }
         await exchangeTimelineCommand(command, success: success)
+    }
+
+    func previewRekordboxXMLSync(_ request: RekordboxXMLSyncPreviewRequest) async {
+        sourceImportFeedback = nil
+        sourceImportFeedbackIsError = false
+        guard lifecycle == .ready,
+              let endpointDescription,
+              let protocolVersion,
+              await acquireInteractiveExchange() else {
+            sourceImportFeedback = "The sync preview could not start because the engine is not ready."
+            sourceImportFeedbackIsError = true
+            return
+        }
+        defer { isExchangingCommand = false }
+        do {
+            let envelope = try await supervisor.send(
+                .previewRekordboxXMLSync(
+                    folder: request.folderPath,
+                    followedPaths: request.followedPaths,
+                    includeFutureChildPlaylists: request.includeFutureChildPlaylists
+                )
+            )
+            if let failure = EngineCommandFailure(envelope) {
+                sourceImportFeedback = failure.message
+                sourceImportFeedbackIsError = true
+                return
+            }
+            let snapshot = try snapshotDecoder.decode(
+                envelope,
+                endpointDescription: endpointDescription,
+                protocolVersion: protocolVersion
+            )
+            latestSnapshot = snapshot
+            workspaceState = LiveWorkspacePresenter.ready(snapshot)
+            libraryState = try libraryDecoder.decode(envelope)
+            guard let preview = libraryState.rekordboxSyncPreview else {
+                sourceImportFeedback = "The engine returned no Rekordbox sync preview."
+                sourceImportFeedbackIsError = true
+                return
+            }
+            sourceImportFeedback = "Preview ready. No library data was changed. \(preview.uniqueTrackCount) unique tracks in \(preview.followedPlaylistCount) playlists."
+        } catch {
+            sourceImportFeedback = (error as? LocalizedError)?.errorDescription
+                ?? "The Rekordbox sync preview could not be completed."
+            sourceImportFeedbackIsError = true
+        }
     }
 
     func mutatePhraseRoles(_ request: PhraseRoleMutationRequest) async {

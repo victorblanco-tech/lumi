@@ -55,6 +55,8 @@ struct FoundationView: View {
                         timelineFeedback: engineStatus.timelineEditFeedback,
                         localPlaybackFeedback: engineStatus.localPlaybackFeedback,
                         localPlaybackFeedbackIsError: engineStatus.localPlaybackFeedbackIsError,
+                        sourceImportFeedback: engineStatus.sourceImportFeedback,
+                        sourceImportFeedbackIsError: engineStatus.sourceImportFeedbackIsError,
                         onQuery: { request in
                             Task { await engineStatus.queryLibrary(request) }
                         },
@@ -75,6 +77,9 @@ struct FoundationView: View {
                         },
                         onPhraseRoleMutation: { request in
                             Task { await engineStatus.mutatePhraseRoles(request) }
+                        },
+                        onRekordboxSyncPreview: { request in
+                            Task { await engineStatus.previewRekordboxXMLSync(request) }
                         }
                     )
                 case .integrations:

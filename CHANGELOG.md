@@ -27,6 +27,10 @@ Lumi gebruikt [Semantic Versioning](https://semver.org/).
 
 ### Added
 
+- Een bounded, read-only Rekordbox XML engine-adapter en native `Preview Sync`
+  die gevolgde folders/playlists normaliseert, gedeelde tracks dedupliceert,
+  source capabilities en SHA-256-identiteit toont en nog geen librarydata
+  schrijft.
 - Een ingebouwd `SoundSwitch Autoloops` Output Profile met vier benoemde banks,
   32 stabiele AutoLoop-posities per bank, vier pagina's van acht fysieke
   buttons, exacte bewerkbare AutoLoop Names,

@@ -20,6 +20,7 @@ lumi-midi-output = { path = "../lumi-midi-output" }
 lumi-output-dry-run = { path = "../lumi-output-dry-run" }
 lumi-planner = { path = "../lumi-planner" }
 lumi-protocol = { path = "../lumi-protocol" }
+lumi-rekordbox-xml = { path = "../lumi-rekordbox-xml" }
 lumi-simulator = { path = "../lumi-simulator" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"

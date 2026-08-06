@@ -64,7 +64,77 @@ public struct LibrarySnapshotDecoder: Sendable {
             midiIntegration: try decodeMidiIntegration(envelope.payload["midiIntegration"]),
             deckInputIntegration: try decodeDeckInputIntegration(
                 envelope.payload["deckInputIntegration"]
+            ),
+            rekordboxSyncPreview: try decodeRekordboxSyncPreview(
+                library["rekordboxSyncPreview"]
             )
+        )
+    }
+
+    private func decodeRekordboxSyncPreview(
+        _ value: JSONValue?
+    ) throws -> RekordboxXMLSyncPreview? {
+        guard let value, value != .null else { return nil }
+        guard case let .object(preview) = value else {
+            throw LibrarySnapshotError.invalidObject
+        }
+        let playlistValues = try array(preview, "playlists")
+        guard !playlistValues.isEmpty, playlistValues.count <= 20_000 else {
+            throw LibrarySnapshotError.unboundedRekordboxSyncPreview
+        }
+        let playlists = try playlistValues.map { value -> RekordboxXMLSyncPlaylist in
+            guard case let .object(playlist) = value else {
+                throw LibrarySnapshotError.invalidObject
+            }
+            return RekordboxXMLSyncPlaylist(
+                path: try string(playlist, "path"),
+                name: try string(playlist, "name"),
+                trackCount: try unsigned(playlist, "trackCount")
+            )
+        }
+        let diagnostics = try object(preview, "diagnostics")
+        let followedPlaylistCount = try unsigned(preview, "followedPlaylistCount")
+        let contentSHA256 = try string(preview, "contentSha256")
+        let selectionPaths = try strings(preview, "selectionPaths")
+        let applyState = try string(preview, "applyState")
+        guard followedPlaylistCount == UInt64(playlists.count),
+              Set(playlists.map(\.path)).count == playlists.count,
+              contentSHA256.count == 64,
+              contentSHA256.allSatisfy({ $0.isHexDigit }),
+              !selectionPaths.isEmpty,
+              selectionPaths.count <= 20_000,
+              Set(selectionPaths).count == selectionPaths.count,
+              applyState == "previewOnly" else {
+            throw LibrarySnapshotError.invalidRekordboxSyncPreview
+        }
+        return RekordboxXMLSyncPreview(
+            exportFileName: try string(preview, "exportFileName"),
+            contentSHA256: contentSHA256,
+            productVersion: try string(preview, "productVersion"),
+            collectionTrackCount: try unsigned(preview, "collectionTrackCount"),
+            followedPlaylistCount: followedPlaylistCount,
+            uniqueTrackCount: try unsigned(preview, "uniqueTrackCount"),
+            selectionPaths: selectionPaths,
+            includeFutureChildPlaylists: try boolean(
+                preview,
+                "includeFutureChildPlaylists"
+            ),
+            playlists: playlists,
+            diagnostics: RekordboxXMLSyncDiagnostics(
+                duplicatePlaylistReferences: try unsigned(
+                    diagnostics,
+                    "duplicatePlaylistReferences"
+                ),
+                missingArtist: try unsigned(diagnostics, "missingArtist"),
+                missingBPM: try unsigned(diagnostics, "missingBpm"),
+                missingKey: try unsigned(diagnostics, "missingKey"),
+                missingDuration: try unsigned(diagnostics, "missingDuration"),
+                missingBeatGrid: try unsigned(diagnostics, "missingBeatGrid"),
+                missingColour: try unsigned(diagnostics, "missingColour"),
+                missingWaveform: try unsigned(diagnostics, "missingWaveform"),
+                missingPhrases: try unsigned(diagnostics, "missingPhrases")
+            ),
+            applyState: applyState
         )
     }
 
@@ -874,6 +944,8 @@ public enum LibrarySnapshotError: Error, Equatable {
     case invalidPhraseRoleSettings
     case unboundedAutoloopCatalog
     case invalidAutoloopCatalog
+    case unboundedRekordboxSyncPreview
+    case invalidRekordboxSyncPreview
 }
 
 private extension Optional {

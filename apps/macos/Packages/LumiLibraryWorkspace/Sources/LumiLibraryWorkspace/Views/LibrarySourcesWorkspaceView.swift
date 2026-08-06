@@ -7,8 +7,11 @@ public struct LibrarySourcesWorkspaceView: View {
     private let library: LibraryWorkspaceState
     private let settings: PhraseRoleSettingsState?
     private let feedback: String?
+    private let syncFeedback: String?
+    private let syncFeedbackIsError: Bool
     private let rendersInteractiveControls: Bool
     private let onMutation: @Sendable (PhraseRoleMutationRequest) -> Void
+    private let onSyncPreview: @Sendable (RekordboxXMLSyncPreviewRequest) -> Void
 
     @AppStorage("nl.blancoservices.lumi.rekordboxXML.folder")
     private var rekordboxFolderPath = ""
@@ -29,14 +32,20 @@ public struct LibrarySourcesWorkspaceView: View {
         library: LibraryWorkspaceState,
         settings: PhraseRoleSettingsState?,
         feedback: String? = nil,
+        syncFeedback: String? = nil,
+        syncFeedbackIsError: Bool = false,
         rendersInteractiveControls: Bool = true,
-        onMutation: @escaping @Sendable (PhraseRoleMutationRequest) -> Void = { _ in }
+        onMutation: @escaping @Sendable (PhraseRoleMutationRequest) -> Void = { _ in },
+        onSyncPreview: @escaping @Sendable (RekordboxXMLSyncPreviewRequest) -> Void = { _ in }
     ) {
         self.library = library
         self.settings = settings
         self.feedback = feedback
+        self.syncFeedback = syncFeedback
+        self.syncFeedbackIsError = syncFeedbackIsError
         self.rendersInteractiveControls = rendersInteractiveControls
         self.onMutation = onMutation
+        self.onSyncPreview = onSyncPreview
         _selectedProviderKind = State(initialValue: settings?.mappingProfiles.first?.providerKind)
     }
 
@@ -47,6 +56,7 @@ public struct LibrarySourcesWorkspaceView: View {
                 rekordboxSource
                 rekordboxSourceSettings
                 rekordboxPlaylistSelection
+                rekordboxSyncPreview
                 activeSource
                 sourceMappings
             }
@@ -215,15 +225,170 @@ public struct LibrarySourcesWorkspaceView: View {
                                 .font(LumiTypography.caption)
                                 .foregroundStyle(followedPaths.isEmpty ? LumiColor.textSecondary : LumiColor.accent)
                             Spacer()
-                            Button("Preview Sync") {}
+                            Button("Preview Sync") {
+                                onSyncPreview(
+                                    RekordboxXMLSyncPreviewRequest(
+                                        folderPath: rekordboxFolderPath,
+                                        followedPaths: followedPaths.sorted(),
+                                        includeFutureChildPlaylists: includeFutureChildPlaylists
+                                    )
+                                )
+                            }
                                 .buttonStyle(.borderedProminent)
-                                .disabled(true)
-                                .help("Sync preview is the next story; no tracks are changed during source discovery")
+                                .disabled(
+                                    followedPaths.isEmpty
+                                        || isScanning
+                                        || !rendersInteractiveControls
+                                )
+                                .help("Read the selected playlists and calculate a mirror preview without changing the Lumi library")
+                                .accessibilityIdentifier("lumi.library.sources.rekordbox.previewSync")
                         }
                     }
                 }
             }
         }
+    }
+
+    @ViewBuilder
+    private var rekordboxSyncPreview: some View {
+        if !syncFeedbackIsError,
+           let preview = library.rekordboxSyncPreview,
+           previewMatchesCurrentConfiguration(preview) {
+            VStack(alignment: .leading, spacing: LumiSpacing.large) {
+                HStack(alignment: .bottom) {
+                    VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+                        Text("Sync Preview")
+                            .font(LumiTypography.cardTitle)
+                        Text("Engine-validated mirror scope. This preview has not written tracks, playlists, phrases or analysis to Lumi.")
+                            .font(LumiTypography.body)
+                            .foregroundStyle(LumiColor.textSecondary)
+                    }
+                    Spacer()
+                    StatusBadge("PREVIEW ONLY", state: .ready)
+                }
+                LumiPanel {
+                    VStack(alignment: .leading, spacing: LumiSpacing.large) {
+                        HStack(spacing: LumiSpacing.medium) {
+                            previewMetric(
+                                "Playlists",
+                                value: preview.followedPlaylistCount,
+                                systemImage: "music.note.list"
+                            )
+                            previewMetric(
+                                "Unique tracks",
+                                value: preview.uniqueTrackCount,
+                                systemImage: "music.note"
+                            )
+                            previewMetric(
+                                "Collection tracks",
+                                value: preview.collectionTrackCount,
+                                systemImage: "shippingbox.fill"
+                            )
+                        }
+                        Divider()
+                        VStack(alignment: .leading, spacing: LumiSpacing.small) {
+                            Text("Selected mirror")
+                                .font(LumiTypography.caption.weight(.semibold))
+                                .foregroundStyle(LumiColor.textSecondary)
+                            ForEach(preview.playlists.prefix(8)) { playlist in
+                                HStack {
+                                    Label(playlist.path, systemImage: "music.note.list")
+                                        .lineLimit(1)
+                                    Spacer()
+                                    Text("\(playlist.trackCount) tracks")
+                                        .font(LumiTypography.technical)
+                                        .foregroundStyle(LumiColor.textSecondary)
+                                }
+                                .font(LumiTypography.body)
+                            }
+                            if preview.playlists.count > 8 {
+                                Text("+ \(preview.playlists.count - 8) more playlists")
+                                    .font(LumiTypography.caption)
+                                    .foregroundStyle(LumiColor.textSecondary)
+                            }
+                        }
+                        Divider()
+                        VStack(alignment: .leading, spacing: LumiSpacing.small) {
+                            Text("Source analysis")
+                                .font(LumiTypography.caption.weight(.semibold))
+                                .foregroundStyle(LumiColor.textSecondary)
+                            HStack(spacing: LumiSpacing.large) {
+                                diagnosticLabel(
+                                    "Duplicate references merged",
+                                    preview.diagnostics.duplicatePlaylistReferences
+                                )
+                                diagnosticLabel("No beat grid", preview.diagnostics.missingBeatGrid)
+                                diagnosticLabel("No key", preview.diagnostics.missingKey)
+                                diagnosticLabel("No duration", preview.diagnostics.missingDuration)
+                                diagnosticLabel("No colour", preview.diagnostics.missingColour)
+                            }
+                            Label(
+                                "Rekordbox XML does not contain RGB waveform or phrase data. Lumi will keep those capabilities explicitly missing until a later analysis source provides them.",
+                                systemImage: "info.circle.fill"
+                            )
+                            .font(LumiTypography.caption)
+                            .foregroundStyle(LumiColor.textSecondary)
+                        }
+                        Divider()
+                        HStack {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(preview.exportFileName)
+                                    .font(LumiTypography.body.weight(.semibold))
+                                Text("SHA-256 \(preview.contentSHA256.prefix(12))… · Rekordbox \(preview.productVersion)")
+                                    .font(LumiTypography.technical)
+                                    .foregroundStyle(LumiColor.textSecondary)
+                            }
+                            Spacer()
+                            Button("Apply Sync") {}
+                                .buttonStyle(.borderedProminent)
+                                .disabled(true)
+                                .help("Apply becomes available after the archive-safe persistence step")
+                        }
+                    }
+                }
+                if let syncFeedback {
+                    Label(syncFeedback, systemImage: "checkmark.shield.fill")
+                        .font(LumiTypography.caption)
+                        .foregroundStyle(LumiColor.success)
+                }
+            }
+            .accessibilityIdentifier("lumi.library.sources.rekordbox.syncPreview")
+        } else if let syncFeedback {
+            Label(syncFeedback, systemImage: "exclamationmark.triangle.fill")
+                .font(LumiTypography.caption)
+                .foregroundStyle(LumiColor.warning)
+        }
+    }
+
+    private func previewMetric(
+        _ title: String,
+        value: UInt64,
+        systemImage: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+            Label(title, systemImage: systemImage)
+                .font(LumiTypography.caption)
+                .foregroundStyle(LumiColor.textSecondary)
+            Text(value.formatted())
+                .font(LumiTypography.cardTitle.monospacedDigit())
+                .foregroundStyle(LumiColor.textPrimary)
+        }
+        .padding(LumiSpacing.medium)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(LumiColor.surfaceElevated)
+        .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
+    }
+
+    private func diagnosticLabel(_ title: String, _ count: UInt64) -> some View {
+        Label("\(title): \(count)", systemImage: count == 0 ? "checkmark.circle.fill" : "exclamationmark.circle.fill")
+            .font(LumiTypography.technical)
+            .foregroundStyle(count == 0 ? LumiColor.success : LumiColor.warning)
+    }
+
+    private func previewMatchesCurrentConfiguration(_ preview: RekordboxXMLSyncPreview) -> Bool {
+        preview.exportFileName == discovery?.export.fileName
+            && Set(preview.selectionPaths) == followedPaths
+            && preview.includeFutureChildPlaylists == includeFutureChildPlaylists
     }
 
     @ViewBuilder

@@ -211,6 +211,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
     public let autoloopCatalog: AutoloopCatalogState?
     public let midiIntegration: MidiIntegrationState?
     public let deckInputIntegration: DeckInputIntegrationState?
+    public let rekordboxSyncPreview: RekordboxXMLSyncPreview?
     public let diagnostic: String?
 
     public init(
@@ -227,6 +228,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
         autoloopCatalog: AutoloopCatalogState? = nil,
         midiIntegration: MidiIntegrationState? = nil,
         deckInputIntegration: DeckInputIntegrationState? = nil,
+        rekordboxSyncPreview: RekordboxXMLSyncPreview? = nil,
         diagnostic: String? = nil
     ) {
         self.condition = condition
@@ -242,6 +244,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
         self.autoloopCatalog = autoloopCatalog
         self.midiIntegration = midiIntegration
         self.deckInputIntegration = deckInputIntegration
+        self.rekordboxSyncPreview = rekordboxSyncPreview
         self.diagnostic = diagnostic
     }
 

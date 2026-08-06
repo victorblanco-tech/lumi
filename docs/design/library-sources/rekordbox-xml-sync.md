@@ -1,6 +1,6 @@
 # Rekordbox XML playlist sync
 
-- Status: **Accepted; source discovery delivered**
+- Status: **Accepted; engine-owned source-scope preview delivered**
 - Accepted: **2026-08-06**
 - Source mode: **Official XML export, read-only**
 - Stories: [E2A-20](https://github.com/victorblanco-tech/lumi/issues/92), [E2A-21](https://github.com/victorblanco-tech/lumi/issues/91), [E2A-22](https://github.com/victorblanco-tech/lumi/issues/90)
@@ -38,6 +38,8 @@ configured XML folder
 ```
 
 - A source track exists once even when it belongs to multiple followed playlists.
+- Repeated references to the same track inside one Rekordbox playlist are
+  normalized to one Lumi membership and reported in preview diagnostics.
 - Playlist order and membership mirror the validated XML snapshot.
 - Removal from one playlist does not remove a track still referenced elsewhere.
 - A track absent from all followed playlists becomes hidden and archived.
@@ -63,3 +65,19 @@ targets tracks referenced by followed playlists.
 - Preview records the XML content hash; Apply rejects a changed source file.
 - Parse, validation, or persistence failure retains the last complete snapshot.
 - The XML and all Rekordbox/audio files remain read-only.
+
+## Delivered preview boundary
+
+`Preview Sync` is an engine command, not a UI-only estimate. It reparses the
+newest XML export using the bounded Rust adapter and returns:
+
+- export filename, Rekordbox version and SHA-256 content identity;
+- exact normalized playlist scope and per-playlist membership counts;
+- unique source-track count versus total Collection count;
+- missing metadata, beatgrid, color, waveform and phrase capabilities;
+- the number of duplicate Rekordbox playlist references normalized by Lumi.
+
+The result is held in memory as `previewOnly`. It does not mutate the SQLite
+library, does not replace the demo provider, and cannot be applied from the UI.
+Changing the selected paths, future-child setting or newest export makes the
+visible preview inapplicable until it is recalculated.
