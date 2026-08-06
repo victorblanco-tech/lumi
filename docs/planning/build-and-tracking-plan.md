@@ -114,6 +114,9 @@ DJ-hardware en draait in CI. De technische uitwerking staat in
 - detectie en planning van de volgende geladen track;
 - phrase/loop/themeplanning;
 - handmatige overrides en stale-editbescherming.
+- taakgerichte macOS-navigatie: Library Sources & Import, Integrations voor Deck
+  Inputs en Lighting Outputs, een afzonderlijke Diagnostics-bestemming en
+  globale Settings zonder providerconfiguratie.
 
 De fase bestaat uit drie opeenvolgende verticale epics:
 
@@ -123,6 +126,11 @@ De fase bestaat uit drie opeenvolgende verticale epics:
 
 Exit: echte librarytracks hebben een duurzame, bewerkbare Lumi-timeline en vóór
 de transitie bestaat een volledig, uitlegbaar en aanpasbaar plan.
+
+Actuele volgorde: de demo-library, Track Editor, Live dual-deck, SoundSwitch-
+output, BLT-input en informatiearchitectuur zijn lokaal bewezen. Het volgende
+werkpakket is de veilige Rekordbox 7-spike/import achter de reeds zichtbare
+`Library > Sources & Import`-bestemming.
 
 ### Fase 3 – SoundSwitch Live MVP (`0.3.0`)
 

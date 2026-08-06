@@ -7,7 +7,7 @@
 
 ## Product outcome
 
-Settings presents SoundSwitch Autoloops as a bank-first surface. Lumi is shown
+`Integrations > Lighting Outputs` presents SoundSwitch Autoloops as a bank-first surface. Lumi is shown
 as the virtual MIDI controller at the same level as an optional physical
 controller. The UI never suggests that Lumi controls or depends on Control One.
 

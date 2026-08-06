@@ -20,7 +20,7 @@ Create two triggers:
 | Expression | same Tracked Update expression | same Tracked Update expression |
 
 The exact versioned expression is available in Lumi under **Settings →
-Integrations → Beat Link Trigger → Copy Tracked Update Expression**. Lumi shows
+Integrations → Deck Inputs → Beat Link Trigger → Copy Tracked Update Expression**. Lumi shows
 the same protocol version and live counters beside that user-facing template.
 
 The expression deliberately distinguishes BLT's Shallow Playback Simulator

@@ -136,7 +136,6 @@ struct LumiLibraryVisualEvidenceCommand {
             Color(red: 0.055, green: 0.063, blue: 0.078)
             PhraseRoleSettingsView(
                 settings: settings,
-                autoloopCatalog: AutoloopCatalogFixtures.incomplete,
                 appearance: .constant(.dark),
                 keyNotation: .constant(.camelot),
                 rendersInteractiveControls: false
@@ -149,12 +148,9 @@ struct LumiLibraryVisualEvidenceCommand {
 
         let mappingView = ZStack {
             Color(red: 0.965, green: 0.97, blue: 0.98)
-            PhraseRoleSettingsView(
+            LibrarySourcesWorkspaceView(
+                library: LibraryWorkspaceFixtures.ready,
                 settings: settings,
-                autoloopCatalog: AutoloopCatalogFixtures.incomplete,
-                appearance: .constant(.light),
-                keyNotation: .constant(.classic),
-                initialSection: .sourceMapping,
                 rendersInteractiveControls: false
             )
         }
@@ -165,12 +161,8 @@ struct LumiLibraryVisualEvidenceCommand {
 
         let autoloopView = ZStack {
             Color(red: 0.055, green: 0.063, blue: 0.078)
-            PhraseRoleSettingsView(
-                settings: settings,
-                autoloopCatalog: AutoloopCatalogFixtures.incomplete,
-                appearance: .constant(.dark),
-                keyNotation: .constant(.camelot),
-                initialSection: .autoloopMatrix,
+            AutoloopCatalogSettingsView(
+                catalog: AutoloopCatalogFixtures.incomplete,
                 rendersInteractiveControls: false
             )
         }

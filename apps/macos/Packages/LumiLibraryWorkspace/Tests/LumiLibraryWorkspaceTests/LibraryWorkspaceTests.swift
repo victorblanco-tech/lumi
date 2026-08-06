@@ -5,6 +5,17 @@ import Testing
 
 @Suite("Library workspace")
 struct LibraryWorkspaceTests {
+    @Test("Task-oriented navigation keeps provider configuration out of Settings")
+    func taskOrientedNavigationBoundaries() {
+        #expect(PhraseRoleSettingsSection.allCases.map(\.rawValue) == [
+            "general", "phraseModel", "planningDefaults"
+        ])
+        #expect(LibraryHubSection.allCases.map(\.rawValue) == ["tracks", "sources"])
+        #expect(IntegrationsWorkspaceSection.allCases.map(\.rawValue) == [
+            "overview", "deckInputs", "lightingOutputs", "diagnostics"
+        ])
+    }
+
     @Test("Authoritative engine library metadata decodes into a bounded page")
     func decodesLibrarySnapshot() throws {
         let state = try LibrarySnapshotDecoder().decode(envelope(trackValues: [trackValue()]))

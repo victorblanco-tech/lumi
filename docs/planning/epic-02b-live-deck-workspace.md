@@ -1,6 +1,6 @@
 # Epic 2B – Live deck intelligence and rolling plans
 
-Status: **In delivery; product Live completion precedes Beat Link PoC**
+Status: **Live product slice complete; BLT MIDI adapter functionally proven, hardening evidence remains**
 
 Target milestone: **0.2.0 – Deck Intelligence**
 
@@ -129,7 +129,7 @@ Status: **UX contract accepted; native companion delivery remains planned**
 
 ### [E2B-06 – Beat Link Trigger simulated-deck MIDI PoC](https://github.com/victorblanco-tech/lumi/issues/87)
 
-Status: **Next**
+Status: **Functional PoC and first adapter complete; latency/loss and reconnect evidence remain open**
 
 - publish a dedicated Lumi virtual MIDI destination for deck-source input;
 - configure two Beat Link Trigger simulation decks to send a documented,
@@ -143,6 +143,14 @@ Status: **Next**
   Beat Link waveform data;
 - deliver a go/no-go decision for MIDI as an initial BLT adapter transport, not
   an assumption that it becomes the production integration.
+
+The two BLT simulation decks now drive Lumi's stable Deck A/B identity, load,
+play/pause, master, pitch-adjusted BPM and beat position through a dedicated
+`Lumi Deck Input` CoreMIDI destination. SoundSwitch uses a separate virtual MIDI
+source. The simulator-only pitch normalization is isolated in the copied BLT
+expression and does not change real-player tempo semantics. Manual product
+validation passed; the story remains open only for measured latency/loss and a
+repeatable disconnect/reconnect transcript.
 
 ## Exit criteria
 

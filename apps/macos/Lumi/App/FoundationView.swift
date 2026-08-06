@@ -6,6 +6,7 @@ import SwiftUI
 private enum AppDestination: String, CaseIterable, Identifiable {
     case live
     case library
+    case integrations
     case settings
 
     var id: String { rawValue }
@@ -15,6 +16,7 @@ struct FoundationView: View {
     @ObservedObject var engineStatus: EngineStatusModel
     @Bindable var preferences: LumiPreferences
     @State private var destination: AppDestination = .live
+    @State private var librarySection: LibraryHubSection = .tracks
 
     private var productVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "LumiProductVersion") as? String
@@ -45,9 +47,14 @@ struct FoundationView: View {
                         }
                     )
                 case .library:
-                    LibraryWorkspaceView(
+                    LibraryHubView(
                         state: engineStatus.libraryState,
                         keyNotation: $preferences.keyNotation,
+                        section: $librarySection,
+                        phraseRoleFeedback: engineStatus.phraseRoleFeedback,
+                        timelineFeedback: engineStatus.timelineEditFeedback,
+                        localPlaybackFeedback: engineStatus.localPlaybackFeedback,
+                        localPlaybackFeedbackIsError: engineStatus.localPlaybackFeedbackIsError,
                         onQuery: { request in
                             Task { await engineStatus.queryLibrary(request) }
                         },
@@ -66,23 +73,18 @@ struct FoundationView: View {
                         onLoadOnLocalDeck: { request in
                             Task { await engineStatus.loadLibraryTrackOnLocalDeck(request) }
                         },
-                        timelineFeedback: engineStatus.timelineEditFeedback,
-                        localPlaybackFeedback: engineStatus.localPlaybackFeedback,
-                        localPlaybackFeedbackIsError: engineStatus.localPlaybackFeedbackIsError
+                        onPhraseRoleMutation: { request in
+                            Task { await engineStatus.mutatePhraseRoles(request) }
+                        }
                     )
-                case .settings:
-                    PhraseRoleSettingsView(
-                        settings: engineStatus.libraryState.phraseRoleSettings,
-                        autoloopCatalog: engineStatus.libraryState.autoloopCatalog,
-                        midiIntegration: engineStatus.libraryState.midiIntegration,
-                        deckInputIntegration: engineStatus.libraryState.deckInputIntegration,
-                        appearance: $preferences.appearance,
-                        keyNotation: $preferences.keyNotation,
-                        feedback: engineStatus.phraseRoleFeedback,
+                case .integrations:
+                    IntegrationsWorkspaceView(
+                        library: engineStatus.libraryState,
                         autoloopFeedback: engineStatus.autoloopCatalogFeedback,
                         midiIntegrationFeedback: engineStatus.midiIntegrationFeedback,
-                        onMutation: { request in
-                            Task { await engineStatus.mutatePhraseRoles(request) }
+                        onOpenLibrarySources: {
+                            librarySection = .sources
+                            destination = .library
                         },
                         onAutoloopMutation: { request in
                             Task { await engineStatus.mutateAutoloopCatalog(request) }
@@ -110,6 +112,16 @@ struct FoundationView: View {
                             }
                         }
                     )
+                case .settings:
+                    PhraseRoleSettingsView(
+                        settings: engineStatus.libraryState.phraseRoleSettings,
+                        appearance: $preferences.appearance,
+                        keyNotation: $preferences.keyNotation,
+                        feedback: engineStatus.phraseRoleFeedback,
+                        onMutation: { request in
+                            Task { await engineStatus.mutatePhraseRoles(request) }
+                        }
+                    )
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -134,7 +146,7 @@ struct FoundationView: View {
                 destinationButton(.live, title: "Live", systemImage: "waveform")
                 destinationButton(.library, title: "Library", systemImage: "music.note.list")
                 unavailableNavigation("Plans", systemImage: "list.bullet.rectangle")
-                unavailableNavigation("Integrations", systemImage: "cable.connector")
+                destinationButton(.integrations, title: "Integrations", systemImage: "cable.connector")
             }
             Spacer()
             destinationButton(.settings, title: "Settings", systemImage: "gearshape")
