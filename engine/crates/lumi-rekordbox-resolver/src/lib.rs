@@ -14,6 +14,13 @@ use thiserror::Error;
 
 const MAXIMUM_REQUESTED_TRACKS: usize = 100_000;
 const QUERY_CHUNK_SIZE: usize = 500;
+// Compatible with pyrekordbox's MIT-licensed Rekordbox key boundary. Keeping
+// the recoverable blob here avoids plaintext process arguments and logs.
+const REKORDBOX_KEY_BLOB: &[u8] =
+    b"PN_Pq^*N>(JYe*u^8;Yg76HuZ<mR13S?=>)b9;DpoTXV(6ItkU`}8*m6tx_I{Solh_N#dfe{v=";
+const REKORDBOX_KEY_BLOB_XOR: &[u8] = b"657f48f84c437cc1";
+const BASE85_ALPHABET: &[u8; 85] =
+    b"0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz!#$%&()*+-;<=>?@^_`{|}~";
 
 pub struct DatabaseKey {
     bytes: [u8; 128],
@@ -40,6 +47,60 @@ impl DatabaseKey {
     fn expose(&self) -> Result<&str, ResolverError> {
         std::str::from_utf8(&self.bytes[..self.len]).map_err(|_| ResolverError::InvalidDatabaseKey)
     }
+
+    /// Decodes the bundled Rekordbox 7 database credential into a zeroing
+    /// value. The plaintext is never returned as a normal String to callers.
+    pub fn rekordbox7_bundled() -> Result<Self, ResolverError> {
+        let mut compressed = decode_base85(REKORDBOX_KEY_BLOB)?;
+        for (index, byte) in compressed.iter_mut().enumerate() {
+            *byte ^= REKORDBOX_KEY_BLOB_XOR[index % REKORDBOX_KEY_BLOB_XOR.len()];
+        }
+        let mut plaintext = miniz_oxide::inflate::decompress_to_vec_zlib(&compressed)
+            .map_err(|_| ResolverError::BundledCredentialUnavailable)?;
+        compressed.fill(0);
+        if plaintext.len() < 32
+            || plaintext.len() > 128
+            || !plaintext.iter().all(u8::is_ascii_hexdigit)
+        {
+            plaintext.fill(0);
+            return Err(ResolverError::BundledCredentialUnavailable);
+        }
+        let mut bytes = [0_u8; 128];
+        bytes[..plaintext.len()].copy_from_slice(&plaintext);
+        let len = plaintext.len();
+        plaintext.fill(0);
+        Ok(Self { bytes, len })
+    }
+}
+
+fn decode_base85(encoded: &[u8]) -> Result<Vec<u8>, ResolverError> {
+    if encoded.is_empty() {
+        return Err(ResolverError::BundledCredentialUnavailable);
+    }
+    let remainder = encoded.len() % 5;
+    let padding = if remainder == 0 { 0 } else { 5 - remainder };
+    let mut padded = Vec::with_capacity(encoded.len() + padding);
+    padded.extend_from_slice(encoded);
+    padded.extend(std::iter::repeat_n(b'~', padding));
+    let mut decoded = Vec::with_capacity(padded.len() / 5 * 4);
+    for chunk in padded.chunks_exact(5) {
+        let mut value = 0_u64;
+        for byte in chunk {
+            let digit = BASE85_ALPHABET
+                .iter()
+                .position(|candidate| candidate == byte)
+                .ok_or(ResolverError::BundledCredentialUnavailable)?;
+            value = value
+                .checked_mul(85)
+                .and_then(|current| current.checked_add(digit as u64))
+                .ok_or(ResolverError::BundledCredentialUnavailable)?;
+        }
+        let value =
+            u32::try_from(value).map_err(|_| ResolverError::BundledCredentialUnavailable)?;
+        decoded.extend_from_slice(&value.to_be_bytes());
+    }
+    decoded.truncate(decoded.len().saturating_sub(padding));
+    Ok(decoded)
 }
 
 impl Drop for DatabaseKey {
@@ -482,6 +543,8 @@ fn sha256_file(path: &Path) -> Result<String, ResolverError> {
 pub enum ResolverError {
     #[error("invalid database key")]
     InvalidDatabaseKey,
+    #[error("bundled Rekordbox database credential could not be decoded")]
+    BundledCredentialUnavailable,
     #[error("invalid source track identity")]
     InvalidSourceTrackId,
     #[error("invalid absolute audio path")]
@@ -522,6 +585,13 @@ mod tests {
     #[test]
     fn key_debug_output_is_redacted() -> Result<(), Box<dyn Error>> {
         let key = DatabaseKey::try_new("a".repeat(64))?;
+        assert_eq!(format!("{key:?}"), "DatabaseKey([REDACTED])");
+        Ok(())
+    }
+
+    #[test]
+    fn bundled_key_decodes_without_exposing_plaintext() -> Result<(), Box<dyn Error>> {
+        let key = DatabaseKey::rekordbox7_bundled()?;
         assert_eq!(format!("{key:?}"), "DatabaseKey([REDACTED])");
         Ok(())
     }

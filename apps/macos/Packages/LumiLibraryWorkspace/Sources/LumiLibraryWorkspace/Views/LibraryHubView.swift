@@ -26,6 +26,7 @@ public struct LibraryHubView: View {
     private let onPhraseRoleMutation: @Sendable (PhraseRoleMutationRequest) -> Void
     private let onRekordboxSyncPreview: @Sendable (RekordboxXMLSyncPreviewRequest) -> Void
     private let onRekordboxSyncApply: @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void
+    private let onRekordboxAnalysisImport: @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void
 
     @Binding private var section: LibraryHubSection
 
@@ -47,7 +48,8 @@ public struct LibraryHubView: View {
         onLoadOnLocalDeck: @escaping @MainActor (LibraryDeckLoadRequest) -> Void = { _ in },
         onPhraseRoleMutation: @escaping @Sendable (PhraseRoleMutationRequest) -> Void = { _ in },
         onRekordboxSyncPreview: @escaping @Sendable (RekordboxXMLSyncPreviewRequest) -> Void = { _ in },
-        onRekordboxSyncApply: @escaping @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void = { _, _ in }
+        onRekordboxSyncApply: @escaping @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void = { _, _ in },
+        onRekordboxAnalysisImport: @escaping @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void = { _, _ in }
     ) {
         self.state = state
         _keyNotation = keyNotation
@@ -67,6 +69,7 @@ public struct LibraryHubView: View {
         self.onPhraseRoleMutation = onPhraseRoleMutation
         self.onRekordboxSyncPreview = onRekordboxSyncPreview
         self.onRekordboxSyncApply = onRekordboxSyncApply
+        self.onRekordboxAnalysisImport = onRekordboxAnalysisImport
     }
 
     public var body: some View {
@@ -98,7 +101,8 @@ public struct LibraryHubView: View {
                         syncFeedbackIsError: sourceImportFeedbackIsError,
                         onMutation: onPhraseRoleMutation,
                         onSyncPreview: onRekordboxSyncPreview,
-                        onSyncApply: onRekordboxSyncApply
+                        onSyncApply: onRekordboxSyncApply,
+                        onAnalysisImport: onRekordboxAnalysisImport
                     )
                 }
             }

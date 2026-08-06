@@ -1,6 +1,6 @@
 # Rekordbox XML playlist sync
 
-- Status: **Accepted; Apply delivered and authoritative analysis resolution proven**
+- Status: **Accepted; canonical analysis import delivered and real-library verified**
 - Accepted: **2026-08-06**
 - Source mode: **XML playlist scope plus closed local analysis snapshot, read-only**
 - Stories: [E2A-20](https://github.com/victorblanco-tech/lumi/issues/92), [E2A-21](https://github.com/victorblanco-tech/lumi/issues/91), [E2A-22](https://github.com/victorblanco-tech/lumi/issues/90)
@@ -139,3 +139,23 @@ maps XML `TrackID` to the current `AnalysisDataPath` from a Lumi-owned SQLCipher
 snapshot. The configured 684-track scope resolved 684/684 without a filename
 fallback; all had beatgrid and colored waveforms and 683 had source phrases.
 See [ADR-0020](../../architecture/adr/0020-closed-rekordbox-snapshot-identity-resolver.md).
+
+## Delivered canonical publication
+
+`Import Analysis` is available only for a current hash-bound XML preview and a
+closed Rekordbox installation. It creates a verified database snapshot, resolves
+the selected stable IDs, snapshots and parses their DAT/EXT/2EX companions, and
+builds the complete provider-neutral baseline before opening the SQLite write
+transaction. Activating Rekordbox replaces the demo source atomically; a parser,
+identity, path, metadata or persistence error keeps the previous active source.
+
+Detailed waveform data is peak-preserving bounded to 16,384 points per track.
+The authenticated local protocol permits at most 1 MiB per message so a real
+track's beatgrid, detailed RGB waveform, phrases and catalogs remain bounded
+while still supporting the editor's zoomed view.
+
+Native verification on 2026-08-06 published the currently configured 393-track,
+13-playlist scope. Lumi persisted 238,708 beatmarkers, 6,429,828 detailed
+waveform points and 6,615 raw phrase observations, created 393 initial Lumi
+timelines, reopened the first track in the editor, and restored the same source
+after a full app restart. No temporary import snapshot remained afterward.

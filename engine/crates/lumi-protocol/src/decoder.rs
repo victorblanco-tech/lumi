@@ -4,7 +4,7 @@ use std::fmt::{Display, Formatter};
 use crate::MessageEnvelope;
 
 pub const PROTOCOL_VERSION: u16 = 1;
-pub const MAX_MESSAGE_BYTES: usize = 131_072;
+pub const MAX_MESSAGE_BYTES: usize = 1_048_576;
 const MAX_IDENTIFIER_BYTES: usize = 128;
 
 /// Safely decodes one complete protocol message.

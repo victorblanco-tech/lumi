@@ -13,6 +13,7 @@ public struct LibrarySourcesWorkspaceView: View {
     private let onMutation: @Sendable (PhraseRoleMutationRequest) -> Void
     private let onSyncPreview: @Sendable (RekordboxXMLSyncPreviewRequest) -> Void
     private let onSyncApply: @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void
+    private let onAnalysisImport: @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void
 
     @AppStorage("nl.blancoservices.lumi.rekordboxXML.folder")
     private var rekordboxFolderPath = ""
@@ -41,7 +42,8 @@ public struct LibrarySourcesWorkspaceView: View {
         rendersInteractiveControls: Bool = true,
         onMutation: @escaping @Sendable (PhraseRoleMutationRequest) -> Void = { _ in },
         onSyncPreview: @escaping @Sendable (RekordboxXMLSyncPreviewRequest) -> Void = { _ in },
-        onSyncApply: @escaping @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void = { _, _ in }
+        onSyncApply: @escaping @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void = { _, _ in },
+        onAnalysisImport: @escaping @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void = { _, _ in }
     ) {
         self.library = library
         self.settings = settings
@@ -52,6 +54,7 @@ public struct LibrarySourcesWorkspaceView: View {
         self.onMutation = onMutation
         self.onSyncPreview = onSyncPreview
         self.onSyncApply = onSyncApply
+        self.onAnalysisImport = onAnalysisImport
         _selectedProviderKind = State(initialValue: settings?.mappingProfiles.first?.providerKind)
     }
 
@@ -356,20 +359,41 @@ public struct LibrarySourcesWorkspaceView: View {
                         HStack {
                             Text("Rekordbox Mirror")
                                 .font(LumiTypography.cardTitle)
-                            StatusBadge("METADATA STAGED", state: .ready)
+                            StatusBadge(
+                                canonicalRekordboxIsActive ? "LIBRARY READY" : "METADATA STAGED",
+                                state: .ready
+                            )
                         }
                         Text("\(mirror.activeTracks) active tracks · \(mirror.archivedTracks) archived · \(mirror.playlists) playlists")
                             .font(LumiTypography.technical)
                             .foregroundStyle(LumiColor.textSecondary)
-                        Text("Playlist scope and metadata are stored safely, but these tracks are not in Tracks yet. Lumi must attach beatgrid, waveform and phrases before publishing them to the library.")
+                        Text(canonicalRekordboxIsActive
+                            ? "Beatgrids, RGB waveforms and Rekordbox phrase observations are stored in Lumi. Phrase edits now evolve independently in Lumi."
+                            : "Playlist scope and metadata are stored safely. Import analysis from the closed Rekordbox library to publish these tracks atomically.")
                             .font(LumiTypography.caption)
                             .foregroundStyle(LumiColor.textSecondary)
                     }
                     Spacer()
-                    StatusBadge("NOT LIBRARY READY", state: .degraded)
+                    if canonicalRekordboxIsActive {
+                        StatusBadge("PUBLISHED", state: .ready)
+                    } else if let preview = library.rekordboxSyncPreview {
+                        Button("Import Analysis") {
+                            onAnalysisImport(currentSyncRequest, preview.contentSHA256)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!rendersInteractiveControls)
+                        .help("Rekordbox must be closed. Lumi reads verified snapshots and publishes only after the complete import succeeds.")
+                        .accessibilityIdentifier("lumi.library.sources.rekordbox.importAnalysis")
+                    } else {
+                        StatusBadge("CHECK FOR CHANGES FIRST", state: .degraded)
+                    }
                 }
             }
         }
+    }
+
+    private var canonicalRekordboxIsActive: Bool {
+        library.providerKind == "rekordbox7"
     }
 
     private func previewMetric(
@@ -417,9 +441,11 @@ public struct LibrarySourcesWorkspaceView: View {
                         Text("\(library.collectionTotal) tracks · revision \(source.revision)")
                             .font(LumiTypography.technical)
                             .foregroundStyle(LumiColor.textSecondary)
-                        Text(library.rekordboxMirror == nil
-                            ? "The local demo source remains available for dry-running Library, Local Play and planning."
-                            : "Tracks currently shows this source. The staged Rekordbox mirror will replace it after its analysis has been imported successfully.")
+                        Text(canonicalRekordboxIsActive
+                            ? "Tracks now uses the canonical Rekordbox library. Future phrase edits and lighting choices remain Lumi-owned."
+                            : library.rekordboxMirror == nil
+                                ? "The local demo source remains available for dry-running Library, Local Play and planning."
+                                : "Tracks currently shows this source. The staged Rekordbox mirror will replace it after its analysis has been imported successfully.")
                             .font(LumiTypography.caption)
                             .foregroundStyle(LumiColor.textSecondary)
                     }

@@ -88,6 +88,14 @@ struct FoundationView: View {
                                     expectedContentSHA256: expectedContentSHA256
                                 )
                             }
+                        },
+                        onRekordboxAnalysisImport: { request, expectedContentSHA256 in
+                            Task {
+                                await engineStatus.importRekordboxAnalysis(
+                                    request,
+                                    expectedContentSHA256: expectedContentSHA256
+                                )
+                            }
                         }
                     )
                 case .integrations:

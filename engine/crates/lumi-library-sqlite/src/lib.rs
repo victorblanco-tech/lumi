@@ -635,6 +635,21 @@ impl LibraryRepository for SqliteLibraryRepository {
         baseline: &ImportedLibraryBaseline,
     ) -> Result<ImportResult, Self::Error> {
         let transaction = self.connection.transaction()?;
+        // Lumi exposes one active canonical library source. Activating a
+        // different provider replaces the previous provider atomically; the
+        // source mirror remains separate staging until this transaction.
+        transaction.execute(
+            "DELETE FROM playlists WHERE source_id <> ?1",
+            [baseline.source_id().as_str()],
+        )?;
+        transaction.execute(
+            "DELETE FROM tracks WHERE source_id <> ?1",
+            [baseline.source_id().as_str()],
+        )?;
+        transaction.execute(
+            "DELETE FROM library_sources WHERE source_id <> ?1",
+            [baseline.source_id().as_str()],
+        )?;
         transaction.execute(
             "INSERT INTO library_sources(source_id, source_kind, display_name, source_revision)
              VALUES (?1, ?2, ?3, ?4)

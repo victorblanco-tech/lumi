@@ -164,6 +164,41 @@ pub struct AnalysisScanResult {
     pub tracks: BTreeMap<String, TrackAnalysisCoverage>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AnalysisBeat {
+    pub beat_number: u16,
+    pub tempo_centi_bpm: u16,
+    pub time_millis: u32,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct AnalysisWaveformPoint {
+    pub low: u8,
+    pub mid: u8,
+    pub high: u8,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AnalysisPhrase {
+    pub start_beat: u32,
+    pub end_beat: u32,
+    pub source_label: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResolvedTrackAnalysis {
+    pub coverage: TrackAnalysisCoverage,
+    pub beat_grid: Vec<AnalysisBeat>,
+    pub waveform: Vec<AnalysisWaveformPoint>,
+    pub phrases: Vec<AnalysisPhrase>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ResolvedAnalysisDataResult {
+    pub report: AnalysisCoverageReport,
+    pub tracks: BTreeMap<String, ResolvedTrackAnalysis>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResolvedAnalysisTrack {
     identity: String,
@@ -419,9 +454,12 @@ pub fn scan_and_snapshot(
         for copied_path in copied {
             let bytes = read_bounded(&copied_path, request.limits.maximum_file_bytes)?;
             let parsed = parse_analysis_file(&bytes)?;
-            coverage.beat_grid_entries = coverage.beat_grid_entries.max(parsed.beat_grid_entries);
-            coverage.phrase_entries = coverage.phrase_entries.max(parsed.phrase_entries);
-            coverage.waveform.merge(parsed.waveform);
+            let parsed_coverage = parsed.coverage();
+            coverage.beat_grid_entries = coverage
+                .beat_grid_entries
+                .max(parsed_coverage.beat_grid_entries);
+            coverage.phrase_entries = coverage.phrase_entries.max(parsed_coverage.phrase_entries);
+            coverage.waveform.merge(parsed_coverage.waveform);
         }
         accumulate_coverage(&mut report, coverage);
         tracks.insert(requested_location, coverage);
@@ -437,6 +475,22 @@ pub fn scan_and_snapshot(
 pub fn snapshot_resolved_analysis(
     request: &ResolvedAnalysisRequest,
 ) -> Result<AnalysisScanResult, AnalysisError> {
+    let result = snapshot_resolved_analysis_data(request)?;
+    Ok(AnalysisScanResult {
+        report: result.report,
+        tracks: result
+            .tracks
+            .into_iter()
+            .map(|(identity, analysis)| (identity, analysis.coverage))
+            .collect(),
+    })
+}
+
+/// Snapshots database-resolved analysis sets and returns bounded typed data for
+/// a canonical Lumi import. The production files are never parsed in place.
+pub fn snapshot_resolved_analysis_data(
+    request: &ResolvedAnalysisRequest,
+) -> Result<ResolvedAnalysisDataResult, AnalysisError> {
     fs::create_dir_all(&request.snapshot_root)?;
     let mut report = AnalysisCoverageReport {
         requested_tracks: request.tracks.len(),
@@ -454,19 +508,26 @@ pub fn snapshot_resolved_analysis(
         fs::create_dir(&snapshot_directory)?;
         let copied = copy_analysis_set(&dat_path, &snapshot_directory)?;
         report.snapshot_files += copied.len();
-        let mut coverage = TrackAnalysisCoverage::default();
+        let mut merged = ParsedAnalysisFile::default();
         for copied_path in copied {
             let bytes = read_bounded(&copied_path, request.limits.maximum_file_bytes)?;
             let parsed = parse_analysis_file(&bytes)?;
-            coverage.beat_grid_entries = coverage.beat_grid_entries.max(parsed.beat_grid_entries);
-            coverage.phrase_entries = coverage.phrase_entries.max(parsed.phrase_entries);
-            coverage.waveform.merge(parsed.waveform);
+            merged.merge(parsed);
         }
+        let coverage = merged.coverage();
         accumulate_coverage(&mut report, coverage);
-        tracks.insert(track.identity.clone(), coverage);
+        tracks.insert(
+            track.identity.clone(),
+            ResolvedTrackAnalysis {
+                coverage,
+                beat_grid: merged.beat_grid,
+                waveform: merged.waveform,
+                phrases: merged.phrases,
+            },
+        );
     }
     report.matched_tracks = tracks.len();
-    Ok(AnalysisScanResult { report, tracks })
+    Ok(ResolvedAnalysisDataResult { report, tracks })
 }
 
 #[derive(Debug)]
@@ -614,9 +675,38 @@ fn same_source_version(before: &fs::Metadata, after: &fs::Metadata) -> bool {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 struct ParsedAnalysisFile {
     audio_location: Option<String>,
-    beat_grid_entries: usize,
-    phrase_entries: usize,
-    waveform: WaveformCoverage,
+    beat_grid: Vec<AnalysisBeat>,
+    phrases: Vec<AnalysisPhrase>,
+    waveform: Vec<AnalysisWaveformPoint>,
+    waveform_priority: u8,
+    waveform_coverage: WaveformCoverage,
+}
+
+impl ParsedAnalysisFile {
+    fn coverage(&self) -> TrackAnalysisCoverage {
+        TrackAnalysisCoverage {
+            beat_grid_entries: self.beat_grid.len(),
+            phrase_entries: self.phrases.len(),
+            waveform: self.waveform_coverage,
+        }
+    }
+
+    fn merge(&mut self, other: Self) {
+        if other.beat_grid.len() > self.beat_grid.len() {
+            self.beat_grid = other.beat_grid;
+        }
+        if other.phrases.len() > self.phrases.len() {
+            self.phrases = other.phrases;
+        }
+        if other.waveform_priority > self.waveform_priority
+            || (other.waveform_priority == self.waveform_priority
+                && other.waveform.len() > self.waveform.len())
+        {
+            self.waveform = other.waveform;
+            self.waveform_priority = other.waveform_priority;
+        }
+        self.waveform_coverage.merge(other.waveform_coverage);
+    }
 }
 
 fn parse_analysis_file(bytes: &[u8]) -> Result<ParsedAnalysisFile, AnalysisError> {
@@ -651,29 +741,46 @@ fn parse_analysis_file(bytes: &[u8]) -> Result<ParsedAnalysisFile, AnalysisError
         let body = &tag[TAG_HEADER_BYTES..tag_bytes];
         match tag_id {
             b"PPTH" => parsed.audio_location = parse_path_tag(body)?,
-            b"PQTZ" => parsed.beat_grid_entries = parse_fixed_entries(body, 8, 12)?,
-            b"PWAV" => parsed.waveform.preview_points = parse_byte_entries(body, 0, 8)?,
+            b"PQTZ" => parsed.beat_grid = parse_beat_grid(body)?,
+            b"PWAV" => {
+                parsed.waveform_coverage.preview_points = parse_byte_entries(body, 0, 8)?;
+            }
             b"PWV2" => {
-                parsed.waveform.preview_points = parsed
-                    .waveform
+                parsed.waveform_coverage.preview_points = parsed
+                    .waveform_coverage
                     .preview_points
                     .max(parse_byte_entries(body, 0, 8)?);
             }
-            b"PWV3" => parsed.waveform.detailed_points = parse_declared_entries(body, 1)?,
+            b"PWV3" => {
+                parsed.waveform_coverage.detailed_points = parse_declared_entries(body, 1)?;
+            }
             b"PWV4" => {
-                parsed.waveform.color_preview_points = parse_declared_entries(body, 6)?;
+                parsed.waveform_coverage.color_preview_points = parse_declared_entries(body, 6)?;
             }
             b"PWV5" => {
-                parsed.waveform.color_detailed_points = parse_declared_entries(body, 2)?;
+                parsed.waveform_coverage.color_detailed_points = parse_declared_entries(body, 2)?;
+                let waveform = parse_color_detailed_waveform(body)?;
+                if parsed.waveform_priority < 3 {
+                    parsed.waveform = waveform;
+                    parsed.waveform_priority = 3;
+                }
             }
             b"PWV6" => {
-                parsed.waveform.three_band_preview_points =
+                parsed.waveform_coverage.three_band_preview_points =
                     parse_compact_declared_entries(body, 3)?;
+                let waveform = parse_three_band_waveform(body, 8)?;
+                if parsed.waveform_priority < 2 {
+                    parsed.waveform = waveform;
+                    parsed.waveform_priority = 2;
+                }
             }
             b"PWV7" => {
-                parsed.waveform.three_band_detailed_points = parse_declared_entries(body, 3)?;
+                parsed.waveform_coverage.three_band_detailed_points =
+                    parse_declared_entries(body, 3)?;
+                parsed.waveform = parse_three_band_waveform(body, 12)?;
+                parsed.waveform_priority = 4;
             }
-            b"PSSI" => parsed.phrase_entries = parse_phrase_entries(body)?,
+            b"PSSI" => parsed.phrases = parse_phrases(body)?,
             _ => {}
         }
         offset = offset
@@ -720,6 +827,24 @@ fn parse_fixed_entries(
     Ok(count)
 }
 
+fn parse_beat_grid(body: &[u8]) -> Result<Vec<AnalysisBeat>, AnalysisError> {
+    let count = parse_fixed_entries(body, 8, 12)?;
+    (0..count)
+        .map(|index| {
+            let offset = 12 + index * 8;
+            let beat_number = be_u16(body, offset)?;
+            if !(1..=4).contains(&beat_number) {
+                return Err(AnalysisError::MalformedAnalysisFile);
+            }
+            Ok(AnalysisBeat {
+                beat_number,
+                tempo_centi_bpm: be_u16(body, offset + 2)?,
+                time_millis: be_u32(body, offset + 4)?,
+            })
+        })
+        .collect()
+}
+
 fn parse_declared_entries(
     body: &[u8],
     expected_entry_bytes: usize,
@@ -746,6 +871,52 @@ fn parse_compact_declared_entries(
     Ok(count)
 }
 
+fn parse_color_detailed_waveform(body: &[u8]) -> Result<Vec<AnalysisWaveformPoint>, AnalysisError> {
+    let count = parse_declared_entries(body, 2)?;
+    (0..count)
+        .map(|index| {
+            let value = be_u16(body, 12 + index * 2)?;
+            let red = u32::from((value & 0xE000) >> 13);
+            let green = u32::from((value & 0x1C00) >> 10);
+            let blue = u32::from((value & 0x0380) >> 7);
+            let height = u32::from((value & 0x007C) >> 2);
+            let scale = |component: u32| -> Result<u8, AnalysisError> {
+                u8::try_from(component * height * 255 / (7 * 31))
+                    .map_err(|_| AnalysisError::MalformedAnalysisFile)
+            };
+            Ok(AnalysisWaveformPoint {
+                low: scale(blue)?,
+                mid: scale(green)?,
+                high: scale(red)?,
+            })
+        })
+        .collect()
+}
+
+fn parse_three_band_waveform(
+    body: &[u8],
+    data_offset: usize,
+) -> Result<Vec<AnalysisWaveformPoint>, AnalysisError> {
+    let count = if data_offset == 8 {
+        parse_compact_declared_entries(body, 3)?
+    } else {
+        parse_declared_entries(body, 3)?
+    };
+    (0..count)
+        .map(|index| {
+            let offset = data_offset + index * 3;
+            let bytes = body
+                .get(offset..offset + 3)
+                .ok_or(AnalysisError::MalformedAnalysisFile)?;
+            Ok(AnalysisWaveformPoint {
+                low: bytes[2],
+                mid: bytes[0],
+                high: bytes[1],
+            })
+        })
+        .collect()
+}
+
 fn validate_entry_range(
     body: &[u8],
     count: usize,
@@ -764,7 +935,7 @@ fn validate_entry_range(
     Ok(())
 }
 
-fn parse_phrase_entries(body: &[u8]) -> Result<usize, AnalysisError> {
+fn parse_phrases(body: &[u8]) -> Result<Vec<AnalysisPhrase>, AnalysisError> {
     if body.len() < 20 {
         return Err(AnalysisError::MalformedAnalysisFile);
     }
@@ -785,15 +956,81 @@ fn parse_phrase_entries(body: &[u8]) -> Result<usize, AnalysisError> {
         return Err(AnalysisError::MalformedAnalysisFile);
     }
     validate_entry_range(&decoded, count, 24, 20)?;
+    let final_end_beat = u32::from(be_u16(&decoded, 14)?);
+    let mut entries = Vec::with_capacity(count);
     for index in 0..count {
         let entry_offset = 20 + index * 24;
-        let beat = be_u16(&decoded, entry_offset + 2)?;
-        let _kind = be_u16(&decoded, entry_offset + 4)?;
+        let beat = u32::from(be_u16(&decoded, entry_offset + 2)?);
+        let kind = be_u16(&decoded, entry_offset + 4)?;
         if beat == 0 {
             return Err(AnalysisError::MalformedAnalysisFile);
         }
+        entries.push((
+            beat,
+            kind,
+            decoded[entry_offset + 6],
+            decoded[entry_offset + 7],
+            decoded[entry_offset + 19],
+        ));
     }
-    Ok(count)
+    entries
+        .iter()
+        .enumerate()
+        .map(|(index, &(beat, kind, k1, k2, k3))| {
+            let next = entries
+                .get(index + 1)
+                .map_or(final_end_beat.saturating_add(1), |entry| entry.0);
+            let start_beat = beat.saturating_sub(1);
+            let end_beat = next.saturating_sub(1);
+            if end_beat <= start_beat {
+                return Err(AnalysisError::MalformedAnalysisFile);
+            }
+            Ok(AnalysisPhrase {
+                start_beat,
+                end_beat,
+                source_label: phrase_label(mood, kind, k1, k2, k3),
+            })
+        })
+        .collect()
+}
+
+fn phrase_label(mood: u16, kind: u16, k1: u8, k2: u8, k3: u8) -> String {
+    match mood {
+        1 => match kind {
+            1 => format!("Intro {}", if k1 == 1 { 1 } else { 2 }),
+            2 => {
+                let variant = match (k2, k3) {
+                    (0, 0) => 1,
+                    (0, 1) => 2,
+                    (1, 0) => 3,
+                    _ => 1,
+                };
+                format!("Up {variant}")
+            }
+            3 => "Down".to_owned(),
+            5 => format!("Chorus {}", if k1 == 1 { 1 } else { 2 }),
+            6 => format!("Outro {}", if k1 == 1 { 1 } else { 2 }),
+            _ => format!("High {kind}"),
+        },
+        2 => match kind {
+            1 => "Intro".to_owned(),
+            2..=7 => format!("Verse {}", kind - 1),
+            8 => "Bridge".to_owned(),
+            9 => "Chorus".to_owned(),
+            10 => "Outro".to_owned(),
+            _ => format!("Mid {kind}"),
+        },
+        3 => match kind {
+            1 => "Intro".to_owned(),
+            2..=4 => "Verse 1".to_owned(),
+            5..=7 => "Verse 2".to_owned(),
+            8 => "Bridge".to_owned(),
+            9 => "Chorus".to_owned(),
+            10 => "Outro".to_owned(),
+            _ => format!("Low {kind}"),
+        },
+        _ => format!("Phrase {kind}"),
+    }
 }
 
 fn read_bounded(path: &Path, maximum_file_bytes: u64) -> Result<Vec<u8>, AnalysisError> {
@@ -951,6 +1188,45 @@ mod tests {
         assert_eq!(result.report.tracks_with_phrases, 1);
         assert_eq!(result.report.tracks_with_color_waveform, 1);
         assert!(result.tracks.contains_key("83110744"));
+        fs::remove_dir_all(test_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn resolved_snapshot_returns_typed_beats_waveform_and_phrases()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let test_root = unique_test_root("typed")?;
+        let analysis_root = test_root.join("source");
+        let set_root = analysis_root.join("P001");
+        fs::create_dir_all(&set_root)?;
+        let dat_path = set_root.join("ANLZ0000.DAT");
+        fs::write(
+            &dat_path,
+            analysis_file(&[
+                tag(*b"PQTZ", fixed_body(8, 8)),
+                tag(*b"PWV7", declared_body(3, 16)),
+                tag(*b"PSSI", phrase_body(2, false)),
+            ]),
+        )?;
+        let request = ResolvedAnalysisRequest::try_new(
+            &analysis_root,
+            test_root.join("snapshot"),
+            [ResolvedAnalysisTrack::try_new("42", &dat_path)?],
+        )?;
+
+        let result = snapshot_resolved_analysis_data(&request)?;
+        let track = result
+            .tracks
+            .get("42")
+            .ok_or_else(|| io::Error::other("typed track missing"))?;
+        assert_eq!(track.beat_grid.len(), 8);
+        assert_eq!(track.beat_grid[4].beat_number, 1);
+        assert_eq!(track.waveform.len(), 16);
+        assert_eq!(track.phrases[0].source_label, "Intro");
+        assert_eq!(
+            (track.phrases[0].start_beat, track.phrases[0].end_beat),
+            (0, 1)
+        );
         fs::remove_dir_all(test_root)?;
         Ok(())
     }
@@ -1176,6 +1452,15 @@ mod tests {
     fn fixed_body(count: u32, entry_bytes: usize) -> Vec<u8> {
         let mut body = vec![0_u8; 12 + count as usize * entry_bytes];
         body[8..12].copy_from_slice(&count.to_be_bytes());
+        if entry_bytes == 8 {
+            for index in 0..count as usize {
+                let offset = 12 + index * entry_bytes;
+                let beat_number = u16::try_from(index % 4 + 1).unwrap_or(1);
+                body[offset..offset + 2].copy_from_slice(&beat_number.to_be_bytes());
+                body[offset + 2..offset + 4].copy_from_slice(&12_800_u16.to_be_bytes());
+                body[offset + 4..offset + 8].copy_from_slice(&(index as u32 * 469).to_be_bytes());
+            }
+        }
         body
     }
 
@@ -1198,6 +1483,7 @@ mod tests {
         body[..4].copy_from_slice(&24_u32.to_be_bytes());
         body[4..6].copy_from_slice(&count.to_be_bytes());
         body[6..8].copy_from_slice(&2_u16.to_be_bytes());
+        body[14..16].copy_from_slice(&count.to_be_bytes());
         for index in 0..usize::from(count) {
             let offset = 20 + index * 24;
             body[offset..offset + 2].copy_from_slice(&(index as u16).to_be_bytes());

@@ -445,6 +445,51 @@ final class EngineStatusModel: ObservableObject {
         }
     }
 
+    func importRekordboxAnalysis(
+        _ request: RekordboxXMLSyncPreviewRequest,
+        expectedContentSHA256: String
+    ) async {
+        sourceImportFeedback = "Importing beatgrids, RGB waveforms and phrases from the closed Rekordbox library…"
+        sourceImportFeedbackIsError = false
+        guard lifecycle == .ready,
+              let endpointDescription,
+              let protocolVersion,
+              await acquireInteractiveExchange() else {
+            sourceImportFeedback = "Analysis import could not start because the engine is not ready."
+            sourceImportFeedbackIsError = true
+            return
+        }
+        defer { isExchangingCommand = false }
+        do {
+            let envelope = try await supervisor.send(
+                .importRekordboxAnalysis(
+                    folder: request.folderPath,
+                    followedPaths: request.followedPaths,
+                    includeFutureChildPlaylists: request.includeFutureChildPlaylists,
+                    expectedContentSHA256: expectedContentSHA256
+                )
+            )
+            if let failure = EngineCommandFailure(envelope) {
+                sourceImportFeedback = failure.message
+                sourceImportFeedbackIsError = true
+                return
+            }
+            let snapshot = try snapshotDecoder.decode(
+                envelope,
+                endpointDescription: endpointDescription,
+                protocolVersion: protocolVersion
+            )
+            latestSnapshot = snapshot
+            workspaceState = LiveWorkspacePresenter.ready(snapshot)
+            libraryState = try libraryDecoder.decode(envelope)
+            sourceImportFeedback = "Rekordbox analysis imported. \(libraryState.collectionTotal) tracks are now available in Tracks."
+        } catch {
+            sourceImportFeedback = (error as? LocalizedError)?.errorDescription
+                ?? "The Rekordbox analysis could not be imported."
+            sourceImportFeedbackIsError = true
+        }
+    }
+
     func mutatePhraseRoles(_ request: PhraseRoleMutationRequest) async {
         guard let settings = libraryState.phraseRoleSettings,
               lifecycle == .ready,

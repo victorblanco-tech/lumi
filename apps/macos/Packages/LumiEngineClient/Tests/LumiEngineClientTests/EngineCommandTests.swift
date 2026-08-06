@@ -22,4 +22,18 @@ struct EngineCommandTests {
         )
         #expect(payload["includeFutureChildPlaylists"] == .boolean(true))
     }
+
+    @Test("Rekordbox analysis import is pinned to the reviewed XML fingerprint")
+    func rekordboxAnalysisImportPayload() {
+        let payload = EngineCommand.importRekordboxAnalysis(
+            folder: "/Music/Rekordbox XML",
+            followedPaths: ["Sets/Beach Set"],
+            includeFutureChildPlaylists: true,
+            expectedContentSHA256: "abc123"
+        ).payload()
+
+        #expect(payload["kind"] == .string("importRekordboxAnalysis"))
+        #expect(payload["expectedContentSha256"] == .string("abc123"))
+        #expect(payload["followedPaths"] == .array([.string("Sets/Beach Set")]))
+    }
 }

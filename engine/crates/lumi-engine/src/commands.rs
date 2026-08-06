@@ -54,6 +54,12 @@ pub enum SessionCommand {
         include_future_child_playlists: bool,
         expected_content_sha256: String,
     },
+    ImportRekordboxAnalysis {
+        folder: String,
+        followed_paths: Vec<String>,
+        include_future_child_playlists: bool,
+        expected_content_sha256: String,
+    },
     ReconcileLibrarySource {
         track_id: u64,
         expected_revision: u64,
@@ -191,6 +197,7 @@ impl SessionCommand {
             | Self::PreviewDemoSourceRefresh
             | Self::PreviewRekordboxXmlSync { .. }
             | Self::ApplyRekordboxXmlSync { .. }
+            | Self::ImportRekordboxAnalysis { .. }
             | Self::ReconcileLibrarySource { .. }
             | Self::EditLibraryTimeline { .. }
             | Self::SetLibraryPhraseLoopStrategy { .. }
@@ -252,6 +259,15 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
             )?,
         }),
         "applyRekordboxXmlSync" => Ok(SessionCommand::ApplyRekordboxXmlSync {
+            folder: string(&envelope.payload, "folder")?.to_owned(),
+            followed_paths: string_array(&envelope.payload, "followedPaths")?,
+            include_future_child_playlists: boolean(
+                &envelope.payload,
+                "includeFutureChildPlaylists",
+            )?,
+            expected_content_sha256: string(&envelope.payload, "expectedContentSha256")?.to_owned(),
+        }),
+        "importRekordboxAnalysis" => Ok(SessionCommand::ImportRekordboxAnalysis {
             folder: string(&envelope.payload, "folder")?.to_owned(),
             followed_paths: string_array(&envelope.payload, "followedPaths")?,
             include_future_child_playlists: boolean(
@@ -871,6 +887,27 @@ mod tests {
         assert_eq!(
             decode_command(&envelope),
             Err(CommandDecodeError::InvalidField("followedPaths"))
+        );
+    }
+
+    #[test]
+    fn rekordbox_analysis_import_is_bound_to_the_expected_export() {
+        let envelope = command_envelope(serde_json::json!({
+            "kind": "importRekordboxAnalysis",
+            "folder": "/Music/Rekordbox XML",
+            "followedPaths": ["Sets/Beach Set"],
+            "includeFutureChildPlaylists": true,
+            "expectedContentSha256": "abc123",
+        }));
+
+        assert_eq!(
+            decode_command(&envelope),
+            Ok(SessionCommand::ImportRekordboxAnalysis {
+                folder: "/Music/Rekordbox XML".to_owned(),
+                followed_paths: vec!["Sets/Beach Set".to_owned()],
+                include_future_child_playlists: true,
+                expected_content_sha256: "abc123".to_owned(),
+            })
         );
     }
 

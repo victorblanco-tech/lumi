@@ -91,6 +91,17 @@ snapshots used for this verification were temporary Lumi-owned copies.
 - Rekordbox schema, encryption and process details remain isolated behind one
   replaceable adapter.
 
+## Product implementation verification
+
+The POC resolver is now part of the native `Library > Sources & Import` flow.
+On 2026-08-06 the then-current 393-track, 13-playlist selection was published as
+the active canonical `rekordbox7` source. The imported baseline contained
+238,708 beatmarkers, 6,429,828 bounded detailed waveform points and 6,615 source
+phrase observations, followed by 393 initial Lumi-owned timelines. Tracks,
+playlists and the first detailed editor waveform remained available after a
+complete app and engine restart. All temporary database and ANLZ snapshots were
+removed after completion.
+
 ## Rejected alternatives
 
 ### Query the live production database read-only

@@ -1,22 +1,34 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use lumi_domain::{
     KeyMode, PhraseKind, PitchClass, ThemeId, TrackId, TrackIdentityFacts, TrackMetadata,
     TrackPhrase,
 };
 use lumi_library::{
-    AutoloopCatalog, AutoloopCatalogError, AutoloopResolutionReason, AutoloopVariantMove,
-    ImportedLibraryBaseline, ImportedTrackAnalysis, LibraryRepository, LibraryTrackQuery,
-    LumiPhraseTimeline, PhraseInstance, PhraseLoopStrategy, PhraseRole, PhraseRoleCatalogError,
-    PhraseRoleId, PhraseRoleMove, PlaylistId, ReconcileError, ReconcilePreview, ReconcileStrategy,
-    SourceChangeClass, SourceMirrorDiff, SourceMirrorPlaylist, SourceMirrorSnapshot,
-    SourceMirrorTrack, SourcePhraseMapping, SourceRevision, SourceTrackDiff, TimelineEditCommand,
+    AutoloopCatalog, AutoloopCatalogError, AutoloopResolutionReason, AutoloopVariantMove, BeatGrid,
+    BeatMarker, ImportedLibraryBaseline, ImportedPlaylist, ImportedTrackAnalysis,
+    LibraryRepository, LibraryTrackQuery, LumiPhraseTimeline, PhraseInstance, PhraseLoopStrategy,
+    PhraseRole, PhraseRoleCatalogError, PhraseRoleId, PhraseRoleMove, PlaylistId,
+    RawPhraseObservation, ReconcileError, ReconcilePreview, ReconcileStrategy, SourceChangeClass,
+    SourceMirrorDiff, SourceMirrorPlaylist, SourceMirrorSnapshot, SourceMirrorTrack,
+    SourcePhraseMapping, SourcePlaylistId, SourceRevision, SourceTrackDiff, TimelineEditCommand,
     TimelineEditError, TimelineRevision, TimelineRevisionOrigin, TimelineRevisionReason,
-    TimelineRevisionSummary, TrackPageRequest, TrackSummary, VariantId, reconcile_timeline,
+    TimelineRevisionSummary, TrackColor, TrackPageRequest, TrackSummary, VariantId, WaveformPoint,
+    reconcile_timeline,
 };
 use lumi_library_demo::{DemoLibraryError, DemoLibraryRevision, DemoLibrarySourceProvider};
 use lumi_library_source::MusicLibrarySourceProvider as _;
 use lumi_library_sqlite::{SqliteLibraryError, SqliteLibraryRepository};
+use lumi_rekordbox_analysis::{
+    AnalysisError, AnalysisWaveformPoint, ResolvedAnalysisRequest, ResolvedAnalysisTrack,
+    ResolvedTrackAnalysis, snapshot_resolved_analysis_data,
+};
+use lumi_rekordbox_resolver::{
+    DatabaseKey, RequestedTrack, ResolverError, SqlCipherResolver, create_database_snapshot,
+};
 use lumi_rekordbox_xml::{
     RekordboxXmlError, RekordboxXmlMirrorSnapshot, RekordboxXmlSyncRequest, load_latest_mirror,
 };
@@ -32,6 +44,9 @@ const DEFAULT_PAGE_LIMIT: u16 = 50;
 const DATABASE_PATH_ENVIRONMENT: &str = "LUMI_LIBRARY_DATABASE_PATH";
 const REKORDBOX_XML_SOURCE_ID: &str = "rekordbox-xml-local";
 const REKORDBOX_XML_SOURCE_KIND: &str = "rekordbox-xml";
+const REKORDBOX_CANONICAL_SOURCE_ID: &str = "rekordbox7-local";
+const REKORDBOX_CANONICAL_SOURCE_KIND: &str = "rekordbox7";
+const MAX_IMPORTED_WAVEFORM_POINTS: usize = 16_384;
 
 pub struct LibraryWorker {
     repository: SqliteLibraryRepository,
@@ -375,24 +390,33 @@ impl LibraryWorker {
         {
             repository.import_baseline(&baseline)?;
         }
-        let latest_baseline =
-            DemoLibrarySourceProvider::curated_revision(DemoLibraryRevision::V2).load_baseline()?;
-        let persisted_before_recovery = repository
-            .library_source(baseline.source_id())?
-            .ok_or(LibraryWorkerError::MissingLibrarySource)?;
-        match repository.complete_source_refresh(&latest_baseline) {
-            Ok(()) => {}
-            Err(SqliteLibraryError::IncompleteSourceRefresh(_))
-                if persisted_before_recovery.revision() == latest_baseline.source_revision() =>
-            {
-                repository.restore_source_checkpoint(&baseline)?;
+        let persisted_source = match repository.library_source(
+            &lumi_library::LibrarySourceId::try_new(REKORDBOX_CANONICAL_SOURCE_ID)?,
+        )? {
+            Some(source) => source,
+            None => {
+                let latest_baseline =
+                    DemoLibrarySourceProvider::curated_revision(DemoLibraryRevision::V2)
+                        .load_baseline()?;
+                let persisted_before_recovery = repository
+                    .library_source(baseline.source_id())?
+                    .ok_or(LibraryWorkerError::MissingLibrarySource)?;
+                match repository.complete_source_refresh(&latest_baseline) {
+                    Ok(()) => {}
+                    Err(SqliteLibraryError::IncompleteSourceRefresh(_))
+                        if persisted_before_recovery.revision()
+                            == latest_baseline.source_revision() =>
+                    {
+                        repository.restore_source_checkpoint(&baseline)?;
+                    }
+                    Err(SqliteLibraryError::IncompleteSourceRefresh(_)) => {}
+                    Err(error) => return Err(error.into()),
+                }
+                repository
+                    .library_source(baseline.source_id())?
+                    .ok_or(LibraryWorkerError::MissingLibrarySource)?
             }
-            Err(SqliteLibraryError::IncompleteSourceRefresh(_)) => {}
-            Err(error) => return Err(error.into()),
-        }
-        let persisted_source = repository
-            .library_source(baseline.source_id())?
-            .ok_or(LibraryWorkerError::MissingLibrarySource)?;
+        };
         seed_default_role_catalog(&mut repository)?;
         seed_default_autoloop_catalog(&mut repository)?;
         let mut worker = Self {
@@ -411,16 +435,7 @@ impl LibraryWorker {
             pending_rekordbox_diff: None,
             last_rekordbox_apply: None,
         };
-        let track_ids = worker
-            .repository
-            .page_tracks(TrackPageRequest::try_new(0, 200)?)?
-            .tracks()
-            .iter()
-            .map(TrackSummary::id)
-            .collect::<Vec<_>>();
-        for track_id in track_ids {
-            worker.ensure_timeline(track_id)?;
-        }
+        worker.ensure_imported_timelines()?;
         Ok(worker)
     }
 
@@ -479,6 +494,80 @@ impl LibraryWorker {
         self.pending_rekordbox_diff = Some(self.repository.preview_source_mirror(&mirror)?);
         self.pending_rekordbox_preview = Some(fresh);
         self.last_rekordbox_apply = Some(applied);
+        Ok(())
+    }
+
+    pub fn import_rekordbox_analysis(
+        &mut self,
+        folder: String,
+        followed_paths: Vec<String>,
+        include_future_child_playlists: bool,
+        expected_content_sha256: &str,
+    ) -> Result<(), LibraryWorkerError> {
+        let request = RekordboxXmlSyncRequest::try_new(
+            folder,
+            followed_paths,
+            include_future_child_playlists,
+        )?;
+        let snapshot = load_latest_mirror(&request)?;
+        if snapshot.content_sha256() != expected_content_sha256 {
+            return Err(LibraryWorkerError::RekordboxPreviewChanged);
+        }
+        let paths = RekordboxInstallationPaths::discover()?;
+        let temporary = RekordboxImportTemporaryRoot::create()?;
+        let database_snapshot =
+            create_database_snapshot(&paths.database, temporary.path().join("master.snapshot.db"))?;
+        let requested = snapshot
+            .tracks()
+            .iter()
+            .map(|track| RequestedTrack::try_new(track.source_track_id(), track.location()))
+            .collect::<Result<Vec<_>, _>>()?;
+        let resolver = SqlCipherResolver::try_new(paths.sqlcipher)?;
+        let key = DatabaseKey::rekordbox7_bundled()?;
+        let resolved =
+            resolver.resolve(&database_snapshot, &key, &paths.analysis_root, requested)?;
+        if resolved.report.resolved_tracks != snapshot.tracks().len()
+            || resolved.report.missing_database_rows != 0
+            || resolved.report.missing_analysis_paths != 0
+            || resolved.report.audio_path_mismatches != 0
+        {
+            return Err(LibraryWorkerError::IncompleteRekordboxResolution {
+                requested: snapshot.tracks().len(),
+                resolved: resolved.report.resolved_tracks,
+                path_mismatches: resolved.report.audio_path_mismatches,
+            });
+        }
+        let analysis_request = ResolvedAnalysisRequest::try_new(
+            &paths.analysis_root,
+            temporary.path().join("analysis"),
+            resolved
+                .tracks
+                .values()
+                .map(|track| {
+                    ResolvedAnalysisTrack::try_new(track.source_track_id(), track.analysis_file())
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        )?;
+        let analysis = snapshot_resolved_analysis_data(&analysis_request)?;
+        if analysis.tracks.len() != snapshot.tracks().len() {
+            return Err(LibraryWorkerError::IncompleteRekordboxAnalysis {
+                requested: snapshot.tracks().len(),
+                parsed: analysis.tracks.len(),
+            });
+        }
+        let baseline =
+            rekordbox_canonical_baseline(&snapshot, &analysis.tracks, database_snapshot.sha256())?;
+        self.repository.import_baseline(&baseline)?;
+        self.source_id = baseline.source_id().as_str().to_owned();
+        self.source_kind = baseline.source_kind().to_owned();
+        self.source_name = baseline.display_name().to_owned();
+        self.source_revision = baseline.source_revision().as_str().to_owned();
+        self.search.clear();
+        self.playlist_id = None;
+        self.offset = 0;
+        self.editor_track_id = None;
+        self.pending_source_refresh = None;
+        self.ensure_imported_timelines()?;
         Ok(())
     }
 
@@ -953,6 +1042,41 @@ impl LibraryWorker {
             phrases,
         )?;
         self.repository.append_timeline_revision(&timeline, None)?;
+        Ok(())
+    }
+
+    fn ensure_imported_timelines(&mut self) -> Result<(), LibraryWorkerError> {
+        let mut offset = 0_u32;
+        loop {
+            let page = self
+                .repository
+                .page_tracks(TrackPageRequest::try_new(offset, 200)?)?;
+            if page.tracks().is_empty() {
+                break;
+            }
+            let track_ids = page
+                .tracks()
+                .iter()
+                .map(TrackSummary::id)
+                .collect::<Vec<_>>();
+            for track_id in track_ids {
+                let has_phrases = self
+                    .repository
+                    .track(track_id)?
+                    .is_some_and(|track| !track.raw_phrases().is_empty());
+                if has_phrases {
+                    self.ensure_timeline(track_id)?;
+                }
+            }
+            let consumed = u32::try_from(page.tracks().len())
+                .map_err(|_| LibraryWorkerError::RekordboxImportOverflow)?;
+            offset = offset
+                .checked_add(consumed)
+                .ok_or(LibraryWorkerError::RekordboxImportOverflow)?;
+            if u64::from(offset) >= page.total() {
+                break;
+            }
+        }
         Ok(())
     }
 
@@ -1829,6 +1953,358 @@ fn rekordbox_mirror_snapshot(
     )?)
 }
 
+struct RekordboxInstallationPaths {
+    database: PathBuf,
+    analysis_root: PathBuf,
+    sqlcipher: PathBuf,
+}
+
+impl RekordboxInstallationPaths {
+    fn discover() -> Result<Self, LibraryWorkerError> {
+        let home = std::env::var_os("HOME")
+            .map(PathBuf::from)
+            .ok_or(LibraryWorkerError::RekordboxInstallationUnavailable)?;
+        let database = home.join("Library/Pioneer/rekordbox/master.db");
+        let analysis_root = home.join("Library/Pioneer/rekordbox/share");
+        let sqlcipher = [
+            PathBuf::from("/opt/homebrew/bin/sqlcipher"),
+            PathBuf::from("/usr/local/bin/sqlcipher"),
+        ]
+        .into_iter()
+        .find(|path| path.is_file())
+        .ok_or(LibraryWorkerError::RekordboxInstallationUnavailable)?;
+        if !database.is_file() || !analysis_root.is_dir() {
+            return Err(LibraryWorkerError::RekordboxInstallationUnavailable);
+        }
+        Ok(Self {
+            database,
+            analysis_root,
+            sqlcipher,
+        })
+    }
+}
+
+struct RekordboxImportTemporaryRoot(PathBuf);
+
+impl RekordboxImportTemporaryRoot {
+    fn create() -> Result<Self, LibraryWorkerError> {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .map_err(|_| LibraryWorkerError::RekordboxImportClock)?
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "lumi-rekordbox-import-{}-{nonce}",
+            std::process::id()
+        ));
+        fs::create_dir(&path)?;
+        Ok(Self(path))
+    }
+
+    fn path(&self) -> &Path {
+        &self.0
+    }
+}
+
+impl Drop for RekordboxImportTemporaryRoot {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
+}
+
+fn rekordbox_canonical_baseline(
+    snapshot: &RekordboxXmlMirrorSnapshot,
+    analysis: &BTreeMap<String, ResolvedTrackAnalysis>,
+    database_sha256: &str,
+) -> Result<ImportedLibraryBaseline, LibraryWorkerError> {
+    let source_revision = SourceRevision::try_new(format!(
+        "xml:{}-db:{}",
+        &snapshot.content_sha256()[..16],
+        &database_sha256[..16]
+    ))?;
+    let tracks = snapshot
+        .tracks()
+        .iter()
+        .map(|track| {
+            let parsed = analysis.get(track.source_track_id()).ok_or_else(|| {
+                LibraryWorkerError::MissingRekordboxTrackAnalysis(
+                    track.source_track_id().to_owned(),
+                )
+            })?;
+            let beat_grid = canonical_beat_grid(parsed)?;
+            let total_beats = u32::try_from(beat_grid.markers().len())
+                .map_err(|_| LibraryWorkerError::RekordboxImportOverflow)?;
+            let bpm_milli = parse_bpm_milli(track.average_bpm())
+                .or_else(|| median_analysis_bpm_milli(parsed))
+                .ok_or_else(|| LibraryWorkerError::InvalidRekordboxMetadata {
+                    track_id: track.source_track_id().to_owned(),
+                    field: "BPM",
+                })?;
+            let musical_key = parse_musical_key(track.tonality()).ok_or_else(|| {
+                LibraryWorkerError::InvalidRekordboxMetadata {
+                    track_id: track.source_track_id().to_owned(),
+                    field: "key",
+                }
+            })?;
+            let duration_millis = track
+                .total_time_seconds()
+                .and_then(|seconds| seconds.checked_mul(1_000))
+                .or_else(|| inferred_duration_millis(&beat_grid, bpm_milli))
+                .ok_or(LibraryWorkerError::RekordboxImportOverflow)?;
+            let waveform = downsample_waveform(&parsed.waveform, MAX_IMPORTED_WAVEFORM_POINTS);
+            let phrases = canonical_phrases(parsed, total_beats)?;
+            ImportedTrackAnalysis::try_new(
+                lumi_library::SourceTrackId::try_new(track.source_track_id())?,
+                source_revision.clone(),
+                track.title(),
+                track.artist().unwrap_or("Unknown Artist"),
+                bpm_milli,
+                musical_key,
+                duration_millis,
+                track.colour().and_then(parse_track_color),
+                track.location(),
+                beat_grid,
+                waveform,
+                phrases,
+            )
+            .map_err(LibraryWorkerError::InvalidRekordboxTrack)
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let imported_ids = tracks
+        .iter()
+        .map(|track| track.source_track_id().as_str())
+        .collect::<BTreeSet<_>>();
+    let playlists = snapshot
+        .playlists()
+        .iter()
+        .map(|playlist| {
+            let track_ids = playlist
+                .track_ids()
+                .iter()
+                .filter(|track_id| imported_ids.contains(track_id.as_str()))
+                .map(|track_id| lumi_library::SourceTrackId::try_new(track_id.clone()))
+                .collect::<Result<Vec<_>, _>>()?;
+            ImportedPlaylist::try_new(
+                SourcePlaylistId::try_new(playlist.path())?,
+                playlist.name(),
+                track_ids,
+            )
+            .map_err(LibraryWorkerError::InvalidRekordboxBaseline)
+        })
+        .collect::<Result<Vec<_>, LibraryWorkerError>>()?;
+    ImportedLibraryBaseline::try_new(
+        lumi_library::LibrarySourceId::try_new(REKORDBOX_CANONICAL_SOURCE_ID)?,
+        REKORDBOX_CANONICAL_SOURCE_KIND,
+        "Rekordbox 7",
+        source_revision,
+        tracks,
+        playlists,
+    )
+    .map_err(LibraryWorkerError::InvalidRekordboxBaseline)
+}
+
+fn canonical_beat_grid(parsed: &ResolvedTrackAnalysis) -> Result<BeatGrid, LibraryWorkerError> {
+    let complete_beats = parsed.beat_grid.len() - parsed.beat_grid.len() % 4;
+    if complete_beats == 0 {
+        return Err(LibraryWorkerError::IncompleteRekordboxBeatGrid);
+    }
+    let markers = parsed
+        .beat_grid
+        .iter()
+        .take(complete_beats)
+        .enumerate()
+        .map(|(index, beat)| {
+            let beat_index =
+                u32::try_from(index).map_err(|_| LibraryWorkerError::RekordboxImportOverflow)?;
+            Ok(BeatMarker::new(
+                beat_index,
+                u64::from(beat.time_millis),
+                beat_index / 4 + 1,
+                u8::try_from(beat_index % 4 + 1)
+                    .map_err(|_| LibraryWorkerError::RekordboxImportOverflow)?,
+            ))
+        })
+        .collect::<Result<Vec<_>, LibraryWorkerError>>()?;
+    BeatGrid::try_new(4, markers).map_err(LibraryWorkerError::InvalidRekordboxBeatGrid)
+}
+
+fn canonical_phrases(
+    parsed: &ResolvedTrackAnalysis,
+    total_beats: u32,
+) -> Result<Vec<RawPhraseObservation>, LibraryWorkerError> {
+    if parsed.phrases.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut labels_by_start = BTreeMap::<u32, String>::new();
+    for phrase in &parsed.phrases {
+        if phrase.start_beat < total_beats {
+            labels_by_start
+                .entry(phrase.start_beat)
+                .or_insert_with(|| phrase.source_label.clone());
+        }
+    }
+    let first_label = labels_by_start
+        .values()
+        .next()
+        .cloned()
+        .ok_or(LibraryWorkerError::IncompleteRekordboxPhrases)?;
+    labels_by_start.entry(0).or_insert(first_label);
+    let starts = labels_by_start.keys().copied().collect::<Vec<_>>();
+    starts
+        .iter()
+        .enumerate()
+        .map(|(index, start)| {
+            let end = starts.get(index + 1).copied().unwrap_or(total_beats);
+            RawPhraseObservation::try_new(
+                *start,
+                end,
+                labels_by_start.get(start).cloned().unwrap_or_default(),
+            )
+            .map_err(LibraryWorkerError::InvalidRekordboxTrack)
+        })
+        .collect()
+}
+
+fn downsample_waveform(points: &[AnalysisWaveformPoint], maximum: usize) -> Vec<WaveformPoint> {
+    if points.len() <= maximum {
+        return points
+            .iter()
+            .map(|point| WaveformPoint::new(point.low, point.mid, point.high))
+            .collect();
+    }
+    (0..maximum)
+        .map(|index| {
+            let start = index * points.len() / maximum;
+            let end = ((index + 1) * points.len() / maximum).max(start + 1);
+            let mut low = 0_u8;
+            let mut mid = 0_u8;
+            let mut high = 0_u8;
+            for point in &points[start..end] {
+                low = low.max(point.low);
+                mid = mid.max(point.mid);
+                high = high.max(point.high);
+            }
+            WaveformPoint::new(low, mid, high)
+        })
+        .collect()
+}
+
+fn parse_bpm_milli(value: Option<&str>) -> Option<u32> {
+    let bpm = value?.trim().parse::<f64>().ok()?;
+    if !bpm.is_finite() || !(20.0..=300.0).contains(&bpm) {
+        return None;
+    }
+    u32::try_from((bpm * 1_000.0).round() as i64).ok()
+}
+
+fn median_analysis_bpm_milli(parsed: &ResolvedTrackAnalysis) -> Option<u32> {
+    let mut values = parsed
+        .beat_grid
+        .iter()
+        .map(|beat| u32::from(beat.tempo_centi_bpm) * 10)
+        .filter(|value| (20_000..=300_000).contains(value))
+        .collect::<Vec<_>>();
+    values.sort_unstable();
+    values.get(values.len() / 2).copied()
+}
+
+fn inferred_duration_millis(beat_grid: &BeatGrid, bpm_milli: u32) -> Option<u64> {
+    let last = beat_grid.markers().last()?.time_millis();
+    last.checked_add(60_000_000_u64 / u64::from(bpm_milli))
+}
+
+fn parse_musical_key(value: Option<&str>) -> Option<lumi_domain::MusicalKey> {
+    let value = value?.trim();
+    if let Some((number, mode)) = parse_camelot(value) {
+        return camelot_key(number, mode);
+    }
+    let minor = value.ends_with('m');
+    let root = value.trim_end_matches('m');
+    let pitch = match root {
+        "C" => PitchClass::C,
+        "C#" | "Db" => PitchClass::CSharp,
+        "D" => PitchClass::D,
+        "D#" | "Eb" => PitchClass::DSharp,
+        "E" | "Fb" => PitchClass::E,
+        "F" | "E#" => PitchClass::F,
+        "F#" | "Gb" => PitchClass::FSharp,
+        "G" => PitchClass::G,
+        "G#" | "Ab" => PitchClass::GSharp,
+        "A" => PitchClass::A,
+        "A#" | "Bb" => PitchClass::ASharp,
+        "B" | "Cb" => PitchClass::B,
+        _ => return None,
+    };
+    Some(lumi_domain::MusicalKey::new(
+        pitch,
+        if minor {
+            KeyMode::Minor
+        } else {
+            KeyMode::Major
+        },
+    ))
+}
+
+fn parse_camelot(value: &str) -> Option<(u8, char)> {
+    let mode = value.chars().last()?.to_ascii_uppercase();
+    if !matches!(mode, 'A' | 'B') {
+        return None;
+    }
+    let number = value[..value.len() - 1].parse::<u8>().ok()?;
+    (1..=12).contains(&number).then_some((number, mode))
+}
+
+fn camelot_key(number: u8, mode: char) -> Option<lumi_domain::MusicalKey> {
+    let pitch = match (number, mode) {
+        (1, 'A') => PitchClass::GSharp,
+        (2, 'A') => PitchClass::DSharp,
+        (3, 'A') => PitchClass::ASharp,
+        (4, 'A') => PitchClass::F,
+        (5, 'A') => PitchClass::C,
+        (6, 'A') => PitchClass::G,
+        (7, 'A') => PitchClass::D,
+        (8, 'A') => PitchClass::A,
+        (9, 'A') => PitchClass::E,
+        (10, 'A') => PitchClass::B,
+        (11, 'A') => PitchClass::FSharp,
+        (12, 'A') => PitchClass::CSharp,
+        (1, 'B') => PitchClass::B,
+        (2, 'B') => PitchClass::FSharp,
+        (3, 'B') => PitchClass::CSharp,
+        (4, 'B') => PitchClass::GSharp,
+        (5, 'B') => PitchClass::DSharp,
+        (6, 'B') => PitchClass::ASharp,
+        (7, 'B') => PitchClass::F,
+        (8, 'B') => PitchClass::C,
+        (9, 'B') => PitchClass::G,
+        (10, 'B') => PitchClass::D,
+        (11, 'B') => PitchClass::A,
+        (12, 'B') => PitchClass::E,
+        _ => return None,
+    };
+    Some(lumi_domain::MusicalKey::new(
+        pitch,
+        if mode == 'A' {
+            KeyMode::Minor
+        } else {
+            KeyMode::Major
+        },
+    ))
+}
+
+fn parse_track_color(value: &str) -> Option<TrackColor> {
+    let hexadecimal = value
+        .trim()
+        .strip_prefix('#')
+        .or_else(|| value.trim().strip_prefix("0x"))
+        .unwrap_or(value.trim());
+    let rgb = u32::from_str_radix(hexadecimal, 16).ok()?;
+    Some(TrackColor::new(
+        u8::try_from((rgb >> 16) & 0xFF).ok()?,
+        u8::try_from((rgb >> 8) & 0xFF).ok()?,
+        u8::try_from(rgb & 0xFF).ok()?,
+    ))
+}
+
 fn pitch_class_name(value: PitchClass) -> &'static str {
     match value {
         PitchClass::C => "c",
@@ -1857,10 +2333,49 @@ fn key_mode_name(value: KeyMode) -> &'static str {
 pub enum LibraryWorkerError {
     #[error("demo library failed: {0}")]
     Demo(#[from] DemoLibraryError),
+    #[error("local library file operation failed: {0}")]
+    Io(#[from] std::io::Error),
     #[error("library persistence failed: {0}")]
     Persistence(#[from] SqliteLibraryError),
     #[error("Rekordbox XML source failed: {0}")]
     RekordboxXml(#[from] RekordboxXmlError),
+    #[error("Rekordbox identity resolver failed: {0}")]
+    RekordboxResolver(#[from] ResolverError),
+    #[error("Rekordbox analysis parser failed: {0}")]
+    RekordboxAnalysis(#[from] AnalysisError),
+    #[error("Rekordbox is not installed in a supported local location")]
+    RekordboxInstallationUnavailable,
+    #[error("the temporary Rekordbox import clock is unavailable")]
+    RekordboxImportClock,
+    #[error("Rekordbox import arithmetic overflowed")]
+    RekordboxImportOverflow,
+    #[error(
+        "Rekordbox resolved {resolved} of {requested} selected tracks ({path_mismatches} path mismatches)"
+    )]
+    IncompleteRekordboxResolution {
+        requested: usize,
+        resolved: usize,
+        path_mismatches: usize,
+    },
+    #[error("Rekordbox parsed {parsed} of {requested} selected tracks")]
+    IncompleteRekordboxAnalysis { requested: usize, parsed: usize },
+    #[error("Rekordbox analysis is missing for track {0}")]
+    MissingRekordboxTrackAnalysis(String),
+    #[error("Rekordbox track {track_id} has invalid {field} metadata")]
+    InvalidRekordboxMetadata {
+        track_id: String,
+        field: &'static str,
+    },
+    #[error("Rekordbox analysis contains no complete beatgrid")]
+    IncompleteRekordboxBeatGrid,
+    #[error("Rekordbox analysis contains no usable phrases")]
+    IncompleteRekordboxPhrases,
+    #[error("Rekordbox beatgrid is invalid: {0}")]
+    InvalidRekordboxBeatGrid(#[from] lumi_library::BeatGridValidationError),
+    #[error("Rekordbox track is invalid: {0}")]
+    InvalidRekordboxTrack(#[from] lumi_library::TrackValidationError),
+    #[error("Rekordbox baseline is invalid: {0}")]
+    InvalidRekordboxBaseline(#[from] lumi_library::LibraryBaselineValidationError),
     #[error("library query is invalid: {0}")]
     Query(#[from] lumi_library::TrackPageRequestError),
     #[error("phrase-role defaults failed: {0}")]

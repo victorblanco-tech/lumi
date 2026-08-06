@@ -180,14 +180,21 @@ worden gebouwd.
 
 ### [E2A-02 – Import a closed local Rekordbox 7 library](https://github.com/victorblanco-tech/lumi/issues/38)
 
-Bouwt detectie, read-only snapshot, incremental import, providerstatus en een
-zichtbare import/refreshflow in de macOS-app. De snapshot- en resolverkern is
-geleverd; het resterende werk is persistence van de geparseerde analyse,
-source-status/progress en de expliciete import/refreshactie in de app. De
-sourcepagina gebruikt één standaard ingeklapte XML-export met de playlistkeuze
-erin, één gecombineerde reload/previewactie bovenaan en een compacte
-hash-bound review met de Apply-knop in de header. De stagingstatus benoemt
-expliciet waarom een track nog niet in de canonieke Library zichtbaar is.
+Status: **delivered and real-library verified**. De native flow ontdekt de
+lokale installatie, weigert een live Rekordbox-database, maakt gecontroleerde
+Lumi-owned database- en ANLZ-snapshots en resolveert uitsluitend de exact
+geselecteerde XML-identiteiten. `Import Analysis` publiceert metadata,
+beatgrids, bounded detailed RGB-waveforms, raw phrase-observaties en playlists
+in één canonieke baseline; een onvolledige resolver/parseruitkomst laat de
+vorige Library actief. De bronstatus gaat daarna van `Metadata staged` naar
+`Library ready / Published` en overleeft een volledige app-herstart.
+
+Op 2026-08-06 is de actuele bewaarde scope native geïmporteerd en gecontroleerd:
+393 tracks, 13 playlists, 238.708 beatmarkers, 6.429.828 waveformpunten, 6.615
+raw phrases en 393 initiële Lumi-timelines. De eerste echte track opende direct
+in de CDJ-geïnspireerde editor. De 1 MiB authenticated-loopback message bound
+houdt de gedetailleerde editorpayload expliciet begrensd; bron- en tijdelijke
+snapshotbestanden zijn na de import niet achtergebleven.
 
 ### E2A-03 – Browse and inspect imported tracks
 

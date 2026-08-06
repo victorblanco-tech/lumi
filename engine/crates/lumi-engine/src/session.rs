@@ -790,6 +790,20 @@ fn apply_command(
             )?;
             return Ok(());
         }
+        SessionCommand::ImportRekordboxAnalysis {
+            folder,
+            followed_paths,
+            include_future_child_playlists,
+            expected_content_sha256,
+        } => {
+            runtime.library_worker.import_rekordbox_analysis(
+                folder,
+                followed_paths,
+                include_future_child_playlists,
+                &expected_content_sha256,
+            )?;
+            return Ok(());
+        }
         SessionCommand::ReconcileLibrarySource {
             track_id,
             expected_revision,
@@ -1129,6 +1143,7 @@ fn apply_command(
         | SessionCommand::PreviewDemoSourceRefresh
         | SessionCommand::PreviewRekordboxXmlSync { .. }
         | SessionCommand::ApplyRekordboxXmlSync { .. }
+        | SessionCommand::ImportRekordboxAnalysis { .. }
         | SessionCommand::ReconcileLibrarySource { .. }
         | SessionCommand::EditLibraryTimeline { .. }
         | SessionCommand::SetLibraryPhraseLoopStrategy { .. }
@@ -1450,6 +1465,29 @@ fn application_error_envelope(
                 None,
             )
         }
+        CommandApplicationError::Library(
+            library_error @ (LibraryWorkerError::RekordboxResolver(_)
+            | LibraryWorkerError::RekordboxAnalysis(_)
+            | LibraryWorkerError::RekordboxInstallationUnavailable
+            | LibraryWorkerError::RekordboxPreviewChanged
+            | LibraryWorkerError::IncompleteRekordboxResolution { .. }
+            | LibraryWorkerError::IncompleteRekordboxAnalysis { .. }
+            | LibraryWorkerError::MissingRekordboxTrackAnalysis(_)
+            | LibraryWorkerError::InvalidRekordboxMetadata { .. }
+            | LibraryWorkerError::IncompleteRekordboxBeatGrid
+            | LibraryWorkerError::IncompleteRekordboxPhrases
+            | LibraryWorkerError::InvalidRekordboxBeatGrid(_)
+            | LibraryWorkerError::InvalidRekordboxTrack(_)
+            | LibraryWorkerError::InvalidRekordboxBaseline(_)),
+        ) => error_envelope(
+            sequence,
+            correlation_id,
+            "validationFailed",
+            "rekordboxAnalysisImportRejected",
+            &library_error.to_string(),
+            false,
+            None,
+        ),
         CommandApplicationError::Library(
             library_error @ (LibraryWorkerError::TimelineEdit(_)
             | LibraryWorkerError::NothingToUndo
