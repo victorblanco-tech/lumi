@@ -2,6 +2,20 @@ import AppKit
 import LumiDesignSystem
 import SwiftUI
 
+private enum WaveformZoomAnchor: String, CaseIterable, Identifiable {
+    case mouse
+    case playhead
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .mouse: "Mouse pointer"
+        case .playhead: "Playhead"
+        }
+    }
+}
+
 public struct TrackLightingEditorView: View {
     private let analysis: TrackEditorAnalysis
     private let autoloopCatalog: AutoloopCatalogState?
@@ -24,6 +38,10 @@ public struct TrackLightingEditorView: View {
     @State private var hoveredBoundaryAfterPhraseIndex: UInt16?
     @State private var pendingBoundaryBeat: UInt32?
     @State private var conflictSides: [UInt16: TrackSourceConflictSide]
+    @AppStorage("nl.blancoservices.lumi.track-editor.zoom-anchor")
+    private var waveformZoomAnchorRaw = WaveformZoomAnchor.mouse.rawValue
+    @AppStorage("nl.blancoservices.lumi.track-editor.reverse-horizontal-scroll")
+    private var reversesHorizontalScroll = false
     @Environment(\.dismiss) private var dismiss
 
     private let background = LumiColor.canvas
@@ -56,7 +74,7 @@ public struct TrackLightingEditorView: View {
         _viewport = State(
             initialValue: TrackEditorViewport(
                 startBeat: 0,
-                visibleBeats: Double(min(32, max(1, analysis.totalBeats))),
+                visibleBeats: Double(max(1, analysis.totalBeats)),
                 totalBeats: analysis.totalBeats,
                 beatsPerBar: analysis.beatsPerBar
             )
@@ -345,6 +363,22 @@ public struct TrackLightingEditorView: View {
                 Text(String(format: "%.1f bars", viewport.visibleBars))
                     .font(.system(size: 11, weight: .semibold, design: .monospaced))
                     .frame(width: 58, alignment: .trailing)
+                Menu {
+                    Picker("Zoom around", selection: waveformZoomAnchorBinding) {
+                        ForEach(WaveformZoomAnchor.allCases) { anchor in
+                            Text(anchor.title).tag(anchor)
+                        }
+                    }
+                    Divider()
+                    Toggle("Reverse horizontal scroll", isOn: $reversesHorizontalScroll)
+                } label: {
+                    Image(systemName: "slider.horizontal.3")
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+                .help("Waveform mouse and trackpad settings")
+                .accessibilityLabel("Waveform interaction settings")
+                .accessibilityIdentifier("lumi.trackEditor.interactionSettings")
             }
             .accessibilityIdentifier("lumi.trackEditor.zoom")
         }
@@ -571,7 +605,8 @@ public struct TrackLightingEditorView: View {
             .overlay {
                 HorizontalScrollMonitor(
                     onScroll: { deltaX in
-                        viewport = viewport.panned(byPixels: deltaX, width: proxy.size.width)
+                        let direction = reversesHorizontalScroll ? -1.0 : 1.0
+                        viewport = viewport.panned(byPixels: deltaX * direction, width: proxy.size.width)
                     },
                     onZoom: { delta, pointerFraction in
                         zoomFromScroll(delta, pointerFraction: pointerFraction)
@@ -1322,10 +1357,26 @@ public struct TrackLightingEditorView: View {
         )
     }
 
+    private var waveformZoomAnchor: WaveformZoomAnchor {
+        WaveformZoomAnchor(rawValue: waveformZoomAnchorRaw) ?? .mouse
+    }
+
+    private var waveformZoomAnchorBinding: Binding<WaveformZoomAnchor> {
+        Binding(
+            get: { waveformZoomAnchor },
+            set: { waveformZoomAnchorRaw = $0.rawValue }
+        )
+    }
+
     private func zoomFromScroll(_ delta: Double, pointerFraction: Double) {
         let boundedDelta = min(max(delta, -24), 24)
         let factor = exp(-boundedDelta * 0.025)
-        let anchorBeat = viewport.startBeat + viewport.visibleBeats * pointerFraction
+        let anchorBeat = switch waveformZoomAnchor {
+        case .mouse:
+            viewport.startBeat + viewport.visibleBeats * pointerFraction
+        case .playhead:
+            currentBeat
+        }
         viewport = viewport.zoomed(
             to: viewport.visibleBeats * factor,
             aroundBeat: anchorBeat

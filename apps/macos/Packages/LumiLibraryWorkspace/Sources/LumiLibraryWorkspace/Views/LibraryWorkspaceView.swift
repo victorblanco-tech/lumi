@@ -43,6 +43,7 @@ public struct LibraryWorkspaceView: View {
     @Binding private var keyNotation: KeyNotationPreference
     @State private var search: String
     @State private var selectedTrackID: UInt64?
+    @State private var selectedPlaylistID: UInt64?
     @State private var readinessFilter: LibraryReadinessFilter = .all
     @State private var editorAnalysis: TrackEditorAnalysis?
     @State private var requestedEditorTrackID: UInt64?
@@ -77,6 +78,7 @@ public struct LibraryWorkspaceView: View {
         _keyNotation = keyNotation
         _search = State(initialValue: state.query.search)
         _selectedTrackID = State(initialValue: state.page.tracks.first?.id)
+        _selectedPlaylistID = State(initialValue: state.query.playlistID)
         _editorAnalysis = State(initialValue: state.editor)
     }
 
@@ -95,6 +97,7 @@ public struct LibraryWorkspaceView: View {
                             onTimelineHistory: onTimelineHistory,
                             onSourceReconcile: onSourceReconcile
                         )
+                        .id(analysis.track.id)
                     } else {
                         editorPlaceholder
                     }
@@ -110,6 +113,7 @@ public struct LibraryWorkspaceView: View {
         .accessibilityIdentifier("lumi.library.workspace")
         .task { requestInitialEditorIfNeeded() }
         .onChange(of: state.query.search) { _, value in search = value }
+        .onChange(of: state.query.playlistID) { _, value in selectedPlaylistID = value }
         .onChange(of: state.page.tracks) { _, tracks in
             if !tracks.contains(where: { $0.id == selectedTrackID }) {
                 selectedTrackID = tracks.first?.id
@@ -187,7 +191,7 @@ public struct LibraryWorkspaceView: View {
                     localized("library.collection"),
                     count: state.collectionTotal,
                     systemImage: "music.note.list",
-                    selected: state.query.playlistID == nil
+                    selected: selectedPlaylistID == nil
                 )
             }
             .buttonStyle(.plain)
@@ -196,21 +200,28 @@ public struct LibraryWorkspaceView: View {
             Text(localized("library.playlists"))
                 .font(LumiTypography.sectionTitle)
                 .padding(.top, LumiSpacing.small)
-            ForEach(state.playlists) { playlist in
-                Button {
-                    selectPlaylist(playlist.id)
-                } label: {
-                    navigationLabel(
-                        playlist.name,
-                        count: playlist.trackCount,
-                        systemImage: "music.note",
-                        selected: state.query.playlistID == playlist.id
-                    )
+            ScrollView(.vertical) {
+                LazyVStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+                    ForEach(state.playlists) { playlist in
+                        Button {
+                            selectPlaylist(playlist.id)
+                        } label: {
+                            navigationLabel(
+                                playlist.name,
+                                count: playlist.trackCount,
+                                systemImage: "music.note",
+                                selected: selectedPlaylistID == playlist.id
+                            )
+                        }
+                        .buttonStyle(.plain)
+                        .accessibilityIdentifier("lumi.library.playlist.\(playlist.id)")
+                    }
                 }
-                .buttonStyle(.plain)
-                .accessibilityIdentifier("lumi.library.playlist.\(playlist.id)")
             }
-            Spacer()
+            .scrollIndicators(.automatic)
+            .frame(maxHeight: .infinity)
+            .accessibilityIdentifier("lumi.library.playlists")
+
             if let source = state.source {
                 VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
                     Label(source.name, systemImage: "externaldrive.fill")
@@ -329,6 +340,11 @@ public struct LibraryWorkspaceView: View {
                             .font(LumiTypography.body.weight(.semibold))
                             .foregroundStyle(LumiColor.textPrimary)
                             .lineLimit(1)
+                        if requestedEditorTrackID == track.id {
+                            ProgressView()
+                                .controlSize(.mini)
+                                .accessibilityLabel("Loading track editor")
+                        }
                     }
                     .accessibilityIdentifier("lumi.library.track.\(track.id)")
                 }
@@ -428,16 +444,12 @@ public struct LibraryWorkspaceView: View {
     }
 
     private func editorLoadingCell<Content: View>(
-        _ track: LibraryTrack,
+        _: LibraryTrack,
         @ViewBuilder content: () -> Content
     ) -> some View {
         content()
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
-            .onTapGesture(count: 2) {
-                guard rendersInteractiveControls else { return }
-                requestEditor(trackID: track.id)
-            }
     }
 
     private func localDeckToolbarButton(_ track: LibraryTrack, deckID: UInt64) -> some View {
@@ -534,6 +546,7 @@ public struct LibraryWorkspaceView: View {
     }
 
     private func selectPlaylist(_ id: UInt64?) {
+        selectedPlaylistID = id
         onQuery(LibraryQueryRequest(search: search, playlistID: id, offset: 0))
     }
 

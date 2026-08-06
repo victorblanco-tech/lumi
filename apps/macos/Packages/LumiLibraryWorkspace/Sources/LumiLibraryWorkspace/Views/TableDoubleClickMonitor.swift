@@ -48,7 +48,7 @@ final class TableDoubleClickMonitorView: NSView {
 
     private func installEventMonitorIfNeeded() {
         guard eventMonitor == nil else { return }
-        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { [weak self] event in
+        eventMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseDown) { [weak self] event in
             guard let self,
                   event.window === self.window,
                   event.clickCount == 2
@@ -56,7 +56,10 @@ final class TableDoubleClickMonitorView: NSView {
 
             let point = self.convert(event.locationInWindow, from: nil)
             guard self.bounds.contains(point) else { return event }
-            self.onDoubleClick?()
+            // Let NSTableView publish its new selection before the editor reads it.
+            DispatchQueue.main.async { [weak self] in
+                self?.onDoubleClick?()
+            }
             return event
         }
     }

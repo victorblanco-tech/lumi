@@ -105,7 +105,9 @@ het Theme verandert.
 
 ### 4.1 Library workspace
 
-- linker kolom: Collection, playlists en readinessfilters;
+- linker kolom: Collection, een onafhankelijk verticaal scrollbare playlistlijst
+  en readinessfilters; playlistselectie geeft onmiddellijk lokale feedback en
+  laat de begrensde query daarna afronden;
 - midden: doorzoekbare tracktabel met import- en analysisstatus;
 - rechter detail: metadata, source revision en warnings;
 - editorcanvas: CDJ-geïnspireerd en vast donker in zowel Lumi dark als light
@@ -116,6 +118,10 @@ het Theme verandert.
 - preview: voorlopig Theme, reason en opgeloste dry-run-Autoloop per phrase;
 - transport: play/pause, stop, seek/scrub, vorige/volgende maat, volume en
   `Loop selected phrase`;
+- iedere nieuw geopende track start met de volledige waveform in beeld;
+  verticale scroll zoomt rond de muispositie of de playhead volgens een
+  persistente gebruikerskeuze, en de horizontale scrollrichting kan eveneens
+  persistent worden omgekeerd;
 - editacties: plaats/verplaats/verwijder een Phrase Point, change role,
   undo/redo, save revision en revision restore; ieder eindpunt wordt afgeleid
   van het volgende Phrase Point of trackeinde;
@@ -208,14 +214,19 @@ Buildup 2.
 ### E2A-03 – Browse and inspect imported tracks
 
 Activeert de Library-workspace met playlists, search, filters, metadata,
-readiness, errors en importprovenance.
+readiness, errors en importprovenance. De native tracktabel houdt selectie vrij
+van conflicterende celgestures; één tabelbrede dubbelklik opent altijd de zojuist
+geselecteerde track. De playlistkolom scrolt onafhankelijk en markeert een keuze
+direct, zodat een providerquery geen stugge of gemiste klik suggereert.
 
 ### E2A-04 – Render waveform and audition local audio
 
 Levert de CDJ-geïnspireerde editorcanvas met beatgrid, gekleurde waveform,
 gekleurde phrase lane en overview. Ondersteunt lokaal play/pause/stop, seek,
 scrub, maatnavigatie, volume en selected-phrase-loop zonder bestanden te
-kopiëren of showstate te muteren.
+kopiëren of showstate te muteren. De defaultviewport is de volledige track;
+waveforminstellingen bewaren `Zoom around Mouse pointer/Playhead` en optionele
+omgekeerde horizontale scroll per gebruiker.
 
 ### E2A-05 – Own and edit versioned Lumi phrase timelines
 
