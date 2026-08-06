@@ -113,7 +113,7 @@ struct LibraryWorkspaceTests {
                     "state": .string("ready"),
                     "destinationName": .string("Lumi Deck Input"),
                     "protocol": .string("BLT MIDI Deck Frame"),
-                    "protocolVersion": .number(1),
+                    "protocolVersion": .number(2),
                     "receivedMessageCount": .number(48),
                     "invalidWordCount": .number(0),
                     "committedFrameCount": .number(3),
@@ -129,6 +129,18 @@ struct LibraryWorkspaceTests {
         #expect(input.isReceiving)
         #expect(input.lastDeckID == 2)
         #expect(state.midiIntegration == nil)
+    }
+
+    @Test("BLT expression corrects the Shallow Playback Simulator without changing real deck tempo")
+    @MainActor
+    func bltExpressionHasSeparateSimulatorAndHardwareTempoPaths() {
+        let expression = BeatLinkTriggerIntegrationView.trackedUpdateExpression
+
+        #expect(expression.contains("simulating? (some? util/*simulating*)"))
+        #expect(expression.contains("(/ (* raw-track-bpm 10.0) pitch-scale)"))
+        #expect(expression.contains("(* raw-track-bpm 10.0)"))
+        #expect(expression.contains("(or effective-tempo 0.0)"))
+        #expect(expression.contains("[119 2]"))
     }
 
     @Test("Duplicate stable role IDs are rejected before Settings renders")

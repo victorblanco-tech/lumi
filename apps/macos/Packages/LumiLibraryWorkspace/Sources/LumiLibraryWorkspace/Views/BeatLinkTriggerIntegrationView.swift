@@ -155,8 +155,17 @@ public struct BeatLinkTriggerIntegrationView: View {
             flags (+ (if loaded 1 0) (if playing? 2 0)
                      (if tempo-master? 4 0) (if on-air? 8 0))
             source-player (long (or track-source-player 0))
-            track-bpm (long (* (max 0 (or raw-bpm 0)) 10))
-            effective-bpm (long (Math/round (* (double (max 0.0 (or effective-tempo 0.0))) 1000.0)))
+            raw-track-bpm (double (max 0 (or raw-bpm 0)))
+            simulating? (some? util/*simulating*)
+            pitch-scale (double (max 0.000001 pitch-multiplier))
+            track-bpm (long (Math/round
+                              (if simulating?
+                                (/ (* raw-track-bpm 10.0) pitch-scale)
+                                (* raw-track-bpm 10.0))))
+            effective-bpm (long (Math/round
+                                  (if simulating?
+                                    (* raw-track-bpm 10.0)
+                                    (* (double (max 0.0 (or effective-tempo 0.0))) 1000.0))))
             current-beat (long (max 0 (or beat-number 0)))
             duration (long (or track-length 0))
             slot (case track-source-slot :sd-slot 1 :usb-slot 2

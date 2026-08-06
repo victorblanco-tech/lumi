@@ -23,6 +23,14 @@ The exact versioned expression is available in Lumi under **Settings →
 Integrations → Beat Link Trigger → Copy Tracked Update Expression**. Lumi shows
 the same protocol version and live counters beside that user-facing template.
 
+The expression deliberately distinguishes BLT's Shallow Playback Simulator
+from real device updates. The simulator writes an already pitch-adjusted value
+into its raw BPM field and also supplies the pitch multiplier, causing BLT's
+normal `effective-tempo` accessor to apply pitch twice. For simulated updates,
+the expression therefore uses raw BPM as effective BPM and divides out pitch
+for immutable track BPM. Real Pro DJ Link updates continue to use BLT's official
+`effective-tempo` value without this compatibility correction.
+
 ## Frame v2
 
 All values are seven-bit Control Change values. Multi-byte numbers use
@@ -52,6 +60,7 @@ is reserved for the independent Lumi → SoundSwitch output profile.
 - Complete Player 1 and Player 2 frames render as fixed Deck A and Deck B.
 - Changing Master moves Live between those fixed deck positions.
 - Play/pause, beat and pitch-adjusted effective BPM updates appear without a local simulator in Lumi.
+- In the Shallow Playback Simulator, displayed BPM and Lumi effective BPM are equal above, below and at zero pitch.
 - Unknown tracks show `AUTO HELD` and never trigger an automatic MIDI output.
 - Partial, duplicate and foreign messages are counted and do not mutate state.
 - Disconnect/restart produces no unsolicited SoundSwitch output.
