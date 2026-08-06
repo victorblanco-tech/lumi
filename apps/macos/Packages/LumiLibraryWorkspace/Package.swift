@@ -26,7 +26,8 @@ let package = Package(
         ),
         .testTarget(
             name: "LumiLibraryWorkspaceTests",
-            dependencies: ["LumiLibraryWorkspace", "LumiProtocol"]
+            dependencies: ["LumiLibraryWorkspace", "LumiProtocol"],
+            resources: [.process("Fixtures")]
         )
     ]
 )

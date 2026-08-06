@@ -91,7 +91,11 @@ public struct IntegrationsWorkspaceView: View {
 
     private func sectionButton(_ value: IntegrationsWorkspaceSection) -> some View {
         Button { section = value } label: {
-            Label(sectionTitle(value), systemImage: sectionIcon(value))
+            HStack(spacing: LumiSpacing.small) {
+                sectionIconView(value)
+                    .frame(width: 18, height: 18)
+                Text(sectionTitle(value))
+            }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .frame(height: LumiControlMetric.standardHeight)
                 .padding(.horizontal, LumiSpacing.small)
@@ -285,9 +289,36 @@ public struct IntegrationsWorkspaceView: View {
     private func sectionIcon(_ value: IntegrationsWorkspaceSection) -> String {
         switch value {
         case .overview: "point.3.connected.trianglepath.dotted"
-        case .deckInputs: "rectangle.and.arrow.down"
+        case .deckInputs: "play.square.stack.fill"
         case .lightingOutputs: "lightbulb.2.fill"
         case .diagnostics: "stethoscope"
         }
+    }
+
+    @ViewBuilder
+    private func sectionIconView(_ value: IntegrationsWorkspaceSection) -> some View {
+        if value == .deckInputs {
+            DeckPlayerIcon()
+        } else {
+            Image(systemName: sectionIcon(value))
+        }
+    }
+}
+
+private struct DeckPlayerIcon: View {
+    var body: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 2.5)
+                .strokeBorder(lineWidth: 1.5)
+            RoundedRectangle(cornerRadius: 1)
+                .frame(width: 10, height: 4)
+                .offset(y: -4)
+            Circle()
+                .strokeBorder(lineWidth: 1.5)
+                .frame(width: 7, height: 7)
+                .offset(y: 4)
+        }
+        .padding(1)
+        .accessibilityHidden(true)
     }
 }

@@ -351,6 +351,26 @@ eigenaar van ieder component. Een grens-test voorkomt dat providerconfiguratie
 weer in Settings belandt. Het geaccepteerde ontwerp staat in
 [`docs/design/information-architecture`](../design/information-architecture/README.md).
 
+### [E2A-20 – Configure a Rekordbox XML source and discover playlists](https://github.com/victorblanco-tech/lumi/issues/92)
+
+Status: **delivered**. Configureert een read-only XML-importfolder onder
+`Library > Sources & Import`, ontdekt exports en toont de playlist/folderboom
+zonder de volledige Collection te importeren. Een gevolgde folder kan optioneel
+toekomstige child-playlists meenemen; deze optie staat standaard aan.
+
+### [E2A-21 – Mirror followed Rekordbox playlists without losing Lumi edits](https://github.com/victorblanco-tech/lumi/issues/91)
+
+Status: **refined**. Importeert uitsluitend tracks uit gevolgde playlists,
+spiegelt membership en volgorde en archiveert tracks die nergens meer gevolgd
+worden. Re-add herstelt alle Lumi-owned data.
+
+### [E2A-22 – Preview and apply Rekordbox XML sync changes](https://github.com/victorblanco-tech/lumi/issues/90)
+
+Status: **refined**. Levert een hash-gebonden diffpreview en atomaire Apply Sync
+met aantallen voor add, update, remove, archive, restore en fouten. De volledige
+beslissing staat in
+[`rekordbox-xml-sync.md`](../design/library-sources/rekordbox-xml-sync.md).
+
 ## 6.1 Bouwvolgorde zonder Rekordbox-developmentlibrary
 
 De Rekordbox-spike is alleen een harde gate voor `E2A-02`, niet voor de
