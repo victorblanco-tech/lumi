@@ -25,7 +25,9 @@ Only a complete supported frame may mutate deck state.
 
 The portable `lumi-blt-midi` adapter decodes frames and implements the existing
 `DeckSourceProvider` port. CoreMIDI types stop at the transport boundary. The
-domain receives only normalized load, position, playback and leader observations.
+domain receives only normalized load, position, effective playback tempo,
+playback and leader observations. Original track BPM remains immutable metadata;
+pitch-adjusted effective BPM remains live deck state.
 
 ## Safety and lifecycle
 
@@ -46,7 +48,8 @@ domain receives only normalized load, position, playback and leader observations
 
 This first adapter carries numeric facts that MIDI can represent reliably:
 player identity, rekordbox/source identity, loaded, playing, master, on-air,
-BPM, beat and duration. Title, artist, musical key, RGB waveform and phrase
+original BPM, pitch-adjusted effective BPM, beat and duration. Title, artist,
+musical key, RGB waveform and phrase
 analysis need either an exact Lumi Library match or a later richer metadata
 transport. The adapter boundary allows that transport, BLT itself, or a native
 PRO DJ LINK implementation to be replaced without changing Live or the domain.

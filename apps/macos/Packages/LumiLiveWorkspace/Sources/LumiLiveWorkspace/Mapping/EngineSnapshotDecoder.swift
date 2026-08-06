@@ -547,7 +547,7 @@ public struct EngineSnapshotDecoder: Sendable {
               case let .object(track) = deck["track"],
               case let .string(title) = track["title"],
               case let .string(artist) = track["artist"],
-              let bpmMilli = unsignedInteger(track["bpmMilli"]),
+              let trackBPMMilli = unsignedInteger(track["bpmMilli"]),
               let durationBeats = unsignedInteger(track["durationBeats"]),
               durationBeats > 0,
               case let .array(phrasePayloads) = track["phrases"],
@@ -555,6 +555,17 @@ public struct EngineSnapshotDecoder: Sendable {
               case let .string(pitchClass) = key["pitchClass"],
               case let .string(keyMode) = key["mode"] else {
             throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+
+        let bpmMilli: UInt64
+        if deck["effectiveBpmMilli"] == nil {
+            bpmMilli = trackBPMMilli
+        } else {
+            guard let value = unsignedInteger(deck["effectiveBpmMilli"]),
+                  (20_000...300_000).contains(value) else {
+                throw EngineSnapshotDecodingError.invalidSnapshot
+            }
+            bpmMilli = value
         }
 
         let colorRGB: UInt64?

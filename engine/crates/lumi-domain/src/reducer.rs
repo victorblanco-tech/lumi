@@ -13,6 +13,7 @@ pub enum DecisionReason {
     SourceStatusAccepted,
     TrackLoadAccepted,
     PositionAdvanced,
+    PlaybackTempoChanged,
     PlaybackStateChanged,
     PhraseChanged,
     LeaderChanged,
@@ -217,6 +218,21 @@ fn reduce_observation(
             }
             None => DecisionReason::TrackLoadMismatch,
         },
+        DeckObservation::PlaybackTempoChanged {
+            deck_id,
+            track_load_id,
+            bpm_milli,
+        } => match state.decks.get_mut(deck_id) {
+            Some(deck)
+                if deck.track_load_id() == *track_load_id
+                    && (20_000..=300_000).contains(bpm_milli) =>
+            {
+                deck.effective_bpm_milli = *bpm_milli;
+                deck.last_observed_at = event.observed_at;
+                DecisionReason::PlaybackTempoChanged
+            }
+            _ => DecisionReason::TrackLoadMismatch,
+        },
         DeckObservation::PlaybackStateChanged {
             deck_id,
             track_load_id,
@@ -316,6 +332,7 @@ fn reduce_observation(
         DecisionReason::SourceStatusAccepted
             | DecisionReason::TrackLoadAccepted
             | DecisionReason::PositionAdvanced
+            | DecisionReason::PlaybackTempoChanged
             | DecisionReason::PlaybackStateChanged
             | DecisionReason::TrackUnloaded
             | DecisionReason::PhraseChanged

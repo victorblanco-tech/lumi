@@ -1691,6 +1691,7 @@ fn snapshot_envelope(
                 "deckId": deck_id.value(),
                 "trackLoadId": deck.track_load_id().value(),
                 "beat": deck.beat(),
+                "effectiveBpmMilli": deck.effective_bpm_milli(),
                 "playing": deck.is_playing(),
                 "phraseIndex": deck.phrase_index(),
                 "planEligibility": plan_eligibility,
@@ -2177,6 +2178,7 @@ const fn decision_reason_name(reason: DecisionReason) -> &'static str {
         DecisionReason::SourceStatusAccepted => "sourceStatusAccepted",
         DecisionReason::TrackLoadAccepted => "trackLoadAccepted",
         DecisionReason::PositionAdvanced => "positionAdvanced",
+        DecisionReason::PlaybackTempoChanged => "playbackTempoChanged",
         DecisionReason::PlaybackStateChanged => "playbackStateChanged",
         DecisionReason::PhraseChanged => "phraseChanged",
         DecisionReason::LeaderChanged => "leaderChanged",
@@ -3028,7 +3030,10 @@ mod tests {
             (30, 1),
             (31, 0),
             (32, 7),
-            (119, 1),
+            (33, 80),
+            (34, 119),
+            (35, 7),
+            (119, 2),
         ];
         for (controller, value) in fields {
             if let Err(error) = runtime.connected_deck_source.ingest(
@@ -3057,6 +3062,7 @@ mod tests {
             .unwrap_or_else(|| panic!("BLT Deck 2 must be loaded"));
         assert_eq!(deck.metadata().title(), "External track 42");
         assert_eq!(deck.beat(), 80);
+        assert_eq!(deck.effective_bpm_milli(), 130_000);
         assert!(deck.is_playing());
         assert!(
             runtime
@@ -3066,12 +3072,59 @@ mod tests {
                 .is_none()
         );
         assert_eq!(runtime.output_worker.provider.records().count(), 0);
+
+        let tempo_update = [
+            (16, 15),
+            (17, 42),
+            (18, 0),
+            (19, 0),
+            (20, 0),
+            (21, 2),
+            (22, 1),
+            (23, 80),
+            (24, 119),
+            (25, 7),
+            (26, 80),
+            (27, 0),
+            (28, 0),
+            (29, 58),
+            (30, 1),
+            (31, 0),
+            (32, 8),
+            (33, 100),
+            (34, 1),
+            (35, 8),
+            (119, 2),
+        ];
+        for (controller, value) in tempo_update {
+            if let Err(error) = runtime.connected_deck_source.ingest(
+                MidiChannelVoiceMessage {
+                    status: 0xb,
+                    channel: 2,
+                    data_one: controller,
+                    data_two: value,
+                },
+                MonotonicTime::new(2),
+            ) {
+                panic!("BLT tempo update must ingest: {error}");
+            }
+        }
+        if let Err(error) = process_pending_source_events(&mut runtime) {
+            panic!("BLT tempo update must enter the engine: {error}");
+        }
+        let deck = runtime
+            .state
+            .state()
+            .deck(lumi_domain::DeckId::new(2))
+            .unwrap_or_else(|| panic!("BLT Deck 2 must remain loaded"));
+        assert_eq!(deck.metadata().bpm_milli(), 130_000);
+        assert_eq!(deck.effective_bpm_milli(), 131_300);
         assert_eq!(
             runtime
                 .connected_deck_source
                 .diagnostics()
                 .committed_frame_count,
-            1
+            2
         );
     }
 

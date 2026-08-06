@@ -18,7 +18,7 @@ use lumi_midi_coremidi::MidiChannelVoiceMessage;
 use thiserror::Error;
 
 pub const PROTOCOL_NAME: &str = "BLT MIDI Deck Frame";
-pub const PROTOCOL_VERSION: u8 = 1;
+pub const PROTOCOL_VERSION: u8 = 2;
 
 const SOURCE_ID: u64 = 30;
 const CONTROL_CHANGE_STATUS: u8 = 0xb;
@@ -30,6 +30,7 @@ const BPM_MILLI_CC: u8 = 23;
 const BEAT_CC: u8 = 26;
 const DURATION_SECONDS_CC: u8 = 29;
 const FRAME_SEQUENCE_CC: u8 = 32;
+const EFFECTIVE_BPM_MILLI_CC: u8 = 33;
 const COMMIT_CC: u8 = 119;
 
 const FLAG_LOADED: u8 = 1;
@@ -44,10 +45,11 @@ struct FrameAssembler {
     rekordbox_id: [u8; 4],
     source_player: u8,
     source_slot: u8,
-    bpm_milli: [u8; 3],
+    track_bpm_milli: [u8; 3],
     beat: [u8; 3],
     duration_seconds: [u8; 3],
     frame_sequence: u8,
+    effective_bpm_milli: [u8; 3],
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -59,7 +61,8 @@ struct DeckFrame {
     rekordbox_id: u32,
     source_player: u8,
     source_slot: u8,
-    bpm_milli: u32,
+    track_bpm_milli: u32,
+    effective_bpm_milli: u32,
     beat: u32,
     duration_seconds: u32,
     frame_sequence: u8,
@@ -70,6 +73,7 @@ struct LoadedDeck {
     identity: u64,
     track_load_id: TrackLoadId,
     beat: u32,
+    effective_bpm_milli: u32,
     playing: bool,
 }
 
@@ -254,7 +258,7 @@ impl BltMidiDeckSourceProvider {
                 TrackId::new(identity),
                 format!("External track {}", frame.rekordbox_id),
                 "Beat Link Trigger".to_owned(),
-                frame.bpm_milli,
+                frame.track_bpm_milli,
                 MusicalKey::new(PitchClass::C, KeyMode::Minor),
                 duration_beats,
             )?;
@@ -264,6 +268,7 @@ impl BltMidiDeckSourceProvider {
                     identity,
                     track_load_id,
                     beat: frame.beat.min(duration_beats),
+                    effective_bpm_milli: frame.effective_bpm_milli,
                     playing: frame.playing,
                 },
             );
@@ -275,6 +280,16 @@ impl BltMidiDeckSourceProvider {
                     track_load_id,
                 },
             )?;
+            if frame.effective_bpm_milli != frame.track_bpm_milli {
+                self.emit(
+                    at,
+                    DeckObservation::PlaybackTempoChanged {
+                        deck_id,
+                        track_load_id,
+                        bpm_milli: frame.effective_bpm_milli,
+                    },
+                )?;
+            }
             self.emit(
                 at,
                 DeckObservation::PlaybackPosition {
@@ -294,6 +309,16 @@ impl BltMidiDeckSourceProvider {
         } else if let Some(previous) = self.decks.get(&deck_id).copied() {
             let duration = duration_beats(frame)?;
             let beat = frame.beat.min(duration);
+            if previous.effective_bpm_milli != frame.effective_bpm_milli {
+                self.emit(
+                    at,
+                    DeckObservation::PlaybackTempoChanged {
+                        deck_id,
+                        track_load_id: previous.track_load_id,
+                        bpm_milli: frame.effective_bpm_milli,
+                    },
+                )?;
+            }
             if previous.beat != beat {
                 self.emit(
                     at,
@@ -316,6 +341,7 @@ impl BltMidiDeckSourceProvider {
             }
             if let Some(deck) = self.decks.get_mut(&deck_id) {
                 deck.beat = beat;
+                deck.effective_bpm_milli = frame.effective_bpm_milli;
                 deck.playing = frame.playing;
             }
         }
@@ -387,29 +413,38 @@ fn write_field(frame: &mut FrameAssembler, controller: u8, value: u8) -> bool {
         }
         SOURCE_PLAYER_CC => frame.source_player = value,
         SOURCE_SLOT_CC => frame.source_slot = value,
-        BPM_MILLI_CC..=25 => frame.bpm_milli[usize::from(controller - BPM_MILLI_CC)] = value,
+        BPM_MILLI_CC..=25 => {
+            frame.track_bpm_milli[usize::from(controller - BPM_MILLI_CC)] = value;
+        }
         BEAT_CC..=28 => frame.beat[usize::from(controller - BEAT_CC)] = value,
         DURATION_SECONDS_CC..=31 => {
             frame.duration_seconds[usize::from(controller - DURATION_SECONDS_CC)] = value;
         }
         FRAME_SEQUENCE_CC => frame.frame_sequence = value,
+        EFFECTIVE_BPM_MILLI_CC..=35 => {
+            frame.effective_bpm_milli[usize::from(controller - EFFECTIVE_BPM_MILLI_CC)] = value;
+        }
         _ => return false,
     }
     true
 }
 
 fn decode_frame(frame: FrameAssembler) -> Result<DeckFrame, BltMidiError> {
-    const REQUIRED_FIELDS: u32 = (1_u32 << 17) - 1;
+    const REQUIRED_FIELDS: u32 = (1_u32 << 20) - 1;
     if frame.present_fields != REQUIRED_FIELDS {
         return Err(BltMidiError::IncompleteFrame);
     }
     let rekordbox_id = decode_7bit(&frame.rekordbox_id)?;
-    let bpm_milli = decode_7bit(&frame.bpm_milli)?;
+    let track_bpm_milli = decode_7bit(&frame.track_bpm_milli)?;
+    let effective_bpm_milli = decode_7bit(&frame.effective_bpm_milli)?;
     let beat = decode_7bit(&frame.beat)?;
     let duration_seconds = decode_7bit(&frame.duration_seconds)?;
     let loaded = frame.flags & FLAG_LOADED != 0;
     if loaded
-        && (rekordbox_id == 0 || !(20_000..=300_000).contains(&bpm_milli) || duration_seconds == 0)
+        && (rekordbox_id == 0
+            || !(20_000..=300_000).contains(&track_bpm_milli)
+            || !(20_000..=300_000).contains(&effective_bpm_milli)
+            || duration_seconds == 0)
     {
         return Err(BltMidiError::IncompleteFrame);
     }
@@ -421,7 +456,8 @@ fn decode_frame(frame: FrameAssembler) -> Result<DeckFrame, BltMidiError> {
         rekordbox_id,
         source_player: frame.source_player,
         source_slot: frame.source_slot,
-        bpm_milli,
+        track_bpm_milli,
+        effective_bpm_milli,
         beat,
         duration_seconds,
         frame_sequence: frame.frame_sequence,
@@ -448,7 +484,7 @@ fn track_identity(frame: DeckFrame) -> u64 {
 
 fn duration_beats(frame: DeckFrame) -> Result<u32, BltMidiError> {
     let estimated = u64::from(frame.duration_seconds)
-        .checked_mul(u64::from(frame.bpm_milli))
+        .checked_mul(u64::from(frame.track_bpm_milli))
         .ok_or(BltMidiError::FrameValueOverflow)?
         .checked_add(30_000)
         .ok_or(BltMidiError::FrameValueOverflow)?
@@ -497,7 +533,13 @@ mod tests {
         );
         messages.push(cc(channel, SOURCE_PLAYER_CC, frame.source_player));
         messages.push(cc(channel, SOURCE_SLOT_CC, frame.source_slot));
-        extend_chunks(&mut messages, channel, BPM_MILLI_CC, frame.bpm_milli, 3);
+        extend_chunks(
+            &mut messages,
+            channel,
+            BPM_MILLI_CC,
+            frame.track_bpm_milli,
+            3,
+        );
         extend_chunks(&mut messages, channel, BEAT_CC, frame.beat, 3);
         extend_chunks(
             &mut messages,
@@ -507,6 +549,13 @@ mod tests {
             3,
         );
         messages.push(cc(channel, FRAME_SEQUENCE_CC, frame.frame_sequence));
+        extend_chunks(
+            &mut messages,
+            channel,
+            EFFECTIVE_BPM_MILLI_CC,
+            frame.effective_bpm_milli,
+            3,
+        );
         messages.push(cc(channel, COMMIT_CC, PROTOCOL_VERSION));
         messages
     }
@@ -544,7 +593,8 @@ mod tests {
             rekordbox_id: 42,
             source_player: 1,
             source_slot: 2,
-            bpm_milli: 130_000,
+            track_bpm_milli: 130_000,
+            effective_bpm_milli: 130_000,
             beat: 169,
             duration_seconds: 430,
             frame_sequence: sequence,
@@ -595,6 +645,48 @@ mod tests {
             .unwrap_or_else(|error| panic!("foreign MIDI must be harmless: {error}"));
         assert_eq!(provider.diagnostics().duplicate_frame_count, 1);
         assert_eq!(provider.diagnostics().ignored_message_count, 1);
+    }
+
+    #[test]
+    fn pitch_change_emits_effective_tempo_without_reloading_track_metadata() {
+        let mut provider = BltMidiDeckSourceProvider::new(MonotonicTime::new(0))
+            .unwrap_or_else(|error| panic!("provider must initialize: {error}"));
+        for message in encode(1, frame(1)) {
+            provider
+                .ingest(message, MonotonicTime::new(10))
+                .unwrap_or_else(|error| panic!("initial frame must ingest: {error}"));
+        }
+        let _ = provider
+            .drain_events()
+            .unwrap_or_else(|error| panic!("initial events must drain: {error}"));
+
+        let mut changed = frame(2);
+        changed.effective_bpm_milli = 131_300;
+        for message in encode(1, changed) {
+            provider
+                .ingest(message, MonotonicTime::new(20))
+                .unwrap_or_else(|error| panic!("tempo frame must ingest: {error}"));
+        }
+        let events = provider
+            .drain_events()
+            .unwrap_or_else(|error| panic!("tempo events must drain: {error}"));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            DomainEvent::Observation(ObservationEnvelope {
+                observation: DeckObservation::PlaybackTempoChanged {
+                    bpm_milli: 131_300,
+                    ..
+                },
+                ..
+            })
+        )));
+        assert!(!events.iter().any(|event| matches!(
+            event,
+            DomainEvent::Observation(ObservationEnvelope {
+                observation: DeckObservation::TrackLoaded { .. },
+                ..
+            })
+        )));
     }
 
     #[test]

@@ -178,6 +178,41 @@ struct LiveWorkspacePresenterTests {
         #expect(snapshot.livePlan == nil)
     }
 
+    @Test("Effective deck BPM overrides immutable track BPM")
+    func effectiveDeckBPMIsDecoded() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case var .array(decks) = payload["decks"],
+              !decks.isEmpty,
+              case var .object(deck) = decks[0],
+              case let .object(track) = deck["track"],
+              let trackBPM = track["bpmMilli"] else {
+            Issue.record("Recorded fixture must contain Deck A BPM")
+            return
+        }
+        deck["effectiveBpmMilli"] = .number(131_300)
+        decks[0] = .object(deck)
+        payload["decks"] = .array(decks)
+        let updated = MessageEnvelope(
+            protocolVersion: recorded.protocolVersion,
+            messageType: recorded.messageType,
+            messageId: recorded.messageId,
+            sequence: recorded.sequence,
+            correlationId: recorded.correlationId,
+            sentAt: recorded.sentAt,
+            payload: payload
+        )
+
+        let snapshot = try EngineSnapshotDecoder().decode(
+            updated,
+            endpointDescription: "127.0.0.1:52841",
+            protocolVersion: 1
+        )
+
+        #expect(trackBPM != .number(131_300))
+        #expect(snapshot.decks[0].bpmMilli == 131_300)
+    }
+
     @Test("BLT input diagnostics decode as a separate connected-deck integration")
     func deckInputDiagnosticsDecode() throws {
         let recorded = try recordedEnvelope()

@@ -155,7 +155,8 @@ public struct BeatLinkTriggerIntegrationView: View {
             flags (+ (if loaded 1 0) (if playing? 2 0)
                      (if tempo-master? 4 0) (if on-air? 8 0))
             source-player (long (or track-source-player 0))
-            bpm (long (* (max 0 (or raw-bpm 0)) 10))
+            track-bpm (long (* (max 0 (or raw-bpm 0)) 10))
+            effective-bpm (long (Math/round (* (double (max 0.0 (or effective-tempo 0.0))) 1000.0)))
             current-beat (long (max 0 (or beat-number 0)))
             duration (long (or track-length 0))
             slot (case track-source-slot :sd-slot 1 :usb-slot 2
@@ -168,12 +169,14 @@ public struct BeatLinkTriggerIntegrationView: View {
                  [17 (chunk rb 0)] [18 (chunk rb 7)]
                  [19 (chunk rb 14)] [20 (chunk rb 21)]
                  [21 source-player] [22 slot]
-                 [23 (chunk bpm 0)] [24 (chunk bpm 7)] [25 (chunk bpm 14)]
+                 [23 (chunk track-bpm 0)] [24 (chunk track-bpm 7)] [25 (chunk track-bpm 14)]
                  [26 (chunk current-beat 0)] [27 (chunk current-beat 7)]
                  [28 (chunk current-beat 14)]
                  [29 (chunk duration 0)] [30 (chunk duration 7)]
                  [31 (chunk duration 14)] [32 sequence]
-                 [119 1]]]
+                 [33 (chunk effective-bpm 0)] [34 (chunk effective-bpm 7)]
+                 [35 (chunk effective-bpm 14)]
+                 [119 2]]]
           (midi/midi-control trigger-output controller value ch))))
     """
 }
