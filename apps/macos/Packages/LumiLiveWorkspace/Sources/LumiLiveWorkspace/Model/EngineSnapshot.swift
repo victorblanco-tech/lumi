@@ -211,6 +211,37 @@ public struct LocalPlaybackTrackSnapshot: Equatable, Sendable {
     }
 }
 
+/// Lightweight app-side clock used only to render Local Playback smoothly.
+/// Authoritative phrase and planning state still comes from the engine.
+public struct LocalPlaybackVisualClockSnapshot: Equatable, Sendable {
+    public let trackLoadID: UInt64
+    public let positionMillis: UInt64
+    public let durationMillis: UInt64
+    public let playing: Bool
+    public let anchoredAtReferenceTime: TimeInterval
+
+    public init(
+        trackLoadID: UInt64,
+        positionMillis: UInt64,
+        durationMillis: UInt64,
+        playing: Bool,
+        anchoredAtReferenceTime: TimeInterval
+    ) {
+        self.trackLoadID = trackLoadID
+        self.positionMillis = positionMillis
+        self.durationMillis = durationMillis
+        self.playing = playing
+        self.anchoredAtReferenceTime = anchoredAtReferenceTime
+    }
+
+    public func positionMillis(at date: Date) -> Double {
+        let elapsed = playing
+            ? max(0, date.timeIntervalSinceReferenceDate - anchoredAtReferenceTime) * 1_000
+            : 0
+        return min(Double(durationMillis), Double(positionMillis) + elapsed)
+    }
+}
+
 public struct DeckSnapshot: Equatable, Identifiable, Sendable {
     public let deckID: UInt64
     public let trackLoadID: UInt64

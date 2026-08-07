@@ -21,6 +21,9 @@ final class EngineStatusModel: ObservableObject {
     @Published private(set) var midiIntegrationFeedback: String?
     @Published private(set) var localPlaybackFeedback: String?
     @Published private(set) var localPlaybackFeedbackIsError = false
+    @Published private(set) var localPlaybackVisualClocks: [
+        UInt64: LocalPlaybackVisualClockSnapshot
+    ] = [:]
     @Published private(set) var sourceImportFeedback: String?
     @Published private(set) var sourceImportFeedbackIsError = false
 
@@ -42,6 +45,7 @@ final class EngineStatusModel: ObservableObject {
     private var pendingLocalTransports: [UInt64: LocalDeckTransportSnapshot] = [:]
     private var pendingLocalTransportDecks: [UInt64] = []
     private var localTransportDrainTask: Task<Void, Never>?
+    private var lastLocalTransportPresentationAt: ContinuousClock.Instant?
     private var isExchangingCommand = false
     private var pendingInteractiveExchanges = 0
     private var pendingLibraryQuery: (generation: UInt64, request: LibraryQueryRequest)?
@@ -135,6 +139,8 @@ final class EngineStatusModel: ObservableObject {
         isDrainingLibraryQueries = false
         localAudioControllers.values.forEach { $0.shutdown() }
         localAudioControllers.removeAll()
+        localPlaybackVisualClocks = [:]
+        lastLocalTransportPresentationAt = nil
         isExchangingCommand = false
         await supervisor.stop()
         lifecycle = .stopped
@@ -1112,7 +1118,20 @@ final class EngineStatusModel: ObservableObject {
             controller.seek(progress: progress)
             discardPendingLocalTransport(for: deckID)
         }
+        updateLocalPlaybackVisualClock(controller.snapshot)
         publishLocalTransport(controller.snapshot)
+    }
+
+    private func updateLocalPlaybackVisualClock(_ transport: LocalDeckTransportSnapshot) {
+        var clocks = localPlaybackVisualClocks
+        clocks[transport.deckID] = LocalPlaybackVisualClockSnapshot(
+            trackLoadID: transport.trackLoadID,
+            positionMillis: transport.positionMillis,
+            durationMillis: transport.durationMillis,
+            playing: transport.playing,
+            anchoredAtReferenceTime: Date.timeIntervalSinceReferenceDate
+        )
+        localPlaybackVisualClocks = clocks
     }
 
     private func discardPendingLocalTransport(for deckID: UInt64) {
@@ -1124,6 +1143,7 @@ final class EngineStatusModel: ObservableObject {
         guard snapshot.deckSource.mode == "localPlayback" else {
             localAudioControllers.values.forEach { $0.shutdown() }
             localAudioControllers.removeAll()
+            localPlaybackVisualClocks = [:]
             return
         }
         let expectedDecks = Set(snapshot.decks.compactMap { deck in
@@ -1131,6 +1151,9 @@ final class EngineStatusModel: ObservableObject {
         })
         for deckID in Array(localAudioControllers.keys) where !expectedDecks.contains(deckID) {
             localAudioControllers.removeValue(forKey: deckID)?.shutdown()
+            var clocks = localPlaybackVisualClocks
+            clocks.removeValue(forKey: deckID)
+            localPlaybackVisualClocks = clocks
         }
         for deck in snapshot.decks {
             guard let playback = deck.localPlayback else { continue }
@@ -1147,9 +1170,14 @@ final class EngineStatusModel: ObservableObject {
             )
             controller.onTransport = { [weak self, weak controller] in
                 guard let self, let controller else { return }
-                self.publishLocalTransport(controller.snapshot)
+                let transport = controller.snapshot
+                if !transport.playing {
+                    self.updateLocalPlaybackVisualClock(transport)
+                }
+                self.publishLocalTransport(transport)
             }
             localAudioControllers[deck.deckID] = controller
+            updateLocalPlaybackVisualClock(controller.snapshot)
         }
     }
 
@@ -1205,6 +1233,12 @@ final class EngineStatusModel: ObservableObject {
                 )
             )
             guard EngineCommandFailure(envelope) == nil else { return }
+            let now = ContinuousClock.now
+            if transport.playing,
+               let lastLocalTransportPresentationAt,
+               lastLocalTransportPresentationAt.duration(to: now) < .milliseconds(250) {
+                return
+            }
             let snapshot = try snapshotDecoder.decode(
                 envelope,
                 endpointDescription: endpointDescription,
@@ -1218,7 +1252,11 @@ final class EngineStatusModel: ObservableObject {
                 return
             }
             latestSnapshot = snapshot
-            workspaceState = LiveWorkspacePresenter.ready(snapshot)
+            let nextWorkspaceState = LiveWorkspacePresenter.ready(snapshot)
+            if nextWorkspaceState != workspaceState {
+                workspaceState = nextWorkspaceState
+            }
+            lastLocalTransportPresentationAt = now
         } catch {
             // The process monitor owns connection failure presentation. Audio
             // remains local and the next transport sample retries safely.
@@ -1319,6 +1357,7 @@ private struct LocalDeckTransportSnapshot: Equatable, Sendable {
     let deckID: UInt64
     let trackLoadID: UInt64
     let positionMillis: UInt64
+    let durationMillis: UInt64
     let playing: Bool
     let discontinuityRevision: UInt64
 }
@@ -1366,6 +1405,7 @@ private final class LocalDeckAudioController {
             deckID: deckID,
             trackLoadID: trackLoadID,
             positionMillis: positionMillis,
+            durationMillis: durationMillis,
             playing: isPlaying,
             discontinuityRevision: discontinuityRevision
         )

@@ -7,6 +7,7 @@ struct LiveDeckSurface<Details: View>: View {
     let plan: PlanSnapshot?
     let musicalKey: String
     let isLocalPlayback: Bool
+    let visualClock: LocalPlaybackVisualClockSnapshot?
     let selectedPhraseIndex: UInt64?
     let onSelectPhrase: (UInt64) -> Void
     let onTogglePlayback: () -> Void
@@ -28,6 +29,7 @@ struct LiveDeckSurface<Details: View>: View {
         plan: PlanSnapshot?,
         musicalKey: String,
         isLocalPlayback: Bool,
+        visualClock: LocalPlaybackVisualClockSnapshot? = nil,
         selectedPhraseIndex: UInt64?,
         onSelectPhrase: @escaping (UInt64) -> Void,
         onTogglePlayback: @escaping () -> Void = {},
@@ -41,6 +43,7 @@ struct LiveDeckSurface<Details: View>: View {
         self.plan = plan
         self.musicalKey = musicalKey
         self.isLocalPlayback = isLocalPlayback
+        self.visualClock = visualClock
         self.selectedPhraseIndex = selectedPhraseIndex
         self.onSelectPhrase = onSelectPhrase
         self.onTogglePlayback = onTogglePlayback
@@ -63,9 +66,7 @@ struct LiveDeckSurface<Details: View>: View {
             metadata
             if isLocalPlayback { transportControls }
             if deck.waveformPreview?.points.isEmpty == false { waveformToolbar }
-            waveform
-            phraseBand
-            plannedAutoloops
+            synchronizedDeckTimeline
             details
         }
         .background(Color.black)
@@ -86,11 +87,24 @@ struct LiveDeckSurface<Details: View>: View {
             scrubProgress = nil
             resetViewport()
         }
-        .onChange(of: deck.beat) { _, beat in
-            guard deck.playing, scrubProgress == nil else { return }
-            let value = Double(beat)
-            if value < viewport.startBeat || value >= viewport.endBeat {
-                viewport = viewport.centered(onBeat: value)
+    }
+
+    private var synchronizedDeckTimeline: some View {
+        TimelineView(
+            .animation(
+                minimumInterval: 1.0 / 30.0,
+                paused: visualClock?.playing != true || scrubProgress != nil
+            )
+        ) { context in
+            let playheadBeat = displayedPlayheadBeat(at: context.date)
+            let renderingViewport = followedViewport(for: playheadBeat)
+            VStack(alignment: .leading, spacing: 0) {
+                waveform(playheadBeat: playheadBeat, renderingViewport: renderingViewport)
+                phraseBand(playheadBeat: playheadBeat, renderingViewport: renderingViewport)
+                plannedAutoloops(
+                    playheadBeat: playheadBeat,
+                    renderingViewport: renderingViewport
+                )
             }
         }
     }
@@ -262,15 +276,18 @@ struct LiveDeckSurface<Details: View>: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
-    private var waveform: some View {
+    private func waveform(
+        playheadBeat: Double,
+        renderingViewport: LumiWaveformViewport
+    ) -> some View {
         ZStack(alignment: .topLeading) {
             Color.black
             if let preview = deck.waveformPreview, !preview.points.isEmpty {
                 RGBDeckWaveform(
                     points: preview.points,
                     durationBeats: deck.durationBeats,
-                    playheadBeat: displayedPlayheadBeat,
-                    viewport: viewport
+                    playheadBeat: playheadBeat,
+                    viewport: renderingViewport
                 )
                 Text(verbatim: "RGB · \(preview.source.uppercased())")
                     .font(LumiTypography.technical)
@@ -295,7 +312,7 @@ struct LiveDeckSurface<Details: View>: View {
                         LumiWaveformInteractionMonitor(
                             onScroll: { deltaX in
                                 let direction = reversesHorizontalScroll ? -1.0 : 1.0
-                                viewport = viewport.panned(
+                                viewport = renderingViewport.panned(
                                     byPixels: deltaX * direction,
                                     width: proxy.size.width
                                 )
@@ -311,14 +328,16 @@ struct LiveDeckSurface<Details: View>: View {
                                 guard isLocalPlayback else { return }
                                 scrubProgress = seekProgress(
                                     atX: value.location.x,
-                                    width: proxy.size.width
+                                    width: proxy.size.width,
+                                    renderingViewport: renderingViewport
                                 )
                             }
                             .onEnded { value in
                                 guard isLocalPlayback else { return }
                                 let progress = seekProgress(
                                     atX: value.location.x,
-                                    width: proxy.size.width
+                                    width: proxy.size.width,
+                                    renderingViewport: renderingViewport
                                 )
                                 scrubProgress = nil
                                 onSeek(progress)
@@ -327,11 +346,12 @@ struct LiveDeckSurface<Details: View>: View {
                     .simultaneousGesture(
                         MagnifyGesture()
                             .onChanged { value in
-                                let baseline = magnificationAnchorBeats ?? viewport.visibleBeats
+                                let baseline = magnificationAnchorBeats
+                                    ?? renderingViewport.visibleBeats
                                 magnificationAnchorBeats = baseline
-                                viewport = viewport.zoomed(
+                                viewport = renderingViewport.zoomed(
                                     to: baseline / max(0.05, value.magnification),
-                                    aroundBeat: Double(deck.beat)
+                                    aroundBeat: playheadBeat
                                 )
                             }
                             .onEnded { _ in magnificationAnchorBeats = nil }
@@ -339,7 +359,7 @@ struct LiveDeckSurface<Details: View>: View {
             }
         }
         .accessibilityElement(children: .ignore)
-        .accessibilityLabel("RGB waveform for \(deck.title), beat \(Int(displayedPlayheadBeat))")
+        .accessibilityLabel("RGB waveform for \(deck.title), beat \(Int(playheadBeat))")
         .accessibilityHint(
             isLocalPlayback
                 ? "Click or drag to seek. Playback continues from the selected position."
@@ -347,20 +367,40 @@ struct LiveDeckSurface<Details: View>: View {
         )
     }
 
-    private var displayedPlayheadBeat: Double {
-        guard let scrubProgress else { return Double(deck.beat) }
-        return scrubProgress * Double(max(1, deck.durationBeats))
+    private func displayedPlayheadBeat(at date: Date) -> Double {
+        if let scrubProgress {
+            return scrubProgress * Double(max(1, deck.durationBeats))
+        }
+        guard let visualClock,
+              visualClock.trackLoadID == deck.trackLoadID,
+              visualClock.durationMillis > 0 else {
+            return Double(deck.beat)
+        }
+        let progress = visualClock.positionMillis(at: date)
+            / Double(visualClock.durationMillis)
+        return min(
+            Double(max(1, deck.durationBeats)),
+            max(0, progress * Double(max(1, deck.durationBeats)))
+        )
     }
 
-    private func seekProgress(atX x: Double, width: Double) -> Double {
-        let beat = viewport.beat(atX: x, width: width)
+    private func seekProgress(
+        atX x: Double,
+        width: Double,
+        renderingViewport: LumiWaveformViewport
+    ) -> Double {
+        let beat = renderingViewport.beat(atX: x, width: width)
         return min(max(0, beat / Double(max(1, deck.durationBeats))), 1)
     }
 
-    private var phraseBand: some View {
-        GeometryReader { proxy in
+    private func phraseBand(
+        playheadBeat: Double,
+        renderingViewport: LumiWaveformViewport
+    ) -> some View {
+        let activePhraseIndex = phraseIndex(at: playheadBeat)
+        return GeometryReader { proxy in
             ZStack(alignment: .leading) {
-                ForEach(visiblePhrases) { phrase in
+                ForEach(visiblePhrases(in: renderingViewport)) { phrase in
                     Button {
                         onSelectPhrase(phrase.index)
                     } label: {
@@ -374,22 +414,32 @@ struct LiveDeckSurface<Details: View>: View {
                         .font(LumiTypography.caption.weight(.semibold))
                         .foregroundStyle(Color.white)
                         .frame(
-                            width: phraseWidth(phrase, totalWidth: proxy.size.width),
+                            width: phraseWidth(
+                                phrase,
+                                totalWidth: proxy.size.width,
+                                renderingViewport: renderingViewport
+                            ),
                             height: 28
                         )
                         .background(phraseColor(phrase.roleID ?? phrase.kind))
-                        .opacity(phrase.index < (deck.phraseIndex ?? 0) ? 0.48 : 1)
+                        .opacity(phrase.index < (activePhraseIndex ?? 0) ? 0.48 : 1)
                         .overlay {
                             if phrase.index == selectedPhraseIndex {
                                 Rectangle().strokeBorder(LumiColor.accent, lineWidth: 3)
-                            } else if phrase.index == deck.phraseIndex {
+                            } else if phrase.index == activePhraseIndex {
                                 Rectangle().strokeBorder(Color.white, lineWidth: 2)
                             }
                         }
                     }
                     .buttonStyle(.plain)
                     .contentShape(Rectangle())
-                    .offset(x: phraseOffset(phrase, totalWidth: proxy.size.width))
+                    .offset(
+                        x: phraseOffset(
+                            phrase,
+                            totalWidth: proxy.size.width,
+                            renderingViewport: renderingViewport
+                        )
+                    )
                     .accessibilityIdentifier("lumi.deck.\(deck.deckID).phrase.\(phrase.index)")
                 }
             }
@@ -401,11 +451,15 @@ struct LiveDeckSurface<Details: View>: View {
     }
 
     @ViewBuilder
-    private var plannedAutoloops: some View {
+    private func plannedAutoloops(
+        playheadBeat: Double,
+        renderingViewport: LumiWaveformViewport
+    ) -> some View {
         let items = PlannedAutoloopPresenter.items(
             deck: deck,
             plan: plan,
-            isMaster: isMaster
+            isMaster: isMaster,
+            playheadBeat: playheadBeat
         )
         if !items.isEmpty {
             VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
@@ -421,7 +475,11 @@ struct LiveDeckSurface<Details: View>: View {
                         .font(LumiTypography.technical)
                         .foregroundStyle(Color.white.opacity(0.36))
                 }
-                plannedAutoloopTimeline(items)
+                plannedAutoloopTimeline(
+                    items,
+                    playheadBeat: playheadBeat,
+                    renderingViewport: renderingViewport
+                )
             }
             .padding(.horizontal, LumiSpacing.small)
             .padding(.vertical, LumiSpacing.small)
@@ -432,25 +490,38 @@ struct LiveDeckSurface<Details: View>: View {
     }
 
     private func plannedAutoloopTimeline(
-        _ items: [PlannedAutoloopPresentation]
+        _ items: [PlannedAutoloopPresentation],
+        playheadBeat: Double,
+        renderingViewport: LumiWaveformViewport
     ) -> some View {
         GeometryReader { proxy in
             ZStack(alignment: .leading) {
                 Color.black.opacity(0.7)
                 ForEach(items) { item in
-                    if let phrase = phrase(for: item), phraseIsVisible(phrase) {
+                    if let phrase = phrase(for: item),
+                       phraseIsVisible(phrase, in: renderingViewport) {
                         plannedAutoloopBlock(
                             item,
-                            width: phraseWidth(phrase, totalWidth: proxy.size.width)
+                            width: phraseWidth(
+                                phrase,
+                                totalWidth: proxy.size.width,
+                                renderingViewport: renderingViewport
+                            )
                         )
-                        .offset(x: phraseOffset(phrase, totalWidth: proxy.size.width))
+                        .offset(
+                            x: phraseOffset(
+                                phrase,
+                                totalWidth: proxy.size.width,
+                                renderingViewport: renderingViewport
+                            )
+                        )
                     }
                 }
-                if playheadIsVisible {
+                if playheadIsVisible(playheadBeat, in: renderingViewport) {
                     lightPlanPlayhead
                         .offset(
                             x: viewport.x(
-                                forBeat: displayedPlayheadBeat,
+                                forBeat: playheadBeat,
                                 width: proxy.size.width
                             ) - 5
                         )
@@ -594,33 +665,75 @@ struct LiveDeckSurface<Details: View>: View {
         return phraseDisplayName(phrase)
     }
 
-    private var visiblePhrases: [DeckPhraseSnapshot] {
-        deck.phrases.filter(phraseIsVisible)
+    private func visiblePhrases(
+        in renderingViewport: LumiWaveformViewport
+    ) -> [DeckPhraseSnapshot] {
+        deck.phrases.filter { phraseIsVisible($0, in: renderingViewport) }
     }
 
-    private func phraseIsVisible(_ phrase: DeckPhraseSnapshot) -> Bool {
-        Double(phrase.endBeat) > viewport.startBeat
-            && Double(phrase.startBeat) < viewport.endBeat
+    private func phraseIsVisible(
+        _ phrase: DeckPhraseSnapshot,
+        in renderingViewport: LumiWaveformViewport
+    ) -> Bool {
+        Double(phrase.endBeat) > renderingViewport.startBeat
+            && Double(phrase.startBeat) < renderingViewport.endBeat
     }
 
     private func phrase(for item: PlannedAutoloopPresentation) -> DeckPhraseSnapshot? {
         deck.phrases.first(where: { $0.index == item.phraseIndex })
     }
 
-    private var playheadIsVisible: Bool {
-        displayedPlayheadBeat >= viewport.startBeat
-            && displayedPlayheadBeat <= viewport.endBeat
+    private func playheadIsVisible(
+        _ playheadBeat: Double,
+        in renderingViewport: LumiWaveformViewport
+    ) -> Bool {
+        playheadBeat >= renderingViewport.startBeat
+            && playheadBeat <= renderingViewport.endBeat
     }
 
-    private func phraseWidth(_ phrase: DeckPhraseSnapshot, totalWidth: CGFloat) -> CGFloat {
-        let start = max(Double(phrase.startBeat), viewport.startBeat)
-        let end = min(Double(phrase.endBeat), viewport.endBeat)
-        return max(1, totalWidth * CGFloat(max(0, end - start) / viewport.visibleBeats) - 1)
+    private func phraseWidth(
+        _ phrase: DeckPhraseSnapshot,
+        totalWidth: CGFloat,
+        renderingViewport: LumiWaveformViewport
+    ) -> CGFloat {
+        let start = max(Double(phrase.startBeat), renderingViewport.startBeat)
+        let end = min(Double(phrase.endBeat), renderingViewport.endBeat)
+        return max(
+            1,
+            totalWidth * CGFloat(
+                max(0, end - start) / renderingViewport.visibleBeats
+            ) - 1
+        )
     }
 
-    private func phraseOffset(_ phrase: DeckPhraseSnapshot, totalWidth: CGFloat) -> CGFloat {
-        let start = max(Double(phrase.startBeat), viewport.startBeat)
-        return totalWidth * CGFloat((start - viewport.startBeat) / viewport.visibleBeats)
+    private func phraseOffset(
+        _ phrase: DeckPhraseSnapshot,
+        totalWidth: CGFloat,
+        renderingViewport: LumiWaveformViewport
+    ) -> CGFloat {
+        let start = max(Double(phrase.startBeat), renderingViewport.startBeat)
+        return totalWidth * CGFloat(
+            (start - renderingViewport.startBeat) / renderingViewport.visibleBeats
+        )
+    }
+
+    private func phraseIndex(at beat: Double) -> UInt64? {
+        deck.phrases.first(where: {
+            beat >= Double($0.startBeat) && beat < Double($0.endBeat)
+        })?.index ?? deck.phrases.last?.index
+    }
+
+    private func followedViewport(for playheadBeat: Double) -> LumiWaveformViewport {
+        guard visualClock?.playing == true,
+              viewport.visibleBeats < Double(viewport.totalBeats) else {
+            return viewport
+        }
+        return LumiWaveformViewport(
+            startBeat: playheadBeat - viewport.visibleBeats * 0.22,
+            visibleBeats: viewport.visibleBeats,
+            totalBeats: viewport.totalBeats,
+            beatsPerBar: viewport.beatsPerBar
+        )
     }
 
     private var zoomSliderBinding: Binding<Double> {

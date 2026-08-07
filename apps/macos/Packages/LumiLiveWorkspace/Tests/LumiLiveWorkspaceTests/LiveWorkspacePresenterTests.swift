@@ -80,6 +80,28 @@ struct LiveWorkspacePresenterTests {
         #expect(previews.allSatisfy { $0.points.count == 192 })
     }
 
+    @Test("Local visual clock advances independently and clamps at track end")
+    func localVisualClockAdvancesSmoothly() {
+        let playing = LocalPlaybackVisualClockSnapshot(
+            trackLoadID: 7,
+            positionMillis: 1_000,
+            durationMillis: 4_000,
+            playing: true,
+            anchoredAtReferenceTime: 100
+        )
+        let paused = LocalPlaybackVisualClockSnapshot(
+            trackLoadID: 7,
+            positionMillis: 1_000,
+            durationMillis: 4_000,
+            playing: false,
+            anchoredAtReferenceTime: 100
+        )
+
+        #expect(playing.positionMillis(at: Date(timeIntervalSinceReferenceDate: 101.25)) == 2_250)
+        #expect(playing.positionMillis(at: Date(timeIntervalSinceReferenceDate: 110)) == 4_000)
+        #expect(paused.positionMillis(at: Date(timeIntervalSinceReferenceDate: 110)) == 1_000)
+    }
+
     @Test("Live AutoLoop plan exposes active, next, and future status with output details")
     func liveAutoloopStatusIsExplicit() throws {
         let content = try #require(LiveWorkspaceFixtures.ready.content)
@@ -94,6 +116,22 @@ struct LiveWorkspacePresenterTests {
         #expect(items.first?.bankNumber == 1)
         #expect(items.first?.slotNumber == 1)
         #expect(items.first?.autoloopName == "Soft Motion")
+    }
+
+    @Test("Visual playhead beat advances AutoLoop status without waiting for a snapshot")
+    func visualBeatDrivesAutoloopStatus() throws {
+        let content = try #require(LiveWorkspaceFixtures.ready.content)
+        let deck = try #require(content.liveDeck)
+        let plan = try #require(content.livePlan)
+        let thirdCue = plan.cues[2]
+        let items = PlannedAutoloopPresenter.items(
+            deck: deck,
+            plan: plan,
+            isMaster: true,
+            playheadBeat: Double(thirdCue.startBeat)
+        )
+
+        #expect(items.map(\.status) == [.completed, .completed, .active, .next])
     }
 
     @Test("Next deck AutoLoop plan marks only its first item as next")

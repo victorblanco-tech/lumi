@@ -12,6 +12,7 @@ public struct LiveWorkspaceView: View {
     private let onSessionCommand: @MainActor (SessionCommandRequest) -> Void
     private let onLocalPlayback: @MainActor (LocalPlaybackRequest) -> Void
     private let localPlaybackBrowser: AnyView?
+    private let localPlaybackVisualClocks: [UInt64: LocalPlaybackVisualClockSnapshot]
     @Binding private var appearance: AppearancePreference
     @Binding private var keyNotation: KeyNotationPreference
     @State private var selectedPhrase: UInt64 = 0
@@ -27,6 +28,7 @@ public struct LiveWorkspaceView: View {
         keyNotation: Binding<KeyNotationPreference>,
         allowsScrolling: Bool = true,
         showsNavigation: Bool = true,
+        localPlaybackVisualClocks: [UInt64: LocalPlaybackVisualClockSnapshot] = [:],
         onPlanMutation: @escaping @MainActor (PlanMutationRequest) -> Void = { _ in },
         onSessionCommand: @escaping @MainActor (SessionCommandRequest) -> Void = { _ in },
         onLocalPlayback: @escaping @MainActor (LocalPlaybackRequest) -> Void = { _ in },
@@ -36,6 +38,7 @@ public struct LiveWorkspaceView: View {
         self.productVersion = productVersion
         self.allowsScrolling = allowsScrolling
         self.showsNavigation = showsNavigation
+        self.localPlaybackVisualClocks = localPlaybackVisualClocks
         self.onPlanMutation = onPlanMutation
         self.onSessionCommand = onSessionCommand
         self.onLocalPlayback = onLocalPlayback
@@ -375,6 +378,7 @@ public struct LiveWorkspaceView: View {
                                     plan: plan,
                                     musicalKey: musicalKey(for: deck),
                                     isLocalPlayback: content.sourceMode == "localPlayback",
+                                    visualClock: localPlaybackVisualClocks[deck.deckID],
                                     selectedPhraseIndex: selectedIndex,
                                     onSelectPhrase: { phraseIndex in
                                         if isMaster {

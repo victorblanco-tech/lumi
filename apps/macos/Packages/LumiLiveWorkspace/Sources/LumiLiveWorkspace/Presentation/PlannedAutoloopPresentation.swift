@@ -24,11 +24,13 @@ public enum PlannedAutoloopPresenter {
     public static func items(
         deck: DeckSnapshot,
         plan: PlanSnapshot?,
-        isMaster: Bool
+        isMaster: Bool,
+        playheadBeat: Double? = nil
     ) -> [PlannedAutoloopPresentation] {
         guard let plan else { return [] }
+        let statusBeat = UInt64(max(0, playheadBeat ?? Double(deck.beat)).rounded(.down))
         let firstUpcomingIndex = plan.cues.first(where: { cue in
-            !isMaster || cue.startBeat > deck.beat
+            !isMaster || cue.startBeat > statusBeat
         })?.phraseIndex
 
         return plan.cues.map { cue in
@@ -46,9 +48,9 @@ public enum PlannedAutoloopPresenter {
                 slotNumber: cue.libraryResolution?.autoloopNumber ?? action.slot,
                 status: status(
                     cue: cue,
-                    deck: deck,
                     isMaster: isMaster,
-                    firstUpcomingIndex: firstUpcomingIndex
+                    firstUpcomingIndex: firstUpcomingIndex,
+                    statusBeat: statusBeat
                 ),
                 locked: cue.locked,
                 holdsCurrentLook: action.holdsCurrentLook
@@ -58,15 +60,15 @@ public enum PlannedAutoloopPresenter {
 
     private static func status(
         cue: PlanCueSnapshot,
-        deck: DeckSnapshot,
         isMaster: Bool,
-        firstUpcomingIndex: UInt64?
+        firstUpcomingIndex: UInt64?,
+        statusBeat: UInt64
     ) -> PlannedAutoloopStatus {
         guard isMaster else {
             return cue.phraseIndex == firstUpcomingIndex ? .next : .planned
         }
-        if cue.endBeat <= deck.beat { return .completed }
-        if cue.startBeat <= deck.beat { return .active }
+        if cue.endBeat <= statusBeat { return .completed }
+        if cue.startBeat <= statusBeat { return .active }
         return cue.phraseIndex == firstUpcomingIndex ? .next : .planned
     }
 

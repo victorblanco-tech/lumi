@@ -40,6 +40,7 @@ struct FoundationView: View {
                         keyNotation: $preferences.keyNotation,
                         allowsScrolling: false,
                         showsNavigation: false,
+                        localPlaybackVisualClocks: engineStatus.localPlaybackVisualClocks,
                         onPlanMutation: { request in
                             Task { await engineStatus.mutatePlan(request) }
                         },
