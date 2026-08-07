@@ -433,56 +433,34 @@ struct LiveDeckSurface<Details: View>: View {
         renderingViewport: LumiWaveformViewport
     ) -> some View {
         let activePhraseIndex = phraseIndex(at: playheadBeat)
-        return GeometryReader { proxy in
-            ZStack(alignment: .leading) {
-                ForEach(visiblePhrases(in: renderingViewport)) { phrase in
-                    Button {
-                        onSelectPhrase(phrase.index)
-                    } label: {
-                        HStack(spacing: 3) {
-                            if cue(for: phrase)?.locked == true {
-                                Image(systemName: "pin.fill")
-                            }
-                            Text(verbatim: phraseDisplayName(phrase))
-                                .lineLimit(1)
-                        }
-                        .font(LumiTypography.caption.weight(.semibold))
-                        .foregroundStyle(Color.white)
-                        .frame(
-                            width: phraseWidth(
-                                phrase,
-                                totalWidth: proxy.size.width,
-                                renderingViewport: renderingViewport
-                            ),
-                            height: 28
-                        )
-                        .background(phraseColor(phrase.roleID ?? phrase.kind))
-                        .opacity(phrase.index < (activePhraseIndex ?? 0) ? 0.48 : 1)
-                        .overlay {
-                            if phrase.index == selectedPhraseIndex {
-                                Rectangle().strokeBorder(LumiColor.accent, lineWidth: 3)
-                            } else if phrase.index == activePhraseIndex {
-                                Rectangle().strokeBorder(Color.white, lineWidth: 2)
-                            }
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .contentShape(Rectangle())
-                    .offset(
-                        x: phraseOffset(
-                            phrase,
-                            totalWidth: proxy.size.width,
-                            renderingViewport: renderingViewport
-                        )
-                    )
-                    .accessibilityIdentifier("lumi.deck.\(deck.deckID).phrase.\(phrase.index)")
-                }
-            }
-        }
+        return SynchronizedPlanTimelineLayerView(
+            segments: deck.phrases.map { phrase in
+                PlanTimelineLayerSegment(
+                    id: phrase.index,
+                    startBeat: Double(phrase.startBeat),
+                    endBeat: Double(phrase.endBeat),
+                    title: (cue(for: phrase)?.locked == true ? "◆ " : "")
+                        + phraseDisplayName(phrase),
+                    detail: nil,
+                    footer: nil,
+                    color: phraseLayerColor(phrase.roleID ?? phrase.kind),
+                    opacity: phrase.index < (activePhraseIndex ?? 0) ? 0.48 : 1,
+                    emphasis: phrase.index == selectedPhraseIndex
+                        ? .selected
+                        : phrase.index == activePhraseIndex ? .active : .normal
+                )
+            },
+            motion: timelineMotion(
+                playheadBeat: playheadBeat,
+                renderingViewport: renderingViewport
+            ),
+            style: .phrases,
+            onSelect: onSelectPhrase
+        )
         .frame(height: 28)
         .padding(.horizontal, LumiSpacing.small)
         .padding(.bottom, LumiSpacing.small)
-        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Synchronized phrase timeline")
     }
 
     @ViewBuilder
@@ -529,40 +507,35 @@ struct LiveDeckSurface<Details: View>: View {
         playheadBeat: Double,
         renderingViewport: LumiWaveformViewport
     ) -> some View {
-        GeometryReader { proxy in
-            ZStack(alignment: .leading) {
-                Color.black.opacity(0.7)
-                ForEach(items) { item in
-                    if let phrase = phrase(for: item),
-                       phraseIsVisible(phrase, in: renderingViewport) {
-                        plannedAutoloopBlock(
-                            item,
-                            width: phraseWidth(
-                                phrase,
-                                totalWidth: proxy.size.width,
-                                renderingViewport: renderingViewport
-                            )
-                        )
-                        .offset(
-                            x: phraseOffset(
-                                phrase,
-                                totalWidth: proxy.size.width,
-                                renderingViewport: renderingViewport
-                            )
-                        )
-                    }
+        SynchronizedPlanTimelineLayerView(
+            segments: items.compactMap { item in
+                guard let phrase = phrase(for: item) else { return nil }
+                let footer = if let bank = item.bankNumber, let slot = item.slotNumber {
+                    "BANK \(bank) · LOOP \(slot)"
+                } else if item.holdsCurrentLook {
+                    "NO MIDI CHANGE"
+                } else {
+                    ""
                 }
-                if playheadIsVisible(playheadBeat, in: renderingViewport) {
-                    lightPlanPlayhead
-                        .offset(
-                            x: renderingViewport.x(
-                                forBeat: playheadBeat,
-                                width: proxy.size.width
-                            ) - 5
-                        )
-                }
-            }
-        }
+                return PlanTimelineLayerSegment(
+                    id: item.phraseIndex,
+                    startBeat: Double(phrase.startBeat),
+                    endBeat: Double(phrase.endBeat),
+                    title: autoloopStatusLabel(item.status),
+                    detail: "\(item.phraseName.uppercased())\n\(item.autoloopName)",
+                    footer: footer,
+                    color: autoloopLayerColor(item.status),
+                    opacity: item.status == .completed ? 0.5 : 1,
+                    emphasis: item.phraseIndex == selectedPhraseIndex ? .selected : .normal
+                )
+            },
+            motion: timelineMotion(
+                playheadBeat: playheadBeat,
+                renderingViewport: renderingViewport
+            ),
+            style: .autoloops,
+            onSelect: onSelectPhrase
+        )
         .frame(height: 82)
         .clipShape(RoundedRectangle(cornerRadius: LumiRadius.compact))
         .overlay {
@@ -573,97 +546,21 @@ struct LiveDeckSurface<Details: View>: View {
         .accessibilityLabel("Synchronized AutoLoop plan timeline")
     }
 
-    private func plannedAutoloopBlock(
-        _ item: PlannedAutoloopPresentation,
-        width: CGFloat
-    ) -> some View {
-        Button {
-            onSelectPhrase(item.phraseIndex)
-        } label: {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 4) {
-                    Circle()
-                        .fill(autoloopStatusColor(item.status))
-                        .frame(width: 6, height: 6)
-                    if width >= 58 {
-                        Text(verbatim: autoloopStatusLabel(item.status))
-                            .font(LumiTypography.technical.weight(.semibold))
-                            .foregroundStyle(autoloopStatusColor(item.status))
-                    }
-                    if item.locked {
-                        Image(systemName: "lock.fill")
-                            .font(LumiTypography.caption)
-                            .foregroundStyle(LumiColor.warning)
-                    }
-                }
-                if width >= 72 {
-                    Text(verbatim: item.phraseName.uppercased())
-                        .font(LumiTypography.caption.weight(.semibold))
-                        .foregroundStyle(Color.white.opacity(0.56))
-                        .lineLimit(1)
-                }
-                if width >= 42 {
-                    Text(verbatim: item.autoloopName)
-                        .font(LumiTypography.metadata.weight(.semibold))
-                        .foregroundStyle(Color.white)
-                        .lineLimit(1)
-                }
-                if width >= 100 {
-                    if let bank = item.bankNumber, let slot = item.slotNumber {
-                        Text(verbatim: "BANK \(bank) · LOOP \(slot)")
-                            .font(LumiTypography.technical)
-                            .foregroundStyle(Color.white.opacity(0.42))
-                            .lineLimit(1)
-                    } else if item.holdsCurrentLook {
-                        Text(verbatim: "NO MIDI CHANGE")
-                            .font(LumiTypography.technical)
-                            .foregroundStyle(Color.white.opacity(0.42))
-                            .lineLimit(1)
-                    }
-                }
-            }
-            .padding(.horizontal, 6)
-            .padding(.vertical, LumiSpacing.xSmall)
-            .frame(width: width, height: 82, alignment: .topLeading)
-            .background(autoloopStatusColor(item.status).opacity(0.11))
-            .overlay(alignment: .top) {
-                Rectangle()
-                    .fill(autoloopStatusColor(item.status))
-                    .frame(height: item.status == .active ? 3 : 2)
-            }
-            .overlay {
-                Rectangle().strokeBorder(
-                    item.phraseIndex == selectedPhraseIndex
-                        ? LumiColor.accent
-                        : Color.white.opacity(0.1),
-                    lineWidth: item.phraseIndex == selectedPhraseIndex ? 2 : 1
-                )
-            }
-            .opacity(item.status == .completed ? 0.5 : 1)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .accessibilityLabel(
-            "\(item.phraseName), \(item.autoloopName), \(autoloopStatusLabel(item.status))"
+    private func timelineMotion(
+        playheadBeat: Double,
+        renderingViewport: LumiWaveformViewport
+    ) -> LiveWaveformMotionPlan {
+        let motionViewport = isMaster && usesLiveViewport ? viewport : renderingViewport
+        return LiveWaveformMotionPlan(
+            waveformID: deck.trackLoadID,
+            totalBeats: Double(max(1, deck.durationBeats)),
+            viewportStartBeat: motionViewport.startBeat,
+            visibleBeats: motionViewport.visibleBeats,
+            followsLiveViewport: isMaster && usesLiveViewport,
+            fallbackPlayheadBeat: playheadBeat,
+            visualClock: scrubProgress == nil ? visualClock : nil,
+            beatsPerBar: motionViewport.beatsPerBar
         )
-        .accessibilityIdentifier(
-            "lumi.deck.\(deck.deckID).autoloop.\(item.phraseIndex)"
-        )
-    }
-
-    private var lightPlanPlayhead: some View {
-        ZStack(alignment: .top) {
-            Rectangle()
-                .fill(LumiColor.accent)
-                .frame(width: 2, height: 82)
-                .shadow(color: LumiColor.accent.opacity(0.8), radius: 3)
-            Image(systemName: "arrowtriangle.down.fill")
-                .font(.system(size: 9, weight: .bold))
-                .foregroundStyle(LumiColor.accent)
-        }
-        .frame(width: 10, height: 82)
-        .allowsHitTesting(false)
-        .accessibilityHidden(true)
     }
 
     private func autoloopStatusLabel(_ status: PlannedAutoloopStatus) -> String {
@@ -675,12 +572,14 @@ struct LiveDeckSurface<Details: View>: View {
         }
     }
 
-    private func autoloopStatusColor(_ status: PlannedAutoloopStatus) -> Color {
+    private func autoloopLayerColor(
+        _ status: PlannedAutoloopStatus
+    ) -> PlanTimelineLayerColor {
         switch status {
-        case .active: LumiColor.destructive
-        case .next: LumiColor.accent
-        case .planned: Color.white.opacity(0.62)
-        case .completed: LumiColor.success
+        case .active: .init(red: 0.96, green: 0.18, blue: 0.22)
+        case .next: .init(red: 0.24, green: 0.72, blue: 0.96)
+        case .planned: .init(red: 0.72, green: 0.74, blue: 0.78)
+        case .completed: .init(red: 0.20, green: 0.76, blue: 0.45)
         }
     }
 
@@ -700,56 +599,8 @@ struct LiveDeckSurface<Details: View>: View {
         return phraseDisplayName(phrase)
     }
 
-    private func visiblePhrases(
-        in renderingViewport: LumiWaveformViewport
-    ) -> [DeckPhraseSnapshot] {
-        deck.phrases.filter { phraseIsVisible($0, in: renderingViewport) }
-    }
-
-    private func phraseIsVisible(
-        _ phrase: DeckPhraseSnapshot,
-        in renderingViewport: LumiWaveformViewport
-    ) -> Bool {
-        Double(phrase.endBeat) > renderingViewport.startBeat
-            && Double(phrase.startBeat) < renderingViewport.endBeat
-    }
-
     private func phrase(for item: PlannedAutoloopPresentation) -> DeckPhraseSnapshot? {
         deck.phrases.first(where: { $0.index == item.phraseIndex })
-    }
-
-    private func playheadIsVisible(
-        _ playheadBeat: Double,
-        in renderingViewport: LumiWaveformViewport
-    ) -> Bool {
-        playheadBeat >= renderingViewport.startBeat
-            && playheadBeat <= renderingViewport.endBeat
-    }
-
-    private func phraseWidth(
-        _ phrase: DeckPhraseSnapshot,
-        totalWidth: CGFloat,
-        renderingViewport: LumiWaveformViewport
-    ) -> CGFloat {
-        let start = max(Double(phrase.startBeat), renderingViewport.startBeat)
-        let end = min(Double(phrase.endBeat), renderingViewport.endBeat)
-        return max(
-            1,
-            totalWidth * CGFloat(
-                max(0, end - start) / renderingViewport.visibleBeats
-            ) - 1
-        )
-    }
-
-    private func phraseOffset(
-        _ phrase: DeckPhraseSnapshot,
-        totalWidth: CGFloat,
-        renderingViewport: LumiWaveformViewport
-    ) -> CGFloat {
-        let start = max(Double(phrase.startBeat), renderingViewport.startBeat)
-        return totalWidth * CGFloat(
-            (start - renderingViewport.startBeat) / renderingViewport.visibleBeats
-        )
     }
 
     private func phraseIndex(at beat: Double) -> UInt64? {
@@ -840,16 +691,18 @@ struct LiveDeckSurface<Details: View>: View {
         viewport = LiveDeckViewportPolicy.overview(totalBeats: deck.durationBeats)
     }
 
-    private func phraseColor(_ role: String) -> Color {
+    private func phraseLayerColor(_ role: String) -> PlanTimelineLayerColor {
         switch role {
-        case "intro-outro", "intro", "outro": Color(red: 0.25, green: 0.55, blue: 0.95)
-        case "bridge": Color(red: 0.37, green: 0.42, blue: 0.78)
-        case "breakdown-1", "breakdown-2", "breakdown-3", "breakdown": Color(red: 0.48, green: 0.28, blue: 0.83)
-        case "synth": Color(red: 0.82, green: 0.24, blue: 0.72)
-        case "pre-drop": Color(red: 0.95, green: 0.46, blue: 0.20)
-        case "buildup-1", "buildup-2", "buildup-3", "build": Color(red: 0.96, green: 0.66, blue: 0.12)
-        case "drop": Color(red: 0.92, green: 0.20, blue: 0.26)
-        default: Color(red: 0.20, green: 0.68, blue: 0.60)
+        case "intro-outro", "intro", "outro": .init(red: 0.25, green: 0.55, blue: 0.95)
+        case "bridge": .init(red: 0.37, green: 0.42, blue: 0.78)
+        case "breakdown-1", "breakdown-2", "breakdown-3", "breakdown":
+            .init(red: 0.48, green: 0.28, blue: 0.83)
+        case "synth": .init(red: 0.82, green: 0.24, blue: 0.72)
+        case "pre-drop": .init(red: 0.95, green: 0.46, blue: 0.20)
+        case "buildup-1", "buildup-2", "buildup-3", "build":
+            .init(red: 0.96, green: 0.66, blue: 0.12)
+        case "drop": .init(red: 0.92, green: 0.20, blue: 0.26)
+        default: .init(red: 0.20, green: 0.68, blue: 0.60)
         }
     }
 
@@ -914,9 +767,7 @@ private struct RGBDeckWaveform: View {
                 Self.makeRasterImage(
                     points: samples,
                     width: rasterWidth,
-                    channelMaximum: channelMaximum,
-                    durationBeats: durationBeats,
-                    beatsPerBar: viewport.beatsPerBar
+                    channelMaximum: channelMaximum
                 )
             }.value
         }
@@ -930,7 +781,8 @@ private struct RGBDeckWaveform: View {
             visibleBeats: viewport.visibleBeats,
             followsLiveViewport: followsLiveViewport,
             fallbackPlayheadBeat: playheadBeat,
-            visualClock: visualClock
+            visualClock: visualClock,
+            beatsPerBar: viewport.beatsPerBar
         )
     }
 
@@ -947,9 +799,7 @@ private struct RGBDeckWaveform: View {
     nonisolated private static func makeRasterImage(
         points: [DeckWaveformPointSnapshot],
         width: Int,
-        channelMaximum: Double,
-        durationBeats: UInt64,
-        beatsPerBar: UInt8
+        channelMaximum: Double
     ) -> CGImage? {
         guard !points.isEmpty else { return nil }
         let width = max(1, width)
@@ -997,20 +847,6 @@ private struct RGBDeckWaveform: View {
             context.addLine(to: CGPoint(x: x, y: center + amplitude))
             context.strokePath()
         }
-        context.setLineWidth(1)
-        for beat in 0...Int(max(1, durationBeats)) {
-            let x = Double(beat) / Double(max(1, durationBeats)) * Double(width)
-            let isBar = beat.isMultiple(of: Int(max(1, beatsPerBar)))
-            context.setStrokeColor(
-                red: 1,
-                green: 1,
-                blue: 1,
-                alpha: isBar ? 0.24 : 0.09
-            )
-            context.move(to: CGPoint(x: x, y: 0))
-            context.addLine(to: CGPoint(x: x, y: Double(height)))
-            context.strokePath()
-        }
         return context.makeImage()
     }
 
@@ -1024,6 +860,7 @@ struct LiveWaveformMotionPlan: Equatable {
     let followsLiveViewport: Bool
     let fallbackPlayheadBeat: Double
     let visualClock: LocalPlaybackVisualClockSnapshot?
+    let beatsPerBar: UInt8
 
     var animationIdentity: AnimationIdentity {
         let hasAuthoritativeClock = visualClock?.trackLoadID == waveformID
@@ -1084,12 +921,459 @@ struct LiveWaveformMotionPlan: Equatable {
     }
 }
 
+struct LiveBeatGridPlan: Equatable {
+    let beatIndices: [Int]
+    let barBeatIndices: [Int]
+
+    init(totalBeats: Double, beatsPerBar: UInt8) {
+        beatIndices = Array(0...Int(max(1, totalBeats)))
+        let barLength = Int(max(1, beatsPerBar))
+        barBeatIndices = beatIndices.filter { $0.isMultiple(of: barLength) }
+    }
+}
+
 private struct WaveformRasterKey: Hashable {
     let waveformID: UInt64
     let durationBeats: UInt64
     let visibleBeats: Double
     let pointCount: Int
     let channelMaximum: Double
+}
+
+private struct PlanTimelineLayerColor: Equatable {
+    let red: CGFloat
+    let green: CGFloat
+    let blue: CGFloat
+
+    var nsColor: NSColor {
+        NSColor(calibratedRed: red, green: green, blue: blue, alpha: 1)
+    }
+}
+
+private enum PlanTimelineLayerEmphasis: Equatable {
+    case normal
+    case active
+    case selected
+}
+
+private struct PlanTimelineLayerSegment: Equatable, Identifiable {
+    let id: UInt64
+    let startBeat: Double
+    let endBeat: Double
+    let title: String
+    let detail: String?
+    let footer: String?
+    let color: PlanTimelineLayerColor
+    let opacity: Double
+    let emphasis: PlanTimelineLayerEmphasis
+}
+
+private enum PlanTimelineLayerStyle: Equatable {
+    case phrases
+    case autoloops
+
+    var showsPlayhead: Bool { self == .autoloops }
+}
+
+private struct SynchronizedPlanTimelineLayerView: NSViewRepresentable {
+    let segments: [PlanTimelineLayerSegment]
+    let motion: LiveWaveformMotionPlan
+    let style: PlanTimelineLayerStyle
+    let onSelect: (UInt64) -> Void
+
+    func makeNSView(context: Context) -> SynchronizedPlanTimelineHostView {
+        SynchronizedPlanTimelineHostView()
+    }
+
+    func updateNSView(_ nsView: SynchronizedPlanTimelineHostView, context: Context) {
+        nsView.update(
+            segments: segments,
+            motion: motion,
+            style: style,
+            onSelect: onSelect
+        )
+    }
+}
+
+private final class SynchronizedPlanTimelineHostView: NSView {
+    private let contentLayer = CALayer()
+    private let playheadLayer = CALayer()
+    private let playheadCapLayer = CALayer()
+    private var segments: [PlanTimelineLayerSegment] = []
+    private var motion: LiveWaveformMotionPlan?
+    private var style = PlanTimelineLayerStyle.phrases
+    private var onSelect: ((UInt64) -> Void)?
+    private var animationIdentity: LiveWaveformMotionPlan.AnimationIdentity?
+    private var appliedBoundsSize = CGSize.zero
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.masksToBounds = true
+        layer?.backgroundColor = NSColor.black.withAlphaComponent(0.7).cgColor
+        contentLayer.anchorPoint = .zero
+        playheadLayer.anchorPoint = .zero
+        playheadLayer.backgroundColor = NSColor(
+            calibratedRed: 0.24,
+            green: 0.72,
+            blue: 0.96,
+            alpha: 1
+        ).cgColor
+        playheadLayer.shadowColor = playheadLayer.backgroundColor
+        playheadLayer.shadowOpacity = 0.8
+        playheadLayer.shadowRadius = 3
+        playheadCapLayer.anchorPoint = .zero
+        playheadCapLayer.backgroundColor = playheadLayer.backgroundColor
+        layer?.addSublayer(contentLayer)
+        layer?.addSublayer(playheadLayer)
+        layer?.addSublayer(playheadCapLayer)
+        setAccessibilityElement(true)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func layout() {
+        super.layout()
+        guard abs(appliedBoundsSize.width - bounds.width) > 0.5
+                || abs(appliedBoundsSize.height - bounds.height) > 0.5 else {
+            return
+        }
+        applyCurrentState(rebuildSegments: true, restartAnimation: true)
+    }
+
+    override func mouseDown(with event: NSEvent) {
+        guard let motion else { return }
+        let point = convert(event.locationInWindow, from: nil)
+        let contentX = (contentLayer.presentation() ?? contentLayer).position.x
+        let beat = Double((point.x - contentX) / max(1, bounds.width))
+            * motion.visibleBeats
+        guard let segment = segments.first(where: {
+            beat >= $0.startBeat && beat < $0.endBeat
+        }) else {
+            return
+        }
+        onSelect?(segment.id)
+    }
+
+    override func accessibilityLabel() -> String? {
+        style == .phrases
+            ? "Synchronized phrase timeline"
+            : "Synchronized AutoLoop plan timeline"
+    }
+
+    func update(
+        segments: [PlanTimelineLayerSegment],
+        motion: LiveWaveformMotionPlan,
+        style: PlanTimelineLayerStyle,
+        onSelect: @escaping (UInt64) -> Void
+    ) {
+        let segmentsChanged = self.segments != segments || self.style != style
+        let motionChanged = animationIdentity != motion.animationIdentity
+        self.segments = segments
+        self.motion = motion
+        self.style = style
+        self.onSelect = onSelect
+        if segmentsChanged || motionChanged {
+            animationIdentity = motion.animationIdentity
+            applyCurrentState(
+                rebuildSegments: segmentsChanged,
+                restartAnimation: true
+            )
+        }
+    }
+
+    private func applyCurrentState(
+        rebuildSegments: Bool,
+        restartAnimation: Bool
+    ) {
+        guard let motion, bounds.width > 0, bounds.height > 0 else { return }
+        appliedBoundsSize = bounds.size
+        if restartAnimation {
+            contentLayer.removeAllAnimations()
+            playheadLayer.removeAllAnimations()
+            playheadCapLayer.removeAllAnimations()
+        }
+
+        let width = bounds.width
+        let height = bounds.height
+        let fullTrackWidth = width * CGFloat(motion.totalBeats / motion.visibleBeats)
+        let currentBeat = motion.playheadBeat(at: Date())
+        let currentStartBeat = motion.startBeat(for: currentBeat)
+        let contentX = -width * CGFloat(currentStartBeat / motion.visibleBeats)
+        let playheadX = width * CGFloat((currentBeat - currentStartBeat) / motion.visibleBeats)
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        contentLayer.bounds = CGRect(x: 0, y: 0, width: fullTrackWidth, height: height)
+        contentLayer.position = CGPoint(x: contentX, y: 0)
+        if rebuildSegments || contentLayer.sublayers?.isEmpty != false {
+            rebuildSegmentLayers(
+                motion: motion,
+                fullTrackWidth: fullTrackWidth,
+                height: height
+            )
+        }
+        configurePlayhead(x: playheadX, height: height)
+        CATransaction.commit()
+
+        guard restartAnimation,
+              let secondsPerBeat = motion.secondsPerBeat(),
+              currentBeat < motion.totalBeats else {
+            return
+        }
+        let duration = max(0.01, (motion.totalBeats - currentBeat) * secondsPerBeat)
+        animateContent(
+            motion: motion,
+            currentBeat: currentBeat,
+            width: width,
+            duration: duration
+        )
+        if style.showsPlayhead {
+            animatePlayhead(
+                motion: motion,
+                currentBeat: currentBeat,
+                width: width,
+                duration: duration
+            )
+        }
+    }
+
+    private func rebuildSegmentLayers(
+        motion: LiveWaveformMotionPlan,
+        fullTrackWidth: CGFloat,
+        height: CGFloat
+    ) {
+        contentLayer.sublayers = nil
+        let scale = window?.backingScaleFactor ?? NSScreen.main?.backingScaleFactor ?? 2
+        for segment in segments {
+            let x = fullTrackWidth * CGFloat(segment.startBeat / motion.totalBeats)
+            let width = max(
+                1,
+                fullTrackWidth * CGFloat(
+                    (segment.endBeat - segment.startBeat) / motion.totalBeats
+                ) - 1
+            )
+            let block = CALayer()
+            block.frame = CGRect(x: x, y: 0, width: width, height: height)
+            block.backgroundColor = segment.color.nsColor
+                .withAlphaComponent(style == .phrases ? 0.92 : 0.11)
+                .cgColor
+            block.opacity = Float(segment.opacity)
+            block.masksToBounds = true
+            block.borderColor = borderColor(for: segment).cgColor
+            block.borderWidth = borderWidth(for: segment)
+
+            if style == .autoloops {
+                let statusLine = CALayer()
+                statusLine.backgroundColor = segment.color.nsColor.cgColor
+                statusLine.frame = CGRect(x: 0, y: height - 3, width: width, height: 3)
+                block.addSublayer(statusLine)
+            }
+
+            let textLayer = CATextLayer()
+            textLayer.contentsScale = scale
+            textLayer.frame = CGRect(
+                x: style == .phrases ? 4 : 6,
+                y: style == .phrases ? 5 : 7,
+                width: max(0, width - (style == .phrases ? 8 : 12)),
+                height: max(0, height - (style == .phrases ? 10 : 14))
+            )
+            textLayer.alignmentMode = style == .phrases ? .center : .left
+            textLayer.truncationMode = .end
+            textLayer.isWrapped = true
+            textLayer.string = segmentText(segment, width: width)
+            block.addSublayer(textLayer)
+            contentLayer.addSublayer(block)
+        }
+    }
+
+    private func segmentText(
+        _ segment: PlanTimelineLayerSegment,
+        width: CGFloat
+    ) -> NSAttributedString {
+        let result = NSMutableAttributedString()
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = style == .phrases ? .center : .left
+        paragraph.lineBreakMode = .byTruncatingTail
+        let titleColor = style == .phrases
+            ? NSColor.white
+            : segment.color.nsColor
+        result.append(NSAttributedString(
+            string: segment.title,
+            attributes: [
+                .font: NSFont.systemFont(
+                    ofSize: style == .phrases ? 9 : 8,
+                    weight: .semibold
+                ),
+                .foregroundColor: titleColor,
+                .paragraphStyle: paragraph
+            ]
+        ))
+        if style == .autoloops, width >= 44, let detail = segment.detail {
+            result.append(NSAttributedString(
+                string: "\n\(detail)",
+                attributes: [
+                    .font: NSFont.systemFont(ofSize: 9, weight: .semibold),
+                    .foregroundColor: NSColor.white,
+                    .paragraphStyle: paragraph
+                ]
+            ))
+        }
+        if style == .autoloops, width >= 100,
+           let footer = segment.footer, !footer.isEmpty {
+            result.append(NSAttributedString(
+                string: "\n\(footer)",
+                attributes: [
+                    .font: NSFont.monospacedSystemFont(ofSize: 7, weight: .regular),
+                    .foregroundColor: NSColor.white.withAlphaComponent(0.44),
+                    .paragraphStyle: paragraph
+                ]
+            ))
+        }
+        return result
+    }
+
+    private func borderColor(for segment: PlanTimelineLayerSegment) -> NSColor {
+        switch segment.emphasis {
+        case .selected:
+            NSColor(calibratedRed: 0.24, green: 0.72, blue: 0.96, alpha: 1)
+        case .active:
+            .white
+        case .normal:
+            NSColor.white.withAlphaComponent(0.1)
+        }
+    }
+
+    private func borderWidth(for segment: PlanTimelineLayerSegment) -> CGFloat {
+        switch segment.emphasis {
+        case .selected: 2
+        case .active: 2
+        case .normal: 1
+        }
+    }
+
+    private func configurePlayhead(x: CGFloat, height: CGFloat) {
+        let hidden = !style.showsPlayhead
+        playheadLayer.isHidden = hidden
+        playheadCapLayer.isHidden = hidden
+        playheadLayer.bounds = CGRect(x: 0, y: 0, width: 2, height: height)
+        playheadLayer.position = CGPoint(x: x - 1, y: 0)
+        playheadCapLayer.bounds = CGRect(x: 0, y: 0, width: 8, height: 3)
+        playheadCapLayer.position = CGPoint(x: x - 4, y: height - 3)
+    }
+
+    private func animateContent(
+        motion: LiveWaveformMotionPlan,
+        currentBeat: Double,
+        width: CGFloat,
+        duration: TimeInterval
+    ) {
+        let keyBeats = animationKeyBeats(motion: motion, currentBeat: currentBeat)
+        let values = keyBeats.map { beat in
+            NSNumber(value: Double(-width * CGFloat(
+                motion.startBeat(for: beat) / motion.visibleBeats
+            )))
+        }
+        let animation = keyframeAnimation(
+            keyPath: "position.x",
+            values: values,
+            keyBeats: keyBeats,
+            currentBeat: currentBeat,
+            totalBeats: motion.totalBeats,
+            duration: duration
+        )
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        contentLayer.position.x = values.last?.doubleValue ?? contentLayer.position.x
+        CATransaction.commit()
+        contentLayer.add(animation, forKey: "lumi.plan.content.motion")
+    }
+
+    private func animatePlayhead(
+        motion: LiveWaveformMotionPlan,
+        currentBeat: Double,
+        width: CGFloat,
+        duration: TimeInterval
+    ) {
+        let keyBeats = animationKeyBeats(motion: motion, currentBeat: currentBeat)
+        let centers = keyBeats.map { beat in
+            let startBeat = motion.startBeat(for: beat)
+            return width * CGFloat((beat - startBeat) / motion.visibleBeats)
+        }
+        let lineValues = centers.map { NSNumber(value: Double($0 - 1)) }
+        let capValues = centers.map { NSNumber(value: Double($0 - 4)) }
+        let lineAnimation = keyframeAnimation(
+            keyPath: "position.x",
+            values: lineValues,
+            keyBeats: keyBeats,
+            currentBeat: currentBeat,
+            totalBeats: motion.totalBeats,
+            duration: duration
+        )
+        let capAnimation = keyframeAnimation(
+            keyPath: "position.x",
+            values: capValues,
+            keyBeats: keyBeats,
+            currentBeat: currentBeat,
+            totalBeats: motion.totalBeats,
+            duration: duration
+        )
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        playheadLayer.position.x = lineValues.last?.doubleValue ?? playheadLayer.position.x
+        playheadCapLayer.position.x = capValues.last?.doubleValue ?? playheadCapLayer.position.x
+        CATransaction.commit()
+        playheadLayer.add(lineAnimation, forKey: "lumi.plan.playhead.motion")
+        playheadCapLayer.add(capAnimation, forKey: "lumi.plan.playhead.cap.motion")
+    }
+
+    private func animationKeyBeats(
+        motion: LiveWaveformMotionPlan,
+        currentBeat: Double
+    ) -> [Double] {
+        guard motion.followsLiveViewport else {
+            return [currentBeat, motion.totalBeats]
+        }
+        let leadingBeat = motion.visibleBeats * LiveDeckViewportPolicy.playheadFraction
+        let trailingBeat = max(
+            leadingBeat,
+            motion.totalBeats - motion.visibleBeats
+                * (1 - LiveDeckViewportPolicy.playheadFraction)
+        )
+        return [currentBeat, leadingBeat, trailingBeat, motion.totalBeats]
+            .filter { $0 >= currentBeat && $0 <= motion.totalBeats }
+            .reduce(into: [Double]()) { beats, beat in
+                if beats.last.map({ abs($0 - beat) > 0.000_1 }) ?? true {
+                    beats.append(beat)
+                }
+            }
+    }
+
+    private func keyframeAnimation(
+        keyPath: String,
+        values: [NSNumber],
+        keyBeats: [Double],
+        currentBeat: Double,
+        totalBeats: Double,
+        duration: TimeInterval
+    ) -> CAKeyframeAnimation {
+        let remainingBeats = max(0.000_1, totalBeats - currentBeat)
+        let animation = CAKeyframeAnimation(keyPath: keyPath)
+        animation.values = values
+        animation.keyTimes = keyBeats.map {
+            NSNumber(value: ($0 - currentBeat) / remainingBeats)
+        }
+        animation.timingFunctions = Array(
+            repeating: CAMediaTimingFunction(name: .linear),
+            count: max(0, values.count - 1)
+        )
+        animation.duration = duration
+        animation.isRemovedOnCompletion = true
+        return animation
+    }
 }
 
 private struct RGBWaveformLayerView: NSViewRepresentable {
@@ -1112,6 +1396,8 @@ private struct RGBWaveformLayerView: NSViewRepresentable {
 
 private final class RGBWaveformLayerHostView: NSView {
     private let waveformLayer = CALayer()
+    private let beatGridLayer = CAShapeLayer()
+    private let barMarkerLayer = CAShapeLayer()
     private let playheadLayer = CALayer()
     private let playheadCapLayer = CALayer()
     private var rasterImage: CGImage?
@@ -1129,6 +1415,18 @@ private final class RGBWaveformLayerHostView: NSView {
         waveformLayer.contentsGravity = .resize
         waveformLayer.magnificationFilter = .linear
         waveformLayer.minificationFilter = .linear
+        beatGridLayer.fillColor = nil
+        beatGridLayer.strokeColor = NSColor(white: 0.82, alpha: 0.46).cgColor
+        beatGridLayer.lineWidth = 0.5
+        barMarkerLayer.fillColor = NSColor(
+            calibratedRed: 0.96,
+            green: 0.14,
+            blue: 0.18,
+            alpha: 0.96
+        ).cgColor
+        barMarkerLayer.strokeColor = nil
+        waveformLayer.addSublayer(beatGridLayer)
+        waveformLayer.addSublayer(barMarkerLayer)
         playheadLayer.anchorPoint = .zero
         playheadLayer.backgroundColor = NSColor.white.cgColor
         playheadLayer.shadowColor = NSColor.black.cgColor
@@ -1197,6 +1495,12 @@ private final class RGBWaveformLayerHostView: NSView {
         CATransaction.setDisableActions(true)
         waveformLayer.bounds = CGRect(x: 0, y: 0, width: fullTrackWidth, height: height)
         waveformLayer.position = CGPoint(x: waveformX, y: 0)
+        configureBeatGrid(
+            totalBeats: motion.totalBeats,
+            beatsPerBar: motion.beatsPerBar,
+            width: fullTrackWidth,
+            height: height
+        )
         playheadLayer.bounds = CGRect(x: 0, y: 0, width: 2, height: height)
         playheadLayer.position = CGPoint(x: playheadX - 1, y: 0)
         playheadCapLayer.bounds = CGRect(x: 0, y: 0, width: 6, height: 7)
@@ -1286,6 +1590,42 @@ private final class RGBWaveformLayerHostView: NSView {
         CATransaction.commit()
         playheadLayer.add(lineAnimation, forKey: "lumi.playhead.motion")
         playheadCapLayer.add(capAnimation, forKey: "lumi.playhead.cap.motion")
+    }
+
+    private func configureBeatGrid(
+        totalBeats: Double,
+        beatsPerBar: UInt8,
+        width: CGFloat,
+        height: CGFloat
+    ) {
+        let beatPath = CGMutablePath()
+        let markerPath = CGMutablePath()
+        let plan = LiveBeatGridPlan(
+            totalBeats: totalBeats,
+            beatsPerBar: beatsPerBar
+        )
+        for beat in plan.beatIndices {
+            let x = CGFloat(Double(beat) / totalBeats) * width
+            beatPath.move(to: CGPoint(x: x, y: 0))
+            beatPath.addLine(to: CGPoint(x: x, y: height))
+        }
+        for beat in plan.barBeatIndices {
+            let x = CGFloat(Double(beat) / totalBeats) * width
+            let halfWidth: CGFloat = 3.5
+            let markerDepth: CGFloat = 5
+            markerPath.move(to: CGPoint(x: x - halfWidth, y: 0))
+            markerPath.addLine(to: CGPoint(x: x + halfWidth, y: 0))
+            markerPath.addLine(to: CGPoint(x: x, y: markerDepth))
+            markerPath.closeSubpath()
+            markerPath.move(to: CGPoint(x: x - halfWidth, y: height))
+            markerPath.addLine(to: CGPoint(x: x + halfWidth, y: height))
+            markerPath.addLine(to: CGPoint(x: x, y: height - markerDepth))
+            markerPath.closeSubpath()
+        }
+        beatGridLayer.frame = CGRect(x: 0, y: 0, width: width, height: height)
+        beatGridLayer.path = beatPath
+        barMarkerLayer.frame = CGRect(x: 0, y: 0, width: width, height: height)
+        barMarkerLayer.path = markerPath
     }
 
     private func animationKeyBeats(
