@@ -520,7 +520,7 @@ struct LiveDeckSurface<Details: View>: View {
                 if playheadIsVisible(playheadBeat, in: renderingViewport) {
                     lightPlanPlayhead
                         .offset(
-                            x: viewport.x(
+                            x: renderingViewport.x(
                                 forBeat: playheadBeat,
                                 width: proxy.size.width
                             ) - 5
