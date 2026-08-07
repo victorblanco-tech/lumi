@@ -284,6 +284,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
     public let playing: Bool
     public let phraseIndex: UInt64?
     public let durationBeats: UInt64
+    public let beatGrid: DeckBeatGridSnapshot?
     public let phrases: [DeckPhraseSnapshot]
     public let waveformPreview: DeckWaveformPreviewSnapshot?
     public let planEligibility: DeckPlanEligibility
@@ -305,6 +306,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
         playing: Bool = false,
         phraseIndex: UInt64?,
         durationBeats: UInt64 = 0,
+        beatGrid: DeckBeatGridSnapshot? = nil,
         phrases: [DeckPhraseSnapshot] = [],
         waveformPreview: DeckWaveformPreviewSnapshot? = nil,
         planEligibility: DeckPlanEligibility = .autoHeld,
@@ -323,10 +325,27 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
         self.playing = playing
         self.phraseIndex = phraseIndex
         self.durationBeats = durationBeats
+        self.beatGrid = beatGrid
         self.phrases = phrases
         self.waveformPreview = waveformPreview
         self.planEligibility = planEligibility
         self.localPlayback = localPlayback
+    }
+}
+
+public struct DeckBeatGridSnapshot: Equatable, Sendable {
+    public let beatsPerBar: UInt8
+    public let durationMillis: UInt64
+    public let timesMillis: [UInt64]
+
+    public init(
+        beatsPerBar: UInt8,
+        durationMillis: UInt64,
+        timesMillis: [UInt64]
+    ) {
+        self.beatsPerBar = beatsPerBar
+        self.durationMillis = durationMillis
+        self.timesMillis = timesMillis
     }
 }
 

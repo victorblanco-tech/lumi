@@ -675,6 +675,16 @@ public struct EngineSnapshotDecoder: Sendable {
             waveformPreview = try decodeWaveformPreview(track["waveformPreview"])
         }
 
+        let beatGrid: DeckBeatGridSnapshot?
+        if track["beatGrid"] == nil || track["beatGrid"] == .null {
+            beatGrid = nil
+        } else {
+            beatGrid = try decodeDeckBeatGrid(
+                track["beatGrid"],
+                durationBeats: durationBeats
+            )
+        }
+
         let keyKnown: Bool
         if key["known"] == nil {
             keyKnown = true
@@ -699,10 +709,48 @@ public struct EngineSnapshotDecoder: Sendable {
             playing: playing,
             phraseIndex: phraseIndex,
             durationBeats: durationBeats,
+            beatGrid: beatGrid,
             phrases: phrases,
             waveformPreview: waveformPreview,
             planEligibility: planEligibility,
             localPlayback: localPlayback
+        )
+    }
+
+    private func decodeDeckBeatGrid(
+        _ value: JSONValue?,
+        durationBeats: UInt64
+    ) throws -> DeckBeatGridSnapshot {
+        guard let value,
+              case let .object(grid) = value,
+              let beatsPerBarValue = unsignedInteger(grid["beatsPerBar"]),
+              (1...16).contains(beatsPerBarValue),
+              let durationMillis = unsignedInteger(grid["durationMillis"]),
+              durationMillis > 0,
+              case let .array(timePayloads) = grid["timesMillis"],
+              timePayloads.count >= 2,
+              timePayloads.count <= 100_000 else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        guard UInt64(timePayloads.count) <= durationBeats else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        let timesMillis = try timePayloads.map { value in
+            guard let timeMillis = unsignedInteger(value),
+                  timeMillis <= durationMillis else {
+                throw EngineSnapshotDecodingError.invalidSnapshot
+            }
+            return timeMillis
+        }
+        guard timesMillis.enumerated().allSatisfy({ offset, timeMillis in
+            offset == 0 || timesMillis[offset - 1] < timeMillis
+        }) else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        return DeckBeatGridSnapshot(
+            beatsPerBar: UInt8(beatsPerBarValue),
+            durationMillis: durationMillis,
+            timesMillis: timesMillis
         )
     }
 

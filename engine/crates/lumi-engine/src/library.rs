@@ -90,7 +90,7 @@ pub struct LibraryPlanContext {
     timeline_revision: u64,
     audio_uri: String,
     duration_millis: u64,
-    beat_times_millis: Vec<u64>,
+    beat_grid: lumi_library::BeatGrid,
     waveform: Vec<lumi_library::WaveformPoint>,
     catalog: AutoloopCatalog,
     phrases: Vec<LibraryPhrasePlanContext>,
@@ -157,10 +157,22 @@ impl LibraryPlanContext {
     }
 
     #[must_use]
+    pub fn beat_grid_json(&self) -> Value {
+        json!({
+            "beatsPerBar": self.beat_grid.beats_per_bar(),
+            "durationMillis": self.duration_millis,
+            "timesMillis": self.beat_grid.markers().iter()
+                .map(|marker| marker.time_millis())
+                .collect::<Vec<_>>(),
+        })
+    }
+
+    #[must_use]
     pub fn beat_at_millis(&self, position_millis: u64) -> u32 {
         let index = self
-            .beat_times_millis
-            .partition_point(|marker| *marker <= position_millis);
+            .beat_grid
+            .markers()
+            .partition_point(|marker| marker.time_millis() <= position_millis);
         u32::try_from(index.saturating_sub(1)).unwrap_or(u32::MAX)
     }
 
@@ -680,12 +692,7 @@ impl LibraryWorker {
             timeline_revision: timeline.revision().value(),
             audio_uri: track.audio_uri().to_owned(),
             duration_millis: track.summary().duration_millis(),
-            beat_times_millis: track
-                .beat_grid()
-                .markers()
-                .iter()
-                .map(|marker| marker.time_millis())
-                .collect(),
+            beat_grid: track.beat_grid().clone(),
             waveform: track.waveform().to_vec(),
             catalog,
             autoloop_overrides: BTreeMap::new(),

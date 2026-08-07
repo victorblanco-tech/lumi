@@ -1799,6 +1799,10 @@ fn snapshot_envelope(
                             || deck_source_kind != "beatLinkTriggerMidi",
                     },
                     "durationBeats": metadata.duration_beats(),
+                    "beatGrid": library_context.map_or(
+                        Value::Null,
+                        LibraryPlanContext::beat_grid_json,
+                    ),
                     "waveformPreview": waveform_preview,
                     "identityFacts": metadata.identity_facts().map(|identity| json!({
                         "matchStatus": "exact",
@@ -2508,6 +2512,15 @@ mod tests {
         let preview = snapshot_envelope(&runtime, 1, "library-preview")
             .unwrap_or_else(|error| panic!("preview must encode: {error}"));
         assert_eq!(preview.payload["decks"][1]["track"]["id"], 1);
+        assert_eq!(
+            preview.payload["decks"][1]["track"]["beatGrid"]["beatsPerBar"],
+            4
+        );
+        assert!(
+            preview.payload["decks"][1]["track"]["beatGrid"]["timesMillis"]
+                .as_array()
+                .is_some_and(|markers| !markers.is_empty() && markers[0].is_number())
+        );
         assert_eq!(
             preview.payload["decks"][1]["track"]["identityFacts"]["timelineRevision"],
             2

@@ -319,6 +319,7 @@ struct LiveDeckSurface<Details: View>: View {
                     channelMaximum: preview.source == "localLibraryDetail" ? 255 : 31,
                     waveformID: deck.trackLoadID,
                     durationBeats: deck.durationBeats,
+                    beatGrid: beatGridTimeline,
                     playheadBeat: playheadBeat,
                     viewport: isMaster && usesLiveViewport ? viewport : renderingViewport,
                     visualClock: scrubProgress == nil ? visualClock : nil,
@@ -411,12 +412,15 @@ struct LiveDeckSurface<Details: View>: View {
               visualClock.durationMillis > 0 else {
             return Double(deck.beat)
         }
-        let progress = visualClock.positionMillis(at: date)
-            / Double(visualClock.durationMillis)
-        return min(
-            Double(max(1, deck.durationBeats)),
-            max(0, progress * Double(max(1, deck.durationBeats)))
-        )
+        let positionMillis = visualClock.positionMillis(at: date)
+        if let beatGridTimeline {
+            return beatGridTimeline.beat(atTimeMillis: positionMillis)
+        }
+        return min(Double(max(1, deck.durationBeats)), max(
+            0,
+            positionMillis / Double(visualClock.durationMillis)
+                * Double(max(1, deck.durationBeats))
+        ))
     }
 
     private func seekProgress(
@@ -425,6 +429,9 @@ struct LiveDeckSurface<Details: View>: View {
         renderingViewport: LumiWaveformViewport
     ) -> Double {
         let beat = renderingViewport.beat(atX: x, width: width)
+        if let beatGridTimeline {
+            return beatGridTimeline.trackProgress(atBeat: beat)
+        }
         return min(max(0, beat / Double(max(1, deck.durationBeats))), 1)
     }
 
@@ -766,6 +773,10 @@ struct LiveDeckSurface<Details: View>: View {
         waveformOverride ?? deck.waveformPreview
     }
 
+    private var beatGridTimeline: LiveBeatGridTimeline? {
+        LiveBeatGridTimeline(grid: deck.beatGrid, totalBeats: deck.durationBeats)
+    }
+
     private func renderingViewport(for playheadBeat: Double) -> LumiWaveformViewport {
         guard isMaster, usesLiveViewport else {
             return viewport
@@ -867,6 +878,7 @@ private struct RGBDeckWaveform: View {
     let channelMaximum: Double
     let waveformID: UInt64
     let durationBeats: UInt64
+    let beatGrid: LiveBeatGridTimeline?
     let playheadBeat: Double
     let viewport: LumiWaveformViewport
     let visualClock: LocalPlaybackVisualClockSnapshot?
@@ -878,6 +890,7 @@ private struct RGBDeckWaveform: View {
         channelMaximum: Double,
         waveformID: UInt64,
         durationBeats: UInt64,
+        beatGrid: LiveBeatGridTimeline?,
         playheadBeat: Double,
         viewport: LumiWaveformViewport,
         visualClock: LocalPlaybackVisualClockSnapshot?,
@@ -887,6 +900,7 @@ private struct RGBDeckWaveform: View {
         self.channelMaximum = channelMaximum
         self.waveformID = waveformID
         self.durationBeats = durationBeats
+        self.beatGrid = beatGrid
         self.playheadBeat = playheadBeat
         self.viewport = viewport
         self.visualClock = visualClock
@@ -916,7 +930,8 @@ private struct RGBDeckWaveform: View {
                     width: rasterWidth,
                     channelMaximum: channelMaximum,
                     durationBeats: durationBeats,
-                    beatsPerBar: viewport.beatsPerBar
+                    beatsPerBar: beatGrid?.beatsPerBar ?? viewport.beatsPerBar,
+                    beatGrid: beatGrid
                 )
             }.value
         }
@@ -930,7 +945,8 @@ private struct RGBDeckWaveform: View {
             visibleBeats: viewport.visibleBeats,
             followsLiveViewport: followsLiveViewport,
             fallbackPlayheadBeat: playheadBeat,
-            visualClock: visualClock
+            visualClock: visualClock,
+            beatGrid: beatGrid
         )
     }
 
@@ -940,7 +956,10 @@ private struct RGBDeckWaveform: View {
             durationBeats: durationBeats,
             visibleBeats: viewport.visibleBeats,
             pointCount: points.count,
-            channelMaximum: channelMaximum
+            channelMaximum: channelMaximum,
+            beatGridMarkerCount: beatGrid?.timesMillis.count ?? 0,
+            firstBeatTimeMillis: beatGrid?.timesMillis.first,
+            lastBeatTimeMillis: beatGrid?.timesMillis.last
         )
     }
 
@@ -949,7 +968,8 @@ private struct RGBDeckWaveform: View {
         width: Int,
         channelMaximum: Double,
         durationBeats: UInt64,
-        beatsPerBar: UInt8
+        beatsPerBar: UInt8,
+        beatGrid: LiveBeatGridTimeline?
     ) -> CGImage? {
         guard !points.isEmpty else { return nil }
         let width = max(1, width)
@@ -969,8 +989,11 @@ private struct RGBDeckWaveform: View {
         let maximumAmplitude = Double(height) * 0.43
         context.setLineWidth(1)
         for pixel in 0..<width {
-            let position = Double(pixel) / Double(max(1, width - 1))
-                * Double(max(0, points.count - 1))
+            let beat = Double(pixel) / Double(max(1, width - 1))
+                * Double(max(1, durationBeats))
+            let trackProgress = beatGrid?.trackProgress(atBeat: beat)
+                ?? beat / Double(max(1, durationBeats))
+            let position = trackProgress * Double(max(0, points.count - 1))
             let lower = Int(position.rounded(.down))
             let upper = min(points.count - 1, lower + 1)
             let sampleFraction = position - Double(lower)
@@ -997,15 +1020,15 @@ private struct RGBDeckWaveform: View {
             context.addLine(to: CGPoint(x: x, y: center + amplitude))
             context.strokePath()
         }
-        context.setLineWidth(1)
         for beat in 0...Int(max(1, durationBeats)) {
             let x = Double(beat) / Double(max(1, durationBeats)) * Double(width)
             let isBar = beat.isMultiple(of: Int(max(1, beatsPerBar)))
+            context.setLineWidth(isBar ? 1.2 : 0.6)
             context.setStrokeColor(
                 red: 1,
                 green: 1,
                 blue: 1,
-                alpha: isBar ? 0.24 : 0.09
+                alpha: isBar ? 0.30 : 0.09
             )
             context.move(to: CGPoint(x: x, y: 0))
             context.addLine(to: CGPoint(x: x, y: Double(height)))
@@ -1024,6 +1047,27 @@ struct LiveWaveformMotionPlan: Equatable {
     let followsLiveViewport: Bool
     let fallbackPlayheadBeat: Double
     let visualClock: LocalPlaybackVisualClockSnapshot?
+    let beatGrid: LiveBeatGridTimeline?
+
+    init(
+        waveformID: UInt64,
+        totalBeats: Double,
+        viewportStartBeat: Double,
+        visibleBeats: Double,
+        followsLiveViewport: Bool,
+        fallbackPlayheadBeat: Double,
+        visualClock: LocalPlaybackVisualClockSnapshot?,
+        beatGrid: LiveBeatGridTimeline? = nil
+    ) {
+        self.waveformID = waveformID
+        self.totalBeats = totalBeats
+        self.viewportStartBeat = viewportStartBeat
+        self.visibleBeats = visibleBeats
+        self.followsLiveViewport = followsLiveViewport
+        self.fallbackPlayheadBeat = fallbackPlayheadBeat
+        self.visualClock = visualClock
+        self.beatGrid = beatGrid
+    }
 
     var animationIdentity: AnimationIdentity {
         let hasAuthoritativeClock = visualClock?.trackLoadID == waveformID
@@ -1037,7 +1081,8 @@ struct LiveWaveformMotionPlan: Equatable {
             durationMillis: visualClock?.durationMillis,
             playing: visualClock?.playing,
             anchoredAtReferenceTime: visualClock?.anchoredAtReferenceTime,
-            fallbackPlayheadBeat: hasAuthoritativeClock ? nil : fallbackPlayheadBeat
+            fallbackPlayheadBeat: hasAuthoritativeClock ? nil : fallbackPlayheadBeat,
+            beatGridMarkerCount: beatGrid?.timesMillis.count ?? 0
         )
     }
 
@@ -1047,8 +1092,11 @@ struct LiveWaveformMotionPlan: Equatable {
               visualClock.durationMillis > 0 else {
             return min(totalBeats, max(0, fallbackPlayheadBeat))
         }
-        let progress = visualClock.positionMillis(at: date)
-            / Double(visualClock.durationMillis)
+        let positionMillis = visualClock.positionMillis(at: date)
+        if let beatGrid {
+            return min(totalBeats, max(0, beatGrid.beat(atTimeMillis: positionMillis)))
+        }
+        let progress = positionMillis / Double(visualClock.durationMillis)
         return min(totalBeats, max(0, progress * totalBeats))
     }
 
@@ -1061,14 +1109,35 @@ struct LiveWaveformMotionPlan: Equatable {
         )
     }
 
-    func secondsPerBeat() -> Double? {
+    func positionMillis(at date: Date) -> Double? {
+        guard let visualClock,
+              visualClock.trackLoadID == waveformID,
+              visualClock.durationMillis > 0 else {
+            return nil
+        }
+        return visualClock.positionMillis(at: date)
+    }
+
+    func remainingDuration(at date: Date) -> TimeInterval? {
         guard let visualClock,
               visualClock.trackLoadID == waveformID,
               visualClock.durationMillis > 0,
-              visualClock.playing else {
+              visualClock.playing,
+              let positionMillis = positionMillis(at: date) else {
             return nil
         }
-        return Double(visualClock.durationMillis) / 1_000 / totalBeats
+        return max(
+            0.01,
+            (Double(visualClock.durationMillis) - positionMillis) / 1_000
+        )
+    }
+
+    func timeMillis(atBeat beat: Double) -> Double {
+        if let beatGrid {
+            return beatGrid.timeMillis(atBeat: beat)
+        }
+        guard let visualClock, visualClock.durationMillis > 0 else { return beat }
+        return min(max(0, beat / totalBeats), 1) * Double(visualClock.durationMillis)
     }
 
     struct AnimationIdentity: Equatable {
@@ -1081,6 +1150,7 @@ struct LiveWaveformMotionPlan: Equatable {
         let playing: Bool?
         let anchoredAtReferenceTime: TimeInterval?
         let fallbackPlayheadBeat: Double?
+        let beatGridMarkerCount: Int
     }
 }
 
@@ -1090,6 +1160,9 @@ private struct WaveformRasterKey: Hashable {
     let visibleBeats: Double
     let pointCount: Int
     let channelMaximum: Double
+    let beatGridMarkerCount: Int
+    let firstBeatTimeMillis: UInt64?
+    let lastBeatTimeMillis: UInt64?
 }
 
 private struct RGBWaveformLayerView: NSViewRepresentable {
@@ -1204,20 +1277,22 @@ private final class RGBWaveformLayerHostView: NSView {
         CATransaction.commit()
 
         guard restartAnimation,
-              let secondsPerBeat = motion.secondsPerBeat(),
+              let remainingDuration = motion.remainingDuration(at: now),
+              let currentPositionMillis = motion.positionMillis(at: now),
               currentBeat < motion.totalBeats else {
             return
         }
-        let remainingDuration = max(0.01, (motion.totalBeats - currentBeat) * secondsPerBeat)
         animateWaveform(
             motion: motion,
             currentBeat: currentBeat,
+            currentPositionMillis: currentPositionMillis,
             width: width,
             duration: remainingDuration
         )
         animatePlayhead(
             motion: motion,
             currentBeat: currentBeat,
+            currentPositionMillis: currentPositionMillis,
             width: width,
             duration: remainingDuration
         )
@@ -1226,6 +1301,7 @@ private final class RGBWaveformLayerHostView: NSView {
     private func animateWaveform(
         motion: LiveWaveformMotionPlan,
         currentBeat: Double,
+        currentPositionMillis: Double,
         width: CGFloat,
         duration: TimeInterval
     ) {
@@ -1239,8 +1315,8 @@ private final class RGBWaveformLayerHostView: NSView {
             keyPath: "position.x",
             values: values,
             keyBeats: keyBeats,
-            currentBeat: currentBeat,
-            totalBeats: motion.totalBeats,
+            motion: motion,
+            currentPositionMillis: currentPositionMillis,
             duration: duration
         )
         CATransaction.begin()
@@ -1253,6 +1329,7 @@ private final class RGBWaveformLayerHostView: NSView {
     private func animatePlayhead(
         motion: LiveWaveformMotionPlan,
         currentBeat: Double,
+        currentPositionMillis: Double,
         width: CGFloat,
         duration: TimeInterval
     ) {
@@ -1267,16 +1344,16 @@ private final class RGBWaveformLayerHostView: NSView {
             keyPath: "position.x",
             values: lineValues,
             keyBeats: keyBeats,
-            currentBeat: currentBeat,
-            totalBeats: motion.totalBeats,
+            motion: motion,
+            currentPositionMillis: currentPositionMillis,
             duration: duration
         )
         let capAnimation = keyframeAnimation(
             keyPath: "position.x",
             values: capValues,
             keyBeats: keyBeats,
-            currentBeat: currentBeat,
-            totalBeats: motion.totalBeats,
+            motion: motion,
+            currentPositionMillis: currentPositionMillis,
             duration: duration
         )
         CATransaction.begin()
@@ -1292,8 +1369,15 @@ private final class RGBWaveformLayerHostView: NSView {
         motion: LiveWaveformMotionPlan,
         currentBeat: Double
     ) -> [Double] {
+        var keyBeats = [currentBeat]
+        if let beatGrid = motion.beatGrid {
+            keyBeats.append(contentsOf: beatGrid.timesMillis.indices.lazy
+                .map(Double.init)
+                .filter { $0 > currentBeat && $0 < motion.totalBeats })
+        }
         guard motion.followsLiveViewport else {
-            return [currentBeat, motion.totalBeats]
+            keyBeats.append(motion.totalBeats)
+            return uniqueSortedBeats(keyBeats)
         }
         let leadingBeat = motion.visibleBeats * LiveDeckViewportPolicy.playheadFraction
         let trailingBeat = max(
@@ -1301,28 +1385,42 @@ private final class RGBWaveformLayerHostView: NSView {
             motion.totalBeats - motion.visibleBeats
                 * (1 - LiveDeckViewportPolicy.playheadFraction)
         )
-        return [currentBeat, leadingBeat, trailingBeat, motion.totalBeats]
-            .filter { $0 >= currentBeat && $0 <= motion.totalBeats }
-            .reduce(into: [Double]()) { beats, beat in
-                if beats.last.map({ abs($0 - beat) > 0.000_1 }) ?? true {
-                    beats.append(beat)
-                }
+        keyBeats.append(contentsOf: [leadingBeat, trailingBeat, motion.totalBeats])
+        return uniqueSortedBeats(keyBeats.filter {
+            $0 >= currentBeat && $0 <= motion.totalBeats
+        })
+    }
+
+    private func uniqueSortedBeats(_ values: [Double]) -> [Double] {
+        values.sorted().reduce(into: [Double]()) { beats, beat in
+            if beats.last.map({ abs($0 - beat) > 0.000_1 }) ?? true {
+                beats.append(beat)
             }
+        }
     }
 
     private func keyframeAnimation(
         keyPath: String,
         values: [NSNumber],
         keyBeats: [Double],
-        currentBeat: Double,
-        totalBeats: Double,
+        motion: LiveWaveformMotionPlan,
+        currentPositionMillis: Double,
         duration: TimeInterval
     ) -> CAKeyframeAnimation {
-        let remainingBeats = max(0.000_1, totalBeats - currentBeat)
+        let finalTimeMillis = max(
+            currentPositionMillis + 0.001,
+            motion.timeMillis(atBeat: motion.totalBeats)
+        )
+        let remainingMillis = finalTimeMillis - currentPositionMillis
         let animation = CAKeyframeAnimation(keyPath: keyPath)
         animation.values = values
-        animation.keyTimes = keyBeats.map {
-            NSNumber(value: ($0 - currentBeat) / remainingBeats)
+        animation.keyTimes = keyBeats.enumerated().map { index, beat in
+            guard index > 0 else { return NSNumber(value: 0) }
+            return NSNumber(value: min(max(
+                0,
+                (motion.timeMillis(atBeat: beat) - currentPositionMillis)
+                    / remainingMillis
+            ), 1))
         }
         animation.timingFunctions = Array(
             repeating: CAMediaTimingFunction(name: .linear),
