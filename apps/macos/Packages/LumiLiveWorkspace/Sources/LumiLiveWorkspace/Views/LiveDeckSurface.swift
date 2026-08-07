@@ -421,16 +421,7 @@ struct LiveDeckSurface<Details: View>: View {
                         .font(LumiTypography.technical)
                         .foregroundStyle(Color.white.opacity(0.36))
                 }
-                ScrollView(.horizontal) {
-                    HStack(spacing: LumiSpacing.xSmall) {
-                        ForEach(items) { item in
-                            plannedAutoloopCard(item)
-                        }
-                    }
-                    .fixedSize(horizontal: true, vertical: false)
-                }
-                .scrollIndicators(.hidden)
-                .frame(height: 82)
+                plannedAutoloopTimeline(items)
             }
             .padding(.horizontal, LumiSpacing.small)
             .padding(.vertical, LumiSpacing.small)
@@ -440,8 +431,45 @@ struct LiveDeckSurface<Details: View>: View {
         }
     }
 
-    private func plannedAutoloopCard(
-        _ item: PlannedAutoloopPresentation
+    private func plannedAutoloopTimeline(
+        _ items: [PlannedAutoloopPresentation]
+    ) -> some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Color.black.opacity(0.7)
+                ForEach(items) { item in
+                    if let phrase = phrase(for: item), phraseIsVisible(phrase) {
+                        plannedAutoloopBlock(
+                            item,
+                            width: phraseWidth(phrase, totalWidth: proxy.size.width)
+                        )
+                        .offset(x: phraseOffset(phrase, totalWidth: proxy.size.width))
+                    }
+                }
+                if playheadIsVisible {
+                    lightPlanPlayhead
+                        .offset(
+                            x: viewport.x(
+                                forBeat: displayedPlayheadBeat,
+                                width: proxy.size.width
+                            ) - 5
+                        )
+                }
+            }
+        }
+        .frame(height: 82)
+        .clipShape(RoundedRectangle(cornerRadius: LumiRadius.compact))
+        .overlay {
+            RoundedRectangle(cornerRadius: LumiRadius.compact)
+                .strokeBorder(Color.white.opacity(0.1), lineWidth: 1)
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityLabel("Synchronized AutoLoop plan timeline")
+    }
+
+    private func plannedAutoloopBlock(
+        _ item: PlannedAutoloopPresentation,
+        width: CGFloat
     ) -> some View {
         Button {
             onSelectPhrase(item.phraseIndex)
@@ -451,48 +479,61 @@ struct LiveDeckSurface<Details: View>: View {
                     Circle()
                         .fill(autoloopStatusColor(item.status))
                         .frame(width: 6, height: 6)
-                    Text(verbatim: autoloopStatusLabel(item.status))
-                        .font(LumiTypography.technical.weight(.semibold))
-                        .foregroundStyle(autoloopStatusColor(item.status))
-                    Spacer(minLength: 2)
+                    if width >= 58 {
+                        Text(verbatim: autoloopStatusLabel(item.status))
+                            .font(LumiTypography.technical.weight(.semibold))
+                            .foregroundStyle(autoloopStatusColor(item.status))
+                    }
                     if item.locked {
-                        Image(systemName: "pin.fill")
+                        Image(systemName: "lock.fill")
                             .font(LumiTypography.caption)
                             .foregroundStyle(LumiColor.warning)
                     }
                 }
-                Text(verbatim: item.phraseName.uppercased())
-                    .font(LumiTypography.caption.weight(.semibold))
-                    .foregroundStyle(Color.white.opacity(0.58))
-                    .lineLimit(1)
-                Text(verbatim: item.autoloopName)
-                    .font(LumiTypography.metadata.weight(.semibold))
-                    .foregroundStyle(Color.white)
-                    .lineLimit(1)
-                HStack(spacing: 4) {
+                if width >= 72 {
+                    Text(verbatim: item.phraseName.uppercased())
+                        .font(LumiTypography.caption.weight(.semibold))
+                        .foregroundStyle(Color.white.opacity(0.56))
+                        .lineLimit(1)
+                }
+                if width >= 42 {
+                    Text(verbatim: item.autoloopName)
+                        .font(LumiTypography.metadata.weight(.semibold))
+                        .foregroundStyle(Color.white)
+                        .lineLimit(1)
+                }
+                if width >= 100 {
                     if let bank = item.bankNumber, let slot = item.slotNumber {
                         Text(verbatim: "BANK \(bank) · LOOP \(slot)")
+                            .font(LumiTypography.technical)
+                            .foregroundStyle(Color.white.opacity(0.42))
+                            .lineLimit(1)
                     } else if item.holdsCurrentLook {
                         Text(verbatim: "NO MIDI CHANGE")
+                            .font(LumiTypography.technical)
+                            .foregroundStyle(Color.white.opacity(0.42))
+                            .lineLimit(1)
                     }
                 }
-                .font(LumiTypography.technical)
-                .foregroundStyle(Color.white.opacity(0.42))
             }
-            .padding(LumiSpacing.small)
-            .frame(width: 140, height: 82, alignment: .topLeading)
-            .background(autoloopStatusColor(item.status).opacity(0.09))
+            .padding(.horizontal, 6)
+            .padding(.vertical, LumiSpacing.xSmall)
+            .frame(width: width, height: 82, alignment: .topLeading)
+            .background(autoloopStatusColor(item.status).opacity(0.11))
+            .overlay(alignment: .top) {
+                Rectangle()
+                    .fill(autoloopStatusColor(item.status))
+                    .frame(height: item.status == .active ? 3 : 2)
+            }
             .overlay {
-                RoundedRectangle(cornerRadius: LumiRadius.compact)
-                    .strokeBorder(
-                        item.phraseIndex == selectedPhraseIndex
-                            ? LumiColor.accent
-                            : autoloopStatusColor(item.status).opacity(0.3),
-                        lineWidth: item.phraseIndex == selectedPhraseIndex ? 2 : 1
-                    )
+                Rectangle().strokeBorder(
+                    item.phraseIndex == selectedPhraseIndex
+                        ? LumiColor.accent
+                        : Color.white.opacity(0.1),
+                    lineWidth: item.phraseIndex == selectedPhraseIndex ? 2 : 1
+                )
             }
-            .clipShape(RoundedRectangle(cornerRadius: LumiRadius.compact))
-            .opacity(item.status == .completed ? 0.52 : 1)
+            .opacity(item.status == .completed ? 0.5 : 1)
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -502,6 +543,21 @@ struct LiveDeckSurface<Details: View>: View {
         .accessibilityIdentifier(
             "lumi.deck.\(deck.deckID).autoloop.\(item.phraseIndex)"
         )
+    }
+
+    private var lightPlanPlayhead: some View {
+        ZStack(alignment: .top) {
+            Rectangle()
+                .fill(LumiColor.accent)
+                .frame(width: 2, height: 82)
+                .shadow(color: LumiColor.accent.opacity(0.8), radius: 3)
+            Image(systemName: "arrowtriangle.down.fill")
+                .font(.system(size: 9, weight: .bold))
+                .foregroundStyle(LumiColor.accent)
+        }
+        .frame(width: 10, height: 82)
+        .allowsHitTesting(false)
+        .accessibilityHidden(true)
     }
 
     private func autoloopStatusLabel(_ status: PlannedAutoloopStatus) -> String {
@@ -539,10 +595,21 @@ struct LiveDeckSurface<Details: View>: View {
     }
 
     private var visiblePhrases: [DeckPhraseSnapshot] {
-        deck.phrases.filter {
-            Double($0.endBeat) > viewport.startBeat
-                && Double($0.startBeat) < viewport.endBeat
-        }
+        deck.phrases.filter(phraseIsVisible)
+    }
+
+    private func phraseIsVisible(_ phrase: DeckPhraseSnapshot) -> Bool {
+        Double(phrase.endBeat) > viewport.startBeat
+            && Double(phrase.startBeat) < viewport.endBeat
+    }
+
+    private func phrase(for item: PlannedAutoloopPresentation) -> DeckPhraseSnapshot? {
+        deck.phrases.first(where: { $0.index == item.phraseIndex })
+    }
+
+    private var playheadIsVisible: Bool {
+        displayedPlayheadBeat >= viewport.startBeat
+            && displayedPlayheadBeat <= viewport.endBeat
     }
 
     private func phraseWidth(_ phrase: DeckPhraseSnapshot, totalWidth: CGFloat) -> CGFloat {
