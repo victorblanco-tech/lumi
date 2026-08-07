@@ -157,8 +157,7 @@ struct LiveWorkspacePresenterTests {
             visibleBeats: 160,
             followsLiveViewport: true,
             fallbackPlayheadBeat: 320,
-            visualClock: nil,
-            beatsPerBar: 4
+            visualClock: nil
         )
         let firstBeat = 320.0
         let nextBeat = 321.0
@@ -185,8 +184,7 @@ struct LiveWorkspacePresenterTests {
             visibleBeats: 160,
             followsLiveViewport: true,
             fallbackPlayheadBeat: 10,
-            visualClock: clock,
-            beatsPerBar: 4
+            visualClock: clock
         )
         let nextPoll = LiveWaveformMotionPlan(
             waveformID: 7,
@@ -195,19 +193,10 @@ struct LiveWorkspacePresenterTests {
             visibleBeats: 160,
             followsLiveViewport: true,
             fallbackPlayheadBeat: 11,
-            visualClock: clock,
-            beatsPerBar: 4
+            visualClock: clock
         )
 
         #expect(first.animationIdentity == nextPoll.animationIdentity)
-    }
-
-    @Test("Beat grid reserves red markers for each four-beat bar")
-    func beatGridMarksBarsWithoutPromotingEveryBeat() {
-        let grid = LiveBeatGridPlan(totalBeats: 16, beatsPerBar: 4)
-
-        #expect(grid.beatIndices == Array(0...16))
-        #expect(grid.barBeatIndices == [0, 4, 8, 12, 16])
     }
 
     @Test("One-time library waveform detail accepts the full high-resolution payload")
