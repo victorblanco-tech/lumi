@@ -22,8 +22,10 @@ will later be driven by Live Decks.
    playback position, play/pause state, and leader selection. It emits the same
    provider-neutral observations that a Live Decks adapter will emit.
 5. The Swift audio controller plays the selected local source and reports its
-   measured position to the engine. The Live playhead therefore follows actual
-   playback and never an autonomous UI timer.
+   measured position to the engine. One local visual-clock anchor extrapolates
+   smooth presentation frames between those measured positions. Waveform,
+   phrase band and AutoLoop Plan consume that same clock and exact beat grid;
+   lighting execution never consumes the UI interpolation.
 6. The planning worker uses only canonical Lumi phrase role IDs. Raw source
    phrase names never become planning roles after import.
 7. Each planned phrase resolves to the actual mapped SoundSwitch bank and
@@ -58,12 +60,19 @@ will later be driven by Live Decks.
 - Missing audio fails closed for playback while analysis remains available.
 - Source switching clears stale deck state rather than presenting Local
   Playback data as if it came from Live Decks.
+- A transport or leader command receives a lightweight acknowledgement; a full
+  engine snapshot is requested only for load, reconciliation and lower-rate
+  monitoring. This prevents repeated large waveform/plan payloads from
+  interrupting native playback presentation.
 - Ordinary app-screen navigation does not switch the deck source. Loaded deck
   identity, transport position, plan and master remain in the engine and are
   restored when Live is shown again.
 - Full editor analysis remains available for deep zoom. A deck snapshot carries
   at most 1,024 peak-preserving RGB preview points so two real imported tracks
   remain safely below the authenticated one-megabyte protocol bound.
+- Rekordbox beat grids may contain a legitimate trailing marker just beyond the
+  nominal audio duration. Local Playback preserves the exact imported grid and
+  clamps presentation/seek bounds safely instead of rejecting the track.
 - The planning worker retains at most 256 library contexts.
 - No network, DJ hardware, Rekordbox process/database, SoundSwitch process, or
   MIDI target is required to use Local Playback.
@@ -78,3 +87,12 @@ evidence is rendered as `local-playback-library-next-dark-camelot.png`.
 
 The historical deterministic simulator fixtures remain available only for
 internal adapter and regression tests.
+
+The 2026-08-07 real-library regression used two imported tracks with trailing
+beat markers. Both loaded successfully, completed six consecutive leader
+switches and retained aligned waveform, phrase and AutoLoop-plan playheads.
+Measured command traffic confirmed the intended boundedness: transport
+acknowledgements remained a few hundred bytes, while reconciliation snapshots
+containing two real deck plans remained below 200 KiB. The user then manually
+accepted the complete Local Playback UI, including play/pause, seek, zoom,
+leader changes and cross-screen state retention.

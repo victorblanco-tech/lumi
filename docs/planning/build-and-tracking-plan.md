@@ -139,6 +139,10 @@ werkpakket is de veilige Rekordbox 7-spike/import achter de reeds zichtbare
   open;
 - [E3-01](https://github.com/victorblanco-tech/lumi/issues/81): generaliseer de
   bewezen bank-delay-AutoLoopsequentie naar iedere geconfigureerde target;
+- [E3-02](https://github.com/victorblanco-tech/lumi/issues/95): speel één
+  volledige echte track via Local Playback af, stuur iedere phrase-boundary
+  automatisch naar SoundSwitch en bewijs de zichtbare DMX-output inclusief een
+  aan Local Playback gekoppelde tempo/beat-clock;
 - generieke MIDI-output;
 - OFF, ARMED, LIVE en PAUSED;
 - phrase-boundary execution;

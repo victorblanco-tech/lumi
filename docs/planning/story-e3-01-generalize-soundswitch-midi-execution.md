@@ -1,5 +1,7 @@
 # E3-01 – Generalize SoundSwitch bank and AutoLoop MIDI execution
 
+Status: **Implementation path complete; repetition and reconnect evidence remain**
+
 ## Outcome
 
 Turn the physically proven Bank 1 → 50 ms → AutoLoop 1 path into the generic,
@@ -44,3 +46,12 @@ SoundSwitch target.
 - SoundSwitch remains responsible for AutoLoops, Ableton Link timing and DMX.
 - Control One remains outside the Lumi domain.
 - Output Profile Builder, ShowNET/laser and Windows MIDI remain deferred.
+
+## Handoff to full-song acceptance
+
+The generic bank/AutoLoop primitive and the automatic materialized-cue path are
+available in the engine. [E3-02](story-e3-02-full-song-local-playback-to-lights.md)
+now proves that path across one complete real Local Playback track, adds the
+missing local tempo/beat-clock bridge and captures visible SoundSwitch/DMX
+evidence. The repetition and disconnect/reconnect criteria above remain open
+until that physical test block is executed.

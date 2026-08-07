@@ -25,6 +25,9 @@ Decision Records (ADR's) die de belangrijkste besluiten vastleggen.
 - [ADR-0016: Stable deck identity, rolling Live plans and waveform sources](adr/0016-stable-deck-identity-rolling-live-plans-and-waveforms.md)
 - [ADR-0017: Product deck sources, Local Playback and safe unmatched tracks](adr/0017-product-deck-sources-local-playback-and-safe-unmatched-tracks.md)
 - [ADR-0018: BLT MIDI deck frames and separate CoreMIDI routes](adr/0018-blt-midi-deck-frames-and-separate-coremidi-routes.md)
+- [ADR-0019: Rekordbox XML mirror with read-only analysis enrichment](adr/0019-rekordbox-xml-analysis-en-lumi-owned-enrichment.md)
+- [ADR-0020: Closed Rekordbox snapshot as authoritative analysis resolver](adr/0020-closed-rekordbox-snapshot-identity-resolver.md)
+- [ADR-0021: Shared track timelines and source-specific playback clocks](adr/0021-shared-track-timelines-and-source-specific-playback-clocks.md)
 
 Release- en deploymentmanagement staat in [`docs/release`](../release/README.md).
 

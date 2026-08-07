@@ -1,6 +1,6 @@
 # Epic 2B – Live deck intelligence and rolling plans
 
-Status: **Live product slice complete; BLT MIDI adapter functionally proven, hardening evidence remains**
+Status: **Local Playback product slice accepted; BLT MIDI adapter functionally proven, hardening evidence remains**
 
 Target milestone: **0.2.0 – Deck Intelligence**
 
@@ -43,7 +43,7 @@ Status: **Complete and locally verified**
 
 ### E2B-08 – Local Playback vertical slice
 
-Status: **Complete and locally verified**
+Status: **Complete, locally verified and user-accepted on 2026-08-07**
 
 - load a ready Lumi Library track on Deck A or B;
 - browse Collection and imported playlists directly below the fixed deck
@@ -51,7 +51,6 @@ Status: **Complete and locally verified**
 - let that browser consume all vertical space left beneath the fixed decks;
 - keep the selected playlist independently scrollable and make the complete
   row and Load Deck A/B controls reliable click targets;
-- drag a ready track by its Library row/handle onto either loaded or empty deck;
 - play the actual local/demo audio, pause, seek and choose the lighting master;
 - toggle the master Local deck with Space while keeping normal spaces available
   to text fields; the Track Editor uses the same shortcut contract;
@@ -70,6 +69,21 @@ detail while each deck receives a peak-preserving preview of at most 1,024
 points, keeping real track loads below the bounded protocol message size.
 Deck loads, playback position and master state remain engine-authoritative when
 the user navigates between Live, Library, Integrations and Settings.
+
+The stabilized transport uses one authoritative local-audio position anchor and
+one exact beat-grid conversion for the waveform, phrase band and AutoLoop Plan.
+The native client interpolates presentation frames between measured anchors;
+that visual clock never schedules lighting output. Track loads and leader
+changes reconcile through bounded engine snapshots, while frequent transport
+updates use lightweight acknowledgements. Real imported tracks whose final beat
+marker lies just beyond their nominal audio duration are accepted and clamped
+safely rather than intermittently failing to load.
+
+Manual acceptance on 2026-08-07 covered two real Rekordbox-enriched tracks,
+play/pause, seek, zoom, six consecutive leader switches, exact phrase/AutoLoop
+alignment and navigation away from and back to Live. The user confirmed that
+the complete Local Playback UI behaves exactly as intended. Physical light
+output is intentionally the next Epic 3 acceptance slice, not part of E2B-08.
 
 ### E2B-09 – Plan eligibility and unmatched-track safety
 
