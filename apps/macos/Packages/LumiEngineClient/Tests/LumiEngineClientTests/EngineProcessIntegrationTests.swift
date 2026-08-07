@@ -408,7 +408,7 @@ func launchesRealEngine() async throws {
             )
         )
         #expect(operationState(live) == "live")
-        let played = try await supervisor.send(
+        let playedAck = try await supervisor.send(
             .updateLocalPlaybackTransport(
                 deckID: 2,
                 trackLoadID: UInt64(nextTrackLoadID),
@@ -416,6 +416,8 @@ func launchesRealEngine() async throws {
                 playing: true
             )
         )
+        #expect(transportWasAccepted(playedAck))
+        let played = try await supervisor.getSnapshot()
         #expect(deckIsPlaying(played, deckID: 2))
 
         let staleState = try await supervisor.send(
@@ -623,7 +625,7 @@ func editsFutureLivePhraseAndTracksPlaybackState() async throws {
         )
         #expect(EngineCommandFailure(rejected)?.code == "startedLivePhraseNotEditable")
 
-        let paused = try await supervisor.send(
+        let pausedAck = try await supervisor.send(
             .updateLocalPlaybackTransport(
                 deckID: 1,
                 trackLoadID: UInt64(trackLoadID),
@@ -631,9 +633,11 @@ func editsFutureLivePhraseAndTracksPlaybackState() async throws {
                 playing: false
             )
         )
+        #expect(transportWasAccepted(pausedAck))
+        let paused = try await supervisor.getSnapshot()
         let pausedBeat = leaderDeckBeat(paused)
         #expect(leaderDeckPlaying(paused) == false)
-        let resumed = try await supervisor.send(
+        let resumedAck = try await supervisor.send(
             .updateLocalPlaybackTransport(
                 deckID: 1,
                 trackLoadID: UInt64(trackLoadID),
@@ -641,8 +645,10 @@ func editsFutureLivePhraseAndTracksPlaybackState() async throws {
                 playing: true
             )
         )
+        #expect(transportWasAccepted(resumedAck))
+        let resumed = try await supervisor.getSnapshot()
         #expect(leaderDeckPlaying(resumed) == true)
-        let advanced = try await supervisor.send(
+        let advancedAck = try await supervisor.send(
             .updateLocalPlaybackTransport(
                 deckID: 1,
                 trackLoadID: UInt64(trackLoadID),
@@ -650,6 +656,8 @@ func editsFutureLivePhraseAndTracksPlaybackState() async throws {
                 playing: true
             )
         )
+        #expect(transportWasAccepted(advancedAck))
+        let advanced = try await supervisor.getSnapshot()
         #expect((leaderDeckBeat(advanced) ?? 0) > (pausedBeat ?? 0))
         await supervisor.stop()
     } catch {
@@ -1083,6 +1091,11 @@ private func midiIntegrationPulseCount(_ envelope: MessageEnvelope) -> UInt64? {
         return nil
     }
     return UInt64(count)
+}
+
+private func transportWasAccepted(_ envelope: MessageEnvelope) -> Bool {
+    envelope.messageType == .event
+        && envelope.payload["kind"] == .string("localPlaybackTransportAccepted")
 }
 
 private func midiIntegrationLastEvent(_ envelope: MessageEnvelope) -> String? {

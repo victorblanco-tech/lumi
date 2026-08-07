@@ -4,9 +4,16 @@ import Foundation
 import LumiEngineClient
 import LumiLibraryWorkspace
 import LumiLiveWorkspace
+import LumiProtocol
+import OSLog
 
 @MainActor
 final class EngineStatusModel: ObservableObject {
+    private static let logger = Logger(
+        subsystem: "nl.blancoservices.lumi",
+        category: "EngineStatusModel"
+    )
+
     private enum LibraryCommandFailurePresentation {
         case library
         case timeline
@@ -48,7 +55,6 @@ final class EngineStatusModel: ObservableObject {
     private var pendingLocalTransports: [UInt64: LocalDeckTransportSnapshot] = [:]
     private var pendingLocalTransportDecks: [UInt64] = []
     private var localTransportDrainTask: Task<Void, Never>?
-    private var lastLocalTransportPresentationAt: ContinuousClock.Instant?
     private var isExchangingCommand = false
     private var pendingInteractiveExchanges = 0
     private var pendingLibraryQuery: (generation: UInt64, request: LibraryQueryRequest)?
@@ -143,7 +149,6 @@ final class EngineStatusModel: ObservableObject {
         localAudioControllers.values.forEach { $0.shutdown() }
         localAudioControllers.removeAll()
         localPlaybackVisualClocks = [:]
-        lastLocalTransportPresentationAt = nil
         isExchangingCommand = false
         await supervisor.stop()
         lifecycle = .stopped
@@ -204,18 +209,16 @@ final class EngineStatusModel: ObservableObject {
                 }
                 return
             }
-            let decoder = snapshotDecoder
-            let snapshot = try await Task.detached(priority: .userInitiated) {
-                try decoder.decode(
-                    envelope,
-                    endpointDescription: endpointDescription,
-                    protocolVersion: protocolVersion
-                )
-            }.value
+            let (snapshot, snapshotEnvelope) = try await decodeSnapshotWithRecovery(
+                envelope,
+                endpointDescription: endpointDescription,
+                protocolVersion: protocolVersion,
+                context: "library query"
+            )
             guard generation == libraryQueryGeneration else { return }
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
-            libraryState = try libraryDecoder.decode(envelope)
+            libraryState = try libraryDecoder.decode(snapshotEnvelope)
         } catch {
             guard generation == libraryQueryGeneration else { return }
             libraryState = .failed(
@@ -488,14 +491,15 @@ final class EngineStatusModel: ObservableObject {
                 sourceImportFeedbackIsError = true
                 return
             }
-            let snapshot = try snapshotDecoder.decode(
+            let (snapshot, snapshotEnvelope) = try await decodeSnapshotWithRecovery(
                 envelope,
                 endpointDescription: endpointDescription,
-                protocolVersion: protocolVersion
+                protocolVersion: protocolVersion,
+                context: "Rekordbox sync preview"
             )
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
-            libraryState = try libraryDecoder.decode(envelope)
+            libraryState = try libraryDecoder.decode(snapshotEnvelope)
             guard let preview = libraryState.rekordboxSyncPreview else {
                 sourceImportFeedback = "The engine returned no Rekordbox sync preview."
                 sourceImportFeedbackIsError = true
@@ -538,14 +542,15 @@ final class EngineStatusModel: ObservableObject {
                 sourceImportFeedbackIsError = true
                 return
             }
-            let snapshot = try snapshotDecoder.decode(
+            let (snapshot, snapshotEnvelope) = try await decodeSnapshotWithRecovery(
                 envelope,
                 endpointDescription: endpointDescription,
-                protocolVersion: protocolVersion
+                protocolVersion: protocolVersion,
+                context: "Rekordbox sync"
             )
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
-            libraryState = try libraryDecoder.decode(envelope)
+            libraryState = try libraryDecoder.decode(snapshotEnvelope)
             guard let mirror = libraryState.rekordboxMirror else {
                 sourceImportFeedback = "The engine applied the sync but returned no mirror status."
                 sourceImportFeedbackIsError = true
@@ -588,14 +593,15 @@ final class EngineStatusModel: ObservableObject {
                 sourceImportFeedbackIsError = true
                 return
             }
-            let snapshot = try snapshotDecoder.decode(
+            let (snapshot, snapshotEnvelope) = try await decodeSnapshotWithRecovery(
                 envelope,
                 endpointDescription: endpointDescription,
-                protocolVersion: protocolVersion
+                protocolVersion: protocolVersion,
+                context: "Rekordbox analysis import"
             )
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
-            libraryState = try libraryDecoder.decode(envelope)
+            libraryState = try libraryDecoder.decode(snapshotEnvelope)
             sourceImportFeedback = "Rekordbox analysis imported. \(libraryState.collectionTotal) tracks are now available in Tracks."
         } catch {
             sourceImportFeedback = (error as? LocalizedError)?.errorDescription
@@ -630,14 +636,15 @@ final class EngineStatusModel: ObservableObject {
                 }
                 return
             }
-            let snapshot = try snapshotDecoder.decode(
+            let (snapshot, snapshotEnvelope) = try await decodeSnapshotWithRecovery(
                 envelope,
                 endpointDescription: endpointDescription,
-                protocolVersion: protocolVersion
+                protocolVersion: protocolVersion,
+                context: "phrase-role mutation"
             )
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
-            libraryState = try libraryDecoder.decode(envelope)
+            libraryState = try libraryDecoder.decode(snapshotEnvelope)
             if let revision = libraryState.phraseRoleSettings?.revision {
                 phraseRoleFeedback = "Phrase-role settings saved. Revision \(revision)."
             } else {
@@ -675,14 +682,15 @@ final class EngineStatusModel: ObservableObject {
                 }
                 return
             }
-            let snapshot = try snapshotDecoder.decode(
+            let (snapshot, snapshotEnvelope) = try await decodeSnapshotWithRecovery(
                 envelope,
                 endpointDescription: endpointDescription,
-                protocolVersion: protocolVersion
+                protocolVersion: protocolVersion,
+                context: "Autoloop catalog mutation"
             )
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
-            libraryState = try libraryDecoder.decode(envelope)
+            libraryState = try libraryDecoder.decode(snapshotEnvelope)
             if let revision = libraryState.autoloopCatalog?.revision {
                 autoloopCatalogFeedback = "Autoloop catalog saved. Revision \(revision)."
             } else {
@@ -774,14 +782,15 @@ final class EngineStatusModel: ObservableObject {
                 }
                 return
             }
-            let snapshot = try snapshotDecoder.decode(
+            let (snapshot, snapshotEnvelope) = try await decodeSnapshotWithRecovery(
                 envelope,
                 endpointDescription: endpointDescription,
-                protocolVersion: protocolVersion
+                protocolVersion: protocolVersion,
+                context: "timeline mutation"
             )
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
-            libraryState = try libraryDecoder.decode(envelope)
+            libraryState = try libraryDecoder.decode(snapshotEnvelope)
             let revision = libraryState.editor?.timeline.revision
             timelineEditFeedback = revision.map { "\(success) Revision \($0)." } ?? success
         } catch {
@@ -858,14 +867,15 @@ final class EngineStatusModel: ObservableObject {
                 )
                 return false
             }
-            let snapshot = try snapshotDecoder.decode(
+            let (snapshot, snapshotEnvelope) = try await decodeSnapshotWithRecovery(
                 envelope,
                 endpointDescription: endpointDescription,
-                protocolVersion: protocolVersion
+                protocolVersion: protocolVersion,
+                context: "library command"
             )
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
-            libraryState = try libraryDecoder.decode(envelope)
+            libraryState = try libraryDecoder.decode(snapshotEnvelope)
             synchronizeLocalAudio(with: snapshot)
             return true
         } catch {
@@ -873,6 +883,41 @@ final class EngineStatusModel: ObservableObject {
                 ?? "The track editor could not be updated."
             presentLibraryCommandFailure(message, as: failurePresentation)
             return false
+        }
+    }
+
+    private func decodeSnapshotWithRecovery(
+        _ envelope: MessageEnvelope,
+        endpointDescription: String,
+        protocolVersion: Int,
+        context: String
+    ) async throws -> (EngineSnapshot, MessageEnvelope) {
+        let decoder = snapshotDecoder
+        do {
+            let snapshot = try await Task.detached(priority: .userInitiated) {
+                try decoder.decode(
+                    envelope,
+                    endpointDescription: endpointDescription,
+                    protocolVersion: protocolVersion
+                )
+            }.value
+            return (snapshot, envelope)
+        } catch {
+            Self.logger.error(
+                "Snapshot decode failed after \(context, privacy: .public); requesting authoritative recovery snapshot: \(error.localizedDescription, privacy: .public)"
+            )
+            let recoveryEnvelope = try await supervisor.getSnapshot()
+            let snapshot = try await Task.detached(priority: .userInitiated) {
+                try decoder.decode(
+                    recoveryEnvelope,
+                    endpointDescription: endpointDescription,
+                    protocolVersion: protocolVersion
+                )
+            }.value
+            Self.logger.info(
+                "Recovered authoritative engine snapshot after \(context, privacy: .public)"
+            )
+            return (snapshot, recoveryEnvelope)
         }
     }
 
@@ -907,14 +952,15 @@ final class EngineStatusModel: ObservableObject {
                 midiIntegrationFeedback = "The MIDI command could not run: \(failure.message)"
                 return
             }
-            let snapshot = try snapshotDecoder.decode(
+            let (snapshot, snapshotEnvelope) = try await decodeSnapshotWithRecovery(
                 envelope,
                 endpointDescription: endpointDescription,
-                protocolVersion: protocolVersion
+                protocolVersion: protocolVersion,
+                context: "MIDI command"
             )
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
-            libraryState = try libraryDecoder.decode(envelope)
+            libraryState = try libraryDecoder.decode(snapshotEnvelope)
             midiIntegrationFeedback = success
         } catch {
             midiIntegrationFeedback = "The MIDI command could not run: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
@@ -954,10 +1000,11 @@ final class EngineStatusModel: ObservableObject {
                 return
             }
 
-            let snapshot = try snapshotDecoder.decode(
+            let (snapshot, _) = try await decodeSnapshotWithRecovery(
                 envelope,
                 endpointDescription: endpointDescription,
-                protocolVersion: protocolVersion
+                protocolVersion: protocolVersion,
+                context: "plan mutation"
             )
             latestSnapshot = snapshot
             let savedRevision = [snapshot.livePlan, snapshot.nextPlan]
@@ -1042,14 +1089,12 @@ final class EngineStatusModel: ObservableObject {
                 }
                 return
             }
-            let decoder = snapshotDecoder
-            let snapshot = try await Task.detached(priority: .userInitiated) {
-                try decoder.decode(
-                    envelope,
-                    endpointDescription: endpointDescription,
-                    protocolVersion: protocolVersion
-                )
-            }.value
+            let (snapshot, _) = try await decodeSnapshotWithRecovery(
+                envelope,
+                endpointDescription: endpointDescription,
+                protocolVersion: protocolVersion,
+                context: "session command"
+            )
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(
                 snapshot,
@@ -1266,9 +1311,7 @@ final class EngineStatusModel: ObservableObject {
     private func exchangeLocalTransport(_ transport: LocalDeckTransportSnapshot) async {
         guard lifecycle == .ready,
               !isExchangingCommand,
-              pendingInteractiveExchanges == 0,
-              let endpointDescription,
-              let protocolVersion else {
+              pendingInteractiveExchanges == 0 else {
             return
         }
         isExchangingCommand = true
@@ -1282,21 +1325,12 @@ final class EngineStatusModel: ObservableObject {
                     playing: transport.playing
                 )
             )
-            guard EngineCommandFailure(envelope) == nil else { return }
-            let now = ContinuousClock.now
-            if transport.playing,
-               let lastLocalTransportPresentationAt,
-               lastLocalTransportPresentationAt.duration(to: now) < .milliseconds(250) {
+            if let failure = EngineCommandFailure(envelope) {
+                Self.logger.error(
+                    "Local transport update rejected for deck \(transport.deckID): \(failure.message, privacy: .public)"
+                )
                 return
             }
-            let decoder = snapshotDecoder
-            let snapshot = try await Task.detached(priority: .userInitiated) {
-                try decoder.decode(
-                    envelope,
-                    endpointDescription: endpointDescription,
-                    protocolVersion: protocolVersion
-                )
-            }.value
             guard localAudioControllers[transport.deckID]?.snapshot.discontinuityRevision
                     == transport.discontinuityRevision else {
                 if let current = localAudioControllers[transport.deckID]?.snapshot {
@@ -1304,15 +1338,11 @@ final class EngineStatusModel: ObservableObject {
                 }
                 return
             }
-            latestSnapshot = snapshot
-            let nextWorkspaceState = LiveWorkspacePresenter.ready(snapshot)
-            if nextWorkspaceState != workspaceState {
-                workspaceState = nextWorkspaceState
-            }
-            lastLocalTransportPresentationAt = now
         } catch {
-            // The process monitor owns connection failure presentation. Audio
-            // remains local and the next transport sample retries safely.
+            Self.logger.error(
+                "Local transport exchange failed for deck \(transport.deckID): \(error.localizedDescription, privacy: .public)"
+            )
+            // Audio remains local and the next transport sample retries safely.
         }
     }
 
@@ -1384,8 +1414,11 @@ final class EngineStatusModel: ObservableObject {
                         self.workspaceState = nextWorkspaceState
                     }
                 } catch {
-                    // The one-second process health check owns disconnect state.
-                    // A single missed polling frame must not disturb Live UI.
+                    Self.logger.error(
+                        "Engine snapshot monitor failed: \(error.localizedDescription, privacy: .public)"
+                    )
+                    // The one-second process health check owns disconnect state. A
+                    // single missed polling frame must not disturb Live UI.
                 }
                 self.isExchangingCommand = false
             }

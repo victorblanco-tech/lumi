@@ -1,5 +1,34 @@
 import Foundation
 
+struct LiveDeckVisualTimeline: Sendable {
+    static func playheadBeat(
+        trackLoadID: UInt64,
+        durationBeats: UInt64,
+        fallbackBeat: Double,
+        visualClock: LocalPlaybackVisualClockSnapshot?,
+        beatGrid: LiveBeatGridTimeline?,
+        at date: Date
+    ) -> Double {
+        let totalBeats = Double(max(1, durationBeats))
+        guard let visualClock,
+              visualClock.trackLoadID == trackLoadID,
+              visualClock.durationMillis > 0 else {
+            return min(totalBeats, max(0, fallbackBeat))
+        }
+        let positionMillis = visualClock.positionMillis(at: date)
+        if let beatGrid {
+            return min(totalBeats, max(
+                0,
+                beatGrid.beat(atTimeMillis: positionMillis)
+            ))
+        }
+        return min(totalBeats, max(
+            0,
+            positionMillis / Double(visualClock.durationMillis) * totalBeats
+        ))
+    }
+}
+
 struct LiveBeatGridTimeline: Equatable, Sendable {
     let durationMillis: UInt64
     let totalBeats: UInt64

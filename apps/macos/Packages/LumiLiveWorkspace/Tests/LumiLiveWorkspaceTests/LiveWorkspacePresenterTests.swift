@@ -183,6 +183,46 @@ struct LiveWorkspacePresenterTests {
         #expect(abs(timeline.trackProgress(atBeat: 1.5) - 674.0 / 1_800.0) < 0.000_1)
     }
 
+    @Test("Waveform and plan share one exact visual playhead clock")
+    func waveformAndPlanShareVisualClock() throws {
+        let grid = DeckBeatGridSnapshot(
+            beatsPerBar: 4,
+            durationMillis: 1_250,
+            timesMillis: [60, 447, 901, 1_300]
+        )
+        let timeline = try #require(LiveBeatGridTimeline(grid: grid, totalBeats: 4))
+        let clock = LocalPlaybackVisualClockSnapshot(
+            trackLoadID: 7,
+            positionMillis: 447,
+            durationMillis: 1_250,
+            playing: true,
+            anchoredAtReferenceTime: 100
+        )
+        let date = Date(timeIntervalSinceReferenceDate: 100.3)
+        let sharedBeat = LiveDeckVisualTimeline.playheadBeat(
+            trackLoadID: 7,
+            durationBeats: 4,
+            fallbackBeat: 0,
+            visualClock: clock,
+            beatGrid: timeline,
+            at: date
+        )
+        let waveformMotion = LiveWaveformMotionPlan(
+            waveformID: 7,
+            totalBeats: 4,
+            viewportStartBeat: 0,
+            visibleBeats: 4,
+            followsLiveViewport: true,
+            fallbackPlayheadBeat: 0,
+            visualClock: clock,
+            beatGrid: timeline
+        )
+
+        #expect(abs(sharedBeat - waveformMotion.playheadBeat(at: date)) < 0.000_1)
+        #expect(waveformMotion.playbackEndBeat < 3)
+        #expect(abs(timeline.timeMillis(atBeat: waveformMotion.playbackEndBeat) - 1_250) < 0.001)
+    }
+
     @Test("Recorded Live decks decode exact Rekordbox beat-grid markers")
     func liveDeckDecodesExactBeatGrid() throws {
         let recorded = try recordedEnvelope()
@@ -218,6 +258,44 @@ struct LiveWorkspacePresenterTests {
         )
 
         #expect(snapshot.decks[0].beatGrid?.timesMillis == [60, 447, 901, 1_300])
+    }
+
+    @Test("Recorded Live decks accept a final Rekordbox marker past the audio duration")
+    func liveDeckAcceptsRekordboxTrailingBeatMarker() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case var .array(decks) = payload["decks"],
+              case var .object(deck) = decks[0],
+              case var .object(track) = deck["track"] else {
+            Issue.record("Recorded deck fixture is malformed")
+            return
+        }
+        track["beatGrid"] = .object([
+            "beatsPerBar": .number(4),
+            "durationMillis": .number(1_250),
+            "timesMillis": .array([.number(60), .number(447), .number(901), .number(1_300)])
+        ])
+        deck["track"] = .object(track)
+        decks[0] = .object(deck)
+        payload["decks"] = .array(decks)
+        let envelope = MessageEnvelope(
+            protocolVersion: recorded.protocolVersion,
+            messageType: recorded.messageType,
+            messageId: recorded.messageId,
+            sequence: recorded.sequence,
+            correlationId: recorded.correlationId,
+            sentAt: recorded.sentAt,
+            payload: payload
+        )
+
+        let snapshot = try EngineSnapshotDecoder().decode(
+            envelope,
+            endpointDescription: "127.0.0.1:52841",
+            protocolVersion: 1
+        )
+
+        #expect(snapshot.decks[0].beatGrid?.durationMillis == 1_250)
+        #expect(snapshot.decks[0].beatGrid?.timesMillis.last == 1_300)
     }
 
     @Test("Authoritative playback clock prevents poll snapshots from restarting waveform motion")

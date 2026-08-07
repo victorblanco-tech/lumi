@@ -736,8 +736,7 @@ public struct EngineSnapshotDecoder: Sendable {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
         let timesMillis = try timePayloads.map { value in
-            guard let timeMillis = unsignedInteger(value),
-                  timeMillis <= durationMillis else {
+            guard let timeMillis = unsignedInteger(value) else {
                 throw EngineSnapshotDecodingError.invalidSnapshot
             }
             return timeMillis

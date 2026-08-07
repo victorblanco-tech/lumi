@@ -703,11 +703,18 @@ fn handle_command(
     };
 
     let is_mutating = command.is_mutating();
+    let is_transport_update = matches!(
+        &command,
+        SessionCommand::UpdateLocalPlaybackTransport { .. }
+    );
     let waveform_detail_track_id = match &command {
         SessionCommand::GetLibraryTrackWaveform { track_id } => Some(*track_id),
         _ => None,
     };
     if is_mutating && command_ids.contains(&envelope.message_id) {
+        if is_transport_update {
+            return transport_ack_envelope(runtime, response_sequence, &envelope.message_id);
+        }
         return snapshot_envelope(runtime, response_sequence, &envelope.message_id);
     }
 
@@ -720,6 +727,9 @@ fn handle_command(
             CommandDisposition::FirstSeen
         );
     }
+    if is_transport_update {
+        return transport_ack_envelope(runtime, response_sequence, &envelope.message_id);
+    }
     let mut response = snapshot_envelope(runtime, response_sequence, &envelope.message_id)?;
     if let Some(track_id) = waveform_detail_track_id {
         response.payload.insert(
@@ -728,6 +738,31 @@ fn handle_command(
         );
     }
     Ok(response)
+}
+
+fn transport_ack_envelope(
+    runtime: &EngineRuntime,
+    sequence: u64,
+    correlation_id: &str,
+) -> Result<MessageEnvelope, EngineError> {
+    let mut payload = Map::new();
+    payload.insert(
+        "kind".to_owned(),
+        Value::String("localPlaybackTransportAccepted".to_owned()),
+    );
+    payload.insert(
+        "stateRevision".to_owned(),
+        json!(runtime.state.state().revision().value()),
+    );
+    Ok(MessageEnvelope {
+        protocol_version: PROTOCOL_VERSION,
+        message_type: MessageType::Event,
+        message_id: format!("event-{sequence}"),
+        sequence,
+        correlation_id: correlation_id.to_owned(),
+        sent_at: OffsetDateTime::now_utc().format(&Rfc3339)?,
+        payload,
+    })
 }
 
 fn process_deck_input_messages(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
