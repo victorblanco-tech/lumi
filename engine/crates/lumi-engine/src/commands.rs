@@ -41,6 +41,9 @@ pub enum SessionCommand {
     OpenLibraryTrackEditor {
         track_id: u64,
     },
+    GetLibraryTrackWaveform {
+        track_id: u64,
+    },
     CloseLibraryTrackEditor,
     PreviewDemoSourceRefresh,
     PreviewRekordboxXmlSync {
@@ -184,6 +187,7 @@ impl SessionCommand {
             Self::GetSnapshot
                 | Self::QueryLibrary { .. }
                 | Self::OpenLibraryTrackEditor { .. }
+                | Self::GetLibraryTrackWaveform { .. }
                 | Self::CloseLibraryTrackEditor
         )
     }
@@ -193,6 +197,7 @@ impl SessionCommand {
             Self::GetSnapshot
             | Self::QueryLibrary { .. }
             | Self::OpenLibraryTrackEditor { .. }
+            | Self::GetLibraryTrackWaveform { .. }
             | Self::CloseLibraryTrackEditor
             | Self::PreviewDemoSourceRefresh
             | Self::PreviewRekordboxXmlSync { .. }
@@ -246,6 +251,9 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
             limit: library_limit(optional_unsigned(&envelope.payload, "limit")?.unwrap_or(50))?,
         }),
         "openLibraryTrackEditor" => Ok(SessionCommand::OpenLibraryTrackEditor {
+            track_id: positive_unsigned(&envelope.payload, "trackId")?,
+        }),
+        "getLibraryTrackWaveform" => Ok(SessionCommand::GetLibraryTrackWaveform {
             track_id: positive_unsigned(&envelope.payload, "trackId")?,
         }),
         "closeLibraryTrackEditor" => Ok(SessionCommand::CloseLibraryTrackEditor),
@@ -909,6 +917,22 @@ mod tests {
                 expected_content_sha256: "abc123".to_owned(),
             })
         );
+    }
+
+    #[test]
+    fn library_waveform_detail_is_a_read_only_track_request() {
+        let envelope = command_envelope(serde_json::json!({
+            "kind": "getLibraryTrackWaveform",
+            "trackId": 42,
+        }));
+
+        let command = decode_command(&envelope).expect("waveform request should decode");
+
+        assert_eq!(
+            command,
+            SessionCommand::GetLibraryTrackWaveform { track_id: 42 }
+        );
+        assert!(!command.is_mutating());
     }
 
     fn command_envelope(payload: Value) -> MessageEnvelope {

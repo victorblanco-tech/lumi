@@ -148,6 +148,88 @@ struct LiveWorkspacePresenterTests {
         #expect(paused.positionMillis(at: Date(timeIntervalSinceReferenceDate: 110)) == 1_000)
     }
 
+    @Test("Live waveform motion keeps a constant fixed playhead while the waveform scrolls")
+    func liveWaveformMotionKeepsFixedPlayhead() {
+        let motion = LiveWaveformMotionPlan(
+            waveformID: 7,
+            totalBeats: 800,
+            viewportStartBeat: 0,
+            visibleBeats: 160,
+            followsLiveViewport: true,
+            fallbackPlayheadBeat: 320,
+            visualClock: nil
+        )
+        let firstBeat = 320.0
+        let nextBeat = 321.0
+        let firstFraction = (firstBeat - motion.startBeat(for: firstBeat)) / motion.visibleBeats
+        let nextFraction = (nextBeat - motion.startBeat(for: nextBeat)) / motion.visibleBeats
+
+        #expect(abs(firstFraction - LiveDeckViewportPolicy.playheadFraction) < 0.000_1)
+        #expect(abs(nextFraction - firstFraction) < 0.000_1)
+    }
+
+    @Test("Authoritative playback clock prevents poll snapshots from restarting waveform motion")
+    func playbackClockKeepsWaveformAnimationIdentityStable() {
+        let clock = LocalPlaybackVisualClockSnapshot(
+            trackLoadID: 7,
+            positionMillis: 1_000,
+            durationMillis: 120_000,
+            playing: true,
+            anchoredAtReferenceTime: 100
+        )
+        let first = LiveWaveformMotionPlan(
+            waveformID: 7,
+            totalBeats: 512,
+            viewportStartBeat: 0,
+            visibleBeats: 160,
+            followsLiveViewport: true,
+            fallbackPlayheadBeat: 10,
+            visualClock: clock
+        )
+        let nextPoll = LiveWaveformMotionPlan(
+            waveformID: 7,
+            totalBeats: 512,
+            viewportStartBeat: 0,
+            visibleBeats: 160,
+            followsLiveViewport: true,
+            fallbackPlayheadBeat: 11,
+            visualClock: clock
+        )
+
+        #expect(first.animationIdentity == nextPoll.animationIdentity)
+    }
+
+    @Test("One-time library waveform detail accepts the full high-resolution payload")
+    func highResolutionWaveformDetailDecodes() throws {
+        let pointCount = 16_384
+        let envelope = MessageEnvelope(
+            protocolVersion: 1,
+            messageType: .snapshot,
+            messageId: "waveform-detail",
+            sequence: 1,
+            correlationId: "test",
+            sentAt: "2026-08-07T00:00:00Z",
+            payload: [
+                "waveformDetail": .object([
+                    "trackId": .number(42),
+                    "source": .string("localLibraryDetail"),
+                    "style": .string("rgb"),
+                    "points": .array(Array(
+                        repeating: .array([.number(32), .number(137), .number(241)]),
+                        count: pointCount
+                    ))
+                ])
+            ]
+        )
+
+        let detail = try EngineSnapshotDecoder().decodeWaveformDetail(envelope)
+
+        #expect(detail.trackID == 42)
+        #expect(detail.preview.source == "localLibraryDetail")
+        #expect(detail.preview.points.count == pointCount)
+        #expect(detail.preview.points.last?.high == 241)
+    }
+
     @Test("Live deck viewport defaults to 40 bars and keeps the playhead left")
     func liveDeckViewportDefaultsToFortyBars() {
         let viewport = LiveDeckViewportPolicy.live(

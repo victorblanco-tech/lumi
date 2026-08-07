@@ -24,6 +24,9 @@ final class EngineStatusModel: ObservableObject {
     @Published private(set) var localPlaybackVisualClocks: [
         UInt64: LocalPlaybackVisualClockSnapshot
     ] = [:]
+    @Published private(set) var localPlaybackWaveforms: [
+        UInt64: DeckWaveformPreviewSnapshot
+    ] = [:]
     @Published private(set) var sourceImportFeedback: String?
     @Published private(set) var sourceImportFeedbackIsError = false
 
@@ -245,6 +248,9 @@ final class EngineStatusModel: ObservableObject {
         guard var snapshot = latestSnapshot else { return }
         localPlaybackFeedback = nil
         localPlaybackFeedbackIsError = false
+        var waveforms = localPlaybackWaveforms
+        waveforms.removeValue(forKey: request.deckID)
+        localPlaybackWaveforms = waveforms
 
         if snapshot.deckSource.mode != "localPlayback" {
             let switched = await exchangeLibraryCommand(
@@ -284,6 +290,34 @@ final class EngineStatusModel: ObservableObject {
         if loaded {
             localPlaybackFeedback = "Loaded exact Lumi timeline r\(request.expectedTimelineRevision) on Local Deck \(request.deckID)."
             localPlaybackFeedbackIsError = false
+            await fetchLocalPlaybackWaveform(
+                trackID: request.trackID,
+                deckID: request.deckID
+            )
+        }
+    }
+
+    private func fetchLocalPlaybackWaveform(trackID: UInt64, deckID: UInt64) async {
+        guard lifecycle == .ready,
+              await acquireInteractiveExchange() else {
+            return
+        }
+        defer { isExchangingCommand = false }
+        do {
+            let envelope = try await supervisor.send(
+                .getLibraryTrackWaveform(trackID: trackID)
+            )
+            guard EngineCommandFailure(envelope) == nil else { return }
+            let decoder = snapshotDecoder
+            let detail = try await Task.detached(priority: .userInitiated) {
+                try decoder.decodeWaveformDetail(envelope)
+            }.value
+            guard detail.trackID == trackID else { return }
+            var waveforms = localPlaybackWaveforms
+            waveforms[deckID] = detail.preview
+            localPlaybackWaveforms = waveforms
+        } catch {
+            // The bounded preview remains available if detail retrieval fails.
         }
     }
 
@@ -1156,6 +1190,7 @@ final class EngineStatusModel: ObservableObject {
             localAudioControllers.values.forEach { $0.shutdown() }
             localAudioControllers.removeAll()
             localPlaybackVisualClocks = [:]
+            localPlaybackWaveforms = [:]
             return
         }
         let expectedDecks = Set(snapshot.decks.compactMap { deck in
@@ -1166,6 +1201,9 @@ final class EngineStatusModel: ObservableObject {
             var clocks = localPlaybackVisualClocks
             clocks.removeValue(forKey: deckID)
             localPlaybackVisualClocks = clocks
+            var waveforms = localPlaybackWaveforms
+            waveforms.removeValue(forKey: deckID)
+            localPlaybackWaveforms = waveforms
         }
         for deck in snapshot.decks {
             guard let playback = deck.localPlayback else { continue }

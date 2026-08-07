@@ -41,6 +41,7 @@ struct FoundationView: View {
                         allowsScrolling: false,
                         showsNavigation: false,
                         localPlaybackVisualClocks: engineStatus.localPlaybackVisualClocks,
+                        localPlaybackWaveforms: engineStatus.localPlaybackWaveforms,
                         localPlaybackFeedback: engineStatus.localPlaybackFeedback,
                         localPlaybackFeedbackIsError: engineStatus.localPlaybackFeedbackIsError,
                         onPlanMutation: { request in

@@ -8,6 +8,47 @@ public enum EngineSnapshotDecodingError: Error, Equatable {
 public struct EngineSnapshotDecoder: Sendable {
     public init() {}
 
+    public func decodeWaveformDetail(
+        _ envelope: MessageEnvelope
+    ) throws -> LibraryWaveformDetailSnapshot {
+        guard envelope.messageType == .snapshot,
+              case let .object(detail) = envelope.payload["waveformDetail"],
+              let trackID = unsignedInteger(detail["trackId"]),
+              trackID > 0,
+              case let .string(source) = detail["source"],
+              !source.isEmpty,
+              detail["style"] == .string("rgb"),
+              case let .array(pointPayloads) = detail["points"],
+              (16...16_384).contains(pointPayloads.count) else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        let points = try pointPayloads.map { value in
+            guard case let .array(channels) = value,
+                  channels.count == 3,
+                  let low = unsignedInteger(channels[0]),
+                  let mid = unsignedInteger(channels[1]),
+                  let high = unsignedInteger(channels[2]),
+                  low <= UInt8.max,
+                  mid <= UInt8.max,
+                  high <= UInt8.max else {
+                throw EngineSnapshotDecodingError.invalidSnapshot
+            }
+            return DeckWaveformPointSnapshot(
+                low: UInt8(low),
+                mid: UInt8(mid),
+                high: UInt8(high)
+            )
+        }
+        return LibraryWaveformDetailSnapshot(
+            trackID: trackID,
+            preview: DeckWaveformPreviewSnapshot(
+                source: source,
+                style: "rgb",
+                points: points
+            )
+        )
+    }
+
     public func decode(
         _ envelope: MessageEnvelope,
         endpointDescription: String,

@@ -703,6 +703,10 @@ fn handle_command(
     };
 
     let is_mutating = command.is_mutating();
+    let waveform_detail_track_id = match &command {
+        SessionCommand::GetLibraryTrackWaveform { track_id } => Some(*track_id),
+        _ => None,
+    };
     if is_mutating && command_ids.contains(&envelope.message_id) {
         return snapshot_envelope(runtime, response_sequence, &envelope.message_id);
     }
@@ -716,7 +720,14 @@ fn handle_command(
             CommandDisposition::FirstSeen
         );
     }
-    snapshot_envelope(runtime, response_sequence, &envelope.message_id)
+    let mut response = snapshot_envelope(runtime, response_sequence, &envelope.message_id)?;
+    if let Some(track_id) = waveform_detail_track_id {
+        response.payload.insert(
+            "waveformDetail".to_owned(),
+            runtime.library_worker.waveform_detail_json(track_id)?,
+        );
+    }
+    Ok(response)
 }
 
 fn process_deck_input_messages(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
@@ -756,6 +767,7 @@ fn apply_command(
             runtime.library_worker.open_editor(track_id)?;
             return Ok(());
         }
+        SessionCommand::GetLibraryTrackWaveform { .. } => return Ok(()),
         SessionCommand::CloseLibraryTrackEditor => {
             runtime.library_worker.close_editor();
             return Ok(());
@@ -1139,6 +1151,7 @@ fn apply_command(
         SessionCommand::GetSnapshot
         | SessionCommand::QueryLibrary { .. }
         | SessionCommand::OpenLibraryTrackEditor { .. }
+        | SessionCommand::GetLibraryTrackWaveform { .. }
         | SessionCommand::CloseLibraryTrackEditor
         | SessionCommand::PreviewDemoSourceRefresh
         | SessionCommand::PreviewRekordboxXmlSync { .. }

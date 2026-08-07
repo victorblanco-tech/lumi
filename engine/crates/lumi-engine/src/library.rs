@@ -48,6 +48,7 @@ const REKORDBOX_CANONICAL_SOURCE_ID: &str = "rekordbox7-local";
 const REKORDBOX_CANONICAL_SOURCE_KIND: &str = "rekordbox7";
 const MAX_IMPORTED_WAVEFORM_POINTS: usize = 16_384;
 const MAX_DECK_WAVEFORM_PREVIEW_POINTS: usize = 1_024;
+const MAX_DECK_WAVEFORM_DETAIL_POINTS: usize = 16_384;
 
 pub struct LibraryWorker {
     repository: SqliteLibraryRepository,
@@ -600,6 +601,26 @@ impl LibraryWorker {
         self.ensure_timeline(track_id)?;
         self.editor_track_id = Some(track_id);
         Ok(())
+    }
+
+    pub fn waveform_detail_json(&self, track_id: u64) -> Result<Value, LibraryWorkerError> {
+        let track_id = TrackId::new(track_id);
+        let track = self
+            .repository
+            .track(track_id)?
+            .ok_or(LibraryWorkerError::UnknownTrack(track_id.value()))?;
+        let points =
+            deck_waveform_preview_points(track.waveform(), MAX_DECK_WAVEFORM_DETAIL_POINTS);
+        Ok(json!({
+            "trackId": track_id.value(),
+            "source": "localLibraryDetail",
+            "style": "rgb",
+            "points": points.iter().map(|point| json!([
+                point[0],
+                point[1],
+                point[2],
+            ])).collect::<Vec<_>>(),
+        }))
     }
 
     /// Builds a Local Playback load exclusively from the stored track identity and

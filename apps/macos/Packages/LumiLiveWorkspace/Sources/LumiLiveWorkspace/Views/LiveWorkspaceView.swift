@@ -13,6 +13,7 @@ public struct LiveWorkspaceView: View {
     private let onLocalPlayback: @MainActor (LocalPlaybackRequest) -> Void
     private let localPlaybackBrowser: AnyView?
     private let localPlaybackVisualClocks: [UInt64: LocalPlaybackVisualClockSnapshot]
+    private let localPlaybackWaveforms: [UInt64: DeckWaveformPreviewSnapshot]
     private let localPlaybackFeedback: String?
     private let localPlaybackFeedbackIsError: Bool
     @Binding private var appearance: AppearancePreference
@@ -31,6 +32,7 @@ public struct LiveWorkspaceView: View {
         allowsScrolling: Bool = true,
         showsNavigation: Bool = true,
         localPlaybackVisualClocks: [UInt64: LocalPlaybackVisualClockSnapshot] = [:],
+        localPlaybackWaveforms: [UInt64: DeckWaveformPreviewSnapshot] = [:],
         localPlaybackFeedback: String? = nil,
         localPlaybackFeedbackIsError: Bool = false,
         onPlanMutation: @escaping @MainActor (PlanMutationRequest) -> Void = { _ in },
@@ -43,6 +45,7 @@ public struct LiveWorkspaceView: View {
         self.allowsScrolling = allowsScrolling
         self.showsNavigation = showsNavigation
         self.localPlaybackVisualClocks = localPlaybackVisualClocks
+        self.localPlaybackWaveforms = localPlaybackWaveforms
         self.localPlaybackFeedback = localPlaybackFeedback
         self.localPlaybackFeedbackIsError = localPlaybackFeedbackIsError
         self.onPlanMutation = onPlanMutation
@@ -429,6 +432,7 @@ public struct LiveWorkspaceView: View {
                                     musicalKey: musicalKey(for: deck),
                                     isLocalPlayback: content.sourceMode == "localPlayback",
                                     visualClock: localPlaybackVisualClocks[deck.deckID],
+                                    waveformOverride: localPlaybackWaveforms[deck.deckID],
                                     selectedPhraseIndex: selectedIndex,
                                     onSelectPhrase: { phraseIndex in
                                         if isMaster {

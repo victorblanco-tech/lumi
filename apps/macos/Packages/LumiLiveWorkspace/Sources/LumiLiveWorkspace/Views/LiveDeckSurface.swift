@@ -1,4 +1,6 @@
+import AppKit
 import LumiDesignSystem
+import QuartzCore
 import SwiftUI
 
 struct LiveDeckSurface<Details: View>: View {
@@ -8,6 +10,7 @@ struct LiveDeckSurface<Details: View>: View {
     let musicalKey: String
     let isLocalPlayback: Bool
     let visualClock: LocalPlaybackVisualClockSnapshot?
+    let waveformOverride: DeckWaveformPreviewSnapshot?
     let selectedPhraseIndex: UInt64?
     let onSelectPhrase: (UInt64) -> Void
     let onTogglePlayback: () -> Void
@@ -31,6 +34,7 @@ struct LiveDeckSurface<Details: View>: View {
         musicalKey: String,
         isLocalPlayback: Bool,
         visualClock: LocalPlaybackVisualClockSnapshot? = nil,
+        waveformOverride: DeckWaveformPreviewSnapshot? = nil,
         selectedPhraseIndex: UInt64?,
         onSelectPhrase: @escaping (UInt64) -> Void,
         onTogglePlayback: @escaping () -> Void = {},
@@ -45,6 +49,7 @@ struct LiveDeckSurface<Details: View>: View {
         self.musicalKey = musicalKey
         self.isLocalPlayback = isLocalPlayback
         self.visualClock = visualClock
+        self.waveformOverride = waveformOverride
         self.selectedPhraseIndex = selectedPhraseIndex
         self.onSelectPhrase = onSelectPhrase
         self.onTogglePlayback = onTogglePlayback
@@ -67,7 +72,7 @@ struct LiveDeckSurface<Details: View>: View {
             header
             metadata
             if isLocalPlayback { transportControls }
-            if deck.waveformPreview?.points.isEmpty == false { waveformToolbar }
+            if waveformPreview?.points.isEmpty == false { waveformToolbar }
             synchronizedDeckTimeline
             details
         }
@@ -133,7 +138,6 @@ struct LiveDeckSurface<Details: View>: View {
                 renderingViewport: renderingViewport
             )
         }
-        .animation(.linear(duration: 0.25), value: deck.beat)
     }
 
     private var header: some View {
@@ -309,13 +313,16 @@ struct LiveDeckSurface<Details: View>: View {
     ) -> some View {
         ZStack(alignment: .topLeading) {
             Color.black
-            if let preview = deck.waveformPreview, !preview.points.isEmpty {
+            if let preview = waveformPreview, !preview.points.isEmpty {
                 RGBDeckWaveform(
                     points: preview.points,
+                    channelMaximum: preview.source == "localLibraryDetail" ? 255 : 31,
                     waveformID: deck.trackLoadID,
                     durationBeats: deck.durationBeats,
                     playheadBeat: playheadBeat,
-                    viewport: renderingViewport
+                    viewport: isMaster && usesLiveViewport ? viewport : renderingViewport,
+                    visualClock: scrubProgress == nil ? visualClock : nil,
+                    followsLiveViewport: isMaster && usesLiveViewport
                 )
                 Text(verbatim: "RGB · \(preview.source.uppercased())")
                     .font(LumiTypography.technical)
@@ -755,6 +762,10 @@ struct LiveDeckSurface<Details: View>: View {
         visualClock?.playing ?? deck.playing
     }
 
+    private var waveformPreview: DeckWaveformPreviewSnapshot? {
+        waveformOverride ?? deck.waveformPreview
+    }
+
     private func renderingViewport(for playheadBeat: Double) -> LumiWaveformViewport {
         guard isMaster, usesLiveViewport else {
             return viewport
@@ -853,109 +864,92 @@ struct LiveDeckSurface<Details: View>: View {
 
 private struct RGBDeckWaveform: View {
     let points: [DeckWaveformPointSnapshot]
+    let channelMaximum: Double
     let waveformID: UInt64
     let durationBeats: UInt64
     let playheadBeat: Double
     let viewport: LumiWaveformViewport
+    let visualClock: LocalPlaybackVisualClockSnapshot?
+    let followsLiveViewport: Bool
     @State private var rasterImage: CGImage?
+
+    init(
+        points: [DeckWaveformPointSnapshot],
+        channelMaximum: Double,
+        waveformID: UInt64,
+        durationBeats: UInt64,
+        playheadBeat: Double,
+        viewport: LumiWaveformViewport,
+        visualClock: LocalPlaybackVisualClockSnapshot?,
+        followsLiveViewport: Bool
+    ) {
+        self.points = points
+        self.channelMaximum = channelMaximum
+        self.waveformID = waveformID
+        self.durationBeats = durationBeats
+        self.playheadBeat = playheadBeat
+        self.viewport = viewport
+        self.visualClock = visualClock
+        self.followsLiveViewport = followsLiveViewport
+    }
 
     var body: some View {
         GeometryReader { proxy in
-            ZStack(alignment: .topLeading) {
-                Canvas(
-                    opaque: false,
-                    colorMode: .linear,
-                    rendersAsynchronously: true
-                ) { context, size in
-                    drawBeatGrid(context: &context, size: size)
-                }
-                if let rasterImage {
-                    Image(decorative: rasterImage, scale: 1)
-                        .resizable()
-                        .interpolation(.high)
-                        .frame(
-                            width: fullTrackWidth(visibleWidth: proxy.size.width),
-                            height: proxy.size.height
-                        )
-                        .offset(x: waveformOffsetX(visibleWidth: proxy.size.width))
-                        .animation(.linear(duration: 0.25), value: viewport.startBeat)
-                }
-                Rectangle()
-                    .fill(Color.white)
-                    .frame(width: 2, height: proxy.size.height)
-                    .shadow(color: Color.black.opacity(0.5), radius: 1)
-                    .overlay(alignment: .top) {
-                        Rectangle()
-                            .fill(Color.white)
-                            .frame(width: 6, height: 7)
-                    }
-                    .offset(x: playheadX(visibleWidth: proxy.size.width) - 1)
-                    .animation(.linear(duration: 0.25), value: playheadBeat)
+            if let rasterImage {
+                RGBWaveformLayerView(
+                    rasterImage: rasterImage,
+                    motion: motionPlan,
+                    viewportWidth: proxy.size.width
+                )
             }
-            .clipped()
         }
-        .task(id: waveformID) {
+        .task(id: rasterKey) {
             let samples = points
+            let zoomScale = Double(max(1, durationBeats)) / viewport.visibleBeats
             let rasterWidth = max(
                 samples.count,
-                min(16_384, Int(max(1, durationBeats)) * 4)
+                min(65_536, Int(ceil(2_048 * zoomScale)))
             )
             rasterImage = await Task.detached(priority: .utility) {
-                Self.makeRasterImage(points: samples, width: rasterWidth)
+                Self.makeRasterImage(
+                    points: samples,
+                    width: rasterWidth,
+                    channelMaximum: channelMaximum,
+                    durationBeats: durationBeats,
+                    beatsPerBar: viewport.beatsPerBar
+                )
             }.value
         }
     }
 
-    private func drawBeatGrid(context: inout GraphicsContext, size: CGSize) {
-        let maximumLines = max(1, Int(size.width / 4))
-        let beatStride = max(1, Int(ceil(viewport.visibleBeats / Double(maximumLines))))
-        let firstBeat = Int(floor(viewport.startBeat / Double(beatStride))) * beatStride
-        let lastBeat = Int(ceil(viewport.endBeat))
-        var beatPath = Path()
-        var barPath = Path()
-        for beat in Swift.stride(from: firstBeat, through: lastBeat, by: beatStride) {
-            let x = viewport.x(forBeat: Double(beat), width: size.width)
-            guard x >= 0, x <= size.width else { continue }
-            let isBar = beat.isMultiple(of: Int(viewport.beatsPerBar))
-            if isBar {
-                barPath.move(to: CGPoint(x: x, y: 0))
-                barPath.addLine(to: CGPoint(x: x, y: size.height))
-            } else {
-                beatPath.move(to: CGPoint(x: x, y: 0))
-                beatPath.addLine(to: CGPoint(x: x, y: size.height))
-            }
-        }
-        if !beatPath.isEmpty {
-            context.stroke(
-                beatPath,
-                with: .color(Color.white.opacity(0.09)),
-                lineWidth: 0.6
-            )
-        }
-        if !barPath.isEmpty {
-            context.stroke(
-                barPath,
-                with: .color(Color.white.opacity(0.24)),
-                lineWidth: 1.1
-            )
-        }
+    private var motionPlan: LiveWaveformMotionPlan {
+        LiveWaveformMotionPlan(
+            waveformID: waveformID,
+            totalBeats: Double(max(1, durationBeats)),
+            viewportStartBeat: viewport.startBeat,
+            visibleBeats: viewport.visibleBeats,
+            followsLiveViewport: followsLiveViewport,
+            fallbackPlayheadBeat: playheadBeat,
+            visualClock: visualClock
+        )
     }
 
-    private func fullTrackWidth(visibleWidth: CGFloat) -> CGFloat {
-        visibleWidth * CGFloat(Double(max(1, durationBeats)) / viewport.visibleBeats)
-    }
-
-    private func waveformOffsetX(visibleWidth: CGFloat) -> CGFloat {
-        -visibleWidth * CGFloat(viewport.startBeat / viewport.visibleBeats)
-    }
-
-    private func playheadX(visibleWidth: CGFloat) -> CGFloat {
-        viewport.x(forBeat: playheadBeat, width: visibleWidth)
+    private var rasterKey: WaveformRasterKey {
+        WaveformRasterKey(
+            waveformID: waveformID,
+            durationBeats: durationBeats,
+            visibleBeats: viewport.visibleBeats,
+            pointCount: points.count,
+            channelMaximum: channelMaximum
+        )
     }
 
     nonisolated private static func makeRasterImage(
         points: [DeckWaveformPointSnapshot],
-        width: Int
+        width: Int,
+        channelMaximum: Double,
+        durationBeats: UInt64,
+        beatsPerBar: UInt8
     ) -> CGImage? {
         guard !points.isEmpty else { return nil }
         let width = max(1, width)
@@ -983,7 +977,8 @@ private struct RGBDeckWaveform: View {
             let first = points[lower]
             let second = points[upper]
             func mix(_ lhs: UInt8, _ rhs: UInt8) -> Double {
-                (Double(lhs) + (Double(rhs) - Double(lhs)) * sampleFraction) / 31
+                (Double(lhs) + (Double(rhs) - Double(lhs)) * sampleFraction)
+                    / max(1, channelMaximum)
             }
             let low = mix(first.low, second.low)
             let mid = mix(first.mid, second.mid)
@@ -1002,7 +997,339 @@ private struct RGBDeckWaveform: View {
             context.addLine(to: CGPoint(x: x, y: center + amplitude))
             context.strokePath()
         }
+        context.setLineWidth(1)
+        for beat in 0...Int(max(1, durationBeats)) {
+            let x = Double(beat) / Double(max(1, durationBeats)) * Double(width)
+            let isBar = beat.isMultiple(of: Int(max(1, beatsPerBar)))
+            context.setStrokeColor(
+                red: 1,
+                green: 1,
+                blue: 1,
+                alpha: isBar ? 0.24 : 0.09
+            )
+            context.move(to: CGPoint(x: x, y: 0))
+            context.addLine(to: CGPoint(x: x, y: Double(height)))
+            context.strokePath()
+        }
         return context.makeImage()
     }
 
+}
+
+struct LiveWaveformMotionPlan: Equatable {
+    let waveformID: UInt64
+    let totalBeats: Double
+    let viewportStartBeat: Double
+    let visibleBeats: Double
+    let followsLiveViewport: Bool
+    let fallbackPlayheadBeat: Double
+    let visualClock: LocalPlaybackVisualClockSnapshot?
+
+    var animationIdentity: AnimationIdentity {
+        let hasAuthoritativeClock = visualClock?.trackLoadID == waveformID
+            && (visualClock?.durationMillis ?? 0) > 0
+        return AnimationIdentity(
+            waveformID: waveformID,
+            viewportStartBeat: viewportStartBeat,
+            visibleBeats: visibleBeats,
+            followsLiveViewport: followsLiveViewport,
+            positionMillis: visualClock?.positionMillis,
+            durationMillis: visualClock?.durationMillis,
+            playing: visualClock?.playing,
+            anchoredAtReferenceTime: visualClock?.anchoredAtReferenceTime,
+            fallbackPlayheadBeat: hasAuthoritativeClock ? nil : fallbackPlayheadBeat
+        )
+    }
+
+    func playheadBeat(at date: Date) -> Double {
+        guard let visualClock,
+              visualClock.trackLoadID == waveformID,
+              visualClock.durationMillis > 0 else {
+            return min(totalBeats, max(0, fallbackPlayheadBeat))
+        }
+        let progress = visualClock.positionMillis(at: date)
+            / Double(visualClock.durationMillis)
+        return min(totalBeats, max(0, progress * totalBeats))
+    }
+
+    func startBeat(for playheadBeat: Double) -> Double {
+        guard followsLiveViewport else { return viewportStartBeat }
+        let maximumStart = max(0, totalBeats - visibleBeats)
+        return min(
+            maximumStart,
+            max(0, playheadBeat - visibleBeats * LiveDeckViewportPolicy.playheadFraction)
+        )
+    }
+
+    func secondsPerBeat() -> Double? {
+        guard let visualClock,
+              visualClock.trackLoadID == waveformID,
+              visualClock.durationMillis > 0,
+              visualClock.playing else {
+            return nil
+        }
+        return Double(visualClock.durationMillis) / 1_000 / totalBeats
+    }
+
+    struct AnimationIdentity: Equatable {
+        let waveformID: UInt64
+        let viewportStartBeat: Double
+        let visibleBeats: Double
+        let followsLiveViewport: Bool
+        let positionMillis: UInt64?
+        let durationMillis: UInt64?
+        let playing: Bool?
+        let anchoredAtReferenceTime: TimeInterval?
+        let fallbackPlayheadBeat: Double?
+    }
+}
+
+private struct WaveformRasterKey: Hashable {
+    let waveformID: UInt64
+    let durationBeats: UInt64
+    let visibleBeats: Double
+    let pointCount: Int
+    let channelMaximum: Double
+}
+
+private struct RGBWaveformLayerView: NSViewRepresentable {
+    let rasterImage: CGImage
+    let motion: LiveWaveformMotionPlan
+    let viewportWidth: CGFloat
+
+    func makeNSView(context: Context) -> RGBWaveformLayerHostView {
+        RGBWaveformLayerHostView()
+    }
+
+    func updateNSView(_ nsView: RGBWaveformLayerHostView, context: Context) {
+        nsView.update(
+            rasterImage: rasterImage,
+            motion: motion,
+            viewportWidth: viewportWidth
+        )
+    }
+}
+
+private final class RGBWaveformLayerHostView: NSView {
+    private let waveformLayer = CALayer()
+    private let playheadLayer = CALayer()
+    private let playheadCapLayer = CALayer()
+    private var rasterImage: CGImage?
+    private var motion: LiveWaveformMotionPlan?
+    private var viewportWidth: CGFloat = 0
+    private var animationIdentity: LiveWaveformMotionPlan.AnimationIdentity?
+    private var appliedBoundsSize = CGSize.zero
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        wantsLayer = true
+        layer?.masksToBounds = true
+        layer?.backgroundColor = NSColor.black.cgColor
+        waveformLayer.anchorPoint = .zero
+        waveformLayer.contentsGravity = .resize
+        waveformLayer.magnificationFilter = .linear
+        waveformLayer.minificationFilter = .linear
+        playheadLayer.anchorPoint = .zero
+        playheadLayer.backgroundColor = NSColor.white.cgColor
+        playheadLayer.shadowColor = NSColor.black.cgColor
+        playheadLayer.shadowOpacity = 0.5
+        playheadLayer.shadowRadius = 1
+        playheadCapLayer.anchorPoint = .zero
+        playheadCapLayer.backgroundColor = NSColor.white.cgColor
+        layer?.addSublayer(waveformLayer)
+        layer?.addSublayer(playheadLayer)
+        layer?.addSublayer(playheadCapLayer)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    override func layout() {
+        super.layout()
+        guard abs(appliedBoundsSize.width - bounds.width) > 0.5
+                || abs(appliedBoundsSize.height - bounds.height) > 0.5 else {
+            return
+        }
+        applyCurrentState(restartAnimation: true)
+    }
+
+    func update(
+        rasterImage: CGImage,
+        motion: LiveWaveformMotionPlan,
+        viewportWidth: CGFloat
+    ) {
+        let imageChanged = self.rasterImage !== rasterImage
+        let motionChanged = animationIdentity != motion.animationIdentity
+        let widthChanged = abs(self.viewportWidth - viewportWidth) > 0.5
+        self.rasterImage = rasterImage
+        self.motion = motion
+        self.viewportWidth = viewportWidth
+        if imageChanged {
+            waveformLayer.contents = rasterImage
+        }
+        if imageChanged || motionChanged || widthChanged {
+            animationIdentity = motion.animationIdentity
+            applyCurrentState(restartAnimation: true)
+        }
+    }
+
+    private func applyCurrentState(restartAnimation: Bool) {
+        guard let motion, bounds.width > 0, bounds.height > 0 else { return }
+        appliedBoundsSize = bounds.size
+        if restartAnimation {
+            waveformLayer.removeAllAnimations()
+            playheadLayer.removeAllAnimations()
+            playheadCapLayer.removeAllAnimations()
+        }
+
+        let width = bounds.width
+        let height = bounds.height
+        let fullTrackWidth = width * CGFloat(motion.totalBeats / motion.visibleBeats)
+        let now = Date()
+        let currentBeat = motion.playheadBeat(at: now)
+        let currentStartBeat = motion.startBeat(for: currentBeat)
+        let waveformX = -width * CGFloat(currentStartBeat / motion.visibleBeats)
+        let playheadX = width * CGFloat((currentBeat - currentStartBeat) / motion.visibleBeats)
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        waveformLayer.bounds = CGRect(x: 0, y: 0, width: fullTrackWidth, height: height)
+        waveformLayer.position = CGPoint(x: waveformX, y: 0)
+        playheadLayer.bounds = CGRect(x: 0, y: 0, width: 2, height: height)
+        playheadLayer.position = CGPoint(x: playheadX - 1, y: 0)
+        playheadCapLayer.bounds = CGRect(x: 0, y: 0, width: 6, height: 7)
+        playheadCapLayer.position = CGPoint(x: playheadX - 3, y: 0)
+        CATransaction.commit()
+
+        guard restartAnimation,
+              let secondsPerBeat = motion.secondsPerBeat(),
+              currentBeat < motion.totalBeats else {
+            return
+        }
+        let remainingDuration = max(0.01, (motion.totalBeats - currentBeat) * secondsPerBeat)
+        animateWaveform(
+            motion: motion,
+            currentBeat: currentBeat,
+            width: width,
+            duration: remainingDuration
+        )
+        animatePlayhead(
+            motion: motion,
+            currentBeat: currentBeat,
+            width: width,
+            duration: remainingDuration
+        )
+    }
+
+    private func animateWaveform(
+        motion: LiveWaveformMotionPlan,
+        currentBeat: Double,
+        width: CGFloat,
+        duration: TimeInterval
+    ) {
+        let keyBeats = animationKeyBeats(motion: motion, currentBeat: currentBeat)
+        let values = keyBeats.map { beat in
+            NSNumber(value: Double(-width * CGFloat(
+                motion.startBeat(for: beat) / motion.visibleBeats
+            )))
+        }
+        let animation = keyframeAnimation(
+            keyPath: "position.x",
+            values: values,
+            keyBeats: keyBeats,
+            currentBeat: currentBeat,
+            totalBeats: motion.totalBeats,
+            duration: duration
+        )
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        waveformLayer.position.x = values.last?.doubleValue ?? waveformLayer.position.x
+        CATransaction.commit()
+        waveformLayer.add(animation, forKey: "lumi.waveform.motion")
+    }
+
+    private func animatePlayhead(
+        motion: LiveWaveformMotionPlan,
+        currentBeat: Double,
+        width: CGFloat,
+        duration: TimeInterval
+    ) {
+        let keyBeats = animationKeyBeats(motion: motion, currentBeat: currentBeat)
+        let centerValues = keyBeats.map { beat in
+            let startBeat = motion.startBeat(for: beat)
+            return width * CGFloat((beat - startBeat) / motion.visibleBeats)
+        }
+        let lineValues = centerValues.map { NSNumber(value: Double($0 - 1)) }
+        let capValues = centerValues.map { NSNumber(value: Double($0 - 3)) }
+        let lineAnimation = keyframeAnimation(
+            keyPath: "position.x",
+            values: lineValues,
+            keyBeats: keyBeats,
+            currentBeat: currentBeat,
+            totalBeats: motion.totalBeats,
+            duration: duration
+        )
+        let capAnimation = keyframeAnimation(
+            keyPath: "position.x",
+            values: capValues,
+            keyBeats: keyBeats,
+            currentBeat: currentBeat,
+            totalBeats: motion.totalBeats,
+            duration: duration
+        )
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        playheadLayer.position.x = lineValues.last?.doubleValue ?? playheadLayer.position.x
+        playheadCapLayer.position.x = capValues.last?.doubleValue ?? playheadCapLayer.position.x
+        CATransaction.commit()
+        playheadLayer.add(lineAnimation, forKey: "lumi.playhead.motion")
+        playheadCapLayer.add(capAnimation, forKey: "lumi.playhead.cap.motion")
+    }
+
+    private func animationKeyBeats(
+        motion: LiveWaveformMotionPlan,
+        currentBeat: Double
+    ) -> [Double] {
+        guard motion.followsLiveViewport else {
+            return [currentBeat, motion.totalBeats]
+        }
+        let leadingBeat = motion.visibleBeats * LiveDeckViewportPolicy.playheadFraction
+        let trailingBeat = max(
+            leadingBeat,
+            motion.totalBeats - motion.visibleBeats
+                * (1 - LiveDeckViewportPolicy.playheadFraction)
+        )
+        return [currentBeat, leadingBeat, trailingBeat, motion.totalBeats]
+            .filter { $0 >= currentBeat && $0 <= motion.totalBeats }
+            .reduce(into: [Double]()) { beats, beat in
+                if beats.last.map({ abs($0 - beat) > 0.000_1 }) ?? true {
+                    beats.append(beat)
+                }
+            }
+    }
+
+    private func keyframeAnimation(
+        keyPath: String,
+        values: [NSNumber],
+        keyBeats: [Double],
+        currentBeat: Double,
+        totalBeats: Double,
+        duration: TimeInterval
+    ) -> CAKeyframeAnimation {
+        let remainingBeats = max(0.000_1, totalBeats - currentBeat)
+        let animation = CAKeyframeAnimation(keyPath: keyPath)
+        animation.values = values
+        animation.keyTimes = keyBeats.map {
+            NSNumber(value: ($0 - currentBeat) / remainingBeats)
+        }
+        animation.timingFunctions = Array(
+            repeating: CAMediaTimingFunction(name: .linear),
+            count: max(0, values.count - 1)
+        )
+        animation.duration = duration
+        animation.isRemovedOnCompletion = true
+        return animation
+    }
 }

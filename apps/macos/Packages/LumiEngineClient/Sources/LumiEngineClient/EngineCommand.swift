@@ -334,6 +334,7 @@ public enum EngineCommand: Equatable, Sendable {
         expectedTimelineRevision: UInt64,
         expectedStateRevision: UInt64
     )
+    case getLibraryTrackWaveform(trackID: UInt64)
     case updateLocalPlaybackTransport(
         deckID: UInt64,
         trackLoadID: UInt64,
@@ -513,6 +514,11 @@ public enum EngineCommand: Equatable, Sendable {
                     "expectedTimelineRevision": .number(Double(expectedTimelineRevision))
                 ]
             )
+        case let .getLibraryTrackWaveform(trackID):
+            return [
+                "kind": .string("getLibraryTrackWaveform"),
+                "trackId": .number(Double(trackID))
+            ]
         case let .updateLocalPlaybackTransport(deckID, trackLoadID, positionMillis, playing):
             return [
                 "kind": .string("updateLocalPlaybackTransport"),

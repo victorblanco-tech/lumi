@@ -369,6 +369,16 @@ public struct DeckWaveformPreviewSnapshot: Equatable, Sendable {
     }
 }
 
+public struct LibraryWaveformDetailSnapshot: Equatable, Sendable {
+    public let trackID: UInt64
+    public let preview: DeckWaveformPreviewSnapshot
+
+    public init(trackID: UInt64, preview: DeckWaveformPreviewSnapshot) {
+        self.trackID = trackID
+        self.preview = preview
+    }
+}
+
 public struct DeckWaveformPointSnapshot: Equatable, Sendable {
     public let low: UInt8
     public let mid: UInt8
