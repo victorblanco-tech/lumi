@@ -19,6 +19,11 @@ pub enum DeckObservation {
         track_load_id: TrackLoadId,
         beat: u32,
     },
+    PlaybackPositionSeeked {
+        deck_id: DeckId,
+        track_load_id: TrackLoadId,
+        beat: u32,
+    },
     PlaybackTempoChanged {
         deck_id: DeckId,
         track_load_id: TrackLoadId,

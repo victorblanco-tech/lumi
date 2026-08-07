@@ -91,6 +91,11 @@ pub fn canonical_transcript(events: &[DomainEvent]) -> Result<Vec<u8>, Simulator
                 deck_id,
                 track_load_id,
                 beat,
+            }
+            | DeckObservation::PlaybackPositionSeeked {
+                deck_id,
+                track_load_id,
+                beat,
             } => {
                 recorded.deck_id = Some(deck_id.value());
                 recorded.track_load_id = Some(track_load_id.value());
@@ -147,6 +152,7 @@ const fn observation_kind(observation: &DeckObservation) -> &'static str {
         DeckObservation::SourceStatusChanged { .. } => "sourceStatusChanged",
         DeckObservation::TrackLoaded { .. } => "trackLoaded",
         DeckObservation::PlaybackPosition { .. } => "playbackPosition",
+        DeckObservation::PlaybackPositionSeeked { .. } => "playbackPositionSeeked",
         DeckObservation::PlaybackTempoChanged { .. } => "playbackTempoChanged",
         DeckObservation::PlaybackStateChanged { .. } => "playbackStateChanged",
         DeckObservation::TrackUnloaded { .. } => "trackUnloaded",

@@ -171,14 +171,20 @@ impl LocalPlaybackDeckSourceProvider {
             deck.playing = normalized_playing;
         }
         if previous_beat != normalized_beat {
-            self.emit(
-                at,
+            let observation = if normalized_beat < previous_beat {
+                DeckObservation::PlaybackPositionSeeked {
+                    deck_id,
+                    track_load_id,
+                    beat: normalized_beat,
+                }
+            } else {
                 DeckObservation::PlaybackPosition {
                     deck_id,
                     track_load_id,
                     beat: normalized_beat,
-                },
-            )?;
+                }
+            };
+            self.emit(at, observation)?;
         }
         if previous_phrase != phrase_index {
             self.emit(
@@ -343,6 +349,20 @@ mod tests {
             .drain_events()
             .unwrap_or_else(|error| panic!("events must drain: {error}"));
         assert!(events.len() >= 7);
+
+        provider
+            .update_transport(DeckId::new(1), load, 8, true, MonotonicTime::new(3))
+            .unwrap_or_else(|error| panic!("backward seek must update: {error}"));
+        let seek_events = provider
+            .drain_events()
+            .unwrap_or_else(|error| panic!("seek events must drain: {error}"));
+        assert!(seek_events.iter().any(|event| matches!(
+            event,
+            DomainEvent::Observation(ObservationEnvelope {
+                observation: DeckObservation::PlaybackPositionSeeked { beat: 8, .. },
+                ..
+            })
+        )));
     }
 
     fn track() -> TrackMetadata {

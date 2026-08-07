@@ -33,6 +33,25 @@ fn migrates_an_empty_database() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
+fn missing_timeline_query_returns_only_tracks_that_still_need_mapping() -> Result<(), Box<dyn Error>>
+{
+    let baseline = DemoLibrarySourceProvider::curated().load_baseline()?;
+    let mut repository = SqliteLibraryRepository::in_memory()?;
+    repository.import_baseline(&baseline)?;
+
+    let missing = repository.track_ids_missing_timelines(200)?;
+    assert!(!missing.is_empty());
+    let mapped_track_id = missing[0];
+    let stored = repository.track(mapped_track_id)?.ok_or("stored track")?;
+    repository.append_timeline_revision(&source_timeline(mapped_track_id, &stored)?, None)?;
+
+    let remaining = repository.track_ids_missing_timelines(200)?;
+    assert!(!remaining.contains(&mapped_track_id));
+    assert_eq!(remaining.len() + 1, missing.len());
+    Ok(())
+}
+
+#[test]
 fn migrates_version_one_timeline_history_without_losing_rows() -> Result<(), Box<dyn Error>> {
     let path = temporary_database_path()?;
     {

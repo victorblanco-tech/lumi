@@ -1070,35 +1070,13 @@ impl LibraryWorker {
     }
 
     fn ensure_imported_timelines(&mut self) -> Result<(), LibraryWorkerError> {
-        let mut offset = 0_u32;
         loop {
-            let page = self
-                .repository
-                .page_tracks(TrackPageRequest::try_new(offset, 200)?)?;
-            if page.tracks().is_empty() {
+            let track_ids = self.repository.track_ids_missing_timelines(200)?;
+            if track_ids.is_empty() {
                 break;
             }
-            let track_ids = page
-                .tracks()
-                .iter()
-                .map(TrackSummary::id)
-                .collect::<Vec<_>>();
             for track_id in track_ids {
-                let has_phrases = self
-                    .repository
-                    .track(track_id)?
-                    .is_some_and(|track| !track.raw_phrases().is_empty());
-                if has_phrases {
-                    self.ensure_timeline(track_id)?;
-                }
-            }
-            let consumed = u32::try_from(page.tracks().len())
-                .map_err(|_| LibraryWorkerError::RekordboxImportOverflow)?;
-            offset = offset
-                .checked_add(consumed)
-                .ok_or(LibraryWorkerError::RekordboxImportOverflow)?;
-            if u64::from(offset) >= page.total() {
-                break;
+                self.ensure_timeline(track_id)?;
             }
         }
         Ok(())

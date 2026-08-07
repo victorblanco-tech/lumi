@@ -2255,6 +2255,7 @@ const fn decision_reason_name(reason: DecisionReason) -> &'static str {
         DecisionReason::SourceStatusAccepted => "sourceStatusAccepted",
         DecisionReason::TrackLoadAccepted => "trackLoadAccepted",
         DecisionReason::PositionAdvanced => "positionAdvanced",
+        DecisionReason::PositionSeeked => "positionSeeked",
         DecisionReason::PlaybackTempoChanged => "playbackTempoChanged",
         DecisionReason::PlaybackStateChanged => "playbackStateChanged",
         DecisionReason::PhraseChanged => "phraseChanged",

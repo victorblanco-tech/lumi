@@ -81,6 +81,21 @@ fn stale_observations_and_old_track_loads_cannot_roll_deck_state_back() {
 }
 
 #[test]
+fn explicit_seek_can_move_the_active_track_backward() {
+    let mut runtime = started_runtime(16);
+    submit_and_process(&mut runtime, track_loaded(1, 10, 100, 1));
+    submit_and_process(&mut runtime, position(2, 10, 96, 2));
+
+    let result = submit_and_process(&mut runtime, seek_position(3, 10, 24, 3));
+
+    assert_eq!(result.decision, DecisionReason::PositionSeeked);
+    assert_eq!(
+        runtime.state().deck(DeckId::new(1)).map(|deck| deck.beat()),
+        Some(24)
+    );
+}
+
+#[test]
 fn every_non_increasing_source_sequence_is_ignored() {
     for stale_sequence in 0..=64 {
         let mut runtime = started_runtime(8);
@@ -290,6 +305,19 @@ fn position(sequence: u64, load: u64, beat: u32, at: u64) -> DomainEvent {
         sequence: SourceSequence::new(sequence),
         observed_at: MonotonicTime::new(at),
         observation: DeckObservation::PlaybackPosition {
+            deck_id: DeckId::new(1),
+            track_load_id: TrackLoadId::new(load),
+            beat,
+        },
+    })
+}
+
+fn seek_position(sequence: u64, load: u64, beat: u32, at: u64) -> DomainEvent {
+    DomainEvent::Observation(ObservationEnvelope {
+        source_id: SourceId::new(1),
+        sequence: SourceSequence::new(sequence),
+        observed_at: MonotonicTime::new(at),
+        observation: DeckObservation::PlaybackPositionSeeked {
             deck_id: DeckId::new(1),
             track_load_id: TrackLoadId::new(load),
             beat,

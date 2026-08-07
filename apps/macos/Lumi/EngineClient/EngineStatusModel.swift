@@ -1110,8 +1110,14 @@ final class EngineStatusModel: ObservableObject {
             controller.stop()
         case let .seek(_, progress):
             controller.seek(progress: progress)
+            discardPendingLocalTransport(for: deckID)
         }
         publishLocalTransport(controller.snapshot)
+    }
+
+    private func discardPendingLocalTransport(for deckID: UInt64) {
+        pendingLocalTransports.removeValue(forKey: deckID)
+        pendingLocalTransportDecks.removeAll(where: { $0 == deckID })
     }
 
     private func synchronizeLocalAudio(with snapshot: EngineSnapshot) {
@@ -1204,6 +1210,13 @@ final class EngineStatusModel: ObservableObject {
                 endpointDescription: endpointDescription,
                 protocolVersion: protocolVersion
             )
+            guard localAudioControllers[transport.deckID]?.snapshot.discontinuityRevision
+                    == transport.discontinuityRevision else {
+                if let current = localAudioControllers[transport.deckID]?.snapshot {
+                    publishLocalTransport(current)
+                }
+                return
+            }
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
         } catch {
@@ -1307,6 +1320,7 @@ private struct LocalDeckTransportSnapshot: Equatable, Sendable {
     let trackLoadID: UInt64
     let positionMillis: UInt64
     let playing: Bool
+    let discontinuityRevision: UInt64
 }
 
 @MainActor
@@ -1341,16 +1355,19 @@ private final class LocalDeckAudioController {
     private var player: AVAudioPlayerNode?
     private var source: AudioSource?
     private var updateTask: Task<Void, Never>?
-    private var scheduledStartFrame: AVAudioFramePosition = 0
     private var scheduledFrameCount: AVAudioFrameCount = 0
+    private var scheduledStartMillis: UInt64 = 0
+    private var playbackStartedAt: ContinuousClock.Instant?
     private var generation: UInt64 = 0
+    private var discontinuityRevision: UInt64 = 0
 
     var snapshot: LocalDeckTransportSnapshot {
         LocalDeckTransportSnapshot(
             deckID: deckID,
             trackLoadID: trackLoadID,
             positionMillis: positionMillis,
-            playing: isPlaying
+            playing: isPlaying,
+            discontinuityRevision: discontinuityRevision
         )
     }
 
@@ -1387,13 +1404,17 @@ private final class LocalDeckAudioController {
             let remainingFrames = source.frameLength - startFrame
             guard remainingFrames > 0,
                   remainingFrames <= AVAudioFramePosition(UInt32.max) else { return }
-            scheduledStartFrame = startFrame
             scheduledFrameCount = AVAudioFrameCount(remainingFrames)
+            scheduledStartMillis = UInt64(
+                (Double(startFrame) / sampleRate * 1_000).rounded()
+            )
+            positionMillis = scheduledStartMillis
             let completion: @Sendable () -> Void = { [weak self] in
                 Task { @MainActor [weak self] in
                     guard let self, self.generation == activeGeneration else { return }
                     self.positionMillis = self.durationMillis
                     self.isPlaying = false
+                    self.playbackStartedAt = nil
                     self.updateTask?.cancel()
                     self.updateTask = nil
                     self.onTransport?()
@@ -1417,6 +1438,7 @@ private final class LocalDeckAudioController {
                 player.scheduleBuffer(slice, completionHandler: completion)
             }
             player.play()
+            playbackStartedAt = ContinuousClock.now
             isPlaying = true
             startUpdates()
         } catch {
@@ -1429,27 +1451,32 @@ private final class LocalDeckAudioController {
         generation &+= 1
         player?.pause()
         isPlaying = false
+        playbackStartedAt = nil
         updateTask?.cancel()
         updateTask = nil
     }
 
     func stop() {
+        discontinuityRevision &+= 1
         generation &+= 1
         player?.stop()
         positionMillis = 0
         isPlaying = false
+        playbackStartedAt = nil
         updateTask?.cancel()
         updateTask = nil
     }
 
     func seek(progress: Double) {
         let shouldResume = isPlaying
+        discontinuityRevision &+= 1
         generation &+= 1
         player?.stop()
         positionMillis = UInt64(
             (min(max(0, progress), 1) * Double(durationMillis)).rounded()
         )
         isPlaying = false
+        playbackStartedAt = nil
         updateTask?.cancel()
         updateTask = nil
         if shouldResume { play() }
@@ -1478,10 +1505,17 @@ private final class LocalDeckAudioController {
 
     private func startUpdates() {
         updateTask?.cancel()
+        let activeGeneration = generation
         updateTask = Task { [weak self] in
             while !Task.isCancelled {
-                try? await Task.sleep(for: .milliseconds(100))
-                guard let self, self.isPlaying else { return }
+                do {
+                    try await Task.sleep(for: .milliseconds(100))
+                } catch {
+                    return
+                }
+                guard let self,
+                      self.isPlaying,
+                      self.generation == activeGeneration else { return }
                 self.refreshPosition()
                 self.onTransport?()
             }
@@ -1489,17 +1523,16 @@ private final class LocalDeckAudioController {
     }
 
     private func refreshPosition() {
-        guard let source, let player,
-              let renderTime = player.lastRenderTime,
-              let playerTime = player.playerTime(forNodeTime: renderTime) else { return }
-        let elapsed = max(0, playerTime.sampleTime)
-        let frame = scheduledStartFrame + min(
-            elapsed,
-            AVAudioFramePosition(scheduledFrameCount)
+        guard let playbackStartedAt else { return }
+        let elapsed = playbackStartedAt.duration(to: ContinuousClock.now).components
+        let elapsedMillis = max(
+            0,
+            Double(elapsed.seconds) * 1_000
+                + Double(elapsed.attoseconds) / 1_000_000_000_000_000
         )
         positionMillis = min(
             durationMillis,
-            UInt64(Double(frame) / source.format.sampleRate * 1_000)
+            scheduledStartMillis + UInt64(elapsedMillis.rounded())
         )
     }
 

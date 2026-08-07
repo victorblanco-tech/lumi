@@ -40,6 +40,32 @@ impl SqliteLibraryRepository {
         Self::from_connection(Connection::open_in_memory()?)
     }
 
+    /// Returns imported tracks that have source phrases but no Lumi timeline.
+    /// The query deliberately avoids materializing waveform blobs.
+    pub fn track_ids_missing_timelines(
+        &self,
+        limit: u16,
+    ) -> Result<Vec<TrackId>, SqliteLibraryError> {
+        let mut statement = self.connection.prepare(
+            "SELECT t.id
+               FROM tracks t
+              WHERE EXISTS (
+                        SELECT 1 FROM raw_phrases r WHERE r.track_id = t.id
+                    )
+                AND NOT EXISTS (
+                        SELECT 1 FROM timeline_heads h WHERE h.track_id = t.id
+                    )
+              ORDER BY t.id
+              LIMIT ?1",
+        )?;
+        let rows = statement.query_map([i64::from(limit)], |row| row.get::<_, i64>(0))?;
+        let mut track_ids = Vec::new();
+        for row in rows {
+            track_ids.push(TrackId::new(from_positive_i64(row?, "track id")?));
+        }
+        Ok(track_ids)
+    }
+
     fn from_connection(connection: Connection) -> Result<Self, SqliteLibraryError> {
         connection.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
         let mut repository = Self { connection };

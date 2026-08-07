@@ -17,6 +17,9 @@ struct FoundationView: View {
     @Bindable var preferences: LumiPreferences
     @State private var destination: AppDestination = .live
     @State private var librarySection: LibraryHubSection = .tracks
+    @State private var navigationHovered = false
+    @AppStorage("nl.blancoservices.lumi.navigation.auto-hide")
+    private var navigationAutoHides = false
 
     private var productVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "LumiProductVersion") as? String
@@ -25,7 +28,7 @@ struct FoundationView: View {
 
     var body: some View {
         HStack(spacing: 0) {
-            appNavigation
+            navigationShell
             Divider()
             Group {
                 switch destination {
@@ -168,15 +171,44 @@ struct FoundationView: View {
         .accessibilityIdentifier("lumi.app.shell")
     }
 
+    private var navigationShell: some View {
+        Group {
+            if navigationAutoHides && !navigationHovered {
+                collapsedNavigation
+            } else {
+                appNavigation
+            }
+        }
+        .onHover { navigationHovered = $0 }
+        .animation(.easeInOut(duration: 0.16), value: navigationHovered)
+        .animation(.easeInOut(duration: 0.16), value: navigationAutoHides)
+    }
+
     private var appNavigation: some View {
         VStack(alignment: .leading, spacing: LumiSpacing.xLarge) {
-            VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-                Text(verbatim: "Lumi")
-                    .font(LumiTypography.screenTitle)
-                    .foregroundStyle(LumiColor.textPrimary)
-                Text(productVersion)
-                    .font(LumiTypography.technical)
-                    .foregroundStyle(LumiColor.textSecondary)
+            HStack(alignment: .top, spacing: LumiSpacing.small) {
+                VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+                    Text(verbatim: "Lumi")
+                        .font(LumiTypography.screenTitle)
+                        .foregroundStyle(LumiColor.textPrimary)
+                    Text(productVersion)
+                        .font(LumiTypography.technical)
+                        .foregroundStyle(LumiColor.textSecondary)
+                }
+                Spacer()
+                Button {
+                    navigationAutoHides.toggle()
+                } label: {
+                    Image(systemName: "sidebar.left")
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(navigationAutoHides ? LumiColor.accent : LumiColor.textSecondary)
+                .help(navigationAutoHides ? "Keep navigation visible" : "Auto-hide navigation")
+                .accessibilityLabel(
+                    navigationAutoHides ? "Keep navigation visible" : "Auto-hide navigation"
+                )
+                .accessibilityIdentifier("lumi.navigation.autoHide")
             }
             VStack(spacing: LumiSpacing.xSmall) {
                 destinationButton(.live, title: "Live", systemImage: "waveform")
@@ -191,6 +223,57 @@ struct FoundationView: View {
         .frame(width: 196)
         .background(LumiColor.surface)
         .accessibilityIdentifier("lumi.navigation")
+    }
+
+    private var collapsedNavigation: some View {
+        VStack(spacing: LumiSpacing.medium) {
+            Button {
+                navigationAutoHides = false
+            } label: {
+                Image(systemName: "sidebar.right")
+                    .frame(width: 32, height: 32)
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(LumiColor.accent)
+            .help("Show navigation")
+            compactDestinationButton(.live, systemImage: "waveform", title: "Live")
+            compactDestinationButton(.library, systemImage: "music.note.list", title: "Library")
+            Image(systemName: "list.bullet.rectangle")
+                .foregroundStyle(LumiColor.textSecondary)
+                .frame(width: 32, height: 32)
+                .accessibilityLabel("Plans, coming soon")
+            compactDestinationButton(
+                .integrations,
+                systemImage: "cable.connector",
+                title: "Integrations"
+            )
+            Spacer()
+            compactDestinationButton(.settings, systemImage: "gearshape", title: "Settings")
+        }
+        .padding(.vertical, LumiSpacing.large)
+        .frame(width: 52)
+        .background(LumiColor.surface)
+        .accessibilityIdentifier("lumi.navigation.collapsed")
+    }
+
+    private func compactDestinationButton(
+        _ value: AppDestination,
+        systemImage: String,
+        title: String
+    ) -> some View {
+        Button {
+            destination = value
+        } label: {
+            Image(systemName: systemImage)
+                .frame(width: 32, height: 32)
+                .foregroundStyle(destination == value ? LumiColor.accent : LumiColor.textPrimary)
+                .background(destination == value ? LumiColor.accent.opacity(0.14) : Color.clear)
+                .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
+        }
+        .buttonStyle(.plain)
+        .help(title)
+        .accessibilityLabel(title)
+        .accessibilityIdentifier("lumi.navigation.compact.\(value.rawValue)")
     }
 
     private func destinationButton(

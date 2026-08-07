@@ -429,7 +429,10 @@ public struct LiveWorkspaceView: View {
                 }
                 .frame(maxHeight: .infinity, alignment: .top)
             } else {
-                placeholder(copy.waitingDecks, systemImage: "waveform.badge.magnifyingglass")
+                placeholder(
+                    state.condition == .loading ? state.engine.detail : copy.waitingDecks,
+                    systemImage: "waveform.badge.magnifyingglass"
+                )
             }
         }
     }
@@ -461,7 +464,27 @@ public struct LiveWorkspaceView: View {
                 VStack(alignment: .leading, spacing: LumiSpacing.small) {
                     HStack(spacing: LumiSpacing.small) {
                         VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-                            Text(verbatim: "THEME FROM \(phraseTitle(cue).uppercased())")
+                            Text(verbatim: "PHRASE")
+                                .font(LumiTypography.technical)
+                                .foregroundStyle(Color.white.opacity(0.46))
+                            PlanSelectionControl(
+                                value: phraseTitle(cue),
+                                selectedID: cue.phraseIndex,
+                                choices: plan.cues.map {
+                                    PlanSelectionChoice(id: $0.phraseIndex, name: phraseTitle($0))
+                                },
+                                isEnabled: plan.cues.count > 1,
+                                onSelect: { phraseIndex in
+                                    if isLive {
+                                        selectedLivePhrase = phraseIndex
+                                    } else {
+                                        selectedPhrase = phraseIndex
+                                    }
+                                }
+                            )
+                        }
+                        VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+                            Text(verbatim: "THEME")
                                 .font(LumiTypography.technical)
                                 .foregroundStyle(Color.white.opacity(0.46))
                             PlanSelectionControl(
@@ -487,10 +510,17 @@ public struct LiveWorkspaceView: View {
                             )
                         }
                     }
-                    HStack(spacing: LumiSpacing.small) {
-                        Text(verbatim: "Selected: \(phraseTitle(cue)) · \(timeRange(cue, bpmMilli: deck.bpmMilli)) · applies on the phrase boundary")
-                            .font(LumiTypography.technical)
-                            .foregroundStyle(Color.white.opacity(0.54))
+                    HStack(alignment: .center, spacing: LumiSpacing.small) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(verbatim: "Selected: \(phraseTitle(cue)) · \(timeRange(cue, bpmMilli: deck.bpmMilli)) · applies on the phrase boundary")
+                                .font(LumiTypography.technical)
+                                .foregroundStyle(Color.white.opacity(0.54))
+                            Text(verbatim: cue.locked
+                                ? "Selection locked — replanning keeps this Theme and AutoLoop."
+                                : "Unlocked — Lumi may replace this Theme and AutoLoop when replanning.")
+                                .font(LumiTypography.technical)
+                                .foregroundStyle(Color.white.opacity(0.42))
+                        }
                         Spacer()
                         Button {
                             onPlanMutation(
@@ -502,8 +532,8 @@ public struct LiveWorkspaceView: View {
                             )
                         } label: {
                             Label(
-                                cue.locked ? "Unpin choice" : "Pin choice",
-                                systemImage: cue.locked ? "pin.slash" : "pin"
+                                cue.locked ? "Unlock selection" : "Lock selection",
+                                systemImage: cue.locked ? "lock.open" : "lock"
                             )
                         }
                         .buttonStyle(.bordered)
