@@ -41,6 +41,8 @@ struct FoundationView: View {
                         allowsScrolling: false,
                         showsNavigation: false,
                         localPlaybackVisualClocks: engineStatus.localPlaybackVisualClocks,
+                        localPlaybackFeedback: engineStatus.localPlaybackFeedback,
+                        localPlaybackFeedbackIsError: engineStatus.localPlaybackFeedbackIsError,
                         onPlanMutation: { request in
                             Task { await engineStatus.mutatePlan(request) }
                         },
@@ -54,8 +56,6 @@ struct FoundationView: View {
                             LocalPlaybackLibraryBrowserView(
                                 state: engineStatus.libraryState,
                                 keyNotation: $preferences.keyNotation,
-                                feedback: engineStatus.localPlaybackFeedback,
-                                feedbackIsError: engineStatus.localPlaybackFeedbackIsError,
                                 onQuery: { request in
                                     Task { await engineStatus.queryLibrary(request) }
                                 },
@@ -63,6 +63,7 @@ struct FoundationView: View {
                                     Task { await engineStatus.loadLibraryTrackOnLocalDeck(request) }
                                 }
                             )
+                            .equatable()
                         )
                     )
                 case .library:

@@ -13,6 +13,8 @@ public struct LiveWorkspaceView: View {
     private let onLocalPlayback: @MainActor (LocalPlaybackRequest) -> Void
     private let localPlaybackBrowser: AnyView?
     private let localPlaybackVisualClocks: [UInt64: LocalPlaybackVisualClockSnapshot]
+    private let localPlaybackFeedback: String?
+    private let localPlaybackFeedbackIsError: Bool
     @Binding private var appearance: AppearancePreference
     @Binding private var keyNotation: KeyNotationPreference
     @State private var selectedPhrase: UInt64 = 0
@@ -29,6 +31,8 @@ public struct LiveWorkspaceView: View {
         allowsScrolling: Bool = true,
         showsNavigation: Bool = true,
         localPlaybackVisualClocks: [UInt64: LocalPlaybackVisualClockSnapshot] = [:],
+        localPlaybackFeedback: String? = nil,
+        localPlaybackFeedbackIsError: Bool = false,
         onPlanMutation: @escaping @MainActor (PlanMutationRequest) -> Void = { _ in },
         onSessionCommand: @escaping @MainActor (SessionCommandRequest) -> Void = { _ in },
         onLocalPlayback: @escaping @MainActor (LocalPlaybackRequest) -> Void = { _ in },
@@ -39,6 +43,8 @@ public struct LiveWorkspaceView: View {
         self.allowsScrolling = allowsScrolling
         self.showsNavigation = showsNavigation
         self.localPlaybackVisualClocks = localPlaybackVisualClocks
+        self.localPlaybackFeedback = localPlaybackFeedback
+        self.localPlaybackFeedbackIsError = localPlaybackFeedbackIsError
         self.onPlanMutation = onPlanMutation
         self.onSessionCommand = onSessionCommand
         self.onLocalPlayback = onLocalPlayback
@@ -140,15 +146,59 @@ public struct LiveWorkspaceView: View {
     private var workspaceContent: some View {
         VStack(alignment: .leading, spacing: LumiSpacing.large) {
             header
-            if let diagnostic = state.diagnostic {
-                diagnosticBanner(diagnostic)
-            }
-            planInteractionBanner
-            sessionInteractionBanner
+            workspaceNotice
             deckWorkspace
         }
         .padding(LumiSpacing.large)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var workspaceNotice: some View {
+        let notice = LiveWorkspaceNoticePresenter.notice(
+            state: state,
+            localPlaybackFeedback: localPlaybackFeedback,
+            localPlaybackFeedbackIsError: localPlaybackFeedbackIsError
+        )
+        return HStack(spacing: LumiSpacing.small) {
+            Image(systemName: noticeSystemImage(notice.tone))
+                .foregroundStyle(noticeColor(notice.tone))
+            Text(verbatim: notice.message)
+                .font(LumiTypography.metadata)
+                .foregroundStyle(LumiColor.textPrimary)
+                .lineLimit(1)
+                .truncationMode(.tail)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, LumiSpacing.medium)
+        .frame(maxWidth: .infinity, minHeight: 36, maxHeight: 36)
+        .background(noticeColor(notice.tone).opacity(0.08))
+        .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
+        .overlay {
+            RoundedRectangle(cornerRadius: LumiRadius.control)
+                .stroke(noticeColor(notice.tone).opacity(0.25), lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityIdentifier("lumi.workspace.notice")
+    }
+
+    private func noticeColor(_ tone: LiveWorkspaceNoticeTone) -> Color {
+        switch tone {
+        case .neutral: LumiColor.textSecondary
+        case .working: LumiColor.accent
+        case .success: LumiColor.success
+        case .warning: LumiColor.warning
+        case .error: LumiColor.destructive
+        }
+    }
+
+    private func noticeSystemImage(_ tone: LiveWorkspaceNoticeTone) -> String {
+        switch tone {
+        case .neutral: "info.circle.fill"
+        case .working: "arrow.triangle.2.circlepath"
+        case .success: "checkmark.circle.fill"
+        case .warning: "exclamationmark.triangle.fill"
+        case .error: "xmark.octagon.fill"
+        }
     }
 
     private var header: some View {
@@ -728,93 +778,6 @@ public struct LiveWorkspaceView: View {
             .foregroundStyle(LumiColor.textSecondary)
             .frame(maxWidth: .infinity, minHeight: 72, alignment: .leading)
         }
-    }
-
-    private func diagnosticBanner(_ message: String) -> some View {
-        HStack(spacing: LumiSpacing.medium) {
-            Image(systemName: componentState.systemImage)
-                .foregroundStyle(componentState.color)
-            Text(verbatim: message)
-                .font(LumiTypography.metadata)
-                .foregroundStyle(LumiColor.textPrimary)
-            Spacer()
-            StatusBadge(key(conditionLabel), state: componentState)
-        }
-        .padding(LumiSpacing.medium)
-        .background(componentState.color.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
-        .overlay {
-            RoundedRectangle(cornerRadius: LumiRadius.control)
-                .stroke(componentState.color.opacity(0.35), lineWidth: 1)
-        }
-        .accessibilityIdentifier("lumi.workspace.diagnostic")
-    }
-
-    @ViewBuilder
-    private var planInteractionBanner: some View {
-        switch state.planInteraction {
-        case .idle:
-            EmptyView()
-        case .submitting:
-            interactionBanner(
-                copy.savingPlan,
-                systemImage: "arrow.triangle.2.circlepath",
-                color: LumiColor.accent
-            )
-        case let .succeeded(message):
-            interactionBanner(message, systemImage: "checkmark.circle.fill", color: .green)
-        case let .rejected(message):
-            interactionBanner(
-                message,
-                systemImage: "exclamationmark.triangle.fill",
-                color: .orange
-            )
-        }
-    }
-
-    @ViewBuilder
-    private var sessionInteractionBanner: some View {
-        switch state.sessionInteraction {
-        case .idle:
-            EmptyView()
-        case .submitting:
-            interactionBanner(
-                copy.applyingCommand,
-                systemImage: "arrow.triangle.2.circlepath",
-                color: LumiColor.accent
-            )
-        case let .succeeded(message):
-            interactionBanner(message, systemImage: "checkmark.circle.fill", color: .green)
-        case let .rejected(message):
-            interactionBanner(
-                message,
-                systemImage: "exclamationmark.triangle.fill",
-                color: .orange
-            )
-        }
-    }
-
-    private func interactionBanner(
-        _ message: String,
-        systemImage: String,
-        color: Color
-    ) -> some View {
-        HStack(spacing: LumiSpacing.medium) {
-            Image(systemName: systemImage)
-                .foregroundStyle(color)
-            Text(verbatim: message)
-                .font(LumiTypography.metadata)
-                .foregroundStyle(LumiColor.textPrimary)
-            Spacer()
-        }
-        .padding(LumiSpacing.medium)
-        .background(color.opacity(0.1))
-        .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
-        .overlay {
-            RoundedRectangle(cornerRadius: LumiRadius.control)
-                .stroke(color.opacity(0.35), lineWidth: 1)
-        }
-        .accessibilityIdentifier("lumi.plan.interaction")
     }
 
     private var keyFormatter: KeyNotationFormatter {

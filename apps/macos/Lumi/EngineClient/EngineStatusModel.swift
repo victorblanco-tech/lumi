@@ -201,11 +201,14 @@ final class EngineStatusModel: ObservableObject {
                 }
                 return
             }
-            let snapshot = try snapshotDecoder.decode(
-                envelope,
-                endpointDescription: endpointDescription,
-                protocolVersion: protocolVersion
-            )
+            let decoder = snapshotDecoder
+            let snapshot = try await Task.detached(priority: .userInitiated) {
+                try decoder.decode(
+                    envelope,
+                    endpointDescription: endpointDescription,
+                    protocolVersion: protocolVersion
+                )
+            }.value
             guard generation == libraryQueryGeneration else { return }
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
@@ -1248,11 +1251,14 @@ final class EngineStatusModel: ObservableObject {
                lastLocalTransportPresentationAt.duration(to: now) < .milliseconds(250) {
                 return
             }
-            let snapshot = try snapshotDecoder.decode(
-                envelope,
-                endpointDescription: endpointDescription,
-                protocolVersion: protocolVersion
-            )
+            let decoder = snapshotDecoder
+            let snapshot = try await Task.detached(priority: .userInitiated) {
+                try decoder.decode(
+                    envelope,
+                    endpointDescription: endpointDescription,
+                    protocolVersion: protocolVersion
+                )
+            }.value
             guard localAudioControllers[transport.deckID]?.snapshot.discontinuityRevision
                     == transport.discontinuityRevision else {
                 if let current = localAudioControllers[transport.deckID]?.snapshot {

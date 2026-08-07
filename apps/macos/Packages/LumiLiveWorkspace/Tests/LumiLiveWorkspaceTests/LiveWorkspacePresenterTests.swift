@@ -87,6 +87,36 @@ struct LiveWorkspacePresenterTests {
         #expect(switched.stateRevision == snapshot.stateRevision)
     }
 
+    @Test("Live notices centralize deck, plan, and local playback feedback")
+    func liveNoticeCentralizesFeedback() {
+        let localNotice = LiveWorkspaceNoticePresenter.notice(
+            state: LiveWorkspaceFixtures.ready,
+            localPlaybackFeedback: "Track loaded on Deck B.",
+            localPlaybackFeedbackIsError: false
+        )
+        let commandNotice = LiveWorkspaceNoticePresenter.notice(
+            state: LiveWorkspacePresenter.ready(
+                LiveWorkspaceFixtures.readySnapshot,
+                sessionInteraction: .submitting
+            ),
+            localPlaybackFeedback: "Track loaded on Deck B.",
+            localPlaybackFeedbackIsError: false
+        )
+        let rejectedNotice = LiveWorkspaceNoticePresenter.notice(
+            state: LiveWorkspacePresenter.ready(
+                LiveWorkspaceFixtures.readySnapshot,
+                planInteraction: .rejected("AutoLoop could not be saved."),
+                sessionInteraction: .succeeded("Deck B is Live.")
+            ),
+            localPlaybackFeedback: nil,
+            localPlaybackFeedbackIsError: false
+        )
+
+        #expect(localNotice == .init(message: "Track loaded on Deck B.", tone: .success))
+        #expect(commandNotice == .init(message: "Applying deck command…", tone: .working))
+        #expect(rejectedNotice == .init(message: "AutoLoop could not be saved.", tone: .warning))
+    }
+
     @Test("Library playback fixture exposes provider-neutral RGB waveform data")
     func localLibraryWaveformIsExplicit() {
         let previews = LiveWorkspaceFixtures.readySnapshot.decks.compactMap(\.waveformPreview)

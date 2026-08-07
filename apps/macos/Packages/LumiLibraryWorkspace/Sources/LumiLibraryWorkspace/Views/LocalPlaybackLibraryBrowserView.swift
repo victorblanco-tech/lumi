@@ -274,3 +274,15 @@ public struct LocalPlaybackLibraryBrowserView: View {
         )
     }
 }
+
+extension LocalPlaybackLibraryBrowserView: @MainActor Equatable {
+    public static func == (
+        lhs: LocalPlaybackLibraryBrowserView,
+        rhs: LocalPlaybackLibraryBrowserView
+    ) -> Bool {
+        lhs.state == rhs.state
+            && lhs.feedback == rhs.feedback
+            && lhs.feedbackIsError == rhs.feedbackIsError
+            && lhs.keyNotation == rhs.keyNotation
+    }
+}

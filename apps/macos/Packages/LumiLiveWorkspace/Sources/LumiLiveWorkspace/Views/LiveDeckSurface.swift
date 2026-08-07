@@ -105,23 +105,35 @@ struct LiveDeckSurface<Details: View>: View {
     }
 
     private var synchronizedDeckTimeline: some View {
-        TimelineView(
-            .animation(
-                minimumInterval: 1.0 / 30.0,
-                paused: visualClock?.playing != true || scrubProgress != nil
-            )
-        ) { context in
-            let playheadBeat = displayedPlayheadBeat(at: context.date)
-            let renderingViewport = renderingViewport(for: playheadBeat)
-            VStack(alignment: .leading, spacing: 0) {
-                waveform(playheadBeat: playheadBeat, renderingViewport: renderingViewport)
-                phraseBand(playheadBeat: playheadBeat, renderingViewport: renderingViewport)
-                plannedAutoloops(
-                    playheadBeat: playheadBeat,
-                    renderingViewport: renderingViewport
-                )
-            }
+        VStack(alignment: .leading, spacing: 0) {
+            animatedWaveformTimeline
+            plannedTimelineSnapshot
         }
+    }
+
+    private var animatedWaveformTimeline: some View {
+        let playheadBeat = displayedPlayheadBeat(at: Date())
+        let renderingViewport = renderingViewport(for: playheadBeat)
+        return waveform(
+            playheadBeat: playheadBeat,
+            renderingViewport: renderingViewport
+        )
+    }
+
+    private var plannedTimelineSnapshot: some View {
+        let playheadBeat = Double(deck.beat)
+        let renderingViewport = renderingViewport(for: playheadBeat)
+        return VStack(alignment: .leading, spacing: 0) {
+            phraseBand(
+                playheadBeat: playheadBeat,
+                renderingViewport: renderingViewport
+            )
+            plannedAutoloops(
+                playheadBeat: playheadBeat,
+                renderingViewport: renderingViewport
+            )
+        }
+        .animation(.linear(duration: 0.25), value: deck.beat)
     }
 
     private var header: some View {
@@ -198,8 +210,8 @@ struct LiveDeckSurface<Details: View>: View {
             ))
             metadataValue("KEY", value: musicalKey)
             metadataValue("BEAT", value: "\(deck.beat)")
-            metadataValue("TRANSPORT", value: deck.playing ? "PLAYING" : "PAUSED")
-            metadataValue("PHRASE", value: activePhraseName)
+            metadataValue("TRANSPORT", value: playbackIsActive ? "PLAYING" : "PAUSED")
+            metadataValue("PHRASE", value: activePhraseName(at: Double(deck.beat)))
         }
         .background(Color.white.opacity(0.035))
         .overlay(alignment: .top) { Divider().overlay(Color.white.opacity(0.12)) }
@@ -300,6 +312,7 @@ struct LiveDeckSurface<Details: View>: View {
             if let preview = deck.waveformPreview, !preview.points.isEmpty {
                 RGBDeckWaveform(
                     points: preview.points,
+                    waveformID: deck.trackLoadID,
                     durationBeats: deck.durationBeats,
                     playheadBeat: playheadBeat,
                     viewport: renderingViewport
@@ -672,8 +685,8 @@ struct LiveDeckSurface<Details: View>: View {
         }
     }
 
-    private var activePhraseName: String {
-        guard let phraseIndex = deck.phraseIndex,
+    private func activePhraseName(at playheadBeat: Double) -> String {
+        guard let phraseIndex = phraseIndex(at: playheadBeat),
               let phrase = deck.phrases.first(where: { $0.index == phraseIndex }) else {
             return "Not started"
         }
@@ -840,15 +853,56 @@ struct LiveDeckSurface<Details: View>: View {
 
 private struct RGBDeckWaveform: View {
     let points: [DeckWaveformPointSnapshot]
+    let waveformID: UInt64
     let durationBeats: UInt64
     let playheadBeat: Double
     let viewport: LumiWaveformViewport
+    @State private var rasterImage: CGImage?
 
     var body: some View {
-        Canvas { context, size in
-            drawBeatGrid(context: &context, size: size)
-            drawWaveform(context: &context, size: size)
-            drawPlayhead(context: &context, size: size)
+        GeometryReader { proxy in
+            ZStack(alignment: .topLeading) {
+                Canvas(
+                    opaque: false,
+                    colorMode: .linear,
+                    rendersAsynchronously: true
+                ) { context, size in
+                    drawBeatGrid(context: &context, size: size)
+                }
+                if let rasterImage {
+                    Image(decorative: rasterImage, scale: 1)
+                        .resizable()
+                        .interpolation(.high)
+                        .frame(
+                            width: fullTrackWidth(visibleWidth: proxy.size.width),
+                            height: proxy.size.height
+                        )
+                        .offset(x: waveformOffsetX(visibleWidth: proxy.size.width))
+                        .animation(.linear(duration: 0.25), value: viewport.startBeat)
+                }
+                Rectangle()
+                    .fill(Color.white)
+                    .frame(width: 2, height: proxy.size.height)
+                    .shadow(color: Color.black.opacity(0.5), radius: 1)
+                    .overlay(alignment: .top) {
+                        Rectangle()
+                            .fill(Color.white)
+                            .frame(width: 6, height: 7)
+                    }
+                    .offset(x: playheadX(visibleWidth: proxy.size.width) - 1)
+                    .animation(.linear(duration: 0.25), value: playheadBeat)
+            }
+            .clipped()
+        }
+        .task(id: waveformID) {
+            let samples = points
+            let rasterWidth = max(
+                samples.count,
+                min(16_384, Int(max(1, durationBeats)) * 4)
+            )
+            rasterImage = await Task.detached(priority: .utility) {
+                Self.makeRasterImage(points: samples, width: rasterWidth)
+            }.value
         }
     }
 
@@ -857,70 +911,98 @@ private struct RGBDeckWaveform: View {
         let beatStride = max(1, Int(ceil(viewport.visibleBeats / Double(maximumLines))))
         let firstBeat = Int(floor(viewport.startBeat / Double(beatStride))) * beatStride
         let lastBeat = Int(ceil(viewport.endBeat))
+        var beatPath = Path()
+        var barPath = Path()
         for beat in Swift.stride(from: firstBeat, through: lastBeat, by: beatStride) {
             let x = viewport.x(forBeat: Double(beat), width: size.width)
             guard x >= 0, x <= size.width else { continue }
             let isBar = beat.isMultiple(of: Int(viewport.beatsPerBar))
-            var path = Path()
-            path.move(to: CGPoint(x: x, y: 0))
-            path.addLine(to: CGPoint(x: x, y: size.height))
+            if isBar {
+                barPath.move(to: CGPoint(x: x, y: 0))
+                barPath.addLine(to: CGPoint(x: x, y: size.height))
+            } else {
+                beatPath.move(to: CGPoint(x: x, y: 0))
+                beatPath.addLine(to: CGPoint(x: x, y: size.height))
+            }
+        }
+        if !beatPath.isEmpty {
             context.stroke(
-                path,
-                with: .color(Color.white.opacity(isBar ? 0.24 : 0.09)),
-                lineWidth: isBar ? 1.1 : 0.6
+                beatPath,
+                with: .color(Color.white.opacity(0.09)),
+                lineWidth: 0.6
+            )
+        }
+        if !barPath.isEmpty {
+            context.stroke(
+                barPath,
+                with: .color(Color.white.opacity(0.24)),
+                lineWidth: 1.1
             )
         }
     }
 
-    private func drawWaveform(context: inout GraphicsContext, size: CGSize) {
-        guard !points.isEmpty else { return }
-        let center = Double(size.height) / 2
-        let maximumAmplitude = Double(size.height) * 0.43
-        let width = max(1, Int(size.width.rounded(.up)))
+    private func fullTrackWidth(visibleWidth: CGFloat) -> CGFloat {
+        visibleWidth * CGFloat(Double(max(1, durationBeats)) / viewport.visibleBeats)
+    }
+
+    private func waveformOffsetX(visibleWidth: CGFloat) -> CGFloat {
+        -visibleWidth * CGFloat(viewport.startBeat / viewport.visibleBeats)
+    }
+
+    private func playheadX(visibleWidth: CGFloat) -> CGFloat {
+        viewport.x(forBeat: playheadBeat, width: visibleWidth)
+    }
+
+    nonisolated private static func makeRasterImage(
+        points: [DeckWaveformPointSnapshot],
+        width: Int
+    ) -> CGImage? {
+        guard !points.isEmpty else { return nil }
+        let width = max(1, width)
+        let height = 156
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else {
+            return nil
+        }
+        let center = Double(height) / 2
+        let maximumAmplitude = Double(height) * 0.43
+        context.setLineWidth(1)
         for pixel in 0..<width {
-            let fraction = Double(pixel) / Double(max(1, width - 1))
-            let beat = viewport.startBeat + fraction * viewport.visibleBeats
-            let trackProgress = beat / Double(max(1, durationBeats))
-            let position = min(max(0, trackProgress), 1) * Double(max(0, points.count - 1))
+            let position = Double(pixel) / Double(max(1, width - 1))
+                * Double(max(0, points.count - 1))
             let lower = Int(position.rounded(.down))
             let upper = min(points.count - 1, lower + 1)
             let sampleFraction = position - Double(lower)
-            let a = points[lower]
-            let b = points[upper]
+            let first = points[lower]
+            let second = points[upper]
             func mix(_ lhs: UInt8, _ rhs: UInt8) -> Double {
                 (Double(lhs) + (Double(rhs) - Double(lhs)) * sampleFraction) / 31
             }
-            let low = mix(a.low, b.low)
-            let mid = mix(a.mid, b.mid)
-            let high = mix(a.high, b.high)
+            let low = mix(first.low, second.low)
+            let mid = mix(first.mid, second.mid)
+            let high = mix(first.high, second.high)
             let peak = max(low, max(mid, high))
             guard peak > 0.000_1 else { continue }
             let amplitude = pow(peak, 0.58) * maximumAmplitude
-            let red = pow(high / peak, 0.72)
-            let green = pow(mid / peak, 0.72)
-            let blue = pow(low / peak, 0.72)
-            let x = Double(pixel)
-            var path = Path()
-            path.move(to: CGPoint(x: x, y: center - amplitude))
-            path.addLine(to: CGPoint(x: x, y: center + amplitude))
-            context.stroke(
-                path,
-                with: .color(Color(red: red, green: green, blue: blue).opacity(0.98)),
-                lineWidth: 1
+            context.setStrokeColor(
+                red: pow(high / peak, 0.72),
+                green: pow(mid / peak, 0.72),
+                blue: pow(low / peak, 0.72),
+                alpha: 0.98
             )
+            let x = Double(pixel) + 0.5
+            context.move(to: CGPoint(x: x, y: center - amplitude))
+            context.addLine(to: CGPoint(x: x, y: center + amplitude))
+            context.strokePath()
         }
+        return context.makeImage()
     }
 
-    private func drawPlayhead(context: inout GraphicsContext, size: CGSize) {
-        guard playheadBeat >= viewport.startBeat, playheadBeat <= viewport.endBeat else { return }
-        let x = viewport.x(forBeat: playheadBeat, width: size.width)
-        var path = Path()
-        path.move(to: CGPoint(x: x, y: 0))
-        path.addLine(to: CGPoint(x: x, y: size.height))
-        context.stroke(path, with: .color(.white), lineWidth: 2)
-        context.fill(
-            Path(CGRect(x: x - 3, y: 0, width: 6, height: 7)),
-            with: .color(.white)
-        )
-    }
 }
