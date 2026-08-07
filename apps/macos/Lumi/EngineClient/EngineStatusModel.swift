@@ -971,8 +971,14 @@ final class EngineStatusModel: ObservableObject {
             return
         }
         defer { isExchangingCommand = false }
+        let presentationSnapshot = switch request {
+        case let .setLocalPlaybackLeader(deckID, _):
+            current.optimisticallySettingLocalPlaybackLeader(deckID)
+        default:
+            current
+        }
         workspaceState = LiveWorkspacePresenter.ready(
-            current,
+            presentationSnapshot,
             sessionInteraction: .submitting
         )
         do {
@@ -999,11 +1005,14 @@ final class EngineStatusModel: ObservableObject {
                 }
                 return
             }
-            let snapshot = try snapshotDecoder.decode(
-                envelope,
-                endpointDescription: endpointDescription,
-                protocolVersion: protocolVersion
-            )
+            let decoder = snapshotDecoder
+            let snapshot = try await Task.detached(priority: .userInitiated) {
+                try decoder.decode(
+                    envelope,
+                    endpointDescription: endpointDescription,
+                    protocolVersion: protocolVersion
+                )
+            }.value
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(
                 snapshot,

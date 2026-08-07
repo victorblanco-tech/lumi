@@ -16,6 +16,7 @@ struct LiveDeckSurface<Details: View>: View {
     let onMakeMaster: () -> Void
     private let details: Details
     @State private var viewport: LumiWaveformViewport
+    @State private var usesLiveViewport: Bool
     @State private var magnificationAnchorBeats: Double?
     @State private var scrubProgress: Double?
     @AppStorage("nl.blancoservices.lumi.waveform.zoom-anchor")
@@ -51,13 +52,14 @@ struct LiveDeckSurface<Details: View>: View {
         self.onSeek = onSeek
         self.onMakeMaster = onMakeMaster
         self.details = details()
-        _viewport = State(
-            initialValue: LumiWaveformViewport(
-                startBeat: 0,
-                visibleBeats: Double(max(1, deck.durationBeats)),
-                totalBeats: max(1, deck.durationBeats)
+        let startsInLiveViewport = isMaster && (visualClock?.playing ?? deck.playing)
+        _usesLiveViewport = State(initialValue: startsInLiveViewport)
+        _viewport = State(initialValue: startsInLiveViewport
+            ? LiveDeckViewportPolicy.live(
+                playheadBeat: Double(deck.beat),
+                totalBeats: deck.durationBeats
             )
-        )
+            : LiveDeckViewportPolicy.overview(totalBeats: deck.durationBeats))
     }
 
     var body: some View {
@@ -87,6 +89,19 @@ struct LiveDeckSurface<Details: View>: View {
             scrubProgress = nil
             resetViewport()
         }
+        .onChange(of: isMaster) { wasMaster, isMasterNow in
+            guard wasMaster != isMasterNow else { return }
+            if isMasterNow {
+                activateDefaultLiveViewport()
+            } else {
+                freezeCurrentLiveViewport()
+                usesLiveViewport = false
+            }
+        }
+        .onChange(of: playbackIsActive) { wasPlaying, isPlaying in
+            guard !wasPlaying, isPlaying, isMaster, !usesLiveViewport else { return }
+            activateDefaultLiveViewport()
+        }
     }
 
     private var synchronizedDeckTimeline: some View {
@@ -97,7 +112,7 @@ struct LiveDeckSurface<Details: View>: View {
             )
         ) { context in
             let playheadBeat = displayedPlayheadBeat(at: context.date)
-            let renderingViewport = followedViewport(for: playheadBeat)
+            let renderingViewport = renderingViewport(for: playheadBeat)
             VStack(alignment: .leading, spacing: 0) {
                 waveform(playheadBeat: playheadBeat, renderingViewport: renderingViewport)
                 phraseBand(playheadBeat: playheadBeat, renderingViewport: renderingViewport)
@@ -723,16 +738,35 @@ struct LiveDeckSurface<Details: View>: View {
         })?.index ?? deck.phrases.last?.index
     }
 
-    private func followedViewport(for playheadBeat: Double) -> LumiWaveformViewport {
-        guard visualClock?.playing == true,
-              viewport.visibleBeats < Double(viewport.totalBeats) else {
+    private var playbackIsActive: Bool {
+        visualClock?.playing ?? deck.playing
+    }
+
+    private func renderingViewport(for playheadBeat: Double) -> LumiWaveformViewport {
+        guard isMaster, usesLiveViewport else {
             return viewport
         }
-        return LumiWaveformViewport(
-            startBeat: playheadBeat - viewport.visibleBeats * 0.22,
-            visibleBeats: viewport.visibleBeats,
+        return LiveDeckViewportPolicy.live(
+            playheadBeat: playheadBeat,
             totalBeats: viewport.totalBeats,
+            visibleBeats: viewport.visibleBeats,
             beatsPerBar: viewport.beatsPerBar
+        )
+    }
+
+    private func activateDefaultLiveViewport() {
+        viewport = LiveDeckViewportPolicy.live(
+            playheadBeat: displayedPlayheadBeat(at: Date()),
+            totalBeats: deck.durationBeats,
+            beatsPerBar: viewport.beatsPerBar
+        )
+        usesLiveViewport = true
+    }
+
+    private func freezeCurrentLiveViewport() {
+        guard usesLiveViewport else { return }
+        viewport = renderingViewport(
+            for: displayedPlayheadBeat(at: Date())
         )
     }
 
@@ -778,11 +812,8 @@ struct LiveDeckSurface<Details: View>: View {
     }
 
     private func resetViewport() {
-        viewport = LumiWaveformViewport(
-            startBeat: 0,
-            visibleBeats: Double(max(1, deck.durationBeats)),
-            totalBeats: max(1, deck.durationBeats)
-        )
+        usesLiveViewport = false
+        viewport = LiveDeckViewportPolicy.overview(totalBeats: deck.durationBeats)
     }
 
     private func phraseColor(_ role: String) -> Color {

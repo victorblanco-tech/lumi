@@ -154,7 +154,7 @@ public enum LiveWorkspaceFixtures {
         )
     )
 
-    private static func libraryBackedSnapshot() -> EngineSnapshot {
+    public static func libraryBackedSnapshot() -> EngineSnapshot {
         let nextDeck = DeckSnapshot(
             deckID: 2,
             trackLoadID: 2_002,

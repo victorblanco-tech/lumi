@@ -1,5 +1,5 @@
 import Foundation
-import LumiLiveWorkspace
+@testable import LumiLiveWorkspace
 import LumiProtocol
 import Testing
 
@@ -71,6 +71,22 @@ struct LiveWorkspacePresenterTests {
         #expect(state.content?.nextDeck?.deckID == 1)
     }
 
+    @Test("Optimistic local leader presentation swaps Live and Next plans immediately")
+    func optimisticLocalLeaderPresentationSwapsPlans() throws {
+        let snapshot = LiveWorkspaceFixtures.libraryBackedSnapshot()
+        let currentLivePlan = try #require(snapshot.livePlan)
+        let currentNextPlan = try #require(snapshot.nextPlan)
+
+        let switched = snapshot.optimisticallySettingLocalPlaybackLeader(2)
+
+        #expect(switched.leaderDeckID == 2)
+        #expect(switched.livePlan?.deckID == 2)
+        #expect(switched.nextPlan?.deckID == 1)
+        #expect(switched.livePlan?.planID == currentNextPlan.planID)
+        #expect(switched.nextPlan?.planID == currentLivePlan.planID)
+        #expect(switched.stateRevision == snapshot.stateRevision)
+    }
+
     @Test("Library playback fixture exposes provider-neutral RGB waveform data")
     func localLibraryWaveformIsExplicit() {
         let previews = LiveWorkspaceFixtures.readySnapshot.decks.compactMap(\.waveformPreview)
@@ -100,6 +116,38 @@ struct LiveWorkspacePresenterTests {
         #expect(playing.positionMillis(at: Date(timeIntervalSinceReferenceDate: 101.25)) == 2_250)
         #expect(playing.positionMillis(at: Date(timeIntervalSinceReferenceDate: 110)) == 4_000)
         #expect(paused.positionMillis(at: Date(timeIntervalSinceReferenceDate: 110)) == 1_000)
+    }
+
+    @Test("Live deck viewport defaults to 40 bars and keeps the playhead left")
+    func liveDeckViewportDefaultsToFortyBars() {
+        let viewport = LiveDeckViewportPolicy.live(
+            playheadBeat: 320,
+            totalBeats: 1_024
+        )
+
+        #expect(viewport.visibleBars == 40)
+        #expect(abs(viewport.x(forBeat: 320, width: 1_000) - 220) < 0.001)
+    }
+
+    @Test("Next deck viewport remains a full-track overview")
+    func nextDeckViewportRemainsOverview() {
+        let viewport = LiveDeckViewportPolicy.overview(totalBeats: 752)
+
+        #expect(viewport.startBeat == 0)
+        #expect(viewport.visibleBeats == 752)
+        #expect(viewport.visibleBars == 188)
+    }
+
+    @Test("A user-selected Live zoom keeps the same fixed playhead position")
+    func liveDeckViewportPreservesUserZoom() {
+        let viewport = LiveDeckViewportPolicy.live(
+            playheadBeat: 400,
+            totalBeats: 1_024,
+            visibleBeats: 96
+        )
+
+        #expect(viewport.visibleBeats == 96)
+        #expect(abs(viewport.x(forBeat: 400, width: 800) - 176) < 0.001)
     }
 
     @Test("Live AutoLoop plan exposes active, next, and future status with output details")

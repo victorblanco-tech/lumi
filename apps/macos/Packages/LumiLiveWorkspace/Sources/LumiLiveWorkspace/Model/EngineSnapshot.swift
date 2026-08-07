@@ -60,6 +60,34 @@ public struct EngineSnapshot: Equatable, Sendable {
         self.planningOptions = planningOptions
         self.timeline = timeline
     }
+
+    public func optimisticallySettingLocalPlaybackLeader(_ deckID: UInt64) -> Self {
+        guard deckSource.mode == "localPlayback",
+              leaderDeckID != deckID,
+              decks.contains(where: { $0.deckID == deckID }) else {
+            return self
+        }
+        let availablePlans = [livePlan, nextPlan].compactMap { $0 }
+        return Self(
+            endpoint: endpoint,
+            engineVersion: engineVersion,
+            protocolVersion: protocolVersion,
+            snapshotSequence: snapshotSequence,
+            stateRevision: stateRevision,
+            operationState: operationState,
+            runtime: runtime,
+            deckSource: deckSource,
+            deckInputIntegration: deckInputIntegration,
+            simulation: simulation,
+            outputProvider: outputProvider,
+            leaderDeckID: deckID,
+            decks: decks,
+            livePlan: availablePlans.first(where: { $0.deckID == deckID }),
+            nextPlan: availablePlans.first(where: { $0.deckID != deckID }),
+            planningOptions: planningOptions,
+            timeline: timeline
+        )
+    }
 }
 
 public struct DeckInputIntegrationSnapshot: Equatable, Sendable {
