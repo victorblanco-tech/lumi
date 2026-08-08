@@ -17,7 +17,7 @@ if [[ -d "$cargo_bin_directory" ]]; then
 fi
 
 profile_directory="debug"
-if [[ "${CONFIGURATION:-Debug}" == "Release" ]]; then
+if [[ "${CONFIGURATION:-Debug}" == "Release" || "${CONFIGURATION:-Debug}" == "Preview" ]]; then
   profile_directory="release"
 fi
 

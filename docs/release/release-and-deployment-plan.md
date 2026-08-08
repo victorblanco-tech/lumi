@@ -194,6 +194,20 @@ GitHub-generated release notes vullen dit aan met gekoppelde PR's en auteurs.
 
 ## 7. Delivery channels
 
+De macOS-apps zijn naast elkaar installeerbaar en hebben elk een eigen bundle-
+identifier, preferencesdomein en Application Support-map:
+
+| Appkanaal | Xcode | App | Bundle identifier | Lokale data |
+|---|---|---|---|---|
+| Development | Debug | Lumi Dev | `co.victorblan.tech.lumi.dev` | `Lumi Dev` |
+| Release candidate | Preview | Lumi Preview | `co.victorblan.tech.lumi.preview` | `Lumi Preview` |
+| Production | Release | Lumi | `co.victorblan.tech.lumi` | `Lumi` |
+
+De versie promoveert zonder codefork van `X.Y.Z-dev`, via `X.Y.Z-rc.N`, naar
+`X.Y.Z`. Een Preview- of Dev-database ontstaat alleen leeg of via een expliciete
+SQLite-backup van Stable; een bestaand kanaal wordt nooit stilzwijgend
+overschreven.
+
 | Channel | Bron | Doel | Automatisch? |
 |---|---|---|---:|
 | PR validation | iedere PR | volledige lokale `./scripts/verify.sh` | lokaal |

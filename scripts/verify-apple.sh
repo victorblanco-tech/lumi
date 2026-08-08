@@ -40,13 +40,24 @@ xcodebuild \
   -quiet \
   build
 
-built_info_plist="build/DerivedData/Build/Products/Debug/Lumi.app/Contents/Info.plist"
-built_engine_helper="build/DerivedData/Build/Products/Debug/Lumi.app/Contents/Helpers/lumi-engine"
+built_app="build/DerivedData/Build/Products/Debug/Lumi Dev.app"
+built_info_plist="$built_app/Contents/Info.plist"
+built_engine_helper="$built_app/Contents/Helpers/lumi-engine"
 built_product_version="$(/usr/libexec/PlistBuddy -c 'Print :LumiProductVersion' "$built_info_plist")"
+built_bundle_identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$built_info_plist")"
+built_channel="$(/usr/libexec/PlistBuddy -c 'Print :LumiReleaseChannel' "$built_info_plist")"
+built_data_directory="$(/usr/libexec/PlistBuddy -c 'Print :LumiDataDirectoryName' "$built_info_plist")"
 canonical_version="$(tr -d '[:space:]' < VERSION)"
 
 if [[ "$built_product_version" != "$canonical_version" ]]; then
   echo "ERROR: built app version '$built_product_version' differs from VERSION '$canonical_version'." >&2
+  exit 1
+fi
+
+if [[ "$built_bundle_identifier" != "co.victorblan.tech.lumi.dev" ]] \
+  || [[ "$built_channel" != "dev" ]] \
+  || [[ "$built_data_directory" != "Lumi Dev" ]]; then
+  echo "ERROR: Debug build does not have the isolated Dev identity." >&2
   exit 1
 fi
 

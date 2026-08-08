@@ -15,11 +15,11 @@ public struct LibrarySourcesWorkspaceView: View {
     private let onSyncApply: @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void
     private let onAnalysisImport: @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void
 
-    @AppStorage("nl.blancoservices.lumi.rekordboxXML.folder")
+    @AppStorage(LumiPreferenceKey.rekordboxXMLFolder)
     private var rekordboxFolderPath = ""
-    @AppStorage("nl.blancoservices.lumi.rekordboxXML.includeFutureChildren")
+    @AppStorage(LumiPreferenceKey.rekordboxXMLIncludeFutureChildren)
     private var includeFutureChildPlaylists = true
-    @AppStorage("nl.blancoservices.lumi.rekordboxXML.followedPaths")
+    @AppStorage(LumiPreferenceKey.rekordboxXMLFollowedPaths)
     private var followedPathsJSON = "[]"
 
     @State private var selectedProviderKind: String?

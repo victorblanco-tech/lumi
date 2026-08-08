@@ -4,7 +4,7 @@ import OSLog
 
 public actor EngineProcessSupervisor {
     private static let logger = Logger(
-        subsystem: "nl.blancoservices.lumi",
+        subsystem: Bundle.main.bundleIdentifier ?? "co.victorblan.tech.lumi",
         category: "EngineProcessSupervisor"
     )
 

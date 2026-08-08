@@ -10,7 +10,7 @@ import OSLog
 @MainActor
 final class EngineStatusModel: ObservableObject {
     private static let logger = Logger(
-        subsystem: "nl.blancoservices.lumi",
+        subsystem: Bundle.main.bundleIdentifier ?? "co.victorblan.tech.lumi",
         category: "EngineStatusModel"
     )
 
@@ -123,12 +123,29 @@ final class EngineStatusModel: ObservableObject {
             appropriateFor: nil,
             create: true
         )
-        let directory = base.appendingPathComponent("Lumi", isDirectory: true)
+        guard let directoryName = Bundle.main.object(
+            forInfoDictionaryKey: "LumiDataDirectoryName"
+        ) as? String,
+        !directoryName.isEmpty,
+        directoryName != ".",
+        directoryName != "..",
+        !directoryName.contains("/") else {
+            throw ApplicationIdentityError.invalidDataDirectory
+        }
+        let directory = base.appendingPathComponent(directoryName, isDirectory: true)
         try FileManager.default.createDirectory(
             at: directory,
             withIntermediateDirectories: true
         )
         return directory.appendingPathComponent("library.sqlite", isDirectory: false)
+    }
+
+    private enum ApplicationIdentityError: LocalizedError {
+        case invalidDataDirectory
+
+        var errorDescription: String? {
+            "The app channel has no valid local data directory configuration."
+        }
     }
 
     func restart() async {

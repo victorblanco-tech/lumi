@@ -28,7 +28,7 @@ private final class ConnectionContinuationGate: @unchecked Sendable {
 }
 
 public actor LoopbackEngineTransport: EngineTransport {
-    private let queue = DispatchQueue(label: "nl.blancoservices.lumi.engine-transport")
+    private let queue = DispatchQueue(label: "co.victorblan.tech.lumi.engine-transport")
     private var connection: NWConnection?
 
     public init() {}

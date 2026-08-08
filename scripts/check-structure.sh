@@ -24,6 +24,9 @@ required_paths=(
   "engine/crates/lumi-simulator"
   "apps/macos/Lumi.xcodeproj"
   "apps/macos/Lumi"
+  "apps/macos/Config/Dev.xcconfig"
+  "apps/macos/Config/Preview.xcconfig"
+  "apps/macos/Config/Stable.xcconfig"
   "apps/macos/Packages/LumiProtocol"
   "apps/macos/Packages/LumiEngineClient"
   "apps/macos/Packages/LumiDesignSystem"
@@ -56,6 +59,8 @@ required_paths=(
   "scripts/verify-apple.sh"
   "scripts/verify.sh"
   "scripts/package-macos-local.sh"
+  "scripts/backup-macos-user-data.sh"
+  "scripts/clone-macos-channel-data.sh"
   "docs"
   "scripts"
 )
@@ -66,6 +71,27 @@ for required_path in "${required_paths[@]}"; do
     exit 1
   fi
 done
+
+retired_namespace='nl.''blancoservices'
+if grep -R -Fq "$retired_namespace" \
+  --exclude-dir=.git \
+  --exclude-dir=.build \
+  --exclude-dir=build \
+  --exclude-dir=target \
+  "$repository_root"; then
+  echo "ERROR: the retired private namespace is present in the active repository." >&2
+  exit 1
+fi
+
+if ! grep -Fq 'PRODUCT_BUNDLE_IDENTIFIER = co.victorblan.tech.lumi.dev' \
+  "$repository_root/apps/macos/Config/Dev.xcconfig" \
+  || ! grep -Fq 'PRODUCT_BUNDLE_IDENTIFIER = co.victorblan.tech.lumi.preview' \
+    "$repository_root/apps/macos/Config/Preview.xcconfig" \
+  || ! grep -Fq 'PRODUCT_BUNDLE_IDENTIFIER = co.victorblan.tech.lumi' \
+    "$repository_root/apps/macos/Config/Stable.xcconfig"; then
+  echo "ERROR: macOS release-channel bundle identities are incomplete." >&2
+  exit 1
+fi
 
 for forbidden_name in Utils Common Shared Helpers Misc; do
   if find "$repository_root" \

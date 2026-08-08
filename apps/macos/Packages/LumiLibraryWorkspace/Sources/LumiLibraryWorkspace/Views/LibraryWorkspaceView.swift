@@ -47,7 +47,7 @@ public struct LibraryWorkspaceView: View {
     @State private var readinessFilter: LibraryReadinessFilter = .all
     @State private var editorAnalysis: TrackEditorAnalysis?
     @State private var requestedEditorTrackID: UInt64?
-    @AppStorage("nl.blancoservices.lumi.library.table-columns")
+    @AppStorage(LumiPreferenceKey.libraryTableColumns)
     private var trackTableCustomization = TableColumnCustomization<LibraryTrack>()
 
     public init(

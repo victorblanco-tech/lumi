@@ -24,9 +24,9 @@ public struct TrackLightingEditorView: View {
     @State private var hoveredBoundaryAfterPhraseIndex: UInt16?
     @State private var pendingBoundaryBeat: UInt32?
     @State private var conflictSides: [UInt16: TrackSourceConflictSide]
-    @AppStorage("nl.blancoservices.lumi.waveform.zoom-anchor")
+    @AppStorage(LumiPreferenceKey.waveformZoomAnchor)
     private var waveformZoomAnchorRaw = LumiWaveformZoomAnchor.mouse.rawValue
-    @AppStorage("nl.blancoservices.lumi.waveform.reverse-horizontal-scroll")
+    @AppStorage(LumiPreferenceKey.waveformReverseHorizontalScroll)
     private var reversesHorizontalScroll = false
     @Environment(\.dismiss) private var dismiss
 

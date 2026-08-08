@@ -18,7 +18,7 @@ struct FoundationView: View {
     @State private var destination: AppDestination = .live
     @State private var librarySection: LibraryHubSection = .tracks
     @State private var navigationHovered = false
-    @AppStorage("nl.blancoservices.lumi.navigation.auto-hide")
+    @AppStorage(LumiPreferenceKey.navigationAutoHide)
     private var navigationAutoHides = false
 
     private var productVersion: String {

@@ -4,10 +4,33 @@ set -euo pipefail
 
 script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 repository_root="$(dirname "$script_dir")"
-release_directory="${1:-$repository_root/build/Releases}"
-derived_data="$repository_root/build/ReleaseDerivedData"
+channel="${1:-preview}"
+release_directory="${2:-$repository_root/build/Releases}"
 canonical_version="$(tr -d '[:space:]' < "$repository_root/VERSION")"
 cargo_bin_directory="${CARGO_HOME:-${HOME}/.cargo}/bin"
+
+case "$channel" in
+  preview)
+    build_configuration="Preview"
+    app_name="Lumi Preview"
+    expected_bundle_identifier="co.victorblan.tech.lumi.preview"
+    expected_data_directory="Lumi Preview"
+    artifact_prefix="Lumi-Preview"
+    ;;
+  stable)
+    build_configuration="Release"
+    app_name="Lumi"
+    expected_bundle_identifier="co.victorblan.tech.lumi"
+    expected_data_directory="Lumi"
+    artifact_prefix="Lumi"
+    ;;
+  *)
+    echo "Usage: $0 [preview|stable] [output-directory]" >&2
+    exit 64
+    ;;
+esac
+
+derived_data="$repository_root/build/${build_configuration}DerivedData"
 
 if [[ -d "$cargo_bin_directory" ]]; then
   export PATH="$cargo_bin_directory:$PATH"
@@ -25,6 +48,10 @@ fi
 
 if [[ ! "$canonical_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; then
   echo "ERROR: VERSION '$canonical_version' is not valid SemVer." >&2
+  exit 1
+fi
+if [[ "$channel" == "stable" && "$canonical_version" == *-* ]]; then
+  echo "ERROR: Stable packaging requires a promoted version without a prerelease suffix." >&2
   exit 1
 fi
 
@@ -52,7 +79,7 @@ mkdir -p "$release_directory"
 xcodebuild \
   -project "$repository_root/apps/macos/Lumi.xcodeproj" \
   -scheme Lumi \
-  -configuration Release \
+  -configuration "$build_configuration" \
   -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath "$derived_data" \
   CODE_SIGNING_ALLOWED=NO \
@@ -61,9 +88,9 @@ xcodebuild \
   -quiet \
   build
 
-source_app="$derived_data/Build/Products/Release/Lumi.app"
+source_app="$derived_data/Build/Products/$build_configuration/$app_name.app"
 if [[ ! -d "$source_app" ]]; then
-  echo "ERROR: Release build did not produce Lumi.app." >&2
+  echo "ERROR: $build_configuration build did not produce $app_name.app." >&2
   exit 1
 fi
 
@@ -79,8 +106,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-staging_directory="$temporary_root/Lumi-$canonical_version"
-packaged_app="$staging_directory/Lumi.app"
+staging_directory="$temporary_root/$artifact_prefix-$canonical_version"
+packaged_app="$staging_directory/$app_name.app"
 packaged_helper="$packaged_app/Contents/Helpers/lumi-engine"
 mkdir -p "$staging_directory"
 ditto "$source_app" "$packaged_app"
@@ -90,8 +117,8 @@ if [[ ! -x "$packaged_helper" ]]; then
   exit 1
 fi
 
-if ! file "$packaged_app/Contents/MacOS/Lumi" | grep -q 'arm64'; then
-  echo "ERROR: packaged Lumi executable is not Apple Silicon arm64." >&2
+if ! file "$packaged_app/Contents/MacOS/$app_name" | grep -q 'arm64'; then
+  echo "ERROR: packaged $app_name executable is not Apple Silicon arm64." >&2
   exit 1
 fi
 if ! file "$packaged_helper" | grep -q 'arm64'; then
@@ -107,6 +134,9 @@ packaged_info_plist="$packaged_app/Contents/Info.plist"
 packaged_version="$(/usr/libexec/PlistBuddy -c 'Print :LumiProductVersion' "$packaged_info_plist")"
 packaged_marketing_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$packaged_info_plist")"
 packaged_build_number="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$packaged_info_plist")"
+packaged_bundle_identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$packaged_info_plist")"
+packaged_channel="$(/usr/libexec/PlistBuddy -c 'Print :LumiReleaseChannel' "$packaged_info_plist")"
+packaged_data_directory="$(/usr/libexec/PlistBuddy -c 'Print :LumiDataDirectoryName' "$packaged_info_plist")"
 expected_marketing_version="${canonical_version%%-*}"
 
 if [[ "$packaged_version" != "$canonical_version" ]]; then
@@ -121,25 +151,38 @@ if [[ "$packaged_build_number" != "$build_number" ]]; then
   echo "ERROR: packaged build '$packaged_build_number' differs from '$build_number'." >&2
   exit 1
 fi
+if [[ "$packaged_bundle_identifier" != "$expected_bundle_identifier" ]]; then
+  echo "ERROR: packaged bundle '$packaged_bundle_identifier' differs from '$expected_bundle_identifier'." >&2
+  exit 1
+fi
+if [[ "$packaged_channel" != "$channel" ]]; then
+  echo "ERROR: packaged channel '$packaged_channel' differs from '$channel'." >&2
+  exit 1
+fi
+if [[ "$packaged_data_directory" != "$expected_data_directory" ]]; then
+  echo "ERROR: packaged data directory '$packaged_data_directory' differs from '$expected_data_directory'." >&2
+  exit 1
+fi
 
 ln -s /Applications "$staging_directory/Applications"
 cp "$repository_root/docs/release/unsigned-macos-installation.txt" \
-  "$staging_directory/README - Install Lumi.txt"
+  "$staging_directory/README - Install $app_name.txt"
 {
-  echo "Lumi $canonical_version"
+  echo "$app_name $canonical_version"
+  echo "Channel $channel"
   echo "Build $build_number"
   echo "Source revision $source_revision"
   echo "Architecture arm64"
   echo "Signing ad hoc (not Developer ID / notarized)"
 } > "$staging_directory/BUILD-INFO.txt"
 
-artifact_name="Lumi-$canonical_version-arm64.dmg"
+artifact_name="$artifact_prefix-$canonical_version-arm64.dmg"
 temporary_dmg="$temporary_root/$artifact_name"
 final_dmg="$release_directory/$artifact_name"
 checksum_file="$final_dmg.sha256"
 
 hdiutil create \
-  -volname "Lumi $canonical_version" \
+  -volname "$app_name $canonical_version" \
   -srcfolder "$staging_directory" \
   -format UDZO \
   -ov \
@@ -154,8 +197,8 @@ hdiutil attach "$temporary_dmg" \
   -mountpoint "$mount_directory" \
   -quiet
 mounted=1
-codesign --verify --deep --strict --verbose=2 "$mount_directory/Lumi.app"
-test -x "$mount_directory/Lumi.app/Contents/Helpers/lumi-engine"
+codesign --verify --deep --strict --verbose=2 "$mount_directory/$app_name.app"
+test -x "$mount_directory/$app_name.app/Contents/Helpers/lumi-engine"
 hdiutil detach "$mount_directory" -quiet
 mounted=0
 
@@ -169,6 +212,7 @@ echo "Local macOS package passed:"
 echo "  $final_dmg"
 echo "  $checksum_file"
 echo "Version: $canonical_version"
+echo "Channel: $channel"
 echo "Build: $build_number"
 echo "Revision: $source_revision"
 echo "Signing: ad hoc (not Developer ID / notarized)"

@@ -24,9 +24,9 @@ struct LiveDeckSurface<Details: View>: View {
     @State private var magnificationAnchorBeats: Double?
     @State private var scrubProgress: Double?
     @State private var masterEmphasis = 1.0
-    @AppStorage("nl.blancoservices.lumi.waveform.zoom-anchor")
+    @AppStorage(LumiPreferenceKey.waveformZoomAnchor)
     private var waveformZoomAnchorRaw = LumiWaveformZoomAnchor.mouse.rawValue
-    @AppStorage("nl.blancoservices.lumi.waveform.reverse-horizontal-scroll")
+    @AppStorage(LumiPreferenceKey.waveformReverseHorizontalScroll)
     private var reversesHorizontalScroll = false
 
     init(
