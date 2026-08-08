@@ -37,6 +37,8 @@ public struct LiveWorkspaceState: Equatable, Sendable {
     public let source: ProviderPresentation
     public let planner: ProviderPresentation
     public let output: ProviderPresentation
+    public let lightingMidi: ProviderPresentation
+    public let playbackClock: ProviderPresentation
     public let content: LiveWorkspaceContent?
     public let diagnostic: String?
     public let planInteraction: PlanInteractionPresentation
@@ -49,6 +51,8 @@ public struct LiveWorkspaceState: Equatable, Sendable {
         source: ProviderPresentation,
         planner: ProviderPresentation,
         output: ProviderPresentation,
+        lightingMidi: ProviderPresentation = .init(detail: "Status unavailable", condition: .empty),
+        playbackClock: ProviderPresentation = .init(detail: "Status unavailable", condition: .empty),
         content: LiveWorkspaceContent?,
         diagnostic: String? = nil,
         planInteraction: PlanInteractionPresentation = .idle,
@@ -60,6 +64,8 @@ public struct LiveWorkspaceState: Equatable, Sendable {
         self.source = source
         self.planner = planner
         self.output = output
+        self.lightingMidi = lightingMidi
+        self.playbackClock = playbackClock
         self.content = content
         self.diagnostic = diagnostic
         self.planInteraction = planInteraction
@@ -258,7 +264,10 @@ public enum LiveWorkspacePresenter {
     ) -> LiveWorkspaceState {
         let content = content(from: snapshot)
         let derivedCondition: LiveWorkspaceCondition
-        if snapshot.runtime.health != "ready" || snapshot.deckSource.status != "ready" {
+        if snapshot.runtime.health != "ready"
+            || snapshot.deckSource.status != "ready"
+            || snapshot.midiIntegration?.state != "ready"
+            || !["ready", "running"].contains(snapshot.midiClockIntegration?.state ?? "stopped") {
             derivedCondition = .degraded
         } else if snapshot.decks.isEmpty {
             derivedCondition = .empty
@@ -296,11 +305,37 @@ public enum LiveWorkspacePresenter {
                 detail: "\(snapshot.outputProvider.providerKind) · \(snapshot.outputProvider.recordCount) records",
                 condition: snapshot.outputProvider.status == "ready" ? healthyProviderCondition : .degraded
             ),
+            lightingMidi: ProviderPresentation(
+                detail: lightingMidiDetail(snapshot),
+                condition: snapshot.midiIntegration?.state == "ready"
+                    ? healthyProviderCondition : .degraded
+            ),
+            playbackClock: ProviderPresentation(
+                detail: playbackClockDetail(snapshot),
+                condition: ["ready", "running"].contains(
+                    snapshot.midiClockIntegration?.state ?? "stopped"
+                ) ? healthyProviderCondition : .degraded
+            ),
             content: content,
             diagnostic: diagnostic ?? defaultDiagnostic(for: derivedCondition),
             planInteraction: planInteraction,
             sessionInteraction: sessionInteraction
         )
+    }
+
+    private static func lightingMidiDetail(_ snapshot: EngineSnapshot) -> String {
+        guard let midi = snapshot.midiIntegration else { return "Status unavailable" }
+        if let error = midi.lastError { return "\(midi.sourceName) · \(error)" }
+        let bank = midi.activeBank.map { " · bank \($0) active" } ?? ""
+        let offset = String(format: "%+d ms", midi.timingOffsetMillis)
+        return "\(midi.sourceName) · auto-publish \(midi.autoPublishEnabled ? "on" : "off") · \(midi.sentPulseCount) pulses\(bank) · timing \(offset) · bank pre-roll \(midi.bankPreRollMillis) ms"
+    }
+
+    private static func playbackClockDetail(_ snapshot: EngineSnapshot) -> String {
+        guard let clock = snapshot.midiClockIntegration else { return "Status unavailable" }
+        if let error = clock.lastError { return "\(clock.sourceName) · \(error)" }
+        let bpm = clock.bpmMilli.map { String(format: " · %.3f BPM", Double($0) / 1_000) } ?? ""
+        return "\(clock.sourceName) · \(clock.state)\(bpm) · \(clock.sentTickCount) ticks"
     }
 
     private static func deckSourceDetail(_ snapshot: EngineSnapshot) -> String {
@@ -379,6 +414,14 @@ public enum LiveWorkspacePresenter {
             ),
             output: ProviderPresentation(
                 detail: "Waiting for an output provider",
+                condition: providerCondition == .error ? .empty : providerCondition
+            ),
+            lightingMidi: ProviderPresentation(
+                detail: "Waiting for the lighting MIDI source",
+                condition: providerCondition == .error ? .empty : providerCondition
+            ),
+            playbackClock: ProviderPresentation(
+                detail: "Waiting for the playback clock",
                 condition: providerCondition == .error ? .empty : providerCondition
             ),
             content: nil,

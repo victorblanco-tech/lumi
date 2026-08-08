@@ -19,7 +19,8 @@ public actor EngineProcessSupervisor {
 
     public func launch(
         engineExecutable: URL,
-        libraryDatabaseURL: URL? = nil
+        libraryDatabaseURL: URL? = nil,
+        automaticallyPublishesMidi: Bool = true
     ) async throws -> EngineEndpoint {
         await stop()
 
@@ -35,6 +36,7 @@ public actor EngineProcessSupervisor {
         process.standardError = FileHandle.nullDevice
         var environment = ProcessInfo.processInfo.environment
         environment["LUMI_SESSION_TOKEN"] = token
+        environment["LUMI_AUTO_PUBLISH_MIDI"] = automaticallyPublishesMidi ? "1" : "0"
         if let libraryDatabaseURL {
             environment["LUMI_LIBRARY_DATABASE_PATH"] = libraryDatabaseURL.path
         }

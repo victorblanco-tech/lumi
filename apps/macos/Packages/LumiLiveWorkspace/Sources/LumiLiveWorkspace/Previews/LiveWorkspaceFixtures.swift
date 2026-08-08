@@ -22,6 +22,26 @@ public enum LiveWorkspaceFixtures {
             displayName: "Local Playback",
             status: "ready"
         ),
+        midiIntegration: MidiOutputIntegrationSnapshot(
+            state: "ready",
+            sourceName: "Lumi Virtual MIDI",
+            protocolName: "MIDI 1.0 UMP",
+            sentPulseCount: 4,
+            lastEvent: "Triggered Bank 1 → AutoLoop 1",
+            lastError: nil,
+            activeBank: 1,
+            autoPublishEnabled: true,
+            timingOffsetMillis: 0
+        ),
+        midiClockIntegration: MidiClockIntegrationSnapshot(
+            state: "running",
+            sourceName: "Lumi Clock",
+            protocolName: "MIDI Clock · 24 PPQN",
+            bpmMilli: 124_000,
+            sentTickCount: 96,
+            lastEvent: "Clock running at 124.000 BPM",
+            lastError: nil
+        ),
         outputProvider: OutputProviderSnapshot(
             providerKind: "dryRun",
             status: "ready",
@@ -226,6 +246,8 @@ public enum LiveWorkspaceFixtures {
             operationState: readySnapshot.operationState,
             runtime: readySnapshot.runtime,
             deckSource: readySnapshot.deckSource,
+            midiIntegration: readySnapshot.midiIntegration,
+            midiClockIntegration: readySnapshot.midiClockIntegration,
             simulation: readySnapshot.simulation,
             outputProvider: readySnapshot.outputProvider,
             leaderDeckID: readySnapshot.leaderDeckID,
@@ -283,6 +305,8 @@ public enum LiveWorkspaceFixtures {
             operationState: readySnapshot.operationState,
             runtime: readySnapshot.runtime,
             deckSource: readySnapshot.deckSource,
+            midiIntegration: readySnapshot.midiIntegration,
+            midiClockIntegration: readySnapshot.midiClockIntegration,
             simulation: readySnapshot.simulation,
             outputProvider: readySnapshot.outputProvider,
             leaderDeckID: readySnapshot.leaderDeckID,
@@ -324,6 +348,8 @@ public enum LiveWorkspaceFixtures {
             operationState: readySnapshot.operationState,
             runtime: readySnapshot.runtime,
             deckSource: readySnapshot.deckSource,
+            midiIntegration: readySnapshot.midiIntegration,
+            midiClockIntegration: readySnapshot.midiClockIntegration,
             simulation: readySnapshot.simulation,
             outputProvider: readySnapshot.outputProvider,
             leaderDeckID: readySnapshot.leaderDeckID,

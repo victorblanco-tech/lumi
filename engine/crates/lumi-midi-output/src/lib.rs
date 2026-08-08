@@ -491,6 +491,8 @@ pub struct MidiSourceStatus {
     pub source_name: &'static str,
     pub sent_pulse_count: u64,
     pub last_event: Option<String>,
+    pub last_error: Option<String>,
+    pub active_bank: Option<u8>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -530,6 +532,8 @@ where
     state: MidiSourceState,
     sent_pulse_count: u64,
     last_event: Option<String>,
+    last_error: Option<String>,
+    active_bank: Option<u8>,
 }
 
 impl<P> MidiOutputController<P>
@@ -542,14 +546,21 @@ where
             state: MidiSourceState::Stopped,
             sent_pulse_count: 0,
             last_event: None,
+            last_error: None,
+            active_bank: None,
         }
     }
 
     pub fn publish(&mut self) -> Result<(), MidiOutputError<P::Error>> {
-        self.provider
-            .publish(MIDI_SOURCE_NAME)
-            .map_err(MidiOutputError::Provider)?;
+        if let Err(error) = self.provider.publish(MIDI_SOURCE_NAME) {
+            self.state = MidiSourceState::Stopped;
+            self.active_bank = None;
+            self.last_error = Some(error.to_string());
+            return Err(MidiOutputError::Provider(error));
+        }
         self.state = MidiSourceState::Ready;
+        self.active_bank = None;
+        self.last_error = None;
         self.last_event = Some("Virtual MIDI source published; no MIDI sent".to_owned());
         Ok(())
     }
@@ -557,6 +568,7 @@ where
     pub fn stop(&mut self) {
         self.provider.stop();
         self.state = MidiSourceState::Stopped;
+        self.active_bank = None;
         self.last_event = Some("Virtual MIDI source stopped".to_owned());
     }
 
@@ -602,7 +614,11 @@ where
         let bank = MidiAddress::bank(bank_number).ok_or(MidiOutputError::InvalidAddress)?;
         let autoloop =
             MidiAddress::autoloop(autoloop_number).ok_or(MidiOutputError::InvalidAddress)?;
+        // Reassert the bank for every phrase. A physical controller can change
+        // SoundSwitch's active bank between Lumi cues, so cached selection is
+        // not authoritative. The engine schedules this pulse before the phrase.
         self.send_address_pulse(bank)?;
+        self.active_bank = Some(bank_number);
         self.last_event = Some(format!(
             "Bank {bank_number} selected · waiting {} ms for SoundSwitch",
             BANK_SETTLE_DELAY.as_millis()
@@ -610,7 +626,7 @@ where
         wait(BANK_SETTLE_DELAY);
         self.send_address_pulse(autoloop)?;
         self.last_event = Some(format!(
-            "Triggered Bank {bank_number} → AutoLoop {autoloop_number} · Ch {MIDI_CHANNEL} · Notes {} → {} · {} ms gap",
+            "Triggered Bank {bank_number} → AutoLoop {autoloop_number} · Ch {MIDI_CHANNEL} · Notes {} → {} · {} ms bank gap",
             bank.note(),
             autoloop.note(),
             BANK_SETTLE_DELAY.as_millis()
@@ -633,10 +649,16 @@ where
             .sent_pulse_count
             .checked_add(1)
             .ok_or(MidiOutputError::PulseCounterOverflow)?;
-        self.provider
-            .send(&[note_on, note_off])
-            .map_err(MidiOutputError::Provider)?;
+        if let Err(error) = self.provider.send(&[note_on, note_off]) {
+            self.provider.stop();
+            self.state = MidiSourceState::Stopped;
+            self.active_bank = None;
+            self.last_error = Some(error.to_string());
+            self.last_event = Some("Virtual MIDI source failed closed".to_owned());
+            return Err(MidiOutputError::Provider(error));
+        }
         self.sent_pulse_count = next_count;
+        self.last_error = None;
         Ok(())
     }
 
@@ -646,6 +668,8 @@ where
             source_name: MIDI_SOURCE_NAME,
             sent_pulse_count: self.sent_pulse_count,
             last_event: self.last_event.clone(),
+            last_error: self.last_error.clone(),
+            active_bank: self.active_bank,
         }
     }
 }
@@ -761,6 +785,46 @@ mod tests {
                 .as_deref()
                 .is_some_and(|event| event.contains("Bank 1 → AutoLoop 1"))
         );
+    }
+
+    #[test]
+    fn runtime_trigger_reasserts_the_bank_for_parallel_manual_control() {
+        let mut controller = MidiOutputController::new(RecordingProvider::default());
+        assert!(controller.publish().is_ok());
+        assert!(controller.trigger_autoloop_with_wait(2, 3, |_| {}).is_ok());
+        let mut observed_delay = None;
+
+        assert!(
+            controller
+                .trigger_autoloop_with_wait(2, 4, |delay| observed_delay = Some(delay))
+                .is_ok()
+        );
+
+        assert_eq!(observed_delay, Some(BANK_SETTLE_DELAY));
+        assert_eq!(controller.provider.messages.len(), 8);
+        assert_eq!(controller.provider.messages[4].bytes(), [0x9f, 61, 100]);
+        assert_eq!(controller.provider.messages[6].bytes(), [0x9f, 67, 100]);
+        assert_eq!(controller.status().sent_pulse_count, 4);
+        assert_eq!(controller.status().active_bank, Some(2));
+    }
+
+    #[test]
+    fn runtime_trigger_selects_a_new_bank_after_the_bank_changes() {
+        let mut controller = MidiOutputController::new(RecordingProvider::default());
+        assert!(controller.publish().is_ok());
+        assert!(controller.trigger_autoloop_with_wait(1, 1, |_| {}).is_ok());
+        let mut observed_delay = None;
+
+        assert!(
+            controller
+                .trigger_autoloop_with_wait(3, 1, |delay| observed_delay = Some(delay))
+                .is_ok()
+        );
+
+        assert_eq!(observed_delay, Some(BANK_SETTLE_DELAY));
+        assert_eq!(controller.provider.messages.len(), 8);
+        assert_eq!(controller.provider.messages[4].bytes(), [0x9f, 62, 100]);
+        assert_eq!(controller.status().active_bank, Some(3));
     }
 
     #[test]

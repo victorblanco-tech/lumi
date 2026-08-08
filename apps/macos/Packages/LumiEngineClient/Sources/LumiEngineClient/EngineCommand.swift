@@ -325,6 +325,7 @@ public enum EngineCommand: Equatable, Sendable {
     )
     case publishMidiSource
     case stopMidiSource
+    case setOutputTimingOffset(millis: Int16)
     case sendMidiLearnPulse
     case sendMidiAddressLearnPulse(targetKind: String, targetNumber: UInt16)
     case triggerMidiAutoloop(bankNumber: UInt16, autoloopNumber: UInt16)
@@ -485,6 +486,11 @@ public enum EngineCommand: Equatable, Sendable {
             return ["kind": .string("publishMidiSource")]
         case .stopMidiSource:
             return ["kind": .string("stopMidiSource")]
+        case let .setOutputTimingOffset(millis):
+            return [
+                "kind": .string("setOutputTimingOffset"),
+                "millis": .number(Double(millis))
+            ]
         case .sendMidiLearnPulse:
             return ["kind": .string("sendMidiLearnPulse")]
         case let .sendMidiAddressLearnPulse(targetKind, targetNumber):

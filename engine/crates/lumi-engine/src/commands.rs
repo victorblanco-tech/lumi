@@ -103,6 +103,9 @@ pub enum SessionCommand {
     },
     PublishMidiSource,
     StopMidiSource,
+    SetOutputTimingOffset {
+        millis: i16,
+    },
     SendMidiLearnPulse,
     SendMidiAddressLearnPulse {
         address: MidiAddress,
@@ -213,6 +216,7 @@ impl SessionCommand {
             | Self::MutateAutoloopCatalog { .. }
             | Self::PublishMidiSource
             | Self::StopMidiSource
+            | Self::SetOutputTimingOffset { .. }
             | Self::SendMidiLearnPulse
             | Self::SendMidiAddressLearnPulse { .. }
             | Self::TriggerMidiAutoloop { .. }
@@ -333,6 +337,16 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
         }),
         "publishMidiSource" => Ok(SessionCommand::PublishMidiSource),
         "stopMidiSource" => Ok(SessionCommand::StopMidiSource),
+        "setOutputTimingOffset" => {
+            let millis = signed(&envelope.payload, "millis")?;
+            if !(-250..=250).contains(&millis) {
+                return Err(CommandDecodeError::InvalidField("millis"));
+            }
+            Ok(SessionCommand::SetOutputTimingOffset {
+                millis: i16::try_from(millis)
+                    .map_err(|_| CommandDecodeError::InvalidField("millis"))?,
+            })
+        }
         "sendMidiLearnPulse" => Ok(SessionCommand::SendMidiLearnPulse),
         "sendMidiAddressLearnPulse" => Ok(SessionCommand::SendMidiAddressLearnPulse {
             address: midi_address(&envelope.payload)?,
@@ -759,6 +773,16 @@ fn unsigned(
         .ok_or(CommandDecodeError::InvalidField(field))
 }
 
+fn signed(
+    payload: &serde_json::Map<String, Value>,
+    field: &'static str,
+) -> Result<i64, CommandDecodeError> {
+    payload
+        .get(field)
+        .and_then(Value::as_i64)
+        .ok_or(CommandDecodeError::InvalidField(field))
+}
+
 fn positive_unsigned(
     payload: &serde_json::Map<String, Value>,
     field: &'static str,
@@ -863,6 +887,27 @@ impl Error for CommandDecodeError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn output_timing_offset_accepts_only_the_safe_signed_range() {
+        let valid = command_envelope(serde_json::json!({
+            "kind": "setOutputTimingOffset",
+            "millis": -125,
+        }));
+        assert_eq!(
+            decode_command(&valid),
+            Ok(SessionCommand::SetOutputTimingOffset { millis: -125 })
+        );
+
+        let invalid = command_envelope(serde_json::json!({
+            "kind": "setOutputTimingOffset",
+            "millis": 251,
+        }));
+        assert_eq!(
+            decode_command(&invalid),
+            Err(CommandDecodeError::InvalidField("millis"))
+        );
+    }
 
     #[test]
     fn rekordbox_preview_decodes_exact_bounded_selection() {

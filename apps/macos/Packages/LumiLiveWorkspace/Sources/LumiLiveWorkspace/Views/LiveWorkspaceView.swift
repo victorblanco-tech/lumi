@@ -18,9 +18,11 @@ public struct LiveWorkspaceView: View {
     private let localPlaybackFeedbackIsError: Bool
     @Binding private var appearance: AppearancePreference
     @Binding private var keyNotation: KeyNotationPreference
+    @Binding private var lightingTimingOffsetMillis: Int
     @State private var selectedPhrase: UInt64 = 0
     @State private var selectedLivePhrase: UInt64?
     @State private var showsTechnicalStatus = false
+    @State private var showsTimingAdjustment = false
 
     private let copy = LiveWorkspaceCopy()
 
@@ -29,6 +31,7 @@ public struct LiveWorkspaceView: View {
         productVersion: String,
         appearance: Binding<AppearancePreference>,
         keyNotation: Binding<KeyNotationPreference>,
+        lightingTimingOffsetMillis: Binding<Int> = .constant(0),
         allowsScrolling: Bool = true,
         showsNavigation: Bool = true,
         localPlaybackVisualClocks: [UInt64: LocalPlaybackVisualClockSnapshot] = [:],
@@ -54,6 +57,7 @@ public struct LiveWorkspaceView: View {
         self.localPlaybackBrowser = localPlaybackBrowser
         _appearance = appearance
         _keyNotation = keyNotation
+        _lightingTimingOffsetMillis = lightingTimingOffsetMillis
     }
 
     public var body: some View {
@@ -216,6 +220,7 @@ public struct LiveWorkspaceView: View {
             }
             Spacer()
             deckSourceSelector
+            lightingTimingButton
             technicalStatusButton
             operationControls
             if allowsScrolling {
@@ -226,6 +231,57 @@ public struct LiveWorkspaceView: View {
         }
         .fixedSize(horizontal: false, vertical: true)
         .layoutPriority(2)
+    }
+
+    private var lightingTimingButton: some View {
+        Button {
+            showsTimingAdjustment.toggle()
+        } label: {
+            Label(
+                String(format: "%+d ms", lightingTimingOffsetMillis),
+                systemImage: "metronome"
+            )
+            .font(LumiTypography.metadata.weight(.semibold))
+            .monospacedDigit()
+            .padding(.horizontal, LumiSpacing.small)
+            .frame(height: LumiControlMetric.standardHeight)
+        }
+        .buttonStyle(.bordered)
+        .help("Lighting output timing")
+        .popover(isPresented: $showsTimingAdjustment, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: LumiSpacing.large) {
+                VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+                    Text("Lighting timing offset")
+                        .font(LumiTypography.sectionTitle)
+                    Text("Positive sends AutoLoops early; negative sends them late.")
+                        .font(LumiTypography.metadata)
+                        .foregroundStyle(LumiColor.textSecondary)
+                }
+                HStack(spacing: LumiSpacing.medium) {
+                    Button {
+                        lightingTimingOffsetMillis = max(-250, lightingTimingOffsetMillis - 5)
+                    } label: {
+                        Image(systemName: "minus")
+                    }
+                    Text(String(format: "%+d ms", lightingTimingOffsetMillis))
+                        .font(LumiTypography.technical.weight(.semibold))
+                        .monospacedDigit()
+                        .frame(minWidth: 72)
+                    Button {
+                        lightingTimingOffsetMillis = min(250, lightingTimingOffsetMillis + 5)
+                    } label: {
+                        Image(systemName: "plus")
+                    }
+                    Button("Reset") {
+                        lightingTimingOffsetMillis = 0
+                    }
+                    .buttonStyle(.borderless)
+                }
+            }
+            .padding(LumiSpacing.large)
+            .frame(width: 330)
+        }
+        .accessibilityIdentifier("lumi.live.lightingTimingOffset")
     }
 
     private var technicalStatusButton: some View {
@@ -277,6 +333,16 @@ public struct LiveWorkspaceView: View {
                 copy.outputProvider,
                 systemImage: "lightbulb.2",
                 presentation: state.output
+            )
+            providerRow(
+                "Lighting MIDI",
+                systemImage: "pianokeys",
+                presentation: state.lightingMidi
+            )
+            providerRow(
+                "Playback Clock",
+                systemImage: "metronome",
+                presentation: state.playbackClock
             )
             Divider()
             VStack(alignment: .leading, spacing: LumiSpacing.small) {

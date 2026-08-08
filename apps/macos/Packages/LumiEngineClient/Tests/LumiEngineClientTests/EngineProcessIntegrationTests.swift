@@ -64,9 +64,9 @@ func launchesRealEngine() async throws {
         #expect(autoloopCatalogRevision(snapshot) == 1)
         #expect(autoloopThemeNames(snapshot).count == 4)
         #expect(autoloopVariantCount(snapshot, roleID: "synth") == 4)
-        #expect(midiIntegrationState(snapshot) == "stopped")
+        #expect(midiIntegrationState(snapshot) == "ready")
         #expect(midiIntegrationPulseCount(snapshot) == 0)
-        #expect(midiClockIntegrationState(snapshot) == "stopped")
+        #expect(midiClockIntegrationState(snapshot) == "ready")
 
         snapshot = try await supervisor.send(
             .publishMidiSource,
@@ -97,7 +97,7 @@ func launchesRealEngine() async throws {
         )
         #expect(midiIntegrationPulseCount(snapshot) == 4)
         #expect(midiIntegrationLastEvent(snapshot)?.contains("Bank 1 → AutoLoop 1") == true)
-        #expect(midiIntegrationLastEvent(snapshot)?.contains("50 ms gap") == true)
+        #expect(midiIntegrationLastEvent(snapshot)?.contains("50 ms bank gap") == true)
 
         let renamedRole = try await supervisor.send(
             .mutatePhraseRoleCatalog(
@@ -428,7 +428,7 @@ func launchesRealEngine() async throws {
         let command = EngineCommand.selectTheme(context: context, themeID: 1)
         let revised = try await supervisor.send(command, messageID: "swift-theme-1")
         #expect(planRevision(revised) == 2)
-        #expect(planThemeName(revised) == "Electric Bloom")
+        #expect(planThemeName(revised) == "Electric Garden")
         #expect(planThemeReason(revised) == "planInstanceUserChoice")
         #expect(planMatchedColorRGB(revised) == nil)
         #expect(planCueThemeIDs(revised) == [1])
@@ -532,7 +532,8 @@ func loadsLibraryTrackIntoLocalPlayback() async throws {
     do {
         let endpoint = try await supervisor.launch(
             engineExecutable: URL(fileURLWithPath: executablePath),
-            libraryDatabaseURL: databaseURL
+            libraryDatabaseURL: databaseURL,
+            automaticallyPublishesMidi: false
         )
         let initial = try await supervisor.connect(to: endpoint)
         let liveLoaded = try await supervisor.send(
@@ -631,7 +632,8 @@ func editsFutureLivePhraseAndTracksPlaybackState() async throws {
     do {
         let endpoint = try await supervisor.launch(
             engineExecutable: URL(fileURLWithPath: executablePath),
-            libraryDatabaseURL: databaseURL
+            libraryDatabaseURL: databaseURL,
+            automaticallyPublishesMidi: false
         )
         let connected = try await supervisor.connect(to: endpoint)
         let initial = try await supervisor.send(

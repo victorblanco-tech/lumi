@@ -24,6 +24,28 @@
       "displayName": "Local Playback",
       "status": "ready"
     },
+    "midiIntegration": {
+      "state": "ready",
+      "sourceName": "Lumi Virtual MIDI",
+      "protocol": "MIDI 1.0 UMP",
+      "sentPulseCount": 4,
+      "lastEvent": "Triggered Bank 1 → AutoLoop 1",
+      "lastError": null,
+      "activeBank": 1,
+      "autoPublishEnabled": true,
+      "timingOffsetMillis": 0,
+      "bankPreRollMillis": 50
+    },
+    "midiClockIntegration": {
+      "state": "running",
+      "sourceName": "Lumi Clock",
+      "protocol": "MIDI Clock · 24 PPQN",
+      "bpmMilli": 124000,
+      "sentTickCount": 96,
+      "sentTransportCount": 1,
+      "lastEvent": "Clock running at 124.000 BPM",
+      "lastError": null
+    },
     "leaderDeckId": 1,
     "decks": [
       {

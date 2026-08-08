@@ -27,10 +27,12 @@ Lumi publishes two provider-owned CoreMIDI sources:
   explicit learn/test pulses;
 - `Lumi Clock` carries only MIDI Clock and transport timing for Local Playback.
 
-Both sources are lifecycle-managed by the lighting-output integration. Publish
-must establish both endpoints; a partial publish is rolled back. Stop removes
-both. Each source has independent status and error diagnostics, while the user
-performs one coherent publish/stop operation.
+Both sources are lifecycle-managed by the lighting-output integration and have
+independent status and error diagnostics. ADR-0023 supersedes the original
+atomic rollback rule after physical testing proved that clock loss must never
+remove the still-healthy lighting-command source. Product startup now publishes
+best-effort automatically; explicit Publish/Stop remains available for testing
+and recovery.
 
 The timing scheduler runs in the Rust output layer on a dedicated thread. It
 derives tempo, Song Position and phase from the authoritative Local Playback
@@ -50,7 +52,8 @@ therefore a Local Playback rehearsal clock, not a competing live-deck master.
   `Lumi Virtual MIDI`; MIDI Sync In uses `Lumi Clock`.
 - Clock loss cannot be mistaken for a failed AutoLoop note, and the two routes
   can expose separate diagnostics and counters.
-- Publishing is stricter because both local endpoints must succeed atomically.
+- A partial failure degrades only the affected route and is visible in Tech
+  status without stopping audio, planning or the other MIDI route.
 - A future generic output profile may choose different adapters, but it must
   preserve the semantic separation between discrete commands and transport
   timing.

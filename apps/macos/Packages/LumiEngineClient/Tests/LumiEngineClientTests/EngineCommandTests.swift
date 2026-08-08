@@ -4,6 +4,14 @@ import Testing
 
 @Suite("Engine command encoding")
 struct EngineCommandTests {
+    @Test("Lighting timing offset preserves signed milliseconds")
+    func lightingTimingOffsetPayload() {
+        let payload = EngineCommand.setOutputTimingOffset(millis: -35).payload()
+
+        #expect(payload["kind"] == .string("setOutputTimingOffset"))
+        #expect(payload["millis"] == .number(-35))
+    }
+
     @Test("Rekordbox preview carries the exact selected playlist paths")
     func rekordboxPreviewPayload() {
         let payload = EngineCommand.previewRekordboxXMLSync(

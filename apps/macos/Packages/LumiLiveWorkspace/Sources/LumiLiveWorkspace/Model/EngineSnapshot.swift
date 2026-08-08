@@ -10,6 +10,8 @@ public struct EngineSnapshot: Equatable, Sendable {
     public let runtime: RuntimeSnapshot
     public let deckSource: DeckSourceSnapshot
     public let deckInputIntegration: DeckInputIntegrationSnapshot?
+    public let midiIntegration: MidiOutputIntegrationSnapshot?
+    public let midiClockIntegration: MidiClockIntegrationSnapshot?
     public let simulation: SimulationSnapshot?
     public let outputProvider: OutputProviderSnapshot
     public let leaderDeckID: UInt64?
@@ -29,6 +31,8 @@ public struct EngineSnapshot: Equatable, Sendable {
         runtime: RuntimeSnapshot,
         deckSource: DeckSourceSnapshot,
         deckInputIntegration: DeckInputIntegrationSnapshot? = nil,
+        midiIntegration: MidiOutputIntegrationSnapshot? = nil,
+        midiClockIntegration: MidiClockIntegrationSnapshot? = nil,
         simulation: SimulationSnapshot? = nil,
         outputProvider: OutputProviderSnapshot = .init(
             providerKind: "dryRun",
@@ -51,6 +55,8 @@ public struct EngineSnapshot: Equatable, Sendable {
         self.runtime = runtime
         self.deckSource = deckSource
         self.deckInputIntegration = deckInputIntegration
+        self.midiIntegration = midiIntegration
+        self.midiClockIntegration = midiClockIntegration
         self.simulation = simulation
         self.outputProvider = outputProvider
         self.leaderDeckID = leaderDeckID
@@ -78,6 +84,8 @@ public struct EngineSnapshot: Equatable, Sendable {
             runtime: runtime,
             deckSource: deckSource,
             deckInputIntegration: deckInputIntegration,
+            midiIntegration: midiIntegration,
+            midiClockIntegration: midiClockIntegration,
             simulation: simulation,
             outputProvider: outputProvider,
             leaderDeckID: deckID,
@@ -87,6 +95,71 @@ public struct EngineSnapshot: Equatable, Sendable {
             planningOptions: planningOptions,
             timeline: timeline
         )
+    }
+}
+
+public struct MidiOutputIntegrationSnapshot: Equatable, Sendable {
+    public let state: String
+    public let sourceName: String
+    public let protocolName: String
+    public let sentPulseCount: UInt64
+    public let lastEvent: String?
+    public let lastError: String?
+    public let activeBank: UInt64?
+    public let autoPublishEnabled: Bool
+    public let timingOffsetMillis: Int
+    public let bankPreRollMillis: UInt64
+
+    public init(
+        state: String,
+        sourceName: String,
+        protocolName: String,
+        sentPulseCount: UInt64,
+        lastEvent: String?,
+        lastError: String?,
+        activeBank: UInt64?,
+        autoPublishEnabled: Bool,
+        timingOffsetMillis: Int,
+        bankPreRollMillis: UInt64 = 50
+    ) {
+        self.state = state
+        self.sourceName = sourceName
+        self.protocolName = protocolName
+        self.sentPulseCount = sentPulseCount
+        self.lastEvent = lastEvent
+        self.lastError = lastError
+        self.activeBank = activeBank
+        self.autoPublishEnabled = autoPublishEnabled
+        self.timingOffsetMillis = timingOffsetMillis
+        self.bankPreRollMillis = bankPreRollMillis
+    }
+}
+
+public struct MidiClockIntegrationSnapshot: Equatable, Sendable {
+    public let state: String
+    public let sourceName: String
+    public let protocolName: String
+    public let bpmMilli: UInt64?
+    public let sentTickCount: UInt64
+    public let lastEvent: String?
+    public let lastError: String?
+
+    public init(
+        state: String,
+        sourceName: String,
+        protocolName: String,
+        bpmMilli: UInt64?,
+        sentTickCount: UInt64,
+        lastEvent: String?,
+        lastError: String?
+    ) {
+        self.state = state
+        self.sourceName = sourceName
+        self.protocolName = protocolName
+        self.bpmMilli = bpmMilli
+        self.sentTickCount = sentTickCount
+        self.lastEvent = lastEvent
+        self.lastError = lastError
     }
 }
 

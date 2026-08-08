@@ -27,7 +27,8 @@ use lumi_midi_coremidi::{
     CoreMidiDestinationProvider, CoreMidiSourceProvider, MidiDestinationState,
 };
 use lumi_midi_output::{
-    MidiClockController, MidiClockState, MidiClockSync, MidiOutputController, MidiSourceState,
+    BANK_SETTLE_DELAY, MidiClockController, MidiClockState, MidiClockSync, MidiOutputController,
+    MidiSourceState,
 };
 use lumi_output_dry_run::{DryRunLightingOutputProvider, DryRunOutputError};
 use lumi_planner::{
@@ -59,6 +60,7 @@ use crate::library::{LibraryPlanContext, LibraryWorker, LibraryWorkerError, Reso
 const SESSION_TOKEN_ENVIRONMENT_KEY: &str = "LUMI_SESSION_TOKEN";
 #[cfg(not(test))]
 const DECK_INPUT_NAME_ENVIRONMENT_KEY: &str = "LUMI_DECK_INPUT_DESTINATION_NAME";
+const AUTO_PUBLISH_MIDI_ENVIRONMENT_KEY: &str = "LUMI_AUTO_PUBLISH_MIDI";
 const MINIMUM_SESSION_TOKEN_BYTES: usize = 32;
 const MAXIMUM_SESSION_TOKEN_BYTES: usize = 256;
 const MAXIMUM_AUTHENTICATION_BYTES: usize = 512;
@@ -299,6 +301,10 @@ fn initialized_runtime_for_mode(
     let mut local_deck_source = LocalPlaybackDeckSourceProvider::new(clock.now())?;
     let mut connected_deck_source = BltMidiDeckSourceProvider::new(clock.now())?;
     let mut output_worker = OutputWorker::new();
+    #[cfg(not(test))]
+    if env::var(AUTO_PUBLISH_MIDI_ENVIRONMENT_KEY).as_deref() != Ok("0") {
+        let _ = output_worker.enable_midi_auto_publish();
+    }
     #[cfg(not(test))]
     let mut deck_input = CoreMidiDestinationProvider::new();
     #[cfg(test)]
@@ -621,6 +627,9 @@ struct OutputWorker {
     midi_output: MidiOutputController<CoreMidiSourceProvider>,
     midi_clock: MidiClockController<CoreMidiSourceProvider>,
     effect_sequence: u64,
+    midi_auto_publish_enabled: bool,
+    timing_offset_millis: i16,
+    last_midi_publish_attempt: Option<Instant>,
 }
 
 impl OutputWorker {
@@ -630,6 +639,9 @@ impl OutputWorker {
             midi_output: MidiOutputController::new(CoreMidiSourceProvider::new()),
             midi_clock: MidiClockController::new(CoreMidiSourceProvider::new),
             effect_sequence: 0,
+            midi_auto_publish_enabled: false,
+            timing_offset_millis: 0,
+            last_midi_publish_attempt: None,
         }
     }
 
@@ -647,13 +659,17 @@ impl OutputWorker {
                     let is_current = execution_context_is_current(runtime.state(), &request);
                     let result = if is_current {
                         let result = self.provider.execute(&request, request.scheduled_at())?;
-                        if self.midi_output.status().state == MidiSourceState::Ready
-                            && let Some((bank_number, autoloop_number)) =
-                                automatic_midi_target(request.action())?
+                        if let Some((bank_number, autoloop_number)) =
+                            automatic_midi_target(request.action())?
                         {
-                            self.midi_output
-                                .trigger_autoloop(bank_number, autoloop_number)
-                                .map_err(|error| EngineError::Midi(error.to_string()))?;
+                            let _ = self.ensure_lighting_midi();
+                            if self.midi_output.status().state == MidiSourceState::Ready {
+                                // Hardware output fails closed and reports through Tech status;
+                                // it must never stall the authoritative transport/runtime lane.
+                                let _ = self
+                                    .midi_output
+                                    .trigger_autoloop(bank_number, autoloop_number);
+                            }
                         }
                         result
                     } else {
@@ -694,28 +710,70 @@ impl OutputWorker {
         self.midi_clock.status()
     }
 
-    fn fail_closed_after_clock_error(&mut self) {
-        if self.midi_clock.status().last_error.is_some() {
-            self.midi_output.stop();
+    fn midi_auto_publish_enabled(&self) -> bool {
+        self.midi_auto_publish_enabled
+    }
+
+    fn timing_offset_millis(&self) -> i16 {
+        self.timing_offset_millis
+    }
+
+    fn set_timing_offset_millis(&mut self, millis: i16) {
+        self.timing_offset_millis = millis.clamp(-250, 250);
+    }
+
+    #[cfg(not(test))]
+    fn enable_midi_auto_publish(&mut self) -> Result<(), EngineError> {
+        self.midi_auto_publish_enabled = true;
+        self.last_midi_publish_attempt = Some(Instant::now());
+        self.publish_midi()
+    }
+
+    fn ensure_lighting_midi(&mut self) -> Result<(), EngineError> {
+        if self.midi_auto_publish_enabled
+            && self.midi_output.status().state != MidiSourceState::Ready
+        {
+            let now = Instant::now();
+            if self.last_midi_publish_attempt.is_some_and(|attempt| {
+                now.saturating_duration_since(attempt) < Duration::from_secs(1)
+            }) {
+                return Ok(());
+            }
+            self.last_midi_publish_attempt = Some(now);
+            self.midi_output
+                .publish()
+                .map_err(|error| EngineError::Midi(error.to_string()))?;
         }
+        Ok(())
     }
 
     fn publish_midi(&mut self) -> Result<(), EngineError> {
+        self.midi_auto_publish_enabled = true;
+        self.last_midi_publish_attempt = Some(Instant::now());
         self.midi_output
             .publish()
             .map_err(|error| EngineError::Midi(error.to_string()))?;
         if let Err(error) = self.midi_clock.publish() {
-            self.midi_output.stop();
             return Err(EngineError::Midi(error.to_string()));
         }
         Ok(())
     }
 
     fn stop_midi(&mut self) -> Result<(), EngineError> {
+        self.midi_auto_publish_enabled = false;
+        self.last_midi_publish_attempt = None;
         self.midi_output.stop();
         self.midi_clock
             .stop()
             .map_err(|error| EngineError::Midi(error.to_string()))
+    }
+}
+
+fn position_with_timing_offset(position_millis: u64, offset_millis: i32) -> u64 {
+    if offset_millis >= 0 {
+        position_millis.saturating_add(u64::from(offset_millis.unsigned_abs()))
+    } else {
+        position_millis.saturating_sub(u64::from(offset_millis.unsigned_abs()))
     }
 }
 
@@ -1121,6 +1179,10 @@ fn apply_command(
                 .map_err(|error| CommandApplicationError::Midi(error.to_string()))?;
             return Ok(());
         }
+        SessionCommand::SetOutputTimingOffset { millis } => {
+            runtime.output_worker.set_timing_offset_millis(millis);
+            return Ok(());
+        }
         SessionCommand::SendMidiLearnPulse => {
             runtime
                 .output_worker
@@ -1199,12 +1261,21 @@ fn apply_command(
             if runtime.deck_source_mode != DeckSourceMode::LocalPlayback {
                 return Err(CommandApplicationError::WrongDeckSourceMode);
             }
-            runtime.output_worker.fail_closed_after_clock_error();
+            let _ = runtime.output_worker.ensure_lighting_midi();
+            let output_position_millis = if playing {
+                position_with_timing_offset(
+                    position_millis,
+                    i32::from(runtime.output_worker.timing_offset_millis())
+                        + i32::try_from(BANK_SETTLE_DELAY.as_millis()).unwrap_or(50),
+                )
+            } else {
+                position_millis
+            };
             let beat = runtime
                 .planning_worker
                 .library_context(track_load_id)
                 .ok_or(CommandApplicationError::TrackLoadMismatch)?
-                .beat_at_millis(position_millis);
+                .beat_at_millis(output_position_millis);
             let at = runtime
                 .clock
                 .advance(1)
@@ -1410,6 +1481,7 @@ fn apply_command(
         | SessionCommand::MutateAutoloopCatalog { .. }
         | SessionCommand::PublishMidiSource
         | SessionCommand::StopMidiSource
+        | SessionCommand::SetOutputTimingOffset { .. }
         | SessionCommand::SendMidiLearnPulse
         | SessionCommand::SendMidiAddressLearnPulse { .. }
         | SessionCommand::TriggerMidiAutoloop { .. }
@@ -1954,6 +2026,11 @@ fn snapshot_envelope(
             "protocol": "MIDI 1.0 UMP",
             "sentPulseCount": midi_output.sent_pulse_count,
             "lastEvent": midi_output.last_event,
+            "lastError": midi_output.last_error,
+            "activeBank": midi_output.active_bank,
+            "autoPublishEnabled": runtime.output_worker.midi_auto_publish_enabled(),
+            "timingOffsetMillis": runtime.output_worker.timing_offset_millis(),
+            "bankPreRollMillis": BANK_SETTLE_DELAY.as_millis(),
         }),
     );
     let midi_clock = runtime.output_worker.midi_clock_status();
@@ -2629,6 +2706,14 @@ mod tests {
     use lumi_library::AutoloopTheme;
     use lumi_output_dry_run::canonical_output_transcript;
     use lumi_simulator::{SimulationControl, SimulationSpeed};
+
+    #[test]
+    fn signed_output_timing_offset_advances_or_delays_without_underflow() {
+        assert_eq!(position_with_timing_offset(1_000, 35), 1_035);
+        assert_eq!(position_with_timing_offset(1_000, -35), 965);
+        assert_eq!(position_with_timing_offset(10, -35), 0);
+        assert_eq!(position_with_timing_offset(u64::MAX - 5, 35), u64::MAX);
+    }
 
     #[test]
     fn next_plan_is_ready_before_the_initial_leader_event() {

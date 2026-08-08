@@ -1,3 +1,4 @@
+import Foundation
 import LumiDesignSystem
 import SwiftUI
 
@@ -13,6 +14,7 @@ public struct PhraseRoleSettingsView: View {
     private let settings: PhraseRoleSettingsState?
     @Binding private var appearance: AppearancePreference
     @Binding private var keyNotation: KeyNotationPreference
+    @Binding private var lightingTimingOffsetMillis: Int
     private let feedback: String?
     private let rendersInteractiveControls: Bool
     private let onMutation: @Sendable (PhraseRoleMutationRequest) -> Void
@@ -27,6 +29,7 @@ public struct PhraseRoleSettingsView: View {
         settings: PhraseRoleSettingsState?,
         appearance: Binding<AppearancePreference>,
         keyNotation: Binding<KeyNotationPreference>,
+        lightingTimingOffsetMillis: Binding<Int> = .constant(0),
         initialSection: PhraseRoleSettingsSection = .phraseModel,
         feedback: String? = nil,
         rendersInteractiveControls: Bool = true,
@@ -35,6 +38,7 @@ public struct PhraseRoleSettingsView: View {
         self.settings = settings
         _appearance = appearance
         _keyNotation = keyNotation
+        _lightingTimingOffsetMillis = lightingTimingOffsetMillis
         self.feedback = feedback
         self.rendersInteractiveControls = rendersInteractiveControls
         self.onMutation = onMutation
@@ -191,12 +195,42 @@ public struct PhraseRoleSettingsView: View {
                             values: KeyNotationPreference.allCases,
                             titleForValue: { $0.titleKey }
                         )
+                        Divider()
+                        lightingTimingSetting
                     }
                 }
             }
             .padding(LumiSpacing.xLarge)
             .frame(maxWidth: 820, alignment: .leading)
         }
+    }
+
+    private var lightingTimingSetting: some View {
+        HStack(alignment: .center, spacing: LumiSpacing.large) {
+            VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+                Text("Lighting timing offset")
+                    .font(LumiTypography.body.weight(.semibold))
+                Text("Compensate MIDI and SoundSwitch latency. Positive values trigger early; negative values trigger late.")
+                    .font(LumiTypography.metadata)
+                    .foregroundStyle(LumiColor.textSecondary)
+            }
+            Spacer(minLength: LumiSpacing.large)
+            Stepper(
+                value: $lightingTimingOffsetMillis,
+                in: -250...250,
+                step: 5
+            ) {
+                Text(timingOffsetLabel)
+                    .font(LumiTypography.technical.weight(.semibold))
+                    .monospacedDigit()
+                    .frame(width: 70, alignment: .trailing)
+            }
+            .accessibilityIdentifier("lumi.settings.lightingTimingOffset")
+        }
+    }
+
+    private var timingOffsetLabel: String {
+        String(format: "%+d ms", lightingTimingOffsetMillis)
     }
 
     private var phraseRoleSettings: some View {

@@ -106,6 +106,10 @@ public struct EngineSnapshotDecoder: Sendable {
         let deckInputIntegration = try decodeDeckInputIntegration(
             envelope.payload["deckInputIntegration"]
         )
+        let midiIntegration = try decodeMidiIntegration(envelope.payload["midiIntegration"])
+        let midiClockIntegration = try decodeMidiClockIntegration(
+            envelope.payload["midiClockIntegration"]
+        )
         let decks = try deckPayloads.map(decodeDeck)
         let timeline = try timelinePayloads.map(decodeTimelineEntry)
         let deckIDs = Set(decks.map(\.deckID))
@@ -170,6 +174,8 @@ public struct EngineSnapshotDecoder: Sendable {
                 status: sourceStatus
             ),
             deckInputIntegration: deckInputIntegration,
+            midiIntegration: midiIntegration,
+            midiClockIntegration: midiClockIntegration,
             simulation: simulation,
             outputProvider: OutputProviderSnapshot(
                 providerKind: outputProviderKind,
@@ -182,6 +188,68 @@ public struct EngineSnapshotDecoder: Sendable {
             nextPlan: nextPlan,
             planningOptions: try decodePlanningOptions(optionsPayload),
             timeline: timeline
+        )
+    }
+
+    private func decodeMidiIntegration(
+        _ value: JSONValue?
+    ) throws -> MidiOutputIntegrationSnapshot? {
+        if value == nil || value == .null { return nil }
+        guard case let .object(midi) = value,
+              case let .string(state) = midi["state"],
+              ["stopped", "ready"].contains(state),
+              case let .string(sourceName) = midi["sourceName"],
+              !sourceName.isEmpty,
+              case let .string(protocolName) = midi["protocol"],
+              !protocolName.isEmpty,
+              let sentPulseCount = unsignedInteger(midi["sentPulseCount"]),
+              case let .boolean(autoPublishEnabled) = midi["autoPublishEnabled"],
+              let timingOffsetMillis = signedInteger(midi["timingOffsetMillis"]),
+              (-250...250).contains(timingOffsetMillis),
+              let bankPreRollMillis = unsignedInteger(midi["bankPreRollMillis"]),
+              bankPreRollMillis <= 250 else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        let activeBank = try optionalUnsignedInteger(midi["activeBank"])
+        guard activeBank.map({ (1...4).contains($0) }) ?? true else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        return MidiOutputIntegrationSnapshot(
+            state: state,
+            sourceName: sourceName,
+            protocolName: protocolName,
+            sentPulseCount: sentPulseCount,
+            lastEvent: try optionalString(midi["lastEvent"]),
+            lastError: try optionalString(midi["lastError"]),
+            activeBank: activeBank,
+            autoPublishEnabled: autoPublishEnabled,
+            timingOffsetMillis: timingOffsetMillis,
+            bankPreRollMillis: bankPreRollMillis
+        )
+    }
+
+    private func decodeMidiClockIntegration(
+        _ value: JSONValue?
+    ) throws -> MidiClockIntegrationSnapshot? {
+        if value == nil || value == .null { return nil }
+        guard case let .object(clock) = value,
+              case let .string(state) = clock["state"],
+              ["stopped", "ready", "running"].contains(state),
+              case let .string(sourceName) = clock["sourceName"],
+              !sourceName.isEmpty,
+              case let .string(protocolName) = clock["protocol"],
+              !protocolName.isEmpty,
+              let sentTickCount = unsignedInteger(clock["sentTickCount"]) else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        return MidiClockIntegrationSnapshot(
+            state: state,
+            sourceName: sourceName,
+            protocolName: protocolName,
+            bpmMilli: try optionalUnsignedInteger(clock["bpmMilli"]),
+            sentTickCount: sentTickCount,
+            lastEvent: try optionalString(clock["lastEvent"]),
+            lastError: try optionalString(clock["lastError"])
         )
     }
 
@@ -826,6 +894,17 @@ public struct EngineSnapshotDecoder: Sendable {
             return nil
         }
         return UInt64(number)
+    }
+
+    private func signedInteger(_ value: JSONValue?) -> Int? {
+        guard case let .number(number) = value,
+              number.isFinite,
+              number.rounded(.towardZero) == number,
+              number >= Double(Int.min),
+              number <= Double(Int.max) else {
+            return nil
+        }
+        return Int(number)
     }
 
     private func optionalUnsignedInteger(_ value: JSONValue?) throws -> UInt64? {

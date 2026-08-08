@@ -39,7 +39,44 @@ struct LiveWorkspacePresenterTests {
         #expect(state.content?.simulation == nil)
         #expect(state.content?.timeline.count == 1)
         #expect(state.output.condition == .ready)
+        #expect(state.lightingMidi.condition == .ready)
+        #expect(state.playbackClock.condition == .ready)
+        #expect(snapshot.midiIntegration?.autoPublishEnabled == true)
+        #expect(snapshot.midiIntegration?.timingOffsetMillis == 0)
         #expect(state.planner.condition == .ready)
+    }
+
+    @Test("Tech degrades when the lighting MIDI source is unavailable")
+    func stoppedLightingMidiIsVisible() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case var .object(midi) = payload["midiIntegration"] else {
+            Issue.record("Recorded fixture has no lighting MIDI status")
+            return
+        }
+        midi["state"] = .string("stopped")
+        midi["lastError"] = .string("CoreMIDI source unavailable")
+        payload["midiIntegration"] = .object(midi)
+        let envelope = MessageEnvelope(
+            protocolVersion: recorded.protocolVersion,
+            messageType: recorded.messageType,
+            messageId: recorded.messageId,
+            sequence: recorded.sequence,
+            correlationId: recorded.correlationId,
+            sentAt: recorded.sentAt,
+            payload: payload
+        )
+
+        let snapshot = try EngineSnapshotDecoder().decode(
+            envelope,
+            endpointDescription: "127.0.0.1:52841",
+            protocolVersion: 1
+        )
+        let state = LiveWorkspacePresenter.ready(snapshot)
+
+        #expect(state.condition == .degraded)
+        #expect(state.lightingMidi.condition == .degraded)
+        #expect(state.lightingMidi.detail.contains("CoreMIDI source unavailable"))
     }
 
     @Test("Physical Deck A and B ordering remains stable when Deck B becomes master")
@@ -54,6 +91,8 @@ struct LiveWorkspacePresenterTests {
             operationState: snapshot.operationState,
             runtime: snapshot.runtime,
             deckSource: snapshot.deckSource,
+            midiIntegration: snapshot.midiIntegration,
+            midiClockIntegration: snapshot.midiClockIntegration,
             simulation: snapshot.simulation,
             outputProvider: snapshot.outputProvider,
             leaderDeckID: 2,
@@ -452,6 +491,8 @@ struct LiveWorkspacePresenterTests {
             runtime: snapshot.runtime,
             deckSource: snapshot.deckSource,
             deckInputIntegration: snapshot.deckInputIntegration,
+            midiIntegration: snapshot.midiIntegration,
+            midiClockIntegration: snapshot.midiClockIntegration,
             simulation: snapshot.simulation,
             outputProvider: snapshot.outputProvider,
             leaderDeckID: snapshot.leaderDeckID,

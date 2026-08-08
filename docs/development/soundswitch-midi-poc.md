@@ -13,7 +13,8 @@ The output port is provider-neutral. CoreMIDI is the first adapter; a later Wind
 ## Safety rules
 
 - Publishing the virtual source sends no MIDI.
-- No source is published automatically at app start.
+- Both virtual sources publish automatically at app start without sending MIDI;
+  explicit Publish/Stop remains available as a diagnostic control.
 - The first POC signal is manual only: MIDI channel 16, note 60.
 - Every learn signal contains Note On followed by Note Off in one CoreMIDI event list.
 - Stop and process exit dispose the virtual source.

@@ -1,6 +1,6 @@
 # E3-02 – Full-song Local Playback to SoundSwitch and physical lights
 
-Status: **Implemented; physical SoundSwitch/DMX acceptance pending**
+Status: **Implemented; initial physical run passed, stability confirmation pending**
 
 Target milestone: **0.3.0 – SoundSwitch Live MVP**
 
@@ -53,7 +53,8 @@ evidence from the real SoundSwitch installation.
 - make clock availability, BPM, transport and last error visible in Lighting
   Output diagnostics;
 - publish no clock or transport while the relevant output is Off;
-- recover only through an explicit reconnect/restart action after endpoint loss.
+- recover the affected command source automatically without coupling clock and
+  lighting-command failures; explicit Stop remains authoritative.
 
 Implementation status: **complete in code and local automated verification**.
 The Rust output worker owns a dedicated 24 PPQN scheduler, emits MIDI Start,
@@ -95,7 +96,8 @@ time and rephase the clock rather than replaying skipped phrase cues.
 
 ### 4. Physical acceptance run
 
-Implementation status: **pending user Gate 0 run**.
+Implementation status: **initial end-to-end light run passed on 2026-08-08;
+repeat stability/timing run pending after hardening**.
 
 - choose one ready imported track with a complete beatgrid, Lumi phrase timeline
   and mapped AutoLoop for each phrase used in the run;
@@ -149,7 +151,8 @@ but incorrect AutoLoops:
 - Pause/resume, one seek safety check, track end and one manual override behave
   as specified without a burst, duplicate, hang or unsolicited blackout.
 - Endpoint loss fails closed and is visible in Diagnostics; explicit recovery
-  restores operation without restarting the full Lumi application.
+  or automatic command-source recovery restores operation without restarting
+  the full Lumi application.
 - Rust scheduling/MIDI tests, real process integration, Swift package tests and
   the native macOS build pass locally without GitHub Actions.
 - The user confirms visible physical light changes for one complete real track.
@@ -186,3 +189,28 @@ with their persisted Bank 1 Autoloop names; the plan remained visible after
 
 These tests prove the application route and safety semantics. They do not
 replace the remaining physical SoundSwitch, Control One and DMX fixture run.
+
+### Post-run lifecycle and timing hardening
+
+The first physical complete-path run proved automatic phrase-driven light
+output, then exposed navigation-related output loss and variable late triggers.
+ADR-0023 records the remediation:
+
+- `Lumi Virtual MIDI` auto-publishes, self-recovers and no longer stops when the
+  separate `Lumi Clock` route reports an error;
+- Tech Ready now includes command-MIDI and clock health;
+- Local Playback transport cadence is 10 ms and is flushed ahead of queued UI
+  work;
+- every phrase reasserts its bank 50 ms before the AutoLoop target, preserving
+  Control One coexistence without adding 50 ms to the visible light change;
+- a persisted signed -250…+250 ms timing offset is available in Settings and as
+  a compact Live adjustment.
+
+The hardening passed the complete local Apple gate on 2026-08-08: the Rust
+workspace, real engine-process integration, all Swift packages, native arm64
+app build, architecture checks and visual-evidence gate are green. A separate
+preference regression covers neutral defaults, signed persistence and safe
+clamping. Desktop validation confirmed automatic publication of `Lumi Virtual
+MIDI` and `Lumi Clock` in Tech without sending a light cue. A repeat physical
+full-song run remains the acceptance check for end-to-end timing and the
+Live → Library → Live continuity fix.

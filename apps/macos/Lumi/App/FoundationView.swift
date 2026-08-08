@@ -38,6 +38,7 @@ struct FoundationView: View {
                         productVersion: productVersion,
                         appearance: $preferences.appearance,
                         keyNotation: $preferences.keyNotation,
+                        lightingTimingOffsetMillis: $preferences.lightingTimingOffsetMillis,
                         allowsScrolling: false,
                         showsNavigation: false,
                         localPlaybackVisualClocks: engineStatus.localPlaybackVisualClocks,
@@ -159,6 +160,7 @@ struct FoundationView: View {
                         settings: engineStatus.libraryState.phraseRoleSettings,
                         appearance: $preferences.appearance,
                         keyNotation: $preferences.keyNotation,
+                        lightingTimingOffsetMillis: $preferences.lightingTimingOffsetMillis,
                         feedback: engineStatus.phraseRoleFeedback,
                         onMutation: { request in
                             Task { await engineStatus.mutatePhraseRoles(request) }

@@ -193,7 +193,10 @@ final class EngineStatusModel: ObservableObject {
               await acquireInteractiveExchange() else {
             return
         }
-        defer { isExchangingCommand = false }
+        var exchangeHeld = true
+        defer {
+            if exchangeHeld { isExchangingCommand = false }
+        }
         do {
             let envelope = try await supervisor.send(
                 .queryLibrary(
@@ -209,16 +212,28 @@ final class EngineStatusModel: ObservableObject {
                 }
                 return
             }
-            let (snapshot, snapshotEnvelope) = try await decodeSnapshotWithRecovery(
-                envelope,
-                endpointDescription: endpointDescription,
-                protocolVersion: protocolVersion,
-                context: "library query"
-            )
+            isExchangingCommand = false
+            exchangeHeld = false
+            let snapshotDecoder = snapshotDecoder
+            let libraryDecoder = libraryDecoder
+            let decoded = try await Task.detached(priority: .userInitiated) {
+                (
+                    try snapshotDecoder.decode(
+                        envelope,
+                        endpointDescription: endpointDescription,
+                        protocolVersion: protocolVersion
+                    ),
+                    try libraryDecoder.decode(envelope)
+                )
+            }.value
+            let snapshot = decoded.0
             guard generation == libraryQueryGeneration else { return }
+            guard snapshot.snapshotSequence >= (latestSnapshot?.snapshotSequence ?? 0) else {
+                return
+            }
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
-            libraryState = try libraryDecoder.decode(snapshotEnvelope)
+            libraryState = decoded.1
         } catch {
             guard generation == libraryQueryGeneration else { return }
             libraryState = .failed(
@@ -992,6 +1007,14 @@ final class EngineStatusModel: ObservableObject {
         }
     }
 
+    func setLightingTimingOffset(_ millis: Int) async {
+        let clamped = max(-250, min(250, millis))
+        await exchangeMidiCommand(
+            .setOutputTimingOffset(millis: Int16(clamped)),
+            success: "Lighting timing set to \(String(format: "%+d ms", clamped))."
+        )
+    }
+
     func mutatePlan(_ request: PlanMutationRequest) async {
         guard lifecycle == .ready,
               let endpointDescription,
@@ -1323,14 +1346,19 @@ final class EngineStatusModel: ObservableObject {
                 }
                 guard lifecycle == .ready else { return }
             }
-            guard !pendingLocalTransportDecks.isEmpty else { return }
-            let deckID = pendingLocalTransportDecks.removeFirst()
-            guard
-                  let transport = pendingLocalTransports.removeValue(forKey: deckID) else {
-                continue
-            }
+            guard let transport = dequeuePendingLocalTransport() else { return }
             await exchangeLocalTransport(transport)
         }
+    }
+
+    private func dequeuePendingLocalTransport() -> LocalDeckTransportSnapshot? {
+        while !pendingLocalTransportDecks.isEmpty {
+            let deckID = pendingLocalTransportDecks.removeFirst()
+            if let transport = pendingLocalTransports.removeValue(forKey: deckID) {
+                return transport
+            }
+        }
+        return nil
     }
 
     private func exchangeLocalTransport(_ transport: LocalDeckTransportSnapshot) async {
@@ -1341,6 +1369,10 @@ final class EngineStatusModel: ObservableObject {
         }
         isExchangingCommand = true
         defer { isExchangingCommand = false }
+        await sendLocalTransport(transport)
+    }
+
+    private func sendLocalTransport(_ transport: LocalDeckTransportSnapshot) async {
         do {
             let envelope = try await supervisor.send(
                 .updateLocalPlaybackTransport(
@@ -1386,6 +1418,12 @@ final class EngineStatusModel: ObservableObject {
 
         guard lifecycle == .ready else { return false }
         isExchangingCommand = true
+        // Preserve phrase-boundary timing when Library/UI commands are queued:
+        // flush at most one latest sample per deck before granting the lane.
+        for _ in 0..<2 {
+            guard let transport = dequeuePendingLocalTransport() else { break }
+            await sendLocalTransport(transport)
+        }
         return true
     }
 
@@ -1417,41 +1455,51 @@ final class EngineStatusModel: ObservableObject {
                     return
                 }
                 guard self.lifecycle == .ready,
-                      !self.isExchangingCommand,
-                      self.pendingInteractiveExchanges == 0,
                       let endpointDescription = self.endpointDescription,
                       let protocolVersion = self.protocolVersion else {
                     continue
                 }
                 let connectedDecks = self.latestSnapshot?.deckSource.mode == "connectedDecks"
                 guard connectedDecks || healthTick == 0 else { continue }
-                self.isExchangingCommand = true
+                guard await self.acquireInteractiveExchange() else { continue }
                 do {
                     let envelope = try await self.supervisor.getSnapshot()
-                    let snapshot = try self.snapshotDecoder.decode(
-                        envelope,
-                        endpointDescription: endpointDescription,
-                        protocolVersion: protocolVersion
-                    )
+                    self.isExchangingCommand = false
+                    let snapshotDecoder = self.snapshotDecoder
+                    let libraryDecoder = self.libraryDecoder
+                    let decodeLibrary = healthTick == 0
+                    let decoded = try await Task.detached(priority: .utility) {
+                        (
+                            try snapshotDecoder.decode(
+                                envelope,
+                                endpointDescription: endpointDescription,
+                                protocolVersion: protocolVersion
+                            ),
+                            decodeLibrary ? try libraryDecoder.decode(envelope) : nil
+                        )
+                    }.value
+                    let snapshot = decoded.0
+                    guard snapshot.snapshotSequence >= (self.latestSnapshot?.snapshotSequence ?? 0)
+                    else { continue }
                     self.latestSnapshot = snapshot
                     let nextWorkspaceState = LiveWorkspacePresenter.ready(snapshot)
                     if nextWorkspaceState != self.workspaceState {
                         self.workspaceState = nextWorkspaceState
                     }
                     if healthTick == 0 {
-                        let nextLibraryState = try self.libraryDecoder.decode(envelope)
+                        guard let nextLibraryState = decoded.1 else { continue }
                         if nextLibraryState != self.libraryState {
                             self.libraryState = nextLibraryState
                         }
                     }
                 } catch {
+                    self.isExchangingCommand = false
                     Self.logger.error(
                         "Engine snapshot monitor failed: \(error.localizedDescription, privacy: .public)"
                     )
                     // The one-second process health check owns disconnect state. A
                     // single missed polling frame must not disturb Live UI.
                 }
-                self.isExchangingCommand = false
             }
         }
     }
@@ -1666,7 +1714,7 @@ private final class LocalDeckAudioController {
         updateTask = Task { [weak self] in
             while !Task.isCancelled {
                 do {
-                    try await Task.sleep(for: .milliseconds(100))
+                    try await Task.sleep(for: .milliseconds(10))
                 } catch {
                     return
                 }

@@ -19,8 +19,16 @@ struct LumiApp: App {
                 .onChange(of: preferences.appearance) { _, appearance in
                     MacApplicationAppearance.apply(appearance)
                 }
+                .onChange(of: preferences.lightingTimingOffsetMillis) { _, millis in
+                    Task {
+                        await engineStatus.setLightingTimingOffset(millis)
+                    }
+                }
                 .task {
                     await engineStatus.start()
+                    await engineStatus.setLightingTimingOffset(
+                        preferences.lightingTimingOffsetMillis
+                    )
                 }
         }
         .defaultSize(width: 1_280, height: 820)
