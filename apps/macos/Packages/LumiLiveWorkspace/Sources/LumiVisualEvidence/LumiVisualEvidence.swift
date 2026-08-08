@@ -42,7 +42,7 @@ struct LumiVisualEvidenceCommand {
             ),
             Variant(
                 name: "ready-light-classic",
-                state: LiveWorkspaceFixtures.ready,
+                state: LiveWorkspaceFixtures.live,
                 appearance: .light,
                 keyNotation: .classic,
                 colorScheme: .light
@@ -77,14 +77,14 @@ struct LumiVisualEvidenceCommand {
             ),
             Variant(
                 name: "edited-locked-dark-camelot",
-                state: LiveWorkspaceFixtures.edited,
+                state: LiveWorkspaceFixtures.editedPaused,
                 appearance: .dark,
                 keyNotation: .camelot,
                 colorScheme: .dark
             ),
             Variant(
                 name: "revision-conflict-light-classic",
-                state: LiveWorkspaceFixtures.revisionConflict,
+                state: LiveWorkspaceFixtures.revisionConflictOff,
                 appearance: .light,
                 keyNotation: .classic,
                 colorScheme: .light

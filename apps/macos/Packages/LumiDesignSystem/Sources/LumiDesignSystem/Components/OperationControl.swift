@@ -5,14 +5,19 @@ public struct OperationControl: View {
     private let systemImage: String
     private let isSelected: Bool
     private let isEnabled: Bool
+    private let selectedColor: Color
+    private let pulsesWhenSelected: Bool
     private let keyboardShortcut: KeyEquivalent?
     private let action: @MainActor () -> Void
+    @State private var selectedEmphasis = 1.0
 
     public init(
         _ label: LocalizedStringKey,
         systemImage: String,
         isSelected: Bool = false,
         isEnabled: Bool = true,
+        selectedColor: Color = LumiColor.accent,
+        pulsesWhenSelected: Bool = false,
         keyboardShortcut: KeyEquivalent? = nil,
         action: @escaping @MainActor () -> Void
     ) {
@@ -20,6 +25,8 @@ public struct OperationControl: View {
         self.systemImage = systemImage
         self.isSelected = isSelected
         self.isEnabled = isEnabled
+        self.selectedColor = selectedColor
+        self.pulsesWhenSelected = pulsesWhenSelected
         self.keyboardShortcut = keyboardShortcut
         self.action = action
     }
@@ -43,14 +50,31 @@ public struct OperationControl: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(isSelected ? LumiColor.accent : LumiColor.textPrimary)
-        .background(isSelected ? LumiColor.accent.opacity(0.14) : LumiColor.surface)
+        .foregroundStyle(isSelected ? selectedColor : LumiColor.textPrimary)
+        .background(isSelected ? selectedColor.opacity(0.14) : LumiColor.surface)
         .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
         .overlay {
             RoundedRectangle(cornerRadius: LumiRadius.control)
-                .stroke(isSelected ? LumiColor.accent : LumiColor.border, lineWidth: 1)
+                .stroke(
+                    isSelected ? selectedColor.opacity(selectedEmphasis) : LumiColor.border,
+                    lineWidth: isSelected ? 1.5 : 1
+                )
         }
         .disabled(!isEnabled)
         .accessibilityAddTraits(isSelected ? .isSelected : [])
+        .task(id: isSelected && pulsesWhenSelected) {
+            selectedEmphasis = 1
+            guard isSelected, pulsesWhenSelected else { return }
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .milliseconds(500))
+                } catch {
+                    return
+                }
+                withAnimation(.linear(duration: 0.12)) {
+                    selectedEmphasis = selectedEmphasis == 1 ? 0.28 : 1
+                }
+            }
+        }
     }
 }

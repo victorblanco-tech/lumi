@@ -14,7 +14,10 @@ current Live track.
 ## Accepted UX
 
 - Desktop keeps Deck A left and Deck B right at all times.
-- `MASTER · LIVE NOW` moves between those surfaces without reordering them.
+- `MASTER` moves between those surfaces without reordering them. `LIVE NOW` is
+  added only while Lumi is in Start and that Master deck is actually playing.
+- The Master card and selected operation control share one state language:
+  Off is white, Armed is orange, Live is red and Paused blinks orange.
 - The master card is visually dominant; `PLAN READY` is deliberately quieter.
 - Both cards show an RGB waveform, beatgrid, playhead and phrase band.
 - Editor and Live share one continuous beat-space interaction model: slider,
@@ -147,6 +150,11 @@ playhead never advances independently in SwiftUI, and a stopped track does not
 wrap back to its beginning. Selecting a phrase band opens its Theme and AutoLoop
 controls directly beneath the waveform. Started phrases fail closed; future
 Live phrases commit revision-safe changes to the retained active plan.
+
+The Local Playback and connected Live Deck modes use the same Master status
+component. Their operation-state border, top control and badge therefore cannot
+drift into source-specific variants. Pause animation is restricted to the
+lightweight outlines and does not invalidate or redraw the waveform timeline.
 
 The first real-output slice maps the small demo Theme/AutoLoop vocabulary to
 SoundSwitch bank and button MIDI pulses at phrase execution. The full persisted

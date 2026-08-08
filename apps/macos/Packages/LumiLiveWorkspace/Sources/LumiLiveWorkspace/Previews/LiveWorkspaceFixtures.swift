@@ -155,6 +155,9 @@ public enum LiveWorkspaceFixtures {
     )
 
     public static let ready = LiveWorkspacePresenter.ready(readySnapshot)
+    public static let live = LiveWorkspacePresenter.ready(
+        replacingOperationState(in: readySnapshot, with: "live")
+    )
     public static let libraryBacked = LiveWorkspacePresenter.ready(libraryBackedSnapshot())
     public static let loading = LiveWorkspacePresenter.starting()
     public static let stale = LiveWorkspacePresenter.stale(readySnapshot)
@@ -167,8 +170,18 @@ public enum LiveWorkspaceFixtures {
         editedSnapshot(),
         planInteraction: .succeeded("Plan revision 3 saved.")
     )
+    public static let editedPaused = LiveWorkspacePresenter.ready(
+        replacingOperationState(in: editedSnapshot(), with: "paused"),
+        planInteraction: .succeeded("Plan revision 3 saved.")
+    )
     public static let revisionConflict = LiveWorkspacePresenter.ready(
         readySnapshot,
+        planInteraction: .rejected(
+            "Plan changed elsewhere. Lumi refreshed the latest revision."
+        )
+    )
+    public static let revisionConflictOff = LiveWorkspacePresenter.ready(
+        replacingOperationState(in: readySnapshot, with: "off"),
         planInteraction: .rejected(
             "Plan changed elsewhere. Lumi refreshed the latest revision."
         )
@@ -379,6 +392,32 @@ public enum LiveWorkspaceFixtures {
                 displayName: snapshot.deckSource.displayName,
                 status: status
             ),
+            simulation: snapshot.simulation,
+            outputProvider: snapshot.outputProvider,
+            leaderDeckID: snapshot.leaderDeckID,
+            decks: snapshot.decks,
+            livePlan: snapshot.livePlan,
+            nextPlan: snapshot.nextPlan,
+            planningOptions: snapshot.planningOptions,
+            timeline: snapshot.timeline
+        )
+    }
+
+    private static func replacingOperationState(
+        in snapshot: EngineSnapshot,
+        with operationState: String
+    ) -> EngineSnapshot {
+        EngineSnapshot(
+            endpoint: snapshot.endpoint,
+            engineVersion: snapshot.engineVersion,
+            protocolVersion: snapshot.protocolVersion,
+            snapshotSequence: snapshot.snapshotSequence,
+            stateRevision: snapshot.stateRevision,
+            operationState: operationState,
+            runtime: snapshot.runtime,
+            deckSource: snapshot.deckSource,
+            midiIntegration: snapshot.midiIntegration,
+            midiClockIntegration: snapshot.midiClockIntegration,
             simulation: snapshot.simulation,
             outputProvider: snapshot.outputProvider,
             leaderDeckID: snapshot.leaderDeckID,

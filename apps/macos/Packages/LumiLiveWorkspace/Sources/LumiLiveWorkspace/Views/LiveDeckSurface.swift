@@ -6,6 +6,7 @@ import SwiftUI
 struct LiveDeckSurface<Details: View>: View {
     let deck: DeckSnapshot
     let isMaster: Bool
+    let operationState: String
     let plan: PlanSnapshot?
     let musicalKey: String
     let isLocalPlayback: Bool
@@ -22,6 +23,7 @@ struct LiveDeckSurface<Details: View>: View {
     @State private var usesLiveViewport: Bool
     @State private var magnificationAnchorBeats: Double?
     @State private var scrubProgress: Double?
+    @State private var masterEmphasis = 1.0
     @AppStorage("nl.blancoservices.lumi.waveform.zoom-anchor")
     private var waveformZoomAnchorRaw = LumiWaveformZoomAnchor.mouse.rawValue
     @AppStorage("nl.blancoservices.lumi.waveform.reverse-horizontal-scroll")
@@ -30,6 +32,7 @@ struct LiveDeckSurface<Details: View>: View {
     init(
         deck: DeckSnapshot,
         isMaster: Bool,
+        operationState: String,
         plan: PlanSnapshot?,
         musicalKey: String,
         isLocalPlayback: Bool,
@@ -45,6 +48,7 @@ struct LiveDeckSurface<Details: View>: View {
     ) {
         self.deck = deck
         self.isMaster = isMaster
+        self.operationState = operationState
         self.plan = plan
         self.musicalKey = musicalKey
         self.isLocalPlayback = isLocalPlayback
@@ -79,14 +83,10 @@ struct LiveDeckSurface<Details: View>: View {
         .background(Color.black)
         .clipShape(RoundedRectangle(cornerRadius: LumiRadius.panel))
         .overlay {
-            RoundedRectangle(cornerRadius: LumiRadius.panel)
-                .strokeBorder(
-                    isMaster ? LumiColor.destructive : LumiColor.border,
-                    lineWidth: isMaster ? 2 : 1
-                )
+            masterBorder
         }
         .shadow(
-            color: isMaster ? LumiColor.destructive.opacity(0.18) : Color.clear,
+            color: isMaster ? operationStatus.color.opacity(0.18) : Color.clear,
             radius: 14
         )
         .accessibilityElement(children: .contain)
@@ -106,6 +106,20 @@ struct LiveDeckSurface<Details: View>: View {
         .onChange(of: playbackIsActive) { wasPlaying, isPlaying in
             guard !wasPlaying, isPlaying, isMaster, !usesLiveViewport else { return }
             activateDefaultLiveViewport()
+        }
+        .task(id: isMaster && operationStatus.pulses) {
+            masterEmphasis = 1
+            guard isMaster, operationStatus.pulses else { return }
+            while !Task.isCancelled {
+                do {
+                    try await Task.sleep(for: .milliseconds(500))
+                } catch {
+                    return
+                }
+                withAnimation(.linear(duration: 0.12)) {
+                    masterEmphasis = masterEmphasis == 1 ? 0.28 : 1
+                }
+            }
         }
     }
 
@@ -174,7 +188,7 @@ struct LiveDeckSurface<Details: View>: View {
         .background {
             if isMaster {
                 LinearGradient(
-                    colors: [LumiColor.destructive.opacity(0.16), Color.clear],
+                    colors: [operationStatus.color.opacity(0.16), Color.clear],
                     startPoint: .leading,
                     endPoint: .trailing
                 )
@@ -185,14 +199,31 @@ struct LiveDeckSurface<Details: View>: View {
     @ViewBuilder
     private var roleBadge: some View {
         if isMaster {
-            Label("MASTER · LIVE NOW", systemImage: "circle.fill")
-                .font(LumiTypography.technical.weight(.semibold))
-                .foregroundStyle(Color.white)
-                .padding(.horizontal, LumiSpacing.small)
-                .frame(height: LumiControlMetric.compactHeight)
-                .background(LumiColor.destructive.opacity(0.9))
-                .clipShape(Capsule())
-                .accessibilityIdentifier("lumi.deck.masterBadge")
+            HStack(spacing: LumiSpacing.xSmall) {
+                Image(systemName: "circle.fill")
+                Text(verbatim: "MASTER")
+                if operationStatus.showsLiveNow(isPlaying: playbackIsActive) {
+                    Text(verbatim: "·")
+                        .foregroundStyle(Color.white.opacity(0.5))
+                    Text(verbatim: "LIVE NOW")
+                        .foregroundStyle(LumiColor.success)
+                }
+            }
+            .font(LumiTypography.technical.weight(.semibold))
+            .foregroundStyle(operationStatus.color)
+            .padding(.horizontal, LumiSpacing.small)
+            .frame(height: LumiControlMetric.compactHeight)
+            .background(operationStatus.color.opacity(0.12))
+            .clipShape(Capsule())
+            .overlay {
+                Capsule()
+                    .stroke(
+                        operationStatus.color.opacity(masterEmphasis),
+                        lineWidth: 1
+                    )
+            }
+            .accessibilityLabel(masterAccessibilityLabel)
+            .accessibilityIdentifier("lumi.deck.masterBadge")
         } else if plan?.status == "ready" {
             Text(verbatim: "PLAN READY")
                 .font(LumiTypography.technical.weight(.semibold))
@@ -210,6 +241,26 @@ struct LiveDeckSurface<Details: View>: View {
                 .background(Color.white.opacity(0.08))
                 .clipShape(Capsule())
         }
+    }
+
+    private var masterBorder: some View {
+        RoundedRectangle(cornerRadius: LumiRadius.panel)
+            .strokeBorder(
+                isMaster
+                    ? operationStatus.color.opacity(masterEmphasis)
+                    : LumiColor.border,
+                lineWidth: isMaster ? 2 : 1
+            )
+    }
+
+    private var operationStatus: LiveOperationStatus {
+        LiveOperationStatus(engineState: operationState)
+    }
+
+    private var masterAccessibilityLabel: String {
+        operationStatus.showsLiveNow(isPlaying: playbackIsActive)
+            ? "Master, Live Now"
+            : "Master"
     }
 
     private var metadata: some View {

@@ -408,36 +408,28 @@ public struct LiveWorkspaceView: View {
 
     private var operationControls: some View {
         HStack(spacing: LumiSpacing.small) {
-            OperationControl(
-                key(copy.arm),
-                systemImage: "shield",
-                isSelected: operationState == "armed",
-                isEnabled: canSetOperation("armed"),
-                action: { setOperation("armed") }
-            )
-            OperationControl(
-                key(copy.start),
-                systemImage: "play.fill",
-                isSelected: operationState == "live",
-                isEnabled: canSetOperation("live"),
-                action: { setOperation("live") }
-            )
-            OperationControl(
-                key(copy.pause),
-                systemImage: "pause.fill",
-                isSelected: operationState == "paused",
-                isEnabled: canSetOperation("paused"),
-                action: { setOperation("paused") }
-            )
-            OperationControl(
-                key(copy.off),
-                systemImage: "stop.fill",
-                isSelected: operationState == "off",
-                isEnabled: canSetOperation("off"),
-                action: { setOperation("off") }
-            )
+            operationControl(copy.arm, systemImage: "shield", status: .armed)
+            operationControl(copy.start, systemImage: "play.fill", status: .live)
+            operationControl(copy.pause, systemImage: "pause.fill", status: .paused)
+            operationControl(copy.off, systemImage: "stop.fill", status: .off)
         }
         .accessibilityIdentifier("lumi.operation.controls")
+    }
+
+    private func operationControl(
+        _ label: String,
+        systemImage: String,
+        status: LiveOperationStatus
+    ) -> some View {
+        OperationControl(
+            key(label),
+            systemImage: systemImage,
+            isSelected: operationStatus == status,
+            isEnabled: canSetOperation(status.rawValue),
+            selectedColor: status.color,
+            pulsesWhenSelected: status.pulses,
+            action: { setOperation(status.rawValue) }
+        )
     }
 
     private var preferenceMenu: some View {
@@ -494,6 +486,7 @@ public struct LiveWorkspaceView: View {
                                 LiveDeckSurface(
                                     deck: deck,
                                     isMaster: isMaster,
+                                    operationState: content.operationState,
                                     plan: plan,
                                     musicalKey: musicalKey(for: deck),
                                     isLocalPlayback: content.sourceMode == "localPlayback",
@@ -953,6 +946,10 @@ public struct LiveWorkspaceView: View {
 
     private var operationState: String {
         state.content?.operationState ?? "off"
+    }
+
+    private var operationStatus: LiveOperationStatus {
+        LiveOperationStatus(engineState: operationState)
     }
 
     private var canSendSessionCommand: Bool {

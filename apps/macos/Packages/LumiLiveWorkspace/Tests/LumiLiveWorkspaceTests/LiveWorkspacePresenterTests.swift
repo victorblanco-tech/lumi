@@ -5,6 +5,29 @@ import Testing
 
 @Suite("Live workspace presentation")
 struct LiveWorkspacePresenterTests {
+    @Test("Operation status drives one shared Master and control presentation")
+    func operationStatusPresentationIsConsistent() {
+        #expect(LiveOperationStatus(engineState: "off") == .off)
+        #expect(LiveOperationStatus(engineState: "armed") == .armed)
+        #expect(LiveOperationStatus(engineState: "live") == .live)
+        #expect(LiveOperationStatus(engineState: "paused") == .paused)
+        #expect(LiveOperationStatus(engineState: "unknown") == .off)
+
+        #expect(!LiveOperationStatus.off.showsLiveNow(isPlaying: true))
+        #expect(!LiveOperationStatus.armed.showsLiveNow(isPlaying: true))
+        #expect(!LiveOperationStatus.live.showsLiveNow(isPlaying: false))
+        #expect(LiveOperationStatus.live.showsLiveNow(isPlaying: true))
+        #expect(!LiveOperationStatus.paused.showsLiveNow(isPlaying: true))
+    }
+
+    @Test("Only Paused requests pulsing emphasis")
+    func pausedStatusPulses() {
+        #expect(!LiveOperationStatus.off.pulses)
+        #expect(!LiveOperationStatus.armed.pulses)
+        #expect(!LiveOperationStatus.live.pulses)
+        #expect(LiveOperationStatus.paused.pulses)
+    }
+
     @Test("Recorded snapshot maps the authoritative leader to Live and the other deck to Next")
     func recordedSnapshotMapsLiveAndNext() throws {
         let envelope = try recordedEnvelope()
