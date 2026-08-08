@@ -23,10 +23,10 @@ Het bouwplan voor de eerste verticale productmilestone staat in
 Het gerefineerde ontwerp en storyplan voor de volgende verticale milestone staat
 in [`docs/planning/epic-02a-library-track-lighting-editor.md`](docs/planning/epic-02a-library-track-lighting-editor.md).
 
-> Status: `0.3.0-dev` bevat de geaccepteerde Rekordbox-backed Library, Track
+> Status: `0.3.0-rc.1` bevat de geaccepteerde Rekordbox-backed Library, Track
 > Lighting Editor, Local Playback dual-deck, rolling AutoLoop Plan en de eerste
-> fysiek bewezen SoundSwitch/MIDI/DMX-keten. De unsigned Apple Silicon
-> releaseverpakking en resterende stabiliteitsgates zijn in actieve bouw.
+> fysiek bewezen SoundSwitch/MIDI/DMX-keten. De geïsoleerde Lumi Preview-DMG
+> is de unsigned Apple Silicon release candidate voor de resterende acceptatie.
 
 ## Development
 

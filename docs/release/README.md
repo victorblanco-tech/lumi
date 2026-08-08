@@ -8,6 +8,7 @@
 - [Epic 2A – 0.2.0 development evidence](0.2.0-epic-2a-evidence.md)
 - [0.3.0 installable release readiness](0.3.0-release-readiness.md)
 - [0.3.0 development release and known limitations](0.3.0-dev-demo-and-limitations.md)
+- [0.3.0-rc.1 release notes](0.3.0-rc.1-release-notes.md)
 - [Unsigned macOS installation instructions](unsigned-macos-installation.txt)
 
 Create a locally verified, unsigned Apple Silicon disk image with:
