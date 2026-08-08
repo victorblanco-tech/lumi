@@ -479,6 +479,10 @@ impl LibraryWorker {
         Self::demo_with_repository(repository)
     }
 
+    pub fn autoloop_catalog(&self) -> Result<AutoloopCatalog, LibraryWorkerError> {
+        Ok(self.repository.autoloop_catalog()?)
+    }
+
     #[cfg(test)]
     fn demo_at(path: &std::path::Path) -> Result<Self, LibraryWorkerError> {
         Self::demo_with_repository(SqliteLibraryRepository::open(path)?)

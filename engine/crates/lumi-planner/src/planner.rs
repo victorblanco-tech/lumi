@@ -76,7 +76,7 @@ pub struct PlanningInput {
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct ThemeDefinition {
     id: ThemeId,
-    name: &'static str,
+    name: String,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -170,19 +170,19 @@ impl PlanningConfiguration {
             themes: vec![
                 ThemeDefinition {
                     id: ThemeId::new(1),
-                    name: "Electric Bloom",
+                    name: "Electric Bloom".to_owned(),
                 },
                 ThemeDefinition {
                     id: ThemeId::new(2),
-                    name: "Deep Ocean",
+                    name: "Deep Ocean".to_owned(),
                 },
                 ThemeDefinition {
                     id: ThemeId::new(3),
-                    name: "Solar Flare",
+                    name: "Solar Flare".to_owned(),
                 },
                 ThemeDefinition {
                     id: ThemeId::new(4),
-                    name: "Ultraviolet",
+                    name: "Ultraviolet".to_owned(),
                 },
             ],
             scenes: vec![
@@ -240,6 +240,25 @@ impl PlanningConfiguration {
     #[must_use]
     pub fn with_default_theme(mut self, theme_id: ThemeId) -> Self {
         self.default_theme_id = theme_id;
+        self
+    }
+
+    /// Replaces the user-visible Theme/Bank catalog while preserving the
+    /// provider-neutral planning rules and stable Theme identities.
+    #[must_use]
+    pub fn with_themes(
+        mut self,
+        revision: PlanConfigurationRevision,
+        themes: Vec<ThemeOption>,
+    ) -> Self {
+        self.revision = revision;
+        self.themes = themes
+            .into_iter()
+            .map(|theme| ThemeDefinition {
+                id: theme.id,
+                name: theme.name,
+            })
+            .collect();
         self
     }
 }

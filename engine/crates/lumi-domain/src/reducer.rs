@@ -479,7 +479,9 @@ fn reduce_command(
         .insert(event.client_id, event.sequence);
     state.operation = target;
     if target == OperationState::Off {
-        state.active_plan = None;
+        // Off closes the physical output gate, but the prepared plan remains
+        // visible and ready. Re-arming must not require a deck/leader change to
+        // recover the plan for the currently loaded track.
         state.last_scheduled_cue = None;
     }
     let effects = if matches!(target, OperationState::Paused | OperationState::Off) {

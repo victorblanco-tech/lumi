@@ -1,13 +1,13 @@
 use std::time::{Duration, Instant};
 
 use lumi_domain::{
-    CueOrigin, CueReason, DeckId, PhraseKind, PlanRevision, PlanStatus, SceneId,
-    SemanticLightingAction, ThemeId, ThemeSelectionReason, TrackColor, TrackId, TrackLoadId,
-    TrackPhrase,
+    CueOrigin, CueReason, DeckId, PhraseKind, PlanConfigurationRevision, PlanRevision, PlanStatus,
+    SceneId, SemanticLightingAction, ThemeId, ThemeSelectionReason, TrackColor, TrackId,
+    TrackLoadId, TrackPhrase,
 };
 use lumi_planner::{
     ChoiceSource, DeterministicPlanner, PlannerTrack, PlanningConfiguration, PlanningInput,
-    ThemeColorRule, ThemeColorRuleMode, ThemeSelectionContext, WeightedThemeCandidate,
+    ThemeColorRule, ThemeColorRuleMode, ThemeOption, ThemeSelectionContext, WeightedThemeCandidate,
     canonical_plan,
 };
 
@@ -78,6 +78,31 @@ fn choice_source_is_injected_and_does_not_use_wall_clock_time() {
 
     assert_eq!(look.theme_name(), "Electric Bloom");
     assert_eq!(look.scene_name(), "Soft Motion");
+}
+
+#[test]
+fn configured_bank_names_are_used_by_options_decisions_and_cues() {
+    let themes = (1_u64..=4)
+        .map(|id| ThemeOption {
+            id: ThemeId::new(id),
+            name: format!("User Bank {id}"),
+        })
+        .collect();
+    let planner = DeterministicPlanner::new(
+        PlanningConfiguration::epic_one().with_themes(PlanConfigurationRevision::new(184), themes),
+        FirstChoice,
+    );
+
+    assert_eq!(planner.options().themes[0].name, "User Bank 1");
+    let plan = generate(&planner, &demo_input());
+    assert_eq!(
+        plan.theme_decision().map(|decision| decision.theme_name()),
+        Some("User Bank 1")
+    );
+    let SemanticLightingAction::ApplyLook(look) = plan.cues()[0].action() else {
+        panic!("an analyzed phrase must apply a look");
+    };
+    assert_eq!(look.theme_name(), "User Bank 1");
 }
 
 #[test]

@@ -107,6 +107,21 @@ Implementation status: **pending user Gate 0 run**.
 - retain an event transcript and screen/video evidence with expected versus
   observed bank, AutoLoop, phrase boundary and clock state.
 
+### Configuration-continuity regression
+
+Resolved on 2026-08-08 before the physical run:
+
+- Live planning options and generated cues now consume the persisted Autoloop
+  catalog Theme/Bank names instead of the original demo planner labels;
+- the exact user-edited Lumi timeline revision and its phrase-role assignments
+  are refreshed into the Local Playback browser and loaded atomically;
+- `Off` closes the output gate and clears execution deduplication, but retains
+  the prepared leader plan, so `Off → Arm → Start` no longer waits for a deck
+  or master change before automatic MIDI can resume;
+- the production database was inspected read-only and confirmed to retain the
+  user's four renamed Banks, custom phrase roles, Bank 1 button mappings and
+  edited track timeline. No configuration recovery or re-entry is required.
+
 ## Acceptance criteria
 
 - No bank/AutoLoop command is emitted before both Live and actual playback.
@@ -146,6 +161,13 @@ Completed on 2026-08-08:
   `Lumi Clock`, clock ticks only during `LIVE + Play`, and pause suppression;
 - native unsigned arm64 macOS app build;
 - repository architecture checks and 22-item visual evidence gate.
+
+The subsequent configuration-continuity regression additionally passed the
+planner/domain suites, all 41 engine unit tests, the real engine process test,
+Rust Clippy with warnings denied, and a fresh native app build. Desktop
+validation loaded timeline revision 29 and showed all 16 user-edited phrases
+with their persisted Bank 1 Autoloop names; the plan remained visible after
+`Off`.
 
 These tests prove the application route and safety semantics. They do not
 replace the remaining physical SoundSwitch, Control One and DMX fixture run.

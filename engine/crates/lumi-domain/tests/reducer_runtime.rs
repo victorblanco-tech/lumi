@@ -203,6 +203,66 @@ fn live_phrase_execution_requires_playback_and_deduplicates_the_same_cue() {
 }
 
 #[test]
+fn off_closes_output_without_discarding_the_prepared_leader_plan() {
+    let mut runtime = started_runtime(48);
+    submit_and_process(&mut runtime, track_loaded(1, 10, 100, 1));
+    submit_and_process(
+        &mut runtime,
+        plan_result(1, plan(PlanRevision::initial(), TrackLoadId::new(10))),
+    );
+    submit_and_process(&mut runtime, leader_changed(2, 10, 2));
+    submit_and_process(&mut runtime, playback_state(3, 10, true, 3));
+
+    let revision = runtime.state().revision();
+    submit_and_process(
+        &mut runtime,
+        command_event(1, revision, OperationCommand::Arm),
+    );
+    let revision = runtime.state().revision();
+    submit_and_process(
+        &mut runtime,
+        command_event(2, revision, OperationCommand::Start),
+    );
+    let scheduled = submit_and_process(&mut runtime, phrase_changed(4, 10, 0, 4));
+    assert!(matches!(
+        scheduled.effects.as_slice(),
+        [Effect::ExecuteCue(_)]
+    ));
+
+    let revision = runtime.state().revision();
+    let off = submit_and_process(
+        &mut runtime,
+        command_event(3, revision, OperationCommand::Off),
+    );
+    assert!(matches!(
+        off.effects.as_slice(),
+        [Effect::EnsureOutputClosed { .. }]
+    ));
+    assert_eq!(runtime.state().operation(), OperationState::Off);
+    assert!(runtime.state().active_plan().is_some());
+
+    let revision = runtime.state().revision();
+    submit_and_process(
+        &mut runtime,
+        command_event(4, revision, OperationCommand::Arm),
+    );
+    let revision = runtime.state().revision();
+    submit_and_process(
+        &mut runtime,
+        command_event(5, revision, OperationCommand::Start),
+    );
+    let rescheduled = submit_and_process(&mut runtime, phrase_changed(5, 10, 0, 5));
+    assert_eq!(
+        rescheduled.decision,
+        DecisionReason::PhraseExecutionScheduled
+    );
+    assert!(matches!(
+        rescheduled.effects.as_slice(),
+        [Effect::ExecuteCue(_)]
+    ));
+}
+
+#[test]
 fn overload_records_a_safe_diagnostic_and_preserves_critical_ingress() {
     let mut runtime = started_runtime(2);
     assert_eq!(

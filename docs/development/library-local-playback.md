@@ -29,8 +29,10 @@ will later be driven by Live Decks.
 6. The planning worker uses only canonical Lumi phrase role IDs. Raw source
    phrase names never become planning roles after import.
 7. Each planned phrase resolves to the actual mapped SoundSwitch bank and
-   Autoloop button. Live only offers compatible, physically mapped choices for
-   that Theme and Phrase Type.
+   Autoloop button. Planner options, plan decisions and Live labels use the
+   current persisted catalog names; demo Bank labels never shadow renamed user
+   Banks. Live only offers compatible, physically mapped choices for that Theme
+   and Phrase Type.
 8. Theme and Autoloop changes are plan-instance overrides. They do not mutate
    the Library timeline or catalog and are applied only to a phrase that has
    not started.
@@ -65,9 +67,11 @@ will later be driven by Live Decks.
 - Track and timeline identity use optimistic concurrency; title/artist guessing
   cannot silently select a Library row.
 - Missing audio fails closed for playback while analysis remains available.
-- Armed, Paused and Off never emit automatic phrase output. A paused seek may
-  move the selected phrase, but only the subsequent Live resume can establish
-  that destination look, once.
+- Armed, Paused and Off never emit automatic phrase output. Off retains the
+  prepared leader plan while closing the output gate, so a later Arm and Start
+  can resume without requiring a deck/master change. A paused seek may move the
+  selected phrase, but only the subsequent Live resume can establish that
+  destination look, once.
 - The MIDI clock pauses with local audio. A start, seek or transport
   discontinuity creates a new beatgrid-derived phase anchor rather than a
   burst of clock or skipped lighting commands.

@@ -11,10 +11,12 @@ use lumi_domain::{
     DeckSourceStatus, DomainEvent, EffectId, EffectResult, EffectResultEnvelope, EffectSequence,
     KeyMode, LightingLook, LightingPlan, MonotonicTime, OperationCommand, OperationState,
     OutputEffectReason, OutputEffectResult, OutputEffectStatus, OutputExecutionRequest, PhraseKind,
-    PitchClass, PlanRevision, PlanStatus, PlanValidationError, RuntimeHealth, SceneCategory,
-    SceneId, SemanticLightingAction, SerializedRuntime, SerializedRuntimeError, TimelineResult,
-    TimelineSource, TrackLoadId, TrackMetadata, UserCommandEnvelope, WorkerId,
+    PitchClass, PlanConfigurationRevision, PlanRevision, PlanStatus, PlanValidationError,
+    RuntimeHealth, SceneCategory, SceneId, SemanticLightingAction, SerializedRuntime,
+    SerializedRuntimeError, TimelineResult, TimelineSource, TrackLoadId, TrackMetadata,
+    UserCommandEnvelope, WorkerId,
 };
+use lumi_library::AutoloopCatalog;
 use lumi_lighting_output::LightingOutputProvider as _;
 use lumi_local_playback::{LocalPlaybackDeckSourceProvider, LocalPlaybackError};
 #[cfg(not(test))]
@@ -29,8 +31,8 @@ use lumi_midi_output::{
 };
 use lumi_output_dry_run::{DryRunLightingOutputProvider, DryRunOutputError};
 use lumi_planner::{
-    DeterministicPlanner, PlanMutationError, PlannerError, PlannerTrack, PlanningInput,
-    PlanningOptions, StableChoiceSource, ThemeSelectionContext,
+    DeterministicPlanner, PlanMutationError, PlannerError, PlannerTrack, PlanningConfiguration,
+    PlanningInput, PlanningOptions, StableChoiceSource, ThemeOption, ThemeSelectionContext,
 };
 use lumi_protocol::{
     CommandDisposition, CommandIdCache, InvalidCacheCapacity, MAX_MESSAGE_BYTES, MessageDecoder,
@@ -296,7 +298,6 @@ fn initialized_runtime_for_mode(
     let mut deck_source = SimulatorDeckSourceProvider::demo(clock.clone())?;
     let mut local_deck_source = LocalPlaybackDeckSourceProvider::new(clock.now())?;
     let mut connected_deck_source = BltMidiDeckSourceProvider::new(clock.now())?;
-    let mut planning_worker = PlanningWorker::new();
     let mut output_worker = OutputWorker::new();
     #[cfg(not(test))]
     let mut deck_input = CoreMidiDestinationProvider::new();
@@ -310,6 +311,8 @@ fn initialized_runtime_for_mode(
         )
         .map_err(|error| EngineError::Midi(error.to_string()))?;
     let library_worker = LibraryWorker::demo()?;
+    let autoloop_catalog = library_worker.autoloop_catalog()?;
+    let mut planning_worker = PlanningWorker::new(&autoloop_catalog);
     match deck_source_mode {
         DeckSourceMode::ConnectedDecks => {
             for event in connected_deck_source.drain_events()? {
@@ -411,13 +414,17 @@ fn planner_track(metadata: &TrackMetadata) -> PlannerTrack {
 }
 
 impl PlanningWorker {
-    fn new() -> Self {
+    fn new(catalog: &AutoloopCatalog) -> Self {
         Self {
-            planner: DeterministicPlanner::epic_one(),
+            planner: planner_for_catalog(catalog),
             effect_sequence: 0,
             recent_theme_ids: Vec::new(),
             library_contexts: BTreeMap::new(),
         }
+    }
+
+    fn synchronize_themes(&mut self, catalog: &AutoloopCatalog) {
+        self.planner = planner_for_catalog(catalog);
     }
 
     fn register_library_context(
@@ -558,6 +565,22 @@ impl PlanningWorker {
         )?;
         Ok(())
     }
+}
+
+fn planner_for_catalog(catalog: &AutoloopCatalog) -> DeterministicPlanner<StableChoiceSource> {
+    let themes = catalog
+        .themes()
+        .iter()
+        .map(|theme| ThemeOption {
+            id: theme.id(),
+            name: theme.display_name().to_owned(),
+        })
+        .collect();
+    let configuration = PlanningConfiguration::epic_one().with_themes(
+        PlanConfigurationRevision::new(catalog.revision().max(1)),
+        themes,
+    );
+    DeterministicPlanner::new(configuration, StableChoiceSource)
 }
 
 struct OutputWorker {
@@ -1045,6 +1068,8 @@ fn apply_command(
             runtime
                 .library_worker
                 .mutate_autoloop_catalog(expected_revision, mutation)?;
+            let catalog = runtime.library_worker.autoloop_catalog()?;
+            runtime.planning_worker.synchronize_themes(&catalog);
             return Ok(());
         }
         SessionCommand::PublishMidiSource => {
@@ -2566,6 +2591,7 @@ mod tests {
     use super::*;
     use crate::commands::PlanCommandContext;
     use lumi_domain::{ClientId, CommandSequence, OperationCommand, ThemeId, UserCommandEnvelope};
+    use lumi_library::AutoloopTheme;
     use lumi_output_dry_run::canonical_output_transcript;
     use lumi_simulator::{SimulationControl, SimulationSpeed};
 
@@ -2591,7 +2617,24 @@ mod tests {
             Ok(events) => events,
             Err(error) => panic!("test simulator events must drain: {error}"),
         };
-        let mut worker = PlanningWorker::new();
+        let catalog = AutoloopCatalog::try_new(
+            1,
+            0,
+            (1_u16..=4)
+                .map(|number| {
+                    AutoloopTheme::try_new(
+                        lumi_domain::ThemeId::new(u64::from(number)),
+                        format!("Bank {number}"),
+                        number,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()
+                .unwrap_or_else(|error| panic!("test themes must be valid: {error}")),
+            Vec::new(),
+            Vec::new(),
+        )
+        .unwrap_or_else(|error| panic!("test catalog must be valid: {error}"));
+        let mut worker = PlanningWorker::new(&catalog);
         let mut output_worker = OutputWorker::new();
 
         for event in events {

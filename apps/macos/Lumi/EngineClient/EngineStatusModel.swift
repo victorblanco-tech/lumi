@@ -273,6 +273,7 @@ final class EngineStatusModel: ObservableObject {
             snapshot = refreshed
         }
 
+        var loadedTimelineRevision = request.expectedTimelineRevision
         let loaded = await exchangeLibraryCommand(
             .loadLibraryTrackOnLocalDeck(
                 trackID: request.trackID,
@@ -288,10 +289,19 @@ final class EngineStatusModel: ObservableObject {
                     expectedTimelineRevision: request.expectedTimelineRevision,
                     expectedStateRevision: actualRevision
                 )
+            },
+            retryOnTimelineRevisionConflict: { actualTimelineRevision, actualStateRevision in
+                loadedTimelineRevision = actualTimelineRevision
+                return .loadLibraryTrackOnLocalDeck(
+                    trackID: request.trackID,
+                    deckID: request.deckID,
+                    expectedTimelineRevision: actualTimelineRevision,
+                    expectedStateRevision: actualStateRevision
+                )
             }
         )
         if loaded {
-            localPlaybackFeedback = "Loaded exact Lumi timeline r\(request.expectedTimelineRevision) on Local Deck \(request.deckID)."
+            localPlaybackFeedback = "Loaded exact Lumi timeline r\(loadedTimelineRevision) on Local Deck \(request.deckID)."
             localPlaybackFeedbackIsError = false
             await fetchLocalPlaybackWaveform(
                 trackID: request.trackID,
@@ -841,7 +851,8 @@ final class EngineStatusModel: ObservableObject {
     private func exchangeLibraryCommand(
         _ command: EngineCommand,
         failurePresentation: LibraryCommandFailurePresentation = .library,
-        retryOnStateRevisionConflict: ((UInt64) -> EngineCommand)? = nil
+        retryOnStateRevisionConflict: ((UInt64) -> EngineCommand)? = nil,
+        retryOnTimelineRevisionConflict: ((UInt64, UInt64) -> EngineCommand)? = nil
     ) async -> Bool {
         guard lifecycle == .ready,
               let endpointDescription,
@@ -852,12 +863,26 @@ final class EngineStatusModel: ObservableObject {
         defer { isExchangingCommand = false }
         do {
             var envelope = try await supervisor.send(command)
+            var effectiveStateRevision = latestSnapshot?.stateRevision
             if let failure = EngineCommandFailure(envelope),
                failure.kind == "revisionConflict",
                let actualRevision = failure.actualStateRevision,
                let retryOnStateRevisionConflict {
+                effectiveStateRevision = actualRevision
                 envelope = try await supervisor.send(
                     retryOnStateRevisionConflict(actualRevision)
+                )
+            }
+            if let failure = EngineCommandFailure(envelope),
+               failure.kind == "revisionConflict",
+               let actualTimelineRevision = failure.actualTimelineRevision,
+               let effectiveStateRevision,
+               let retryOnTimelineRevisionConflict {
+                envelope = try await supervisor.send(
+                    retryOnTimelineRevisionConflict(
+                        actualTimelineRevision,
+                        effectiveStateRevision
+                    )
                 )
             }
             if let failure = EngineCommandFailure(envelope) {
@@ -1412,6 +1437,12 @@ final class EngineStatusModel: ObservableObject {
                     let nextWorkspaceState = LiveWorkspacePresenter.ready(snapshot)
                     if nextWorkspaceState != self.workspaceState {
                         self.workspaceState = nextWorkspaceState
+                    }
+                    if healthTick == 0 {
+                        let nextLibraryState = try self.libraryDecoder.decode(envelope)
+                        if nextLibraryState != self.libraryState {
+                            self.libraryState = nextLibraryState
+                        }
                     }
                 } catch {
                     Self.logger.error(
