@@ -23,10 +23,10 @@ Het bouwplan voor de eerste verticale productmilestone staat in
 Het gerefineerde ontwerp en storyplan voor de volgende verticale milestone staat
 in [`docs/planning/epic-02a-library-track-lighting-editor.md`](docs/planning/epic-02a-library-track-lighting-editor.md).
 
-> Status: Epic 1 is geïntegreerd als lokale `0.1.0-dev` release candidate; Epic
-> 2A heeft nu de provider-neutrale Library, versioned Track Lighting Editor,
-> configureerbare Phrase Roles, vier-Theme Autoloop-matrix en duurzame
-> per-phrase loopstrategieën in actieve bouw.
+> Status: `0.3.0-dev` bevat de geaccepteerde Rekordbox-backed Library, Track
+> Lighting Editor, Local Playback dual-deck, rolling AutoLoop Plan en de eerste
+> fysiek bewezen SoundSwitch/MIDI/DMX-keten. De unsigned Apple Silicon
+> releaseverpakking en resterende stabiliteitsgates zijn in actieve bouw.
 
 ## Development
 

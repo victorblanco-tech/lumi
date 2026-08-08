@@ -60,6 +60,7 @@ use crate::library::{LibraryPlanContext, LibraryWorker, LibraryWorkerError, Reso
 const SESSION_TOKEN_ENVIRONMENT_KEY: &str = "LUMI_SESSION_TOKEN";
 #[cfg(not(test))]
 const DECK_INPUT_NAME_ENVIRONMENT_KEY: &str = "LUMI_DECK_INPUT_DESTINATION_NAME";
+#[cfg(not(test))]
 const AUTO_PUBLISH_MIDI_ENVIRONMENT_KEY: &str = "LUMI_AUTO_PUBLISH_MIDI";
 const MINIMUM_SESSION_TOKEN_BYTES: usize = 32;
 const MAXIMUM_SESSION_TOKEN_BYTES: usize = 256;

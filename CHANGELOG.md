@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.3.0-dev
+
+- Rekordbox-backed Library en Lumi-owned phrase editing.
+- Stabiele Local Playback dual-deck met rolling AutoLoop Plan.
+- Persistente vier-bank/32-slot SoundSwitch-mapping en generieke MIDI-output.
+- Automatische phrase-boundary execution, MIDI Clock en een eerste fysieke
+  SoundSwitch/Control One/DMX-run.
+- Lokale unsigned Apple Silicon releaseverpakking in voorbereiding.
+
 ## 0.1.0-dev
 
 - Epic 1 is als reproduceerbare, volledig lokale vertical slice gehard met een
