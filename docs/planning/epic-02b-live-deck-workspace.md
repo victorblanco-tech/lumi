@@ -1,6 +1,6 @@
 # Epic 2B – Live deck intelligence and rolling plans
 
-Status: **Local Playback product slice accepted; BLT MIDI adapter functionally proven, hardening evidence remains**
+Status: **Local Playback product slice user-accepted; BLT MIDI adapter functionally proven, connected-hardware hardening remains**
 
 Target milestone: **0.2.0 – Deck Intelligence**
 
@@ -136,7 +136,7 @@ Status: **Complete and locally verified**
 
 ### [E2B-04 – Live planning interaction and diagnostics](https://github.com/victorblanco-tech/lumi/issues/85)
 
-Status: **Complete and locally verified**
+Status: **Complete, locally verified and user-accepted on 2026-08-08**
 
 - integrate the remaining-Live-track editor into the master deck surface;
 - keep next-track planning available alongside it;
@@ -155,6 +155,13 @@ The Local Playback and connected Live Deck modes use the same Master status
 component. Their operation-state border, top control and badge therefore cannot
 drift into source-specific variants. Pause animation is restricted to the
 lightweight outlines and does not invalidate or redraw the waveform timeline.
+
+The accepted operation-state language is now implemented on both source modes:
+Off uses a white Master outline, Armed orange, Live red and Paused a lightweight
+blinking orange outline. The selected top operation control uses the same color.
+The badge reads only `MASTER` outside active execution. During `Start` and real
+deck playback it reads red `MASTER` plus green `LIVE NOW`; a prepared but stopped
+deck is never presented as live. The user confirmed this behavior on 2026-08-08.
 
 The first real-output slice maps the small demo Theme/AutoLoop vocabulary to
 SoundSwitch bank and button MIDI pulses at phrase execution. The full persisted
@@ -205,6 +212,10 @@ repeatable disconnect/reconnect transcript.
 - Stale input or stale edits cannot regress or mutate authoritative state.
 - macOS Swift tests, Rust tests, native build and headless visual evidence pass
   locally without GitHub Actions.
+
+The Local Playback form of these criteria is met and user-accepted. Final Epic
+closure still requires the E2B-06 latency/loss and reconnect transcript and a
+connected-deck hardware acceptance run when Pro DJ Link equipment is available.
 
 ## Dependencies and boundaries
 

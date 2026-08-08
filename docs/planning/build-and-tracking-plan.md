@@ -127,12 +127,18 @@ De fase bestaat uit drie opeenvolgende verticale epics:
 Exit: echte librarytracks hebben een duurzame, bewerkbare Lumi-timeline en vóór
 de transitie bestaat een volledig, uitlegbaar en aanpasbaar plan.
 
-Actuele volgorde: de demo-library, Track Editor, Live dual-deck, SoundSwitch-
-output, BLT-input en informatiearchitectuur zijn lokaal bewezen. Het volgende
-werkpakket is de veilige Rekordbox 7-spike/import achter de reeds zichtbare
-`Library > Sources & Import`-bestemming.
+Actuele status op 2026-08-08: de read-only Rekordbox 7 playlistmirror en
+analyse-resolver, Track Editor, Local Playback dual-deck, rolling plan,
+SoundSwitch-output, BLT-simulatordecks en informatiearchitectuur zijn lokaal
+bewezen. De Local Playback product slice is door de gebruiker geaccepteerd.
+Open voor volledige fase-afsluiting zijn gemeten BLT latency/loss/reconnect,
+connected-deck hardware-evidence en de production-ready afronding van de
+preplanned next-track planner.
 
 ### Fase 3 – SoundSwitch Live MVP (`0.3.0`)
+
+Status op 2026-08-08: **functioneel bewezen; release- en fysieke
+stabiliteitsgates blijven open**.
 
 - [E3-00](https://github.com/victorblanco-tech/lumi/issues/75): de fysieke
   virtual-MIDI/Control One/DMX-keten is bewezen; repetition en reconnect blijven
@@ -152,6 +158,13 @@ werkpakket is de veilige Rekordbox 7-spike/import achter de reeds zichtbare
 
 Exit: Lumi voert betrouwbaar uit zonder de gebruikersbediening over te nemen.
 
+De eerste fysieke automatische licht-run en parallelle Control One-bediening
+zijn geslaagd. De Local Playback→phrase scheduler→MIDI→SoundSwitch→DMX-keten
+is daarmee end-to-end bewezen. Voor releaseacceptatie blijven een herhaalde
+full-song timingrun, 100-trigger/reconnect evidence en navigatiecontinuïteit met
+aangesloten verlichting open. De concrete status staat in
+[E3-02](story-e3-02-full-song-local-playback-to-lights.md).
+
 ### Fase 4 – macOS Beta (`0.4.0`)
 
 - native SwiftUI-app;
@@ -160,6 +173,11 @@ Exit: Lumi voert betrouwbaar uit zonder de gebruikersbediening over te nemen.
 - signing, notarization en installeerbare Apple Silicon DMG.
 
 Exit: Lumi installeert en herstelt betrouwbaar op een schone Mac.
+
+Een eerste ondertekende en genotariseerde Apple Silicon DMG wordt naar voren
+gehaald als delivery gate voor `0.3.0`. De autonome service-installatie,
+upgrade/recovery en volledige schone-Mac hardening blijven onderdeel van
+`0.4.0`; een installeerbare `0.3.0` claimt die service-eigenschappen nog niet.
 
 ### Fase 5 – iPhone Remote Beta (`0.5.0`)
 

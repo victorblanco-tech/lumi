@@ -1,6 +1,6 @@
 # E3-02 – Full-song Local Playback to SoundSwitch and physical lights
 
-Status: **Implemented; initial physical run passed, stability confirmation pending**
+Status: **Implemented and functionally accepted; physical hardening revalidation pending**
 
 Target milestone: **0.3.0 – SoundSwitch Live MVP**
 
@@ -214,3 +214,14 @@ clamping. Desktop validation confirmed automatic publication of `Lumi Virtual
 MIDI` and `Lumi Clock` in Tech without sending a light cue. A repeat physical
 full-song run remains the acceptance check for end-to-end timing and the
 Live → Library → Live continuity fix.
+
+### Latest product acceptance checkpoint
+
+On 2026-08-08 the user accepted the current Live/Local Playback product behavior
+after the lifecycle, timing and Master-status hardening. The authoritative decks,
+fixed playhead, AutoLoop Plan, persisted user mappings and operation-state
+presentation now form one coherent product flow. The physical fixtures were
+disconnected for this last UI checkpoint, so it does not replace the outstanding
+repeat full-song SoundSwitch/DMX run. No remapping or re-entry of the existing
+Banks, AutoLoops, phrase roles or edited track timelines is required for that
+run.

@@ -1,6 +1,6 @@
 # E3-01 – Generalize SoundSwitch bank and AutoLoop MIDI execution
 
-Status: **Implementation path complete; repetition and reconnect evidence remain**
+Status: **Functionally and physically proven; repetition and reconnect evidence remain**
 
 ## Outcome
 
@@ -16,6 +16,10 @@ SoundSwitch target.
 - Bank 1 → 50 ms → AutoLoop 1 works physically.
 - Control One remains usable in parallel and DMX output visibly works.
 - Test Controller and MIDI Status are permanent product diagnostics.
+- `Lumi Virtual MIDI` now publishes automatically, self-recovers independently
+  from the clock endpoint and participates in the compact Tech Ready status.
+- A first physical run confirmed that Lumi and Control One can operate in
+  parallel while SoundSwitch continues to own DMX output.
 
 ## Acceptance criteria
 
@@ -54,4 +58,6 @@ available in the engine. [E3-02](story-e3-02-full-song-local-playback-to-lights.
 now proves that path across one complete real Local Playback track, adds the
 missing local tempo/beat-clock bridge and captures visible SoundSwitch/DMX
 evidence. The repetition and disconnect/reconnect criteria above remain open
-until that physical test block is executed.
+until that physical test block is executed. The first automatic full-song light
+run has already proven real phrase-boundary execution; the open evidence is a
+repeatable 100-trigger/reconnect stability run rather than basic feasibility.
