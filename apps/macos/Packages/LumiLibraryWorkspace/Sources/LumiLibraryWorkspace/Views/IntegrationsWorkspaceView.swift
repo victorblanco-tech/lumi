@@ -118,6 +118,7 @@ public struct IntegrationsWorkspaceView: View {
             AutoloopCatalogSettingsView(
                 catalog: library.autoloopCatalog,
                 midiIntegration: library.midiIntegration,
+                midiClockIntegration: library.midiClockIntegration,
                 feedback: autoloopFeedback,
                 midiIntegrationFeedback: midiIntegrationFeedback,
                 rendersInteractiveControls: rendersInteractiveControls,
@@ -236,6 +237,10 @@ public struct IntegrationsWorkspaceView: View {
                         Divider()
                         diagnosticRow("MIDI test pulses", "\(library.midiIntegration?.sentPulseCount ?? 0)", lightingOutputState)
                         Divider()
+                        diagnosticRow("Local Playback clock", clockDiagnostic, clockOutputState)
+                        Divider()
+                        diagnosticRow("MIDI Clock ticks", "\(library.midiClockIntegration?.sentTickCount ?? 0)", clockOutputState)
+                        Divider()
                         diagnosticRow("Library provider", library.source?.name ?? "No source", library.condition.componentState)
                     }
                 }
@@ -265,6 +270,15 @@ public struct IntegrationsWorkspaceView: View {
 
     private var lightingOutputState: LumiComponentState {
         library.midiIntegration?.isReady == true ? .ready : .degraded
+    }
+
+    private var clockOutputState: LumiComponentState {
+        library.midiClockIntegration?.isPublished == true ? .ready : .degraded
+    }
+
+    private var clockDiagnostic: String {
+        guard let clock = library.midiClockIntegration else { return "Not published" }
+        return "\(clock.sourceName) · \(clock.state.uppercased()) · \(clock.bpmDescription)"
     }
 
     private var deckInputDetail: String {

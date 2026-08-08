@@ -62,6 +62,9 @@ public struct LibrarySnapshotDecoder: Sendable {
             phraseRoleSettings: try decodePhraseRoleSettings(library["phraseRoleSettings"]),
             autoloopCatalog: try decodeAutoloopCatalog(library["autoloopCatalog"]),
             midiIntegration: try decodeMidiIntegration(envelope.payload["midiIntegration"]),
+            midiClockIntegration: try decodeMidiClockIntegration(
+                envelope.payload["midiClockIntegration"]
+            ),
             deckInputIntegration: try decodeDeckInputIntegration(
                 envelope.payload["deckInputIntegration"]
             ),
@@ -212,6 +215,29 @@ public struct LibrarySnapshotDecoder: Sendable {
             midiProtocol: try string(midi, "protocol"),
             sentPulseCount: try unsigned(midi, "sentPulseCount"),
             lastEvent: optionalString(midi, "lastEvent")
+        )
+    }
+
+    private func decodeMidiClockIntegration(
+        _ value: JSONValue?
+    ) throws -> MidiClockIntegrationState? {
+        guard let value, value != .null else { return nil }
+        guard case let .object(clock) = value else {
+            throw LibrarySnapshotError.invalidObject
+        }
+        let state = try string(clock, "state")
+        guard ["stopped", "ready", "running"].contains(state) else {
+            throw LibrarySnapshotError.invalidObject
+        }
+        return MidiClockIntegrationState(
+            state: state,
+            sourceName: try string(clock, "sourceName"),
+            midiProtocol: try string(clock, "protocol"),
+            bpmMilli: optionalUnsigned(clock, "bpmMilli"),
+            sentTickCount: try unsigned(clock, "sentTickCount"),
+            sentTransportCount: try unsigned(clock, "sentTransportCount"),
+            lastEvent: optionalString(clock, "lastEvent"),
+            lastError: optionalString(clock, "lastError")
         )
     }
 

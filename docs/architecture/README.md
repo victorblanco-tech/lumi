@@ -28,6 +28,7 @@ Decision Records (ADR's) die de belangrijkste besluiten vastleggen.
 - [ADR-0019: Rekordbox XML mirror with read-only analysis enrichment](adr/0019-rekordbox-xml-analysis-en-lumi-owned-enrichment.md)
 - [ADR-0020: Closed Rekordbox snapshot as authoritative analysis resolver](adr/0020-closed-rekordbox-snapshot-identity-resolver.md)
 - [ADR-0021: Shared track timelines and source-specific playback clocks](adr/0021-shared-track-timelines-and-source-specific-playback-clocks.md)
+- [ADR-0022: Separate CoreMIDI sources for lighting commands and playback timing](adr/0022-separate-coremidi-command-and-clock-sources.md)
 
 Release- en deploymentmanagement staat in [`docs/release`](../release/README.md).
 

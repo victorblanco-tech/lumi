@@ -169,6 +169,40 @@ fn plan_revision_and_track_load_identity_are_enforced() {
 }
 
 #[test]
+fn live_phrase_execution_requires_playback_and_deduplicates_the_same_cue() {
+    let mut runtime = started_runtime(32);
+    submit_and_process(&mut runtime, track_loaded(1, 10, 100, 1));
+    submit_and_process(
+        &mut runtime,
+        plan_result(1, plan(PlanRevision::initial(), TrackLoadId::new(10))),
+    );
+    submit_and_process(&mut runtime, leader_changed(2, 10, 2));
+    let revision = runtime.state().revision();
+    submit_and_process(
+        &mut runtime,
+        command_event(1, revision, OperationCommand::Arm),
+    );
+    let revision = runtime.state().revision();
+    submit_and_process(
+        &mut runtime,
+        command_event(2, revision, OperationCommand::Start),
+    );
+
+    let stopped = submit_and_process(&mut runtime, phrase_changed(3, 10, 0, 3));
+    assert_eq!(stopped.decision, DecisionReason::PhraseChanged);
+    assert!(stopped.effects.is_empty());
+
+    submit_and_process(&mut runtime, playback_state(4, 10, true, 4));
+    let first = submit_and_process(&mut runtime, phrase_changed(5, 10, 0, 5));
+    assert_eq!(first.decision, DecisionReason::PhraseExecutionScheduled);
+    assert!(matches!(first.effects.as_slice(), [Effect::ExecuteCue(_)]));
+
+    let duplicate = submit_and_process(&mut runtime, phrase_changed(6, 10, 0, 6));
+    assert_eq!(duplicate.decision, DecisionReason::PhraseExecutionSkipped);
+    assert!(duplicate.effects.is_empty());
+}
+
+#[test]
 fn overload_records_a_safe_diagnostic_and_preserves_critical_ingress() {
     let mut runtime = started_runtime(2);
     assert_eq!(
@@ -321,6 +355,44 @@ fn seek_position(sequence: u64, load: u64, beat: u32, at: u64) -> DomainEvent {
             deck_id: DeckId::new(1),
             track_load_id: TrackLoadId::new(load),
             beat,
+        },
+    })
+}
+
+fn playback_state(sequence: u64, load: u64, playing: bool, at: u64) -> DomainEvent {
+    DomainEvent::Observation(ObservationEnvelope {
+        source_id: SourceId::new(1),
+        sequence: SourceSequence::new(sequence),
+        observed_at: MonotonicTime::new(at),
+        observation: DeckObservation::PlaybackStateChanged {
+            deck_id: DeckId::new(1),
+            track_load_id: TrackLoadId::new(load),
+            playing,
+        },
+    })
+}
+
+fn phrase_changed(sequence: u64, load: u64, phrase_index: u16, at: u64) -> DomainEvent {
+    DomainEvent::Observation(ObservationEnvelope {
+        source_id: SourceId::new(1),
+        sequence: SourceSequence::new(sequence),
+        observed_at: MonotonicTime::new(at),
+        observation: DeckObservation::PhraseChanged {
+            deck_id: DeckId::new(1),
+            track_load_id: TrackLoadId::new(load),
+            phrase_index,
+        },
+    })
+}
+
+fn leader_changed(sequence: u64, load: u64, at: u64) -> DomainEvent {
+    DomainEvent::Observation(ObservationEnvelope {
+        source_id: SourceId::new(1),
+        sequence: SourceSequence::new(sequence),
+        observed_at: MonotonicTime::new(at),
+        observation: DeckObservation::LeaderChanged {
+            deck_id: DeckId::new(1),
+            track_load_id: TrackLoadId::new(load),
         },
     })
 }

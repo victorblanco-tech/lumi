@@ -93,6 +93,28 @@ struct LibraryWorkspaceTests {
         #expect(state.midiIntegration?.sentPulseCount == 1)
     }
 
+    @Test("Local Playback MIDI Clock diagnostics decode independently")
+    func decodesMidiClockIntegrationState() throws {
+        let clock: JSONValue = .object([
+            "state": .string("running"),
+            "sourceName": .string("Lumi Clock"),
+            "protocol": .string("MIDI Clock · 24 PPQN"),
+            "bpmMilli": .number(130_000),
+            "sentTickCount": .number(240),
+            "sentTransportCount": .number(1),
+            "lastEvent": .string("Clock running"),
+            "lastError": .null
+        ])
+        let state = try LibrarySnapshotDecoder().decode(
+            envelope(trackValues: [trackValue()], midiClockIntegration: clock)
+        )
+
+        #expect(state.midiClockIntegration?.isRunning == true)
+        #expect(state.midiClockIntegration?.sourceName == "Lumi Clock")
+        #expect(state.midiClockIntegration?.bpmDescription == "130.000 BPM")
+        #expect(state.midiClockIntegration?.sentTickCount == 240)
+    }
+
     @Test("Rekordbox sync preview decodes a bounded, hash-bound apply plan")
     func decodesRekordboxSyncPreview() throws {
         let state = try LibrarySnapshotDecoder().decode(
@@ -712,6 +734,7 @@ private func envelope(
     phraseRoleSettings: JSONValue = .null,
     autoloopCatalog: JSONValue = .null,
     midiIntegration: JSONValue = .null,
+    midiClockIntegration: JSONValue = .null,
     deckInputIntegration: JSONValue = .null,
     rekordboxSyncPreview: JSONValue = .null
 ) -> MessageEnvelope {
@@ -724,6 +747,7 @@ private func envelope(
         sentAt: "2026-08-03T00:00:00Z",
         payload: [
             "midiIntegration": midiIntegration,
+            "midiClockIntegration": midiClockIntegration,
             "deckInputIntegration": deckInputIntegration,
             "library": .object([
                 "condition": .string("ready"),

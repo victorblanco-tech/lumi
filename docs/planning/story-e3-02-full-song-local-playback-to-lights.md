@@ -1,6 +1,6 @@
 # E3-02 – Full-song Local Playback to SoundSwitch and physical lights
 
-Status: **Ready for build and physical acceptance**
+Status: **Implemented; physical SoundSwitch/DMX acceptance pending**
 
 Target milestone: **0.3.0 – SoundSwitch Live MVP**
 
@@ -26,10 +26,10 @@ and supplies the timing source that Local Playback lacks without DJ decks.
 
 ## Gate 0 – SoundSwitch timing compatibility
 
-Before expanding implementation, verify on the real installation whether
-SoundSwitch can consume MIDI Clock and Lumi bank/AutoLoop commands from the
-same virtual CoreMIDI source. If not, Lumi exposes a separate `Lumi Clock`
-source while preserving the existing `Lumi Virtual MIDI` command source.
+The implementation publishes a dedicated `Lumi Clock` CoreMIDI source while
+preserving `Lumi Virtual MIDI` for bank/AutoLoop commands. This keeps timing
+traffic isolated from learned command notes and lets SoundSwitch select the
+appropriate endpoint for each function. ADR-0022 records the decision.
 
 The spike must prove:
 
@@ -41,8 +41,8 @@ The spike must prove:
 - measured drift at phrase boundaries remains at most one eighth of a beat over
   one complete test track.
 
-The result is recorded as a short compatibility transcript. A separate virtual
-clock source is the default fallback, not a failure of the story.
+The remaining physical gate records a short compatibility transcript and DMX
+evidence from the real SoundSwitch installation.
 
 ## Build slices
 
@@ -54,6 +54,11 @@ clock source is the default fallback, not a failure of the story.
   Output diagnostics;
 - publish no clock or transport while the relevant output is Off;
 - recover only through an explicit reconnect/restart action after endpoint loss.
+
+Implementation status: **complete in code and local automated verification**.
+The Rust output worker owns a dedicated 24 PPQN scheduler, emits MIDI Start,
+Continue, Stop and Song Position messages, derives BPM and phase from the exact
+imported beatgrid, and exposes separate clock diagnostics to SwiftUI.
 
 ### 2. Automatic full-song execution
 
@@ -68,6 +73,11 @@ clock source is the default fallback, not a failure of the story.
   and Lumi may reclaim control only at the next valid phrase boundary;
 - hold the last look at track end; do not invent a blackout.
 
+Implementation status: **complete in code and local automated verification**.
+Playback state is applied before phrase activation, stopped/Armed playback is
+output-silent, and identical phrase cues are deduplicated by deck, track-load,
+phrase, cue and plan revision.
+
 ### 3. Discontinuity and fail-closed behavior
 
 - pause stops clock advancement and produces no phantom phrase transition;
@@ -78,7 +88,14 @@ clock source is the default fallback, not a failure of the story.
   current safe look, keeps local audio usable and surfaces a precise diagnostic;
 - Off and Paused suppress automatic output immediately.
 
+Implementation status: **complete for the local product path**. A paused seek
+updates the visible phrase but emits nothing; resume establishes the destination
+phrase once. Position discontinuities are detected against monotonic elapsed
+time and rephase the clock rather than replaying skipped phrase cues.
+
 ### 4. Physical acceptance run
+
+Implementation status: **pending user Gate 0 run**.
 
 - choose one ready imported track with a complete beatgrid, Lumi phrase timeline
   and mapped AutoLoop for each phrase used in the run;
@@ -116,3 +133,19 @@ clock source is the default fallback, not a failure of the story.
 - SoundSwitch owns DMX output; Control One remains outside the Lumi domain.
 - Output Profile Builder, iPhone control and generic non-SoundSwitch devices
   remain separate stories.
+
+## Local verification record
+
+Completed on 2026-08-08:
+
+- `cargo fmt --all -- --check`;
+- `cargo clippy --workspace --all-targets -- -D warnings`;
+- `cargo test --workspace`, including CoreMIDI and the real engine process;
+- all macOS Swift package tests with warnings as errors;
+- Swift-to-Rust process integration proving both `Lumi Virtual MIDI` and
+  `Lumi Clock`, clock ticks only during `LIVE + Play`, and pause suppression;
+- native unsigned arm64 macOS app build;
+- repository architecture checks and 22-item visual evidence gate.
+
+These tests prove the application route and safety semantics. They do not
+replace the remaining physical SoundSwitch, Control One and DMX fixture run.

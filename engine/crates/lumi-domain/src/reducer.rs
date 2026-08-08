@@ -257,6 +257,14 @@ fn reduce_observation(
             Some(deck) if deck.track_load_id() == *track_load_id => {
                 deck.playing = *playing;
                 deck.last_observed_at = event.observed_at;
+                if !playing
+                    && deck.beat() == 0
+                    && state
+                        .last_scheduled_cue
+                        .is_some_and(|scheduled| scheduled.0 == *deck_id)
+                {
+                    state.last_scheduled_cue = None;
+                }
                 DecisionReason::PlaybackStateChanged
             }
             _ => DecisionReason::TrackLoadMismatch,
@@ -277,6 +285,12 @@ fn reduce_observation(
                     .is_some_and(|plan| plan.deck_id() == *deck_id)
                 {
                     state.active_plan = None;
+                }
+                if state
+                    .last_scheduled_cue
+                    .is_some_and(|scheduled| scheduled.0 == *deck_id)
+                {
+                    state.last_scheduled_cue = None;
                 }
                 DecisionReason::TrackUnloaded
             }
@@ -300,7 +314,12 @@ fn reduce_observation(
             };
             if !accepted {
                 DecisionReason::TrackLoadMismatch
-            } else if state.operation != OperationState::Live {
+            } else if state.operation != OperationState::Live
+                || !state
+                    .decks
+                    .get(deck_id)
+                    .is_some_and(|deck| deck.is_playing())
+            {
                 DecisionReason::PhraseChanged
             } else if let Some(effect) = execution_effect(
                 state,
@@ -384,6 +403,16 @@ fn execution_effect(
     else {
         return Ok(None);
     };
+    let execution_identity = (
+        deck_id,
+        track_load_id,
+        phrase_index,
+        cue.id(),
+        plan.revision(),
+    );
+    if state.last_scheduled_cue == Some(execution_identity) {
+        return Ok(None);
+    }
     let command_sequence = state
         .output_command_sequence
         .checked_add(1)
@@ -401,6 +430,7 @@ fn execution_effect(
         scheduled_at,
     );
     state.output_command_sequence = command_sequence;
+    state.last_scheduled_cue = Some(execution_identity);
     Ok(Some(Effect::ExecuteCue(request)))
 }
 
@@ -450,6 +480,7 @@ fn reduce_command(
     state.operation = target;
     if target == OperationState::Off {
         state.active_plan = None;
+        state.last_scheduled_cue = None;
     }
     let effects = if matches!(target, OperationState::Paused | OperationState::Off) {
         vec![Effect::EnsureOutputClosed {

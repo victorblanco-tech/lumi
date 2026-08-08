@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use lumi_domain::{
     KeyMode, PhraseKind, PitchClass, ThemeId, TrackId, TrackIdentityFacts, TrackMetadata,
@@ -120,6 +120,13 @@ pub struct ResolvedLibraryCue {
     pub resolution_reason: String,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct LocalPlaybackClockAnchor {
+    pub bpm_milli: u32,
+    pub song_position_16th: u16,
+    pub delay_to_next_tick: Duration,
+}
+
 impl LibraryPlanContext {
     #[must_use]
     pub fn identity_json(&self) -> Value {
@@ -174,6 +181,71 @@ impl LibraryPlanContext {
             .markers()
             .partition_point(|marker| marker.time_millis() <= position_millis);
         u32::try_from(index.saturating_sub(1)).unwrap_or(u32::MAX)
+    }
+
+    #[must_use]
+    pub fn clock_anchor_at_millis(
+        &self,
+        position_millis: u64,
+        fallback_bpm_milli: u32,
+    ) -> Option<LocalPlaybackClockAnchor> {
+        let markers = self.beat_grid.markers();
+        let first = markers.first()?;
+        let insertion = markers.partition_point(|marker| marker.time_millis() <= position_millis);
+        let current_index = insertion.saturating_sub(1);
+        let current = markers.get(current_index).unwrap_or(first);
+        let song_position = u16::try_from(current.beat_index().checked_mul(4)?).ok()?;
+
+        let last_index = markers.len().saturating_sub(1);
+        let window_start = current_index.saturating_sub(8);
+        let window_end = current_index.saturating_add(8).min(last_index);
+        let bpm_milli = if window_end > window_start {
+            let elapsed = markers[window_end]
+                .time_millis()
+                .saturating_sub(markers[window_start].time_millis());
+            let beat_count = u64::try_from(window_end - window_start).ok()?;
+            if let Some(measured_bpm) = beat_count.saturating_mul(60_000_000).checked_div(elapsed) {
+                u32::try_from(measured_bpm)
+                    .ok()
+                    .filter(|bpm| (20_000..=300_000).contains(bpm))
+                    .unwrap_or(fallback_bpm_milli)
+            } else {
+                fallback_bpm_milli
+            }
+        } else {
+            fallback_bpm_milli
+        };
+
+        let delay_to_next_tick = if position_millis < first.time_millis() {
+            Duration::from_micros(
+                first
+                    .time_millis()
+                    .saturating_sub(position_millis)
+                    .saturating_mul(1_000),
+            )
+        } else if position_millis == current.time_millis() {
+            Duration::ZERO
+        } else if let Some(next) = markers.get(current_index.saturating_add(1)) {
+            let beat_micros = next
+                .time_millis()
+                .saturating_sub(current.time_millis())
+                .saturating_mul(1_000);
+            let elapsed_micros = position_millis
+                .saturating_sub(current.time_millis())
+                .saturating_mul(1_000)
+                .min(beat_micros);
+            let elapsed_ticks = elapsed_micros.saturating_mul(24) / beat_micros.max(1);
+            let next_tick_offset = elapsed_ticks.saturating_add(1).saturating_mul(beat_micros) / 24;
+            Duration::from_micros(next_tick_offset.saturating_sub(elapsed_micros))
+        } else {
+            Duration::from_nanos(60_000_000_000_000_u64 / (u64::from(bpm_milli).saturating_mul(24)))
+        };
+
+        Some(LocalPlaybackClockAnchor {
+            bpm_milli,
+            song_position_16th: song_position,
+            delay_to_next_tick,
+        })
     }
 
     #[must_use]

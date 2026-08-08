@@ -920,19 +920,21 @@ mod tests {
     }
 
     #[test]
-    fn library_waveform_detail_is_a_read_only_track_request() {
+    fn library_waveform_detail_is_a_read_only_track_request()
+    -> Result<(), Box<dyn std::error::Error>> {
         let envelope = command_envelope(serde_json::json!({
             "kind": "getLibraryTrackWaveform",
             "trackId": 42,
         }));
 
-        let command = decode_command(&envelope).expect("waveform request should decode");
+        let command = decode_command(&envelope)?;
 
         assert_eq!(
             command,
             SessionCommand::GetLibraryTrackWaveform { track_id: 42 }
         );
         assert!(!command.is_mutating());
+        Ok(())
     }
 
     fn command_envelope(payload: Value) -> MessageEnvelope {

@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, VecDeque};
 
 use crate::{
-    ClientId, CommandSequence, DecisionReason, DeckId, DeckSourceStatus, Diagnostic,
-    EffectSequence, LightingPlan, MonotonicTime, OutputEffectResult, SourceId, SourceSequence,
-    StateRevision, TimelineEntry, TrackId, TrackLoadId, TrackMetadata, WorkerId,
+    ClientId, CommandSequence, CueId, DecisionReason, DeckId, DeckSourceStatus, Diagnostic,
+    EffectSequence, LightingPlan, MonotonicTime, OutputEffectResult, PlanRevision, SourceId,
+    SourceSequence, StateRevision, TimelineEntry, TrackId, TrackLoadId, TrackMetadata, WorkerId,
 };
 
 const MAXIMUM_DIAGNOSTICS: usize = 64;
@@ -98,6 +98,7 @@ pub struct RuntimeState {
     pub(crate) leader_deck: Option<DeckId>,
     pub(crate) active_plan: Option<LightingPlan>,
     pub(crate) output_command_sequence: u64,
+    pub(crate) last_scheduled_cue: Option<(DeckId, TrackLoadId, u16, CueId, PlanRevision)>,
     pub(crate) output_effects: VecDeque<OutputEffectResult>,
     pub(crate) source_sequences: BTreeMap<SourceId, SourceSequence>,
     pub(crate) source_times: BTreeMap<SourceId, MonotonicTime>,
@@ -121,6 +122,7 @@ impl Default for RuntimeState {
             leader_deck: None,
             active_plan: None,
             output_command_sequence: 0,
+            last_scheduled_cue: None,
             output_effects: VecDeque::new(),
             source_sequences: BTreeMap::new(),
             source_times: BTreeMap::new(),
@@ -228,6 +230,12 @@ impl RuntimeState {
             },
         );
         self.plans.remove(&deck_id);
+        if self
+            .last_scheduled_cue
+            .is_some_and(|scheduled| scheduled.0 == deck_id)
+        {
+            self.last_scheduled_cue = None;
+        }
         if self
             .active_plan
             .as_ref()

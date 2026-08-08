@@ -34,6 +34,13 @@ will later be driven by Live Decks.
 8. Theme and Autoloop changes are plan-instance overrides. They do not mutate
    the Library timeline or catalog and are applied only to a phrase that has
    not started.
+9. In Live operation, the engine—not SwiftUI—converts the authoritative local
+   transport and exact imported beatgrid into a dedicated `Lumi Clock` 24 PPQN
+   MIDI stream. Learned bank/AutoLoop commands remain on `Lumi Virtual MIDI`.
+10. A phrase becomes executable only after its deck reports actual playback.
+    The engine identifies an executed cue by deck, track load, phrase, cue and
+    plan revision, so a poll, duplicate observation or pause/resume cannot fire
+    the same cue twice.
 
 ## Live behavior
 
@@ -58,6 +65,12 @@ will later be driven by Live Decks.
 - Track and timeline identity use optimistic concurrency; title/artist guessing
   cannot silently select a Library row.
 - Missing audio fails closed for playback while analysis remains available.
+- Armed, Paused and Off never emit automatic phrase output. A paused seek may
+  move the selected phrase, but only the subsequent Live resume can establish
+  that destination look, once.
+- The MIDI clock pauses with local audio. A start, seek or transport
+  discontinuity creates a new beatgrid-derived phase anchor rather than a
+  burst of clock or skipped lighting commands.
 - Source switching clears stale deck state rather than presenting Local
   Playback data as if it came from Live Decks.
 - A transport or leader command receives a lightweight acknowledgement; a full
@@ -84,6 +97,13 @@ mapped Autoloop materialization, plan overrides, leader changes, and safe
 unmatched tracks. Swift tests cover decoding, fixed deck placement, editing
 boundaries, RGB waveform presentation, and the real Rust process. Native visual
 evidence is rendered as `local-playback-library-next-dark-camelot.png`.
+
+The E3-02 integration gate additionally publishes both real CoreMIDI endpoints
+from the Rust engine. It verifies that `Lumi Clock` advances only during
+`LIVE + Play`, exposes measured BPM and tick counts in the app model, pauses
+cleanly, and leaves `Lumi Virtual MIDI` available for learned SoundSwitch
+commands. Physical SoundSwitch/DMX acceptance remains an explicit hardware
+gate; see the E3-02 story.
 
 The historical deterministic simulator fixtures remain available only for
 internal adapter and regression tests.

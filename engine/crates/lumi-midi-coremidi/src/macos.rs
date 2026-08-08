@@ -2,11 +2,12 @@ use coremidi::{
     EventListBuffer, MidiClient, MidiError, MidiObject, MidiProperty, MidiProtocol,
     MidiVirtualDestinationStream, VirtualSource,
 };
-use lumi_midi_output::{MidiMessage, MidiSourceProvider};
+use lumi_midi_output::{MIDI_CLOCK_SOURCE_NAME, MidiMessage, MidiSourceProvider};
 
 use crate::{MidiChannelVoiceMessage, MidiDestinationState, MidiDestinationStatus};
 
 const LUMI_COREMIDI_UNIQUE_ID: i32 = 0x4c55_4d49;
+const LUMI_CLOCK_COREMIDI_UNIQUE_ID: i32 = 0x4c55_4d4a;
 const DESTINATION_BUFFER_CAPACITY: usize = 256;
 
 #[derive(Default)]
@@ -125,7 +126,12 @@ impl MidiSourceProvider for CoreMidiSourceProvider {
         }
         let client = MidiClient::new("Lumi MIDI Engine")?;
         let source = client.virtual_source_with_protocol(source_name, MidiProtocol::Midi1)?;
-        source.set_integer_property(MidiProperty::unique_id(), LUMI_COREMIDI_UNIQUE_ID)?;
+        let unique_id = if source_name == MIDI_CLOCK_SOURCE_NAME {
+            LUMI_CLOCK_COREMIDI_UNIQUE_ID
+        } else {
+            LUMI_COREMIDI_UNIQUE_ID
+        };
+        source.set_integer_property(MidiProperty::unique_id(), unique_id)?;
         self.source = Some(source);
         self.client = Some(client);
         Ok(())
@@ -151,7 +157,11 @@ impl MidiSourceProvider for CoreMidiSourceProvider {
 }
 
 fn midi_one_ump_word(bytes: [u8; 3]) -> u32 {
-    (0x2_u32 << 28) | (u32::from(bytes[0]) << 16) | (u32::from(bytes[1]) << 8) | u32::from(bytes[2])
+    let message_type = if bytes[0] >= 0xf0 { 0x1_u32 } else { 0x2_u32 };
+    (message_type << 28)
+        | (u32::from(bytes[0]) << 16)
+        | (u32::from(bytes[1]) << 8)
+        | u32::from(bytes[2])
 }
 
 fn decode_midi_one_ump_word(word: u32) -> Option<MidiChannelVoiceMessage> {
@@ -179,6 +189,12 @@ mod tests {
     fn midi_one_channel_voice_bytes_encode_as_ump() {
         assert_eq!(midi_one_ump_word([0x9f, 60, 100]), 0x209f_3c64);
         assert_eq!(midi_one_ump_word([0x8f, 60, 0]), 0x208f_3c00);
+    }
+
+    #[test]
+    fn midi_one_system_realtime_bytes_encode_as_system_ump() {
+        assert_eq!(midi_one_ump_word(MidiMessage::clock().bytes()), 0x10f8_0000);
+        assert_eq!(midi_one_ump_word(MidiMessage::start().bytes()), 0x10fa_0000);
     }
 
     #[test]

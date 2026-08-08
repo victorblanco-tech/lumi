@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 use std::env;
 use std::io::{self, Write as _};
 use std::net::Ipv4Addr;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use lumi_blt_midi::{BltMidiDeckSourceProvider, BltMidiError};
 use lumi_deck_source::DeckSourceProvider as _;
@@ -24,7 +24,9 @@ use lumi_midi_coremidi::MidiChannelVoiceMessage;
 use lumi_midi_coremidi::{
     CoreMidiDestinationProvider, CoreMidiSourceProvider, MidiDestinationState,
 };
-use lumi_midi_output::{MidiOutputController, MidiSourceState};
+use lumi_midi_output::{
+    MidiClockController, MidiClockState, MidiClockSync, MidiOutputController, MidiSourceState,
+};
 use lumi_output_dry_run::{DryRunLightingOutputProvider, DryRunOutputError};
 use lumi_planner::{
     DeterministicPlanner, PlanMutationError, PlannerError, PlannerTrack, PlanningInput,
@@ -231,6 +233,15 @@ struct EngineRuntime {
     deck_input: CoreMidiDestinationProvider,
     library_worker: LibraryWorker,
     operation_sequence: u64,
+    local_transports: BTreeMap<lumi_domain::DeckId, LocalTransportObservation>,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct LocalTransportObservation {
+    track_load_id: TrackLoadId,
+    position_millis: u64,
+    playing: bool,
+    observed_at: Instant,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -343,6 +354,7 @@ fn initialized_runtime_for_mode(
         deck_input,
         library_worker,
         operation_sequence: 0,
+        local_transports: BTreeMap::new(),
     })
 }
 
@@ -551,6 +563,7 @@ impl PlanningWorker {
 struct OutputWorker {
     provider: DryRunLightingOutputProvider,
     midi_output: MidiOutputController<CoreMidiSourceProvider>,
+    midi_clock: MidiClockController<CoreMidiSourceProvider>,
     effect_sequence: u64,
 }
 
@@ -559,6 +572,7 @@ impl OutputWorker {
         Self {
             provider: DryRunLightingOutputProvider::default(),
             midi_output: MidiOutputController::new(CoreMidiSourceProvider::new()),
+            midi_clock: MidiClockController::new(CoreMidiSourceProvider::new),
             effect_sequence: 0,
         }
     }
@@ -619,6 +633,34 @@ impl OutputWorker {
     fn midi_status(&self) -> lumi_midi_output::MidiSourceStatus {
         self.midi_output.status()
     }
+
+    fn midi_clock_status(&self) -> lumi_midi_output::MidiClockStatus {
+        self.midi_clock.status()
+    }
+
+    fn fail_closed_after_clock_error(&mut self) {
+        if self.midi_clock.status().last_error.is_some() {
+            self.midi_output.stop();
+        }
+    }
+
+    fn publish_midi(&mut self) -> Result<(), EngineError> {
+        self.midi_output
+            .publish()
+            .map_err(|error| EngineError::Midi(error.to_string()))?;
+        if let Err(error) = self.midi_clock.publish() {
+            self.midi_output.stop();
+            return Err(EngineError::Midi(error.to_string()));
+        }
+        Ok(())
+    }
+
+    fn stop_midi(&mut self) -> Result<(), EngineError> {
+        self.midi_output.stop();
+        self.midi_clock
+            .stop()
+            .map_err(|error| EngineError::Midi(error.to_string()))
+    }
 }
 
 fn automatic_midi_target(action: &SemanticLightingAction) -> Result<Option<(u8, u8)>, EngineError> {
@@ -653,6 +695,74 @@ fn execution_context_is_current(
                         cue.id() == request.cue_id() && cue.action() == request.action()
                     })
         })
+}
+
+fn local_transport_is_discontinuous(
+    previous: Option<LocalTransportObservation>,
+    track_load_id: TrackLoadId,
+    position_millis: u64,
+    playing: bool,
+    now: Instant,
+) -> bool {
+    let Some(previous) = previous else {
+        return playing;
+    };
+    if previous.track_load_id != track_load_id || (!previous.playing && playing) {
+        return true;
+    }
+    if !previous.playing || !playing {
+        return false;
+    }
+    let expected_delta = i128::try_from(
+        now.saturating_duration_since(previous.observed_at)
+            .as_millis(),
+    )
+    .unwrap_or(i128::MAX);
+    let actual_delta = i128::from(position_millis) - i128::from(previous.position_millis);
+    actual_delta.saturating_sub(expected_delta).abs() > 250
+}
+
+fn reconcile_local_midi_clock(
+    runtime: &mut EngineRuntime,
+    force_rephase: bool,
+) -> Result<(), EngineError> {
+    let sync = if runtime.deck_source_mode == DeckSourceMode::LocalPlayback {
+        runtime.state.state().leader_deck().and_then(|deck_id| {
+            let deck = runtime.state.state().deck(deck_id)?;
+            let transport = runtime.local_transports.get(&deck_id)?;
+            if transport.track_load_id != deck.track_load_id() {
+                return None;
+            }
+            let context = runtime
+                .planning_worker
+                .library_context(deck.track_load_id())?;
+            let anchor = context
+                .clock_anchor_at_millis(transport.position_millis, deck.effective_bpm_milli())?;
+            Some(MidiClockSync {
+                bpm_milli: anchor.bpm_milli,
+                playing: runtime.state.state().operation() == OperationState::Live
+                    && deck.is_playing()
+                    && transport.playing,
+                song_position_16th: anchor.song_position_16th,
+                delay_to_next_tick: anchor.delay_to_next_tick,
+                rephase: force_rephase,
+            })
+        })
+    } else {
+        None
+    }
+    .unwrap_or(MidiClockSync {
+        bpm_milli: 120_000,
+        playing: false,
+        song_position_16th: 0,
+        delay_to_next_tick: Duration::ZERO,
+        rephase: false,
+    });
+    runtime
+        .output_worker
+        .midi_clock
+        .synchronize(sync)
+        .map_err(|error| EngineError::Midi(error.to_string()))
 }
 
 fn process_domain_event(
@@ -940,13 +1050,17 @@ fn apply_command(
         SessionCommand::PublishMidiSource => {
             runtime
                 .output_worker
-                .midi_output
-                .publish()
+                .publish_midi()
+                .map_err(|error| CommandApplicationError::Midi(error.to_string()))?;
+            reconcile_local_midi_clock(runtime, true)
                 .map_err(|error| CommandApplicationError::Midi(error.to_string()))?;
             return Ok(());
         }
         SessionCommand::StopMidiSource => {
-            runtime.output_worker.midi_output.stop();
+            runtime
+                .output_worker
+                .stop_midi()
+                .map_err(|error| CommandApplicationError::Midi(error.to_string()))?;
             return Ok(());
         }
         SessionCommand::SendMidiLearnPulse => {
@@ -1005,7 +1119,17 @@ fn apply_command(
             runtime
                 .planning_worker
                 .register_library_context(track_load_id, context);
+            runtime.local_transports.insert(
+                deck_id,
+                LocalTransportObservation {
+                    track_load_id,
+                    position_millis: 0,
+                    playing: false,
+                    observed_at: Instant::now(),
+                },
+            );
             process_pending_source_events(runtime).map_err(CommandApplicationError::Engine)?;
+            reconcile_local_midi_clock(runtime, false).map_err(CommandApplicationError::Engine)?;
             return Ok(());
         }
         SessionCommand::UpdateLocalPlaybackTransport {
@@ -1017,6 +1141,7 @@ fn apply_command(
             if runtime.deck_source_mode != DeckSourceMode::LocalPlayback {
                 return Err(CommandApplicationError::WrongDeckSourceMode);
             }
+            runtime.output_worker.fail_closed_after_clock_error();
             let beat = runtime
                 .planning_worker
                 .library_context(track_load_id)
@@ -1026,6 +1151,14 @@ fn apply_command(
                 .clock
                 .advance(1)
                 .ok_or(CommandApplicationError::ClockOverflow)?;
+            let observed_at = Instant::now();
+            let rephase = local_transport_is_discontinuous(
+                runtime.local_transports.get(&deck_id).copied(),
+                track_load_id,
+                position_millis,
+                playing,
+                observed_at,
+            );
             runtime.local_deck_source.update_transport(
                 deck_id,
                 track_load_id,
@@ -1033,7 +1166,19 @@ fn apply_command(
                 playing,
                 at,
             )?;
+            runtime.local_transports.insert(
+                deck_id,
+                LocalTransportObservation {
+                    track_load_id,
+                    position_millis,
+                    playing,
+                    observed_at,
+                },
+            );
             process_pending_source_events(runtime).map_err(CommandApplicationError::Engine)?;
+            let leader_rephase = rephase && runtime.state.state().leader_deck() == Some(deck_id);
+            reconcile_local_midi_clock(runtime, leader_rephase)
+                .map_err(CommandApplicationError::Engine)?;
             return Ok(());
         }
         SessionCommand::SetLocalPlaybackLeader {
@@ -1050,6 +1195,7 @@ fn apply_command(
                 .ok_or(CommandApplicationError::ClockOverflow)?;
             runtime.local_deck_source.set_leader(deck_id, at)?;
             process_pending_source_events(runtime).map_err(CommandApplicationError::Engine)?;
+            reconcile_local_midi_clock(runtime, true).map_err(CommandApplicationError::Engine)?;
             return Ok(());
         }
         SessionCommand::SelectDeckSourceMode {
@@ -1068,6 +1214,7 @@ fn apply_command(
                         .advance(1)
                         .ok_or(CommandApplicationError::ClockOverflow)?;
                     runtime.local_deck_source.clear(at)?;
+                    runtime.local_transports.clear();
                     process_pending_source_events(runtime)
                         .map_err(CommandApplicationError::Engine)?;
                 } else if runtime.deck_source_mode == DeckSourceMode::ConnectedDecks {
@@ -1081,6 +1228,8 @@ fn apply_command(
                 }
                 runtime.deck_source_mode = target;
                 process_pending_source_events(runtime).map_err(CommandApplicationError::Engine)?;
+                reconcile_local_midi_clock(runtime, true)
+                    .map_err(CommandApplicationError::Engine)?;
             }
             return Ok(());
         }
@@ -1095,6 +1244,7 @@ fn apply_command(
             command,
         } => {
             apply_operation_command(runtime, expected_revision, command)?;
+            reconcile_local_midi_clock(runtime, true).map_err(CommandApplicationError::Engine)?;
             return Ok(());
         }
         SessionCommand::SetSimulationSpeed {
@@ -1746,6 +1896,24 @@ fn snapshot_envelope(
             "protocol": "MIDI 1.0 UMP",
             "sentPulseCount": midi_output.sent_pulse_count,
             "lastEvent": midi_output.last_event,
+        }),
+    );
+    let midi_clock = runtime.output_worker.midi_clock_status();
+    payload.insert(
+        "midiClockIntegration".to_owned(),
+        json!({
+            "state": match midi_clock.state {
+                MidiClockState::Stopped => "stopped",
+                MidiClockState::Ready => "ready",
+                MidiClockState::Running => "running",
+            },
+            "sourceName": midi_clock.source_name,
+            "protocol": "MIDI Clock · 24 PPQN",
+            "bpmMilli": midi_clock.bpm_milli,
+            "sentTickCount": midi_clock.sent_tick_count,
+            "sentTransportCount": midi_clock.sent_transport_count,
+            "lastEvent": midi_clock.last_event,
+            "lastError": midi_clock.last_error,
         }),
     );
     let deck_input = runtime.deck_input.status();
@@ -2856,6 +3024,100 @@ mod tests {
         };
         assert_eq!(last.status(), OutputEffectStatus::Skipped);
         assert_eq!(last.reason(), OutputEffectReason::StaleExecutionContext);
+    }
+
+    #[test]
+    fn local_playback_executes_first_phrase_once_and_activates_a_paused_seek_on_resume() {
+        let mut runtime =
+            initialized_runtime_for_mode(ManualClock::new(0), DeckSourceMode::LocalPlayback)
+                .unwrap_or_else(|error| panic!("local product runtime must initialize: {error}"));
+        apply_current_session_command(&mut runtime, |expected_state_revision| {
+            SessionCommand::LoadLibraryTrackOnLocalDeck {
+                track_id: 1,
+                deck_id: lumi_domain::DeckId::new(1),
+                expected_timeline_revision: 1,
+                expected_state_revision,
+            }
+        });
+        let track_load_id = runtime
+            .state
+            .state()
+            .deck(lumi_domain::DeckId::new(1))
+            .map(lumi_domain::DeckState::track_load_id)
+            .unwrap_or_else(|| panic!("local deck must be loaded"));
+        let second_phrase_beat = runtime
+            .state
+            .state()
+            .deck(lumi_domain::DeckId::new(1))
+            .and_then(|deck| deck.metadata().phrases().get(1))
+            .map(|phrase| phrase.start_beat())
+            .unwrap_or_else(|| panic!("fixture track must have a second phrase"));
+        let second_phrase_millis = runtime
+            .planning_worker
+            .library_context(track_load_id)
+            .and_then(|context| {
+                (0..120_000_u64)
+                    .step_by(100)
+                    .find(|position| context.beat_at_millis(*position) >= second_phrase_beat)
+            })
+            .unwrap_or_else(|| panic!("fixture beat grid must reach its second phrase"));
+
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::SetOperationState {
+                expected_revision,
+                command: OperationCommand::Arm,
+            }
+        });
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::SetOperationState {
+                expected_revision,
+                command: OperationCommand::Start,
+            }
+        });
+        apply_session_command(
+            &mut runtime,
+            SessionCommand::UpdateLocalPlaybackTransport {
+                deck_id: lumi_domain::DeckId::new(1),
+                track_load_id,
+                position_millis: 0,
+                playing: true,
+            },
+        );
+        assert_eq!(runtime.output_worker.provider.records().count(), 1);
+
+        for playing in [false, true] {
+            apply_session_command(
+                &mut runtime,
+                SessionCommand::UpdateLocalPlaybackTransport {
+                    deck_id: lumi_domain::DeckId::new(1),
+                    track_load_id,
+                    position_millis: 0,
+                    playing,
+                },
+            );
+        }
+        assert_eq!(runtime.output_worker.provider.records().count(), 1);
+
+        apply_session_command(
+            &mut runtime,
+            SessionCommand::UpdateLocalPlaybackTransport {
+                deck_id: lumi_domain::DeckId::new(1),
+                track_load_id,
+                position_millis: second_phrase_millis,
+                playing: false,
+            },
+        );
+        assert_eq!(runtime.output_worker.provider.records().count(), 1);
+        apply_session_command(
+            &mut runtime,
+            SessionCommand::UpdateLocalPlaybackTransport {
+                deck_id: lumi_domain::DeckId::new(1),
+                track_load_id,
+                position_millis: second_phrase_millis,
+                playing: true,
+            },
+        );
+        assert_eq!(runtime.output_worker.provider.records().count(), 2);
     }
 
     #[test]

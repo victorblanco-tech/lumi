@@ -20,6 +20,7 @@ struct LocalDeck {
     beat: u32,
     phrase_index: u16,
     playing: bool,
+    pending_phrase_activation: bool,
 }
 
 /// Normalizes native local audio transport into the same events as a connected
@@ -87,6 +88,7 @@ impl LocalPlaybackDeckSourceProvider {
                 beat: 0,
                 phrase_index: 0,
                 playing: false,
+                pending_phrase_activation: true,
             },
         );
         self.emit(
@@ -131,7 +133,7 @@ impl LocalPlaybackDeckSourceProvider {
         playing: bool,
         at: MonotonicTime,
     ) -> Result<(), LocalPlaybackError> {
-        let (duration, previous_beat, previous_phrase, previous_playing) = {
+        let (duration, previous_beat, previous_phrase, previous_playing, pending_phrase_activation) = {
             let deck = self
                 .decks
                 .get(&deck_id)
@@ -147,6 +149,7 @@ impl LocalPlaybackDeckSourceProvider {
                 deck.beat,
                 deck.phrase_index,
                 deck.playing,
+                deck.pending_phrase_activation,
             )
         };
         let normalized_beat = beat.min(duration);
@@ -165,10 +168,19 @@ impl LocalPlaybackDeckSourceProvider {
             })
             .map_or(0, |phrase| phrase.index());
         let normalized_playing = playing && normalized_beat < duration;
+        let phrase_changed = previous_phrase != phrase_index;
+        let started_playing = !previous_playing && normalized_playing;
+        let should_activate_phrase = normalized_playing
+            && (phrase_changed || (started_playing && pending_phrase_activation));
         if let Some(deck) = self.decks.get_mut(&deck_id) {
             deck.beat = normalized_beat;
             deck.phrase_index = phrase_index;
             deck.playing = normalized_playing;
+            if phrase_changed && !normalized_playing {
+                deck.pending_phrase_activation = true;
+            } else if should_activate_phrase {
+                deck.pending_phrase_activation = false;
+            }
         }
         if previous_beat != normalized_beat {
             let observation = if normalized_beat < previous_beat {
@@ -186,16 +198,8 @@ impl LocalPlaybackDeckSourceProvider {
             };
             self.emit(at, observation)?;
         }
-        if previous_phrase != phrase_index {
-            self.emit(
-                at,
-                DeckObservation::PhraseChanged {
-                    deck_id,
-                    track_load_id,
-                    phrase_index,
-                },
-            )?;
-        }
+        // Publish playback before the phrase activation. The domain can then
+        // prove that audio is actually moving before it schedules output.
         if previous_playing != normalized_playing {
             self.emit(
                 at,
@@ -203,6 +207,16 @@ impl LocalPlaybackDeckSourceProvider {
                     deck_id,
                     track_load_id,
                     playing: normalized_playing,
+                },
+            )?;
+        }
+        if phrase_changed || should_activate_phrase {
+            self.emit(
+                at,
+                DeckObservation::PhraseChanged {
+                    deck_id,
+                    track_load_id,
+                    phrase_index,
                 },
             )?;
         }
@@ -363,6 +377,58 @@ mod tests {
                 ..
             })
         )));
+    }
+
+    #[test]
+    fn first_play_activates_one_phrase_after_playback_and_resume_does_not_duplicate_it() {
+        let mut provider = LocalPlaybackDeckSourceProvider::new(MonotonicTime::new(0))
+            .unwrap_or_else(|error| panic!("provider must initialize: {error}"));
+        let _ = provider.drain_events();
+        let load = provider
+            .load_track(DeckId::new(1), track(), MonotonicTime::new(1))
+            .unwrap_or_else(|error| panic!("track must load: {error}"));
+        let _ = provider.drain_events();
+
+        provider
+            .update_transport(DeckId::new(1), load, 0, true, MonotonicTime::new(2))
+            .unwrap_or_else(|error| panic!("first play must update: {error}"));
+        let first_play = provider
+            .drain_events()
+            .unwrap_or_else(|error| panic!("first-play events must drain: {error}"));
+        assert!(matches!(
+            first_play.as_slice(),
+            [
+                DomainEvent::Observation(ObservationEnvelope {
+                    observation: DeckObservation::PlaybackStateChanged { playing: true, .. },
+                    ..
+                }),
+                DomainEvent::Observation(ObservationEnvelope {
+                    observation: DeckObservation::PhraseChanged {
+                        phrase_index: 0,
+                        ..
+                    },
+                    ..
+                })
+            ]
+        ));
+
+        provider
+            .update_transport(DeckId::new(1), load, 0, false, MonotonicTime::new(3))
+            .unwrap_or_else(|error| panic!("pause must update: {error}"));
+        let _ = provider.drain_events();
+        provider
+            .update_transport(DeckId::new(1), load, 0, true, MonotonicTime::new(4))
+            .unwrap_or_else(|error| panic!("resume must update: {error}"));
+        let resumed = provider
+            .drain_events()
+            .unwrap_or_else(|error| panic!("resume events must drain: {error}"));
+        assert!(matches!(
+            resumed.as_slice(),
+            [DomainEvent::Observation(ObservationEnvelope {
+                observation: DeckObservation::PlaybackStateChanged { playing: true, .. },
+                ..
+            })]
+        ));
     }
 
     fn track() -> TrackMetadata {

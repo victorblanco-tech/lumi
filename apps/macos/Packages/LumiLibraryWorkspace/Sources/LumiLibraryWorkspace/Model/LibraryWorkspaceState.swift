@@ -1,3 +1,4 @@
+import Foundation
 import LumiDesignSystem
 
 public enum LibraryCondition: String, CaseIterable, Equatable, Sendable {
@@ -197,6 +198,24 @@ public struct MidiIntegrationState: Equatable, Sendable {
     public var isReady: Bool { state == "ready" }
 }
 
+public struct MidiClockIntegrationState: Equatable, Sendable {
+    public let state: String
+    public let sourceName: String
+    public let midiProtocol: String
+    public let bpmMilli: UInt64?
+    public let sentTickCount: UInt64
+    public let sentTransportCount: UInt64
+    public let lastEvent: String?
+    public let lastError: String?
+
+    public var isPublished: Bool { state != "stopped" }
+    public var isRunning: Bool { state == "running" }
+    public var bpmDescription: String {
+        guard let bpmMilli else { return "Waiting for Local Playback" }
+        return String(format: "%.3f BPM", Double(bpmMilli) / 1_000)
+    }
+}
+
 public struct LibraryWorkspaceState: Equatable, Sendable {
     public let condition: LibraryCondition
     public let providerKind: String
@@ -210,6 +229,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
     public let phraseRoleSettings: PhraseRoleSettingsState?
     public let autoloopCatalog: AutoloopCatalogState?
     public let midiIntegration: MidiIntegrationState?
+    public let midiClockIntegration: MidiClockIntegrationState?
     public let deckInputIntegration: DeckInputIntegrationState?
     public let rekordboxSyncPreview: RekordboxXMLSyncPreview?
     public let rekordboxMirror: RekordboxMirrorState?
@@ -228,6 +248,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
         phraseRoleSettings: PhraseRoleSettingsState? = nil,
         autoloopCatalog: AutoloopCatalogState? = nil,
         midiIntegration: MidiIntegrationState? = nil,
+        midiClockIntegration: MidiClockIntegrationState? = nil,
         deckInputIntegration: DeckInputIntegrationState? = nil,
         rekordboxSyncPreview: RekordboxXMLSyncPreview? = nil,
         rekordboxMirror: RekordboxMirrorState? = nil,
@@ -245,6 +266,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
         self.phraseRoleSettings = phraseRoleSettings
         self.autoloopCatalog = autoloopCatalog
         self.midiIntegration = midiIntegration
+        self.midiClockIntegration = midiClockIntegration
         self.deckInputIntegration = deckInputIntegration
         self.rekordboxSyncPreview = rekordboxSyncPreview
         self.rekordboxMirror = rekordboxMirror

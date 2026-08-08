@@ -66,6 +66,7 @@ func launchesRealEngine() async throws {
         #expect(autoloopVariantCount(snapshot, roleID: "synth") == 4)
         #expect(midiIntegrationState(snapshot) == "stopped")
         #expect(midiIntegrationPulseCount(snapshot) == 0)
+        #expect(midiClockIntegrationState(snapshot) == "stopped")
 
         snapshot = try await supervisor.send(
             .publishMidiSource,
@@ -73,6 +74,8 @@ func launchesRealEngine() async throws {
         )
         #expect(midiIntegrationState(snapshot) == "ready")
         #expect(midiIntegrationSourceName(snapshot) == "Lumi Virtual MIDI")
+        #expect(midiClockIntegrationState(snapshot) == "ready")
+        #expect(midiClockIntegrationSourceName(snapshot) == "Lumi Clock")
 
         snapshot = try await supervisor.send(
             .sendMidiLearnPulse,
@@ -95,12 +98,6 @@ func launchesRealEngine() async throws {
         #expect(midiIntegrationPulseCount(snapshot) == 4)
         #expect(midiIntegrationLastEvent(snapshot)?.contains("Bank 1 → AutoLoop 1") == true)
         #expect(midiIntegrationLastEvent(snapshot)?.contains("50 ms gap") == true)
-
-        snapshot = try await supervisor.send(
-            .stopMidiSource,
-            messageID: "swift-stop-midi-source"
-        )
-        #expect(midiIntegrationState(snapshot) == "stopped")
 
         let renamedRole = try await supervisor.send(
             .mutatePhraseRoleCatalog(
@@ -251,6 +248,68 @@ func launchesRealEngine() async throws {
         )
         #expect(stateRevision(closedEditor) == editorRevision)
         #expect(libraryEditorIsClosed(closedEditor))
+
+        snapshot = try await supervisor.send(
+            .loadLibraryTrackOnLocalDeck(
+                trackID: requiredFirstLibraryTrackID(snapshot),
+                deckID: 1,
+                expectedTimelineRevision: 3,
+                expectedStateRevision: requiredStateRevision(snapshot)
+            ),
+            messageID: "swift-clock-load"
+        )
+        snapshot = try await supervisor.send(
+            .setOperationState(
+                "armed",
+                expectedStateRevision: requiredStateRevision(snapshot)
+            ),
+            messageID: "swift-clock-arm"
+        )
+        snapshot = try await supervisor.send(
+            .setOperationState(
+                "live",
+                expectedStateRevision: requiredStateRevision(snapshot)
+            ),
+            messageID: "swift-clock-live"
+        )
+        guard let clockTrackLoadID = leaderTrackLoadID(snapshot) else {
+            Issue.record("Local Playback leader must expose a track load")
+            await supervisor.stop()
+            return
+        }
+        let clockPlaying = try await supervisor.send(
+            .updateLocalPlaybackTransport(
+                deckID: 1,
+                trackLoadID: clockTrackLoadID,
+                positionMillis: 0,
+                playing: true
+            )
+        )
+        #expect(transportWasAccepted(clockPlaying))
+        try await Task.sleep(for: .milliseconds(120))
+        snapshot = try await supervisor.getSnapshot()
+        #expect(midiClockIntegrationState(snapshot) == "running")
+        #expect((midiClockIntegrationTickCount(snapshot) ?? 0) > 0)
+        #expect((midiClockIntegrationBPM(snapshot) ?? 0) > 0)
+        let clockPaused = try await supervisor.send(
+            .updateLocalPlaybackTransport(
+                deckID: 1,
+                trackLoadID: clockTrackLoadID,
+                positionMillis: 0,
+                playing: false
+            )
+        )
+        #expect(transportWasAccepted(clockPaused))
+        try await Task.sleep(for: .milliseconds(30))
+        snapshot = try await supervisor.getSnapshot()
+        #expect(midiClockIntegrationState(snapshot) == "ready")
+
+        snapshot = try await supervisor.send(
+            .stopMidiSource,
+            messageID: "swift-stop-midi-source"
+        )
+        #expect(midiIntegrationState(snapshot) == "stopped")
+        #expect(midiClockIntegrationState(snapshot) == "stopped")
 
         await supervisor.stop()
         let restartedEndpoint = try await supervisor.launch(
@@ -750,6 +809,18 @@ private func leaderDeckPlaying(_ envelope: MessageEnvelope) -> Bool? {
     return nil
 }
 
+private func leaderTrackLoadID(_ envelope: MessageEnvelope) -> UInt64? {
+    guard case let .number(leaderID) = envelope.payload["leaderDeckId"],
+          case let .array(decks) = envelope.payload["decks"] else { return nil }
+    for value in decks {
+        guard case let .object(deck) = value,
+              deck["deckId"] == .number(leaderID),
+              case let .number(trackLoadID) = deck["trackLoadId"] else { continue }
+        return UInt64(trackLoadID)
+    }
+    return nil
+}
+
 private func leaderDeckBeat(_ envelope: MessageEnvelope) -> UInt64? {
     guard case let .number(leaderID) = envelope.payload["leaderDeckId"],
           case let .array(decks) = envelope.payload["decks"] else { return nil }
@@ -1104,6 +1175,38 @@ private func midiIntegrationLastEvent(_ envelope: MessageEnvelope) -> String? {
         return nil
     }
     return lastEvent
+}
+
+private func midiClockIntegrationState(_ envelope: MessageEnvelope) -> String? {
+    guard case let .object(clock) = envelope.payload["midiClockIntegration"],
+          case let .string(state) = clock["state"] else {
+        return nil
+    }
+    return state
+}
+
+private func midiClockIntegrationSourceName(_ envelope: MessageEnvelope) -> String? {
+    guard case let .object(clock) = envelope.payload["midiClockIntegration"],
+          case let .string(sourceName) = clock["sourceName"] else {
+        return nil
+    }
+    return sourceName
+}
+
+private func midiClockIntegrationTickCount(_ envelope: MessageEnvelope) -> UInt64? {
+    guard case let .object(clock) = envelope.payload["midiClockIntegration"],
+          case let .number(count) = clock["sentTickCount"] else {
+        return nil
+    }
+    return UInt64(count)
+}
+
+private func midiClockIntegrationBPM(_ envelope: MessageEnvelope) -> UInt64? {
+    guard case let .object(clock) = envelope.payload["midiClockIntegration"],
+          case let .number(bpm) = clock["bpmMilli"] else {
+        return nil
+    }
+    return UInt64(bpm)
 }
 
 private func timelineContainsSimulatedOutput(_ envelope: MessageEnvelope) -> Bool {

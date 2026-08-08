@@ -11,6 +11,7 @@ public struct AutoloopCatalogSettingsView: View {
 
     private let catalog: AutoloopCatalogState?
     private let midiIntegration: MidiIntegrationState?
+    private let midiClockIntegration: MidiClockIntegrationState?
     private let profile = SoundSwitchOutputProfileState.builtIn
     private let feedback: String?
     private let midiIntegrationFeedback: String?
@@ -31,6 +32,7 @@ public struct AutoloopCatalogSettingsView: View {
     public init(
         catalog: AutoloopCatalogState?,
         midiIntegration: MidiIntegrationState? = nil,
+        midiClockIntegration: MidiClockIntegrationState? = nil,
         feedback: String? = nil,
         midiIntegrationFeedback: String? = nil,
         rendersInteractiveControls: Bool = true,
@@ -42,6 +44,7 @@ public struct AutoloopCatalogSettingsView: View {
     ) {
         self.catalog = catalog
         self.midiIntegration = midiIntegration
+        self.midiClockIntegration = midiClockIntegration
         self.feedback = feedback
         self.midiIntegrationFeedback = midiIntegrationFeedback
         self.rendersInteractiveControls = rendersInteractiveControls
@@ -511,7 +514,13 @@ public struct AutoloopCatalogSettingsView: View {
                     inspectorValue("Output Device", midiIntegration?.sourceName ?? "Lumi Virtual MIDI")
                     inspectorValue("Protocol", midiIntegration?.midiProtocol ?? "MIDI 1.0 UMP")
                     inspectorValue("Configured Surface", "4 banks · 32 AutoLoops per bank")
-                    inspectorValue("Timing", "Ableton Link → SoundSwitch")
+                    inspectorValue(
+                        "Local Playback Timing",
+                        midiClockIntegration.map {
+                            "\($0.sourceName) · \($0.bpmDescription)"
+                        } ?? "Lumi Clock → SoundSwitch"
+                    )
+                    inspectorValue("Live Deck Timing", "Beat Link Trigger → Ableton Link")
                     HStack {
                         if midiIntegration?.isReady == true {
                             Button("Stop Virtual Source", action: onStopMidi)
@@ -524,6 +533,16 @@ public struct AutoloopCatalogSettingsView: View {
                     Text(midiIntegration?.lastEvent ?? "No MIDI is sent when the source is published.")
                         .font(LumiTypography.caption)
                         .foregroundStyle(LumiColor.textSecondary)
+                    Text(
+                        midiClockIntegration?.lastError
+                            ?? midiClockIntegration?.lastEvent
+                            ?? "The Local Playback clock starts only in LIVE while audio is playing."
+                    )
+                    .font(LumiTypography.caption)
+                    .foregroundStyle(
+                        midiClockIntegration?.lastError == nil
+                            ? LumiColor.textSecondary : LumiColor.warning
+                    )
                     Spacer(minLength: 0)
                 }
             }

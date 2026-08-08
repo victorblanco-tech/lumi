@@ -669,7 +669,7 @@ struct LiveDeckSurface<Details: View>: View {
                 .frame(width: 2, height: 82)
                 .shadow(color: LumiColor.accent.opacity(0.8), radius: 3)
             Image(systemName: "arrowtriangle.down.fill")
-                .font(.system(size: 9, weight: .bold))
+                .font(LumiTypography.caption.weight(.bold))
                 .foregroundStyle(LumiColor.accent)
         }
         .frame(width: 10, height: 82)
