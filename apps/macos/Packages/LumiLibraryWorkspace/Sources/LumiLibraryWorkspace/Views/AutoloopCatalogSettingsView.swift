@@ -225,7 +225,10 @@ public struct AutoloopCatalogSettingsView: View {
     private func selectedBankAutoloops(_ catalog: AutoloopCatalogState) -> some View {
         let bank = selectedBank(catalog)
         let bankSlots = bank.map {
-            SoundSwitchOutputProfileProjection.slots(for: $0.id, catalog: catalog)
+            SoundSwitchOutputProfileProjection.controllerGridSlots(
+                for: $0.id,
+                catalog: catalog
+            )
         } ?? []
         let columns = Array(
             repeating: GridItem(.flexible(minimum: 130), spacing: 7),

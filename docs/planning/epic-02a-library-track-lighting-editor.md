@@ -385,6 +385,10 @@ de virtuele MIDI-bron expliciet wordt gepubliceerd. De permanente `MIDI Status`-
 pagina toont bronstatus, protocol, configured surface, laatste event, pulsteller,
 integratiechecks en handmatige testacties. De Test Controller gebruikt dezelfde
 SoundSwitch-volgorde: 1–8 verticaal, gevolgd door 9–16, 17–24 en 25–32.
+De E3-02 fysieke run vond dat de oorspronkelijke mappingweergave deze volgorde
+alleen visueel nabootste maar de posities row-major opsloeg. Defaults version 4
+migreert die bestaande configuratie behoudend en beide views gebruiken nu ook
+intern exact dezelfde slotidentiteit.
 
 ### E2A-19 – Reorganize Library, Integrations, and Settings around user tasks
 

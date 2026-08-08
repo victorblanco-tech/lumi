@@ -517,7 +517,14 @@ impl PlanningWorker {
                 .checked_add(1)
                 .ok_or(EngineError::PlanningEffectSequenceOverflow)?;
             let context = ThemeSelectionContext::new(self.recent_theme_ids.clone());
-            let generated = self.planner.generate_with_context(&input, &context)?;
+            let generated = if let Some(library_context) = self.library_context(input.track_load_id)
+            {
+                let themes = library_context.executable_themes();
+                let planner = planner_for_themes(library_context.catalog_revision(), themes)?;
+                planner.generate_with_context(&input, &context)?
+            } else {
+                self.planner.generate_with_context(&input, &context)?
+            };
             let plan = self.materialize_library_plan(generated)?;
             if let Some(decision) = plan.theme_decision() {
                 self.recent_theme_ids.push(decision.theme_id());
@@ -575,12 +582,38 @@ fn planner_for_catalog(catalog: &AutoloopCatalog) -> DeterministicPlanner<Stable
             id: theme.id(),
             name: theme.display_name().to_owned(),
         })
-        .collect();
-    let configuration = PlanningConfiguration::epic_one().with_themes(
-        PlanConfigurationRevision::new(catalog.revision().max(1)),
-        themes,
-    );
-    DeterministicPlanner::new(configuration, StableChoiceSource)
+        .collect::<Vec<_>>();
+    planner_for_theme_options(catalog.revision(), themes)
+        .unwrap_or_else(|_| DeterministicPlanner::epic_one())
+}
+
+fn planner_for_themes(
+    catalog_revision: u64,
+    themes: Vec<(lumi_domain::ThemeId, String)>,
+) -> Result<DeterministicPlanner<StableChoiceSource>, EngineError> {
+    planner_for_theme_options(
+        catalog_revision,
+        themes
+            .into_iter()
+            .map(|(id, name)| ThemeOption { id, name })
+            .collect(),
+    )
+}
+
+fn planner_for_theme_options(
+    catalog_revision: u64,
+    themes: Vec<ThemeOption>,
+) -> Result<DeterministicPlanner<StableChoiceSource>, EngineError> {
+    let Some(default_theme) = themes.first().map(|theme| theme.id) else {
+        return Err(EngineError::NoExecutableLibraryTheme);
+    };
+    let configuration = PlanningConfiguration::epic_one()
+        .with_themes(
+            PlanConfigurationRevision::new(catalog_revision.max(1)),
+            themes,
+        )
+        .with_default_theme(default_theme);
+    Ok(DeterministicPlanner::new(configuration, StableChoiceSource))
 }
 
 struct OutputWorker {
@@ -2568,6 +2601,8 @@ pub enum EngineError {
     MissingLibraryAutoloopResolution,
     #[error("a resolved Library Autoloop has no MIDI button address")]
     MissingLibraryAutoloopAddress,
+    #[error("the Library track has no fully mapped executable SoundSwitch Theme")]
+    NoExecutableLibraryTheme,
     #[error("the serialized runtime lost an event after accepting it")]
     SubmittedEventMissing,
     #[error("the planning worker effect sequence overflowed")]

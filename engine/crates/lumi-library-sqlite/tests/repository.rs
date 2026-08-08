@@ -241,6 +241,54 @@ fn autoloop_catalog_mutation_and_conflict_survive_restart() -> Result<(), Box<dy
 }
 
 #[test]
+fn autoloop_catalog_replacement_persists_a_defaults_upgrade() -> Result<(), Box<dyn Error>> {
+    let path = temporary_database_path()?;
+    {
+        let mut repository = SqliteLibraryRepository::open(&path)?;
+        let roles = PhraseRoleCatalog::try_new(
+            1,
+            PHRASE_ROLE_DEFAULTS_VERSION,
+            vec![PhraseRole::try_new(
+                PhraseRoleId::try_new("synth")?,
+                "Synth",
+                1,
+                false,
+            )?],
+            vec![],
+        )?;
+        repository.initialize_phrase_role_catalog(&roles)?;
+        let current = test_autoloop_catalog()?;
+        let legacy = AutoloopCatalog::try_new(
+            current.revision(),
+            1,
+            current.themes().to_vec(),
+            current.variants().to_vec(),
+            current.cells().to_vec(),
+        )?;
+        repository.initialize_autoloop_catalog(&legacy)?;
+        let upgraded = AutoloopCatalog::try_new(
+            2,
+            AUTOLOOP_CATALOG_DEFAULTS_VERSION,
+            legacy.themes().to_vec(),
+            legacy.variants().to_vec(),
+            legacy.cells().to_vec(),
+        )?;
+        repository.replace_autoloop_catalog(&upgraded, 1)?;
+    }
+
+    let repository = SqliteLibraryRepository::open(&path)?;
+    let restarted = repository.autoloop_catalog()?;
+    assert_eq!(restarted.revision(), 2);
+    assert_eq!(
+        restarted.defaults_version(),
+        AUTOLOOP_CATALOG_DEFAULTS_VERSION
+    );
+    drop(repository);
+    std::fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
 fn import_is_idempotent_and_track_ids_are_stable() -> Result<(), Box<dyn Error>> {
     let baseline = DemoLibrarySourceProvider::curated().load_baseline()?;
     let mut repository = SqliteLibraryRepository::in_memory()?;

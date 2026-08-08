@@ -33,7 +33,10 @@ mapping identifiers are never presented as editable Variant names.
 The spatial layout is part of the product contract: selecting Bank 1, 2, 3, or
 4 replaces the grid with that bank's 32 unique positions. No page, range, or
 shared slot state is presented. The inspector augments that surface; it never
-replaces it.
+replaces it. Slot numbering follows SoundSwitch/Control One column-major order:
+1–8 run top-to-bottom in the first column, followed by 9–16, 17–24 and 25–32.
+The mapping surface, Learn surface, Test Controller and MIDI adapter must all
+use this exact same coordinate system.
 
 ### Test Controller
 
@@ -65,3 +68,16 @@ Library phrase
 The built-in profile owns the canonical MIDI addresses and validated sequencing.
 Future output profiles persist their provider-specific mapping without changing
 the generic controller and status-page model.
+
+## Version 4 slot migration
+
+The initial 4×32 mapping view accidentally stored the four-column screen
+position in row-major order while Learn and Test Controller already used the
+SoundSwitch column-major order. Catalog defaults version 4 applies a one-time
+bijection from the old screen positions to the physical slots and preserves
+every user-authored Bank name, Phrase Type and exact AutoLoop name. Generated
+placeholder cells are removed rather than treated as executable mappings.
+The SQLite catalog replacement persists the upgraded defaults version in the
+same transaction, making the migration restart-safe and idempotent.
+Tracks using automatic Phrase Type resolution then select only a Theme whose
+phrases are fully mapped; an unconfigured Bank cannot be chosen at random.

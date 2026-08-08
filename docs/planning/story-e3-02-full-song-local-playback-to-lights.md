@@ -122,6 +122,21 @@ Resolved on 2026-08-08 before the physical run:
   user's four renamed Banks, custom phrase roles, Bank 1 button mappings and
   edited track timeline. No configuration recovery or re-entry is required.
 
+### SoundSwitch slot-coordinate regression
+
+Resolved after the first physical phrase-boundary run exposed deterministic
+but incorrect AutoLoops:
+
+- Banks & AutoLoops had stored four-column positions row-major, while MIDI Learn
+  and SoundSwitch number 1–8 vertically before continuing with 9–32;
+- catalog defaults version 4 transposes the existing stable mapping IDs once,
+  preserving user names and Phrase Types without manual re-entry;
+- generated placeholder mappings no longer count as executable physical slots;
+- automatic planning is restricted to a Theme that has complete real mappings
+  for the loaded track, so an unfinished Bank cannot enter rotation;
+- the mapping view now uses the same 1,9,17,25 first visual row as Learn and the
+  Test Controller.
+
 ## Acceptance criteria
 
 - No bank/AutoLoop command is emitted before both Live and actual playback.

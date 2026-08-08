@@ -1739,6 +1739,11 @@ impl LibraryRepository for SqliteLibraryRepository {
         replace_autoloop_rows(&transaction, catalog)?;
         set_setting(
             &transaction,
+            AUTOLOOP_DEFAULTS_VERSION_KEY,
+            u64::from(catalog.defaults_version()),
+        )?;
+        set_setting(
+            &transaction,
             AUTOLOOP_CATALOG_REVISION_KEY,
             catalog.revision(),
         )?;

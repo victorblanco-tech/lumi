@@ -252,6 +252,7 @@ impl PlanningConfiguration {
         themes: Vec<ThemeOption>,
     ) -> Self {
         self.revision = revision;
+        let theme_ids = themes.iter().map(|theme| theme.id).collect::<Vec<_>>();
         self.themes = themes
             .into_iter()
             .map(|theme| ThemeDefinition {
@@ -259,6 +260,23 @@ impl PlanningConfiguration {
                 name: theme.name,
             })
             .collect();
+        for rule in &mut self.color_rules {
+            rule.candidates
+                .retain(|candidate| theme_ids.contains(&candidate.theme_id));
+        }
+        self.color_rules
+            .retain(|rule| rule.candidates.iter().any(|candidate| candidate.weight > 0));
+        if self
+            .global_theme_lock
+            .is_some_and(|theme_id| !theme_ids.contains(&theme_id))
+        {
+            self.global_theme_lock = None;
+        }
+        if !theme_ids.contains(&self.default_theme_id)
+            && let Some(first) = theme_ids.first()
+        {
+            self.default_theme_id = *first;
+        }
         self
     }
 }

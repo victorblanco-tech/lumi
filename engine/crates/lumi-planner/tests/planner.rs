@@ -106,6 +106,30 @@ fn configured_bank_names_are_used_by_options_decisions_and_cues() {
 }
 
 #[test]
+fn unavailable_theme_rules_are_removed_from_an_executable_subset() {
+    let planner = DeterministicPlanner::new(
+        PlanningConfiguration::epic_one().with_themes(
+            PlanConfigurationRevision::new(185),
+            vec![ThemeOption {
+                id: ThemeId::new(1),
+                name: "Only Mapped Bank".to_owned(),
+            }],
+        ),
+        FirstChoice,
+    );
+    let plan = generate(&planner, &colored_input(TrackColor::new(187, 72, 126)));
+
+    assert_eq!(
+        plan.theme_decision().map(|decision| decision.theme_id()),
+        Some(ThemeId::new(1))
+    );
+    assert_eq!(
+        plan.theme_decision().map(|decision| decision.theme_name()),
+        Some("Only Mapped Bank")
+    );
+}
+
+#[test]
 fn two_hundred_phrase_plan_completes_within_epic_one_budget() {
     let phrases = (0_u16..200)
         .map(|index| {

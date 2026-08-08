@@ -129,6 +129,21 @@ pub struct LocalPlaybackClockAnchor {
 
 impl LibraryPlanContext {
     #[must_use]
+    pub const fn catalog_revision(&self) -> u64 {
+        self.catalog.revision()
+    }
+
+    #[must_use]
+    pub fn executable_themes(&self) -> Vec<(ThemeId, String)> {
+        self.catalog
+            .themes()
+            .iter()
+            .filter(|theme| self.resolve(theme.id()).is_ok())
+            .map(|theme| (theme.id(), theme.display_name().to_owned()))
+            .collect()
+    }
+
+    #[must_use]
     pub fn identity_json(&self) -> Value {
         json!({
             "matchStatus": "exact",
