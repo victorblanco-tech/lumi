@@ -15,7 +15,7 @@
         .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
         .metric { background: #0a0c0e; border-radius: 8px; padding: 10px; }
         .metric span { display: block; color: #8e9aa7; font-size: 11px; text-transform: uppercase; }
-        .metric strong { display: block; margin-top: 4px; font-size: 16px; overflow: hidden; text-overflow: ellipsis; }
+        .metric strong { display: block; margin-top: 4px; font-size: 16px; overflow: hidden; text-overflow: ellipsis; overflow-wrap: anywhere; }
         button, input { border-radius: 7px; border: 1px solid #35424d; background: #171c21; color: #f4f7fa; min-height: 36px; }
         button { padding: 0 14px; cursor: pointer; }
         button:hover { border-color: #63c7ff; }
@@ -29,7 +29,15 @@
         .track { width: 100%; display: grid; grid-template-columns: 1fr 1fr 80px 90px; text-align: left; border: 0; border-bottom: 1px solid #20272d; border-radius: 0; background: #0b0e10; }
         .track:hover { background: #121a20; }
         .error { color: #ff7b86; min-height: 20px; margin-top: 10px; }
-        @media (max-width: 720px) { .grid { grid-template-columns: repeat(2, 1fr); } .track { grid-template-columns: 1fr 90px; } .track .secondary { display: none; } }
+        @media (max-width: 720px) {
+            main { padding: 18px 14px; }
+            h1 { font-size: 20px; }
+            .panel { padding: 12px; }
+            .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+            .slider { grid-template-columns: 72px minmax(0, 1fr) 52px; }
+            .track { grid-template-columns: minmax(0, 1fr) 72px; }
+            .track .secondary { display: none; }
+        }
     </style>
 </head>
 <body>
