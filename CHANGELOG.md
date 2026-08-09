@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.0-dev
+
+- Deterministische pause/cue/play-outputreconciliatie en expliciete
+  desired-versus-applied timingbevestiging gepland.
+
 ## 0.3.0
 
 - Rekordbox-backed Library en Lumi-owned phrase editing.
