@@ -233,6 +233,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
     public let deckInputIntegration: DeckInputIntegrationState?
     public let rekordboxSyncPreview: RekordboxXMLSyncPreview?
     public let rekordboxMirror: RekordboxMirrorState?
+    public let rekordboxDevices: [RekordboxDeviceState]
     public let diagnostic: String?
 
     public init(
@@ -252,6 +253,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
         deckInputIntegration: DeckInputIntegrationState? = nil,
         rekordboxSyncPreview: RekordboxXMLSyncPreview? = nil,
         rekordboxMirror: RekordboxMirrorState? = nil,
+        rekordboxDevices: [RekordboxDeviceState] = [],
         diagnostic: String? = nil
     ) {
         self.condition = condition
@@ -270,6 +272,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
         self.deckInputIntegration = deckInputIntegration
         self.rekordboxSyncPreview = rekordboxSyncPreview
         self.rekordboxMirror = rekordboxMirror
+        self.rekordboxDevices = rekordboxDevices
         self.diagnostic = diagnostic
     }
 
@@ -297,6 +300,19 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
             diagnostic: diagnostic
         )
     }
+}
+
+public struct RekordboxDeviceState: Equatable, Sendable, Identifiable {
+    public let sourceID: String
+    public let displayName: String
+    public let databaseRevision: String
+    public let activeTracks: UInt64
+    public let matchedTracks: UInt64
+    public let unmatchedTracks: UInt64
+    public let beatGridRefresh: Bool
+    public let cueRevisionTracked: Bool
+
+    public var id: String { sourceID }
 }
 
 public struct DeckInputIntegrationState: Equatable, Sendable {

@@ -31,6 +31,7 @@ Decision Records (ADR's) die de belangrijkste besluiten vastleggen.
 - [ADR-0022: Separate CoreMIDI sources for lighting commands and playback timing](adr/0022-separate-coremidi-command-and-clock-sources.md)
 - [ADR-0023: Independent MIDI lifecycle and phrase-boundary pre-roll](adr/0023-independent-midi-lifecycle-and-phrase-boundary-preroll.md)
 - [ADR-0024: VB Tech-appidentiteit en geïsoleerde releasekanalen](adr/0024-vb-tech-app-identiteit-en-geisoleerde-releasekanalen.md)
+- [ADR-0025: Read-only Rekordbox Device identity and analysis sync](adr/0025-read-only-rekordbox-device-identity-and-analysis-sync.md)
 
 Release- en deploymentmanagement staat in [`docs/release`](../release/README.md).
 

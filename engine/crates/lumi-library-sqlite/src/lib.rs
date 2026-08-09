@@ -21,7 +21,7 @@ use lumi_library::{
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 use thiserror::Error;
 
-const SCHEMA_VERSION: u32 = 6;
+const SCHEMA_VERSION: u32 = 7;
 const DEFAULTS_VERSION_KEY: &str = "phrase-role-defaults-version";
 const CATALOG_REVISION_KEY: &str = "phrase-role-catalog-revision";
 const AUTOLOOP_DEFAULTS_VERSION_KEY: &str = "autoloop-catalog-defaults-version";
@@ -29,6 +29,58 @@ const AUTOLOOP_CATALOG_REVISION_KEY: &str = "autoloop-catalog-revision";
 
 pub struct SqliteLibraryRepository {
     connection: Connection,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeviceMatchCandidate {
+    pub track_id: TrackId,
+    pub title: String,
+    pub artist: String,
+    pub bpm_milli: u32,
+    pub duration_millis: u64,
+    pub audio_uri: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeviceAliasUpsert {
+    pub device_track_id: u32,
+    pub simulator_signature: u32,
+    pub canonical_track_id: Option<TrackId>,
+    pub match_kind: String,
+    pub title: String,
+    pub artist: String,
+    pub bpm_milli: u32,
+    pub duration_millis: u64,
+    pub file_size: u32,
+    pub metadata_revision: String,
+    pub analysis_revision: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeviceAliasResolution {
+    pub source_id: String,
+    pub display_name: String,
+    pub device_track_id: u32,
+    pub canonical_track_id: TrackId,
+    pub analysis_revision: String,
+    pub match_kind: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeviceAnalysisUpsert {
+    pub track_id: TrackId,
+    pub analysis_revision: String,
+    pub beat_grid: BeatGrid,
+    pub waveform: Vec<WaveformPoint>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeviceSourceSummary {
+    pub source_id: String,
+    pub display_name: String,
+    pub database_revision: String,
+    pub active_tracks: u64,
+    pub matched_tracks: u64,
 }
 
 impl SqliteLibraryRepository {
@@ -64,6 +116,179 @@ impl SqliteLibraryRepository {
             track_ids.push(TrackId::new(from_positive_i64(row?, "track id")?));
         }
         Ok(track_ids)
+    }
+
+    pub fn device_match_candidates(&self) -> Result<Vec<DeviceMatchCandidate>, SqliteLibraryError> {
+        let mut statement = self.connection.prepare(
+            "SELECT id, title, artist, bpm_milli, duration_millis, audio_uri
+               FROM tracks ORDER BY id",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, String>(5)?,
+            ))
+        })?;
+        let mut candidates = Vec::new();
+        for row in rows {
+            let (track_id, title, artist, bpm, duration, audio_uri) = row?;
+            candidates.push(DeviceMatchCandidate {
+                track_id: TrackId::new(from_positive_i64(track_id, "track id")?),
+                title,
+                artist,
+                bpm_milli: i64_to_u32(bpm, "track BPM")?,
+                duration_millis: from_positive_i64(duration, "track duration")?,
+                audio_uri,
+            });
+        }
+        Ok(candidates)
+    }
+
+    pub fn sync_device_aliases(
+        &mut self,
+        source_id: &str,
+        display_name: &str,
+        database_revision: &str,
+        aliases: &[DeviceAliasUpsert],
+        analyses: &[DeviceAnalysisUpsert],
+    ) -> Result<(), SqliteLibraryError> {
+        let transaction = self.connection.transaction()?;
+        transaction.execute(
+            "INSERT INTO device_library_sources(source_id, display_name, database_revision)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(source_id) DO UPDATE SET
+               display_name = excluded.display_name,
+               database_revision = excluded.database_revision,
+               synced_at = CURRENT_TIMESTAMP",
+            params![source_id, display_name, database_revision],
+        )?;
+        transaction.execute(
+            "UPDATE device_library_track_aliases SET archived = 1 WHERE source_id = ?1",
+            [source_id],
+        )?;
+        let mut statement = transaction.prepare(
+            "INSERT INTO device_library_track_aliases
+             (source_id, device_track_id, simulator_signature, canonical_track_id, match_kind,
+              title, artist, bpm_milli, duration_millis, file_size, metadata_revision,
+              analysis_revision, archived)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, 0)
+             ON CONFLICT(source_id, device_track_id) DO UPDATE SET
+               simulator_signature = excluded.simulator_signature,
+               canonical_track_id = excluded.canonical_track_id,
+               match_kind = excluded.match_kind,
+               title = excluded.title,
+               artist = excluded.artist,
+               bpm_milli = excluded.bpm_milli,
+               duration_millis = excluded.duration_millis,
+               file_size = excluded.file_size,
+               metadata_revision = excluded.metadata_revision,
+               analysis_revision = excluded.analysis_revision,
+               archived = 0",
+        )?;
+        for alias in aliases {
+            statement.execute(params![
+                source_id,
+                i64::from(alias.device_track_id),
+                i64::from(alias.simulator_signature),
+                alias
+                    .canonical_track_id
+                    .map(|track_id| i64::try_from(track_id.value()))
+                    .transpose()
+                    .map_err(|_| SqliteLibraryError::ArithmeticOverflow)?,
+                alias.match_kind,
+                alias.title,
+                alias.artist,
+                i64::from(alias.bpm_milli),
+                to_i64(alias.duration_millis)?,
+                i64::from(alias.file_size),
+                alias.metadata_revision,
+                alias.analysis_revision,
+            ])?;
+        }
+        drop(statement);
+        for analysis in analyses {
+            replace_track_analysis_in_transaction(
+                &transaction,
+                analysis.track_id,
+                &analysis.analysis_revision,
+                &analysis.beat_grid,
+                &analysis.waveform,
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
+    pub fn resolve_device_alias(
+        &self,
+        device_track_id: u32,
+        simulator_signature: u32,
+    ) -> Result<Option<DeviceAliasResolution>, SqliteLibraryError> {
+        let (predicate, value) = if simulator_signature == 0 {
+            ("a.device_track_id = ?1", device_track_id)
+        } else {
+            ("a.simulator_signature = ?1", simulator_signature)
+        };
+        let sql = format!(
+            "SELECT a.source_id, s.display_name, a.device_track_id, a.canonical_track_id,
+                    a.analysis_revision, a.match_kind
+               FROM device_library_track_aliases a
+               JOIN device_library_sources s ON s.source_id = a.source_id
+              WHERE {predicate} AND a.archived = 0 AND a.canonical_track_id IS NOT NULL
+              ORDER BY s.synced_at DESC, a.source_id
+              LIMIT 2"
+        );
+        let mut statement = self.connection.prepare(&sql)?;
+        let rows = statement.query_map([i64::from(value)], |row| {
+            Ok(DeviceAliasResolution {
+                source_id: row.get(0)?,
+                display_name: row.get(1)?,
+                device_track_id: u32::try_from(row.get::<_, i64>(2)?).map_err(|_| {
+                    rusqlite::Error::IntegralValueOutOfRange(2, row.get::<_, i64>(2).unwrap_or(-1))
+                })?,
+                canonical_track_id: TrackId::new(u64::try_from(row.get::<_, i64>(3)?).map_err(
+                    |_| {
+                        rusqlite::Error::IntegralValueOutOfRange(
+                            3,
+                            row.get::<_, i64>(3).unwrap_or(-1),
+                        )
+                    },
+                )?),
+                analysis_revision: row.get(4)?,
+                match_kind: row.get(5)?,
+            })
+        })?;
+        let resolved = rows.collect::<Result<Vec<_>, _>>()?;
+        if resolved.len() != 1 {
+            return Ok(None);
+        }
+        Ok(resolved.into_iter().next())
+    }
+
+    pub fn device_source_summaries(&self) -> Result<Vec<DeviceSourceSummary>, SqliteLibraryError> {
+        let mut statement = self.connection.prepare(
+            "SELECT s.source_id, s.display_name, s.database_revision,
+                    COUNT(a.device_track_id), COUNT(a.canonical_track_id)
+               FROM device_library_sources s
+               LEFT JOIN device_library_track_aliases a
+                 ON a.source_id = s.source_id AND a.archived = 0
+              GROUP BY s.source_id, s.display_name, s.database_revision
+              ORDER BY s.display_name, s.source_id",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok(DeviceSourceSummary {
+                source_id: row.get(0)?,
+                display_name: row.get(1)?,
+                database_revision: row.get(2)?,
+                active_tracks: u64::try_from(row.get::<_, i64>(3)?).unwrap_or(0),
+                matched_tracks: u64::try_from(row.get::<_, i64>(4)?).unwrap_or(0),
+            })
+        })?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
     fn from_connection(connection: Connection) -> Result<Self, SqliteLibraryError> {
@@ -280,7 +505,33 @@ impl SqliteLibraryRepository {
                     playlist_count INTEGER NOT NULL,
                     PRIMARY KEY(source_id, source_revision)
                 );
-                PRAGMA user_version = 6;
+                CREATE TABLE device_library_sources (
+                    source_id TEXT PRIMARY KEY,
+                    display_name TEXT NOT NULL,
+                    database_revision TEXT NOT NULL,
+                    synced_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE device_library_track_aliases (
+                    source_id TEXT NOT NULL REFERENCES device_library_sources(source_id),
+                    device_track_id INTEGER NOT NULL,
+                    simulator_signature INTEGER NOT NULL,
+                    canonical_track_id INTEGER REFERENCES tracks(id) ON DELETE SET NULL,
+                    match_kind TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    artist TEXT NOT NULL,
+                    bpm_milli INTEGER NOT NULL,
+                    duration_millis INTEGER NOT NULL,
+                    file_size INTEGER NOT NULL,
+                    metadata_revision TEXT NOT NULL,
+                    analysis_revision TEXT NOT NULL,
+                    archived INTEGER NOT NULL,
+                    PRIMARY KEY(source_id, device_track_id)
+                );
+                CREATE INDEX device_alias_by_simulator_signature
+                    ON device_library_track_aliases(simulator_signature, archived);
+                CREATE INDEX device_alias_by_canonical_track
+                    ON device_library_track_aliases(canonical_track_id, archived);
+                PRAGMA user_version = 7;
                 COMMIT;
                 ",
             )?;
@@ -456,6 +707,42 @@ impl SqliteLibraryRepository {
                     PRIMARY KEY(source_id, source_revision)
                 );
                 PRAGMA user_version = 6;
+                COMMIT;
+                ",
+            )?;
+            current = 6;
+        }
+        if current == 6 {
+            self.connection.execute_batch(
+                "
+                BEGIN IMMEDIATE;
+                CREATE TABLE device_library_sources (
+                    source_id TEXT PRIMARY KEY,
+                    display_name TEXT NOT NULL,
+                    database_revision TEXT NOT NULL,
+                    synced_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE device_library_track_aliases (
+                    source_id TEXT NOT NULL REFERENCES device_library_sources(source_id),
+                    device_track_id INTEGER NOT NULL,
+                    simulator_signature INTEGER NOT NULL,
+                    canonical_track_id INTEGER REFERENCES tracks(id) ON DELETE SET NULL,
+                    match_kind TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    artist TEXT NOT NULL,
+                    bpm_milli INTEGER NOT NULL,
+                    duration_millis INTEGER NOT NULL,
+                    file_size INTEGER NOT NULL,
+                    metadata_revision TEXT NOT NULL,
+                    analysis_revision TEXT NOT NULL,
+                    archived INTEGER NOT NULL,
+                    PRIMARY KEY(source_id, device_track_id)
+                );
+                CREATE INDEX device_alias_by_simulator_signature
+                    ON device_library_track_aliases(simulator_signature, archived);
+                CREATE INDEX device_alias_by_canonical_track
+                    ON device_library_track_aliases(canonical_track_id, archived);
+                PRAGMA user_version = 7;
                 COMMIT;
                 ",
             )?;
@@ -2220,6 +2507,65 @@ fn replace_autoloop_rows(
     Ok(())
 }
 
+fn replace_track_analysis_in_transaction(
+    transaction: &Transaction<'_>,
+    track_id: TrackId,
+    analysis_revision: &str,
+    beat_grid: &BeatGrid,
+    waveform: &[WaveformPoint],
+) -> Result<(), SqliteLibraryError> {
+    let track_id = to_i64(track_id.value())?;
+    let updated = transaction.execute(
+        "UPDATE tracks SET analysis_revision = ?1 WHERE id = ?2",
+        params![analysis_revision, track_id],
+    )?;
+    if updated != 1 {
+        return Err(SqliteLibraryError::MissingTrack);
+    }
+    transaction.execute("DELETE FROM beat_markers WHERE track_id = ?1", [track_id])?;
+    transaction.execute("DELETE FROM beat_grids WHERE track_id = ?1", [track_id])?;
+    transaction.execute(
+        "DELETE FROM waveform_points WHERE track_id = ?1",
+        [track_id],
+    )?;
+    transaction.execute(
+        "INSERT INTO beat_grids(track_id, beats_per_bar) VALUES (?1, ?2)",
+        params![track_id, i64::from(beat_grid.beats_per_bar())],
+    )?;
+    {
+        let mut statement = transaction.prepare(
+            "INSERT INTO beat_markers
+             (track_id, beat_index, time_millis, bar_index, beat_in_bar)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+        )?;
+        for marker in beat_grid.markers() {
+            statement.execute(params![
+                track_id,
+                i64::from(marker.beat_index()),
+                to_i64(marker.time_millis())?,
+                i64::from(marker.bar_index()),
+                i64::from(marker.beat_in_bar()),
+            ])?;
+        }
+    }
+    {
+        let mut statement = transaction.prepare(
+            "INSERT INTO waveform_points(track_id, point_index, low, mid, high)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+        )?;
+        for (index, point) in waveform.iter().enumerate() {
+            statement.execute(params![
+                track_id,
+                usize_to_i64(index)?,
+                i64::from(point.low()),
+                i64::from(point.mid()),
+                i64::from(point.high()),
+            ])?;
+        }
+    }
+    Ok(())
+}
+
 #[derive(Debug, Error)]
 pub enum SqliteLibraryError {
     #[error("SQLite library error: {0}")]
@@ -2244,6 +2590,8 @@ pub enum SqliteLibraryError {
     ArithmeticOverflow,
     #[error("playlist references missing source track {0}")]
     MissingPlaylistTrack(String),
+    #[error("music-library track is missing")]
+    MissingTrack,
     #[error("music-library source {0} is missing")]
     MissingLibrarySource(String),
     #[error("source refresh is incomplete for {0}")]
@@ -2605,7 +2953,7 @@ mod fault_tests {
     use lumi_library_demo::DemoLibrarySourceProvider;
     use lumi_library_source::MusicLibrarySourceProvider;
 
-    use super::SqliteLibraryRepository;
+    use super::{DeviceAliasUpsert, DeviceAnalysisUpsert, SqliteLibraryRepository};
 
     #[test]
     fn failed_analysis_refresh_rolls_back_the_complete_previous_track()
@@ -2660,6 +3008,81 @@ mod fault_tests {
             .track(track_id)?
             .ok_or("stored track not found after rollback")?;
         assert_eq!(after, before);
+        Ok(())
+    }
+
+    #[test]
+    fn device_alias_resolves_real_and_simulated_identity_and_archives_on_resync()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let baseline = DemoLibrarySourceProvider::curated().load_baseline()?;
+        let mut repository = SqliteLibraryRepository::in_memory()?;
+        repository.import_baseline(&baseline)?;
+        let source_track = &baseline.tracks()[0];
+        let track_id = repository
+            .page_tracks(TrackPageRequest::try_new(0, 25)?)?
+            .tracks()
+            .iter()
+            .find(|track| track.source_track_id() == source_track.source_track_id())
+            .ok_or("stored source track not found")?
+            .id();
+        let aliases = vec![DeviceAliasUpsert {
+            device_track_id: 1_256,
+            simulator_signature: 3_456_789_012,
+            canonical_track_id: Some(track_id),
+            match_kind: "metadata+file-size".to_owned(),
+            title: source_track.title().to_owned(),
+            artist: source_track.artist().to_owned(),
+            bpm_milli: source_track.bpm_milli(),
+            duration_millis: source_track.duration_millis(),
+            file_size: 123,
+            metadata_revision: "metadata-v1".to_owned(),
+            analysis_revision: "analysis-v1".to_owned(),
+        }];
+        let analyses = vec![DeviceAnalysisUpsert {
+            track_id,
+            analysis_revision: "device:test:analysis-v1".to_owned(),
+            beat_grid: source_track.beat_grid().clone(),
+            waveform: source_track.waveform().to_vec(),
+        }];
+        repository.sync_device_aliases(
+            "rekordbox-device:test",
+            "Test USB",
+            "database-v1",
+            &aliases,
+            &analyses,
+        )?;
+
+        assert_eq!(
+            repository
+                .resolve_device_alias(1_256, 0)?
+                .ok_or("real device alias not resolved")?
+                .canonical_track_id,
+            track_id
+        );
+        assert_eq!(
+            repository
+                .resolve_device_alias(42, 3_456_789_012)?
+                .ok_or("simulator alias not resolved")?
+                .canonical_track_id,
+            track_id
+        );
+        let summary = repository.device_source_summaries()?;
+        assert_eq!(summary[0].active_tracks, 1);
+        assert_eq!(summary[0].matched_tracks, 1);
+
+        repository.sync_device_aliases(
+            "rekordbox-device:test",
+            "Test USB",
+            "database-v2",
+            &[],
+            &[],
+        )?;
+        assert!(repository.resolve_device_alias(1_256, 0)?.is_none());
+        assert!(
+            repository
+                .resolve_device_alias(42, 3_456_789_012)?
+                .is_none()
+        );
         Ok(())
     }
 }

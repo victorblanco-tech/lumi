@@ -1,0 +1,14 @@
+[package]
+name = "lumi-rekordbox-device"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+rekordbox-pdb = "0.1.0"
+sha2 = "0.10.9"
+thiserror = "2"
+
+[lints]
+workspace = true

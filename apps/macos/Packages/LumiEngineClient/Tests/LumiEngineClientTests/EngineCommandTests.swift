@@ -44,4 +44,12 @@ struct EngineCommandTests {
         #expect(payload["expectedContentSha256"] == .string("abc123"))
         #expect(payload["followedPaths"] == .array([.string("Sets/Beach Set")]))
     }
+
+    @Test("Rekordbox device sync carries the selected mounted root exactly")
+    func rekordboxDeviceSyncPayload() {
+        let payload = EngineCommand.syncRekordboxDevice(root: "/Volumes/DJ USB").payload()
+
+        #expect(payload["kind"] == .string("syncRekordboxDevice"))
+        #expect(payload["root"] == .string("/Volumes/DJ USB"))
+    }
 }

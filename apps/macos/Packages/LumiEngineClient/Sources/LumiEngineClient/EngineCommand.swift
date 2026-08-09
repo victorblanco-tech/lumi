@@ -291,6 +291,7 @@ public enum EngineCommand: Equatable, Sendable {
         includeFutureChildPlaylists: Bool,
         expectedContentSHA256: String
     )
+    case syncRekordboxDevice(root: String)
     case reconcileLibrarySource(
         trackID: UInt64,
         expectedTimelineRevision: UInt64,
@@ -425,6 +426,11 @@ public enum EngineCommand: Equatable, Sendable {
                 "followedPaths": .array(followedPaths.map(JSONValue.string)),
                 "includeFutureChildPlaylists": .boolean(includeFutureChildPlaylists),
                 "expectedContentSha256": .string(expectedContentSHA256)
+            ]
+        case let .syncRekordboxDevice(root):
+            return [
+                "kind": .string("syncRekordboxDevice"),
+                "root": .string(root)
             ]
         case let .reconcileLibrarySource(trackID, expectedRevision, strategy):
             var payload = strategy.payload

@@ -373,6 +373,7 @@ fn process_pending_source_events(runtime: &mut EngineRuntime) -> Result<(), Engi
     match runtime.deck_source_mode {
         DeckSourceMode::ConnectedDecks => {
             for event in runtime.connected_deck_source.drain_events()? {
+                let event = hydrate_connected_library_event(runtime, event)?;
                 runtime.planning_worker.process_source_event(
                     &mut runtime.state,
                     &mut runtime.output_worker,
@@ -403,6 +404,42 @@ fn process_pending_source_events(runtime: &mut EngineRuntime) -> Result<(), Engi
         }
     }
     Ok(())
+}
+
+fn hydrate_connected_library_event(
+    runtime: &mut EngineRuntime,
+    event: DomainEvent,
+) -> Result<DomainEvent, EngineError> {
+    let DomainEvent::Observation(mut envelope) = event else {
+        return Ok(event);
+    };
+    let DeckObservation::TrackLoaded {
+        deck_id,
+        track_load_id,
+        ..
+    } = envelope.observation
+    else {
+        return Ok(DomainEvent::Observation(envelope));
+    };
+    let Some(identity) = runtime.connected_deck_source.track_identity(track_load_id) else {
+        return Ok(DomainEvent::Observation(envelope));
+    };
+    let Some(connected) = runtime
+        .library_worker
+        .connected_track(identity.rekordbox_id, identity.simulator_signature)?
+    else {
+        return Ok(DomainEvent::Observation(envelope));
+    };
+    let (metadata, context) = connected.prepared.into_parts();
+    runtime
+        .planning_worker
+        .register_library_context(track_load_id, context);
+    envelope.observation = DeckObservation::TrackLoaded {
+        deck_id,
+        metadata,
+        track_load_id,
+    };
+    Ok(DomainEvent::Observation(envelope))
 }
 
 struct PlanningWorker {
@@ -1109,6 +1146,10 @@ fn apply_command(
             )?;
             return Ok(());
         }
+        SessionCommand::SyncRekordboxDevice { root } => {
+            runtime.library_worker.sync_rekordbox_device(root)?;
+            return Ok(());
+        }
         SessionCommand::ReconcileLibrarySource {
             track_id,
             expected_revision,
@@ -1512,6 +1553,7 @@ fn apply_command(
         | SessionCommand::PreviewRekordboxXmlSync { .. }
         | SessionCommand::ApplyRekordboxXmlSync { .. }
         | SessionCommand::ImportRekordboxAnalysis { .. }
+        | SessionCommand::SyncRekordboxDevice { .. }
         | SessionCommand::ReconcileLibrarySource { .. }
         | SessionCommand::EditLibraryTimeline { .. }
         | SessionCommand::SetLibraryPhraseLoopStrategy { .. }
@@ -1834,6 +1876,18 @@ fn application_error_envelope(
                 None,
             )
         }
+        CommandApplicationError::Library(
+            library_error @ (LibraryWorkerError::RekordboxDevice(_)
+            | LibraryWorkerError::InvalidRekordboxDeviceRoot),
+        ) => error_envelope(
+            sequence,
+            correlation_id,
+            "validationFailed",
+            "rekordboxDeviceSyncRejected",
+            &library_error.to_string(),
+            false,
+            None,
+        ),
         CommandApplicationError::Library(
             library_error @ (LibraryWorkerError::RekordboxResolver(_)
             | LibraryWorkerError::RekordboxAnalysis(_)
@@ -3661,7 +3715,12 @@ mod tests {
             (33, 80),
             (34, 119),
             (35, 7),
-            (119, 2),
+            (36, 0),
+            (37, 0),
+            (38, 0),
+            (39, 0),
+            (40, 0),
+            (119, lumi_blt_midi::PROTOCOL_VERSION),
         ];
         for (controller, value) in fields {
             if let Err(error) = runtime.connected_deck_source.ingest(
@@ -3722,7 +3781,12 @@ mod tests {
             (33, 100),
             (34, 1),
             (35, 8),
-            (119, 2),
+            (36, 0),
+            (37, 0),
+            (38, 0),
+            (39, 0),
+            (40, 0),
+            (119, lumi_blt_midi::PROTOCOL_VERSION),
         ];
         for (controller, value) in tempo_update {
             if let Err(error) = runtime.connected_deck_source.ingest(

@@ -71,8 +71,31 @@ public struct LibrarySnapshotDecoder: Sendable {
             rekordboxSyncPreview: try decodeRekordboxSyncPreview(
                 library["rekordboxSyncPreview"]
             ),
-            rekordboxMirror: try decodeRekordboxMirror(library["rekordboxMirror"])
+            rekordboxMirror: try decodeRekordboxMirror(library["rekordboxMirror"]),
+            rekordboxDevices: try decodeRekordboxDevices(library["rekordboxDevices"])
         )
+    }
+
+    private func decodeRekordboxDevices(_ value: JSONValue?) throws -> [RekordboxDeviceState] {
+        guard let value, value != .null else { return [] }
+        guard case let .array(values) = value, values.count <= 32 else {
+            throw LibrarySnapshotError.invalidObject
+        }
+        return try values.map { value in
+            guard case let .object(device) = value else {
+                throw LibrarySnapshotError.invalidObject
+            }
+            return RekordboxDeviceState(
+                sourceID: try string(device, "sourceId"),
+                displayName: try string(device, "displayName"),
+                databaseRevision: try string(device, "databaseRevision"),
+                activeTracks: try unsigned(device, "activeTracks"),
+                matchedTracks: try unsigned(device, "matchedTracks"),
+                unmatchedTracks: try unsigned(device, "unmatchedTracks"),
+                beatGridRefresh: try boolean(device, "beatGridRefresh"),
+                cueRevisionTracked: try boolean(device, "cueRevisionTracked")
+            )
+        }
     }
 
     private func decodeRekordboxSyncPreview(

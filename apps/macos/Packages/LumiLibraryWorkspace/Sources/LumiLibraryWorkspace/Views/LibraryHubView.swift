@@ -27,6 +27,7 @@ public struct LibraryHubView: View {
     private let onRekordboxSyncPreview: @Sendable (RekordboxXMLSyncPreviewRequest) -> Void
     private let onRekordboxSyncApply: @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void
     private let onRekordboxAnalysisImport: @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void
+    private let onRekordboxDeviceSync: @Sendable (String) -> Void
 
     @Binding private var section: LibraryHubSection
 
@@ -49,7 +50,8 @@ public struct LibraryHubView: View {
         onPhraseRoleMutation: @escaping @Sendable (PhraseRoleMutationRequest) -> Void = { _ in },
         onRekordboxSyncPreview: @escaping @Sendable (RekordboxXMLSyncPreviewRequest) -> Void = { _ in },
         onRekordboxSyncApply: @escaping @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void = { _, _ in },
-        onRekordboxAnalysisImport: @escaping @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void = { _, _ in }
+        onRekordboxAnalysisImport: @escaping @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void = { _, _ in },
+        onRekordboxDeviceSync: @escaping @Sendable (String) -> Void = { _ in }
     ) {
         self.state = state
         _keyNotation = keyNotation
@@ -70,6 +72,7 @@ public struct LibraryHubView: View {
         self.onRekordboxSyncPreview = onRekordboxSyncPreview
         self.onRekordboxSyncApply = onRekordboxSyncApply
         self.onRekordboxAnalysisImport = onRekordboxAnalysisImport
+        self.onRekordboxDeviceSync = onRekordboxDeviceSync
     }
 
     public var body: some View {
@@ -102,7 +105,8 @@ public struct LibraryHubView: View {
                         onMutation: onPhraseRoleMutation,
                         onSyncPreview: onRekordboxSyncPreview,
                         onSyncApply: onRekordboxSyncApply,
-                        onAnalysisImport: onRekordboxAnalysisImport
+                        onAnalysisImport: onRekordboxAnalysisImport,
+                        onDeviceSync: onRekordboxDeviceSync
                     )
                 }
             }

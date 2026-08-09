@@ -21,6 +21,7 @@ lumi-output-dry-run = { path = "../lumi-output-dry-run" }
 lumi-planner = { path = "../lumi-planner" }
 lumi-protocol = { path = "../lumi-protocol" }
 lumi-rekordbox-analysis = { path = "../lumi-rekordbox-analysis" }
+lumi-rekordbox-device = { path = "../lumi-rekordbox-device" }
 lumi-rekordbox-resolver = { path = "../lumi-rekordbox-resolver" }
 lumi-rekordbox-xml = { path = "../lumi-rekordbox-xml" }
 lumi-simulator = { path = "../lumi-simulator" }

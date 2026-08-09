@@ -123,7 +123,7 @@ public struct BeatLinkTriggerIntegrationView: View {
                 Text("Current adapter scope").font(LumiTypography.cardTitle)
                 Label("Player identity, load identity, play state, master, on-air, BPM, beat and duration", systemImage: "checkmark.circle.fill")
                 Label("Unknown tracks fail safe as External track and remain AUTO HELD", systemImage: "shield.lefthalf.filled")
-                Label("Track title, artist, key, RGB waveform and phrases require a later metadata transport or exact Lumi Library match", systemImage: "clock")
+                Label("Exact Device Library matches hydrate title, artist, key, RGB waveform, beatgrid and the Lumi phrase plan", systemImage: "checkmark.shield.fill")
             }
             .font(LumiTypography.caption)
         }
@@ -157,6 +157,7 @@ public struct BeatLinkTriggerIntegrationView: View {
             source-player (long (or track-source-player 0))
             raw-track-bpm (double (max 0 (or raw-bpm 0)))
             simulating? (some? util/*simulating*)
+            sim-meta (:metadata util/*simulating*)
             pitch-scale (double (max 0.000001 pitch-multiplier))
             track-bpm (long (Math/round
                               (if simulating?
@@ -166,8 +167,18 @@ public struct BeatLinkTriggerIntegrationView: View {
                                   (if simulating?
                                     (* raw-track-bpm 10.0)
                                     (* (double (max 0.0 (or effective-tempo 0.0))) 1000.0))))
-            current-beat (long (max 0 (or beat-number 0)))
             duration (long (or track-length 0))
+            sim-separator (str (char 31))
+            sim-identity (when simulating?
+                           (str (clojure.string/lower-case (clojure.string/trim (str (or (:title sim-meta) ""))))
+                                sim-separator
+                                (clojure.string/lower-case (clojure.string/trim (str (or (:artist sim-meta) ""))))
+                                sim-separator (long (/ track-bpm 10))
+                                sim-separator duration))
+            sim-signature (if simulating?
+                            (long (bit-and 0xffffffff (.hashCode ^String sim-identity)))
+                            0)
+            current-beat (long (max 0 (or beat-number 0)))
             slot (case track-source-slot :sd-slot 1 :usb-slot 2
                                          :collection 3 :cd-slot 4 0)
             sequence (mod (inc (get @locals :lumi-sequence 0)) 128)
@@ -185,7 +196,10 @@ public struct BeatLinkTriggerIntegrationView: View {
                  [31 (chunk duration 14)] [32 sequence]
                  [33 (chunk effective-bpm 0)] [34 (chunk effective-bpm 7)]
                  [35 (chunk effective-bpm 14)]
-                 [119 2]]]
+                 [36 (chunk sim-signature 0)] [37 (chunk sim-signature 7)]
+                 [38 (chunk sim-signature 14)] [39 (chunk sim-signature 21)]
+                 [40 (chunk sim-signature 28)]
+                 [119 3]]]
           (midi/midi-control trigger-output controller value ch))))
     """
 }

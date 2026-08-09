@@ -18,7 +18,7 @@ use lumi_midi_coremidi::MidiChannelVoiceMessage;
 use thiserror::Error;
 
 pub const PROTOCOL_NAME: &str = "BLT MIDI Deck Frame";
-pub const PROTOCOL_VERSION: u8 = 2;
+pub const PROTOCOL_VERSION: u8 = 3;
 
 const SOURCE_ID: u64 = 30;
 const CONTROL_CHANGE_STATUS: u8 = 0xb;
@@ -31,6 +31,7 @@ const BEAT_CC: u8 = 26;
 const DURATION_SECONDS_CC: u8 = 29;
 const FRAME_SEQUENCE_CC: u8 = 32;
 const EFFECTIVE_BPM_MILLI_CC: u8 = 33;
+const SIMULATOR_SIGNATURE_CC: u8 = 36;
 const COMMIT_CC: u8 = 119;
 
 const FLAG_LOADED: u8 = 1;
@@ -50,6 +51,7 @@ struct FrameAssembler {
     duration_seconds: [u8; 3],
     frame_sequence: u8,
     effective_bpm_milli: [u8; 3],
+    simulator_signature: [u8; 5],
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -66,6 +68,7 @@ struct DeckFrame {
     beat: u32,
     duration_seconds: u32,
     frame_sequence: u8,
+    simulator_signature: u32,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -75,6 +78,15 @@ struct LoadedDeck {
     beat: u32,
     effective_bpm_milli: u32,
     playing: bool,
+    media_identity: BltTrackIdentity,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BltTrackIdentity {
+    pub rekordbox_id: u32,
+    pub source_player: u8,
+    pub source_slot: u8,
+    pub simulator_signature: u32,
 }
 
 pub struct BltMidiDeckSourceProvider {
@@ -185,6 +197,14 @@ impl BltMidiDeckSourceProvider {
         }
     }
 
+    #[must_use]
+    pub fn track_identity(&self, track_load_id: TrackLoadId) -> Option<BltTrackIdentity> {
+        self.decks
+            .values()
+            .find(|deck| deck.track_load_id == track_load_id)
+            .map(|deck| deck.media_identity)
+    }
+
     pub fn clear(&mut self, at: MonotonicTime) -> Result<(), BltMidiError> {
         let loaded = self
             .decks
@@ -270,6 +290,12 @@ impl BltMidiDeckSourceProvider {
                     beat: frame.beat.min(duration_beats),
                     effective_bpm_milli: frame.effective_bpm_milli,
                     playing: frame.playing,
+                    media_identity: BltTrackIdentity {
+                        rekordbox_id: frame.rekordbox_id,
+                        source_player: frame.source_player,
+                        source_slot: frame.source_slot,
+                        simulator_signature: frame.simulator_signature,
+                    },
                 },
             );
             self.emit(
@@ -424,13 +450,16 @@ fn write_field(frame: &mut FrameAssembler, controller: u8, value: u8) -> bool {
         EFFECTIVE_BPM_MILLI_CC..=35 => {
             frame.effective_bpm_milli[usize::from(controller - EFFECTIVE_BPM_MILLI_CC)] = value;
         }
+        SIMULATOR_SIGNATURE_CC..=40 => {
+            frame.simulator_signature[usize::from(controller - SIMULATOR_SIGNATURE_CC)] = value;
+        }
         _ => return false,
     }
     true
 }
 
 fn decode_frame(frame: FrameAssembler) -> Result<DeckFrame, BltMidiError> {
-    const REQUIRED_FIELDS: u32 = (1_u32 << 20) - 1;
+    const REQUIRED_FIELDS: u32 = (1_u32 << 25) - 1;
     if frame.present_fields != REQUIRED_FIELDS {
         return Err(BltMidiError::IncompleteFrame);
     }
@@ -439,6 +468,7 @@ fn decode_frame(frame: FrameAssembler) -> Result<DeckFrame, BltMidiError> {
     let effective_bpm_milli = decode_7bit(&frame.effective_bpm_milli)?;
     let beat = decode_7bit(&frame.beat)?;
     let duration_seconds = decode_7bit(&frame.duration_seconds)?;
+    let simulator_signature = decode_7bit(&frame.simulator_signature)?;
     let loaded = frame.flags & FLAG_LOADED != 0;
     if loaded
         && (rekordbox_id == 0
@@ -461,6 +491,7 @@ fn decode_frame(frame: FrameAssembler) -> Result<DeckFrame, BltMidiError> {
         beat,
         duration_seconds,
         frame_sequence: frame.frame_sequence,
+        simulator_signature,
     })
 }
 
@@ -477,9 +508,14 @@ fn decode_7bit<const N: usize>(chunks: &[u8; N]) -> Result<u32, BltMidiError> {
 }
 
 fn track_identity(frame: DeckFrame) -> u64 {
+    let provider_track_id = if frame.simulator_signature == 0 {
+        frame.rekordbox_id
+    } else {
+        frame.simulator_signature
+    };
     (u64::from(frame.source_player) << 40)
         | (u64::from(frame.source_slot) << 32)
-        | u64::from(frame.rekordbox_id)
+        | u64::from(provider_track_id)
 }
 
 fn duration_beats(frame: DeckFrame) -> Result<u32, BltMidiError> {
@@ -556,6 +592,13 @@ mod tests {
             frame.effective_bpm_milli,
             3,
         );
+        extend_chunks(
+            &mut messages,
+            channel,
+            SIMULATOR_SIGNATURE_CC,
+            frame.simulator_signature,
+            5,
+        );
         messages.push(cc(channel, COMMIT_CC, PROTOCOL_VERSION));
         messages
     }
@@ -598,6 +641,7 @@ mod tests {
             beat: 169,
             duration_seconds: 430,
             frame_sequence: sequence,
+            simulator_signature: 0,
         }
     }
 
@@ -687,6 +731,39 @@ mod tests {
                 ..
             })
         )));
+    }
+
+    #[test]
+    fn simulator_signature_is_preserved_as_media_identity() {
+        let mut provider = BltMidiDeckSourceProvider::new(MonotonicTime::new(0))
+            .unwrap_or_else(|error| panic!("provider must initialize: {error}"));
+        let mut simulated = frame(1);
+        simulated.simulator_signature = 3_456_789_012;
+        for message in encode(1, simulated) {
+            provider
+                .ingest(message, MonotonicTime::new(10))
+                .unwrap_or_else(|error| panic!("simulation frame must ingest: {error}"));
+        }
+        let events = provider
+            .drain_events()
+            .unwrap_or_else(|error| panic!("events must drain: {error}"));
+        let track_load_id = events
+            .iter()
+            .find_map(|event| match event {
+                DomainEvent::Observation(ObservationEnvelope {
+                    observation: DeckObservation::TrackLoaded { track_load_id, .. },
+                    ..
+                }) => Some(*track_load_id),
+                _ => None,
+            })
+            .unwrap_or_else(|| panic!("simulation must emit a track load"));
+        let identity = provider
+            .track_identity(track_load_id)
+            .unwrap_or_else(|| panic!("loaded track must keep its media identity"));
+        assert_eq!(identity.rekordbox_id, 42);
+        assert_eq!(identity.source_player, 1);
+        assert_eq!(identity.source_slot, 2);
+        assert_eq!(identity.simulator_signature, 3_456_789_012);
     }
 
     #[test]

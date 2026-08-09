@@ -63,6 +63,9 @@ pub enum SessionCommand {
         include_future_child_playlists: bool,
         expected_content_sha256: String,
     },
+    SyncRekordboxDevice {
+        root: String,
+    },
     ReconcileLibrarySource {
         track_id: u64,
         expected_revision: u64,
@@ -206,6 +209,7 @@ impl SessionCommand {
             | Self::PreviewRekordboxXmlSync { .. }
             | Self::ApplyRekordboxXmlSync { .. }
             | Self::ImportRekordboxAnalysis { .. }
+            | Self::SyncRekordboxDevice { .. }
             | Self::ReconcileLibrarySource { .. }
             | Self::EditLibraryTimeline { .. }
             | Self::SetLibraryPhraseLoopStrategy { .. }
@@ -287,6 +291,9 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
                 "includeFutureChildPlaylists",
             )?,
             expected_content_sha256: string(&envelope.payload, "expectedContentSha256")?.to_owned(),
+        }),
+        "syncRekordboxDevice" => Ok(SessionCommand::SyncRekordboxDevice {
+            root: string(&envelope.payload, "root")?.to_owned(),
         }),
         "reconcileLibrarySource" => Ok(SessionCommand::ReconcileLibrarySource {
             track_id: positive_unsigned(&envelope.payload, "trackId")?,

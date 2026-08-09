@@ -75,6 +75,32 @@ struct LibraryWorkspaceTests {
         #expect(state.page.tracks.first?.missingCapabilities == [])
     }
 
+    @Test("Rekordbox device sync diagnostics decode match and cue revision status")
+    func decodesRekordboxDeviceState() throws {
+        let devices: JSONValue = .array([
+            .object([
+                "sourceId": .string("rekordbox-device:dj-usb"),
+                "displayName": .string("DJ USB"),
+                "databaseRevision": .string("device-sha"),
+                "activeTracks": .number(1_138),
+                "matchedTracks": .number(43),
+                "unmatchedTracks": .number(1_095),
+                "beatGridRefresh": .boolean(true),
+                "cueRevisionTracked": .boolean(true)
+            ])
+        ])
+        let state = try LibrarySnapshotDecoder().decode(
+            envelope(trackValues: [trackValue()], rekordboxDevices: devices)
+        )
+
+        let device = try #require(state.rekordboxDevices.first)
+        #expect(device.displayName == "DJ USB")
+        #expect(device.matchedTracks == 43)
+        #expect(device.unmatchedTracks == 1_095)
+        #expect(device.beatGridRefresh)
+        #expect(device.cueRevisionTracked)
+    }
+
     @Test("MIDI integration state decodes independently from the library catalog")
     func decodesMidiIntegrationState() throws {
         let midi: JSONValue = .object([
@@ -245,7 +271,7 @@ struct LibraryWorkspaceTests {
                     "state": .string("ready"),
                     "destinationName": .string("Lumi Deck Input"),
                     "protocol": .string("BLT MIDI Deck Frame"),
-                    "protocolVersion": .number(2),
+                    "protocolVersion": .number(3),
                     "receivedMessageCount": .number(48),
                     "invalidWordCount": .number(0),
                     "committedFrameCount": .number(3),
@@ -272,7 +298,9 @@ struct LibraryWorkspaceTests {
         #expect(expression.contains("(/ (* raw-track-bpm 10.0) pitch-scale)"))
         #expect(expression.contains("(* raw-track-bpm 10.0)"))
         #expect(expression.contains("(or effective-tempo 0.0)"))
-        #expect(expression.contains("[119 2]"))
+        #expect(expression.contains("sim-signature"))
+        #expect(expression.contains("[36 (chunk sim-signature 0)]"))
+        #expect(expression.contains("[119 3]"))
     }
 
     @Test("Duplicate stable role IDs are rejected before Settings renders")
@@ -736,7 +764,8 @@ private func envelope(
     midiIntegration: JSONValue = .null,
     midiClockIntegration: JSONValue = .null,
     deckInputIntegration: JSONValue = .null,
-    rekordboxSyncPreview: JSONValue = .null
+    rekordboxSyncPreview: JSONValue = .null,
+    rekordboxDevices: JSONValue = .null
 ) -> MessageEnvelope {
     MessageEnvelope(
         protocolVersion: 1,
@@ -789,7 +818,8 @@ private func envelope(
                 "editor": editorValue,
                 "phraseRoleSettings": phraseRoleSettings,
                 "autoloopCatalog": autoloopCatalog,
-                "rekordboxSyncPreview": rekordboxSyncPreview
+                "rekordboxSyncPreview": rekordboxSyncPreview,
+                "rekordboxDevices": rekordboxDevices
             ])
         ]
     )

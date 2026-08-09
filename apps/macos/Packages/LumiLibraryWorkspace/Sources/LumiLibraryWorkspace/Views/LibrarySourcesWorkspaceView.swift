@@ -14,6 +14,7 @@ public struct LibrarySourcesWorkspaceView: View {
     private let onSyncPreview: @Sendable (RekordboxXMLSyncPreviewRequest) -> Void
     private let onSyncApply: @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void
     private let onAnalysisImport: @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void
+    private let onDeviceSync: @Sendable (String) -> Void
 
     @AppStorage(LumiPreferenceKey.rekordboxXMLFolder)
     private var rekordboxFolderPath = ""
@@ -21,6 +22,8 @@ public struct LibrarySourcesWorkspaceView: View {
     private var includeFutureChildPlaylists = true
     @AppStorage(LumiPreferenceKey.rekordboxXMLFollowedPaths)
     private var followedPathsJSON = "[]"
+    @AppStorage(LumiPreferenceKey.rekordboxDeviceRoot)
+    private var rekordboxDeviceRoot = ""
 
     @State private var selectedProviderKind: String?
     @State private var followedPaths: Set<String> = []
@@ -43,7 +46,8 @@ public struct LibrarySourcesWorkspaceView: View {
         onMutation: @escaping @Sendable (PhraseRoleMutationRequest) -> Void = { _ in },
         onSyncPreview: @escaping @Sendable (RekordboxXMLSyncPreviewRequest) -> Void = { _ in },
         onSyncApply: @escaping @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void = { _, _ in },
-        onAnalysisImport: @escaping @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void = { _, _ in }
+        onAnalysisImport: @escaping @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void = { _, _ in },
+        onDeviceSync: @escaping @Sendable (String) -> Void = { _ in }
     ) {
         self.library = library
         self.settings = settings
@@ -55,6 +59,7 @@ public struct LibrarySourcesWorkspaceView: View {
         self.onSyncPreview = onSyncPreview
         self.onSyncApply = onSyncApply
         self.onAnalysisImport = onAnalysisImport
+        self.onDeviceSync = onDeviceSync
         _selectedProviderKind = State(initialValue: settings?.mappingProfiles.first?.providerKind)
     }
 
@@ -63,6 +68,7 @@ public struct LibrarySourcesWorkspaceView: View {
             VStack(alignment: .leading, spacing: LumiSpacing.xLarge) {
                 header
                 rekordboxSource
+                rekordboxDeviceSource
                 rekordboxSyncPreview
                 appliedRekordboxMirror
                 activeSource
@@ -80,6 +86,78 @@ public struct LibrarySourcesWorkspaceView: View {
             restoreFollowedPaths()
             if !rekordboxFolderPath.isEmpty { scanImportFolder() }
         }
+    }
+
+    private var rekordboxDeviceSource: some View {
+        LumiPanel {
+            VStack(alignment: .leading, spacing: LumiSpacing.large) {
+                HStack(alignment: .top, spacing: LumiSpacing.large) {
+                    sourceIcon("externaldrive.fill.badge.checkmark", state: deviceSourceState)
+                    VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+                        HStack {
+                            Text("Rekordbox Device Library")
+                                .font(LumiTypography.cardTitle)
+                            Text("USB / SD · READ ONLY")
+                                .font(LumiTypography.technical)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(LumiColor.surfaceElevated)
+                                .clipShape(Capsule())
+                        }
+                        Text(deviceSourceStatus)
+                            .font(LumiTypography.technical)
+                            .foregroundStyle(LumiColor.textSecondary)
+                        Text("Syncs performance identity plus Rekordbox metadata, beatgrid, RGB waveform and analysis revisions. Lumi never writes to or ejects the device.")
+                            .font(LumiTypography.caption)
+                            .foregroundStyle(LumiColor.textSecondary)
+                    }
+                    Spacer()
+                    HStack(spacing: LumiSpacing.small) {
+                        Button(rekordboxDeviceRoot.isEmpty ? "Choose Device…" : "Change Device…") {
+                            chooseRekordboxDevice()
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!rendersInteractiveControls)
+                        .accessibilityIdentifier("lumi.library.sources.device.choose")
+                        Button("Sync Device") {
+                            onDeviceSync(rekordboxDeviceRoot)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(rekordboxDeviceRoot.isEmpty || !rendersInteractiveControls)
+                        .accessibilityIdentifier("lumi.library.sources.device.sync")
+                    }
+                }
+                if !rekordboxDeviceRoot.isEmpty {
+                    Divider()
+                    HStack(spacing: LumiSpacing.large) {
+                        sourceSettingRow(
+                            title: "Selected device",
+                            detail: rekordboxDeviceRoot,
+                            systemImage: "externaldrive"
+                        )
+                        sourceSettingRow(
+                            title: "Refresh policy",
+                            detail: "Metadata, beatgrid and cue revisions on every sync",
+                            systemImage: "arrow.triangle.2.circlepath"
+                        )
+                    }
+                    if let syncFeedback, isDeviceSyncFeedback {
+                        Label(
+                            syncFeedback,
+                            systemImage: syncFeedbackIsError
+                                ? "exclamationmark.triangle.fill"
+                                : "checkmark.shield.fill"
+                        )
+                        .font(LumiTypography.caption)
+                        .foregroundStyle(syncFeedbackIsError ? LumiColor.warning : LumiColor.success)
+                    }
+                    Text("Cue changes already invalidate the stored analysis revision. Cue markers will become visible in a later UI step.")
+                        .font(LumiTypography.caption)
+                        .foregroundStyle(LumiColor.textSecondary)
+                }
+            }
+        }
+        .accessibilityIdentifier("lumi.library.sources.device")
     }
 
     private var header: some View {
@@ -334,7 +412,7 @@ public struct LibrarySourcesWorkspaceView: View {
                     }
                     .tint(LumiColor.accent)
                     .accessibilityIdentifier("lumi.library.sources.rekordbox.previewDetailsDisclosure")
-                    if let syncFeedback {
+                    if let syncFeedback, !isDeviceSyncFeedback {
                         Label(syncFeedback, systemImage: "checkmark.shield.fill")
                             .font(LumiTypography.caption)
                             .foregroundStyle(LumiColor.success)
@@ -342,7 +420,7 @@ public struct LibrarySourcesWorkspaceView: View {
                 }
             }
             .accessibilityIdentifier("lumi.library.sources.rekordbox.syncPreview")
-        } else if let syncFeedback {
+        } else if let syncFeedback, !isDeviceSyncFeedback {
             Label(syncFeedback, systemImage: "exclamationmark.triangle.fill")
                 .font(LumiTypography.caption)
                 .foregroundStyle(LumiColor.warning)
@@ -606,6 +684,30 @@ public struct LibrarySourcesWorkspaceView: View {
         return "Ready · \(discovery.export.fileName) · \(availableExportCount) XML export\(availableExportCount == 1 ? "" : "s") found"
     }
 
+    private var selectedDeviceSummary: RekordboxDeviceState? {
+        let displayName = URL(fileURLWithPath: rekordboxDeviceRoot).lastPathComponent
+        return library.rekordboxDevices.first(where: { $0.displayName == displayName })
+            ?? library.rekordboxDevices.first
+    }
+
+    private var isDeviceSyncFeedback: Bool {
+        syncFeedback?.lowercased().contains("device") == true
+    }
+
+    private var deviceSourceState: LumiComponentState {
+        if selectedDeviceSummary != nil { return .ready }
+        return rekordboxDeviceRoot.isEmpty ? .empty : .stale
+    }
+
+    private var deviceSourceStatus: String {
+        guard let device = selectedDeviceSummary else {
+            return rekordboxDeviceRoot.isEmpty
+                ? "Not configured"
+                : "Configured · sync required"
+        }
+        return "Ready · \(device.displayName) · \(device.matchedTracks)/\(device.activeTracks) tracks matched · \(device.unmatchedTracks) held"
+    }
+
     private var currentSyncRequest: RekordboxXMLSyncPreviewRequest {
         RekordboxXMLSyncPreviewRequest(
             folderPath: rekordboxFolderPath,
@@ -696,6 +798,22 @@ public struct LibrarySourcesWorkspaceView: View {
         discovery = nil
         sourceError = nil
         scanImportFolder()
+    }
+
+    private func chooseRekordboxDevice() {
+        let panel = NSOpenPanel()
+        panel.title = "Choose Rekordbox USB or SD Device"
+        panel.message = "Choose the mounted device root. Lumi opens its Rekordbox Device Library read-only."
+        panel.prompt = "Use Device"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = false
+        panel.directoryURL = rekordboxDeviceRoot.isEmpty
+            ? URL(fileURLWithPath: "/Volumes", isDirectory: true)
+            : URL(fileURLWithPath: rekordboxDeviceRoot, isDirectory: true)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        rekordboxDeviceRoot = url.path
     }
 
     private func scanImportFolder(previewAfterScan: Bool = false) {

@@ -652,6 +652,50 @@ final class EngineStatusModel: ObservableObject {
         }
     }
 
+    func syncRekordboxDevice(root: String) async {
+        sourceImportFeedback = "Reading the Rekordbox Device Library and analysis revisions…"
+        sourceImportFeedbackIsError = false
+        guard lifecycle == .ready,
+              let endpointDescription,
+              let protocolVersion,
+              await acquireInteractiveExchange() else {
+            sourceImportFeedback = "Device Library Sync could not start because the engine is not ready."
+            sourceImportFeedbackIsError = true
+            return
+        }
+        defer { isExchangingCommand = false }
+        do {
+            let envelope = try await supervisor.send(.syncRekordboxDevice(root: root))
+            if let failure = EngineCommandFailure(envelope) {
+                sourceImportFeedback = failure.message
+                sourceImportFeedbackIsError = true
+                return
+            }
+            let (snapshot, snapshotEnvelope) = try await decodeSnapshotWithRecovery(
+                envelope,
+                endpointDescription: endpointDescription,
+                protocolVersion: protocolVersion,
+                context: "Rekordbox Device Library sync"
+            )
+            latestSnapshot = snapshot
+            workspaceState = LiveWorkspacePresenter.ready(snapshot)
+            libraryState = try libraryDecoder.decode(snapshotEnvelope)
+            let selectedName = URL(fileURLWithPath: root).lastPathComponent
+            let device = libraryState.rekordboxDevices.first(where: {
+                $0.displayName == selectedName
+            }) ?? libraryState.rekordboxDevices.first
+            if let device {
+                sourceImportFeedback = "Device Library synced read-only: \(device.matchedTracks)/\(device.activeTracks) tracks matched; \(device.unmatchedTracks) safely held. Beatgrid and cue revisions are current."
+            } else {
+                sourceImportFeedback = "Device Library synced read-only. Updated beatgrid and cue revisions are now available to Connected Decks."
+            }
+        } catch {
+            sourceImportFeedback = (error as? LocalizedError)?.errorDescription
+                ?? "The Rekordbox Device Library could not be synchronized."
+            sourceImportFeedbackIsError = true
+        }
+    }
+
     func mutatePhraseRoles(_ request: PhraseRoleMutationRequest) async {
         guard let settings = libraryState.phraseRoleSettings,
               lifecycle == .ready,

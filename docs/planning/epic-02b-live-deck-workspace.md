@@ -4,6 +4,22 @@ Status: **Local Playback product slice user-accepted; BLT MIDI adapter functiona
 
 Target milestone: **0.2.0 – Deck Intelligence**
 
+## 2026-08-09 — Rekordbox Device Library POC
+
+- [x] Define a read-only DeviceSQL adapter and persistent performance aliases.
+- [x] Refresh metadata, beatgrid, RGB waveform and cue-bearing analysis
+  revisions on every explicit device sync.
+- [x] Preserve Lumi-owned phrases and AutoLoop choices during that refresh.
+- [x] Extend the BLT frame for deterministic Shallow Simulator identity without
+  changing BLT itself.
+- [x] Hydrate a matched Connected Deck from the canonical Library timeline;
+  unmatched and ambiguous tracks remain `AUTO HELD`.
+- [x] Add Sources & Import device selection, sync and match diagnostics.
+- [ ] Validate a full track through BLT simulation and Local/Connected Deck
+  lighting output using the same canonical track.
+- [ ] Parse and display Rekordbox memory/hot cue markers from the tracked
+  analysis revision.
+
 ## Product outcome
 
 Lumi presents a fixed, CDJ-recognizable Deck A/B workspace. The master role,

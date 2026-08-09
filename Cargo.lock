@@ -290,6 +290,7 @@ dependencies = [
  "lumi-planner",
  "lumi-protocol",
  "lumi-rekordbox-analysis",
+ "lumi-rekordbox-device",
  "lumi-rekordbox-resolver",
  "lumi-rekordbox-xml",
  "lumi-simulator",
@@ -409,6 +410,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "lumi-rekordbox-device"
+version = "0.4.0-dev"
+dependencies = [
+ "rekordbox-pdb",
+ "sha2",
+ "thiserror",
+]
+
+[[package]]
 name = "lumi-rekordbox-resolver"
 version = "0.4.0-dev"
 dependencies = [
@@ -522,6 +532,12 @@ checksum = "1fbf4db142a473a8d80c26bbf18454ed458bf8d26c8219c331daecfdbd079001"
 dependencies = [
  "proc-macro2",
 ]
+
+[[package]]
+name = "rekordbox-pdb"
+version = "0.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4a5c748a2f596d999010b766c6c497fd6eb2bc91458c15c8c786b0cbce355a71"
 
 [[package]]
 name = "rsqlite-vfs"

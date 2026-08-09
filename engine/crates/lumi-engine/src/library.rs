@@ -21,11 +21,13 @@ use lumi_library::{
 };
 use lumi_library_demo::{DemoLibraryError, DemoLibraryRevision, DemoLibrarySourceProvider};
 use lumi_library_source::MusicLibrarySourceProvider as _;
+use lumi_library_sqlite::{DeviceAliasUpsert, DeviceAnalysisUpsert, DeviceMatchCandidate};
 use lumi_library_sqlite::{SqliteLibraryError, SqliteLibraryRepository};
 use lumi_rekordbox_analysis::{
     AnalysisError, AnalysisWaveformPoint, ResolvedAnalysisRequest, ResolvedAnalysisTrack,
     ResolvedTrackAnalysis, snapshot_resolved_analysis_data,
 };
+use lumi_rekordbox_device::{DeviceError, DeviceTrack, read_device_library};
 use lumi_rekordbox_resolver::{
     DatabaseKey, RequestedTrack, ResolverError, SqlCipherResolver, create_database_snapshot,
 };
@@ -71,6 +73,22 @@ pub struct LibraryWorker {
 pub struct LibraryLocalPlaybackTrack {
     metadata: TrackMetadata,
     context: LibraryPlanContext,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RekordboxDeviceSyncResult {
+    pub source_id: String,
+    pub display_name: String,
+    pub database_revision: String,
+    pub tracks: usize,
+    pub matched: usize,
+    pub unmatched: usize,
+    pub refreshed_analyses: usize,
+}
+
+#[derive(Clone, Debug)]
+pub struct ConnectedLibraryTrack {
+    pub prepared: LibraryLocalPlaybackTrack,
 }
 
 impl LibraryLocalPlaybackTrack {
@@ -697,6 +715,162 @@ impl LibraryWorker {
         self.pending_source_refresh = None;
         self.ensure_imported_timelines()?;
         Ok(())
+    }
+
+    /// Imports a mounted Rekordbox Device Library as a performance identity
+    /// source. Device rows never replace Lumi-owned phrases or AutoLoop
+    /// choices. Matched beatgrids and waveforms are refreshed atomically with
+    /// the aliases, so an interrupted sync leaves the previous snapshot live.
+    pub fn sync_rekordbox_device(
+        &mut self,
+        root: impl AsRef<Path>,
+    ) -> Result<RekordboxDeviceSyncResult, LibraryWorkerError> {
+        let snapshot = read_device_library(root)?;
+        let candidates = self.repository.device_match_candidates()?;
+        let preliminary_matches = snapshot
+            .tracks
+            .values()
+            .map(|device_track| {
+                let matches = candidates
+                    .iter()
+                    .filter(|candidate| device_track_matches(candidate, device_track))
+                    .collect::<Vec<_>>();
+                let canonical_track_id = if matches.len() == 1 {
+                    Some(matches[0].track_id)
+                } else {
+                    None
+                };
+                (device_track, canonical_track_id, matches.len())
+            })
+            .collect::<Vec<_>>();
+        let mut canonical_match_counts = BTreeMap::<TrackId, usize>::new();
+        for (_, canonical_track_id, _) in &preliminary_matches {
+            if let Some(track_id) = canonical_track_id {
+                *canonical_match_counts.entry(*track_id).or_default() += 1;
+            }
+        }
+        let mut aliases = Vec::with_capacity(snapshot.tracks.len());
+        let mut matched_tracks = BTreeMap::<TrackId, &DeviceTrack>::new();
+        for (device_track, preliminary_track_id, candidate_count) in preliminary_matches {
+            let canonical_track_id = preliminary_track_id
+                .filter(|track_id| canonical_match_counts.get(track_id).copied() == Some(1));
+            if let Some(track_id) = canonical_track_id {
+                matched_tracks.insert(track_id, device_track);
+            }
+            aliases.push(DeviceAliasUpsert {
+                device_track_id: device_track.device_track_id,
+                simulator_signature: device_track.simulator_signature,
+                canonical_track_id,
+                match_kind: if canonical_track_id.is_some() {
+                    "metadata+file-size".to_owned()
+                } else if candidate_count == 0 {
+                    "unmatched".to_owned()
+                } else {
+                    "ambiguous".to_owned()
+                },
+                title: device_track.title.clone(),
+                artist: device_track.artist.clone(),
+                bpm_milli: device_track.bpm_milli,
+                duration_millis: u64::from(device_track.duration_millis),
+                file_size: device_track.file_size,
+                metadata_revision: device_track.metadata_revision.clone(),
+                analysis_revision: device_track.analysis_revision.clone(),
+            });
+        }
+
+        let temporary = RekordboxImportTemporaryRoot::create()?;
+        let analysis_root = snapshot
+            .database_path
+            .parent()
+            .and_then(Path::parent)
+            .ok_or(LibraryWorkerError::InvalidRekordboxDeviceRoot)?
+            .join("USBANLZ");
+        let analyses = if matched_tracks.is_empty() {
+            Vec::new()
+        } else {
+            let request = ResolvedAnalysisRequest::try_new(
+                &analysis_root,
+                temporary.path().join("device-analysis"),
+                matched_tracks
+                    .iter()
+                    .map(|(track_id, device_track)| {
+                        ResolvedAnalysisTrack::try_new(
+                            track_id.value().to_string(),
+                            &device_track.analysis_dat_path,
+                        )
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            )?;
+            let parsed = snapshot_resolved_analysis_data(&request)?;
+            matched_tracks
+                .iter()
+                .map(|(track_id, device_track)| {
+                    let analysis = parsed
+                        .tracks
+                        .get(&track_id.value().to_string())
+                        .ok_or_else(|| {
+                            LibraryWorkerError::MissingRekordboxTrackAnalysis(
+                                device_track.device_track_id.to_string(),
+                            )
+                        })?;
+                    Ok(DeviceAnalysisUpsert {
+                        track_id: *track_id,
+                        analysis_revision: format!(
+                            "device:{}:{}",
+                            snapshot.source_id, device_track.analysis_revision
+                        ),
+                        beat_grid: canonical_beat_grid(analysis)?,
+                        waveform: downsample_waveform(
+                            &analysis.waveform,
+                            MAX_IMPORTED_WAVEFORM_POINTS,
+                        ),
+                    })
+                })
+                .collect::<Result<Vec<_>, LibraryWorkerError>>()?
+        };
+        self.repository.sync_device_aliases(
+            &snapshot.source_id,
+            &snapshot.display_name,
+            &snapshot.database_revision,
+            &aliases,
+            &analyses,
+        )?;
+        let matched = aliases
+            .iter()
+            .filter(|alias| alias.canonical_track_id.is_some())
+            .count();
+        Ok(RekordboxDeviceSyncResult {
+            source_id: snapshot.source_id,
+            display_name: snapshot.display_name,
+            database_revision: snapshot.database_revision,
+            tracks: aliases.len(),
+            matched,
+            unmatched: aliases.len().saturating_sub(matched),
+            refreshed_analyses: analyses.len(),
+        })
+    }
+
+    pub fn connected_track(
+        &mut self,
+        device_track_id: u32,
+        simulator_signature: u32,
+    ) -> Result<Option<ConnectedLibraryTrack>, LibraryWorkerError> {
+        let Some(alias) = self
+            .repository
+            .resolve_device_alias(device_track_id, simulator_signature)?
+        else {
+            return Ok(None);
+        };
+        self.ensure_timeline(alias.canonical_track_id)?;
+        let timeline = self
+            .repository
+            .timeline_head(alias.canonical_track_id)?
+            .ok_or(LibraryWorkerError::MissingTimeline)?;
+        let prepared = self.local_playback_track(
+            alias.canonical_track_id.value(),
+            timeline.revision().value(),
+        )?;
+        Ok(Some(ConnectedLibraryTrack { prepared }))
     }
 
     pub fn open_editor(&mut self, track_id: u64) -> Result<(), LibraryWorkerError> {
@@ -1446,6 +1620,16 @@ impl LibraryWorker {
             "sourceRefresh": source_refresh,
             "rekordboxSyncPreview": self.rekordbox_sync_preview_json(),
             "rekordboxMirror": self.rekordbox_mirror_json()?,
+            "rekordboxDevices": self.repository.device_source_summaries()?.iter().map(|source| json!({
+                "sourceId": source.source_id,
+                "displayName": source.display_name,
+                "databaseRevision": source.database_revision,
+                "activeTracks": source.active_tracks,
+                "matchedTracks": source.matched_tracks,
+                "unmatchedTracks": source.active_tracks.saturating_sub(source.matched_tracks),
+                "beatGridRefresh": true,
+                "cueRevisionTracked": true,
+            })).collect::<Vec<_>>(),
             "capabilities": {
                 "playlists": true,
                 "color": true,
@@ -2321,6 +2505,59 @@ fn canonical_beat_grid(parsed: &ResolvedTrackAnalysis) -> Result<BeatGrid, Libra
     BeatGrid::try_new(4, markers).map_err(LibraryWorkerError::InvalidRekordboxBeatGrid)
 }
 
+fn device_track_matches(candidate: &DeviceMatchCandidate, device: &DeviceTrack) -> bool {
+    if normalize_device_match(&candidate.title) != normalize_device_match(&device.title)
+        || normalize_device_match(&candidate.artist) != normalize_device_match(&device.artist)
+        || candidate.bpm_milli.abs_diff(device.bpm_milli) > 10
+        || candidate
+            .duration_millis
+            .abs_diff(u64::from(device.duration_millis))
+            > 1_000
+    {
+        return false;
+    }
+    let Some(path) = file_uri_path(&candidate.audio_uri) else {
+        return false;
+    };
+    fs::metadata(path)
+        .map(|metadata| metadata.is_file() && metadata.len() == u64::from(device.file_size))
+        .unwrap_or(false)
+}
+
+fn normalize_device_match(value: &str) -> String {
+    value.trim().to_lowercase()
+}
+
+fn file_uri_path(value: &str) -> Option<PathBuf> {
+    let encoded = value
+        .strip_prefix("file://localhost")
+        .or_else(|| value.strip_prefix("file://"))?;
+    let bytes = encoded.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        if bytes[index] == b'%' {
+            let high = hexadecimal(*bytes.get(index + 1)?)?;
+            let low = hexadecimal(*bytes.get(index + 2)?)?;
+            decoded.push(high * 16 + low);
+            index += 3;
+        } else {
+            decoded.push(bytes[index]);
+            index += 1;
+        }
+    }
+    String::from_utf8(decoded).ok().map(PathBuf::from)
+}
+
+fn hexadecimal(value: u8) -> Option<u8> {
+    match value {
+        b'0'..=b'9' => Some(value - b'0'),
+        b'a'..=b'f' => Some(value - b'a' + 10),
+        b'A'..=b'F' => Some(value - b'A' + 10),
+        _ => None,
+    }
+}
+
 fn canonical_phrases(
     parsed: &ResolvedTrackAnalysis,
     total_beats: u32,
@@ -2537,6 +2774,10 @@ pub enum LibraryWorkerError {
     RekordboxResolver(#[from] ResolverError),
     #[error("Rekordbox analysis parser failed: {0}")]
     RekordboxAnalysis(#[from] AnalysisError),
+    #[error("Rekordbox Device Library failed: {0}")]
+    RekordboxDevice(#[from] DeviceError),
+    #[error("the selected Rekordbox device has an invalid PIONEER layout")]
+    InvalidRekordboxDeviceRoot,
     #[error("Rekordbox is not installed in a supported local location")]
     RekordboxInstallationUnavailable,
     #[error("the temporary Rekordbox import clock is unavailable")]
@@ -2675,6 +2916,41 @@ mod tests {
         AutoloopCatalogMutation, LibraryWorker, LibraryWorkerError, PhraseRoleCatalogMutation,
         deck_waveform_preview_points,
     };
+
+    #[test]
+    #[ignore = "requires LUMI_DEVICE_POC_DATABASE and LUMI_REKORDBOX_DEVICE_ROOT"]
+    fn mounted_device_sync_hydrates_the_same_canonical_track_by_real_and_simulator_identity()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let database_path = std::env::var("LUMI_DEVICE_POC_DATABASE")?;
+        let device_root = std::env::var("LUMI_REKORDBOX_DEVICE_ROOT")?;
+        let device = lumi_rekordbox_device::read_device_library(&device_root)?;
+        let mut worker = LibraryWorker::demo_at(std::path::Path::new(&database_path))?;
+
+        let result = worker.sync_rekordbox_device(&device_root)?;
+        assert_eq!(result.tracks, device.tracks.len());
+        assert!(result.matched > 0);
+        assert_eq!(result.matched, result.refreshed_analyses);
+
+        let (device_track, real) = device
+            .tracks
+            .values()
+            .find_map(|device_track| {
+                worker
+                    .connected_track(device_track.device_track_id, 0)
+                    .ok()
+                    .flatten()
+                    .map(|track| (device_track, track))
+            })
+            .ok_or("no synchronized device track resolved")?;
+        let simulated = worker
+            .connected_track(42, device_track.simulator_signature)?
+            .ok_or("simulated identity did not resolve")?;
+        assert_eq!(
+            real.prepared.metadata.id(),
+            simulated.prepared.metadata.id()
+        );
+        Ok(())
+    }
 
     #[test]
     fn deck_waveform_preview_is_bounded_and_peak_preserving() {

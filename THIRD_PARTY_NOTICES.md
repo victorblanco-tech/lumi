@@ -12,6 +12,15 @@ output through a virtual MIDI port.
 - Project: https://github.com/Deep-Symmetry/beat-link-trigger
 - License: https://github.com/Deep-Symmetry/beat-link-trigger/blob/master/LICENSE
 
+## rekordbox-pdb
+
+Lumi uses the `rekordbox-pdb` Rust parser to read the classic Rekordbox Device
+Library database. Lumi's adapter exposes no write operation and opens media
+files read-only.
+
+- Project: https://github.com/fragmede/rekordbox-pdb-rs
+- License: MIT
+
 ## Product names
 
 Rekordbox, SoundSwitch, Control One and other product names are used only to

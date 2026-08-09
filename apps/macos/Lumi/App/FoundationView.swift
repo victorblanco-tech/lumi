@@ -118,6 +118,9 @@ struct FoundationView: View {
                                     expectedContentSHA256: expectedContentSHA256
                                 )
                             }
+                        },
+                        onRekordboxDeviceSync: { root in
+                            Task { await engineStatus.syncRekordboxDevice(root: root) }
                         }
                     )
                 case .integrations:
