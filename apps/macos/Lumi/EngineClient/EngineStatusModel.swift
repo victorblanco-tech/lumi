@@ -1028,7 +1028,7 @@ final class EngineStatusModel: ObservableObject {
         let clamped = max(-250, min(250, millis))
         await exchangeMidiCommand(
             .setOutputTimingOffset(millis: Int16(clamped)),
-            success: "Lighting timing set to \(String(format: "%+d ms", clamped))."
+            success: "Lighting timing \(String(format: "%+d ms", clamped)) accepted. Live changes activate on the next phrase."
         )
     }
 

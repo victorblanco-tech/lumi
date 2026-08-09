@@ -43,6 +43,8 @@ xcodebuild \
 built_app="build/DerivedData/Build/Products/Debug/Lumi Dev.app"
 built_info_plist="$built_app/Contents/Info.plist"
 built_engine_helper="$built_app/Contents/Helpers/lumi-engine"
+built_app_icon="$built_app/Contents/Resources/AppIcon.icns"
+built_asset_catalog="$built_app/Contents/Resources/Assets.car"
 built_product_version="$(/usr/libexec/PlistBuddy -c 'Print :LumiProductVersion' "$built_info_plist")"
 built_bundle_identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$built_info_plist")"
 built_channel="$(/usr/libexec/PlistBuddy -c 'Print :LumiReleaseChannel' "$built_info_plist")"
@@ -63,6 +65,11 @@ fi
 
 if [[ ! -x "$built_engine_helper" ]]; then
   echo "ERROR: the built app does not contain an executable Lumi engine helper." >&2
+  exit 1
+fi
+
+if [[ ! -s "$built_app_icon" ]] || [[ ! -s "$built_asset_catalog" ]]; then
+  echo "ERROR: the built Lumi app is missing its compiled app icon or in-app brand assets." >&2
   exit 1
 fi
 

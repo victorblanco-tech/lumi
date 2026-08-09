@@ -237,12 +237,15 @@ public struct LiveWorkspaceView: View {
         Button {
             showsTimingAdjustment.toggle()
         } label: {
-            Label(
-                String(format: "%+d ms", lightingTimingOffsetMillis),
-                systemImage: "metronome"
-            )
+            HStack(spacing: LumiSpacing.xSmall) {
+                Image(systemName: "metronome")
+                Text(String(format: "%+d ms", lightingTimingOffsetMillis))
+                    .monospacedDigit()
+                Text(timingConfirmationLabel)
+                    .font(LumiTypography.technical.weight(.semibold))
+                    .foregroundStyle(timingConfirmationColor)
+            }
             .font(LumiTypography.metadata.weight(.semibold))
-            .monospacedDigit()
             .padding(.horizontal, LumiSpacing.small)
             .frame(height: LumiControlMetric.standardHeight)
         }
@@ -256,6 +259,9 @@ public struct LiveWorkspaceView: View {
                     Text("Positive sends AutoLoops early; negative sends them late.")
                         .font(LumiTypography.metadata)
                         .foregroundStyle(LumiColor.textSecondary)
+                    Text(timingConfirmationDetail)
+                        .font(LumiTypography.technical)
+                        .foregroundStyle(timingConfirmationColor)
                 }
                 HStack(spacing: LumiSpacing.medium) {
                     Button {
@@ -282,6 +288,36 @@ public struct LiveWorkspaceView: View {
             .frame(width: 330)
         }
         .accessibilityIdentifier("lumi.live.lightingTimingOffset")
+    }
+
+    private var appliedLightingTimingOffsetMillis: Int {
+        state.content?.lightingTimingOffsetMillis ?? lightingTimingOffsetMillis
+    }
+
+    private var pendingLightingTimingOffsetMillis: Int? {
+        state.content?.pendingLightingTimingOffsetMillis
+    }
+
+    private var timingConfirmationLabel: String {
+        if pendingLightingTimingOffsetMillis != nil { return "NEXT" }
+        if appliedLightingTimingOffsetMillis != lightingTimingOffsetMillis { return "SYNC" }
+        return "APPLIED"
+    }
+
+    private var timingConfirmationColor: Color {
+        timingConfirmationLabel == "APPLIED" ? LumiColor.success : LumiColor.warning
+    }
+
+    private var timingConfirmationDetail: String {
+        let applied = String(format: "%+d ms", appliedLightingTimingOffsetMillis)
+        if let pendingLightingTimingOffsetMillis {
+            let pending = String(format: "%+d ms", pendingLightingTimingOffsetMillis)
+            return "Applied \(applied) · \(pending) will activate at the next Live phrase."
+        }
+        if appliedLightingTimingOffsetMillis != lightingTimingOffsetMillis {
+            return "Applied \(applied) · waiting for engine confirmation."
+        }
+        return "Applied by the lighting engine: \(applied)."
     }
 
     private var technicalStatusButton: some View {
@@ -492,6 +528,8 @@ public struct LiveWorkspaceView: View {
                                     isLocalPlayback: content.sourceMode == "localPlayback",
                                     visualClock: localPlaybackVisualClocks[deck.deckID],
                                     waveformOverride: localPlaybackWaveforms[deck.deckID],
+                                    lightingTimingOffsetMillis: content.lightingTimingOffsetMillis,
+                                    pendingLightingTimingOffsetMillis: content.pendingLightingTimingOffsetMillis,
                                     selectedPhraseIndex: selectedIndex,
                                     onSelectPhrase: { phraseIndex in
                                         if isMaster {

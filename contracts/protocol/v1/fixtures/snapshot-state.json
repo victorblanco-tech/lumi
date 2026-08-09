@@ -34,6 +34,7 @@
       "activeBank": 1,
       "autoPublishEnabled": true,
       "timingOffsetMillis": 0,
+      "pendingTimingOffsetMillis": null,
       "bankPreRollMillis": 50
     },
     "midiClockIntegration": {

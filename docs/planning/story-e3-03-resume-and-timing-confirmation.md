@@ -1,7 +1,22 @@
 # Story E3-03 – deterministic resume and confirmed lighting timing
 
 Target milestone: **0.4.0 – next development cycle**
-Status: **Accepted for refinement**
+Status: **In progress**
+
+## Delivered in `0.4.0-dev`
+
+- an offset requested while the Live leader is playing remains engine-owned
+  pending state and cannot shift the active phrase;
+- the pending value activates only on the next authoritative, actually playing
+  leader phrase-boundary; pause and paused seek do not activate it;
+- engine snapshots keep applied and pending values separate;
+- Live shows `APPLIED`, `NEXT` or `SYNC`, and both deck headers retain the
+  applied value with an optional next-phrase value;
+- deterministic Rust and Swift regressions cover the boundary and presentation.
+
+The intermittent pause → cue/seek → play output reconciliation, bounded
+command-busy retry and a Settings-level engine acknowledgement remain in this
+story.
 
 ## Physical finding
 

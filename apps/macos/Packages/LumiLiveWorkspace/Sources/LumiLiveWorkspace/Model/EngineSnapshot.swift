@@ -108,6 +108,7 @@ public struct MidiOutputIntegrationSnapshot: Equatable, Sendable {
     public let activeBank: UInt64?
     public let autoPublishEnabled: Bool
     public let timingOffsetMillis: Int
+    public let pendingTimingOffsetMillis: Int?
     public let bankPreRollMillis: UInt64
 
     public init(
@@ -120,6 +121,7 @@ public struct MidiOutputIntegrationSnapshot: Equatable, Sendable {
         activeBank: UInt64?,
         autoPublishEnabled: Bool,
         timingOffsetMillis: Int,
+        pendingTimingOffsetMillis: Int? = nil,
         bankPreRollMillis: UInt64 = 50
     ) {
         self.state = state
@@ -131,6 +133,7 @@ public struct MidiOutputIntegrationSnapshot: Equatable, Sendable {
         self.activeBank = activeBank
         self.autoPublishEnabled = autoPublishEnabled
         self.timingOffsetMillis = timingOffsetMillis
+        self.pendingTimingOffsetMillis = pendingTimingOffsetMillis
         self.bankPreRollMillis = bankPreRollMillis
     }
 }

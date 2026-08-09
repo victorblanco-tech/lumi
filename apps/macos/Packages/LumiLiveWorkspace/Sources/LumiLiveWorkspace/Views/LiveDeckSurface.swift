@@ -12,6 +12,8 @@ struct LiveDeckSurface<Details: View>: View {
     let isLocalPlayback: Bool
     let visualClock: LocalPlaybackVisualClockSnapshot?
     let waveformOverride: DeckWaveformPreviewSnapshot?
+    let lightingTimingOffsetMillis: Int
+    let pendingLightingTimingOffsetMillis: Int?
     let selectedPhraseIndex: UInt64?
     let onSelectPhrase: (UInt64) -> Void
     let onTogglePlayback: () -> Void
@@ -38,6 +40,8 @@ struct LiveDeckSurface<Details: View>: View {
         isLocalPlayback: Bool,
         visualClock: LocalPlaybackVisualClockSnapshot? = nil,
         waveformOverride: DeckWaveformPreviewSnapshot? = nil,
+        lightingTimingOffsetMillis: Int = 0,
+        pendingLightingTimingOffsetMillis: Int? = nil,
         selectedPhraseIndex: UInt64?,
         onSelectPhrase: @escaping (UInt64) -> Void,
         onTogglePlayback: @escaping () -> Void = {},
@@ -54,6 +58,8 @@ struct LiveDeckSurface<Details: View>: View {
         self.isLocalPlayback = isLocalPlayback
         self.visualClock = visualClock
         self.waveformOverride = waveformOverride
+        self.lightingTimingOffsetMillis = lightingTimingOffsetMillis
+        self.pendingLightingTimingOffsetMillis = pendingLightingTimingOffsetMillis
         self.selectedPhraseIndex = selectedPhraseIndex
         self.onSelectPhrase = onSelectPhrase
         self.onTogglePlayback = onTogglePlayback
@@ -182,6 +188,7 @@ struct LiveDeckSurface<Details: View>: View {
                     .lineLimit(1)
             }
             Spacer(minLength: LumiSpacing.small)
+            lightingTimingBadge
             roleBadge
         }
         .padding(LumiSpacing.medium)
@@ -194,6 +201,31 @@ struct LiveDeckSurface<Details: View>: View {
                 )
             }
         }
+    }
+
+    private var lightingTimingBadge: some View {
+        let applied = String(format: "%+d ms", lightingTimingOffsetMillis)
+        let pending = pendingLightingTimingOffsetMillis.map {
+            String(format: " → %+d ms", $0)
+        } ?? ""
+        return HStack(spacing: LumiSpacing.xSmall) {
+            Image(systemName: "metronome")
+            Text(verbatim: "\(applied)\(pending)")
+                .monospacedDigit()
+            if pendingLightingTimingOffsetMillis != nil {
+                Text(verbatim: "NEXT")
+                    .foregroundStyle(LumiColor.warning)
+            }
+        }
+        .font(LumiTypography.technical.weight(.semibold))
+        .foregroundStyle(Color.white.opacity(0.62))
+        .frame(minWidth: 90, minHeight: LumiControlMetric.compactHeight)
+        .accessibilityLabel(
+            pendingLightingTimingOffsetMillis.map {
+                "Lighting timing \(applied) applied, \(String(format: "%+d ms", $0)) pending for next phrase"
+            } ?? "Lighting timing \(applied) applied"
+        )
+        .accessibilityIdentifier("lumi.deck.lightingTiming")
     }
 
     @ViewBuilder

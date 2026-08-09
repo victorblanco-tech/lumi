@@ -85,6 +85,8 @@ public struct LiveWorkspaceContent: Equatable, Sendable {
     public let stateRevision: UInt64
     public let planningOptions: PlanningOptionsSnapshot
     public let operationState: String
+    public let lightingTimingOffsetMillis: Int
+    public let pendingLightingTimingOffsetMillis: Int?
     public let simulation: SimulationSnapshot?
     public let timeline: [TimelineEntrySnapshot]
 
@@ -100,6 +102,8 @@ public struct LiveWorkspaceContent: Equatable, Sendable {
         stateRevision: UInt64,
         planningOptions: PlanningOptionsSnapshot,
         operationState: String,
+        lightingTimingOffsetMillis: Int = 0,
+        pendingLightingTimingOffsetMillis: Int? = nil,
         simulation: SimulationSnapshot? = nil,
         timeline: [TimelineEntrySnapshot]
     ) {
@@ -114,6 +118,8 @@ public struct LiveWorkspaceContent: Equatable, Sendable {
         self.stateRevision = stateRevision
         self.planningOptions = planningOptions
         self.operationState = operationState
+        self.lightingTimingOffsetMillis = lightingTimingOffsetMillis
+        self.pendingLightingTimingOffsetMillis = pendingLightingTimingOffsetMillis
         self.simulation = simulation
         self.timeline = timeline
     }
@@ -328,7 +334,10 @@ public enum LiveWorkspacePresenter {
         if let error = midi.lastError { return "\(midi.sourceName) · \(error)" }
         let bank = midi.activeBank.map { " · bank \($0) active" } ?? ""
         let offset = String(format: "%+d ms", midi.timingOffsetMillis)
-        return "\(midi.sourceName) · auto-publish \(midi.autoPublishEnabled ? "on" : "off") · \(midi.sentPulseCount) pulses\(bank) · timing \(offset) · bank pre-roll \(midi.bankPreRollMillis) ms"
+        let pending = midi.pendingTimingOffsetMillis.map {
+            " · \(String(format: "%+d ms", $0)) pending for next phrase"
+        } ?? ""
+        return "\(midi.sourceName) · auto-publish \(midi.autoPublishEnabled ? "on" : "off") · \(midi.sentPulseCount) pulses\(bank) · timing \(offset) applied\(pending) · bank pre-roll \(midi.bankPreRollMillis) ms"
     }
 
     private static func playbackClockDetail(_ snapshot: EngineSnapshot) -> String {
@@ -383,6 +392,8 @@ public enum LiveWorkspacePresenter {
             stateRevision: snapshot.stateRevision,
             planningOptions: snapshot.planningOptions,
             operationState: snapshot.operationState,
+            lightingTimingOffsetMillis: snapshot.midiIntegration?.timingOffsetMillis ?? 0,
+            pendingLightingTimingOffsetMillis: snapshot.midiIntegration?.pendingTimingOffsetMillis,
             simulation: snapshot.simulation,
             timeline: snapshot.timeline
         )

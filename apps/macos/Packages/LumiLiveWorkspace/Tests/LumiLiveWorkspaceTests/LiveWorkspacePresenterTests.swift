@@ -69,6 +69,42 @@ struct LiveWorkspacePresenterTests {
         #expect(state.planner.condition == .ready)
     }
 
+    @Test("Live timing distinguishes the applied value from the next-phrase value")
+    func pendingTimingIsPresentedWithoutReplacingAppliedTiming() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case var .object(midi) = payload["midiIntegration"] else {
+            Issue.record("Recorded fixture has no lighting MIDI status")
+            return
+        }
+        midi["timingOffsetMillis"] = .number(0)
+        midi["pendingTimingOffsetMillis"] = .number(20)
+        payload["midiIntegration"] = .object(midi)
+        let envelope = MessageEnvelope(
+            protocolVersion: recorded.protocolVersion,
+            messageType: recorded.messageType,
+            messageId: recorded.messageId,
+            sequence: recorded.sequence,
+            correlationId: recorded.correlationId,
+            sentAt: recorded.sentAt,
+            payload: payload
+        )
+
+        let snapshot = try EngineSnapshotDecoder().decode(
+            envelope,
+            endpointDescription: "127.0.0.1:52841",
+            protocolVersion: 1
+        )
+        let state = LiveWorkspacePresenter.ready(snapshot)
+
+        #expect(snapshot.midiIntegration?.timingOffsetMillis == 0)
+        #expect(snapshot.midiIntegration?.pendingTimingOffsetMillis == 20)
+        #expect(state.content?.lightingTimingOffsetMillis == 0)
+        #expect(state.content?.pendingLightingTimingOffsetMillis == 20)
+        #expect(state.lightingMidi.detail.contains("+0 ms applied"))
+        #expect(state.lightingMidi.detail.contains("+20 ms pending for next phrase"))
+    }
+
     @Test("Tech degrades when the lighting MIDI source is unavailable")
     func stoppedLightingMidiIsVisible() throws {
         let recorded = try recordedEnvelope()

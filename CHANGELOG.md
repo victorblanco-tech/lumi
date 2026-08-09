@@ -2,8 +2,11 @@
 
 ## 0.4.0-dev
 
-- Deterministische pause/cue/play-outputreconciliatie en expliciete
-  desired-versus-applied timingbevestiging gepland.
+- Live timing changes remain pending until the next actually playing phrase;
+  applied and pending values are visible in Live and on both decks.
+- Het goedgekeurde RGB-waveform/light-fan-logo is toegevoegd als macOS-app-icon
+  en blijvend navigatiemerk, ook bij ingeklapte navigatie.
+- Deterministische pause/cue/play-outputreconciliatie blijft gepland.
 
 ## 0.3.0
 

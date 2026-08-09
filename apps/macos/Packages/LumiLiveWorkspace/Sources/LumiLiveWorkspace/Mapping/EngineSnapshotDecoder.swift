@@ -211,7 +211,13 @@ public struct EngineSnapshotDecoder: Sendable {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
         let activeBank = try optionalUnsignedInteger(midi["activeBank"])
+        let pendingTimingOffsetMillis = try optionalSignedInteger(
+            midi["pendingTimingOffsetMillis"]
+        )
         guard activeBank.map({ (1...4).contains($0) }) ?? true else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        guard pendingTimingOffsetMillis.map({ (-250...250).contains($0) }) ?? true else {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
         return MidiOutputIntegrationSnapshot(
@@ -224,6 +230,7 @@ public struct EngineSnapshotDecoder: Sendable {
             activeBank: activeBank,
             autoPublishEnabled: autoPublishEnabled,
             timingOffsetMillis: timingOffsetMillis,
+            pendingTimingOffsetMillis: pendingTimingOffsetMillis,
             bankPreRollMillis: bankPreRollMillis
         )
     }
@@ -912,6 +919,16 @@ public struct EngineSnapshotDecoder: Sendable {
             return nil
         }
         guard let decoded = unsignedInteger(value) else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        return decoded
+    }
+
+    private func optionalSignedInteger(_ value: JSONValue?) throws -> Int? {
+        if value == nil || value == .null {
+            return nil
+        }
+        guard let decoded = signedInteger(value) else {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
         return decoded

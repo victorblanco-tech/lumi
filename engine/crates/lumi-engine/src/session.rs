@@ -495,8 +495,17 @@ impl PlanningWorker {
         runtime: &mut SerializedRuntime,
         output_worker: &mut OutputWorker,
         event: DomainEvent,
-        _leader_deck_id: Option<lumi_domain::DeckId>,
+        leader_deck_id: Option<lumi_domain::DeckId>,
     ) -> Result<(), EngineError> {
+        let activates_pending_timing = matches!(
+            &event,
+            DomainEvent::Observation(lumi_domain::ObservationEnvelope {
+                observation: DeckObservation::PhraseChanged { deck_id, .. },
+                ..
+            }) if Some(*deck_id) == leader_deck_id
+                && runtime.state().operation() == OperationState::Live
+                && runtime.state().deck(*deck_id).is_some_and(lumi_domain::DeckState::is_playing)
+        );
         let planning_input = match &event {
             DomainEvent::Observation(observation) => match &observation.observation {
                 DeckObservation::TrackLoaded {
@@ -517,6 +526,12 @@ impl PlanningWorker {
             _ => None,
         };
         let observed_at = event.monotonic_time();
+        if activates_pending_timing {
+            // Timing is engine-owned and changes only at an authoritative Live
+            // phrase boundary. A UI adjustment can therefore never shift the
+            // active phrase or replay its already executed cue.
+            output_worker.activate_pending_timing_offset();
+        }
         process_domain_event(runtime, output_worker, event)?;
         if let Some(input) = planning_input {
             self.effect_sequence = self
@@ -630,6 +645,7 @@ struct OutputWorker {
     effect_sequence: u64,
     midi_auto_publish_enabled: bool,
     timing_offset_millis: i16,
+    pending_timing_offset_millis: Option<i16>,
     last_midi_publish_attempt: Option<Instant>,
 }
 
@@ -642,6 +658,7 @@ impl OutputWorker {
             effect_sequence: 0,
             midi_auto_publish_enabled: false,
             timing_offset_millis: 0,
+            pending_timing_offset_millis: None,
             last_midi_publish_attempt: None,
         }
     }
@@ -719,8 +736,24 @@ impl OutputWorker {
         self.timing_offset_millis
     }
 
-    fn set_timing_offset_millis(&mut self, millis: i16) {
-        self.timing_offset_millis = millis.clamp(-250, 250);
+    fn pending_timing_offset_millis(&self) -> Option<i16> {
+        self.pending_timing_offset_millis
+    }
+
+    fn request_timing_offset_millis(&mut self, millis: i16, defer_until_phrase: bool) {
+        let requested = millis.clamp(-250, 250);
+        if defer_until_phrase && requested != self.timing_offset_millis {
+            self.pending_timing_offset_millis = Some(requested);
+        } else {
+            self.timing_offset_millis = requested;
+            self.pending_timing_offset_millis = None;
+        }
+    }
+
+    fn activate_pending_timing_offset(&mut self) {
+        if let Some(pending) = self.pending_timing_offset_millis.take() {
+            self.timing_offset_millis = pending;
+        }
     }
 
     #[cfg(not(test))]
@@ -1181,7 +1214,14 @@ fn apply_command(
             return Ok(());
         }
         SessionCommand::SetOutputTimingOffset { millis } => {
-            runtime.output_worker.set_timing_offset_millis(millis);
+            let defer_until_phrase = runtime.state.state().operation() == OperationState::Live
+                && runtime
+                    .leader_deck_id()
+                    .and_then(|deck_id| runtime.state.state().deck(deck_id))
+                    .is_some_and(lumi_domain::DeckState::is_playing);
+            runtime
+                .output_worker
+                .request_timing_offset_millis(millis, defer_until_phrase);
             return Ok(());
         }
         SessionCommand::SendMidiLearnPulse => {
@@ -2031,6 +2071,7 @@ fn snapshot_envelope(
             "activeBank": midi_output.active_bank,
             "autoPublishEnabled": runtime.output_worker.midi_auto_publish_enabled(),
             "timingOffsetMillis": runtime.output_worker.timing_offset_millis(),
+            "pendingTimingOffsetMillis": runtime.output_worker.pending_timing_offset_millis(),
             "bankPreRollMillis": BANK_SETTLE_DELAY.as_millis(),
         }),
     );
@@ -3249,6 +3290,16 @@ mod tests {
         );
         assert_eq!(runtime.output_worker.provider.records().count(), 1);
 
+        apply_session_command(
+            &mut runtime,
+            SessionCommand::SetOutputTimingOffset { millis: 20 },
+        );
+        assert_eq!(runtime.output_worker.timing_offset_millis(), 0);
+        assert_eq!(
+            runtime.output_worker.pending_timing_offset_millis(),
+            Some(20)
+        );
+
         for playing in [false, true] {
             apply_session_command(
                 &mut runtime,
@@ -3261,6 +3312,11 @@ mod tests {
             );
         }
         assert_eq!(runtime.output_worker.provider.records().count(), 1);
+        assert_eq!(runtime.output_worker.timing_offset_millis(), 0);
+        assert_eq!(
+            runtime.output_worker.pending_timing_offset_millis(),
+            Some(20)
+        );
 
         apply_session_command(
             &mut runtime,
@@ -3272,6 +3328,11 @@ mod tests {
             },
         );
         assert_eq!(runtime.output_worker.provider.records().count(), 1);
+        assert_eq!(runtime.output_worker.timing_offset_millis(), 0);
+        assert_eq!(
+            runtime.output_worker.pending_timing_offset_millis(),
+            Some(20)
+        );
         apply_session_command(
             &mut runtime,
             SessionCommand::UpdateLocalPlaybackTransport {
@@ -3282,6 +3343,8 @@ mod tests {
             },
         );
         assert_eq!(runtime.output_worker.provider.records().count(), 2);
+        assert_eq!(runtime.output_worker.timing_offset_millis(), 20);
+        assert_eq!(runtime.output_worker.pending_timing_offset_millis(), None);
     }
 
     #[test]

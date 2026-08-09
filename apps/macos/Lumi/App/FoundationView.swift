@@ -192,6 +192,12 @@ struct FoundationView: View {
     private var appNavigation: some View {
         VStack(alignment: .leading, spacing: LumiSpacing.xLarge) {
             HStack(alignment: .top, spacing: LumiSpacing.small) {
+                Image("LumiMark")
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 38, height: 38)
+                    .accessibilityHidden(true)
+                    .accessibilityIdentifier("lumi.navigation.brandMark")
                 VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
                     Text(verbatim: "Lumi")
                         .font(LumiTypography.screenTitle)
@@ -235,12 +241,16 @@ struct FoundationView: View {
             Button {
                 navigationAutoHides = false
             } label: {
-                Image(systemName: "sidebar.right")
-                    .frame(width: 32, height: 32)
+                Image("LumiMark")
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 36, height: 36)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(LumiColor.accent)
-            .help("Show navigation")
+            .help("Lumi · Show navigation")
+            .accessibilityLabel("Lumi, show navigation")
+            .accessibilityIdentifier("lumi.navigation.brandMark")
             compactDestinationButton(.live, systemImage: "waveform", title: "Live")
             compactDestinationButton(.library, systemImage: "music.note.list", title: "Library")
             Image(systemName: "list.bullet.rectangle")
