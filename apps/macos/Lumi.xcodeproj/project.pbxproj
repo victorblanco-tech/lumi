@@ -1,0 +1,354 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {
+	};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		100000000000000000000001 /* LumiApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000001 /* LumiApp.swift */; };
+		100000000000000000000002 /* FoundationView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000002 /* FoundationView.swift */; };
+		100000000000000000000003 /* Localizable.xcstrings in Resources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000003 /* Localizable.xcstrings */; };
+		100000000000000000000004 /* EngineStatusModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = 200000000000000000000007 /* EngineStatusModel.swift */; };
+		100000000000000000000005 /* LumiEngineClient in Frameworks */ = {isa = PBXBuildFile; productRef = 900000000000000000000001 /* LumiEngineClient */; };
+		100000000000000000000006 /* LumiDesignSystem in Frameworks */ = {isa = PBXBuildFile; productRef = 900000000000000000000002 /* LumiDesignSystem */; };
+		100000000000000000000007 /* LumiLiveWorkspace in Frameworks */ = {isa = PBXBuildFile; productRef = 900000000000000000000003 /* LumiLiveWorkspace */; };
+		100000000000000000000008 /* LumiLibraryWorkspace in Frameworks */ = {isa = PBXBuildFile; productRef = 900000000000000000000004 /* LumiLibraryWorkspace */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		200000000000000000000001 /* LumiApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumiApp.swift; sourceTree = "<group>"; };
+		200000000000000000000002 /* FoundationView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FoundationView.swift; sourceTree = "<group>"; };
+		200000000000000000000003 /* Localizable.xcstrings */ = {isa = PBXFileReference; lastKnownFileType = text.json.xcstrings; path = Localizable.xcstrings; sourceTree = "<group>"; };
+		200000000000000000000004 /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Base.xcconfig; sourceTree = "<group>"; };
+		200000000000000000000005 /* Lumi.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Lumi.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		200000000000000000000006 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		200000000000000000000007 /* EngineStatusModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = EngineStatusModel.swift; sourceTree = "<group>"; };
+		200000000000000000000008 /* Dev.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Dev.xcconfig; sourceTree = "<group>"; };
+		200000000000000000000009 /* Preview.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Preview.xcconfig; sourceTree = "<group>"; };
+		200000000000000000000010 /* Stable.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Stable.xcconfig; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		300000000000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000005 /* LumiEngineClient in Frameworks */,
+				100000000000000000000006 /* LumiDesignSystem in Frameworks */,
+				100000000000000000000007 /* LumiLiveWorkspace in Frameworks */,
+				100000000000000000000008 /* LumiLibraryWorkspace in Frameworks */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		400000000000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				400000000000000000000002 /* Lumi */,
+				400000000000000000000005 /* Config */,
+				400000000000000000000006 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		400000000000000000000002 /* Lumi */ = {
+			isa = PBXGroup;
+			children = (
+				400000000000000000000003 /* App */,
+				400000000000000000000007 /* EngineClient */,
+				400000000000000000000004 /* Resources */,
+			);
+			path = Lumi;
+			sourceTree = "<group>";
+		};
+		400000000000000000000003 /* App */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000001 /* LumiApp.swift */,
+				200000000000000000000002 /* FoundationView.swift */,
+			);
+			path = App;
+			sourceTree = "<group>";
+		};
+		400000000000000000000004 /* Resources */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000006 /* Info.plist */,
+				200000000000000000000003 /* Localizable.xcstrings */,
+			);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+		400000000000000000000005 /* Config */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000004 /* Base.xcconfig */,
+				200000000000000000000008 /* Dev.xcconfig */,
+				200000000000000000000009 /* Preview.xcconfig */,
+				200000000000000000000010 /* Stable.xcconfig */,
+			);
+			path = Config;
+			sourceTree = "<group>";
+		};
+		400000000000000000000006 /* Products */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000005 /* Lumi.app */,
+			);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		400000000000000000000007 /* EngineClient */ = {
+			isa = PBXGroup;
+			children = (
+				200000000000000000000007 /* EngineStatusModel.swift */,
+			);
+			path = EngineClient;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		500000000000000000000001 /* Lumi */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = 600000000000000000000002 /* Build configuration list for PBXNativeTarget "Lumi" */;
+			buildPhases = (
+				300000000000000000000004 /* Build Lumi engine helper */,
+				300000000000000000000002 /* Sources */,
+				300000000000000000000001 /* Frameworks */,
+				300000000000000000000003 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = Lumi;
+			packageProductDependencies = (
+				900000000000000000000001 /* LumiEngineClient */,
+				900000000000000000000002 /* LumiDesignSystem */,
+				900000000000000000000003 /* LumiLiveWorkspace */,
+				900000000000000000000004 /* LumiLibraryWorkspace */,
+			);
+			productName = Lumi;
+			productReference = 200000000000000000000005 /* Lumi.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		500000000000000000000002 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {
+				BuildIndependentTargetsInParallel = 1;
+				LastSwiftUpdateCheck = 2660;
+				LastUpgradeCheck = 2660;
+				TargetAttributes = {
+					500000000000000000000001 = {
+						CreatedOnToolsVersion = 26.6;
+					};
+				};
+			};
+			buildConfigurationList = 600000000000000000000001 /* Build configuration list for PBXProject "Lumi" */;
+			compatibilityVersion = "Xcode 14.0";
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (
+				en,
+				Base,
+			);
+			mainGroup = 400000000000000000000001;
+			minimizedProjectReferenceProxies = 1;
+			packageReferences = (
+				800000000000000000000001 /* XCLocalSwiftPackageReference "Packages/LumiEngineClient" */,
+				800000000000000000000002 /* XCLocalSwiftPackageReference "Packages/LumiDesignSystem" */,
+				800000000000000000000003 /* XCLocalSwiftPackageReference "Packages/LumiLiveWorkspace" */,
+				800000000000000000000004 /* XCLocalSwiftPackageReference "Packages/LumiLibraryWorkspace" */,
+			);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = 400000000000000000000006 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (
+				500000000000000000000001 /* Lumi */,
+			);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		300000000000000000000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000003 /* Localizable.xcstrings in Resources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXShellScriptBuildPhase section */
+		300000000000000000000004 /* Build Lumi engine helper */ = {
+			isa = PBXShellScriptBuildPhase;
+			alwaysOutOfDate = 1;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			inputFileListPaths = (
+			);
+			inputPaths = (
+			);
+			name = "Build Lumi engine helper";
+			outputFileListPaths = (
+			);
+			outputPaths = (
+				"$(BUILT_PRODUCTS_DIR)/$(CONTENTS_FOLDER_PATH)/Helpers/lumi-engine",
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+			shellPath = /bin/bash;
+			shellScript = "\"${SRCROOT}/../../scripts/build-engine-helper.sh\" \"${BUILT_PRODUCTS_DIR}/${CONTENTS_FOLDER_PATH}/Helpers\"\n";
+		};
+/* End PBXShellScriptBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		300000000000000000000002 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				100000000000000000000001 /* LumiApp.swift in Sources */,
+				100000000000000000000002 /* FoundationView.swift in Sources */,
+				100000000000000000000004 /* EngineStatusModel.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		700000000000000000000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 200000000000000000000008 /* Dev.xcconfig */;
+			buildSettings = {
+				DEBUG_INFORMATION_FORMAT = dwarf;
+				ENABLE_TESTABILITY = YES;
+				GCC_OPTIMIZATION_LEVEL = 0;
+				ONLY_ACTIVE_ARCH = YES;
+				SWIFT_ACTIVE_COMPILATION_CONDITIONS = "DEBUG $(inherited)";
+				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
+			};
+			name = Debug;
+		};
+		700000000000000000000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 200000000000000000000010 /* Stable.xcconfig */;
+			buildSettings = {
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Release;
+		};
+		700000000000000000000003 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 200000000000000000000008 /* Dev.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				PRODUCT_NAME = "$(LUMI_PRODUCT_NAME)";
+			};
+			name = Debug;
+		};
+		700000000000000000000004 /* Release */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 200000000000000000000010 /* Stable.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				PRODUCT_NAME = "$(LUMI_PRODUCT_NAME)";
+			};
+			name = Release;
+		};
+		700000000000000000000005 /* Preview */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 200000000000000000000009 /* Preview.xcconfig */;
+			buildSettings = {
+				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
+				SWIFT_COMPILATION_MODE = wholemodule;
+			};
+			name = Preview;
+		};
+		700000000000000000000006 /* Preview */ = {
+			isa = XCBuildConfiguration;
+			baseConfigurationReference = 200000000000000000000009 /* Preview.xcconfig */;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = "";
+				PRODUCT_NAME = "$(LUMI_PRODUCT_NAME)";
+			};
+			name = Preview;
+		};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		600000000000000000000001 /* Build configuration list for PBXProject "Lumi" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				700000000000000000000001 /* Debug */,
+				700000000000000000000005 /* Preview */,
+				700000000000000000000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		600000000000000000000002 /* Build configuration list for PBXNativeTarget "Lumi" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				700000000000000000000003 /* Debug */,
+				700000000000000000000006 /* Preview */,
+				700000000000000000000004 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		800000000000000000000001 /* XCLocalSwiftPackageReference "Packages/LumiEngineClient" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/LumiEngineClient;
+		};
+		800000000000000000000002 /* XCLocalSwiftPackageReference "Packages/LumiDesignSystem" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/LumiDesignSystem;
+		};
+		800000000000000000000003 /* XCLocalSwiftPackageReference "Packages/LumiLiveWorkspace" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/LumiLiveWorkspace;
+		};
+		800000000000000000000004 /* XCLocalSwiftPackageReference "Packages/LumiLibraryWorkspace" */ = {
+			isa = XCLocalSwiftPackageReference;
+			relativePath = Packages/LumiLibraryWorkspace;
+		};
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		900000000000000000000001 /* LumiEngineClient */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 800000000000000000000001 /* XCLocalSwiftPackageReference "Packages/LumiEngineClient" */;
+			productName = LumiEngineClient;
+		};
+		900000000000000000000002 /* LumiDesignSystem */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 800000000000000000000002 /* XCLocalSwiftPackageReference "Packages/LumiDesignSystem" */;
+			productName = LumiDesignSystem;
+		};
+		900000000000000000000003 /* LumiLiveWorkspace */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 800000000000000000000003 /* XCLocalSwiftPackageReference "Packages/LumiLiveWorkspace" */;
+			productName = LumiLiveWorkspace;
+		};
+		900000000000000000000004 /* LumiLibraryWorkspace */ = {
+			isa = XCSwiftPackageProductDependency;
+			package = 800000000000000000000004 /* XCLocalSwiftPackageReference "Packages/LumiLibraryWorkspace" */;
+			productName = LumiLibraryWorkspace;
+		};
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = 500000000000000000000002 /* Project object */;
+}

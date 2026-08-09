@@ -1,0 +1,1833 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="referrer" content="no-referrer">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'unsafe-inline' 'unsafe-eval' 'wasm-unsafe-eval' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src 'unsafe-inline' blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'">
+<title>Lumi Track Editor – RGB Phrase Editing UX</title>
+<style>:root{color-scheme:light dark;background:light-dark(rgb(255 255 255), rgb(24 24 24))}html,body{margin:0}body{box-sizing:border-box;padding:1rem;background:inherit}iframe{display:block;width:100%;height:calc(100vh - 2rem);margin:0 auto;border:0}</style>
+</head>
+<body>
+<iframe sandbox="allow-scripts" referrerpolicy="no-referrer" title="Lumi Track Editor – RGB Phrase Editing UX" srcdoc="&lt;!doctype html&gt;
+&lt;html lang=&quot;en&quot;&gt;
+&lt;head&gt;
+&lt;meta charset=&quot;utf-8&quot;&gt;
+&lt;meta name=&quot;viewport&quot; content=&quot;width=device-width, initial-scale=1&quot;&gt;
+&lt;meta name=&quot;referrer&quot; content=&quot;no-referrer&quot;&gt;
+&lt;meta http-equiv=&quot;Content-Security-Policy&quot; content=&quot;default-src &#x27;none&#x27;; script-src &#x27;unsafe-inline&#x27; &#x27;unsafe-eval&#x27; &#x27;wasm-unsafe-eval&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; style-src &#x27;unsafe-inline&#x27; blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; img-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; font-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; media-src blob: data: https://cdnjs.cloudflare.com https://cdn.jsdelivr.net https://esm.sh https://fonts.bunny.net https://fonts.googleapis.com https://fonts.gstatic.com https://unpkg.com; worker-src blob:; connect-src blob: data:; frame-src &#x27;none&#x27;; object-src &#x27;none&#x27;; base-uri &#x27;none&#x27;; form-action &#x27;none&#x27;&quot;&gt;
+&lt;title&gt;Lumi Track Editor – RGB Phrase Editing UX&lt;/title&gt;
+&lt;style&gt;:root {
+  color-scheme: light dark;
+  background-color: var(
+    --background,
+    var(--color-background-primary, light-dark(rgb(255 255 255), rgb(24 24 24)))
+  ) !important;
+
+  /* Agent-facing contract; keep in sync with SKILL.md. */
+  --background: var(
+    --color-background-primary,
+    light-dark(rgb(255 255 255), rgb(24 24 24))
+  );
+  --foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --card: color-mix(in oklab, var(--foreground) 5%, var(--background));
+  --card-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --popover: var(
+    --color-background-secondary,
+    light-dark(rgb(255 255 255), rgb(45 45 45))
+  );
+  --popover-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --primary: var(
+    --color-text-info,
+    light-dark(rgb(51 156 255), rgb(131 195 255))
+  );
+  --primary-foreground: var(
+    --color-text-inverse,
+    light-dark(rgb(255 255 255), rgb(13 13 13))
+  );
+  --secondary: var(
+    --color-background-secondary,
+    light-dark(rgb(255 255 255 / 96%), rgb(54 54 54 / 96%))
+  );
+  --secondary-foreground: var(
+    --color-text-primary,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --muted: color-mix(in srgb, var(--foreground) 10%, transparent);
+  --muted-foreground: var(
+    --color-text-secondary,
+    light-dark(rgb(26 28 31 / 49.4%), rgb(255 255 255 / 49.8%))
+  );
+  --accent: var(
+    --color-background-info,
+    light-dark(rgb(229 242 255), rgb(13 39 63))
+  );
+  --accent-foreground: var(
+    --color-text-info,
+    light-dark(rgb(51 156 255), rgb(131 195 255))
+  );
+  --destructive: var(
+    --color-text-warning,
+    light-dark(rgb(226 85 7), rgb(255 133 73))
+  );
+  --border: var(
+    --color-border-secondary,
+    light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%))
+  );
+  --input: var(
+    --color-border-primary,
+    light-dark(
+      rgb(26 28 31 / 11.8%),
+      color-mix(in oklab, rgb(0 0 0) 10%, transparent)
+    )
+  );
+  --ring: var(
+    --color-ring-primary,
+    light-dark(rgb(51 156 255), rgb(131 195 255 / 76%))
+  );
+  --font-size-base: var(--font-text-md-size, 14px);
+  --red: light-dark(rgb(186 38 35), rgb(250 66 62));
+  --green: light-dark(rgb(0 162 64), rgb(64 201 119));
+  --viz-series-1: var(--primary);
+  --viz-series-2: light-dark(rgb(243 136 59), rgb(245 154 86));
+  --viz-series-3: light-dark(rgb(93 201 119), rgb(116 213 139));
+  --viz-series-4: light-dark(rgb(235 119 177), rgb(240 143 192));
+  --viz-series-5: light-dark(rgb(155 121 236), rgb(170 145 239));
+  --viz-series-6: light-dark(rgb(58 185 177), rgb(90 203 194));
+
+  /* Internal implementation variables; not part of the agent contract. */
+  --font-sans: -apple-system, system-ui, &quot;Segoe UI&quot;, sans-serif;
+  --font-mono:
+    ui-monospace, SFMono-Regular, &quot;SF Mono&quot;, Menlo, Consolas, &quot;Liberation Mono&quot;,
+    monospace;
+  --font-size-normal: max(11px, var(--font-size-base));
+  --font-size-tooltip: calc(var(--font-size-base) - 1px);
+  --font-size-small: max(11px, calc(var(--font-size-base) - 2px));
+  --font-size-h1: calc(var(--font-size-normal) * 1.7142857143);
+  --font-size-h2: calc(var(--font-size-normal) * 1.4285714286);
+  --font-size-h3: calc(var(--font-size-normal) * 1.2857142857);
+  --font-weight-normal: 430;
+  --font-weight-medium: 500;
+  --line-height-normal: calc(var(--font-size-normal) * 1.5);
+  --line-height-tooltip: calc(var(--font-size-tooltip) * 1.4285714286);
+  --line-height-small: calc(var(--font-size-small) + 4px);
+  --radius: var(--border-radius-lg, 12.5px);
+  --radius-sm: calc(var(--radius) * 0.6);
+  --radius-md: calc(var(--radius) * 0.8);
+  --radius-lg: var(--radius);
+  --radius-2xl: calc(var(--radius) * 1.6);
+  --radius-full: 9999px;
+  --shadow-sm: 0 1px 2px -1px rgb(0 0 0 / 8%);
+  --checkmark-image: url(&quot;data:image/svg+xml,%3Csvg xmlns=&#x27;http://www.w3.org/2000/svg&#x27; viewBox=&#x27;0 0 17 17&#x27;%3E%3Cpath d=&#x27;M12.8961 3.64101C13.1297 3.41418 13.4984 3.37523 13.7779 3.56581C14.0571 3.75635 14.1554 4.11331 14.0299 4.41347L13.9615 4.53847L7.71151 13.7045C7.59411 13.8767 7.4063 13.9877 7.19881 14.0072C6.99136 14.0267 6.78564 13.9533 6.63826 13.806L2.88826 10.056L2.79842 9.9457C2.6192 9.67407 2.64927 9.30496 2.88826 9.06581C3.12738 8.82669 3.49647 8.79676 3.76815 8.97597L3.8785 9.06581L7.03084 12.2182L12.8053 3.74941L12.8961 3.64101Z&#x27;/%3E%3C/svg%3E&quot;);
+
+  /* Legacy aliases; not part of the current agent contract. */
+  --viz-bg: transparent;
+  --viz-panel: var(--card);
+  --viz-border: var(--border);
+  --viz-text: var(--foreground);
+  --viz-muted: var(--muted-foreground);
+  --viz-accent: var(--primary);
+  --viz-accent-text: var(--primary-foreground);
+  --viz-accent-bg: var(--accent);
+  --viz-font-size: var(--font-size-base);
+  --viz-warning: var(--destructive);
+}
+
+:root[data-theme=&quot;light&quot;] {
+  color-scheme: light;
+}
+
+:root[data-theme=&quot;dark&quot;] {
+  color-scheme: dark;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html &gt; body {
+  /* Preserve MCP aliases for older inline renderers without creating :root cycles. */
+  --color-background-primary: var(
+    --background,
+    light-dark(rgb(255 255 255), rgb(24 24 24))
+  );
+  --color-text-primary: var(
+    --foreground,
+    light-dark(rgb(26 28 31), rgb(255 255 255))
+  );
+  --color-border-secondary: var(
+    --border,
+    light-dark(rgb(26 28 31 / 8%), rgb(255 255 255 / 8.2%))
+  );
+
+  margin: 0;
+  padding: 5px;
+  color: var(--foreground);
+  background: transparent !important;
+  font-family: var(--font-sans);
+  font-size: var(--font-size-normal);
+  font-weight: var(--font-weight-normal);
+  line-height: var(--line-height-normal);
+}
+
+a {
+  color: color-mix(in srgb, var(--viz-accent) 80%, var(--viz-text) 20%);
+  cursor: pointer;
+  font-weight: var(--font-weight-medium, 500);
+  text-decoration: none;
+  text-underline-offset: 2px;
+}
+
+a:is(:hover, :focus-visible) {
+  text-decoration-line: underline;
+  text-decoration-style: dashed;
+  text-decoration-thickness: 0.5px;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p {
+  margin-block: 0;
+}
+
+h1 {
+  font-size: var(--font-size-h1);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h2 {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+h3,
+h4,
+h5,
+h6 {
+  font-size: var(--font-size-h3);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.3;
+}
+
+b,
+strong,
+th {
+  font-weight: var(--font-weight-medium);
+}
+
+code:not(pre code) {
+  display: inline;
+  padding: 1px 6px;
+  border-radius: var(--radius-sm);
+  corner-shape: superellipse(1.5);
+  background: var(--muted);
+  font-family: var(--font-mono);
+  font-size: 0.92em;
+  overflow-wrap: anywhere;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone;
+  word-break: break-word;
+}
+
+.table-responsive {
+  width: 100%;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--foreground);
+  font: inherit;
+  text-align: start;
+}
+
+.table :is(th, td) {
+  padding-block: 10px;
+  padding-inline: 0 24px;
+  overflow-wrap: anywhere;
+  border-bottom: 1px solid var(--border);
+  text-align: start;
+  vertical-align: top;
+}
+
+.table-responsive &gt; .table :is(th, td) {
+  overflow-wrap: break-word;
+}
+
+.table :is(th, td):last-child {
+  padding-inline-end: 0;
+}
+
+.table :is(caption, thead th) {
+  font-weight: 600;
+}
+
+.table thead th {
+  padding-block: 8px;
+  border-bottom-color: color-mix(in srgb, var(--foreground) 16%, transparent);
+}
+
+.table tbody tr:last-child :is(th, td) {
+  border-bottom: 0;
+}
+
+.table.table-sm :is(th, td) {
+  padding-block: 6px;
+}
+
+.table.table-sm :is(th, td):not(:last-child) {
+  padding-inline-end: 16px;
+}
+
+.table :is(.text-end, [align=&quot;right&quot;]) {
+  text-align: end;
+  font-variant-numeric: tabular-nums;
+}
+
+.table :is(.text-center, [align=&quot;center&quot;]) {
+  text-align: center;
+}
+
+.table .text-nowrap {
+  white-space: nowrap;
+}
+
+#widget {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  width: 100%;
+  padding: 0;
+  background: transparent !important;
+}
+
+.card {
+  min-width: 0;
+  padding: 12px;
+  overflow: hidden;
+  overflow-wrap: break-word;
+  border-radius: var(--radius-2xl);
+  corner-shape: superellipse(1.5);
+  color: var(--card-foreground);
+  background: var(--card);
+}
+
+#widget &gt; :not(.card) {
+  width: 100% !important;
+  max-width: none !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  border-radius: 0 !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+.tooltip {
+  position: fixed;
+  z-index: 50;
+  top: 0;
+  left: 0;
+  width: max-content;
+  max-width: min(
+    20rem,
+    var(--tooltip-available-width, calc(100vw - 10px)),
+    calc(100vw - 10px)
+  );
+  max-height: min(
+    var(--tooltip-available-height, calc(100vh - 10px)),
+    calc(100vh - 10px)
+  );
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--popover-foreground);
+  background: var(--popover);
+  box-shadow: none;
+  font-size: var(--font-size-tooltip);
+  line-height: var(--line-height-tooltip);
+  overflow-wrap: break-word;
+  white-space: normal;
+  pointer-events: none;
+  user-select: none;
+}
+
+.viz-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(max(180px, 24%), 1fr));
+  gap: 10px;
+}
+
+.viz-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.viz-stat-value {
+  font-size: var(--font-size-h2);
+  font-weight: var(--font-weight-medium);
+  line-height: 1.25;
+}
+
+.viz-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.viz-badge {
+  padding: 3px 8px;
+  border-radius: var(--radius-full);
+  color: var(--accent-foreground);
+  background: var(--accent);
+  font-weight: var(--font-weight-medium);
+}
+
+small,
+.text-small,
+.viz-badge {
+  font-size: var(--font-size-small);
+  line-height: var(--line-height-small);
+}
+
+.text-muted {
+  color: var(--muted-foreground);
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.viz-controls {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.viz-controls &gt; .form-label {
+  display: grid;
+  min-width: min(100%, 260px);
+  flex: 1 1 280px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: baseline;
+  gap: 2px 12px;
+  margin-bottom: 0;
+}
+
+.viz-controls &gt; .form-label &gt; :is(.form-control, .form-range, .form-select) {
+  grid-column: 1 / -1;
+}
+
+.btn,
+.form-check-input,
+.form-control,
+.form-range,
+.form-select {
+  font: inherit;
+}
+
+.btn {
+  appearance: button;
+  display: inline-flex;
+  inline-size: fit-content;
+  max-inline-size: 100%;
+  min-height: 28px;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  margin: 0;
+  padding: 0 8px;
+  -webkit-app-region: no-drag;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: var(--cursor-interaction, pointer);
+  text-align: center;
+  text-decoration: none;
+  white-space: nowrap;
+  user-select: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+.btn:is(.btn-block, .viz-tile) {
+  inline-size: 100%;
+}
+
+.btn.viz-tile {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  white-space: normal;
+}
+
+a.btn {
+  cursor: pointer;
+  text-decoration: none;
+}
+
+.btn:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn-primary {
+  border-color: transparent;
+  color: var(--primary-foreground);
+  background: var(--foreground);
+  background-clip: padding-box;
+}
+
+.btn-primary .text-muted {
+  color: color-mix(in srgb, var(--primary-foreground) 50%, transparent);
+}
+
+.btn-primary:not(:disabled):hover {
+  background: color-mix(in srgb, var(--foreground) 80%, transparent);
+  background-clip: padding-box;
+}
+
+.btn-ghost {
+  border-color: transparent;
+  color: var(--muted-foreground);
+  background: transparent;
+}
+
+.btn-ghost:not(:disabled):hover {
+  color: var(--foreground);
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.btn:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+[data-lucide] {
+  stroke-width: 1.6;
+}
+
+.form-label {
+  display: block;
+  margin-bottom: 6px;
+  color: var(--foreground);
+}
+
+.form-control {
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  padding: 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--foreground);
+  background: var(--secondary);
+}
+
+.form-control::placeholder {
+  color: var(--muted-foreground);
+}
+
+.form-control[type=&quot;file&quot;] {
+  padding: 0;
+  overflow: hidden;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control[type=&quot;file&quot;]::file-selector-button {
+  min-height: 26px;
+  margin-right: 8px;
+  padding: 0 8px;
+  border: 0;
+  border-right: 1px solid var(--input);
+  color: var(--secondary-foreground);
+  background: var(--secondary);
+  cursor: inherit;
+  font: inherit;
+}
+
+.form-control[type=&quot;file&quot;]:not(:disabled):hover::file-selector-button {
+  background: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-control-color[type=&quot;color&quot;] {
+  width: 40px;
+  height: 28px;
+  padding: 3px;
+  cursor: var(--cursor-interaction, pointer);
+}
+
+.form-control-color[type=&quot;color&quot;]::-webkit-color-swatch-wrapper {
+  padding: 0;
+}
+
+.form-control-color[type=&quot;color&quot;]::-webkit-color-swatch {
+  border: 0;
+  border-radius: calc(var(--radius-lg) - 4px);
+  corner-shape: superellipse(1.5);
+}
+
+textarea.form-control {
+  height: auto;
+  min-height: 72px;
+  padding: 8px 10px;
+  resize: vertical;
+}
+
+.form-control:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-control:disabled,
+.form-select:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.form-select {
+  appearance: none;
+  display: block;
+  width: 100%;
+  min-height: 28px;
+  margin: 0;
+  padding: 0 32px 0 8px;
+  outline: none;
+  border: 1px solid var(--input);
+  border-radius: var(--radius-lg);
+  corner-shape: superellipse(1.5);
+  color: var(--foreground);
+  background-color: var(--secondary);
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--muted-foreground) 50%),
+    linear-gradient(135deg, var(--muted-foreground) 50%, transparent 50%);
+  background-position:
+    calc(100% - 14px) 50%,
+    calc(100% - 10px) 50%;
+  background-repeat: no-repeat;
+  background-size: 4px 4px;
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-select:not(:disabled):hover {
+  background-color: color-mix(in srgb, var(--foreground) 6%, var(--secondary));
+}
+
+.form-select:focus-visible {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-check {
+  display: flex;
+  min-height: 20px;
+  align-items: center;
+  gap: 6px;
+}
+
+.form-check-input {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  margin: 0;
+  border: 1px solid var(--input);
+  color: var(--primary-foreground);
+  background-color: transparent;
+  cursor: var(--cursor-interaction, default);
+  transition:
+    background-color 150ms,
+    border-color 150ms,
+    box-shadow 150ms;
+}
+
+.form-check:not(.form-switch) .form-check-input[type=&quot;checkbox&quot;] {
+  border-color: var(--input);
+  border-radius: var(--radius-sm);
+  corner-shape: superellipse(1.5);
+  background-color: var(--secondary);
+  box-shadow: var(--shadow-sm);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input:not(:disabled):not(:checked):hover {
+  background-color: var(--card);
+}
+
+.form-check:not(.form-switch) .form-check-input[type=&quot;checkbox&quot;]:checked {
+  border-color: var(--primary);
+  background-color: var(--primary);
+}
+
+.form-check:not(.form-switch)
+  .form-check-input[type=&quot;checkbox&quot;]:checked::before {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: var(--primary-foreground);
+  content: &quot;&quot;;
+  mask: var(--checkmark-image) center / 12px 12px no-repeat;
+}
+
+.form-check-input[type=&quot;radio&quot;] {
+  width: 14px;
+  height: 14px;
+  border-radius: var(--radius-full);
+}
+
+.form-check-input[type=&quot;radio&quot;]:checked {
+  border: 2px solid var(--primary);
+  background:
+    radial-gradient(circle, var(--primary-foreground) 0 2.5px, transparent 3px),
+    var(--primary);
+}
+
+.form-check:not(.form-switch) .form-check-input:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled {
+  cursor: not-allowed;
+  pointer-events: none;
+}
+
+.form-check:not(.form-switch) .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+}
+
+.form-switch .form-check-input:disabled,
+.form-switch .form-check-input:disabled + .form-check-label {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
+.form-check-label {
+  color: var(--foreground);
+  cursor: var(--cursor-interaction, default);
+}
+
+.form-switch .form-check-input {
+  position: relative;
+  width: 32px;
+  height: 20px;
+  border: 0;
+  border-radius: var(--radius-full);
+  background: var(--muted);
+  box-shadow: none;
+  transition: background-color 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input::before {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  width: 16px;
+  height: 16px;
+  box-sizing: border-box;
+  border: 1px solid light-dark(var(--primary-foreground), var(--foreground));
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+  box-shadow: var(--shadow-sm);
+  content: &quot;&quot;;
+  transform: translate(2px, -50%);
+  transition: transform 200ms cubic-bezier(0, 0, 0.2, 1);
+}
+
+.form-switch .form-check-input:checked {
+  background: var(--primary);
+}
+
+.form-switch .form-check-input:checked::before {
+  transform: translate(14px, -50%);
+}
+
+.form-switch .form-check-input:focus-visible {
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.form-range {
+  appearance: none;
+  display: block;
+  width: 100%;
+  height: 28px;
+  flex: 1;
+  margin: 0;
+  padding: 0;
+  outline: none;
+  border: 0;
+  accent-color: var(--primary);
+  background: linear-gradient(
+      color-mix(in srgb, var(--foreground) 7%, transparent),
+      color-mix(in srgb, var(--foreground) 7%, transparent)
+    )
+    center / 100% 2px no-repeat;
+}
+
+.form-range::-webkit-slider-runnable-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-webkit-slider-thumb {
+  appearance: none;
+  width: 20px;
+  height: 20px;
+  margin-top: 4px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-webkit-slider-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range::-moz-range-track {
+  height: 28px;
+  background: transparent;
+}
+
+.form-range::-moz-range-thumb {
+  width: 20px;
+  height: 20px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-full);
+  background: light-dark(var(--primary-foreground), var(--foreground));
+}
+
+.form-range:focus-visible::-moz-range-thumb {
+  border-color: var(--ring);
+  box-shadow: inset 0 0 0 1px var(--ring);
+}
+
+.form-range:disabled {
+  cursor: not-allowed;
+  opacity: 0.4;
+}
+
+.btn:not(.btn-primary, .viz-tile):is(
+    [aria-pressed=&quot;true&quot;],
+    [aria-selected=&quot;true&quot;],
+    .is-selected
+  ) {
+  border-color: var(--primary);
+  color: var(--primary-foreground);
+  background: var(--primary);
+}
+
+.btn.viz-tile:is([aria-pressed=&quot;true&quot;], [aria-selected=&quot;true&quot;], .is-selected) {
+  border-color: var(--primary);
+  box-shadow: inset 0 0 0 1px var(--primary);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
+
+svg {
+  display: block;
+  max-width: 100%;
+  height: auto;
+}
+
+#widget &gt; svg {
+  width: 100%;
+}
+
+/* Model-authored chart rules can otherwise stretch icons after these styles load. */
+svg.lucide {
+  display: block;
+  width: 16px !important;
+  height: 16px !important;
+  flex: none;
+  margin: 0 !important;
+  stroke-width: 1.6;
+}
+
+.text-warning,
+.text-destructive {
+  color: var(--destructive);
+}
+
+html&gt;body{padding:0}&lt;/style&gt;
+&lt;/head&gt;
+&lt;body&gt;
+&lt;div id=&quot;lumi-track-editor-proposal&quot;&gt;
+  &lt;div class=&quot;lumi-window&quot;&gt;
+    &lt;header class=&quot;lumi-appbar&quot;&gt;
+      &lt;div class=&quot;lumi-brand&quot;&gt;LUMI&lt;/div&gt;
+      &lt;div class=&quot;lumi-breadcrumb&quot;&gt;&lt;span&gt;Library&lt;/span&gt;&lt;span aria-hidden=&quot;true&quot;&gt;›&lt;/span&gt;&lt;strong&gt;Track lighting editor&lt;/strong&gt;&lt;/div&gt;
+      &lt;div class=&quot;lumi-app-actions&quot;&gt;
+        &lt;span class=&quot;lumi-save-state&quot; id=&quot;lumi-save-state&quot;&gt;All changes saved locally&lt;/span&gt;
+        &lt;button class=&quot;lumi-button lumi-button-quiet&quot; type=&quot;button&quot;&gt;Close&lt;/button&gt;
+        &lt;button class=&quot;lumi-button lumi-button-primary&quot; type=&quot;button&quot; id=&quot;lumi-save&quot;&gt;Save&lt;/button&gt;
+      &lt;/div&gt;
+    &lt;/header&gt;
+
+    &lt;section class=&quot;lumi-track-header&quot; aria-label=&quot;Track information&quot;&gt;
+      &lt;div class=&quot;lumi-artwork&quot; aria-hidden=&quot;true&quot;&gt;&lt;span&gt;AS&lt;/span&gt;&lt;/div&gt;
+      &lt;div class=&quot;lumi-track-copy&quot;&gt;
+        &lt;h2&gt;Aurora Signal &lt;span&gt;— Extended Mix&lt;/span&gt;&lt;/h2&gt;
+        &lt;p&gt;Lumi Lab&lt;/p&gt;
+      &lt;/div&gt;
+      &lt;dl class=&quot;lumi-track-facts&quot;&gt;
+        &lt;div&gt;&lt;dt&gt;BPM&lt;/dt&gt;&lt;dd&gt;128.0&lt;/dd&gt;&lt;/div&gt;
+        &lt;div&gt;&lt;dt&gt;Key&lt;/dt&gt;&lt;dd&gt;8A&lt;/dd&gt;&lt;/div&gt;
+        &lt;div&gt;&lt;dt&gt;Duration&lt;/dt&gt;&lt;dd&gt;04:30&lt;/dd&gt;&lt;/div&gt;
+        &lt;div&gt;&lt;dt&gt;Beatgrid&lt;/dt&gt;&lt;dd&gt;&lt;span class=&quot;lumi-status-dot&quot;&gt;&lt;/span&gt;Ready&lt;/dd&gt;&lt;/div&gt;
+      &lt;/dl&gt;
+    &lt;/section&gt;
+
+    &lt;nav class=&quot;lumi-tabs&quot; aria-label=&quot;Track editor sections&quot;&gt;
+      &lt;button type=&quot;button&quot; class=&quot;lumi-tab lumi-tab-active&quot;&gt;Waveform &amp;amp; phrases&lt;/button&gt;
+      &lt;button type=&quot;button&quot; class=&quot;lumi-tab&quot;&gt;Lighting mapping&lt;/button&gt;
+      &lt;button type=&quot;button&quot; class=&quot;lumi-tab&quot;&gt;Track details&lt;/button&gt;
+    &lt;/nav&gt;
+
+    &lt;main class=&quot;lumi-editor-layout&quot;&gt;
+      &lt;section class=&quot;lumi-waveform-workspace&quot; aria-label=&quot;Waveform and phrase editor&quot;&gt;
+        &lt;div class=&quot;lumi-transport&quot;&gt;
+          &lt;button class=&quot;lumi-round-button&quot; type=&quot;button&quot; id=&quot;lumi-play&quot; aria-label=&quot;Play&quot;&gt;&lt;i data-lucide=&quot;play&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+          &lt;button class=&quot;lumi-round-button&quot; type=&quot;button&quot; id=&quot;lumi-stop&quot; aria-label=&quot;Stop&quot;&gt;&lt;i data-lucide=&quot;square&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+          &lt;div class=&quot;lumi-time-readout&quot;&gt;
+            &lt;strong id=&quot;lumi-time&quot;&gt;01:32.531&lt;/strong&gt;
+            &lt;span id=&quot;lumi-position&quot;&gt;Bar 50 · Beat 2&lt;/span&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;lumi-divider&quot; aria-hidden=&quot;true&quot;&gt;&lt;/div&gt;
+          &lt;label class=&quot;lumi-select-label&quot; for=&quot;lumi-role&quot;&gt;New phrase role&lt;/label&gt;
+          &lt;select class=&quot;lumi-select&quot; id=&quot;lumi-role&quot;&gt;
+            &lt;option&gt;Intro&lt;/option&gt;
+            &lt;option&gt;Bridge&lt;/option&gt;
+            &lt;option&gt;Breakdown 1&lt;/option&gt;
+            &lt;option&gt;Breakdown 2&lt;/option&gt;
+            &lt;option&gt;Breakdown 3&lt;/option&gt;
+            &lt;option selected&gt;Synth&lt;/option&gt;
+            &lt;option&gt;Pre-drop&lt;/option&gt;
+            &lt;option&gt;Buildup 1&lt;/option&gt;
+            &lt;option&gt;Buildup 2&lt;/option&gt;
+            &lt;option&gt;Buildup 3&lt;/option&gt;
+            &lt;option&gt;Drop&lt;/option&gt;
+            &lt;option&gt;Outro&lt;/option&gt;
+          &lt;/select&gt;
+          &lt;button class=&quot;lumi-button lumi-button-primary&quot; type=&quot;button&quot; id=&quot;lumi-add-point&quot;&gt;&lt;i data-lucide=&quot;map-pin-plus&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;Add phrase point&lt;/button&gt;
+          &lt;span class=&quot;lumi-quantize&quot;&gt;&lt;i data-lucide=&quot;magnet&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;Quantize · 1 beat&lt;/span&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;lumi-waveform-toolbar&quot;&gt;
+          &lt;div&gt;
+            &lt;strong&gt;Detailed RGB waveform &lt;span class=&quot;lumi-waveform-mode&quot;&gt;Default&lt;/span&gt;&lt;/strong&gt;
+            &lt;span&gt;Click or drag the playhead freely. Phrase points snap to the nearest beat.&lt;/span&gt;
+          &lt;/div&gt;
+          &lt;div class=&quot;lumi-zoom-controls&quot; aria-label=&quot;Waveform zoom&quot;&gt;
+            &lt;button class=&quot;lumi-icon-button&quot; type=&quot;button&quot; id=&quot;lumi-zoom-out&quot; aria-label=&quot;Zoom out&quot;&gt;&lt;i data-lucide=&quot;zoom-out&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+            &lt;span id=&quot;lumi-zoom-label&quot;&gt;16 bars visible&lt;/span&gt;
+            &lt;button class=&quot;lumi-icon-button&quot; type=&quot;button&quot; id=&quot;lumi-zoom-in&quot; aria-label=&quot;Zoom in&quot;&gt;&lt;i data-lucide=&quot;zoom-in&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+          &lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;div class=&quot;lumi-detail-shell&quot;&gt;
+          &lt;div class=&quot;lumi-beat-ruler&quot; id=&quot;lumi-beat-ruler&quot; aria-hidden=&quot;true&quot;&gt;&lt;/div&gt;
+          &lt;canvas id=&quot;lumi-detail-waveform&quot; class=&quot;lumi-detail-waveform&quot; role=&quot;img&quot; aria-label=&quot;Detailed RGB waveform with beatgrid, phrase points, and playhead&quot;&gt;&lt;/canvas&gt;
+          &lt;div class=&quot;lumi-detail-phrases&quot; id=&quot;lumi-detail-phrases&quot; aria-label=&quot;Visible phrase ranges&quot;&gt;&lt;/div&gt;
+        &lt;/div&gt;
+
+        &lt;label class=&quot;lumi-scroll-label&quot; for=&quot;lumi-scroll&quot;&gt;Waveform position&lt;/label&gt;
+        &lt;input id=&quot;lumi-scroll&quot; class=&quot;lumi-scroll&quot; type=&quot;range&quot; min=&quot;0&quot; max=&quot;512&quot; step=&quot;1&quot; value=&quot;164&quot; /&gt;
+
+        &lt;div class=&quot;lumi-overview-heading&quot;&gt;
+          &lt;div&gt;&lt;strong&gt;Track overview&lt;/strong&gt;&lt;span&gt;Click to jump; the viewport shows the detailed area above.&lt;/span&gt;&lt;/div&gt;
+          &lt;span&gt;Entire track · 144 bars&lt;/span&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;lumi-overview-shell&quot; id=&quot;lumi-overview-shell&quot;&gt;
+          &lt;canvas id=&quot;lumi-overview-waveform&quot; class=&quot;lumi-overview-waveform&quot; role=&quot;img&quot; aria-label=&quot;Full track waveform overview with current viewport and playhead&quot;&gt;&lt;/canvas&gt;
+          &lt;div class=&quot;lumi-overview-phrases&quot; id=&quot;lumi-overview-phrases&quot; aria-label=&quot;Full track phrase ranges&quot;&gt;&lt;/div&gt;
+        &lt;/div&gt;
+      &lt;/section&gt;
+
+      &lt;aside class=&quot;lumi-inspector&quot; aria-label=&quot;Selected phrase inspector&quot;&gt;
+        &lt;div class=&quot;lumi-inspector-title&quot;&gt;
+          &lt;div&gt;&lt;span&gt;Selected phrase&lt;/span&gt;&lt;strong id=&quot;lumi-selected-role&quot;&gt;Buildup 1&lt;/strong&gt;&lt;/div&gt;
+          &lt;button class=&quot;lumi-icon-button&quot; type=&quot;button&quot; id=&quot;lumi-delete&quot; aria-label=&quot;Delete selected phrase point&quot;&gt;&lt;i data-lucide=&quot;trash-2&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;lumi-role-swatch&quot; id=&quot;lumi-role-swatch&quot;&gt;&lt;/div&gt;
+        &lt;dl class=&quot;lumi-inspector-fields&quot;&gt;
+          &lt;div&gt;&lt;dt&gt;Starts at&lt;/dt&gt;&lt;dd id=&quot;lumi-selected-start&quot;&gt;Bar 49 · Beat 1&lt;/dd&gt;&lt;/div&gt;
+          &lt;div&gt;&lt;dt&gt;Ends at&lt;/dt&gt;&lt;dd id=&quot;lumi-selected-end&quot;&gt;Next phrase point&lt;/dd&gt;&lt;/div&gt;
+          &lt;div&gt;&lt;dt&gt;Length&lt;/dt&gt;&lt;dd id=&quot;lumi-selected-length&quot;&gt;8 bars&lt;/dd&gt;&lt;/div&gt;
+          &lt;div&gt;&lt;dt&gt;Source&lt;/dt&gt;&lt;dd&gt;User edited&lt;/dd&gt;&lt;/div&gt;
+        &lt;/dl&gt;
+        &lt;label class=&quot;lumi-field-label&quot; for=&quot;lumi-edit-role&quot;&gt;Phrase role&lt;/label&gt;
+        &lt;select class=&quot;lumi-select lumi-select-wide&quot; id=&quot;lumi-edit-role&quot;&gt;
+          &lt;option&gt;Intro&lt;/option&gt;
+          &lt;option&gt;Bridge&lt;/option&gt;
+          &lt;option&gt;Breakdown 1&lt;/option&gt;
+          &lt;option&gt;Breakdown 2&lt;/option&gt;
+          &lt;option&gt;Breakdown 3&lt;/option&gt;
+          &lt;option&gt;Synth&lt;/option&gt;
+          &lt;option&gt;Pre-drop&lt;/option&gt;
+          &lt;option selected&gt;Buildup 1&lt;/option&gt;
+          &lt;option&gt;Buildup 2&lt;/option&gt;
+          &lt;option&gt;Buildup 3&lt;/option&gt;
+          &lt;option&gt;Drop&lt;/option&gt;
+          &lt;option&gt;Outro&lt;/option&gt;
+        &lt;/select&gt;
+        &lt;div class=&quot;lumi-rule-note&quot;&gt;
+          &lt;i data-lucide=&quot;corner-down-right&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;
+          &lt;p&gt;&lt;strong&gt;No separate end marker&lt;/strong&gt;&lt;span&gt;This phrase automatically runs until the next phrase point. The final phrase runs to the end of the track.&lt;/span&gt;&lt;/p&gt;
+        &lt;/div&gt;
+        &lt;div class=&quot;lumi-inspector-section&quot;&gt;
+          &lt;span&gt;Track-specific lighting&lt;/span&gt;
+          &lt;button class=&quot;lumi-mapping-row&quot; type=&quot;button&quot;&gt;&lt;span&gt;Autoloop override&lt;/span&gt;&lt;strong&gt;Not set&lt;/strong&gt;&lt;i data-lucide=&quot;chevron-right&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+          &lt;button class=&quot;lumi-mapping-row&quot; type=&quot;button&quot;&gt;&lt;span&gt;Theme&lt;/span&gt;&lt;strong&gt;Automatic&lt;/strong&gt;&lt;i data-lucide=&quot;chevron-right&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&lt;/button&gt;
+        &lt;/div&gt;
+      &lt;/aside&gt;
+    &lt;/main&gt;
+
+    &lt;footer class=&quot;lumi-shortcuts&quot;&gt;
+      &lt;span&gt;&lt;kbd&gt;Space&lt;/kbd&gt; Play / pause&lt;/span&gt;
+      &lt;span&gt;&lt;kbd&gt;←&lt;/kbd&gt;&lt;kbd&gt;→&lt;/kbd&gt; Move one beat&lt;/span&gt;
+      &lt;span&gt;&lt;kbd&gt;⇧&lt;/kbd&gt; + &lt;kbd&gt;←&lt;/kbd&gt;&lt;kbd&gt;→&lt;/kbd&gt; Move one bar&lt;/span&gt;
+      &lt;span&gt;&lt;kbd&gt;P&lt;/kbd&gt; Add phrase point&lt;/span&gt;
+      &lt;span&gt;&lt;kbd&gt;⌫&lt;/kbd&gt; Delete selected point&lt;/span&gt;
+    &lt;/footer&gt;
+  &lt;/div&gt;
+&lt;/div&gt;
+
+&lt;style&gt;
+  #lumi-track-editor-proposal {
+    color-scheme: light dark;
+    --lumi-bg: light-dark(#edf0f4, #07090c);
+    --lumi-surface: light-dark(#ffffff, #0f1318);
+    --lumi-surface-raised: light-dark(#f8f9fb, #151a21);
+    --lumi-surface-strong: light-dark(#e8ebf0, #1c222b);
+    --lumi-text: light-dark(#151922, #f4f7fb);
+    --lumi-text-soft: light-dark(#5d6674, #9aa5b4);
+    --lumi-line: light-dark(#d7dce4, #28303a);
+    --lumi-line-strong: light-dark(#aab3c0, #46515f);
+    --lumi-blue: light-dark(#1769e0, #4a8fff);
+    --lumi-blue-soft: light-dark(#dbe9ff, #112b53);
+    --lumi-cyan: light-dark(#008eaa, #32d3f2);
+    --lumi-orange: light-dark(#bc5c00, #ff9b45);
+    --lumi-white-wave: light-dark(#354052, #f6f8fb);
+    --lumi-danger: light-dark(#bd2b39, #ff6b76);
+    --lumi-green: light-dark(#0b7b52, #35d39a);
+    --lumi-shadow: light-dark(rgba(28, 37, 50, .14), rgba(0, 0, 0, .55));
+    width: 100%;
+    color: var(--lumi-text);
+    font-family: -apple-system, BlinkMacSystemFont, &quot;SF Pro Display&quot;, &quot;Segoe UI&quot;, sans-serif;
+  }
+
+  #lumi-track-editor-proposal * { box-sizing: border-box; }
+  #lumi-track-editor-proposal button,
+  #lumi-track-editor-proposal select,
+  #lumi-track-editor-proposal input { font: inherit; }
+
+  #lumi-track-editor-proposal .lumi-window {
+    overflow: hidden;
+    background: var(--lumi-bg);
+    border: 1px solid var(--lumi-line);
+    border-radius: 12px;
+    box-shadow: 0 20px 55px var(--lumi-shadow);
+  }
+
+  #lumi-track-editor-proposal .lumi-appbar {
+    min-height: 52px;
+    display: flex;
+    align-items: center;
+    gap: 20px;
+    padding: 8px 16px;
+    background: var(--lumi-surface);
+    border-bottom: 1px solid var(--lumi-line);
+  }
+
+  #lumi-track-editor-proposal .lumi-brand { font-weight: 500; letter-spacing: .22em; }
+  #lumi-track-editor-proposal .lumi-breadcrumb { display: flex; align-items: center; gap: 8px; flex: 1; color: var(--lumi-text-soft); }
+  #lumi-track-editor-proposal .lumi-breadcrumb strong { color: var(--lumi-text); font-weight: 500; }
+  #lumi-track-editor-proposal .lumi-app-actions { display: flex; align-items: center; gap: 8px; }
+  #lumi-track-editor-proposal .lumi-save-state { color: var(--lumi-text-soft); font-size: .82em; }
+
+  #lumi-track-editor-proposal .lumi-button,
+  #lumi-track-editor-proposal .lumi-icon-button,
+  #lumi-track-editor-proposal .lumi-round-button,
+  #lumi-track-editor-proposal .lumi-tab,
+  #lumi-track-editor-proposal .lumi-mapping-row {
+    color: var(--lumi-text);
+    border: 1px solid var(--lumi-line);
+    background: var(--lumi-surface-raised);
+    cursor: pointer;
+  }
+
+  #lumi-track-editor-proposal .lumi-button { min-height: 34px; padding: 0 12px; border-radius: 7px; display: inline-flex; align-items: center; justify-content: center; gap: 7px; }
+  #lumi-track-editor-proposal .lumi-button:hover,
+  #lumi-track-editor-proposal .lumi-icon-button:hover,
+  #lumi-track-editor-proposal .lumi-round-button:hover,
+  #lumi-track-editor-proposal .lumi-mapping-row:hover { background: var(--lumi-surface-strong); }
+  #lumi-track-editor-proposal .lumi-button-primary { color: light-dark(#ffffff, #061221); background: var(--lumi-blue); border-color: var(--lumi-blue); }
+  #lumi-track-editor-proposal .lumi-button-primary:hover { background: var(--lumi-blue); filter: brightness(1.06); }
+  #lumi-track-editor-proposal .lumi-button-quiet { background: transparent; }
+  #lumi-track-editor-proposal .lumi-button:focus-visible,
+  #lumi-track-editor-proposal .lumi-icon-button:focus-visible,
+  #lumi-track-editor-proposal .lumi-round-button:focus-visible,
+  #lumi-track-editor-proposal .lumi-tab:focus-visible,
+  #lumi-track-editor-proposal .lumi-mapping-row:focus-visible,
+  #lumi-track-editor-proposal .lumi-select:focus-visible,
+  #lumi-track-editor-proposal input:focus-visible { outline: 2px solid var(--lumi-blue); outline-offset: 2px; }
+
+  #lumi-track-editor-proposal .lumi-track-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 18px;
+    background: var(--lumi-surface);
+  }
+  #lumi-track-editor-proposal .lumi-artwork { width: 48px; height: 48px; display: grid; place-items: center; border-radius: 7px; color: light-dark(#ffffff, #07111c); background: linear-gradient(135deg, var(--lumi-cyan), var(--lumi-blue), var(--lumi-orange)); font-weight: 500; }
+  #lumi-track-editor-proposal .lumi-track-copy { min-width: 190px; flex: 1; }
+  #lumi-track-editor-proposal .lumi-track-copy h2 { margin: 0 0 4px; font-size: 1.06em; font-weight: 500; }
+  #lumi-track-editor-proposal .lumi-track-copy h2 span { color: var(--lumi-text-soft); font-weight: 400; }
+  #lumi-track-editor-proposal .lumi-track-copy p { margin: 0; color: var(--lumi-text-soft); }
+  #lumi-track-editor-proposal .lumi-track-facts { display: flex; gap: 24px; margin: 0; }
+  #lumi-track-editor-proposal .lumi-track-facts div { min-width: 64px; }
+  #lumi-track-editor-proposal .lumi-track-facts dt { color: var(--lumi-text-soft); font-size: .72em; text-transform: uppercase; letter-spacing: .08em; }
+  #lumi-track-editor-proposal .lumi-track-facts dd { margin: 3px 0 0; font-variant-numeric: tabular-nums; }
+  #lumi-track-editor-proposal .lumi-status-dot { display: inline-block; width: 7px; height: 7px; margin-right: 6px; border-radius: 50%; background: var(--lumi-green); }
+
+  #lumi-track-editor-proposal .lumi-tabs { display: flex; gap: 2px; padding: 0 18px; background: var(--lumi-surface); border-bottom: 1px solid var(--lumi-line); }
+  #lumi-track-editor-proposal .lumi-tab { padding: 10px 12px; border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--lumi-text-soft); }
+  #lumi-track-editor-proposal .lumi-tab-active { color: var(--lumi-text); border-bottom-color: var(--lumi-blue); }
+
+  #lumi-track-editor-proposal .lumi-editor-layout { display: grid; grid-template-columns: minmax(0, 1fr) 268px; }
+  #lumi-track-editor-proposal .lumi-waveform-workspace { min-width: 0; padding: 14px 16px 16px; }
+  #lumi-track-editor-proposal .lumi-transport { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  #lumi-track-editor-proposal .lumi-round-button,
+  #lumi-track-editor-proposal .lumi-icon-button { width: 34px; height: 34px; padding: 0; display: inline-grid; place-items: center; border-radius: 7px; }
+  #lumi-track-editor-proposal .lumi-round-button { border-radius: 50%; }
+  #lumi-track-editor-proposal .lumi-time-readout { min-width: 102px; display: flex; flex-direction: column; }
+  #lumi-track-editor-proposal .lumi-time-readout strong { font-variant-numeric: tabular-nums; }
+  #lumi-track-editor-proposal .lumi-time-readout span { color: var(--lumi-text-soft); font-size: .75em; }
+  #lumi-track-editor-proposal .lumi-divider { width: 1px; height: 32px; margin: 0 3px; background: var(--lumi-line); }
+  #lumi-track-editor-proposal .lumi-select-label { color: var(--lumi-text-soft); font-size: .78em; }
+  #lumi-track-editor-proposal .lumi-select { min-height: 34px; padding: 0 30px 0 9px; color: var(--lumi-text); background: var(--lumi-surface-raised); border: 1px solid var(--lumi-line); border-radius: 7px; }
+  #lumi-track-editor-proposal .lumi-quantize { margin-left: auto; display: inline-flex; align-items: center; gap: 6px; color: var(--lumi-text-soft); font-size: .8em; }
+
+  #lumi-track-editor-proposal .lumi-waveform-toolbar,
+  #lumi-track-editor-proposal .lumi-overview-heading { display: flex; justify-content: space-between; align-items: end; gap: 12px; margin-bottom: 7px; }
+  #lumi-track-editor-proposal .lumi-waveform-toolbar &gt; div:first-child,
+  #lumi-track-editor-proposal .lumi-overview-heading &gt; div { display: flex; flex-direction: column; gap: 2px; }
+  #lumi-track-editor-proposal .lumi-waveform-toolbar span,
+  #lumi-track-editor-proposal .lumi-overview-heading span { color: var(--lumi-text-soft); font-size: .78em; }
+  #lumi-track-editor-proposal .lumi-waveform-toolbar .lumi-waveform-mode { margin-left: 6px; color: var(--lumi-cyan); font-size: .68em; text-transform: uppercase; letter-spacing: .08em; }
+  #lumi-track-editor-proposal .lumi-zoom-controls { display: flex; align-items: center; gap: 8px; }
+  #lumi-track-editor-proposal .lumi-zoom-controls span { min-width: 82px; text-align: center; }
+
+  #lumi-track-editor-proposal .lumi-detail-shell,
+  #lumi-track-editor-proposal .lumi-overview-shell { position: relative; overflow: hidden; background: light-dark(#f8fafc, #030507); border: 1px solid var(--lumi-line-strong); }
+  #lumi-track-editor-proposal .lumi-detail-shell { border-radius: 7px; }
+  #lumi-track-editor-proposal .lumi-beat-ruler { height: 28px; position: relative; border-bottom: 1px solid var(--lumi-line); color: var(--lumi-text-soft); font-size: .7em; overflow: hidden; }
+  #lumi-track-editor-proposal .lumi-ruler-label { position: absolute; bottom: 5px; transform: translateX(-50%); font-variant-numeric: tabular-nums; }
+  #lumi-track-editor-proposal .lumi-ruler-tick { position: absolute; bottom: 0; width: 1px; height: 5px; background: var(--lumi-line-strong); }
+  #lumi-track-editor-proposal .lumi-ruler-tick-bar { height: 9px; }
+  #lumi-track-editor-proposal .lumi-detail-waveform { width: 100%; height: 230px; display: block; cursor: crosshair; touch-action: none; }
+  #lumi-track-editor-proposal .lumi-detail-phrases { position: relative; height: 31px; border-top: 1px solid var(--lumi-line); background: var(--lumi-surface); overflow: hidden; }
+  #lumi-track-editor-proposal .lumi-phrase-segment { position: absolute; top: 4px; bottom: 4px; padding: 3px 7px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; border-left: 2px solid currentColor; background: color-mix(in srgb, currentColor 16%, transparent); color: var(--phrase-color); font-size: .72em; cursor: pointer; }
+  #lumi-track-editor-proposal .lumi-phrase-segment-selected { box-shadow: inset 0 0 0 1px currentColor; }
+
+  #lumi-track-editor-proposal .lumi-scroll-label { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
+  #lumi-track-editor-proposal .lumi-scroll { width: 100%; margin: 7px 0 16px; accent-color: var(--lumi-blue); }
+  #lumi-track-editor-proposal .lumi-overview-heading { align-items: center; }
+  #lumi-track-editor-proposal .lumi-overview-shell { border-radius: 5px; }
+  #lumi-track-editor-proposal .lumi-overview-waveform { width: 100%; height: 82px; display: block; cursor: pointer; }
+  #lumi-track-editor-proposal .lumi-overview-phrases { display: flex; height: 27px; border-top: 1px solid var(--lumi-line); }
+  #lumi-track-editor-proposal .lumi-overview-segment { min-width: 2px; padding: 5px 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; border-left: 2px solid currentColor; color: var(--phrase-color); background: color-mix(in srgb, currentColor 18%, transparent); font-size: .68em; cursor: pointer; }
+  #lumi-track-editor-proposal .lumi-overview-segment-selected { background: color-mix(in srgb, currentColor 30%, transparent); }
+
+  #lumi-track-editor-proposal .lumi-inspector { padding: 16px; background: var(--lumi-surface); border-left: 1px solid var(--lumi-line); }
+  #lumi-track-editor-proposal .lumi-inspector-title { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+  #lumi-track-editor-proposal .lumi-inspector-title &gt; div { display: flex; flex-direction: column; gap: 3px; }
+  #lumi-track-editor-proposal .lumi-inspector-title span,
+  #lumi-track-editor-proposal .lumi-field-label,
+  #lumi-track-editor-proposal .lumi-inspector-section &gt; span { color: var(--lumi-text-soft); font-size: .76em; text-transform: uppercase; letter-spacing: .06em; }
+  #lumi-track-editor-proposal .lumi-inspector-title strong { font-weight: 500; }
+  #lumi-track-editor-proposal .lumi-role-swatch { height: 4px; margin: 12px 0 16px; border-radius: 2px; background: var(--lumi-orange); }
+  #lumi-track-editor-proposal .lumi-inspector-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin: 0 0 16px; }
+  #lumi-track-editor-proposal .lumi-inspector-fields div { min-width: 0; }
+  #lumi-track-editor-proposal .lumi-inspector-fields dt { color: var(--lumi-text-soft); font-size: .74em; }
+  #lumi-track-editor-proposal .lumi-inspector-fields dd { margin: 3px 0 0; font-size: .85em; font-variant-numeric: tabular-nums; }
+  #lumi-track-editor-proposal .lumi-field-label { display: block; margin-bottom: 6px; }
+  #lumi-track-editor-proposal .lumi-select-wide { width: 100%; }
+  #lumi-track-editor-proposal .lumi-rule-note { display: flex; gap: 9px; margin: 16px 0; padding: 11px; background: var(--lumi-blue-soft); border-radius: 7px; }
+  #lumi-track-editor-proposal .lumi-rule-note p { display: flex; flex-direction: column; gap: 4px; margin: 0; font-size: .78em; }
+  #lumi-track-editor-proposal .lumi-rule-note p span { color: var(--lumi-text-soft); }
+  #lumi-track-editor-proposal .lumi-inspector-section { padding-top: 16px; border-top: 1px solid var(--lumi-line); }
+  #lumi-track-editor-proposal .lumi-mapping-row { width: 100%; display: grid; grid-template-columns: 1fr auto auto; align-items: center; gap: 6px; padding: 10px 0; border: 0; border-bottom: 1px solid var(--lumi-line); background: transparent; text-align: left; }
+  #lumi-track-editor-proposal .lumi-mapping-row strong { font-weight: 400; color: var(--lumi-text-soft); }
+
+  #lumi-track-editor-proposal .lumi-shortcuts { display: flex; flex-wrap: wrap; gap: 16px; padding: 9px 16px; background: var(--lumi-surface); border-top: 1px solid var(--lumi-line); color: var(--lumi-text-soft); font-size: .74em; }
+  #lumi-track-editor-proposal .lumi-shortcuts span { display: inline-flex; align-items: center; gap: 4px; }
+  #lumi-track-editor-proposal kbd { min-width: 20px; padding: 2px 5px; border: 1px solid var(--lumi-line-strong); border-bottom-width: 2px; border-radius: 4px; background: var(--lumi-surface-raised); color: var(--lumi-text); text-align: center; font-family: inherit; }
+
+  @media (max-width: 980px) {
+    #lumi-track-editor-proposal .lumi-editor-layout { grid-template-columns: 1fr; }
+    #lumi-track-editor-proposal .lumi-inspector { border-left: 0; border-top: 1px solid var(--lumi-line); }
+    #lumi-track-editor-proposal .lumi-track-facts { gap: 12px; }
+    #lumi-track-editor-proposal .lumi-detail-waveform { height: 200px; }
+  }
+
+  @media (max-width: 660px) {
+    #lumi-track-editor-proposal .lumi-appbar,
+    #lumi-track-editor-proposal .lumi-track-header { align-items: flex-start; flex-wrap: wrap; }
+    #lumi-track-editor-proposal .lumi-breadcrumb { order: 3; flex-basis: 100%; }
+    #lumi-track-editor-proposal .lumi-save-state { display: none; }
+    #lumi-track-editor-proposal .lumi-track-facts { width: 100%; display: grid; grid-template-columns: 1fr 1fr; }
+    #lumi-track-editor-proposal .lumi-tabs { overflow-x: auto; }
+    #lumi-track-editor-proposal .lumi-tab { white-space: nowrap; }
+    #lumi-track-editor-proposal .lumi-quantize { margin-left: 0; width: 100%; }
+    #lumi-track-editor-proposal .lumi-waveform-toolbar,
+    #lumi-track-editor-proposal .lumi-overview-heading { align-items: flex-start; flex-direction: column; }
+    #lumi-track-editor-proposal .lumi-detail-waveform { height: 170px; }
+  }
+&lt;/style&gt;
+
+&lt;script&gt;
+(() =&gt; {
+  const root = document.getElementById(&#x27;lumi-track-editor-proposal&#x27;);
+  if (!root) return;
+
+  const totalBeats = 576;
+  const bpm = 128;
+  const zoomLevels = [1, 2, 4, 8, 16, 32, 64];
+  const colors = {
+    &#x27;Intro&#x27;: &#x27;var(--lumi-cyan)&#x27;,
+    &#x27;Bridge&#x27;: &#x27;var(--lumi-green)&#x27;,
+    &#x27;Breakdown 1&#x27;: &#x27;var(--lumi-blue)&#x27;,
+    &#x27;Breakdown 2&#x27;: &#x27;var(--lumi-blue)&#x27;,
+    &#x27;Breakdown 3&#x27;: &#x27;var(--lumi-blue)&#x27;,
+    &#x27;Synth&#x27;: &#x27;#bd79ff&#x27;,
+    &#x27;Pre-drop&#x27;: &#x27;var(--lumi-orange)&#x27;,
+    &#x27;Buildup 1&#x27;: &#x27;var(--lumi-orange)&#x27;,
+    &#x27;Buildup 2&#x27;: &#x27;#ff7a45&#x27;,
+    &#x27;Buildup 3&#x27;: &#x27;#ff5f5f&#x27;,
+    &#x27;Drop&#x27;: &#x27;#ff4d88&#x27;,
+    &#x27;Outro&#x27;: &#x27;var(--lumi-cyan)&#x27;
+  };
+  let points = [
+    { beat: 0, role: &#x27;Intro&#x27; },
+    { beat: 64, role: &#x27;Breakdown 1&#x27; },
+    { beat: 128, role: &#x27;Synth&#x27; },
+    { beat: 192, role: &#x27;Buildup 1&#x27; },
+    { beat: 224, role: &#x27;Buildup 2&#x27; },
+    { beat: 256, role: &#x27;Buildup 3&#x27; },
+    { beat: 288, role: &#x27;Drop&#x27; },
+    { beat: 384, role: &#x27;Breakdown 2&#x27; },
+    { beat: 448, role: &#x27;Synth&#x27; },
+    { beat: 512, role: &#x27;Outro&#x27; }
+  ];
+  let selectedBeat = 192;
+  let playhead = 197.4;
+  let zoomIndex = 3;
+  let viewportStart = 164;
+  let playing = false;
+  let lastFrame = 0;
+
+  const detailCanvas = root.querySelector(&#x27;#lumi-detail-waveform&#x27;);
+  const overviewCanvas = root.querySelector(&#x27;#lumi-overview-waveform&#x27;);
+  const scroll = root.querySelector(&#x27;#lumi-scroll&#x27;);
+  const play = root.querySelector(&#x27;#lumi-play&#x27;);
+  const roleSelect = root.querySelector(&#x27;#lumi-role&#x27;);
+  const editRole = root.querySelector(&#x27;#lumi-edit-role&#x27;);
+
+  const visibleBeats = () =&gt; totalBeats / zoomLevels[zoomIndex];
+  const maxViewportStart = () =&gt; Math.max(0, totalBeats - visibleBeats());
+  const clamp = (value, min, max) =&gt; Math.max(min, Math.min(max, value));
+  const formatTime = beat =&gt; {
+    const seconds = beat * 60 / bpm;
+    const minutes = Math.floor(seconds / 60);
+    const wholeSeconds = Math.floor(seconds % 60);
+    const milliseconds = Math.floor((seconds % 1) * 1000);
+    return `${String(minutes).padStart(2, &#x27;0&#x27;)}:${String(wholeSeconds).padStart(2, &#x27;0&#x27;)}.${String(milliseconds).padStart(3, &#x27;0&#x27;)}`;
+  };
+  const beatLabel = beat =&gt; `Bar ${Math.floor(beat / 4) + 1} · Beat ${Math.floor(beat % 4) + 1}`;
+  const cssColor = role =&gt; colors[role] || &#x27;var(--lumi-blue)&#x27;;
+  const resolveColor = token =&gt; {
+    const probe = document.createElement(&#x27;span&#x27;);
+    probe.style.color = token;
+    root.appendChild(probe);
+    const resolved = getComputedStyle(probe).color;
+    probe.remove();
+    return resolved;
+  };
+
+  function setupCanvas(canvas) {
+    const rect = canvas.getBoundingClientRect();
+    const ratio = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = Math.max(1, Math.floor(rect.width * ratio));
+    canvas.height = Math.max(1, Math.floor(rect.height * ratio));
+    const ctx = canvas.getContext(&#x27;2d&#x27;);
+    ctx.setTransform(ratio, 0, 0, ratio, 0, 0);
+    return { ctx, width: rect.width, height: rect.height };
+  }
+
+  function envelope(beat) {
+    const phase = beat - Math.floor(beat);
+    const kick = Math.exp(-phase * 8.5);
+    const offbeat = Math.exp(-Math.abs(phase - .5) * 18) * .22;
+    const texture = Math.abs(Math.sin(beat * 4.73 + Math.sin(beat * .19))) * .11;
+    const section = points.findIndex((point, index) =&gt; beat &gt;= point.beat &amp;&amp; beat &lt; (points[index + 1]?.beat ?? totalBeats));
+    const role = points[Math.max(0, section)]?.role || &#x27;Intro&#x27;;
+    const roleLevel = role.includes(&#x27;Drop&#x27;) ? .82 : role.includes(&#x27;Buildup 3&#x27;) ? .72 : role.includes(&#x27;Buildup 2&#x27;) ? .62 : role.includes(&#x27;Buildup&#x27;) ? .52 : role.includes(&#x27;Breakdown&#x27;) ? .36 : role === &#x27;Synth&#x27; ? .48 : .3;
+    return clamp(roleLevel * (.28 + kick * .72) + offbeat + texture, .08, .96);
+  }
+
+  function drawWaveform(canvas, startBeat, beatSpan, overview = false) {
+    const { ctx, width, height } = setupCanvas(canvas);
+    const grid = resolveColor(&#x27;var(--lumi-line)&#x27;);
+    const gridStrong = resolveColor(&#x27;var(--lumi-line-strong)&#x27;);
+    const blue = resolveColor(&#x27;var(--lumi-blue)&#x27;);
+    const white = resolveColor(&#x27;var(--lumi-white-wave)&#x27;);
+    const center = height / 2;
+    ctx.clearRect(0, 0, width, height);
+
+    if (!overview) {
+      const firstBeat = Math.ceil(startBeat);
+      const lastBeat = Math.floor(startBeat + beatSpan);
+      for (let beat = firstBeat; beat &lt;= lastBeat; beat++) {
+        const x = (beat - startBeat) / beatSpan * width;
+        ctx.strokeStyle = beat % 4 === 0 ? gridStrong : grid;
+        ctx.globalAlpha = beat % 4 === 0 ? .7 : .32;
+        ctx.lineWidth = beat % 4 === 0 ? 1.25 : 1;
+        ctx.beginPath();
+        ctx.moveTo(x, 0);
+        ctx.lineTo(x, height);
+        ctx.stroke();
+      }
+      ctx.globalAlpha = 1;
+    }
+
+    const step = overview ? 1 : 1;
+    for (let x = 0; x &lt; width; x += step) {
+      const beat = startBeat + (x / width) * beatSpan;
+      const amp = envelope(beat) * height * .46;
+      const lowEnergy = .5 + .5 * Math.sin(beat * .21 + .4);
+      const midEnergy = .5 + .5 * Math.sin(beat * .73 + 1.7);
+      const highEnergy = .5 + .5 * Math.sin(beat * 2.19 + Math.sin(beat * .11));
+      const darkAppearance = window.matchMedia(&#x27;(prefers-color-scheme: dark)&#x27;).matches;
+      const floor = darkAppearance ? 34 : 20;
+      const range = darkAppearance ? 218 : 178;
+      const red = Math.round(floor + range * highEnergy);
+      const green = Math.round(floor + range * midEnergy);
+      const rgbBlue = Math.round(floor + range * lowEnergy);
+      ctx.globalAlpha = overview ? .82 : .94;
+      ctx.strokeStyle = `rgb(${red}, ${green}, ${rgbBlue})`;
+      ctx.lineWidth = overview ? .8 : 1;
+      ctx.beginPath(); ctx.moveTo(x, center - amp); ctx.lineTo(x, center + amp); ctx.stroke();
+    }
+    ctx.globalAlpha = 1;
+
+    if (!overview) {
+      points.forEach(point =&gt; {
+        if (point.beat &lt; startBeat || point.beat &gt; startBeat + beatSpan) return;
+        const x = (point.beat - startBeat) / beatSpan * width;
+        const color = resolveColor(cssColor(point.role));
+        ctx.fillStyle = color;
+        ctx.beginPath(); ctx.moveTo(x - 6, 3); ctx.lineTo(x + 6, 3); ctx.lineTo(x, 12); ctx.closePath(); ctx.fill();
+        ctx.strokeStyle = color;
+        ctx.globalAlpha = .74;
+        ctx.lineWidth = point.beat === selectedBeat ? 2 : 1;
+        ctx.beginPath(); ctx.moveTo(x, 3); ctx.lineTo(x, height); ctx.stroke();
+        ctx.globalAlpha = 1;
+        if (beatSpan &lt;= 144) {
+          ctx.font = &#x27;500 11px -apple-system, BlinkMacSystemFont, sans-serif&#x27;;
+          ctx.fillStyle = color;
+          ctx.fillText(point.role, Math.min(x + 7, width - 82), 22);
+        }
+      });
+    } else {
+      const viewX = viewportStart / totalBeats * width;
+      const viewWidth = visibleBeats() / totalBeats * width;
+      ctx.fillStyle = &#x27;rgba(90, 150, 255, .12)&#x27;;
+      ctx.fillRect(viewX, 0, viewWidth, height);
+      ctx.strokeStyle = blue;
+      ctx.lineWidth = 1.5;
+      ctx.strokeRect(viewX + .75, .75, Math.max(2, viewWidth - 1.5), height - 1.5);
+    }
+
+    const playX = (playhead - startBeat) / beatSpan * width;
+    if (playX &gt;= 0 &amp;&amp; playX &lt;= width) {
+      ctx.strokeStyle = white;
+      ctx.lineWidth = overview ? 1 : 2;
+      ctx.globalAlpha = .95;
+      ctx.beginPath(); ctx.moveTo(playX, 0); ctx.lineTo(playX, height); ctx.stroke();
+      if (!overview) {
+        ctx.fillStyle = white;
+        ctx.beginPath(); ctx.moveTo(playX - 5, 0); ctx.lineTo(playX + 5, 0); ctx.lineTo(playX, 8); ctx.closePath(); ctx.fill();
+      }
+      ctx.globalAlpha = 1;
+    }
+  }
+
+  function drawRuler() {
+    const ruler = root.querySelector(&#x27;#lumi-beat-ruler&#x27;);
+    const span = visibleBeats();
+    ruler.innerHTML = &#x27;&#x27;;
+    const first = Math.ceil(viewportStart);
+    const last = Math.floor(viewportStart + span);
+    for (let beat = first; beat &lt;= last; beat++) {
+      const left = (beat - viewportStart) / span * 100;
+      const tick = document.createElement(&#x27;span&#x27;);
+      tick.className = `lumi-ruler-tick${beat % 4 === 0 ? &#x27; lumi-ruler-tick-bar&#x27; : &#x27;&#x27;}`;
+      tick.style.left = `${left}%`;
+      ruler.appendChild(tick);
+      if (beat % 4 === 0 &amp;&amp; (span &lt;= 72 || beat % 16 === 0)) {
+        const label = document.createElement(&#x27;span&#x27;);
+        label.className = &#x27;lumi-ruler-label&#x27;;
+        label.style.left = `${left}%`;
+        label.textContent = `Bar ${Math.floor(beat / 4) + 1}`;
+        ruler.appendChild(label);
+      }
+    }
+  }
+
+  function renderPhraseLanes() {
+    const detail = root.querySelector(&#x27;#lumi-detail-phrases&#x27;);
+    const overview = root.querySelector(&#x27;#lumi-overview-phrases&#x27;);
+    detail.innerHTML = &#x27;&#x27;;
+    overview.innerHTML = &#x27;&#x27;;
+    const span = visibleBeats();
+    points.forEach((point, index) =&gt; {
+      const end = points[index + 1]?.beat ?? totalBeats;
+      const color = cssColor(point.role);
+      const overviewSegment = document.createElement(&#x27;button&#x27;);
+      overviewSegment.type = &#x27;button&#x27;;
+      overviewSegment.className = `lumi-overview-segment${point.beat === selectedBeat ? &#x27; lumi-overview-segment-selected&#x27; : &#x27;&#x27;}`;
+      overviewSegment.style.flex = `${end - point.beat} 0 0`;
+      overviewSegment.style.setProperty(&#x27;--phrase-color&#x27;, color);
+      overviewSegment.textContent = point.role;
+      overviewSegment.setAttribute(&#x27;aria-label&#x27;, `${point.role}, ${beatLabel(point.beat)} to ${beatLabel(end - 1)}`);
+      overviewSegment.addEventListener(&#x27;click&#x27;, () =&gt; selectPoint(point.beat, true));
+      overview.appendChild(overviewSegment);
+
+      const visibleStart = Math.max(point.beat, viewportStart);
+      const visibleEnd = Math.min(end, viewportStart + span);
+      if (visibleEnd &lt;= visibleStart) return;
+      const segment = document.createElement(&#x27;button&#x27;);
+      segment.type = &#x27;button&#x27;;
+      segment.className = `lumi-phrase-segment${point.beat === selectedBeat ? &#x27; lumi-phrase-segment-selected&#x27; : &#x27;&#x27;}`;
+      segment.style.left = `${(visibleStart - viewportStart) / span * 100}%`;
+      segment.style.width = `${(visibleEnd - visibleStart) / span * 100}%`;
+      segment.style.setProperty(&#x27;--phrase-color&#x27;, color);
+      segment.textContent = point.role;
+      segment.addEventListener(&#x27;click&#x27;, () =&gt; selectPoint(point.beat, false));
+      detail.appendChild(segment);
+    });
+  }
+
+  function updateInspector() {
+    let index = points.findIndex(point =&gt; point.beat === selectedBeat);
+    if (index &lt; 0) { index = 0; selectedBeat = points[0].beat; }
+    const point = points[index];
+    const end = points[index + 1]?.beat ?? totalBeats;
+    root.querySelector(&#x27;#lumi-selected-role&#x27;).textContent = point.role;
+    root.querySelector(&#x27;#lumi-selected-start&#x27;).textContent = beatLabel(point.beat);
+    root.querySelector(&#x27;#lumi-selected-end&#x27;).textContent = index &lt; points.length - 1 ? `${beatLabel(end)} · automatic` : &#x27;End of track · automatic&#x27;;
+    root.querySelector(&#x27;#lumi-selected-length&#x27;).textContent = `${(end - point.beat) / 4} bars`;
+    root.querySelector(&#x27;#lumi-role-swatch&#x27;).style.background = cssColor(point.role);
+    editRole.value = point.role;
+    root.querySelector(&#x27;#lumi-delete&#x27;).disabled = point.beat === 0;
+  }
+
+  function updatePosition() {
+    root.querySelector(&#x27;#lumi-time&#x27;).textContent = formatTime(playhead);
+    root.querySelector(&#x27;#lumi-position&#x27;).textContent = beatLabel(playhead);
+  }
+
+  function syncScroll() {
+    scroll.max = String(Math.ceil(maxViewportStart()));
+    scroll.value = String(Math.round(viewportStart));
+  }
+
+  function render() {
+    viewportStart = clamp(viewportStart, 0, maxViewportStart());
+    drawRuler();
+    drawWaveform(detailCanvas, viewportStart, visibleBeats(), false);
+    drawWaveform(overviewCanvas, 0, totalBeats, true);
+    renderPhraseLanes();
+    updateInspector();
+    updatePosition();
+    syncScroll();
+    root.querySelector(&#x27;#lumi-zoom-label&#x27;).textContent = `${Math.round(visibleBeats() / 4)} bars visible`;
+  }
+
+  function centerOn(beat) {
+    viewportStart = clamp(beat - visibleBeats() / 2, 0, maxViewportStart());
+  }
+
+  function selectPoint(beat, center) {
+    selectedBeat = beat;
+    playhead = beat;
+    if (center) centerOn(beat);
+    render();
+  }
+
+  function setPlayheadFromCanvas(event, canvas, overview) {
+    const rect = canvas.getBoundingClientRect();
+    const fraction = clamp((event.clientX - rect.left) / rect.width, 0, 1);
+    playhead = overview ? fraction * totalBeats : viewportStart + fraction * visibleBeats();
+    if (overview) centerOn(playhead);
+    render();
+  }
+
+  function addPhrasePoint() {
+    const beat = clamp(Math.round(playhead), 0, totalBeats - 1);
+    const existing = points.find(point =&gt; point.beat === beat);
+    if (existing) {
+      existing.role = roleSelect.value;
+    } else {
+      points.push({ beat, role: roleSelect.value });
+      points.sort((a, b) =&gt; a.beat - b.beat);
+    }
+    selectedBeat = beat;
+    playhead = beat;
+    root.querySelector(&#x27;#lumi-save-state&#x27;).textContent = `Phrase point placed at ${beatLabel(beat)}`;
+    render();
+  }
+
+  function deleteSelected() {
+    if (selectedBeat === 0) return;
+    const index = points.findIndex(point =&gt; point.beat === selectedBeat);
+    points = points.filter(point =&gt; point.beat !== selectedBeat);
+    selectedBeat = points[Math.max(0, index - 1)].beat;
+    root.querySelector(&#x27;#lumi-save-state&#x27;).textContent = &#x27;Phrase point removed; adjacent range extended automatically&#x27;;
+    render();
+  }
+
+  function animate(timestamp) {
+    if (!playing) return;
+    if (!lastFrame) lastFrame = timestamp;
+    const elapsed = Math.min(.1, (timestamp - lastFrame) / 1000);
+    lastFrame = timestamp;
+    playhead += elapsed * bpm / 60;
+    if (playhead &gt;= totalBeats) { playhead = totalBeats; playing = false; }
+    if (playhead &gt; viewportStart + visibleBeats() * .85) centerOn(playhead);
+    render();
+    if (playing) requestAnimationFrame(animate);
+  }
+
+  detailCanvas.addEventListener(&#x27;pointerdown&#x27;, event =&gt; setPlayheadFromCanvas(event, detailCanvas, false));
+  detailCanvas.addEventListener(&#x27;pointermove&#x27;, event =&gt; { if (event.buttons === 1) setPlayheadFromCanvas(event, detailCanvas, false); });
+  overviewCanvas.addEventListener(&#x27;pointerdown&#x27;, event =&gt; setPlayheadFromCanvas(event, overviewCanvas, true));
+  scroll.addEventListener(&#x27;input&#x27;, () =&gt; { viewportStart = Number(scroll.value); render(); });
+  root.querySelector(&#x27;#lumi-add-point&#x27;).addEventListener(&#x27;click&#x27;, addPhrasePoint);
+  root.querySelector(&#x27;#lumi-delete&#x27;).addEventListener(&#x27;click&#x27;, deleteSelected);
+  root.querySelector(&#x27;#lumi-zoom-in&#x27;).addEventListener(&#x27;click&#x27;, () =&gt; { if (zoomIndex &lt; zoomLevels.length - 1) { zoomIndex++; centerOn(playhead); render(); } });
+  root.querySelector(&#x27;#lumi-zoom-out&#x27;).addEventListener(&#x27;click&#x27;, () =&gt; { if (zoomIndex &gt; 0) { zoomIndex--; centerOn(playhead); render(); } });
+  play.addEventListener(&#x27;click&#x27;, () =&gt; {
+    playing = !playing;
+    play.innerHTML = playing ? &#x27;&lt;i data-lucide=&quot;pause&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&#x27; : &#x27;&lt;i data-lucide=&quot;play&quot; aria-hidden=&quot;true&quot;&gt;&lt;/i&gt;&#x27;;
+    play.setAttribute(&#x27;aria-label&#x27;, playing ? &#x27;Pause&#x27; : &#x27;Play&#x27;);
+    if (window.lucide) lucide.createIcons({ attrs: { width: 16, height: 16 } });
+    if (playing) { lastFrame = 0; requestAnimationFrame(animate); }
+  });
+  root.querySelector(&#x27;#lumi-stop&#x27;).addEventListener(&#x27;click&#x27;, () =&gt; { playing = false; playhead = selectedBeat; render(); });
+  root.querySelector(&#x27;#lumi-save&#x27;).addEventListener(&#x27;click&#x27;, () =&gt; {
+    root.querySelector(&#x27;#lumi-save-state&#x27;).textContent = &#x27;Saved locally just now&#x27;;
+  });
+  editRole.addEventListener(&#x27;change&#x27;, () =&gt; {
+    const point = points.find(item =&gt; item.beat === selectedBeat);
+    if (point) point.role = editRole.value;
+    root.querySelector(&#x27;#lumi-save-state&#x27;).textContent = &#x27;Unsaved phrase role change&#x27;;
+    render();
+  });
+  root.addEventListener(&#x27;keydown&#x27;, event =&gt; {
+    if (event.target.matches(&#x27;select, input&#x27;)) return;
+    if (event.code === &#x27;Space&#x27;) { event.preventDefault(); play.click(); }
+    if (event.key.toLowerCase() === &#x27;p&#x27;) addPhrasePoint();
+    if (event.key === &#x27;Backspace&#x27; || event.key === &#x27;Delete&#x27;) deleteSelected();
+    if (event.key === &#x27;ArrowLeft&#x27; || event.key === &#x27;ArrowRight&#x27;) {
+      event.preventDefault();
+      const direction = event.key === &#x27;ArrowLeft&#x27; ? -1 : 1;
+      playhead = clamp(Math.round(playhead) + direction * (event.shiftKey ? 4 : 1), 0, totalBeats);
+      centerOn(playhead);
+      render();
+    }
+  });
+  window.addEventListener(&#x27;resize&#x27;, render);
+  render();
+  requestAnimationFrame(() =&gt; requestAnimationFrame(render));
+})();
+&lt;/script&gt;
+
+&lt;script src=&quot;https://unpkg.com/@floating-ui/core@1.7.3/dist/floating-ui.core.umd.min.js&quot;&gt;&lt;/script&gt;
+&lt;script src=&quot;https://unpkg.com/@floating-ui/dom@1.7.4/dist/floating-ui.dom.umd.min.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+(() =&gt; {
+  if (window.FloatingUIDOM == null) {
+    return;
+  }
+  const { autoUpdate, computePosition, flip, offset, shift, size } =
+    window.FloatingUIDOM;
+  const tooltipPlacements = new Set([&quot;top&quot;, &quot;right&quot;, &quot;bottom&quot;, &quot;left&quot;]);
+  const tooltipId = `codex-visualization-tooltip-${
+    window.crypto?.randomUUID?.() ?? Date.now().toString(36)
+  }`;
+  const tooltipGap = 5;
+  const hoverDelay = 700;
+  const skipDelay = 300;
+  let activeTrigger = null;
+  let pendingTrigger = null;
+  let tooltip = null;
+  let openTimeout = null;
+  let autoUpdateCleanup = null;
+  let positionRequest = 0;
+  let skipDelayUntil = 0;
+
+  const getTrigger = (target) =&gt;
+    target?.nodeType === Node.ELEMENT_NODE
+      ? target.closest(&quot;[data-tooltip]&quot;)
+      : null;
+  const containsTarget = (trigger, target) =&gt;
+    target?.nodeType != null &amp;&amp; trigger.contains(target);
+  const getContent = (trigger) =&gt;
+    trigger.getAttribute(&quot;data-tooltip&quot;)?.trim() ?? &quot;&quot;;
+  const getPlacement = (trigger) =&gt; {
+    const placement = trigger.getAttribute(&quot;data-tooltip-placement&quot;);
+    return tooltipPlacements.has(placement) ? placement : &quot;top&quot;;
+  };
+  const getTooltip = () =&gt; {
+    if (tooltip == null) {
+      tooltip = document.createElement(&quot;div&quot;);
+      tooltip.id = tooltipId;
+      tooltip.className = &quot;tooltip&quot;;
+      tooltip.setAttribute(&quot;role&quot;, &quot;tooltip&quot;);
+    }
+    return tooltip;
+  };
+  const setDescribedBy = (trigger, described) =&gt; {
+    const ids = new Set(
+      (trigger.getAttribute(&quot;aria-describedby&quot;) ?? &quot;&quot;)
+        .split(/\s+/)
+        .filter(Boolean),
+    );
+    if (described) {
+      ids.add(tooltipId);
+    } else {
+      ids.delete(tooltipId);
+    }
+    if (ids.size === 0) {
+      trigger.removeAttribute(&quot;aria-describedby&quot;);
+    } else {
+      trigger.setAttribute(&quot;aria-describedby&quot;, [...ids].join(&quot; &quot;));
+    }
+  };
+  const clearOpenTimeout = () =&gt; {
+    if (openTimeout != null) {
+      window.clearTimeout(openTimeout);
+      openTimeout = null;
+    }
+    pendingTrigger = null;
+  };
+  const closeTooltip = (activateSkipDelay = true) =&gt; {
+    clearOpenTimeout();
+    positionRequest += 1;
+    autoUpdateCleanup?.();
+    autoUpdateCleanup = null;
+    if (activeTrigger == null) {
+      return;
+    }
+    setDescribedBy(activeTrigger, false);
+    activeTrigger = null;
+    tooltip?.remove();
+    if (activateSkipDelay) {
+      skipDelayUntil = Date.now() + skipDelay;
+    }
+  };
+  const updatePosition = (trigger, floating) =&gt; {
+    const request = ++positionRequest;
+    void computePosition(trigger, floating, {
+      middleware: [
+        offset(tooltipGap),
+        flip({ padding: tooltipGap }),
+        shift({ padding: tooltipGap }),
+        size({
+          padding: tooltipGap,
+          apply({ availableHeight, availableWidth, elements }) {
+            elements.floating.style.setProperty(
+              &quot;--tooltip-available-width&quot;,
+              `${Math.max(0, availableWidth)}px`,
+            );
+            elements.floating.style.setProperty(
+              &quot;--tooltip-available-height&quot;,
+              `${Math.max(0, availableHeight)}px`,
+            );
+          },
+        }),
+      ],
+      placement: getPlacement(trigger),
+      strategy: &quot;fixed&quot;,
+    })
+      .then(({ x, y }) =&gt; {
+        if (activeTrigger !== trigger || request !== positionRequest) {
+          return;
+        }
+        const scale = window.devicePixelRatio || 1;
+        floating.style.transform = `translate(${Math.round(x * scale) / scale}px, ${Math.round(y * scale) / scale}px)`;
+        floating.style.visibility = &quot;visible&quot;;
+      })
+      .catch(() =&gt; {
+        if (activeTrigger === trigger &amp;&amp; request === positionRequest) {
+          closeTooltip(false);
+        }
+      });
+  };
+  const openTooltip = (trigger) =&gt; {
+    const content = getContent(trigger);
+    if (!trigger.isConnected || content.length === 0) {
+      return;
+    }
+    clearOpenTimeout();
+    if (activeTrigger === trigger) {
+      return;
+    }
+    closeTooltip();
+    const floating = getTooltip();
+    floating.textContent = content;
+    floating.style.visibility = &quot;hidden&quot;;
+    floating.style.transform = &quot;translate(0, 0)&quot;;
+    document.body.appendChild(floating);
+    activeTrigger = trigger;
+    setDescribedBy(trigger, true);
+    autoUpdateCleanup = autoUpdate(trigger, floating, () =&gt; {
+      updatePosition(trigger, floating);
+    });
+  };
+  const requestOpen = (trigger, immediate = false) =&gt; {
+    if (
+      getContent(trigger).length === 0 ||
+      activeTrigger === trigger ||
+      pendingTrigger === trigger
+    ) {
+      return;
+    }
+    clearOpenTimeout();
+    pendingTrigger = trigger;
+    const delay =
+      immediate || activeTrigger != null || Date.now() &lt; skipDelayUntil
+        ? 0
+        : hoverDelay;
+    if (delay === 0) {
+      openTooltip(trigger);
+      return;
+    }
+    openTimeout = window.setTimeout(() =&gt; {
+      openTimeout = null;
+      pendingTrigger = null;
+      openTooltip(trigger);
+    }, delay);
+  };
+  const handlePointerOpen = (event) =&gt; {
+    if (event.pointerType === &quot;touch&quot;) {
+      return;
+    }
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    requestOpen(trigger);
+  };
+  const handleLeave = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (trigger == null || containsTarget(trigger, event.relatedTarget)) {
+      return;
+    }
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const handleFocusIn = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (trigger?.matches(&quot;:focus-visible&quot;)) {
+      requestOpen(trigger, true);
+    }
+  };
+  const handleKeyDown = (event) =&gt; {
+    if (event.key === &quot;Escape&quot;) {
+      closeTooltip();
+    }
+  };
+  const handleContextMenu = (event) =&gt; {
+    const trigger = getTrigger(event.target);
+    if (activeTrigger === trigger || pendingTrigger === trigger) {
+      closeTooltip();
+    }
+  };
+  const destroy = () =&gt; {
+    closeTooltip(false);
+    document.removeEventListener(&quot;pointerover&quot;, handlePointerOpen);
+    document.removeEventListener(&quot;pointerout&quot;, handleLeave);
+    document.removeEventListener(&quot;focusin&quot;, handleFocusIn);
+    document.removeEventListener(&quot;focusout&quot;, handleLeave);
+    document.removeEventListener(&quot;keydown&quot;, handleKeyDown);
+    document.removeEventListener(&quot;contextmenu&quot;, handleContextMenu);
+    tooltip = null;
+  };
+
+  document.addEventListener(&quot;pointerover&quot;, handlePointerOpen);
+  document.addEventListener(&quot;pointerout&quot;, handleLeave);
+  document.addEventListener(&quot;focusin&quot;, handleFocusIn);
+  document.addEventListener(&quot;focusout&quot;, handleLeave);
+  document.addEventListener(&quot;keydown&quot;, handleKeyDown);
+  document.addEventListener(&quot;contextmenu&quot;, handleContextMenu);
+  window.addEventListener(&quot;pagehide&quot;, destroy, { once: true });
+})();
+&lt;/script&gt;
+&lt;script id=&quot;codex-visualization-lucide&quot; async src=&quot;https://unpkg.com/lucide@1.17.0/dist/umd/lucide.js&quot;&gt;&lt;/script&gt;
+&lt;script&gt;
+(() =&gt; {
+  const initialize = () =&gt; {
+    globalThis.lucide?.createIcons({ attrs: { width: 16, height: 16 } });
+  };
+  if (globalThis.lucide != null) {
+    initialize();
+    return;
+  }
+  document
+    .getElementById(&quot;codex-visualization-lucide&quot;)
+    ?.addEventListener(&quot;load&quot;, initialize, { once: true });
+})();
+&lt;/script&gt;
+
+&lt;/body&gt;
+&lt;/html&gt;
+"></iframe>
+</body>
+</html>

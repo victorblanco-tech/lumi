@@ -67,8 +67,9 @@ stap.
 - force-push en branch deletion zijn niet toegestaan;
 - directe pushes worden tijdens de vroege solo-fase technisch toegestaan, maar
   PR's blijven de standaardwerkwijze;
-- zodra de volledige CI bestaat, wordt ook voor `dev` een geslaagde PR-check
-  verplicht.
+- tijdens de solo POC-fase is `./scripts/verify.sh` de verplichte lokale gate;
+  hosted PR-checks worden pas opnieuw verplicht wanneer een team of externe
+  contributors daar aantoonbaar baat bij hebben.
 
 ### 3.3 Werkbranches
 
@@ -122,19 +123,39 @@ Tijdens de pre-1.0-fase:
 
 ### 5.1 Initiële versie
 
-De repository start op `0.0.0`: er is nog geen uitvoerbaar product uitgebracht.
-De eerste bruikbare simulator-MVP wordt naar verwachting `0.1.0`.
+De ontwikkelbranch start op `0.0.1-dev`. De suffix maakt direct zichtbaar dat
+dit geen productieversie is. Als deze ontwikkelcyclus wordt uitgebracht, wordt
+de suffix verwijderd en ontstaat release `0.0.1`.
+
+Na iedere productieversie krijgt `dev` meteen de eerstvolgende geplande versie
+met `-dev`, bijvoorbeeld:
+
+```text
+dev:   0.0.1-dev
+main:  0.0.1
+dev:   0.0.2-dev
+rc:    0.0.2-rc.1
+main:  0.0.2
+```
+
+Een grotere functionele MVP-stap mag bewust naar `0.1.0-dev` worden verhoogd.
 
 ### 5.2 Canonieke versie
 
-Het rootbestand `VERSION` is de canonieke marketingversie. Een releasevalidatie
-controleert later automatisch dat deze gelijk is aan:
+Het rootbestand `VERSION` is de canonieke bronversie. Op `dev` is dit een geldige
+SemVer pre-release zoals `0.0.1-dev`; op een productiecommit op `main` staat
+uitsluitend `MAJOR.MINOR.PATCH`. Een releasevalidatie controleert later
+automatisch dat deze gelijk is aan:
 
 - de Rust workspace/packageversie;
 - macOS `MARKETING_VERSION` / `CFBundleShortVersionString`;
 - iOS `MARKETING_VERSION` / `CFBundleShortVersionString`;
 - documentatie- en protocolversieverwijzingen waar van toepassing;
-- de Git-tag zonder `v`-prefix.
+- de Git-tag zonder `v`-prefix, uitsluitend bij productiebuilds.
+
+Omdat Apple voor `CFBundleShortVersionString` alleen numerieke componenten
+gebruikt, wordt daar de suffix weggelaten. De ontwikkelstatus blijft zichtbaar
+in de appnaam/buildmetadata en het monotone `CFBundleVersion`.
 
 ### 5.3 Buildnummers
 
@@ -142,8 +163,9 @@ Buildnummers zijn monotonisch en veranderen bij iedere CI-build:
 
 - Apple `CFBundleVersion`: afgeleid van de CI-run plus retry-attempt;
 - artefactnaam: versie, channel, korte commit-SHA en buildnummer;
-- GitHub developmentbuild: `0.1.0-dev.<run>+<sha>` als display-/artefactversie;
-- release candidate: `0.1.0-rc.<n>` in GitHub/artefactnamen, met Apple-compatible
+- GitHub developmentbuild: de versie uit `VERSION`, aangevuld met buildnummer en
+  korte commit-SHA in de artefactnaam;
+- release candidate: `0.0.2-rc.<n>` in GitHub/artefactnamen, met Apple-compatible
   numerieke marketing- en buildversies in de appbundle.
 
 Een buildnummer is nooit een vervanging voor de productversie.
@@ -172,18 +194,35 @@ GitHub-generated release notes vullen dit aan met gekoppelde PR's en auteurs.
 
 ## 7. Delivery channels
 
+De macOS-apps zijn naast elkaar installeerbaar en hebben elk een eigen bundle-
+identifier, preferencesdomein en Application Support-map:
+
+| Appkanaal | Xcode | App | Bundle identifier | Lokale data |
+|---|---|---|---|---|
+| Development | Debug | Lumi Dev | `co.victorblan.tech.lumi.dev` | `Lumi Dev` |
+| Release candidate | Preview | Lumi Preview | `co.victorblan.tech.lumi.preview` | `Lumi Preview` |
+| Production | Release | Lumi | `co.victorblan.tech.lumi` | `Lumi` |
+
+De versie promoveert zonder codefork van `X.Y.Z-dev`, via `X.Y.Z-rc.N`, naar
+`X.Y.Z`. Een Preview- of Dev-database ontstaat alleen leeg of via een expliciete
+SQLite-backup van Stable; een bestaand kanaal wordt nooit stilzwijgend
+overschreven.
+
 | Channel | Bron | Doel | Automatisch? |
 |---|---|---|---:|
-| PR validation | iedere PR | checks en unsigned testbuilds | ja |
-| Development | `dev` | tijdelijke CI-artefacten | ja |
+| PR validation | iedere PR | volledige lokale `./scripts/verify.sh` | lokaal |
+| Development | `dev` | geen dubbele hosted build in de solo POC-fase | nee |
 | Internal beta | handmatige run op `dev`/RC | TestFlight internal + macOS beta | bewust gestart |
 | Release candidate | releasecommit | signed kandidaten en acceptatietest | bewust gestart |
 | Production | tag `vX.Y.Z` op `main` | GitHub Release + App Store | na goedkeuring |
 
 ## 8. CI-pipeline
 
-De concrete workflows worden toegevoegd zodra de betreffende projecttargets
-bestaan. De beoogde checks zijn:
+De checks bestaan als lokale scripts en blijven gelijk aan de hosted release-
+workflow. Tijdens de solo POC-fase draait de volledige hosted workflow alleen
+handmatig of na een merge naar `main`; onderstaande PR-checks worden lokaal
+uitgevoerd. Bij teamontwikkeling kunnen ze opnieuw als hosted required checks
+worden geactiveerd.
 
 ### 8.1 Snelle PR-checks
 
@@ -238,7 +277,7 @@ bestaan. De beoogde checks zijn:
 Maak `release/vX.Y.Z` vanaf `dev` en wijzig uitsluitend releasegerelateerde
 zaken:
 
-- `VERSION`;
+- `VERSION`: verwijder `-dev` of vervang dit eerst door `-rc.<n>`;
 - Cargo- en Xcodeversies;
 - changelog;
 - migratie-/compatibiliteitsnotities;
@@ -277,7 +316,8 @@ Start bewust de releaseworkflow op de mergecommit:
 ### Stap 6 – Terugsynchroniseren
 
 Merge `main` terug naar `dev` zodat release- en taghistorie gemeenschappelijk
-blijven. Verwijder de releasebranch na succesvolle synchronisatie.
+blijven. Verhoog daarna `VERSION` op `dev` naar de volgende geplande versie met
+`-dev`. Verwijder de releasebranch na succesvolle synchronisatie.
 
 ## 10. macOS deployment
 
@@ -389,14 +429,28 @@ repositories ondersteunt:
 
 ## 15. GitHub-inrichting
 
+### Huidige repositorystatus (2026-08-02)
+
+- `dev` is aangemaakt en ingesteld als default branch;
+- squash merge en merge commits zijn actief, rebase merge is uitgeschakeld;
+- head branches worden na een merge automatisch verwijderd;
+- de bronbranchguard voor PR's naar `main` en alle release-labels zijn actief;
+- remote branch protection voor de private repository is nog niet actief, omdat
+  GitHub dit op het huidige Free-plan weigert. Hiervoor is GitHub Pro nodig of
+  moet de repository publiek worden gemaakt.
+
+Tot branch protection beschikbaar is, blijft "nooit direct naar `main` pushen"
+een procesregel. De Actions-guard controleert PR's, maar kan een directe push
+niet blokkeren.
+
 ### Direct activeren na de initiële repositorycommit
 
 - `dev` aanmaken en als default branch instellen;
 - squash merge en merge commits toestaan;
 - rebase merge uitschakelen;
 - merged branches automatisch verwijderen;
-- `main`: PR vereist, geen force-push of deletion;
-- `dev`: geen force-push of deletion;
+- `main`: PR vereist, geen force-push of deletion (wacht op GitHub Pro);
+- `dev`: geen force-push of deletion (wacht op GitHub Pro);
 - guard-workflow voor toegestane bronbranches richting `main`;
 - PR-template en release-notescategorieën toevoegen.
 

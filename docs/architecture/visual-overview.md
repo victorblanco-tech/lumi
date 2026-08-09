@@ -92,11 +92,14 @@ flowchart TB
   subgraph engine["lumi-engine – Rust LaunchAgent"]
     API["Versiegebonden Control API<br/>commands, snapshots, events"]
 
-    subgraph inputs["Source adapters"]
+    subgraph inputs["Deck source providers"]
       SIM["Simulator"]
-      META["Rekordbox metadata"]
-      LIVE["Beat Link Trigger / PRO DJ LINK"]
+      REPLAY["Replay"]
+      LIVE["DeckSourceProvider<br/>Beat Link eerst; native/anders later"]
     end
+
+    META["MusicLibrarySourceProvider<br/>Rekordbox 7 eerst"]
+    LIBSTORE[("Lumi Music Library<br/>baselines + phrase revisions")]
 
     QUEUE[("Begrensde eventqueue")]
     REDUCER[["Single-writer reducer<br/>centrale runtime-state"]]
@@ -104,7 +107,7 @@ flowchart TB
     subgraph planning["Planning Engine"]
       direction LR
       MATCH["Track matching"]
-      RULES["Theme, kleur, rotatie<br/>en variation rules"]
+      RULES["Late-bound Theme, kleur, rotatie<br/>en matrixresolutie"]
       PREFLIGHT["Preflight en fallbacks"]
     end
 
@@ -118,11 +121,15 @@ flowchart TB
       SCENE["Self-contained ApplyScene<br/>bank → delay → Autoloop"]
     end
 
-    PROFILE["SoundSwitch-outputprofiel<br/>semantische actie → MIDI"]
+    OUTPUT["LightingOutputProvider<br/>SoundSwitch MIDI eerst"]
+    PROFILE["Targetprofiel<br/>semantische actie → MIDI"]
+    TRANSPORT["MidiTransportProvider<br/>CoreMIDI eerst"]
     LOGS[("Config, revisions,<br/>sessies en logs")]
 
     SIM --> QUEUE
-    META --> QUEUE
+    REPLAY --> QUEUE
+    META --> LIBSTORE
+    LIBSTORE --> QUEUE
     LIVE --> QUEUE
     API -->|"user commands"| QUEUE
     QUEUE --> REDUCER
@@ -136,9 +143,12 @@ flowchart TB
     REDUCER --> GATE
     GATE --> BOUNDARY
     BOUNDARY --> SCENE
-    SCENE --> PROFILE
-    PROFILE -->|"effectresultaat"| QUEUE
+    SCENE --> OUTPUT
+    OUTPUT --> PROFILE
+    PROFILE --> TRANSPORT
+    TRANSPORT -->|"effectresultaat"| QUEUE
     REDUCER <--> LOGS
+    LIBSTORE <--> LOGS
     PLANS <--> LOGS
     REDUCER -->|"state + plan events"| API
   end
@@ -147,12 +157,16 @@ flowchart TB
 
   MACAPP <-->|"lokale IPC"| API
   IOSAPP <-->|"Bonjour + pairing + TLS op LAN"| API
-  PROFILE -->|"virtuele MIDI-poort"| SS
+  TRANSPORT -->|"virtuele MIDI-poort"| SS
 ```
 
-De Planning Engine doet het creatieve werk vooraf. De Execution Engine voert in
-`LIVE` alleen een reeds gevalideerde cue uit. UI's, source-adapters en
-outputworkers muteren nooit rechtstreeks de centrale state.
+De Music Library bewaart een eigen versioned phrase-timeline nadat een
+source-adapter de eerste baseline heeft geleverd. De Planning Engine bindt het
+Theme pas per geladen track en doet het creatieve werk vooraf. De Execution
+Engine voert in `LIVE` alleen een reeds gevalideerde cue uit. UI's,
+source-adapters en outputproviders muteren nooit rechtstreeks de centrale state.
+Rekordbox, Beat Link en SoundSwitch zijn eerste providerimplementaties en geen
+dependencies van de corecontracten.
 
 ## Plaat 3 – De Lumi-usecase: het ontbrekende stuk
 

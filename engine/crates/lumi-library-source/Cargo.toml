@@ -1,0 +1,12 @@
+[package]
+name = "lumi-library-source"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+lumi-library = { path = "../lumi-library" }
+
+[lints]
+workspace = true

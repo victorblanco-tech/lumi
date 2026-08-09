@@ -1,0 +1,15 @@
+{
+  "protocolVersion": 1,
+  "messageType": "command",
+  "messageId": "cmd-0001",
+  "sequence": 1,
+  "correlationId": "interaction-0001",
+  "sentAt": "2026-08-02T18:00:00Z",
+  "payload": {
+    "kind": "selectTheme",
+    "planId": "14113485664261432828",
+    "trackLoadId": 2001,
+    "themeId": 1,
+    "expectedPlanRevision": 1
+  }
+}

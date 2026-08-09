@@ -1,0 +1,15 @@
+[package]
+name = "lumi-rekordbox-xml"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+quick-xml = { version = "0.41.0", features = ["serialize"] }
+serde = { version = "1", features = ["derive"] }
+sha2 = "0.10.9"
+thiserror = "2"
+
+[lints]
+workspace = true

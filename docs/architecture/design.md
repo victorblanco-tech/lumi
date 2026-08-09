@@ -54,9 +54,9 @@ functionele gat staan in [Functionele architectuurplaten](visual-overview.md).
                                                 |
                     +---------------------------+--------------------------+
                     |                           |                          |
-              Source adapters            Planning & execution       MIDI output
+           Deck source providers         Planning & execution    Lighting output provider
                     |                           |                          |
-     Simulator / metadata / BLT       Lighting Plans en state       SoundSwitch
+       Simulator / Beat Link          Lighting Plans en state    SoundSwitch via MIDI
                                                                            ^
                                                                            |
                                                         fysieke MIDI-controller
@@ -70,14 +70,16 @@ functionele gat staan in [Functionele architectuurplaten](visual-overview.md).
 `lumi-engine` is een zelfstandige Rust-binary zonder gebruikersinterface. De
 engine bevat:
 
-- source-adapters;
+- provider-onafhankelijke deck-sourcepoort en adapters;
+- provider-onafhankelijke music-library-sourcepoort en read-only imports;
 - trackmatching en metadatareferenties;
+- duurzame Lumi-owned phrase-timelines en revisions;
 - lighting-leaderselectie;
 - Planning Engine;
 - Execution Engine;
 - centrale runtime-state;
 - configuratievalidatie;
-- MIDI-output;
+- provider-onafhankelijke lighting-outputpoort en MIDI-transport;
 - lokale API/IPC;
 - gestructureerde logging en diagnostiek.
 
@@ -113,18 +115,32 @@ Verlies van de iPhone-verbinding heeft geen invloed op planning of uitvoering.
 
 ## 5. Plan-and-execute
 
-### 5.1 Planning
+### 5.1 Library-import en timeline-ownership
 
-Zodra een nieuwe track op een deck wordt geladen, publiceert de source-adapter
+Een `MusicLibrarySourceProvider` levert een immutable baseline met raw
+trackanalyse. Rekordbox 7 is de eerste adapter en wordt alleen vanuit een
+consistente read-only snapshot geïmporteerd wanneer Rekordbox gesloten is. De
+eerste source-mapping initialiseert een `LumiPhraseTimeline`; daarna is Lumi
+eigenaar van grenzen, roles en revisions. Reimport toont sourcewijzigingen maar
+overschrijft user edits nooit automatisch.
+
+Phrasegrenzen zijn beatgebaseerd, aaneengesloten en standaard maatgesnapt. De
+configureerbare Lumi-roles bepalen rechtstreeks de gelijknamige Autoloop
+Category. Raw providerlabels en concrete SoundSwitch-types komen niet in de
+planner terecht.
+
+### 5.2 Planning
+
+Zodra een nieuwe track op een deck wordt geladen, publiceert de deck-sourceprovider
 een `TrackLoaded`-event met een unieke `trackLoadInstanceId`. Laden staat los van
 lighting-leader- of tempo-masterstatus.
 
 De Planning Engine:
 
-1. matcht de track met lokale metadata;
-2. leest kleur en phrase-timeline;
-3. projecteert de toepasselijke theme-regels en trackrotatie;
-4. kiest vooraf een concrete loop voor iedere phrase-instance;
+1. matcht de track met de canonieke Lumi-library;
+2. leest kleur en de autoritatieve Lumi phrase-timeline;
+3. kiest per track-load-instance een voorlopig Theme uit uitlegbare regels;
+4. resolveert `Theme × Phrase Role × Variant` naar een concrete loop;
 5. voegt fallbacks en outputacties toe;
 6. valideert het volledige plan;
 7. publiceert een bewerkbaar `AUTO_PROPOSED`-plan;
@@ -133,7 +149,12 @@ De Planning Engine:
 Het maken van een plan verstuurt geen MIDI en verhoogt geen trackcounter. Een
 track telt pas wanneer hij daadwerkelijk lighting leader wordt.
 
-### 5.2 Lighting Plan
+Een tracktemplate bewaart standaard geen Theme. De engine kiest dit bij het
+laden; een Mac- of iPhone-keuze wijzigt alleen de actuele planinstance. Een
+theme-onafhankelijke vaste variant blijft bij een Theme-wijziging dezelfde
+matrixrij gebruiken.
+
+### 5.3 Lighting Plan
 
 Het centrale domeinobject is `TrackLightingPlan`. De onderstaande
 TypeScript-achtige notatie is illustratief en schrijft niet de implementatietaal
@@ -169,22 +190,22 @@ minimaal track-load-instance en startbeat:
 ```typescript
 interface PlannedPhraseCue {
   cueId: string;
-  phraseType: PhraseType;
+  phraseRoleId: string;
   startBeat: number;
   endBeat: number;
-  bank: number;
-  loopId: string;
-  intensity: number;
+  themeId: string;
+  variantId: string;
+  resolvedAutoloopId: string;
   origin: "AUTO" | "USER";
   locked: boolean;
-  fallbackLoopId?: string;
+  fallbackAutoloopId?: string;
 }
 ```
 
 Daardoor kunnen twee drops in dezelfde track verschillende vooraf gekozen loops
 hebben.
 
-### 5.3 Handmatige aanpassing en replanning
+### 5.4 Handmatige aanpassing en replanning
 
 De gebruiker kan op Mac of iPhone:
 
@@ -202,7 +223,7 @@ Wanneer automatische context verandert, wordt een nieuw basisplan berekend en
 worden compatibele user-locks daarop gerebased. Een niet meer geldige gelockte
 keuze maakt het plan `STALE`; Lumi vervangt die keuze niet stilzwijgend.
 
-### 5.4 Activatie en uitvoering
+### 5.5 Activatie en uitvoering
 
 Wanneer een deck lighting leader wordt, valideert Lumi dat het ready plan
 nog bij exact dezelfde track-load-instance hoort. Daarna wordt het plan
@@ -269,7 +290,7 @@ De outputlevenscyclus staat los van planstatus en themeregels:
 
 Een ontbrekend MIDI-device blokkeert `Start`, maar niet `Arm` of de simulator.
 
-## 8. MIDI en SoundSwitch
+## 8. Provider-onafhankelijke output, MIDI en SoundSwitch
 
 ### 8.1 Semantische output
 
@@ -282,9 +303,13 @@ ENABLE_STATIC_LOOK(id)
 DISABLE_STATIC_LOOK(id)
 ```
 
-Een SoundSwitch-outputprofiel vertaalt deze acties naar MIDI-messages. De
-capaciteiten van het actieve targetprofiel bepalen onder andere het aantal
-banks, slots en ondersteunde Static Look-acties.
+De core levert deze acties via een stabiele `LightingOutputProvider`-poort. De
+eerste implementatie is een SoundSwitch-MIDI-provider. Een configureerbaar
+SoundSwitch-outputprofiel vertaalt de acties naar MIDI-messages; een
+afzonderlijke `MidiTransportProvider` verzendt deze via CoreMIDI. De capaciteiten
+van de actieve provider en het targetprofiel bepalen onder andere het aantal
+banks, slots en ondersteunde Static Look-acties. Planning, state en UI kennen
+geen CoreMIDI- of SoundSwitch-specifieke types.
 
 ### 8.2 Co-existentie met fysieke controllers
 
@@ -392,7 +417,9 @@ worden vastgelegd:
 - alle applicatie-assets lokaal gebundeld.
 
 De engine schrijft nooit rechtstreeks in de live Rekordbox- of SoundSwitch-
-database. Imports gebeuren read-only, bij voorkeur vanuit exports of snapshots.
+database. Rekordbox 7-import gebeurt vanuit een read-only snapshot wanneer de
+bronapp gesloten is. Importbaselines, de canonieke library en Lumi-owned
+timeline-revisions worden lokaal in SQLite opgeslagen achter een repositorypoort.
 
 ## 12. Fout- en herstelgedrag
 
@@ -422,8 +449,9 @@ offline en lokaal, ook wanneer installatie en updates via Apple lopen.
 De volgende onderwerpen zijn bewust nog geen bewezen capabilities:
 
 1. exacte Rekordbox-phrase- en kleurimportstrategie;
-2. live deck-, load-, beat-, on-air- en masterevents via Beat Link Trigger of
-   PRO DJ LINK;
+2. live deck-, load-, beat-, on-air- en masterevents via de eerste
+   `BeatLinkDeckSourceProvider` en later eventueel een native PRO DJ LINK- of
+   andere provider;
 3. stabiele trackidentiteit tussen metadata-export, USB en live deck;
 4. SoundSwitch MIDI-bank-, Autoloop- en Static Look-mappings;
 5. betrouwbare bank-switchdelay en quantisatie;
@@ -431,7 +459,7 @@ De volgende onderwerpen zijn bewust nog geen bewezen capabilities:
 7. gedrag wanneer Control One en Lumi gelijktijdig SoundSwitch bedienen;
 8. lokale Bonjour-, pairing- en reconnectflow in een druk booth-netwerk;
 9. App Store Review-flow met ingebouwde demomodus;
-10. exacte Windows-service- en MIDI-adapters in een latere fase.
+10. exacte Windows-service- en MIDI-transportproviders in een latere fase.
 
 ## 15. Niet in dit document
 

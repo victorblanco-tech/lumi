@@ -19,6 +19,8 @@ macOS-publicatie vinden bovendien niet atomair plaats.
 - Hotfixes vertrekken vanaf en keren terug naar `main`.
 - `main` wordt na iedere release/hotfix terug naar `dev` gesynchroniseerd.
 - Productversies volgen Semantic Versioning en staan canoniek in `VERSION`.
+- `dev` draagt de eerstvolgende geplande versie met `-dev`; productiecommits op
+  `main` hebben geen pre-release suffix.
 - Productietags gebruiken `vMAJOR.MINOR.PATCH` en worden niet verplaatst.
 - Releasebouw en publicatie zijn afzonderlijke, gecontroleerde stappen.
 - macOS en iPhone delen een marketingversie, maar hebben eigen monotone

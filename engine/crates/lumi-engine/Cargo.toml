@@ -1,0 +1,35 @@
+[package]
+name = "lumi-engine"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+
+[dependencies]
+lumi-blt-midi = { path = "../lumi-blt-midi" }
+lumi-deck-source = { path = "../lumi-deck-source" }
+lumi-domain = { path = "../lumi-domain" }
+lumi-lighting-output = { path = "../lumi-lighting-output" }
+lumi-local-playback = { path = "../lumi-local-playback" }
+lumi-library = { path = "../lumi-library" }
+lumi-library-demo = { path = "../lumi-library-demo" }
+lumi-library-source = { path = "../lumi-library-source" }
+lumi-library-sqlite = { path = "../lumi-library-sqlite" }
+lumi-midi-coremidi = { path = "../lumi-midi-coremidi" }
+lumi-midi-output = { path = "../lumi-midi-output" }
+lumi-output-dry-run = { path = "../lumi-output-dry-run" }
+lumi-planner = { path = "../lumi-planner" }
+lumi-protocol = { path = "../lumi-protocol" }
+lumi-rekordbox-analysis = { path = "../lumi-rekordbox-analysis" }
+lumi-rekordbox-resolver = { path = "../lumi-rekordbox-resolver" }
+lumi-rekordbox-xml = { path = "../lumi-rekordbox-xml" }
+lumi-simulator = { path = "../lumi-simulator" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+subtle = "2"
+thiserror = "2"
+time = { version = "0.3", features = ["formatting"] }
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "time"] }
+
+[lints]
+workspace = true

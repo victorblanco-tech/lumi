@@ -1,0 +1,22 @@
+{
+  "fromRevision": "horizon-lines-v1",
+  "toRevision": "horizon-lines-v2",
+  "sourceLibraryRevision": "demo-library-v2",
+  "metadataOnly": false,
+  "requiresTimelineDecision": true,
+  "changes": ["waveform", "rawPhrases"],
+  "sourceTotalBeats": 128,
+  "rebaseAmbiguities": [],
+  "conflicts": [
+    {
+      "phraseIndex": 1,
+      "lumi": { "startBeat": 32, "endBeat": 64, "roleId": "breakdown-1" },
+      "source": { "startBeat": 32, "endBeat": 72, "roleId": "breakdown-1" }
+    },
+    {
+      "phraseIndex": 2,
+      "lumi": { "startBeat": 64, "endBeat": 96, "roleId": "buildup-1" },
+      "source": { "startBeat": 72, "endBeat": 96, "roleId": "buildup-1" }
+    }
+  ]
+}

@@ -1,0 +1,26 @@
+Lumi for macOS - unsigned development build
+============================================
+
+This early Apple Silicon build is distributed outside the Mac App Store and is
+not signed with a paid Apple Developer ID.
+
+Install
+-------
+
+1. Drag the Lumi app in this disk image to the Applications shortcut.
+2. Open Applications and try to start Lumi once.
+3. If macOS blocks the app, open System Settings > Privacy & Security.
+4. Find the Lumi message in Security and choose Open Anyway.
+5. Confirm Open when macOS asks again.
+
+Only use a disk image downloaded from the official Lumi GitHub repository and
+compare its SHA-256 checksum with the checksum published beside the release.
+
+Requirements
+------------
+
+- Apple Silicon Mac
+- macOS 15 or newer
+- Local Rekordbox/SoundSwitch integrations remain optional
+
+This build runs fully locally and has no runtime internet dependency.

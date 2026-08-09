@@ -1,0 +1,36 @@
+[workspace]
+members = [
+    "engine/crates/lumi-blt-midi",
+    "engine/crates/lumi-deck-source",
+    "engine/crates/lumi-domain",
+    "engine/crates/lumi-engine",
+    "engine/crates/lumi-library",
+    "engine/crates/lumi-library-demo",
+    "engine/crates/lumi-library-source",
+    "engine/crates/lumi-library-sqlite",
+    "engine/crates/lumi-lighting-output",
+    "engine/crates/lumi-local-playback",
+    "engine/crates/lumi-midi-coremidi",
+    "engine/crates/lumi-midi-output",
+    "engine/crates/lumi-output-dry-run",
+    "engine/crates/lumi-planner",
+    "engine/crates/lumi-protocol",
+    "engine/crates/lumi-rekordbox-analysis",
+    "engine/crates/lumi-rekordbox-resolver",
+    "engine/crates/lumi-rekordbox-xml",
+    "engine/crates/lumi-simulator",
+]
+resolver = "3"
+
+[workspace.package]
+version = "0.3.0"
+edition = "2024"
+rust-version = "1.97.1"
+license = "EPL-2.0"
+
+[workspace.lints.rust]
+unsafe_code = "forbid"
+
+[workspace.lints.clippy]
+expect_used = "deny"
+unwrap_used = "deny"

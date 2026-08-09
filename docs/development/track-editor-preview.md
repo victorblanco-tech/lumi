@@ -1,0 +1,81 @@
+# Track Lighting Editor waveform and audio preview
+
+E2A-04 turns the Library inspector action into a real CDJ-inspired Track
+Lighting Editor. The editor is deliberately fixed-dark in Lumi's dark, light,
+and system appearances, while key notation still follows the global
+Camelot/Classic preference.
+
+## Runtime boundary
+
+Opening an editor sends a non-mutating `openLibraryTrackEditor` command to the
+local Rust engine. The returned library snapshot contains one bounded,
+provider-neutral analysis projection:
+
+- canonical track metadata and a read-only audio URI;
+- the complete beat grid with bar and beat indices;
+- neutral low, mid, and high waveform samples rendered as RGB by the editor;
+- source phrase observations for the initial read-only phrase lane.
+
+Open and close commands never advance `stateRevision`, open the output gate, or
+change a Live/Next plan. Swift decodes the projection into `TrackEditorAnalysis`.
+The bar/beat grid, performance waveform, phrase lane, overview, scrubber, and
+playhead all use the same beat-coordinate mapper. The viewport pans and zooms
+continuously; phrase mutations alone quantize to whole beats.
+
+## Local read-only audio
+
+`TrackAudioPreviewResolver` accepts only repository-owned `lumi-demo://` audio
+or readable local file URLs/absolute paths. Network and unsupported schemes
+fail closed. A missing, moved, empty, unsupported, or corrupt source leaves the
+track analysis editable and shows an explicit preview-unavailable diagnostic.
+
+Local files are opened for reading and are never copied, tagged, rewritten, or
+deleted. Demo audio is generated deterministically in memory. AVAudioEngine and
+its player node are created lazily only when Play is pressed, so inspecting a
+track does not claim an audio device. Closing the sheet, switching engine state,
+or disconnecting the local helper stops playback and releases the audio graph.
+
+## Controls
+
+- Play/Pause and `Space` share one deterministic transport action.
+- Stop resets to the start of the track.
+- Left/Right Arrow and the previous/next buttons seek one beat; Shift+Arrow seeks one bar.
+- Dragging the main waveform seeks and scrubs through the shared beat map.
+- Dragging the overview centers the continuous detailed viewport.
+- Volume affects preview audio only.
+- `Loop selected phrase` schedules the exact derived whole-beat phrase range.
+
+Phrase editing replaces the phrase projection without replacing the isolated
+audio transport, so valid edits update loop boundaries without interrupting
+ordinary preview.
+
+## Verification
+
+The feature package proves bounded decoding, invalid/incomplete grid rejection,
+continuous zoom scales, coordinate inversion, viewport clamping, safe
+source resolution, and bar/phrase transport boundaries. Rust tests prove editor
+open/close projection and unknown-track failure. The real Swift process test
+opens and closes an editor against the bundled Rust helper and proves that show
+state revision remains unchanged.
+
+Two deterministic PNGs cover the editor under dark and light host appearances;
+the editor remains fixed-dark in both. The canonical hands-on build is launched
+only through:
+
+```bash
+open -n "/Users/victor/Engineering/Repo/Lumi/build/DerivedData/Build/Products/Debug/Lumi Dev.app"
+```
+
+## E2A-13 RGB Phrase Point implementation
+
+Hands-on UX review superseded the block-like visual treatment and
+complete-bar-only editor interaction. The delivered editor uses a continuously rendered **RGB** waveform by default,
+unrestricted horizontal pan and zoom, a free playhead, and Phrase Point
+mutations quantized to one whole beat. Each point starts a phrase whose end is
+derived from the next point or track end.
+
+The compact full-track waveform remains below the detailed editor and shows the
+viewport, playhead, and derived phrase ranges. The approved interaction and
+layout are recorded in [`docs/design/track-editor`](../design/track-editor/README.md)
+and ADR-0014. SQLite schema v5, engine commands, reconciliation, simulator, and
+planner all consume the same whole-beat Phrase Point positions.

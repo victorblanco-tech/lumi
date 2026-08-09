@@ -1,0 +1,45 @@
+{
+  "schemaVersion": 1,
+  "sourceId": 1,
+  "initialLeaderDeckId": 1,
+  "decks": [
+    {
+      "deckId": 1,
+      "trackLoadId": 1001,
+      "track": {
+        "id": 101,
+        "title": "Aurora Signal",
+        "artist": "Lumi Lab",
+        "bpmMilli": 124000,
+        "key": { "pitchClass": "a", "mode": "minor" },
+        "colorRgb": 12273790,
+        "durationBeats": 128,
+        "phrases": [
+          { "index": 0, "startBeat": 0, "endBeat": 32, "kind": "intro" },
+          { "index": 1, "startBeat": 32, "endBeat": 64, "kind": "verse" },
+          { "index": 2, "startBeat": 64, "endBeat": 96, "kind": "build" },
+          { "index": 3, "startBeat": 96, "endBeat": 128, "kind": "drop" }
+        ]
+      }
+    },
+    {
+      "deckId": 2,
+      "trackLoadId": 2001,
+      "track": {
+        "id": 202,
+        "title": "Neon Horizon",
+        "artist": "Lumi Lab",
+        "bpmMilli": 128000,
+        "key": { "pitchClass": "c", "mode": "major" },
+        "colorRgb": 4747469,
+        "durationBeats": 128,
+        "phrases": [
+          { "index": 0, "startBeat": 0, "endBeat": 32, "kind": "intro" },
+          { "index": 1, "startBeat": 32, "endBeat": 64, "kind": "breakdown" },
+          { "index": 2, "startBeat": 64, "endBeat": 96, "kind": "build" },
+          { "index": 3, "startBeat": 96, "endBeat": 128, "kind": "drop" }
+        ]
+      }
+    }
+  ]
+}

@@ -1,0 +1,92 @@
+{
+  "activation": {
+    "activePlan": {
+      "deckId": 2,
+      "planId": "16571449367899180180",
+      "planRevision": 1,
+      "trackLoadId": 2002
+    },
+    "leaderDeckId": 2
+  },
+  "next": {
+    "cues": [
+      {
+        "endBeat": 32,
+        "entryId": "theme-2--mapping-1",
+        "phraseIndex": 0,
+        "roleId": "intro-outro",
+        "startBeat": 0,
+        "strategy": "auto",
+        "variantId": "mapping-1"
+      },
+      {
+        "endBeat": 64,
+        "entryId": "theme-2--mapping-2",
+        "phraseIndex": 1,
+        "roleId": "breakdown-1",
+        "startBeat": 32,
+        "strategy": "fixedVariant",
+        "variantId": "mapping-2"
+      },
+      {
+        "endBeat": 96,
+        "entryId": "theme-2--mapping-3",
+        "phraseIndex": 2,
+        "roleId": "buildup-1",
+        "startBeat": 64,
+        "strategy": "auto",
+        "variantId": "mapping-3"
+      },
+      {
+        "endBeat": 128,
+        "entryId": "theme-2--mapping-4",
+        "phraseIndex": 3,
+        "roleId": "drop",
+        "startBeat": 96,
+        "strategy": "auto",
+        "variantId": "mapping-4"
+      }
+    ],
+    "deckId": 2,
+    "libraryTrack": {
+      "analysisRevision": "horizon-lines-v1",
+      "matchStatus": "exact",
+      "providerKind": "demo",
+      "sourceId": "lumi-demo-library",
+      "sourceName": "Lumi Demo Library",
+      "sourceTrackId": "horizon-lines",
+      "timelineRevision": 2
+    },
+    "themeDecision": {
+      "matchedColorRgb": 4747469,
+      "reason": "colorPrefer",
+      "themeId": 2,
+      "themeName": "Deep Ocean"
+    },
+    "trackId": 1,
+    "trackLoadId": 2002
+  },
+  "outputs": [
+    {
+      "entryId": "theme-2--mapping-1",
+      "phraseIndex": 0,
+      "status": "simulated"
+    },
+    {
+      "entryId": "theme-2--mapping-2",
+      "phraseIndex": 1,
+      "status": "simulated"
+    },
+    {
+      "entryId": "theme-2--mapping-3",
+      "phraseIndex": 2,
+      "status": "simulated"
+    },
+    {
+      "entryId": "theme-2--mapping-4",
+      "phraseIndex": 3,
+      "status": "simulated"
+    }
+  ],
+  "scenarioVersion": 1
+}

@@ -3,6 +3,7 @@
 
 # Rust
 /target/
+/build/
 
 # Xcode / Swift
 DerivedData/
