@@ -8,6 +8,7 @@
 #![forbid(unsafe_code)]
 
 use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
 
 use lumi_deck_source::DeckSourceProvider;
 use lumi_domain::{
@@ -18,7 +19,7 @@ use lumi_midi_coremidi::MidiChannelVoiceMessage;
 use thiserror::Error;
 
 pub const PROTOCOL_NAME: &str = "BLT MIDI Deck Frame";
-pub const PROTOCOL_VERSION: u8 = 3;
+pub const PROTOCOL_VERSION: u8 = 4;
 
 const SOURCE_ID: u64 = 30;
 const CONTROL_CHANGE_STATUS: u8 = 0xb;
@@ -32,12 +33,14 @@ const DURATION_SECONDS_CC: u8 = 29;
 const FRAME_SEQUENCE_CC: u8 = 32;
 const EFFECTIVE_BPM_MILLI_CC: u8 = 33;
 const SIMULATOR_SIGNATURE_CC: u8 = 36;
+const PLAYBACK_POSITION_MILLIS_CC: u8 = 41;
 const COMMIT_CC: u8 = 119;
 
 const FLAG_LOADED: u8 = 1;
 const FLAG_PLAYING: u8 = 2;
 const FLAG_MASTER: u8 = 4;
 const FLAG_ON_AIR: u8 = 8;
+const FLAG_POSITION_KNOWN: u8 = 16;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 struct FrameAssembler {
@@ -52,6 +55,7 @@ struct FrameAssembler {
     frame_sequence: u8,
     effective_bpm_milli: [u8; 3],
     simulator_signature: [u8; 5],
+    playback_position_millis: [u8; 3],
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -69,6 +73,7 @@ struct DeckFrame {
     duration_seconds: u32,
     frame_sequence: u8,
     simulator_signature: u32,
+    playback_position_millis: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -79,6 +84,7 @@ struct LoadedDeck {
     effective_bpm_milli: u32,
     playing: bool,
     media_identity: BltTrackIdentity,
+    playback_position_millis: Option<u32>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -89,11 +95,19 @@ pub struct BltTrackIdentity {
     pub simulator_signature: u32,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct BltTransportSnapshot {
+    pub position_millis: Option<u32>,
+    pub effective_bpm_milli: u32,
+    pub playing: bool,
+}
+
 pub struct BltMidiDeckSourceProvider {
     source_id: SourceId,
     sequence: u64,
     next_track_load_id: u64,
     assemblers: [FrameAssembler; 2],
+    last_frame_received_at: [Option<Instant>; 2],
     last_frame_sequences: [Option<u8>; 2],
     decks: BTreeMap<DeckId, LoadedDeck>,
     leader_deck_id: Option<DeckId>,
@@ -112,6 +126,7 @@ impl BltMidiDeckSourceProvider {
             sequence: 0,
             next_track_load_id: 1,
             assemblers: [FrameAssembler::default(); 2],
+            last_frame_received_at: [None; 2],
             last_frame_sequences: [None, None],
             decks: BTreeMap::new(),
             leader_deck_id: None,
@@ -156,6 +171,7 @@ impl BltMidiDeckSourceProvider {
                 return Ok(());
             }
             self.last_frame_sequences[index] = Some(frame.frame_sequence);
+            self.last_frame_received_at[index] = Some(Instant::now());
             self.committed_frame_count = self.committed_frame_count.saturating_add(1);
             let deck_id = DeckId::new(message.channel);
             self.apply_frame(deck_id, frame, at)?;
@@ -171,6 +187,42 @@ impl BltMidiDeckSourceProvider {
                 1_u32 << u32::from(message.data_one - FLAGS_CC);
         } else {
             self.ignored_message_count = self.ignored_message_count.saturating_add(1);
+        }
+        Ok(())
+    }
+
+    /// Removes decks whose BLT heartbeat disappeared. The virtual MIDI
+    /// destination remains published when BLT quits, so endpoint state alone
+    /// cannot distinguish a stopped source from a paused deck.
+    pub fn expire_stale(
+        &mut self,
+        now: Instant,
+        maximum_age: Duration,
+        at: MonotonicTime,
+    ) -> Result<(), BltMidiError> {
+        for index in 0..self.last_frame_received_at.len() {
+            let Some(last_received_at) = self.last_frame_received_at[index] else {
+                continue;
+            };
+            if now.saturating_duration_since(last_received_at) <= maximum_age {
+                continue;
+            }
+            self.last_frame_received_at[index] = None;
+            self.last_frame_sequences[index] = None;
+            self.assemblers[index] = FrameAssembler::default();
+            let deck_id = DeckId::new(if index == 0 { 1 } else { 2 });
+            if let Some(previous) = self.decks.remove(&deck_id) {
+                self.emit(
+                    at,
+                    DeckObservation::TrackUnloaded {
+                        deck_id,
+                        track_load_id: previous.track_load_id,
+                    },
+                )?;
+            }
+            if self.leader_deck_id == Some(deck_id) {
+                self.leader_deck_id = None;
+            }
         }
         Ok(())
     }
@@ -205,6 +257,18 @@ impl BltMidiDeckSourceProvider {
             .map(|deck| deck.media_identity)
     }
 
+    #[must_use]
+    pub fn transport(&self, track_load_id: TrackLoadId) -> Option<BltTransportSnapshot> {
+        self.decks
+            .values()
+            .find(|deck| deck.track_load_id == track_load_id)
+            .map(|deck| BltTransportSnapshot {
+                position_millis: deck.playback_position_millis,
+                effective_bpm_milli: deck.effective_bpm_milli,
+                playing: deck.playing,
+            })
+    }
+
     pub fn clear(&mut self, at: MonotonicTime) -> Result<(), BltMidiError> {
         let loaded = self
             .decks
@@ -222,6 +286,9 @@ impl BltMidiDeckSourceProvider {
         }
         self.decks.clear();
         self.leader_deck_id = None;
+        self.last_frame_received_at = [None; 2];
+        self.last_frame_sequences = [None; 2];
+        self.assemblers = [FrameAssembler::default(); 2];
         Ok(())
     }
 
@@ -296,6 +363,7 @@ impl BltMidiDeckSourceProvider {
                         source_slot: frame.source_slot,
                         simulator_signature: frame.simulator_signature,
                     },
+                    playback_position_millis: frame.playback_position_millis,
                 },
             );
             self.emit(
@@ -346,14 +414,20 @@ impl BltMidiDeckSourceProvider {
                 )?;
             }
             if previous.beat != beat {
-                self.emit(
-                    at,
+                let observation = if beat < previous.beat {
+                    DeckObservation::PlaybackPositionSeeked {
+                        deck_id,
+                        track_load_id: previous.track_load_id,
+                        beat,
+                    }
+                } else {
                     DeckObservation::PlaybackPosition {
                         deck_id,
                         track_load_id: previous.track_load_id,
                         beat,
-                    },
-                )?;
+                    }
+                };
+                self.emit(at, observation)?;
             }
             if previous.playing != frame.playing {
                 self.emit(
@@ -369,6 +443,7 @@ impl BltMidiDeckSourceProvider {
                 deck.beat = beat;
                 deck.effective_bpm_milli = frame.effective_bpm_milli;
                 deck.playing = frame.playing;
+                deck.playback_position_millis = frame.playback_position_millis;
             }
         }
 
@@ -453,13 +528,17 @@ fn write_field(frame: &mut FrameAssembler, controller: u8, value: u8) -> bool {
         SIMULATOR_SIGNATURE_CC..=40 => {
             frame.simulator_signature[usize::from(controller - SIMULATOR_SIGNATURE_CC)] = value;
         }
+        PLAYBACK_POSITION_MILLIS_CC..=43 => {
+            frame.playback_position_millis[usize::from(controller - PLAYBACK_POSITION_MILLIS_CC)] =
+                value;
+        }
         _ => return false,
     }
     true
 }
 
 fn decode_frame(frame: FrameAssembler) -> Result<DeckFrame, BltMidiError> {
-    const REQUIRED_FIELDS: u32 = (1_u32 << 25) - 1;
+    const REQUIRED_FIELDS: u32 = (1_u32 << 28) - 1;
     if frame.present_fields != REQUIRED_FIELDS {
         return Err(BltMidiError::IncompleteFrame);
     }
@@ -469,6 +548,7 @@ fn decode_frame(frame: FrameAssembler) -> Result<DeckFrame, BltMidiError> {
     let beat = decode_7bit(&frame.beat)?;
     let duration_seconds = decode_7bit(&frame.duration_seconds)?;
     let simulator_signature = decode_7bit(&frame.simulator_signature)?;
+    let playback_position_millis = decode_7bit(&frame.playback_position_millis)?;
     let loaded = frame.flags & FLAG_LOADED != 0;
     if loaded
         && (rekordbox_id == 0
@@ -492,6 +572,8 @@ fn decode_frame(frame: FrameAssembler) -> Result<DeckFrame, BltMidiError> {
         duration_seconds,
         frame_sequence: frame.frame_sequence,
         simulator_signature,
+        playback_position_millis: (frame.flags & FLAG_POSITION_KNOWN != 0)
+            .then_some(playback_position_millis),
     })
 }
 
@@ -599,6 +681,13 @@ mod tests {
             frame.simulator_signature,
             5,
         );
+        extend_chunks(
+            &mut messages,
+            channel,
+            PLAYBACK_POSITION_MILLIS_CC,
+            frame.playback_position_millis.unwrap_or_default(),
+            3,
+        );
         messages.push(cc(channel, COMMIT_CC, PROTOCOL_VERSION));
         messages
     }
@@ -625,6 +714,11 @@ mod tests {
             | (if frame.playing { FLAG_PLAYING } else { 0 })
             | (if frame.master { FLAG_MASTER } else { 0 })
             | (if frame.on_air { FLAG_ON_AIR } else { 0 })
+            | (if frame.playback_position_millis.is_some() {
+                FLAG_POSITION_KNOWN
+            } else {
+                0
+            })
     }
 
     fn frame(sequence: u8) -> DeckFrame {
@@ -642,6 +736,7 @@ mod tests {
             duration_seconds: 430,
             frame_sequence: sequence,
             simulator_signature: 0,
+            playback_position_millis: Some(74_250),
         }
     }
 
@@ -764,6 +859,111 @@ mod tests {
         assert_eq!(identity.source_player, 1);
         assert_eq!(identity.source_slot, 2);
         assert_eq!(identity.simulator_signature, 3_456_789_012);
+        assert_eq!(
+            provider.transport(track_load_id),
+            Some(BltTransportSnapshot {
+                position_millis: Some(74_250),
+                effective_bpm_milli: 130_000,
+                playing: true,
+            })
+        );
+    }
+
+    #[test]
+    fn regressing_beat_is_emitted_as_an_authoritative_seek() {
+        let mut provider = BltMidiDeckSourceProvider::new(MonotonicTime::new(0))
+            .unwrap_or_else(|error| panic!("provider must initialize: {error}"));
+        for message in encode(1, frame(1)) {
+            provider
+                .ingest(message, MonotonicTime::new(10))
+                .unwrap_or_else(|error| panic!("initial frame must ingest: {error}"));
+        }
+        let _ = provider
+            .drain_events()
+            .unwrap_or_else(|error| panic!("initial events must drain: {error}"));
+
+        let mut seeked = frame(2);
+        seeked.beat = 64;
+        seeked.playback_position_millis = Some(29_500);
+        for message in encode(1, seeked) {
+            provider
+                .ingest(message, MonotonicTime::new(20))
+                .unwrap_or_else(|error| panic!("seek frame must ingest: {error}"));
+        }
+        let events = provider
+            .drain_events()
+            .unwrap_or_else(|error| panic!("seek events must drain: {error}"));
+        assert!(events.iter().any(|event| matches!(
+            event,
+            DomainEvent::Observation(ObservationEnvelope {
+                observation: DeckObservation::PlaybackPositionSeeked { beat: 64, .. },
+                ..
+            })
+        )));
+        assert_eq!(
+            provider
+                .transport(TrackLoadId::new(1))
+                .and_then(|transport| transport.position_millis),
+            Some(29_500)
+        );
+    }
+
+    #[test]
+    fn missing_heartbeat_unloads_only_after_the_stale_timeout() {
+        let mut provider = BltMidiDeckSourceProvider::new(MonotonicTime::new(0))
+            .unwrap_or_else(|error| panic!("provider must initialize: {error}"));
+        for message in encode(1, frame(1)) {
+            provider
+                .ingest(message, MonotonicTime::new(10))
+                .unwrap_or_else(|error| panic!("initial frame must ingest: {error}"));
+        }
+        let _ = provider
+            .drain_events()
+            .unwrap_or_else(|error| panic!("initial events must drain: {error}"));
+        let received_at = provider.last_frame_received_at[0]
+            .unwrap_or_else(|| panic!("committed frame must record its arrival time"));
+        let timeout = Duration::from_millis(2_500);
+
+        provider
+            .expire_stale(
+                received_at + Duration::from_millis(2_500),
+                timeout,
+                MonotonicTime::new(20),
+            )
+            .unwrap_or_else(|error| panic!("fresh heartbeat must remain loaded: {error}"));
+        assert!(provider.track_identity(TrackLoadId::new(1)).is_some());
+        assert!(
+            provider
+                .drain_events()
+                .unwrap_or_else(|error| panic!("fresh events must drain: {error}"))
+                .is_empty()
+        );
+
+        provider
+            .expire_stale(
+                received_at + Duration::from_millis(2_501),
+                timeout,
+                MonotonicTime::new(21),
+            )
+            .unwrap_or_else(|error| panic!("stale heartbeat must unload cleanly: {error}"));
+        assert!(provider.track_identity(TrackLoadId::new(1)).is_none());
+        assert_eq!(provider.leader_deck_id(), None);
+        assert!(
+            provider
+                .drain_events()
+                .unwrap_or_else(|error| panic!("stale events must drain: {error}"))
+                .iter()
+                .any(|event| matches!(
+                    event,
+                    DomainEvent::Observation(ObservationEnvelope {
+                        observation: DeckObservation::TrackUnloaded {
+                            deck_id,
+                            track_load_id,
+                        },
+                        ..
+                    }) if *deck_id == DeckId::new(1) && *track_load_id == TrackLoadId::new(1)
+                ))
+        );
     }
 
     #[test]

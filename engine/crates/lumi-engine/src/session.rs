@@ -1062,9 +1062,6 @@ fn transport_ack_envelope(
 
 fn process_deck_input_messages(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
     let messages = runtime.deck_input.drain_messages();
-    if messages.is_empty() {
-        return Ok(());
-    }
     if runtime.deck_source_mode != DeckSourceMode::ConnectedDecks {
         return Ok(());
     }
@@ -1072,6 +1069,9 @@ fn process_deck_input_messages(runtime: &mut EngineRuntime) -> Result<(), Engine
     for message in messages {
         runtime.connected_deck_source.ingest(message, at)?;
     }
+    runtime
+        .connected_deck_source
+        .expire_stale(Instant::now(), Duration::from_millis(2_500), at)?;
     process_pending_source_events(runtime)?;
     Ok(())
 }
@@ -2201,6 +2201,14 @@ fn snapshot_envelope(
             } else {
                 Value::Null
             };
+            let connected_transport = if runtime.deck_source_mode == DeckSourceMode::ConnectedDecks
+            {
+                runtime
+                    .connected_deck_source
+                    .transport(deck.track_load_id())
+            } else {
+                None
+            };
             let plan_eligibility = if library_context.is_some() {
                 "readyExact"
             } else if state
@@ -2217,6 +2225,8 @@ fn snapshot_envelope(
                 "beat": deck.beat(),
                 "effectiveBpmMilli": deck.effective_bpm_milli(),
                 "playing": deck.is_playing(),
+                "playbackPositionMillis": connected_transport
+                    .and_then(|transport| transport.position_millis),
                 "phraseIndex": deck.phrase_index(),
                 "planEligibility": plan_eligibility,
                 "localPlayback": local_playback,
@@ -3695,7 +3705,7 @@ mod tests {
                 Err(error) => panic!("connected test engine must initialize: {error}"),
             };
         let fields = [
-            (16, 15),
+            (16, 31),
             (17, 42),
             (18, 0),
             (19, 0),
@@ -3720,6 +3730,9 @@ mod tests {
             (38, 0),
             (39, 0),
             (40, 0),
+            (41, 10),
+            (42, 68),
+            (43, 4),
             (119, lumi_blt_midi::PROTOCOL_VERSION),
         ];
         for (controller, value) in fields {
@@ -3761,7 +3774,7 @@ mod tests {
         assert_eq!(runtime.output_worker.provider.records().count(), 0);
 
         let tempo_update = [
-            (16, 15),
+            (16, 31),
             (17, 42),
             (18, 0),
             (19, 0),
@@ -3786,6 +3799,9 @@ mod tests {
             (38, 0),
             (39, 0),
             (40, 0),
+            (41, 10),
+            (42, 68),
+            (43, 4),
             (119, lumi_blt_midi::PROTOCOL_VERSION),
         ];
         for (controller, value) in tempo_update {
@@ -3811,6 +3827,13 @@ mod tests {
             .unwrap_or_else(|| panic!("BLT Deck 2 must remain loaded"));
         assert_eq!(deck.metadata().bpm_milli(), 130_000);
         assert_eq!(deck.effective_bpm_milli(), 131_300);
+        assert_eq!(
+            runtime
+                .connected_deck_source
+                .transport(deck.track_load_id())
+                .and_then(|transport| transport.position_millis),
+            Some(74_250)
+        );
         assert_eq!(
             runtime
                 .connected_deck_source

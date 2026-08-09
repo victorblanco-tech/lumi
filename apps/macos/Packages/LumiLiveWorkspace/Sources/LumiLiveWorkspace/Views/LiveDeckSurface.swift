@@ -10,7 +10,7 @@ struct LiveDeckSurface<Details: View>: View {
     let plan: PlanSnapshot?
     let musicalKey: String
     let isLocalPlayback: Bool
-    let visualClock: LocalPlaybackVisualClockSnapshot?
+    let visualClock: DeckVisualClockSnapshot?
     let waveformOverride: DeckWaveformPreviewSnapshot?
     let lightingTimingOffsetMillis: Int
     let pendingLightingTimingOffsetMillis: Int?
@@ -38,7 +38,7 @@ struct LiveDeckSurface<Details: View>: View {
         plan: PlanSnapshot?,
         musicalKey: String,
         isLocalPlayback: Bool,
-        visualClock: LocalPlaybackVisualClockSnapshot? = nil,
+        visualClock: DeckVisualClockSnapshot? = nil,
         waveformOverride: DeckWaveformPreviewSnapshot? = nil,
         lightingTimingOffsetMillis: Int = 0,
         pendingLightingTimingOffsetMillis: Int? = nil,
@@ -968,7 +968,7 @@ private struct RGBDeckWaveform: View {
     let beatGrid: LiveBeatGridTimeline?
     let playheadBeat: Double
     let viewport: LumiWaveformViewport
-    let visualClock: LocalPlaybackVisualClockSnapshot?
+    let visualClock: DeckVisualClockSnapshot?
     let followsLiveViewport: Bool
     @State private var rasterImage: CGImage?
 
@@ -980,7 +980,7 @@ private struct RGBDeckWaveform: View {
         beatGrid: LiveBeatGridTimeline?,
         playheadBeat: Double,
         viewport: LumiWaveformViewport,
-        visualClock: LocalPlaybackVisualClockSnapshot?,
+        visualClock: DeckVisualClockSnapshot?,
         followsLiveViewport: Bool
     ) {
         self.points = points
@@ -1133,7 +1133,7 @@ struct LiveWaveformMotionPlan: Equatable {
     let visibleBeats: Double
     let followsLiveViewport: Bool
     let fallbackPlayheadBeat: Double
-    let visualClock: LocalPlaybackVisualClockSnapshot?
+    let visualClock: DeckVisualClockSnapshot?
     let beatGrid: LiveBeatGridTimeline?
 
     init(
@@ -1143,7 +1143,7 @@ struct LiveWaveformMotionPlan: Equatable {
         visibleBeats: Double,
         followsLiveViewport: Bool,
         fallbackPlayheadBeat: Double,
-        visualClock: LocalPlaybackVisualClockSnapshot?,
+        visualClock: DeckVisualClockSnapshot?,
         beatGrid: LiveBeatGridTimeline? = nil
     ) {
         self.waveformID = waveformID
@@ -1168,6 +1168,7 @@ struct LiveWaveformMotionPlan: Equatable {
             durationMillis: visualClock?.durationMillis,
             playing: visualClock?.playing,
             anchoredAtReferenceTime: visualClock?.anchoredAtReferenceTime,
+            playbackRate: visualClock?.playbackRate,
             fallbackPlayheadBeat: hasAuthoritativeClock ? nil : fallbackPlayheadBeat,
             beatGridMarkerCount: beatGrid?.timesMillis.count ?? 0
         )
@@ -1213,6 +1214,7 @@ struct LiveWaveformMotionPlan: Equatable {
         return max(
             0.01,
             (Double(visualClock.durationMillis) - positionMillis) / 1_000
+                / max(0.000_001, visualClock.playbackRate)
         )
     }
 
@@ -1242,6 +1244,7 @@ struct LiveWaveformMotionPlan: Equatable {
         let durationMillis: UInt64?
         let playing: Bool?
         let anchoredAtReferenceTime: TimeInterval?
+        let playbackRate: Double?
         let fallbackPlayheadBeat: Double?
         let beatGridMarkerCount: Int
     }

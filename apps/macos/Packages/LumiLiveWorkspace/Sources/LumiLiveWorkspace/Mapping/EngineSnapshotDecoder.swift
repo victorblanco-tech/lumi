@@ -724,6 +724,17 @@ public struct EngineSnapshotDecoder: Sendable {
             phraseIndex = value
         }
 
+        let playbackPositionMillis: UInt64?
+        if deck["playbackPositionMillis"] == nil
+            || deck["playbackPositionMillis"] == .null {
+            playbackPositionMillis = nil
+        } else {
+            playbackPositionMillis = unsignedInteger(deck["playbackPositionMillis"])
+            guard playbackPositionMillis != nil else {
+                throw EngineSnapshotDecodingError.invalidSnapshot
+            }
+        }
+
         let phrases = try phrasePayloads.map(decodeDeckPhrase)
         let phraseTimelineIsValid = phrases.isEmpty
             ? planEligibility == .autoHeld && phraseIndex == nil
@@ -782,6 +793,7 @@ public struct EngineSnapshotDecoder: Sendable {
             keyKnown: keyKnown,
             beat: beat,
             playing: playing,
+            playbackPositionMillis: playbackPositionMillis,
             phraseIndex: phraseIndex,
             durationBeats: durationBeats,
             beatGrid: beatGrid,

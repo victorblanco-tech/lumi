@@ -41,7 +41,7 @@ struct FoundationView: View {
                         lightingTimingOffsetMillis: $preferences.lightingTimingOffsetMillis,
                         allowsScrolling: false,
                         showsNavigation: false,
-                        localPlaybackVisualClocks: engineStatus.localPlaybackVisualClocks,
+                        deckVisualClocks: engineStatus.deckVisualClocks,
                         localPlaybackWaveforms: engineStatus.localPlaybackWaveforms,
                         localPlaybackFeedback: engineStatus.localPlaybackFeedback,
                         localPlaybackFeedbackIsError: engineStatus.localPlaybackFeedbackIsError,

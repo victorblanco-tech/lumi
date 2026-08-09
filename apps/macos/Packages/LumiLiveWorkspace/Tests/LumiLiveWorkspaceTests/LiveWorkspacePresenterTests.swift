@@ -226,24 +226,33 @@ struct LiveWorkspacePresenterTests {
 
     @Test("Local visual clock advances independently and clamps at track end")
     func localVisualClockAdvancesSmoothly() {
-        let playing = LocalPlaybackVisualClockSnapshot(
+        let playing = DeckVisualClockSnapshot(
             trackLoadID: 7,
             positionMillis: 1_000,
             durationMillis: 4_000,
             playing: true,
             anchoredAtReferenceTime: 100
         )
-        let paused = LocalPlaybackVisualClockSnapshot(
+        let paused = DeckVisualClockSnapshot(
             trackLoadID: 7,
             positionMillis: 1_000,
             durationMillis: 4_000,
             playing: false,
             anchoredAtReferenceTime: 100
         )
+        let pitched = DeckVisualClockSnapshot(
+            trackLoadID: 7,
+            positionMillis: 1_000,
+            durationMillis: 4_000,
+            playing: true,
+            anchoredAtReferenceTime: 100,
+            playbackRate: 1.1
+        )
 
         #expect(playing.positionMillis(at: Date(timeIntervalSinceReferenceDate: 101.25)) == 2_250)
         #expect(playing.positionMillis(at: Date(timeIntervalSinceReferenceDate: 110)) == 4_000)
         #expect(paused.positionMillis(at: Date(timeIntervalSinceReferenceDate: 110)) == 1_000)
+        #expect(pitched.positionMillis(at: Date(timeIntervalSinceReferenceDate: 101)) == 2_100)
     }
 
     @Test("Live waveform motion keeps a constant fixed playhead while the waveform scrolls")
@@ -289,7 +298,7 @@ struct LiveWorkspacePresenterTests {
             timesMillis: [60, 447, 901, 1_300]
         )
         let timeline = try #require(LiveBeatGridTimeline(grid: grid, totalBeats: 4))
-        let clock = LocalPlaybackVisualClockSnapshot(
+        let clock = DeckVisualClockSnapshot(
             trackLoadID: 7,
             positionMillis: 447,
             durationMillis: 1_250,
@@ -398,7 +407,7 @@ struct LiveWorkspacePresenterTests {
 
     @Test("Authoritative playback clock prevents poll snapshots from restarting waveform motion")
     func playbackClockKeepsWaveformAnimationIdentityStable() {
-        let clock = LocalPlaybackVisualClockSnapshot(
+        let clock = DeckVisualClockSnapshot(
             trackLoadID: 7,
             positionMillis: 1_000,
             durationMillis: 120_000,

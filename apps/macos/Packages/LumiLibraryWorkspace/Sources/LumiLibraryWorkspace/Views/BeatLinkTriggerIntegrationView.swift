@@ -152,8 +152,13 @@ public struct BeatLinkTriggerIntegrationView: View {
       (let [ch (dec device-number)
             rb (long (or rekordbox-id 0))
             loaded (pos? rb)
+            raw-position (playback-time status)
+            position-known? (some? raw-position)
+            current-position (long (max 0 (or raw-position 0)))
+            sampled-position (* 100 (quot current-position 100))
             flags (+ (if loaded 1 0) (if playing? 2 0)
-                     (if tempo-master? 4 0) (if on-air? 8 0))
+                     (if tempo-master? 4 0) (if on-air? 8 0)
+                     (if position-known? 16 0))
             source-player (long (or track-source-player 0))
             raw-track-bpm (double (max 0 (or raw-bpm 0)))
             simulating? (some? util/*simulating*)
@@ -181,25 +186,37 @@ public struct BeatLinkTriggerIntegrationView: View {
             current-beat (long (max 0 (or beat-number 0)))
             slot (case track-source-slot :sd-slot 1 :usb-slot 2
                                          :collection 3 :cd-slot 4 0)
+            frame-key [flags rb source-player slot track-bpm current-beat
+                       duration effective-bpm sim-signature sampled-position]
+            now-ms (System/currentTimeMillis)
+            last-sent-ms (long (or (:lumi-last-sent-ms @locals) 0))
+            send-frame? (or (not= frame-key (:lumi-last-frame @locals))
+                            (>= (- now-ms last-sent-ms) 1000))
             sequence (mod (inc (get @locals :lumi-sequence 0)) 128)
             chunk (fn [value shift] (bit-and (bit-shift-right value shift) 127))]
-        (swap! locals assoc :lumi-sequence sequence)
-        (doseq [[controller value]
-                [[16 flags]
-                 [17 (chunk rb 0)] [18 (chunk rb 7)]
-                 [19 (chunk rb 14)] [20 (chunk rb 21)]
-                 [21 source-player] [22 slot]
-                 [23 (chunk track-bpm 0)] [24 (chunk track-bpm 7)] [25 (chunk track-bpm 14)]
-                 [26 (chunk current-beat 0)] [27 (chunk current-beat 7)]
-                 [28 (chunk current-beat 14)]
-                 [29 (chunk duration 0)] [30 (chunk duration 7)]
-                 [31 (chunk duration 14)] [32 sequence]
-                 [33 (chunk effective-bpm 0)] [34 (chunk effective-bpm 7)]
-                 [35 (chunk effective-bpm 14)]
-                 [36 (chunk sim-signature 0)] [37 (chunk sim-signature 7)]
-                 [38 (chunk sim-signature 14)] [39 (chunk sim-signature 21)]
-                 [40 (chunk sim-signature 28)]
-                 [119 3]]]
-          (midi/midi-control trigger-output controller value ch))))
+        (when send-frame?
+          (swap! locals assoc
+                 :lumi-sequence sequence
+                 :lumi-last-frame frame-key
+                 :lumi-last-sent-ms now-ms)
+          (doseq [[controller value]
+                  [[16 flags]
+                   [17 (chunk rb 0)] [18 (chunk rb 7)]
+                   [19 (chunk rb 14)] [20 (chunk rb 21)]
+                   [21 source-player] [22 slot]
+                   [23 (chunk track-bpm 0)] [24 (chunk track-bpm 7)] [25 (chunk track-bpm 14)]
+                   [26 (chunk current-beat 0)] [27 (chunk current-beat 7)]
+                   [28 (chunk current-beat 14)]
+                   [29 (chunk duration 0)] [30 (chunk duration 7)]
+                   [31 (chunk duration 14)] [32 sequence]
+                   [33 (chunk effective-bpm 0)] [34 (chunk effective-bpm 7)]
+                   [35 (chunk effective-bpm 14)]
+                   [36 (chunk sim-signature 0)] [37 (chunk sim-signature 7)]
+                   [38 (chunk sim-signature 14)] [39 (chunk sim-signature 21)]
+                   [40 (chunk sim-signature 28)]
+                   [41 (chunk sampled-position 0)] [42 (chunk sampled-position 7)]
+                   [43 (chunk sampled-position 14)]
+                   [119 4]]]
+            (midi/midi-control trigger-output controller value ch)))))
     """
 }

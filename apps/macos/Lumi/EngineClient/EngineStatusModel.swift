@@ -28,8 +28,8 @@ final class EngineStatusModel: ObservableObject {
     @Published private(set) var midiIntegrationFeedback: String?
     @Published private(set) var localPlaybackFeedback: String?
     @Published private(set) var localPlaybackFeedbackIsError = false
-    @Published private(set) var localPlaybackVisualClocks: [
-        UInt64: LocalPlaybackVisualClockSnapshot
+    @Published private(set) var deckVisualClocks: [
+        UInt64: DeckVisualClockSnapshot
     ] = [:]
     @Published private(set) var localPlaybackWaveforms: [
         UInt64: DeckWaveformPreviewSnapshot
@@ -165,7 +165,7 @@ final class EngineStatusModel: ObservableObject {
         isDrainingLibraryQueries = false
         localAudioControllers.values.forEach { $0.shutdown() }
         localAudioControllers.removeAll()
-        localPlaybackVisualClocks = [:]
+        deckVisualClocks = [:]
         isExchangingCommand = false
         await supervisor.stop()
         lifecycle = .stopped
@@ -1323,15 +1323,76 @@ final class EngineStatusModel: ObservableObject {
     }
 
     private func updateLocalPlaybackVisualClock(_ transport: LocalDeckTransportSnapshot) {
-        var clocks = localPlaybackVisualClocks
-        clocks[transport.deckID] = LocalPlaybackVisualClockSnapshot(
+        var clocks = deckVisualClocks
+        clocks[transport.deckID] = DeckVisualClockSnapshot(
             trackLoadID: transport.trackLoadID,
             positionMillis: transport.positionMillis,
             durationMillis: transport.durationMillis,
             playing: transport.playing,
             anchoredAtReferenceTime: Date.timeIntervalSinceReferenceDate
         )
-        localPlaybackVisualClocks = clocks
+        deckVisualClocks = clocks
+    }
+
+    private func synchronizeConnectedDeckVisualClocks(with snapshot: EngineSnapshot) {
+        let anchoredAt = Date.timeIntervalSinceReferenceDate
+        deckVisualClocks = Dictionary(uniqueKeysWithValues: snapshot.decks.compactMap { deck in
+            guard let positionMillis = deck.playbackPositionMillis,
+                  let beatGrid = deck.beatGrid,
+                  beatGrid.durationMillis > 0 else {
+                return nil
+            }
+            let boundedPosition = min(positionMillis, beatGrid.durationMillis)
+            let playbackRate = connectedPlaybackRate(
+                effectiveBPMMilli: deck.bpmMilli,
+                positionMillis: boundedPosition,
+                beatTimesMillis: beatGrid.timesMillis
+            )
+            if let existing = deckVisualClocks[deck.deckID],
+               existing.trackLoadID == deck.trackLoadID,
+               existing.playing == deck.playing,
+               deck.playing,
+               abs(existing.playbackRate - playbackRate) < 0.005,
+               abs(
+                   existing.positionMillis(
+                       at: Date(timeIntervalSinceReferenceDate: anchoredAt)
+                   ) - Double(boundedPosition)
+               ) < 250 {
+                return (deck.deckID, existing)
+            }
+            return (deck.deckID, DeckVisualClockSnapshot(
+                trackLoadID: deck.trackLoadID,
+                positionMillis: boundedPosition,
+                durationMillis: beatGrid.durationMillis,
+                playing: deck.playing,
+                anchoredAtReferenceTime: anchoredAt,
+                playbackRate: playbackRate
+            ))
+        })
+    }
+
+    private func connectedPlaybackRate(
+        effectiveBPMMilli: UInt64,
+        positionMillis: UInt64,
+        beatTimesMillis: [UInt64]
+    ) -> Double {
+        guard beatTimesMillis.count >= 2 else { return 1 }
+        var lower = 0
+        var upper = beatTimesMillis.count
+        while lower < upper {
+            let middle = lower + (upper - lower) / 2
+            if beatTimesMillis[middle] > positionMillis {
+                upper = middle
+            } else {
+                lower = middle + 1
+            }
+        }
+        let intervalIndex = min(max(0, lower - 1), beatTimesMillis.count - 2)
+        let start = beatTimesMillis[intervalIndex]
+        let end = beatTimesMillis[intervalIndex + 1]
+        guard end > start else { return 1 }
+        let rate = Double(effectiveBPMMilli) * Double(end - start) / 60_000_000
+        return min(4, max(0.25, rate))
     }
 
     private func discardPendingLocalTransport(for deckID: UInt64) {
@@ -1343,8 +1404,12 @@ final class EngineStatusModel: ObservableObject {
         guard snapshot.deckSource.mode == "localPlayback" else {
             localAudioControllers.values.forEach { $0.shutdown() }
             localAudioControllers.removeAll()
-            localPlaybackVisualClocks = [:]
             localPlaybackWaveforms = [:]
+            if snapshot.deckSource.mode == "connectedDecks" {
+                synchronizeConnectedDeckVisualClocks(with: snapshot)
+            } else {
+                deckVisualClocks = [:]
+            }
             return
         }
         let expectedDecks = Set(snapshot.decks.compactMap { deck in
@@ -1352,9 +1417,9 @@ final class EngineStatusModel: ObservableObject {
         })
         for deckID in Array(localAudioControllers.keys) where !expectedDecks.contains(deckID) {
             localAudioControllers.removeValue(forKey: deckID)?.shutdown()
-            var clocks = localPlaybackVisualClocks
+            var clocks = deckVisualClocks
             clocks.removeValue(forKey: deckID)
-            localPlaybackVisualClocks = clocks
+            deckVisualClocks = clocks
             var waveforms = localPlaybackWaveforms
             waveforms.removeValue(forKey: deckID)
             localPlaybackWaveforms = waveforms
@@ -1543,6 +1608,7 @@ final class EngineStatusModel: ObservableObject {
                     guard snapshot.snapshotSequence >= (self.latestSnapshot?.snapshotSequence ?? 0)
                     else { continue }
                     self.latestSnapshot = snapshot
+                    self.synchronizeLocalAudio(with: snapshot)
                     let nextWorkspaceState = LiveWorkspacePresenter.ready(snapshot)
                     if nextWorkspaceState != self.workspaceState {
                         self.workspaceState = nextWorkspaceState

@@ -300,7 +300,12 @@ struct LibraryWorkspaceTests {
         #expect(expression.contains("(or effective-tempo 0.0)"))
         #expect(expression.contains("sim-signature"))
         #expect(expression.contains("[36 (chunk sim-signature 0)]"))
-        #expect(expression.contains("[119 3]"))
+        #expect(expression.contains("raw-position (playback-time status)"))
+        #expect(expression.contains("sampled-position (* 100 (quot current-position 100))"))
+        #expect(expression.contains(":lumi-last-frame frame-key"))
+        #expect(expression.contains("(>= (- now-ms last-sent-ms) 1000)"))
+        #expect(expression.contains("[41 (chunk sampled-position 0)]"))
+        #expect(expression.contains("[119 4]"))
     }
 
     @Test("Duplicate stable role IDs are rejected before Settings renders")

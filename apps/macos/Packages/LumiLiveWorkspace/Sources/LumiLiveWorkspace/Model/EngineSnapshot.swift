@@ -315,32 +315,36 @@ public struct LocalPlaybackTrackSnapshot: Equatable, Sendable {
     }
 }
 
-/// Lightweight app-side clock used only to render Local Playback smoothly.
-/// Authoritative phrase and planning state still comes from the engine.
-public struct LocalPlaybackVisualClockSnapshot: Equatable, Sendable {
+/// Lightweight app-side clock used to render local and connected decks smoothly.
+/// Authoritative transport, phrase and planning state still comes from the engine.
+public struct DeckVisualClockSnapshot: Equatable, Sendable {
     public let trackLoadID: UInt64
     public let positionMillis: UInt64
     public let durationMillis: UInt64
     public let playing: Bool
     public let anchoredAtReferenceTime: TimeInterval
+    public let playbackRate: Double
 
     public init(
         trackLoadID: UInt64,
         positionMillis: UInt64,
         durationMillis: UInt64,
         playing: Bool,
-        anchoredAtReferenceTime: TimeInterval
+        anchoredAtReferenceTime: TimeInterval,
+        playbackRate: Double = 1
     ) {
         self.trackLoadID = trackLoadID
         self.positionMillis = positionMillis
         self.durationMillis = durationMillis
         self.playing = playing
         self.anchoredAtReferenceTime = anchoredAtReferenceTime
+        self.playbackRate = max(0, playbackRate)
     }
 
     public func positionMillis(at date: Date) -> Double {
         let elapsed = playing
-            ? max(0, date.timeIntervalSinceReferenceDate - anchoredAtReferenceTime) * 1_000
+            ? max(0, date.timeIntervalSinceReferenceDate - anchoredAtReferenceTime)
+                * 1_000 * playbackRate
             : 0
         return min(Double(durationMillis), Double(positionMillis) + elapsed)
     }
@@ -358,6 +362,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
     public let keyKnown: Bool
     public let beat: UInt64
     public let playing: Bool
+    public let playbackPositionMillis: UInt64?
     public let phraseIndex: UInt64?
     public let durationBeats: UInt64
     public let beatGrid: DeckBeatGridSnapshot?
@@ -380,6 +385,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
         keyKnown: Bool = true,
         beat: UInt64,
         playing: Bool = false,
+        playbackPositionMillis: UInt64? = nil,
         phraseIndex: UInt64?,
         durationBeats: UInt64 = 0,
         beatGrid: DeckBeatGridSnapshot? = nil,
@@ -399,6 +405,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
         self.keyKnown = keyKnown
         self.beat = beat
         self.playing = playing
+        self.playbackPositionMillis = playbackPositionMillis
         self.phraseIndex = phraseIndex
         self.durationBeats = durationBeats
         self.beatGrid = beatGrid

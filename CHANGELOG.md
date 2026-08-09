@@ -4,8 +4,13 @@
 
 - Read-only Rekordbox Device Library-sync koppelt echte USB/SD-track-ID's aan
   canonieke Lumi-tracks en ververst beatgrid, RGB-waveform en cue-bearing
-  analyserevisies; BLT MIDI v3 ondersteunt daarnaast exacte Shallow Simulator-
+  analyserevisies; BLT MIDI v4 ondersteunt daarnaast exacte Shallow Simulator-
   matching zonder BLT zelf te wijzigen.
+- BLT-transport is begrensd tot gewijzigde state, 100 ms-positieframes en een
+  heartbeat; connected decks tonen daarmee een vloeiend geïnterpoleerde
+  playhead zonder de engine-commandlane met identieke frames te overspoelen.
+  Een ontbrekende heartbeat ruimt per deck na 2,5 seconde veilige stale
+  transportstate op.
 - Live timing changes remain pending until the next actually playing phrase;
   applied and pending values are visible in Live and on both decks.
 - Het goedgekeurde RGB-waveform/light-fan-logo is toegevoegd als macOS-app-icon

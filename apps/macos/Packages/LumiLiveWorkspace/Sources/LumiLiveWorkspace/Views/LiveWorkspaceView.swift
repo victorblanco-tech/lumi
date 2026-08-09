@@ -12,7 +12,7 @@ public struct LiveWorkspaceView: View {
     private let onSessionCommand: @MainActor (SessionCommandRequest) -> Void
     private let onLocalPlayback: @MainActor (LocalPlaybackRequest) -> Void
     private let localPlaybackBrowser: AnyView?
-    private let localPlaybackVisualClocks: [UInt64: LocalPlaybackVisualClockSnapshot]
+    private let deckVisualClocks: [UInt64: DeckVisualClockSnapshot]
     private let localPlaybackWaveforms: [UInt64: DeckWaveformPreviewSnapshot]
     private let localPlaybackFeedback: String?
     private let localPlaybackFeedbackIsError: Bool
@@ -34,7 +34,7 @@ public struct LiveWorkspaceView: View {
         lightingTimingOffsetMillis: Binding<Int> = .constant(0),
         allowsScrolling: Bool = true,
         showsNavigation: Bool = true,
-        localPlaybackVisualClocks: [UInt64: LocalPlaybackVisualClockSnapshot] = [:],
+        deckVisualClocks: [UInt64: DeckVisualClockSnapshot] = [:],
         localPlaybackWaveforms: [UInt64: DeckWaveformPreviewSnapshot] = [:],
         localPlaybackFeedback: String? = nil,
         localPlaybackFeedbackIsError: Bool = false,
@@ -47,7 +47,7 @@ public struct LiveWorkspaceView: View {
         self.productVersion = productVersion
         self.allowsScrolling = allowsScrolling
         self.showsNavigation = showsNavigation
-        self.localPlaybackVisualClocks = localPlaybackVisualClocks
+        self.deckVisualClocks = deckVisualClocks
         self.localPlaybackWaveforms = localPlaybackWaveforms
         self.localPlaybackFeedback = localPlaybackFeedback
         self.localPlaybackFeedbackIsError = localPlaybackFeedbackIsError
@@ -526,7 +526,7 @@ public struct LiveWorkspaceView: View {
                                     plan: plan,
                                     musicalKey: musicalKey(for: deck),
                                     isLocalPlayback: content.sourceMode == "localPlayback",
-                                    visualClock: localPlaybackVisualClocks[deck.deckID],
+                                    visualClock: deckVisualClocks[deck.deckID],
                                     waveformOverride: localPlaybackWaveforms[deck.deckID],
                                     lightingTimingOffsetMillis: content.lightingTimingOffsetMillis,
                                     pendingLightingTimingOffsetMillis: content.pendingLightingTimingOffsetMillis,

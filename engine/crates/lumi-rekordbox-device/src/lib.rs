@@ -84,17 +84,17 @@ pub fn read_device_library(root: impl AsRef<Path>) -> Result<DeviceLibrarySnapsh
     for track in &database.tracks {
         let audio_path = canonical_declared_child(&canonical_root, track.file_path())?;
         let analysis_dat_path = canonical_declared_child(&canonical_root, track.analyze_path())?;
-        let metadata_revision = metadata_revision(
-            track.id,
-            track.title(),
-            artists.get(&track.artist_id).copied().unwrap_or_default(),
-            track.tempo,
-            track.duration,
-            track.file_size,
-            track.file_path(),
-            track.analyze_path(),
-            track.analyze_date(),
-        );
+        let metadata_revision = metadata_revision(MetadataRevisionInput {
+            id: track.id,
+            title: track.title(),
+            artist: artists.get(&track.artist_id).copied().unwrap_or_default(),
+            tempo: track.tempo,
+            duration: track.duration,
+            file_size: track.file_size,
+            file_path: track.file_path(),
+            analyze_path: track.analyze_path(),
+            analyze_date: track.analyze_date(),
+        });
         let analysis_revision = analysis_set_revision(&analysis_dat_path)?;
         let device_track = DeviceTrack {
             device_track_id: track.id,
@@ -145,7 +145,7 @@ pub fn read_device_library(root: impl AsRef<Path>) -> Result<DeviceLibrarySnapsh
 }
 
 /// Returns the Java `String.hashCode` of the normalized metadata tuple sent
-/// by Lumi's BLT protocol v3 expression during shallow simulation.
+/// by Lumi's BLT protocol v4 expression during shallow simulation.
 #[must_use]
 pub fn simulator_signature(title: &str, artist: &str, tempo_centi_bpm: u32, duration: u16) -> u32 {
     let identity = format!(
@@ -182,28 +182,30 @@ fn canonical_child(root: &Path, relative: &Path) -> Result<PathBuf, DeviceError>
     Ok(canonical)
 }
 
-fn metadata_revision(
+struct MetadataRevisionInput<'a> {
     id: u32,
-    title: &str,
-    artist: &str,
+    title: &'a str,
+    artist: &'a str,
     tempo: u32,
     duration: u16,
     file_size: u32,
-    file_path: &str,
-    analyze_path: &str,
-    analyze_date: &str,
-) -> String {
+    file_path: &'a str,
+    analyze_path: &'a str,
+    analyze_date: &'a str,
+}
+
+fn metadata_revision(input: MetadataRevisionInput<'_>) -> String {
     let mut digest = Sha256::new();
     for value in [
-        id.to_string(),
-        title.to_owned(),
-        artist.to_owned(),
-        tempo.to_string(),
-        duration.to_string(),
-        file_size.to_string(),
-        file_path.to_owned(),
-        analyze_path.to_owned(),
-        analyze_date.to_owned(),
+        input.id.to_string(),
+        input.title.to_owned(),
+        input.artist.to_owned(),
+        input.tempo.to_string(),
+        input.duration.to_string(),
+        input.file_size.to_string(),
+        input.file_path.to_owned(),
+        input.analyze_path.to_owned(),
+        input.analyze_date.to_owned(),
     ] {
         digest.update(value.as_bytes());
         digest.update([0]);
