@@ -4,6 +4,7 @@
 # Rust
 /target/
 /build/
+/bridges/prolink/target/
 
 # Xcode / Swift
 DerivedData/

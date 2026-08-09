@@ -60,6 +60,10 @@ reject_dependency \
   'lumi-(engine|simulator|planner|protocol|library|lighting-output|midi-output)' \
   "the Beat Link Trigger adapter may depend only on deck-source/domain ports and raw CoreMIDI messages."
 reject_dependency \
+  "engine/crates/lumi-prolink-input/Cargo.toml" \
+  'lumi-(engine|simulator|planner|protocol|library|lighting-output|midi-output|midi-coremidi|blt-midi)' \
+  "the direct Pro DJ Link input boundary may not depend on engine, planning, library, output, MIDI, or BLT adapters."
+reject_dependency \
   "engine/crates/lumi-library/Cargo.toml" \
   'lumi-(engine|simulator|planner|protocol|deck-source|lighting-output|output-dry-run|library-source|library-demo|library-sqlite)' \
   "the canonical library model and repository port may depend inward on the domain only."

@@ -12,6 +12,21 @@ output through a virtual MIDI port.
 - Project: https://github.com/Deep-Symmetry/beat-link-trigger
 - License: https://github.com/Deep-Symmetry/beat-link-trigger/blob/master/LICENSE
 
+Beat Link Trigger is a temporary optional integration and is not bundled with
+Lumi.
+
+## beat-link
+
+The direct Pro DJ Link bridge uses Deep Symmetry's `beat-link` Java library as
+a pinned build dependency. The library repository publishes its source under
+the Eclipse Public License 2.0. Before a Lumi package containing the bridge is
+distributed, the exact pinned binary, source, transitive licenses and Maven
+license metadata are verified and included in the release inventory.
+
+- Project: https://github.com/Deep-Symmetry/beat-link
+- License: https://github.com/Deep-Symmetry/beat-link/blob/main/LICENSE.md
+- Source distribution: https://github.com/Deep-Symmetry/beat-link/releases
+
 ## rekordbox-pdb
 
 Lumi uses the `rekordbox-pdb` Rust parser to read the classic Rekordbox Device
