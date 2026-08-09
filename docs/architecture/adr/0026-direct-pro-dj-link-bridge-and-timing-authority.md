@@ -89,6 +89,8 @@ must not depend on fork-only behavior without an explicit follow-up ADR.
   lighting lane.
 - The first release is read-only on the Pro DJ Link network; player remote
   control is outside scope.
+- Development-simulator controls are a separate authenticated HTTP test surface
+  defined by ADR-0027 and never target physical Pro DJ Link devices.
 
 ## Consequences
 

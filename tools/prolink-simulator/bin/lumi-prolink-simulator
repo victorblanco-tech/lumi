@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+
+set -euo pipefail
+
+bin_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
+bundle_root="$(dirname "$bin_dir")"
+
+exec "$bundle_root/runtime/bin/java" \
+  -jar "$bundle_root/lib/lumi-prolink-simulator.jar" \
+  "$@"

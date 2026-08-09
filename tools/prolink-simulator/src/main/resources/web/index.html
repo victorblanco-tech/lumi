@@ -1,0 +1,126 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Lumi Pro DJ Link Simulator</title>
+    <style>
+        :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+        * { box-sizing: border-box; }
+        body { margin: 0; background: #050607; color: #f4f7fa; }
+        main { max-width: 980px; margin: 0 auto; padding: 28px; }
+        h1 { font-size: 22px; margin: 0 0 4px; }
+        .subtle { color: #8e9aa7; font-size: 13px; }
+        .panel { background: #111417; border: 1px solid #27313a; border-radius: 12px; padding: 16px; margin-top: 16px; }
+        .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
+        .metric { background: #0a0c0e; border-radius: 8px; padding: 10px; }
+        .metric span { display: block; color: #8e9aa7; font-size: 11px; text-transform: uppercase; }
+        .metric strong { display: block; margin-top: 4px; font-size: 16px; overflow: hidden; text-overflow: ellipsis; }
+        button, input { border-radius: 7px; border: 1px solid #35424d; background: #171c21; color: #f4f7fa; min-height: 36px; }
+        button { padding: 0 14px; cursor: pointer; }
+        button:hover { border-color: #63c7ff; }
+        button.primary { background: #0c75a9; border-color: #63c7ff; }
+        button.active { border-color: #ff4d5d; color: #ff7b86; }
+        input[type="search"] { width: 100%; padding: 0 10px; }
+        input[type="range"] { width: 100%; accent-color: #63c7ff; }
+        .controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+        .slider { margin-top: 14px; display: grid; grid-template-columns: 90px 1fr 90px; gap: 10px; align-items: center; }
+        .tracks { max-height: 330px; overflow: auto; margin-top: 10px; border: 1px solid #27313a; border-radius: 8px; }
+        .track { width: 100%; display: grid; grid-template-columns: 1fr 1fr 80px 90px; text-align: left; border: 0; border-bottom: 1px solid #20272d; border-radius: 0; background: #0b0e10; }
+        .track:hover { background: #121a20; }
+        .error { color: #ff7b86; min-height: 20px; margin-top: 10px; }
+        @media (max-width: 720px) { .grid { grid-template-columns: repeat(2, 1fr); } .track { grid-template-columns: 1fr 90px; } .track .secondary { display: none; } }
+    </style>
+</head>
+<body>
+<main>
+    <h1>Lumi Pro DJ Link Simulator</h1>
+    <div class="subtle">Development-only USB player · remote control enabled</div>
+
+    <section class="panel">
+        <div class="grid">
+            <div class="metric"><span>Player</span><strong id="player">—</strong></div>
+            <div class="metric"><span>Transport</span><strong id="transport">—</strong></div>
+            <div class="metric"><span>Effective BPM</span><strong id="bpm">—</strong></div>
+            <div class="metric"><span>Beat</span><strong id="beat">—</strong></div>
+        </div>
+        <div class="metric" style="margin-top: 10px"><span>Loaded track</span><strong id="loaded">No track loaded</strong></div>
+        <div class="controls">
+            <button class="primary" id="play">Play</button>
+            <button id="pause">Pause</button>
+            <button id="master">Master</button>
+            <button id="onAir">On Air</button>
+        </div>
+        <div class="slider"><label for="seek">Position</label><input id="seek" type="range" min="0" max="1" value="0"><output id="seekValue">0:00</output></div>
+        <div class="slider"><label for="pitch">Pitch</label><input id="pitch" type="range" min="-20" max="20" step="0.05" value="0"><output id="pitchValue">0.00%</output></div>
+        <div class="subtle" id="network" style="margin-top: 12px">Network: —</div>
+        <div class="error" id="error"></div>
+    </section>
+
+    <section class="panel">
+        <input id="search" type="search" placeholder="Search the Rekordbox USB by title, artist or track ID">
+        <div class="tracks" id="tracks"></div>
+    </section>
+</main>
+<script>
+    const queryToken = new URLSearchParams(location.search).get('token');
+    if (queryToken) sessionStorage.setItem('lumiSimulatorToken', queryToken);
+    const token = sessionStorage.getItem('lumiSimulatorToken') || '';
+    history.replaceState({}, '', location.pathname);
+    const el = id => document.getElementById(id);
+    let current = null;
+    let seekDragging = false;
+    let pitchDragging = false;
+
+    async function api(path, options = {}) {
+        const response = await fetch(path, {
+            ...options,
+            headers: { 'Authorization': `Bearer ${token}`, 'Content-Type': 'application/json', ...(options.headers || {}) }
+        });
+        const body = await response.json();
+        if (!response.ok) throw new Error(body.error || `HTTP ${response.status}`);
+        return body;
+    }
+    async function control(action, body = {}) {
+        try { current = await api(`/api/v1/control/${action}`, { method: 'POST', body: JSON.stringify(body) }); render(); el('error').textContent = ''; }
+        catch (error) { el('error').textContent = error.message; }
+    }
+    function time(ms) { const seconds = Math.floor(ms / 1000); return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`; }
+    function render() {
+        if (!current) return;
+        el('player').textContent = `Deck ${current.playerNumber}`;
+        el('transport').textContent = current.playing ? 'PLAYING' : 'PAUSED';
+        el('bpm').textContent = current.track ? current.effectiveBpm.toFixed(2) : '—';
+        el('beat').textContent = current.beatNumber ? `${current.beatNumber} · ${current.beatWithinBar}/4` : '—';
+        el('loaded').textContent = current.track ? `${current.track.artist} — ${current.track.title}` : 'No track loaded';
+        el('master').classList.toggle('active', current.master);
+        el('onAir').classList.toggle('active', current.onAir);
+        if (!seekDragging) { el('seek').max = current.track ? current.track.durationMillis : 1; el('seek').value = current.positionMillis; el('seekValue').textContent = time(current.positionMillis); }
+        if (!pitchDragging) { el('pitch').value = current.pitchPercent; el('pitchValue').textContent = `${current.pitchPercent.toFixed(2)}%`; }
+        el('network').textContent = `Network: ${current.networkInterface} · ${current.networkAddress} → ${current.broadcastAddress}`;
+    }
+    async function refresh() { try { current = await api('/api/v1/status'); render(); el('error').textContent = ''; } catch (error) { el('error').textContent = error.message; } }
+    async function search() {
+        try {
+            const result = await api(`/api/v1/tracks?q=${encodeURIComponent(el('search').value)}&limit=200`);
+            el('tracks').replaceChildren(...result.tracks.map(track => {
+                const button = document.createElement('button'); button.className = 'track';
+                for (const [text, className] of [[track.title, ''], [track.artist, 'secondary'], [track.bpm.toFixed(2), ''], [`ID ${track.trackId}`, 'secondary']]) {
+                    const span = document.createElement('span'); span.textContent = text; span.className = className; button.append(span);
+                }
+                button.onclick = () => control('load', { trackId: track.trackId }); return button;
+            }));
+        } catch (error) { el('error').textContent = error.message; }
+    }
+    el('play').onclick = () => control('play'); el('pause').onclick = () => control('pause');
+    el('master').onclick = () => control('master', { enabled: !current.master });
+    el('onAir').onclick = () => control('on-air', { enabled: !current.onAir });
+    el('seek').oninput = event => { seekDragging = true; el('seekValue').textContent = time(Number(event.target.value)); };
+    el('seek').onchange = event => { seekDragging = false; control('seek', { positionMillis: Number(event.target.value) }); };
+    el('pitch').oninput = event => { pitchDragging = true; el('pitchValue').textContent = `${Number(event.target.value).toFixed(2)}%`; };
+    el('pitch').onchange = event => { pitchDragging = false; control('pitch', { pitchPercent: Number(event.target.value) }); };
+    let searchTimer; el('search').oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(search, 160); };
+    refresh(); search(); setInterval(refresh, 200);
+</script>
+</body>
+</html>

@@ -5,6 +5,7 @@
 /target/
 /build/
 /bridges/prolink/target/
+/tools/prolink-simulator/target/
 
 # Xcode / Swift
 DerivedData/

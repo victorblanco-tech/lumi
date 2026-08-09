@@ -10,6 +10,7 @@ engine/     Autonomous Rust domain and runtime crates
 fixtures/   Deterministic license-safe test and demo data
 docs/       Architecture, planning, release, and development documentation
 scripts/    Repository-wide validation and delivery entry points
+tools/      Development-only external-system simulators and diagnostics
 ```
 
 ## Dependency direction
@@ -57,6 +58,12 @@ domain, protocol or Swift packages.
 `lumi-prolink-input` owns strict decoding and validation of that local bridge
 protocol. It initially has no domain or engine dependency; the later deck
 adapter consumes its immutable messages and implements `DeckSourceProvider`.
+
+`tools/prolink-simulator` owns the development-only Pro DJ Link network player.
+It reads a mounted Rekordbox USB without writing, emits only the discovery,
+status and beat facts needed by Lumi, and exposes authenticated HTTP controls
+for repeatable two-Mac acceptance tests. It is not a deck-source adapter, never
+ships in the production DMG and never sends commands to physical players.
 
 `lumi-planner` owns deterministic creative selection and canonical plan
 evidence. It depends only on `lumi-domain`; it knows no simulator, transport,

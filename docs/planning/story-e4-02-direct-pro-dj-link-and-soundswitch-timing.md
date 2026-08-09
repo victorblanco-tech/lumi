@@ -64,6 +64,21 @@ This story is delivered in visible, independently testable increments:
 - No separately installed Java, BLT or internet dependency.
 - Physical player, mixer, SoundSwitch, Control One and DMX acceptance run.
 
+### E4-02S — USB-backed network simulator — implemented
+
+- Development-only Mac mini player; excluded from production packaging.
+- Read-only DeviceSQL and ANLZ track catalog from the same show USB.
+- Real Pro DJ Link discovery, status and beat packet generation for one player.
+- Rekordbox ID, exact beat grid, play/pause, seek, pitch, master and on-air.
+- Token-protected browser controls and stable HTTP API for remote agent tests.
+- `prolink-simulatorctl.sh` wrapper and local packet/config verification.
+- Verified on `DJ VIC GRAY`: 1,138 tracks and 64 playlists indexed read-only;
+  track ID 1256 resolved as `90s Bitch - Extended Mix` with an exact beat grid.
+- Generated announcement, status and beat packets parse successfully through
+  beat-link 8.0.0 with USB identity and effective tempo intact.
+- Two-host Mac mini → MacBook discovery remains the next POC step; local bridge
+  coexistence was correctly blocked while Beat Link Trigger owned UDP 50000/50001.
+
 ## Acceptance criteria
 
 - Lumi starts and stops the bridge automatically with the engine.
@@ -78,10 +93,13 @@ This story is delivered in visible, independently testable increments:
   the independent virtual MIDI output.
 - Control One continues to operate alongside Lumi.
 - All bridge and Rust contract tests run locally without paid CI minutes.
+- Simulator packet tests and API acceptance checks run locally without paid CI
+  minutes.
 
 ## Out of scope
 
 - Sending load, play, sync or master commands to physical players.
 - Replacing SoundSwitch fixture programming or DMX output.
 - A native Rust implementation of the Pro DJ Link protocol.
+- Full CDJ audio, display, media-server or remote-command emulation.
 - Removing the BLT fallback before physical acceptance succeeds.

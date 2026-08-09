@@ -36,6 +36,17 @@ files read-only.
 - Project: https://github.com/fragmede/rekordbox-pdb-rs
 - License: MIT
 
+## Crate Digger
+
+The development-only Pro DJ Link simulator uses Deep Symmetry's `crate-digger`
+Java library to parse the mounted Rekordbox DeviceSQL database and ANLZ beat
+grid. It is not part of the production Lumi DMG. Maven metadata for the pinned
+0.2.1 artifact identifies EPL-1.0; its exact source and license are retained in
+the development-tool release inventory.
+
+- Project: https://github.com/Deep-Symmetry/crate-digger
+- Artifact: `org.deepsymmetry:crate-digger:0.2.1`
+
 ## Product names
 
 Rekordbox, SoundSwitch, Control One and other product names are used only to
