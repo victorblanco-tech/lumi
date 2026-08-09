@@ -1,5 +1,5 @@
 {
-  "engineVersion": "0.3.0-rc.1",
+  "engineVersion": "0.3.0",
   "leaderBeat": 128,
   "leaderDeckId": 2,
   "operationState": "live",

@@ -1,13 +1,15 @@
 # Changelog
 
-## 0.3.0-rc.1
+## 0.3.0
 
 - Rekordbox-backed Library en Lumi-owned phrase editing.
 - Stabiele Local Playback dual-deck met rolling AutoLoop Plan.
 - Persistente vier-bank/32-slot SoundSwitch-mapping en generieke MIDI-output.
 - Automatische phrase-boundary execution, MIDI Clock en een eerste fysieke
   SoundSwitch/Control One/DMX-run.
-- Geïsoleerde, lokaal geverifieerde Lumi Preview-DMG voor Apple Silicon.
+- Fysiek geaccepteerde SoundSwitch/Control One/DMX-keten en een geïsoleerde,
+  lokaal geverifieerde Stable-DMG voor Apple Silicon.
+- EPL-2.0-projectlicentie en compacte branding- en integratienotices.
 
 ## 0.1.0-dev
 

@@ -167,6 +167,19 @@ fi
 ln -s /Applications "$staging_directory/Applications"
 cp "$repository_root/docs/release/unsigned-macos-installation.txt" \
   "$staging_directory/README - Install $app_name.txt"
+cp "$repository_root/LICENSE" "$staging_directory/LICENSE.txt"
+cp "$repository_root/TRADEMARKS.md" "$staging_directory/TRADEMARKS.md"
+cp "$repository_root/THIRD_PARTY_NOTICES.md" \
+  "$staging_directory/THIRD-PARTY-NOTICES.md"
+{
+  echo "Lumi source code"
+  echo
+  echo "Lumi is available under the Eclipse Public License 2.0."
+  echo "Preferred source form: https://github.com/victorblanco-tech/lumi"
+  echo
+  echo "If that repository is private when you receive this build, request"
+  echo "corresponding source access from the person who distributed it."
+} > "$staging_directory/SOURCE-AND-LICENSE.txt"
 {
   echo "$app_name $canonical_version"
   echo "Channel $channel"

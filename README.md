@@ -23,10 +23,10 @@ Het bouwplan voor de eerste verticale productmilestone staat in
 Het gerefineerde ontwerp en storyplan voor de volgende verticale milestone staat
 in [`docs/planning/epic-02a-library-track-lighting-editor.md`](docs/planning/epic-02a-library-track-lighting-editor.md).
 
-> Status: `0.3.0-rc.1` bevat de geaccepteerde Rekordbox-backed Library, Track
+> Status: `0.3.0` bevat de geaccepteerde Rekordbox-backed Library, Track
 > Lighting Editor, Local Playback dual-deck, rolling AutoLoop Plan en de eerste
-> fysiek bewezen SoundSwitch/MIDI/DMX-keten. De geïsoleerde Lumi Preview-DMG
-> is de unsigned Apple Silicon release candidate voor de resterende acceptatie.
+> fysiek bewezen SoundSwitch/MIDI/DMX-keten. De geïsoleerde Stable-DMG is de
+> eerste unsigned Apple Silicon owner release.
 
 ## Development
 
@@ -36,3 +36,10 @@ dry-run event timeline. The no-terminal demo and known limitations are in
 [`docs/release/0.1.0-demo-and-limitations.md`](docs/release/0.1.0-demo-and-limitations.md).
 Environment setup and the single local verification command are documented in
 [`docs/development/README.md`](docs/development/README.md).
+
+## License
+
+Copyright © 2026 Victor Blanco. Lumi is available under the
+[Eclipse Public License 2.0](LICENSE). Names and branding are covered separately
+by [the project branding notice](TRADEMARKS.md); optional external integrations
+are listed in [third-party notices](THIRD_PARTY_NOTICES.md).

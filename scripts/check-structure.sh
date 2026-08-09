@@ -6,6 +6,9 @@ script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 repository_root="$(dirname "$script_dir")"
 
 required_paths=(
+  "LICENSE"
+  "TRADEMARKS.md"
+  "THIRD_PARTY_NOTICES.md"
   "Cargo.toml"
   "engine/crates/lumi-domain"
   "engine/crates/lumi-deck-source"
@@ -51,6 +54,7 @@ required_paths=(
   "docs/release/0.2.0-demo-and-limitations.md"
   "docs/release/0.2.0-epic-2a-evidence.md"
   "docs/release/0.3.0-release-readiness.md"
+  "docs/release/0.3.0-release-notes.md"
   "docs/release/0.3.0-dev-demo-and-limitations.md"
   "docs/release/unsigned-macos-installation.txt"
   "scripts/check-architecture.sh"
@@ -61,6 +65,7 @@ required_paths=(
   "scripts/package-macos-local.sh"
   "scripts/backup-macos-user-data.sh"
   "scripts/clone-macos-channel-data.sh"
+  "docs/planning/story-e3-03-resume-and-timing-confirmation.md"
   "docs"
   "scripts"
 )
