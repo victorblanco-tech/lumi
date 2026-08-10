@@ -32,6 +32,10 @@ production DMG.
    for its remote URL. It contains its own Java runtime; Java and Terminal are
    not required on the Mac mini.
 
+   Installing into the system `/Applications` folder can require an
+   administrator account. A non-admin user can instead create `~/Applications`
+   and copy the app there; running the app never requires administrator rights.
+
    App settings are stored in:
 
    ```text

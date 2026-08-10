@@ -8,6 +8,7 @@ import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
+import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JSpinner;
 import javax.swing.JTextField;
@@ -21,10 +22,14 @@ import java.awt.Desktop;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.Font;
+import java.awt.GraphicsEnvironment;
 import java.awt.Toolkit;
 import java.awt.datatransfer.StringSelection;
 import java.io.IOException;
+import java.io.FileOutputStream;
+import java.io.PrintStream;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
@@ -48,15 +53,27 @@ public final class SimulatorAppMain {
 
     public static void main(String[] arguments) {
         configureLogging();
+        appendLog("Java main entered; headless=" + GraphicsEnvironment.isHeadless(), null);
+        Thread.setDefaultUncaughtExceptionHandler((thread, failure) -> {
+            appendLog("Uncaught exception on " + thread.getName(), failure);
+            showFatalError(failure);
+        });
         System.setProperty("apple.awt.application.name", APP_NAME);
         System.setProperty("apple.laf.useScreenMenuBar", "true");
         SwingUtilities.invokeLater(() -> {
             try {
+                appendLog("Swing event thread started", null);
                 UIManager.setLookAndFeel(UIManager.getSystemLookAndFeelClassName());
-            } catch (Exception ignored) {
+            } catch (Exception failure) {
+                appendLog("System look and feel unavailable; using fallback", failure);
                 // The cross-platform Swing theme remains a safe fallback.
             }
-            new SimulatorWindow().show();
+            try {
+                new SimulatorWindow().show();
+            } catch (Throwable failure) {
+                appendLog("Could not construct or show the main window", failure);
+                showFatalError(failure);
+            }
         });
     }
 
@@ -76,13 +93,62 @@ public final class SimulatorAppMain {
     private static void configureLogging() {
         try {
             Files.createDirectories(LOG_FILE.getParent());
-            System.setProperty("org.slf4j.simpleLogger.logFile", LOG_FILE.toString());
+            PrintStream logStream = new PrintStream(
+                    new FileOutputStream(LOG_FILE.toFile(), true),
+                    true,
+                    StandardCharsets.UTF_8
+            );
+            System.setOut(logStream);
+            System.setErr(logStream);
+            System.setProperty("org.slf4j.simpleLogger.logFile", "System.err");
             Files.writeString(
                     LOG_FILE, System.lineSeparator() + "=== App launch " + Instant.now() + " ===" + System.lineSeparator(),
                     StandardOpenOption.CREATE, StandardOpenOption.APPEND
             );
         } catch (IOException failure) {
             System.err.println("Could not configure log file: " + failure.getMessage());
+        }
+    }
+
+    private static synchronized void appendLog(String message, Throwable failure) {
+        try {
+            Files.createDirectories(LOG_FILE.getParent());
+            StringBuilder entry = new StringBuilder()
+                    .append(Instant.now()).append(" · ").append(message).append(System.lineSeparator());
+            if (failure != null) {
+                java.io.StringWriter text = new java.io.StringWriter();
+                failure.printStackTrace(new java.io.PrintWriter(text));
+                entry.append(text).append(System.lineSeparator());
+            }
+            Files.writeString(
+                    LOG_FILE, entry, StandardOpenOption.CREATE, StandardOpenOption.APPEND
+            );
+        } catch (IOException ignored) {
+            // There is no safer fallback when the app log itself is unavailable.
+        }
+    }
+
+    private static void showFatalError(Throwable failure) {
+        Runnable dialog = () -> {
+            try {
+                String message = failure.getMessage() == null
+                        ? failure.getClass().getSimpleName()
+                        : failure.getMessage();
+                JOptionPane.showMessageDialog(
+                        null,
+                        "The simulator could not open its window.\n\n" + message
+                                + "\n\nDiagnostics: " + LOG_FILE,
+                        APP_NAME,
+                        JOptionPane.ERROR_MESSAGE
+                );
+            } catch (Throwable dialogFailure) {
+                appendLog("Could not show the fatal error dialog", dialogFailure);
+            }
+        };
+        if (SwingUtilities.isEventDispatchThread()) {
+            dialog.run();
+        } else {
+            SwingUtilities.invokeLater(dialog);
         }
     }
 
@@ -126,7 +192,17 @@ public final class SimulatorAppMain {
         }
 
         void show() {
+            appendLog("Showing the main window", null);
+            frame.setLocationRelativeTo(null);
             frame.setVisible(true);
+            frame.setExtendedState(JFrame.NORMAL);
+            frame.setAlwaysOnTop(true);
+            frame.toFront();
+            frame.requestFocus();
+            javax.swing.Timer releaseFront = new javax.swing.Timer(1_200, event -> frame.setAlwaysOnTop(false));
+            releaseFront.setRepeats(false);
+            releaseFront.start();
+            appendLog("Main window visible=" + frame.isVisible() + "; displayable=" + frame.isDisplayable(), null);
             refreshVolumes(true);
         }
 
@@ -238,6 +314,7 @@ public final class SimulatorAppMain {
             Thread.startVirtualThread(() -> {
                 try {
                     List<Path> volumes = findRekordboxVolumes(Path.of("/Volumes"));
+                    appendLog("Rekordbox USB scan found " + volumes.size() + " volume(s)", null);
                     SwingUtilities.invokeLater(() -> {
                         usbVolumes.removeAllItems();
                         volumes.forEach(usbVolumes::addItem);
@@ -257,6 +334,7 @@ public final class SimulatorAppMain {
                         }
                     });
                 } catch (Exception failure) {
+                    appendLog("Rekordbox USB scan failed", failure);
                     SwingUtilities.invokeLater(() -> {
                         busy = false;
                         showFailure(failure);
@@ -281,6 +359,8 @@ public final class SimulatorAppMain {
                             "--usb", usb.toString(), "--player", Integer.toString(player)
                     });
                     SimulatorSession started = SimulatorSession.start(config);
+                    appendLog("Simulator session started for " + usb + " with "
+                            + started.library().size() + " tracks", null);
                     session = started;
                     SwingUtilities.invokeLater(() -> {
                         busy = false;
@@ -297,6 +377,7 @@ public final class SimulatorAppMain {
                         saveSettings();
                     });
                 } catch (Exception failure) {
+                    appendLog("Simulator session failed", failure);
                     SwingUtilities.invokeLater(() -> {
                         busy = false;
                         setControlsEnabled(true);

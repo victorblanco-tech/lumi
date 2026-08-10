@@ -72,6 +72,7 @@ dmg_root="$staging_root/dmg"
 mkdir -p "$dmg_root"
 ditto "$app_bundle" "$dmg_root/$app_name.app"
 ln -s /Applications "$dmg_root/Applications"
+cp "$repository_root/tools/prolink-simulator/INSTALL.txt" "$dmg_root/READ ME - Installation.txt"
 hdiutil create \
   -volname "$app_name" \
   -srcfolder "$dmg_root" \
