@@ -25,7 +25,7 @@ final class RemoteControlServer implements AutoCloseable {
 
     private final UsbLibrary library;
     private final PlayerState state;
-    private final ProLinkBroadcaster.Endpoint networkEndpoint;
+    private final ProLinkBroadcaster broadcaster;
     private final String token;
     private final HttpServer server;
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
@@ -33,14 +33,14 @@ final class RemoteControlServer implements AutoCloseable {
     RemoteControlServer(
             UsbLibrary library,
             PlayerState state,
-            ProLinkBroadcaster.Endpoint networkEndpoint,
+            ProLinkBroadcaster broadcaster,
             String bindAddress,
             int port,
             String token
     ) throws IOException {
         this.library = library;
         this.state = state;
-        this.networkEndpoint = networkEndpoint;
+        this.broadcaster = broadcaster;
         this.token = token;
         server = HttpServer.create(new InetSocketAddress(InetAddress.getByName(bindAddress), port), 0);
         server.setExecutor(executor);
@@ -159,9 +159,11 @@ final class RemoteControlServer implements AutoCloseable {
         payload.put("revision", snapshot.revision());
         payload.put("usbRoot", library.root().toString());
         payload.put("usbTrackCount", library.size());
+        ProLinkBroadcaster.Endpoint networkEndpoint = broadcaster.endpoint();
         payload.put("networkInterface", networkEndpoint.interfaceName());
         payload.put("networkAddress", networkEndpoint.localAddressText());
         payload.put("broadcastAddress", networkEndpoint.broadcastAddressText());
+        payload.put("proLinkPeerCount", broadcaster.peerCount());
         if (snapshot.track() == null) {
             payload.put("track", null);
         } else {

@@ -31,7 +31,7 @@ final class SimulatorSession implements AutoCloseable {
         ProLinkBroadcaster broadcaster = new ProLinkBroadcaster(player, config.networkInterface());
         try {
             RemoteControlServer remote = new RemoteControlServer(
-                    library, player, broadcaster.endpoint(), config.bindAddress(),
+                    library, player, broadcaster, config.bindAddress(),
                     config.controlPort(), config.controlToken()
             );
             broadcaster.start();

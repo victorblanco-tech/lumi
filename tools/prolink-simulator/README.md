@@ -9,6 +9,10 @@ by Lumi:
 - play/pause, pitch, master and on-air state;
 - beat number and beat within bar.
 
+The simulator discovers virtual players from their Pro DJ Link announcements
+and sends CDJ status to each active peer exactly as a physical player does.
+Beat and discovery packets remain broadcast traffic.
+
 It does not play audio, serve media to other players, emulate a CDJ display, or
 accept Pro DJ Link remote-control commands. It is never included in the Lumi
 production DMG.
