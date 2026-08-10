@@ -8,20 +8,46 @@ distribution_root="$repository_root/build/prolink-simulator-app"
 app_name="Lumi Pro DJ Link Simulator"
 version="0.4.0"
 
-if [[ -z "${JAVA_HOME:-}" ]]; then
-  for java_candidate in \
-    /opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home \
-    /usr/local/opt/openjdk@21/libexec/openjdk.jdk/Contents/Home; do
-    if [[ -x "$java_candidate/bin/jpackage" ]]; then
-      export JAVA_HOME="$java_candidate"
-      break
-    fi
-  done
+temurin_cache="$repository_root/build/package-toolchains/temurin-21-macos-aarch64"
+packaging_java_home="${SIMULATOR_PACKAGING_JAVA_HOME:-$temurin_cache/Contents/Home}"
+
+if [[ ! -x "$packaging_java_home/bin/jpackage" ]]; then
+  mkdir -p "$(dirname "$temurin_cache")"
+  download_root="$(mktemp -d "$repository_root/build/package-toolchains/.temurin-download.XXXXXX")"
+  metadata="$download_root/metadata.json"
+  archive="$download_root/temurin.tar.gz"
+  curl --fail --location --silent --show-error \
+    'https://api.adoptium.net/v3/assets/latest/21/hotspot?architecture=aarch64&heap_size=normal&image_type=jdk&jvm_impl=hotspot&os=mac&project=jdk&vendor=eclipse' \
+    --output "$metadata"
+  download_url="$(jq -er '.[0].binary.package.link' "$metadata")"
+  expected_checksum="$(jq -er '.[0].binary.package.checksum' "$metadata")"
+  curl --fail --location --show-error "$download_url" --output "$archive"
+  actual_checksum="$(shasum -a 256 "$archive" | awk '{print $1}')"
+  if [[ "$actual_checksum" != "$expected_checksum" ]]; then
+    echo "ERROR: Temurin JDK checksum mismatch." >&2
+    exit 1
+  fi
+  tar -xzf "$archive" -C "$download_root"
+  downloaded_jdk="$(
+    find "$download_root" -mindepth 1 -maxdepth 1 -type d -print | while IFS= read -r candidate; do
+      if [[ -x "$candidate/Contents/Home/bin/jpackage" ]]; then
+        echo "$candidate"
+        break
+      fi
+    done
+  )"
+  if [[ -z "$downloaded_jdk" || ! -x "$downloaded_jdk/Contents/Home/bin/jpackage" ]]; then
+    echo "ERROR: Downloaded Temurin archive does not contain jpackage." >&2
+    exit 1
+  fi
+  if [[ -e "$temurin_cache" ]]; then
+    mv "$temurin_cache" "$temurin_cache.invalid.$(date +%s)"
+  fi
+  mv "$downloaded_jdk" "$temurin_cache"
+  rm -rf "$download_root"
 fi
-if [[ -z "${JAVA_HOME:-}" || ! -x "$JAVA_HOME/bin/jpackage" ]]; then
-  echo "ERROR: OpenJDK 21 with jpackage is required to package the simulator app." >&2
-  exit 1
-fi
+
+export JAVA_HOME="$packaging_java_home"
 
 "$script_dir/verify-prolink-simulator.sh"
 
@@ -66,6 +92,19 @@ app_bundle="$app_image_root/$app_name.app"
 info_plist="$app_bundle/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $version" "$info_plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1" "$info_plist"
+
+external_dependencies="$(
+  find "$app_bundle" -type f -print0 | while IFS= read -r -d '' binary; do
+    if file "$binary" | grep -q 'Mach-O'; then
+      otool -L "$binary" 2>/dev/null | grep -E '/usr/local/|/opt/homebrew/' || true
+    fi
+  done
+)"
+if [[ -n "$external_dependencies" ]]; then
+  echo "ERROR: Packaged app contains non-portable Homebrew dependencies:" >&2
+  echo "$external_dependencies" >&2
+  exit 1
+fi
 codesign --force --deep --sign - "$app_bundle"
 
 dmg_root="$staging_root/dmg"
