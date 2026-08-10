@@ -21,32 +21,18 @@ public final class SimulatorMain {
             return;
         }
 
-        UsbLibrary library = UsbLibrary.open(config.usbRoot());
-        PlayerState player = new PlayerState(config.playerNumber());
-        ProLinkBroadcaster broadcaster = new ProLinkBroadcaster(player, config.networkInterface());
-        RemoteControlServer remote = new RemoteControlServer(
-                library, player, broadcaster.endpoint(), config.bindAddress(),
-                config.controlPort(), config.controlToken()
-        );
+        SimulatorSession session = SimulatorSession.start(config);
         CountDownLatch shutdown = new CountDownLatch(1);
         Runtime.getRuntime().addShutdownHook(Thread.ofPlatform().unstarted(() -> {
-            remote.close();
-            broadcaster.close();
+            session.close();
             shutdown.countDown();
         }));
 
-        broadcaster.start();
-        remote.start();
-        String remoteHost = "127.0.0.1".equals(config.bindAddress())
-                ? "127.0.0.1"
-                : broadcaster.endpoint().localAddressText();
         System.out.println("Lumi Pro DJ Link Simulator is ready");
-        System.out.println("USB: " + library.root() + " (" + library.size() + " tracks)");
+        System.out.println("USB: " + session.library().root() + " (" + session.library().size() + " tracks)");
         System.out.println("Player: " + config.playerNumber());
-        System.out.println("Network: " + broadcaster.endpoint().interfaceName()
-                + " / " + broadcaster.endpoint().localAddressText());
-        System.out.println("Remote control: http://" + remoteHost + ":" + remote.port()
-                + "/?token=" + config.controlToken());
+        System.out.println("Network: " + session.networkSummary());
+        System.out.println("Remote control: " + session.remoteUrl());
         System.out.println("API token: " + config.controlToken());
         shutdown.await();
     }

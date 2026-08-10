@@ -19,16 +19,40 @@ production DMG.
    mirror contains the current track IDs and analysis revisions.
 2. Eject the USB and connect it to the Mac mini.
 3. Connect both Macs to the same LAN; wired Ethernet is preferred.
-4. For the simplest Mac mini installation, build the self-contained archive on
-   the development Mac and unpack it on the Mac mini:
+4. For the normal Mac mini installation, build the standalone macOS DMG on the
+   development Mac:
+
+   ```bash
+   ./scripts/package-prolink-simulator-app-local.sh
+   ```
+
+   Open the DMG from `build/prolink-simulator-app`, drag **Lumi Pro DJ Link
+   Simulator** to Applications, and launch it from Finder. The app detects
+   Rekordbox USB exports, starts the simulator, and exposes copy/open controls
+   for its remote URL. It contains its own Java runtime; Java and Terminal are
+   not required on the Mac mini.
+
+   App settings are stored in:
+
+   ```text
+   ~/Library/Application Support/Lumi Pro DJ Link Simulator/config.properties
+   ```
+
+   Diagnostic logs are stored in:
+
+   ```text
+   ~/Library/Logs/Lumi Pro DJ Link Simulator/simulator.log
+   ```
+
+   The portable terminal archive remains available for development and CI
+   diagnostics:
 
    ```bash
    ./scripts/package-prolink-simulator-local.sh
    ```
 
-   The resulting archive in `build/prolink-simulator-distribution` contains its
-   own minimal Java runtime. The Mac mini needs neither Java nor Maven.
-5. On the Mac mini, start one simulated player from the unpacked directory:
+5. For the portable archive only, start one simulated player from its unpacked
+   directory:
 
    ```bash
    LUMI_SIM_TOKEN='choose-at-least-16-characters' \
