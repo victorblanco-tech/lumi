@@ -748,6 +748,44 @@ struct LiveWorkspacePresenterTests {
         #expect(snapshot.deckInputIntegration?.lastDeckID == 2)
     }
 
+    @Test("Direct Pro DJ Link diagnostics accept the bridge sequence and player range")
+    func directProLinkDiagnosticsDecode() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        payload["deckInputIntegration"] = .object([
+            "state": .string("ready"),
+            "destinationName": .null,
+            "protocol": .string("lumi-prolink-bridge"),
+            "protocolVersion": .number(1),
+            "receivedMessageCount": .number(340),
+            "invalidWordCount": .number(0),
+            "committedFrameCount": .number(340),
+            "ignoredMessageCount": .number(0),
+            "duplicateFrameCount": .number(0),
+            "lastDeckId": .number(4),
+            "lastFrameSequence": .number(340)
+        ])
+        let envelope = MessageEnvelope(
+            protocolVersion: recorded.protocolVersion,
+            messageType: recorded.messageType,
+            messageId: recorded.messageId,
+            sequence: recorded.sequence,
+            correlationId: recorded.correlationId,
+            sentAt: recorded.sentAt,
+            payload: payload
+        )
+
+        let snapshot = try EngineSnapshotDecoder().decode(
+            envelope,
+            endpointDescription: "127.0.0.1:52841",
+            protocolVersion: 1
+        )
+
+        #expect(snapshot.deckInputIntegration?.protocolName == "lumi-prolink-bridge")
+        #expect(snapshot.deckInputIntegration?.lastFrameSequence == 340)
+        #expect(snapshot.deckInputIntegration?.lastDeckID == 4)
+    }
+
     @Test("Malformed optional BLT diagnostics fail strict decoding")
     func malformedDeckInputDiagnosticsFailStrictly() throws {
         let recorded = try recordedEnvelope()

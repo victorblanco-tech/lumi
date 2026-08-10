@@ -283,9 +283,10 @@ public struct EngineSnapshotDecoder: Sendable {
         let destinationName = try optionalString(input["destinationName"])
         let lastDeckID = try optionalUnsignedInteger(input["lastDeckId"])
         let lastFrameSequence = try optionalUnsignedInteger(input["lastFrameSequence"])
+        let isBLTMIDI = protocolName == "BLT MIDI Deck Frame"
         guard destinationName?.isEmpty != true,
-              lastDeckID.map({ [1, 2].contains($0) }) ?? true,
-              lastFrameSequence.map({ $0 <= 127 }) ?? true else {
+              lastDeckID.map({ (1...4).contains($0) }) ?? true,
+              lastFrameSequence.map({ !isBLTMIDI || $0 <= 127 }) ?? true else {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
         return DeckInputIntegrationSnapshot(

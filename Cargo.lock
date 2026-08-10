@@ -288,6 +288,7 @@ dependencies = [
  "lumi-midi-output",
  "lumi-output-dry-run",
  "lumi-planner",
+ "lumi-prolink-input",
  "lumi-protocol",
  "lumi-rekordbox-analysis",
  "lumi-rekordbox-device",
@@ -396,6 +397,8 @@ dependencies = [
 name = "lumi-prolink-input"
 version = "0.4.0-dev"
 dependencies = [
+ "lumi-deck-source",
+ "lumi-domain",
  "serde",
  "serde_json",
  "thiserror",

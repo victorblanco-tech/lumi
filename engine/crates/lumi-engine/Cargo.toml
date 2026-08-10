@@ -20,6 +20,7 @@ lumi-midi-output = { path = "../lumi-midi-output" }
 lumi-output-dry-run = { path = "../lumi-output-dry-run" }
 lumi-planner = { path = "../lumi-planner" }
 lumi-protocol = { path = "../lumi-protocol" }
+lumi-prolink-input = { path = "../lumi-prolink-input" }
 lumi-rekordbox-analysis = { path = "../lumi-rekordbox-analysis" }
 lumi-rekordbox-device = { path = "../lumi-rekordbox-device" }
 lumi-rekordbox-resolver = { path = "../lumi-rekordbox-resolver" }

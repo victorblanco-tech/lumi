@@ -10,6 +10,18 @@ use serde::Deserialize;
 use serde_json::Value;
 use thiserror::Error;
 
+mod provider;
+mod supervisor;
+
+pub use provider::{
+    ProLinkDeckSourceDiagnostics, ProLinkDeckSourceProvider, ProLinkProviderError,
+    ProLinkTrackIdentity, ProLinkTransportSnapshot,
+};
+pub use supervisor::{
+    BridgeLaunchConfiguration, BridgeProcessDiagnostics, BridgeProcessSupervisor,
+    BridgeSupervisorError,
+};
+
 pub const PROTOCOL_NAME: &str = "lumi-prolink-bridge";
 pub const PROTOCOL_VERSION: u16 = 1;
 

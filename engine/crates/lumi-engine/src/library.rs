@@ -217,6 +217,14 @@ impl LibraryPlanContext {
     }
 
     #[must_use]
+    pub fn millis_at_beat(&self, beat: u32) -> Option<u64> {
+        self.beat_grid
+            .markers()
+            .get(usize::try_from(beat).ok()?)
+            .map(|marker| marker.time_millis())
+    }
+
+    #[must_use]
     pub fn clock_anchor_at_millis(
         &self,
         position_millis: u64,

@@ -204,14 +204,16 @@ public struct LibrarySnapshotDecoder: Sendable {
         }
         let lastDeckID = try strictOptionalUnsigned(input, "lastDeckId")
         let lastFrameSequence = try strictOptionalUnsigned(input, "lastFrameSequence")
-        guard lastDeckID.map({ [1, 2].contains($0) }) ?? true,
-              lastFrameSequence.map({ $0 <= 127 }) ?? true else {
+        let protocolName = try string(input, "protocol")
+        let isBLTMIDI = protocolName == "BLT MIDI Deck Frame"
+        guard lastDeckID.map({ (1...4).contains($0) }) ?? true,
+              lastFrameSequence.map({ !isBLTMIDI || $0 <= 127 }) ?? true else {
             throw LibrarySnapshotError.invalidObject
         }
         return DeckInputIntegrationState(
             state: state,
             destinationName: try strictOptionalString(input, "destinationName"),
-            protocolName: try string(input, "protocol"),
+            protocolName: protocolName,
             protocolVersion: try unsigned(input, "protocolVersion"),
             receivedMessageCount: try unsigned(input, "receivedMessageCount"),
             invalidWordCount: try unsigned(input, "invalidWordCount"),

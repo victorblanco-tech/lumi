@@ -28,17 +28,24 @@ This story is delivered in visible, independently testable increments:
 
 ### E4-02A — Bridge foundation
 
-- Java 21 helper module with pinned `beat-link` dependency.
-- Versioned NDJSON envelopes on stdout and commands on stdin.
-- Structured stderr diagnostics and deterministic protocol fixtures.
-- Rust bridge decoder and supervisor contract tests.
-- Local build script; no GitHub Actions consumption during development.
+- **Implemented:** Java 21 helper module with pinned `beat-link` dependency.
+- **Implemented:** versioned NDJSON envelopes on stdout and commands on stdin.
+- **Implemented:** structured stderr diagnostics and deterministic protocol fixtures.
+- **Implemented:** Rust bridge decoder, process supervisor and contract tests.
+- **Implemented:** app-owned development launch with BLT retained as fallback.
+- **Verified on two hosts:** Lumi discovered `LUMI-SIM` player 1 at
+  `192.168.1.61` and reached `ready` without BLT or a manually started bridge.
+- Local build and verification scripts remain the development path; no paid
+  GitHub Actions minutes are consumed.
 
 ### E4-02B — Direct deck observations
 
-- Device discovery and lifecycle.
-- Virtual CDJ read-only session.
-- Player status, master, effective BPM and beat events.
+- **Implemented:** device discovery and lifecycle through the supervised bridge.
+- **Implemented:** Virtual CDJ read-only session.
+- **Implemented and contract-tested:** player status, master, effective BPM,
+  beat, seek and play/pause translation into provider-neutral observations.
+- **Implemented:** exact USB/Rekordbox ID hydration through the existing local
+  Library context, reusing Live waveform, beat-grid, phrase and plan rendering.
 - Freshness lease and safe disconnect behavior.
 - Replay fixtures captured without copyrighted audio.
 

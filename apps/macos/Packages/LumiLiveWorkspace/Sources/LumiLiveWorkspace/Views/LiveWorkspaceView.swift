@@ -799,7 +799,7 @@ public struct LiveWorkspaceView: View {
             Text(verbatim: sourceMode == "localPlayback" ? "No Library track loaded" : "Waiting for connected deck")
                 .font(LumiTypography.cardTitle)
                 .foregroundStyle(Color.white)
-            Text(verbatim: sourceMode == "localPlayback" ? "Load a track onto this deck from Library." : "Beat Link Trigger connection will appear here without changing the Live workflow.")
+            Text(verbatim: sourceMode == "localPlayback" ? "Load a track onto this deck from Library." : "A Direct Pro DJ Link player will appear here without changing the Live workflow.")
                 .font(LumiTypography.metadata)
                 .foregroundStyle(Color.white.opacity(0.54))
                 .multilineTextAlignment(.center)

@@ -10,7 +10,6 @@ import org.deepsymmetry.beatlink.VirtualCdj;
 import org.deepsymmetry.beatlink.data.MetadataFinder;
 import org.deepsymmetry.beatlink.data.SearchableItem;
 import org.deepsymmetry.beatlink.data.SignatureFinder;
-import org.deepsymmetry.beatlink.data.TimeFinder;
 import org.deepsymmetry.beatlink.data.TrackMetadata;
 
 import java.util.Objects;
@@ -95,11 +94,10 @@ final class BeatLinkRuntime implements AutoCloseable {
                     throw new IllegalStateException("Beat Link could not claim a virtual player session");
                 }
                 BeatFinder.getInstance().start();
-                TimeFinder.getInstance().start();
                 SignatureFinder.getInstance().start();
                 sessionReady = true;
                 publisher.publish("sourceStatus", new BridgePayloads.SourceStatus(
-                        "ready", "Direct Pro DJ Link session is receiving rich deck data"
+                        "ready", "Direct Pro DJ Link session is receiving deck status and beat data"
                 ));
             } catch (Exception failure) {
                 publishFailure("startSession", failure);
@@ -189,7 +187,6 @@ final class BeatLinkRuntime implements AutoCloseable {
             return;
         }
         lifecycleExecutor.shutdownNow();
-        TimeFinder.getInstance().stop();
         SignatureFinder.getInstance().stop();
         MetadataFinder.getInstance().stop();
         BeatFinder.getInstance().stop();

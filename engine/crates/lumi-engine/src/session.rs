@@ -2,6 +2,8 @@ use std::collections::BTreeMap;
 use std::env;
 use std::io::{self, Write as _};
 use std::net::Ipv4Addr;
+#[cfg(not(test))]
+use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
 use lumi_blt_midi::{BltMidiDeckSourceProvider, BltMidiError};
@@ -35,6 +37,11 @@ use lumi_planner::{
     DeterministicPlanner, PlanMutationError, PlannerError, PlannerTrack, PlanningConfiguration,
     PlanningInput, PlanningOptions, StableChoiceSource, ThemeOption, ThemeSelectionContext,
 };
+#[cfg(not(test))]
+use lumi_prolink_input::{
+    BridgeLaunchConfiguration, BridgeProcessSupervisor, BridgeSupervisorError,
+};
+use lumi_prolink_input::{ProLinkDeckSourceProvider, ProLinkProviderError};
 use lumi_protocol::{
     CommandDisposition, CommandIdCache, InvalidCacheCapacity, MAX_MESSAGE_BYTES, MessageDecoder,
     MessageEnvelope, MessageType, PROTOCOL_VERSION,
@@ -70,6 +77,10 @@ const AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(5);
 const EVENT_QUEUE_CAPACITY: usize = 256;
 const COMMAND_ID_CACHE_CAPACITY: usize = 256;
 const LIBRARY_CONTEXT_CAPACITY: usize = 256;
+#[cfg(not(test))]
+const PROLINK_JAVA_ENVIRONMENT_KEY: &str = "LUMI_PROLINK_JAVA";
+#[cfg(not(test))]
+const PROLINK_BRIDGE_JAR_ENVIRONMENT_KEY: &str = "LUMI_PROLINK_BRIDGE_JAR";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -232,6 +243,10 @@ struct EngineRuntime {
     deck_source: SimulatorDeckSourceProvider<ManualClock>,
     local_deck_source: LocalPlaybackDeckSourceProvider,
     connected_deck_source: BltMidiDeckSourceProvider,
+    direct_deck_source: ProLinkDeckSourceProvider,
+    #[cfg(not(test))]
+    prolink_bridge: Option<BridgeProcessSupervisor>,
+    prolink_start_error: Option<String>,
     deck_source_mode: DeckSourceMode,
     planning_worker: PlanningWorker,
     output_worker: OutputWorker,
@@ -259,7 +274,8 @@ enum DeckSourceMode {
 impl EngineRuntime {
     fn deck_source_kind(&self) -> &'static str {
         match self.deck_source_mode {
-            DeckSourceMode::ConnectedDecks => "beatLinkTrigger",
+            DeckSourceMode::ConnectedDecks if self.direct_prolink_active() => "directProDjLink",
+            DeckSourceMode::ConnectedDecks => "beatLinkTriggerMidi",
             DeckSourceMode::LocalPlayback => "localPlayback",
             DeckSourceMode::Simulator => "simulator",
         }
@@ -267,9 +283,23 @@ impl EngineRuntime {
 
     fn leader_deck_id(&self) -> Option<lumi_domain::DeckId> {
         match self.deck_source_mode {
+            DeckSourceMode::ConnectedDecks if self.direct_prolink_active() => {
+                self.direct_deck_source.leader_deck_id()
+            }
             DeckSourceMode::ConnectedDecks => self.connected_deck_source.leader_deck_id(),
             DeckSourceMode::LocalPlayback => self.local_deck_source.leader_deck_id(),
             DeckSourceMode::Simulator => Some(self.deck_source.leader_deck_id()),
+        }
+    }
+
+    fn direct_prolink_active(&self) -> bool {
+        #[cfg(not(test))]
+        {
+            self.prolink_bridge.is_some()
+        }
+        #[cfg(test)]
+        {
+            false
         }
     }
 }
@@ -301,6 +331,11 @@ fn initialized_runtime_for_mode(
     let mut deck_source = SimulatorDeckSourceProvider::demo(clock.clone())?;
     let mut local_deck_source = LocalPlaybackDeckSourceProvider::new(clock.now())?;
     let mut connected_deck_source = BltMidiDeckSourceProvider::new(clock.now())?;
+    let mut direct_deck_source = ProLinkDeckSourceProvider::new(clock.now())?;
+    #[cfg(not(test))]
+    let (prolink_bridge, prolink_start_error) = launch_prolink_bridge();
+    #[cfg(test)]
+    let prolink_start_error = None;
     let mut output_worker = OutputWorker::new();
     #[cfg(not(test))]
     if env::var(AUTO_PUBLISH_MIDI_ENVIRONMENT_KEY).as_deref() != Ok("0") {
@@ -322,13 +357,28 @@ fn initialized_runtime_for_mode(
     let mut planning_worker = PlanningWorker::new(&autoloop_catalog);
     match deck_source_mode {
         DeckSourceMode::ConnectedDecks => {
-            for event in connected_deck_source.drain_events()? {
-                planning_worker.process_source_event(
-                    &mut runtime,
-                    &mut output_worker,
-                    event,
-                    connected_deck_source.leader_deck_id(),
-                )?;
+            #[cfg(not(test))]
+            let direct_active = prolink_bridge.is_some();
+            #[cfg(test)]
+            let direct_active = false;
+            if direct_active {
+                for event in direct_deck_source.drain_events()? {
+                    planning_worker.process_source_event(
+                        &mut runtime,
+                        &mut output_worker,
+                        event,
+                        direct_deck_source.leader_deck_id(),
+                    )?;
+                }
+            } else {
+                for event in connected_deck_source.drain_events()? {
+                    planning_worker.process_source_event(
+                        &mut runtime,
+                        &mut output_worker,
+                        event,
+                        connected_deck_source.leader_deck_id(),
+                    )?;
+                }
             }
         }
         DeckSourceMode::LocalPlayback => {
@@ -358,6 +408,10 @@ fn initialized_runtime_for_mode(
         deck_source,
         local_deck_source,
         connected_deck_source,
+        direct_deck_source,
+        #[cfg(not(test))]
+        prolink_bridge,
+        prolink_start_error,
         deck_source_mode,
         planning_worker,
         output_worker,
@@ -368,18 +422,82 @@ fn initialized_runtime_for_mode(
     })
 }
 
+#[cfg(not(test))]
+fn launch_prolink_bridge() -> (Option<BridgeProcessSupervisor>, Option<String>) {
+    let Some(configuration) = prolink_bridge_configuration() else {
+        return (
+            None,
+            Some("The bundled Direct Pro DJ Link bridge is unavailable.".to_owned()),
+        );
+    };
+    match BridgeProcessSupervisor::spawn(&configuration) {
+        Ok(supervisor) => (Some(supervisor), None),
+        Err(error) => (None, Some(error.to_string())),
+    }
+}
+
+#[cfg(not(test))]
+fn prolink_bridge_configuration() -> Option<BridgeLaunchConfiguration> {
+    if let (Ok(java), Ok(jar)) = (
+        env::var(PROLINK_JAVA_ENVIRONMENT_KEY),
+        env::var(PROLINK_BRIDGE_JAR_ENVIRONMENT_KEY),
+    ) {
+        let java = PathBuf::from(java);
+        let jar = PathBuf::from(jar);
+        if java.is_file() && jar.is_file() {
+            return Some(BridgeLaunchConfiguration::java_jar(java, jar));
+        }
+    }
+
+    let helper_directory = env::current_exe().ok()?.parent()?.to_path_buf();
+    let bundled_java = helper_directory.join("prolink-runtime/bin/java");
+    let bundled_jar = helper_directory.join("prolink/lumi-prolink-bridge.jar");
+    if bundled_java.is_file() && bundled_jar.is_file() {
+        return Some(BridgeLaunchConfiguration::java_jar(
+            bundled_java,
+            bundled_jar,
+        ));
+    }
+
+    #[cfg(debug_assertions)]
+    {
+        let development_java = PathBuf::from("/usr/local/opt/openjdk@21/bin/java");
+        let development_jar = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../bridges/prolink/target/lumi-prolink-bridge.jar");
+        if development_java.is_file() && development_jar.is_file() {
+            return Some(BridgeLaunchConfiguration::java_jar(
+                development_java,
+                development_jar,
+            ));
+        }
+    }
+    None
+}
+
 fn process_pending_source_events(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
     let leader_deck_id = runtime.leader_deck_id();
     match runtime.deck_source_mode {
         DeckSourceMode::ConnectedDecks => {
-            for event in runtime.connected_deck_source.drain_events()? {
-                let event = hydrate_connected_library_event(runtime, event)?;
-                runtime.planning_worker.process_source_event(
-                    &mut runtime.state,
-                    &mut runtime.output_worker,
-                    event,
-                    leader_deck_id,
-                )?;
+            if runtime.direct_prolink_active() {
+                for event in runtime.direct_deck_source.drain_events()? {
+                    let event = hydrate_direct_library_event(runtime, event)?;
+                    runtime.planning_worker.process_source_event(
+                        &mut runtime.state,
+                        &mut runtime.output_worker,
+                        event,
+                        leader_deck_id,
+                    )?;
+                }
+            } else {
+                for event in runtime.connected_deck_source.drain_events()? {
+                    let event = hydrate_connected_library_event(runtime, event)?;
+                    runtime.planning_worker.process_source_event(
+                        &mut runtime.state,
+                        &mut runtime.output_worker,
+                        event,
+                        leader_deck_id,
+                    )?;
+                }
             }
         }
         DeckSourceMode::LocalPlayback => {
@@ -404,6 +522,42 @@ fn process_pending_source_events(runtime: &mut EngineRuntime) -> Result<(), Engi
         }
     }
     Ok(())
+}
+
+fn hydrate_direct_library_event(
+    runtime: &mut EngineRuntime,
+    event: DomainEvent,
+) -> Result<DomainEvent, EngineError> {
+    let DomainEvent::Observation(mut envelope) = event else {
+        return Ok(event);
+    };
+    let DeckObservation::TrackLoaded {
+        deck_id,
+        track_load_id,
+        ..
+    } = envelope.observation
+    else {
+        return Ok(DomainEvent::Observation(envelope));
+    };
+    let Some(identity) = runtime.direct_deck_source.track_identity(track_load_id) else {
+        return Ok(DomainEvent::Observation(envelope));
+    };
+    let Some(connected) = runtime
+        .library_worker
+        .connected_track(identity.rekordbox_id, 0)?
+    else {
+        return Ok(DomainEvent::Observation(envelope));
+    };
+    let (metadata, context) = connected.prepared.into_parts();
+    runtime
+        .planning_worker
+        .register_library_context(track_load_id, context);
+    envelope.observation = DeckObservation::TrackLoaded {
+        deck_id,
+        metadata,
+        track_load_id,
+    };
+    Ok(DomainEvent::Observation(envelope))
 }
 
 fn hydrate_connected_library_event(
@@ -1063,16 +1217,38 @@ fn transport_ack_envelope(
 fn process_deck_input_messages(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
     let messages = runtime.deck_input.drain_messages();
     if runtime.deck_source_mode != DeckSourceMode::ConnectedDecks {
+        #[cfg(not(test))]
+        pump_direct_prolink_bridge(runtime)?;
         return Ok(());
     }
     let at = runtime.clock.now();
-    for message in messages {
-        runtime.connected_deck_source.ingest(message, at)?;
+    if runtime.direct_prolink_active() {
+        #[cfg(not(test))]
+        pump_direct_prolink_bridge(runtime)?;
+    } else {
+        for message in messages {
+            runtime.connected_deck_source.ingest(message, at)?;
+        }
+        runtime.connected_deck_source.expire_stale(
+            Instant::now(),
+            Duration::from_millis(2_500),
+            at,
+        )?;
     }
-    runtime
-        .connected_deck_source
-        .expire_stale(Instant::now(), Duration::from_millis(2_500), at)?;
     process_pending_source_events(runtime)?;
+    Ok(())
+}
+
+#[cfg(not(test))]
+fn pump_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
+    let Some(bridge) = runtime.prolink_bridge.as_mut() else {
+        return Ok(());
+    };
+    let messages = bridge.drain_messages()?;
+    let at = runtime.clock.now();
+    for message in messages {
+        runtime.direct_deck_source.ingest(message, at)?;
+    }
     Ok(())
 }
 
@@ -1433,7 +1609,13 @@ fn apply_command(
                         .clock
                         .advance(1)
                         .ok_or(CommandApplicationError::ClockOverflow)?;
-                    runtime.connected_deck_source.clear(at)?;
+                    if runtime.direct_prolink_active() {
+                        runtime.direct_deck_source.clear(at).map_err(|error| {
+                            CommandApplicationError::Engine(EngineError::ProLinkProvider(error))
+                        })?;
+                    } else {
+                        runtime.connected_deck_source.clear(at)?;
+                    }
                     process_pending_source_events(runtime)
                         .map_err(CommandApplicationError::Engine)?;
                 }
@@ -2086,7 +2268,9 @@ fn snapshot_envelope(
                 DeckSourceMode::Simulator => "Internal Test Source",
             },
             "status": if runtime.deck_source_mode == DeckSourceMode::ConnectedDecks {
-                if runtime.connected_deck_source.diagnostics().committed_frame_count > 0 {
+                if runtime.direct_prolink_active() {
+                    deck_source_status_name(runtime.direct_deck_source.diagnostics().source_status)
+                } else if runtime.connected_deck_source.diagnostics().committed_frame_count > 0 {
                     "ready"
                 } else {
                     "disconnected"
@@ -2147,33 +2331,70 @@ fn snapshot_envelope(
             "lastError": midi_clock.last_error,
         }),
     );
-    let deck_input = runtime.deck_input.status();
-    let blt_diagnostics = runtime.connected_deck_source.diagnostics();
-    payload.insert(
-        "deckInputIntegration".to_owned(),
-        json!({
-            "state": match deck_input.state {
-                MidiDestinationState::Stopped => "stopped",
-                MidiDestinationState::Ready => "ready",
-            },
-            "destinationName": deck_input.destination_name,
-            "protocol": lumi_blt_midi::PROTOCOL_NAME,
-            "protocolVersion": lumi_blt_midi::PROTOCOL_VERSION,
-            "receivedMessageCount": deck_input.received_message_count,
-            "invalidWordCount": deck_input.invalid_word_count,
-            "lastMessage": deck_input.last_message.map(|message| json!({
-                "status": message.status,
-                "channel": message.channel,
-                "dataOne": message.data_one,
-                "dataTwo": message.data_two,
-            })),
-            "committedFrameCount": blt_diagnostics.committed_frame_count,
-            "ignoredMessageCount": blt_diagnostics.ignored_message_count,
-            "duplicateFrameCount": blt_diagnostics.duplicate_frame_count,
-            "lastDeckId": blt_diagnostics.last_deck_id.map(lumi_domain::DeckId::value),
-            "lastFrameSequence": blt_diagnostics.last_frame_sequence,
-        }),
-    );
+    if runtime.direct_prolink_active() {
+        let diagnostics = runtime.direct_deck_source.diagnostics();
+        payload.insert(
+            "deckInputIntegration".to_owned(),
+            json!({
+                "state": if diagnostics.source_status == DeckSourceStatus::Ready {
+                    "ready"
+                } else {
+                    "stopped"
+                },
+                "sourceState": deck_source_status_name(diagnostics.source_status),
+                "destinationName": Value::Null,
+                "protocol": lumi_prolink_input::PROTOCOL_NAME,
+                "protocolVersion": lumi_prolink_input::PROTOCOL_VERSION,
+                "receivedMessageCount": diagnostics.received_message_count,
+                "invalidWordCount": 0,
+                "lastMessage": Value::Null,
+                "committedFrameCount": diagnostics.received_message_count,
+                "ignoredMessageCount": diagnostics.ignored_message_count,
+                "duplicateFrameCount": 0,
+                "lastDeckId": runtime.direct_deck_source.leader_deck_id()
+                    .map(lumi_domain::DeckId::value),
+                "lastFrameSequence": diagnostics.last_bridge_sequence,
+                "bridgeVersion": diagnostics.bridge_version,
+                "beatLinkVersion": diagnostics.beat_link_version,
+                "discoveredPlayers": diagnostics.discovered_devices.iter()
+                    .map(|(number, name)| json!({
+                        "playerNumber": number,
+                        "name": name,
+                    }))
+                    .collect::<Vec<_>>(),
+                "lastError": diagnostics.last_error
+                    .or_else(|| runtime.prolink_start_error.clone()),
+            }),
+        );
+    } else {
+        let deck_input = runtime.deck_input.status();
+        let blt_diagnostics = runtime.connected_deck_source.diagnostics();
+        payload.insert(
+            "deckInputIntegration".to_owned(),
+            json!({
+                "state": match deck_input.state {
+                    MidiDestinationState::Stopped => "stopped",
+                    MidiDestinationState::Ready => "ready",
+                },
+                "destinationName": deck_input.destination_name,
+                "protocol": lumi_blt_midi::PROTOCOL_NAME,
+                "protocolVersion": lumi_blt_midi::PROTOCOL_VERSION,
+                "receivedMessageCount": deck_input.received_message_count,
+                "invalidWordCount": deck_input.invalid_word_count,
+                "lastMessage": deck_input.last_message.map(|message| json!({
+                    "status": message.status,
+                    "channel": message.channel,
+                    "dataOne": message.data_one,
+                    "dataTwo": message.data_two,
+                })),
+                "committedFrameCount": blt_diagnostics.committed_frame_count,
+                "ignoredMessageCount": blt_diagnostics.ignored_message_count,
+                "duplicateFrameCount": blt_diagnostics.duplicate_frame_count,
+                "lastDeckId": blt_diagnostics.last_deck_id.map(lumi_domain::DeckId::value),
+                "lastFrameSequence": blt_diagnostics.last_frame_sequence,
+            }),
+        );
+    }
     payload.insert(
         "leaderDeckId".to_owned(),
         json!(state.leader_deck().map(|deck_id| deck_id.value())),
@@ -2201,14 +2422,25 @@ fn snapshot_envelope(
             } else {
                 Value::Null
             };
-            let connected_transport = if runtime.deck_source_mode == DeckSourceMode::ConnectedDecks
-            {
-                runtime
-                    .connected_deck_source
-                    .transport(deck.track_load_id())
-            } else {
-                None
-            };
+            let connected_playback_position_millis =
+                if runtime.deck_source_mode == DeckSourceMode::ConnectedDecks {
+                    if runtime.direct_prolink_active() {
+                        runtime
+                            .direct_deck_source
+                            .transport(deck.track_load_id())
+                            .and_then(|transport| {
+                                library_context
+                                    .and_then(|context| context.millis_at_beat(transport.beat))
+                            })
+                    } else {
+                        runtime
+                            .connected_deck_source
+                            .transport(deck.track_load_id())
+                            .and_then(|transport| transport.position_millis.map(u64::from))
+                    }
+                } else {
+                    None
+                };
             let plan_eligibility = if library_context.is_some() {
                 "readyExact"
             } else if state
@@ -2225,8 +2457,7 @@ fn snapshot_envelope(
                 "beat": deck.beat(),
                 "effectiveBpmMilli": deck.effective_bpm_milli(),
                 "playing": deck.is_playing(),
-                "playbackPositionMillis": connected_transport
-                    .and_then(|transport| transport.position_millis),
+                "playbackPositionMillis": connected_playback_position_millis,
                 "phraseIndex": deck.phrase_index(),
                 "planEligibility": plan_eligibility,
                 "localPlayback": local_playback,
@@ -2776,6 +3007,11 @@ pub enum EngineError {
     LocalPlayback(#[from] LocalPlaybackError),
     #[error("Beat Link Trigger MIDI adapter failed: {0}")]
     BltMidi(#[from] BltMidiError),
+    #[error("Direct Pro DJ Link adapter failed: {0}")]
+    ProLinkProvider(#[from] ProLinkProviderError),
+    #[cfg(not(test))]
+    #[error("Direct Pro DJ Link bridge failed: {0}")]
+    ProLinkBridge(#[from] BridgeSupervisorError),
     #[error("planner failed: {0}")]
     Planner(#[from] PlannerError),
     #[error("a Library plan could not be materialized: {0}")]

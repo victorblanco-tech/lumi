@@ -352,9 +352,15 @@ public enum LiveWorkspacePresenter {
               let input = snapshot.deckInputIntegration else {
             return snapshot.deckSource.displayName
         }
-        let endpoint = input.destinationName ?? "MIDI input unavailable"
+        let isDirectProLink = input.protocolName == "lumi-prolink-bridge"
+        let endpoint = if isDirectProLink {
+            "Direct Pro DJ Link"
+        } else {
+            input.destinationName ?? "MIDI input unavailable"
+        }
+        let messageKind = isDirectProLink ? "bridge events" : "MIDI messages"
         let lastDeck = input.lastDeckID.map { " · last deck \($0)" } ?? ""
-        return "\(snapshot.deckSource.displayName) · \(endpoint) · \(input.receivedMessageCount) MIDI messages · \(input.committedFrameCount) frames\(lastDeck)"
+        return "\(snapshot.deckSource.displayName) · \(endpoint) · \(input.receivedMessageCount) \(messageKind) · \(input.committedFrameCount) frames\(lastDeck)"
     }
 
     private static func plannerDetail(_ snapshot: EngineSnapshot) -> String {
