@@ -116,7 +116,7 @@ public struct EngineSnapshotDecoder: Sendable {
         guard decks.count <= 2,
               deckIDs.count == decks.count,
               deckIDs.allSatisfy({ [1, 2].contains($0) }),
-              leaderDeckID.map(deckIDs.contains) ?? decks.isEmpty else {
+              leaderDeckID.map(deckIDs.contains) ?? true else {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
         guard timeline.count <= 256,
@@ -131,10 +131,11 @@ public struct EngineSnapshotDecoder: Sendable {
             nextPlan = nil
         } else {
             nextPlan = try decodePlan(envelope.payload["nextPlan"])
-            guard let leaderDeckID,
-                  let nextDeck = decks.first(where: { $0.deckID != leaderDeckID }),
-                  nextPlan?.deckID == nextDeck.deckID,
-                  nextPlan?.trackLoadID == nextDeck.trackLoadID else {
+            guard let nextPlan,
+                  let nextDeck = decks.first(where: { $0.deckID == nextPlan.deckID }),
+                  nextPlan.deckID == nextDeck.deckID,
+                  nextPlan.trackLoadID == nextDeck.trackLoadID,
+                  leaderDeckID.map({ nextDeck.deckID != $0 }) ?? true else {
                 throw EngineSnapshotDecodingError.invalidSnapshot
             }
         }

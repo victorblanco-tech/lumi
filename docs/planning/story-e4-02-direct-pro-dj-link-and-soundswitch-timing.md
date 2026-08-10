@@ -51,6 +51,9 @@ This story is delivered in visible, independently testable increments:
   previous observation atomically.
 - **Verified across two hosts:** play/pause, exact seek, pitch/effective BPM,
   master, beat position and live track replacement remain connected in Lumi.
+- **Implemented and UI-tested:** a loaded connected deck may have a ready next
+  plan before any deck is elected Master; the strict macOS decoder preserves
+  this normal DJ preparation state instead of rejecting the snapshot.
 - Freshness lease and safe disconnect behavior.
 - Replay fixtures captured without copyrighted audio.
 
@@ -90,13 +93,16 @@ This story is delivered in visible, independently testable increments:
   beat-link 8.0.0 with USB identity and effective tempo intact.
 - **Verified across two hosts:** the Mac mini simulator discovers Lumi as a Pro
   DJ Link peer and unicasts CDJ status to the MacBook's leased player endpoint.
-- **Verified in the product UI:** `DJ VIC CHRM` track IDs 1022 and 1031 survive
-  load-at-beat-zero, play/pause, seek and +5% pitch changes without source loss.
-- The current Lumi development mirror is from `DJ VIC GRAY`; the simulator is
-  reading `DJ VIC CHRM`. Because Rekordbox device track IDs differ between those
-  exports, Lumi correctly shows an external track and holds automatic lighting.
-  Full phrase/Autoloop hydration requires syncing the exact show USB mirror or
-  adding the content-signature reconciliation from E4-02C.
+- **Verified safe mismatch behavior:** `DJ VIC CHRM` track IDs 1022 and 1031
+  survive load-at-beat-zero, play/pause, seek and +5% pitch changes while Lumi
+  displays an external track and holds automatic lighting.
+- **Verified exact USB hydration end to end:** with `DJ VIC GRAY` mounted on the
+  simulator and mirrored by Lumi, Rekordbox ID 1256 resolves to canonical track
+  202 (`90s Bitch - Extended Mix`). The product UI renders the exact RGB
+  waveform, beat grid, 17 Lumi phrases and a ready 17-cue Bank 1 Autoloop plan.
+- **Verified live transition:** electing the simulated player Master and On Air
+  advances the fixed waveform playhead, active phrase and active/next Autoloop
+  statuses from the same authoritative deck clock.
 
 ## Acceptance criteria
 

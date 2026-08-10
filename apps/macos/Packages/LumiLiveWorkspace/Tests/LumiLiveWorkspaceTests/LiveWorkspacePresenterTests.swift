@@ -710,6 +710,47 @@ struct LiveWorkspacePresenterTests {
         #expect(snapshot.decks[0].bpmMilli == 131_300)
     }
 
+    @Test("A loaded connected deck can be planned before a Master is elected")
+    func loadedConnectedDeckWithoutMasterDecodesAsNextPlan() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case let .array(decks) = payload["decks"],
+              decks.count == 2,
+              case let .object(nextPlan) = payload["nextPlan"],
+              let nextDeckID = nextPlan["deckId"],
+              let nextDeck = decks.first(where: { deck in
+                  guard case let .object(value) = deck else { return false }
+                  return value["deckId"] == nextDeckID
+              }) else {
+            Issue.record("Recorded fixture must contain a next deck and plan")
+            return
+        }
+        payload["leaderDeckId"] = .null
+        payload["decks"] = .array([nextDeck])
+        payload["livePlan"] = .null
+        let envelope = MessageEnvelope(
+            protocolVersion: recorded.protocolVersion,
+            messageType: recorded.messageType,
+            messageId: recorded.messageId,
+            sequence: recorded.sequence,
+            correlationId: recorded.correlationId,
+            sentAt: recorded.sentAt,
+            payload: payload
+        )
+
+        let snapshot = try EngineSnapshotDecoder().decode(
+            envelope,
+            endpointDescription: "127.0.0.1:52841",
+            protocolVersion: 1
+        )
+
+        #expect(snapshot.leaderDeckID == nil)
+        #expect(snapshot.decks.count == 1)
+        #expect(snapshot.nextPlan?.deckID == snapshot.decks[0].deckID)
+        #expect(snapshot.nextPlan?.trackLoadID == snapshot.decks[0].trackLoadID)
+        #expect(snapshot.livePlan == nil)
+    }
+
     @Test("BLT input diagnostics decode as a separate connected-deck integration")
     func deckInputDiagnosticsDecode() throws {
         let recorded = try recordedEnvelope()
