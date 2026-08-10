@@ -245,10 +245,17 @@ fn validate_event(event: &BridgeEvent) -> Result<(), BridgeDecodeError> {
             validate_device(device)?;
         }
         BridgeEvent::DeckStatus(status) => {
+            let has_track_id = status.rekordbox_id != 0;
+            let has_source_player = status.source_player != 0;
+            let loaded_track_is_invalid = has_track_id
+                && (!valid_bpm(status.track_bpm)
+                    || !valid_bpm(status.effective_bpm)
+                    || status.source_slot.trim().is_empty()
+                    || status.track_type.trim().is_empty());
             if status.device_number == 0
-                || !valid_bpm(status.track_bpm)
-                || !valid_bpm(status.effective_bpm)
-                || !(1..=4).contains(&status.beat_within_bar)
+                || has_track_id != has_source_player
+                || loaded_track_is_invalid
+                || status.beat_within_bar > 4
             {
                 return Err(BridgeDecodeError::InvalidPayload("deckStatus"));
             }

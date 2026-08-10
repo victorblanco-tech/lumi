@@ -54,3 +54,28 @@ fn exposes_owned_protocol_identity() {
     assert_eq!(PROTOCOL_NAME, "lumi-prolink-bridge");
     assert_eq!(PROTOCOL_VERSION, 1);
 }
+
+#[test]
+fn accepts_loaded_pre_roll_and_empty_deck_status() {
+    let mut decoder = BridgeDecoder::new();
+    decoder
+        .decode_line(HELLO)
+        .unwrap_or_else(|error| panic!("hello fixture must decode: {error}"));
+
+    let pre_roll = DECK_STATUS
+        .replace("\"beatNumber\":169", "\"beatNumber\":0")
+        .replace("\"beatWithinBar\":1", "\"beatWithinBar\":0");
+    decoder
+        .decode_line(&pre_roll)
+        .unwrap_or_else(|error| panic!("loaded pre-roll status must decode: {error}"));
+
+    let empty = pre_roll
+        .replace("\"sequence\":2", "\"sequence\":3")
+        .replace("\"sourcePlayer\":2", "\"sourcePlayer\":0")
+        .replace("\"rekordboxId\":1842", "\"rekordboxId\":0")
+        .replace("\"trackBpm\":136.0", "\"trackBpm\":655.35")
+        .replace("\"effectiveBpm\":136.5", "\"effectiveBpm\":0.0");
+    decoder
+        .decode_line(&empty)
+        .unwrap_or_else(|error| panic!("empty deck status must decode: {error}"));
+}

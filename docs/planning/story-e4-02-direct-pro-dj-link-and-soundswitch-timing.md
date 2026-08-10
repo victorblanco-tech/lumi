@@ -46,6 +46,11 @@ This story is delivered in visible, independently testable increments:
   beat, seek and play/pause translation into provider-neutral observations.
 - **Implemented:** exact USB/Rekordbox ID hydration through the existing local
   Library context, reusing Live waveform, beat-grid, phrase and plan rendering.
+- **Implemented and tested:** loaded pre-roll and empty-deck status accept beat
+  zero without terminating the bridge source; track replacement unloads the
+  previous observation atomically.
+- **Verified across two hosts:** play/pause, exact seek, pitch/effective BPM,
+  master, beat position and live track replacement remain connected in Lumi.
 - Freshness lease and safe disconnect behavior.
 - Replay fixtures captured without copyrighted audio.
 
@@ -83,8 +88,15 @@ This story is delivered in visible, independently testable increments:
   track ID 1256 resolved as `90s Bitch - Extended Mix` with an exact beat grid.
 - Generated announcement, status and beat packets parse successfully through
   beat-link 8.0.0 with USB identity and effective tempo intact.
-- Two-host Mac mini → MacBook discovery remains the next POC step; local bridge
-  coexistence was correctly blocked while Beat Link Trigger owned UDP 50000/50001.
+- **Verified across two hosts:** the Mac mini simulator discovers Lumi as a Pro
+  DJ Link peer and unicasts CDJ status to the MacBook's leased player endpoint.
+- **Verified in the product UI:** `DJ VIC CHRM` track IDs 1022 and 1031 survive
+  load-at-beat-zero, play/pause, seek and +5% pitch changes without source loss.
+- The current Lumi development mirror is from `DJ VIC GRAY`; the simulator is
+  reading `DJ VIC CHRM`. Because Rekordbox device track IDs differ between those
+  exports, Lumi correctly shows an external track and holds automatic lighting.
+  Full phrase/Autoloop hydration requires syncing the exact show USB mirror or
+  adding the content-signature reconciliation from E4-02C.
 
 ## Acceptance criteria
 
