@@ -15,6 +15,7 @@
 "library.key" = "Key";
 "library.duration" = "Duration";
 "library.source" = "Source";
+"library.usbSources" = "USB Sources";
 "library.sourceTrackID" = "Source track ID";
 "library.analysisRevision" = "Analysis revision";
 "library.timelineRevision" = "Lumi timeline";

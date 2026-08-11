@@ -26,6 +26,7 @@ lumi-rekordbox-device = { path = "../lumi-rekordbox-device" }
 lumi-rekordbox-resolver = { path = "../lumi-rekordbox-resolver" }
 lumi-rekordbox-xml = { path = "../lumi-rekordbox-xml" }
 lumi-simulator = { path = "../lumi-simulator" }
+lumi-timing-output = { path = "../lumi-timing-output" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 subtle = "2"

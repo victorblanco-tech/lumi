@@ -35,6 +35,7 @@ struct LocalPlaybackTrackTable: NSViewRepresentable {
         addColumn("artist", title: "Artist", width: 200, minimumWidth: 120, to: table)
         addColumn("bpm", title: "BPM", width: 64, minimumWidth: 55, to: table)
         addColumn("key", title: "Key", width: 54, minimumWidth: 44, to: table)
+        addColumn("usbSources", title: "USB Sources", width: 150, minimumWidth: 110, to: table)
         addColumn("lumi", title: "Lumi", width: 58, minimumWidth: 48, to: table)
 
         let scrollView = NSScrollView()
@@ -137,6 +138,13 @@ struct LocalPlaybackTrackTable: NSViewRepresentable {
                     KeyNotationFormatter(notation: keyNotation).string(from: track.musicalKey),
                     identifier: "keyCell",
                     monospaced: true,
+                    in: tableView
+                )
+            case "usbSources":
+                let value = track.usbSources.map(\.displayName).joined(separator: ", ")
+                return textCell(
+                    value.isEmpty ? "—" : value,
+                    identifier: "usbSourcesCell",
                     in: tableView
                 )
             case "lumi":

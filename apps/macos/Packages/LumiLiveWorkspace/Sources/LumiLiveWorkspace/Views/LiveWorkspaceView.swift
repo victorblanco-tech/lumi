@@ -376,8 +376,8 @@ public struct LiveWorkspaceView: View {
                 presentation: state.lightingMidi
             )
             providerRow(
-                "Playback Clock",
-                systemImage: "metronome",
+                "Ableton Link",
+                systemImage: "link",
                 presentation: state.playbackClock
             )
             Divider()
@@ -1205,7 +1205,7 @@ private struct PlanSelectionControl: View {
 #Preview("Ready · Dark") {
     LiveWorkspaceView(
         state: LiveWorkspaceFixtures.ready,
-        productVersion: "0.4.0-dev",
+        productVersion: "0.4.0-dev-17",
         appearance: .constant(.dark),
         keyNotation: .constant(.camelot)
     )
@@ -1216,7 +1216,7 @@ private struct PlanSelectionControl: View {
 #Preview("Fallback · Light") {
     LiveWorkspaceView(
         state: LiveWorkspaceFixtures.fallback,
-        productVersion: "0.4.0-dev",
+        productVersion: "0.4.0-dev-17",
         appearance: .constant(.light),
         keyNotation: .constant(.classic)
     )

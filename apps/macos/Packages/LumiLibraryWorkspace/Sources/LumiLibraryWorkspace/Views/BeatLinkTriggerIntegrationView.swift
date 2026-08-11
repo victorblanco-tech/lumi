@@ -34,7 +34,7 @@ public struct BeatLinkTriggerIntegrationView: View {
                 .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
             VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
                 HStack {
-                    Text("Beat Link Trigger")
+                    Text("Legacy MIDI Fallback")
                         .font(LumiTypography.sectionTitle)
                     Text("BUILT-IN")
                         .font(LumiTypography.technical)
@@ -89,7 +89,7 @@ public struct BeatLinkTriggerIntegrationView: View {
             VStack(alignment: .leading, spacing: LumiSpacing.medium) {
                 HStack {
                     VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-                        Text("Beat Link Trigger Setup").font(LumiTypography.cardTitle)
+                        Text("Legacy MIDI Fallback Setup").font(LumiTypography.cardTitle)
                         Text("Create one trigger for Player 1 and one for Player 2. Both use the same expression; the player number becomes the MIDI channel.")
                             .font(LumiTypography.caption)
                             .foregroundStyle(LumiColor.textSecondary)

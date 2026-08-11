@@ -31,9 +31,26 @@ public actor EngineProcessSupervisor {
         let token = try SessionTokenGenerator.generate()
         let process = Process()
         let stdout = Pipe()
+        let stderr = Pipe()
         process.executableURL = engineExecutable
         process.standardOutput = stdout
-        process.standardError = FileHandle.nullDevice
+        process.standardError = stderr
+        stderr.fileHandleForReading.readabilityHandler = { handle in
+            let data = handle.availableData
+            guard !data.isEmpty,
+                  let message = String(data: data, encoding: .utf8)?
+                    .trimmingCharacters(in: .whitespacesAndNewlines),
+                  !message.isEmpty else {
+                return
+            }
+            Self.logger.error("Local Lumi engine: \(message, privacy: .public)")
+        }
+        process.terminationHandler = { process in
+            stderr.fileHandleForReading.readabilityHandler = nil
+            Self.logger.error(
+                "Local Lumi engine terminated with status \(process.terminationStatus)"
+            )
+        }
         var environment = ProcessInfo.processInfo.environment
         environment["LUMI_SESSION_TOKEN"] = token
         environment["LUMI_AUTO_PUBLISH_MIDI"] = automaticallyPublishesMidi ? "1" : "0"

@@ -273,7 +273,7 @@ public enum LiveWorkspacePresenter {
         if snapshot.runtime.health != "ready"
             || snapshot.deckSource.status != "ready"
             || snapshot.midiIntegration?.state != "ready"
-            || !["ready", "running"].contains(snapshot.midiClockIntegration?.state ?? "stopped") {
+            || !["ready", "running"].contains(snapshot.abletonLinkIntegration?.state ?? "stopped") {
             derivedCondition = .degraded
         } else if snapshot.decks.isEmpty {
             derivedCondition = .empty
@@ -317,9 +317,9 @@ public enum LiveWorkspacePresenter {
                     ? healthyProviderCondition : .degraded
             ),
             playbackClock: ProviderPresentation(
-                detail: playbackClockDetail(snapshot),
+                detail: abletonLinkDetail(snapshot),
                 condition: ["ready", "running"].contains(
-                    snapshot.midiClockIntegration?.state ?? "stopped"
+                    snapshot.abletonLinkIntegration?.state ?? "stopped"
                 ) ? healthyProviderCondition : .degraded
             ),
             content: content,
@@ -340,11 +340,18 @@ public enum LiveWorkspacePresenter {
         return "\(midi.sourceName) · auto-publish \(midi.autoPublishEnabled ? "on" : "off") · \(midi.sentPulseCount) pulses\(bank) · timing \(offset) applied\(pending) · bank pre-roll \(midi.bankPreRollMillis) ms"
     }
 
-    private static func playbackClockDetail(_ snapshot: EngineSnapshot) -> String {
-        guard let clock = snapshot.midiClockIntegration else { return "Status unavailable" }
-        if let error = clock.lastError { return "\(clock.sourceName) · \(error)" }
-        let bpm = clock.bpmMilli.map { String(format: " · %.3f BPM", Double($0) / 1_000) } ?? ""
-        return "\(clock.sourceName) · \(clock.state)\(bpm) · \(clock.sentTickCount) ticks"
+    private static func abletonLinkDetail(_ snapshot: EngineSnapshot) -> String {
+        guard let link = snapshot.abletonLinkIntegration else { return "Status unavailable" }
+        if let error = link.lastError { return "\(link.provider) · \(error)" }
+        let source: String = switch link.source {
+        case "localPlayback": "Local Playback"
+        case "proDjLink": "Pro DJ Link"
+        default: "waiting for timing authority"
+        }
+        let bpm = link.bpmMilli.map { String(format: " · %.3f BPM", Double($0) / 1_000) } ?? ""
+        let deck = link.deckNumber.map { " · deck \($0)" } ?? ""
+        let age = link.lastBeatAgeMillis.map { " · beat \($0) ms ago" } ?? ""
+        return "\(link.provider) · \(link.state) · \(source)\(deck)\(bpm) · \(link.peers) peers\(age)"
     }
 
     private static func deckSourceDetail(_ snapshot: EngineSnapshot) -> String {

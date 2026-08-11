@@ -5,7 +5,8 @@ set -euo pipefail
 script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 repository_root="$(dirname "$script_dir")"
 distribution_root="$repository_root/build/prolink-simulator-distribution"
-archive="$distribution_root/lumi-prolink-simulator-0.4.0-dev-macos-$(uname -m).tar.gz"
+version="$(tr -d '[:space:]' < "$repository_root/VERSION")"
+archive="$distribution_root/lumi-prolink-simulator-${version}-macos-$(uname -m).tar.gz"
 
 if [[ -z "${JAVA_HOME:-}" ]]; then
   for java_candidate in \

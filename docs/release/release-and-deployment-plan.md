@@ -121,29 +121,32 @@ Tijdens de pre-1.0-fase:
 - `1.0.0` zodra de liveketen, upgrade-/migratieflow en publieke contracten
   stabiel genoeg zijn voor duurzaam gebruik.
 
-### 5.1 Initiële versie
+### 5.1 Developmentvolgnummer
 
-De ontwikkelbranch start op `0.0.1-dev`. De suffix maakt direct zichtbaar dat
-dit geen productieversie is. Als deze ontwikkelcyclus wordt uitgebracht, wordt
-de suffix verwijderd en ontstaat release `0.0.1`.
+Iedere testbare developmentstaat krijgt binnen de geplande productversie een
+oplopend pre-releasevolgnummer: `X.Y.Z-dev-1`, `X.Y.Z-dev-2`, enzovoort.
+Dit nummer wordt zichtbaar in Lumi en wordt gelijk gehouden aan het lokale Apple
+buildnummer. Een eenmaal gedeelde developmentversie wordt niet opnieuw gebouwd
+met andere inhoud onder hetzelfde nummer.
 
 Na iedere productieversie krijgt `dev` meteen de eerstvolgende geplande versie
 met `-dev`, bijvoorbeeld:
 
 ```text
-dev:   0.0.1-dev
+dev:   0.0.1-dev-1
+dev:   0.0.1-dev-2
 main:  0.0.1
-dev:   0.0.2-dev
-rc:    0.0.2-rc.1
+dev:   0.0.2-dev-1
+rc:    0.0.2-rc-1
 main:  0.0.2
 ```
 
-Een grotere functionele MVP-stap mag bewust naar `0.1.0-dev` worden verhoogd.
+Een grotere functionele MVP-stap mag bewust naar `0.1.0-dev-1` worden verhoogd.
 
 ### 5.2 Canonieke versie
 
 Het rootbestand `VERSION` is de canonieke bronversie. Op `dev` is dit een geldige
-SemVer pre-release zoals `0.0.1-dev`; op een productiecommit op `main` staat
+pre-release zoals `0.0.1-dev-1`; op een productiecommit op `main` staat
 uitsluitend `MAJOR.MINOR.PATCH`. Een releasevalidatie controleert later
 automatisch dat deze gelijk is aan:
 
@@ -155,7 +158,7 @@ automatisch dat deze gelijk is aan:
 
 Omdat Apple voor `CFBundleShortVersionString` alleen numerieke componenten
 gebruikt, wordt daar de suffix weggelaten. De ontwikkelstatus blijft zichtbaar
-in de appnaam/buildmetadata en het monotone `CFBundleVersion`.
+in de productversie in Lumi en het monotone `CFBundleVersion`.
 
 ### 5.3 Buildnummers
 
@@ -165,7 +168,7 @@ Buildnummers zijn monotonisch en veranderen bij iedere CI-build:
 - artefactnaam: versie, channel, korte commit-SHA en buildnummer;
 - GitHub developmentbuild: de versie uit `VERSION`, aangevuld met buildnummer en
   korte commit-SHA in de artefactnaam;
-- release candidate: `0.0.2-rc.<n>` in GitHub/artefactnamen, met Apple-compatible
+- release candidate: `0.0.2-rc-<n>` in GitHub/artefactnamen, met Apple-compatible
   numerieke marketing- en buildversies in de appbundle.
 
 Een buildnummer is nooit een vervanging voor de productversie.
@@ -199,13 +202,13 @@ identifier, preferencesdomein en Application Support-map:
 
 | Appkanaal | Xcode | App | Bundle identifier | Lokale data |
 |---|---|---|---|---|
-| Development | Debug | Lumi Dev | `co.victorblan.tech.lumi.dev` | `Lumi Dev` |
-| Release candidate | Preview | Lumi Preview | `co.victorblan.tech.lumi.preview` | `Lumi Preview` |
-| Production | Release | Lumi | `co.victorblan.tech.lumi` | `Lumi` |
+| Development | Dev | Lumi | `co.victorblan.tech.lumi.dev` | `Lumi Dev` (intern) |
+| Release candidate | RC | Lumi | `co.victorblan.tech.lumi.rc` | `Lumi RC` (intern) |
+| Main release | Release | Lumi | `co.victorblan.tech.lumi` | `Lumi` |
 
-De versie promoveert zonder codefork van `X.Y.Z-dev`, via `X.Y.Z-rc.N`, naar
-`X.Y.Z`. Een Preview- of Dev-database ontstaat alleen leeg of via een expliciete
-SQLite-backup van Stable; een bestaand kanaal wordt nooit stilzwijgend
+De versie promoveert zonder codefork van `X.Y.Z-dev-N`, via `X.Y.Z-rc-N`, naar
+`X.Y.Z`. Een RC- of dev-database ontstaat alleen leeg of via een expliciete
+SQLite-backup van de release; een bestaand kanaal wordt nooit stilzwijgend
 overschreven.
 
 | Channel | Bron | Doel | Automatisch? |
@@ -277,7 +280,8 @@ worden geactiveerd.
 Maak `release/vX.Y.Z` vanaf `dev` en wijzig uitsluitend releasegerelateerde
 zaken:
 
-- `VERSION`: verwijder `-dev` of vervang dit eerst door `-rc.<n>`;
+- `VERSION`: vervang `-dev-N` eerst door `-rc-N`, of verwijder de suffix voor
+  de productieversie;
 - Cargo- en Xcodeversies;
 - changelog;
 - migratie-/compatibiliteitsnotities;

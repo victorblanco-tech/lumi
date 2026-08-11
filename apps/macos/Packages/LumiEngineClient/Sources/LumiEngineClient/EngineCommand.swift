@@ -291,7 +291,10 @@ public enum EngineCommand: Equatable, Sendable {
         includeFutureChildPlaylists: Bool,
         expectedContentSHA256: String
     )
-    case syncRekordboxDevice(root: String)
+    case inspectRekordboxDevice(root: String, sourceID: String? = nil)
+    case syncRekordboxDevice(root: String, sourceID: String? = nil, playlistIDs: [UInt32])
+    case previewLibraryReset(preserveTrackIDs: [UInt64])
+    case applyLibraryReset(expectedResetToken: String, backupDatabasePath: String)
     case reconcileLibrarySource(
         trackID: UInt64,
         expectedTimelineRevision: UInt64,
@@ -427,10 +430,33 @@ public enum EngineCommand: Equatable, Sendable {
                 "includeFutureChildPlaylists": .boolean(includeFutureChildPlaylists),
                 "expectedContentSha256": .string(expectedContentSHA256)
             ]
-        case let .syncRekordboxDevice(root):
-            return [
-                "kind": .string("syncRekordboxDevice"),
+        case let .inspectRekordboxDevice(root, sourceID):
+            var payload: [String: JSONValue] = [
+                "kind": .string("inspectRekordboxDevice"),
                 "root": .string(root)
+            ]
+            payload["sourceId"] = sourceID.map(JSONValue.string) ?? .null
+            return payload
+        case let .syncRekordboxDevice(root, sourceID, playlistIDs):
+            var payload: [String: JSONValue] = [
+                "kind": .string("syncRekordboxDevice"),
+                "root": .string(root),
+                "playlistIds": .array(playlistIDs.map { .number(Double($0)) })
+            ]
+            payload["sourceId"] = sourceID.map(JSONValue.string) ?? .null
+            return payload
+        case let .previewLibraryReset(preserveTrackIDs):
+            return [
+                "kind": .string("previewLibraryReset"),
+                "preserveTrackIds": .array(
+                    preserveTrackIDs.map { .number(Double($0)) }
+                )
+            ]
+        case let .applyLibraryReset(expectedResetToken, backupDatabasePath):
+            return [
+                "kind": .string("applyLibraryReset"),
+                "expectedResetToken": .string(expectedResetToken),
+                "backupDatabasePath": .string(backupDatabasePath)
             ]
         case let .reconcileLibrarySource(trackID, expectedRevision, strategy):
             var payload = strategy.payload

@@ -42,14 +42,18 @@ De eerste ingebouwde outputpresentatie heet `SoundSwitch Autoloops`.
   introduceert geen tweede mappingmodel. Zij heet niet `Virtual Control One`.
 
 ```text
-Beat Link Trigger ── Ableton Link ───────────────> SoundSwitch timing
+Pro DJ Link / Local Playback -> Lumi -> Ableton Link timing ---------+
+                                                                    |
+Lumi Engine -> Lumi Virtual MIDI -> Bank + AutoLoop ----------------+-> SoundSwitch
+                                                                    |
+Control One (optional) -> direct manual control --------------------+
 
-Lumi Engine ── Lumi Virtual MIDI ──┐
-                                   ├────────────> SoundSwitch control
-Control One (optional, physical) ──┘
-
-SoundSwitch ── selected DMX interface ──────────> Fixtures
+SoundSwitch -> selected DMX interface (optionally Control One) -> Fixtures
 ```
+
+Ableton Link, Lumi Virtual MIDI and Control One are parallel inputs to
+SoundSwitch. Control One may independently be the downstream DMX interface;
+that second role does not place it in Lumi's command or timing path.
 
 ## POC-gate
 

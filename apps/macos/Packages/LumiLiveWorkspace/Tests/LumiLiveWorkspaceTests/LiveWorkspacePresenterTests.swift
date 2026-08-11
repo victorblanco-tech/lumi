@@ -5,6 +5,23 @@ import Testing
 
 @Suite("Live workspace presentation")
 struct LiveWorkspacePresenterTests {
+    @Test("Mounted USB inspection snapshot preserves the live workspace")
+    func mountedUSBInspectionSnapshotDecodesWhenProvided() throws {
+        guard let envelopePath = ProcessInfo.processInfo.environment[
+            "LUMI_TEST_USB_ENVELOPE"
+        ] else {
+            return
+        }
+        let data = try Data(contentsOf: URL(fileURLWithPath: envelopePath))
+        let envelope = try JSONDecoder().decode(MessageEnvelope.self, from: data)
+        let snapshot = try EngineSnapshotDecoder().decode(
+            envelope,
+            endpointDescription: "127.0.0.1:1",
+            protocolVersion: 1
+        )
+        #expect(snapshot.snapshotSequence > 0)
+    }
+
     @Test("Operation status drives one shared Master and control presentation")
     func operationStatusPresentationIsConsistent() {
         #expect(LiveOperationStatus(engineState: "off") == .off)
@@ -64,6 +81,10 @@ struct LiveWorkspacePresenterTests {
         #expect(state.output.condition == .ready)
         #expect(state.lightingMidi.condition == .ready)
         #expect(state.playbackClock.condition == .ready)
+        #expect(snapshot.abletonLinkIntegration?.provider == "Carabiner")
+        #expect(snapshot.abletonLinkIntegration?.source == "localPlayback")
+        #expect(snapshot.abletonLinkIntegration?.lastBeatAgeMillis == 4)
+        #expect(snapshot.abletonLinkIntegration?.lastReanchor == "started")
         #expect(snapshot.midiIntegration?.autoPublishEnabled == true)
         #expect(snapshot.midiIntegration?.timingOffsetMillis == 0)
         #expect(state.planner.condition == .ready)
@@ -152,6 +173,7 @@ struct LiveWorkspacePresenterTests {
             deckSource: snapshot.deckSource,
             midiIntegration: snapshot.midiIntegration,
             midiClockIntegration: snapshot.midiClockIntegration,
+            abletonLinkIntegration: snapshot.abletonLinkIntegration,
             simulation: snapshot.simulation,
             outputProvider: snapshot.outputProvider,
             leaderDeckID: 2,
@@ -561,6 +583,7 @@ struct LiveWorkspacePresenterTests {
             deckInputIntegration: snapshot.deckInputIntegration,
             midiIntegration: snapshot.midiIntegration,
             midiClockIntegration: snapshot.midiClockIntegration,
+            abletonLinkIntegration: snapshot.abletonLinkIntegration,
             simulation: snapshot.simulation,
             outputProvider: snapshot.outputProvider,
             leaderDeckID: snapshot.leaderDeckID,

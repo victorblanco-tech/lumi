@@ -110,6 +110,9 @@ public struct EngineSnapshotDecoder: Sendable {
         let midiClockIntegration = try decodeMidiClockIntegration(
             envelope.payload["midiClockIntegration"]
         )
+        let abletonLinkIntegration = try decodeAbletonLinkIntegration(
+            envelope.payload["abletonLinkIntegration"]
+        )
         let decks = try deckPayloads.map(decodeDeck)
         let timeline = try timelinePayloads.map(decodeTimelineEntry)
         let deckIDs = Set(decks.map(\.deckID))
@@ -177,6 +180,7 @@ public struct EngineSnapshotDecoder: Sendable {
             deckInputIntegration: deckInputIntegration,
             midiIntegration: midiIntegration,
             midiClockIntegration: midiClockIntegration,
+            abletonLinkIntegration: abletonLinkIntegration,
             simulation: simulation,
             outputProvider: OutputProviderSnapshot(
                 providerKind: outputProviderKind,
@@ -258,6 +262,38 @@ public struct EngineSnapshotDecoder: Sendable {
             sentTickCount: sentTickCount,
             lastEvent: try optionalString(clock["lastEvent"]),
             lastError: try optionalString(clock["lastError"])
+        )
+    }
+
+    private func decodeAbletonLinkIntegration(
+        _ value: JSONValue?
+    ) throws -> AbletonLinkIntegrationSnapshot? {
+        if value == nil || value == .null { return nil }
+        guard case let .object(link) = value,
+              case let .string(state) = link["state"],
+              ["stopped", "starting", "ready", "running", "degraded"].contains(state),
+              case let .string(provider) = link["provider"],
+              !provider.isEmpty,
+              let peers = unsignedInteger(link["peers"]),
+              case let .boolean(playing) = link["playing"] else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        return AbletonLinkIntegrationSnapshot(
+            state: state,
+            provider: provider,
+            helperVersion: try optionalString(link["helperVersion"]),
+            peers: peers,
+            source: try optionalString(link["source"]),
+            deckNumber: try optionalUnsignedInteger(link["deckNumber"]),
+            bpmMilli: try optionalUnsignedInteger(link["bpmMilli"]),
+            beatWithinBar: try optionalUnsignedInteger(link["beatWithinBar"]),
+            playing: playing,
+            generation: try optionalUnsignedInteger(link["generation"]),
+            lastBeatAgeMillis: try optionalUnsignedInteger(link["lastBeatAgeMillis"]),
+            phaseErrorMicros: try optionalSignedInteger(link["phaseErrorMicros"]),
+            lastReanchor: try optionalString(link["lastReanchor"]),
+            lastEvent: try optionalString(link["lastEvent"]),
+            lastError: try optionalString(link["lastError"])
         )
     }
 

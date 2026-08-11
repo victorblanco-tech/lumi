@@ -6,6 +6,7 @@ public enum PhraseRoleSettingsSection: String, CaseIterable, Identifiable, Senda
     case general
     case phraseModel
     case planningDefaults
+    case dataBackups
 
     public var id: String { rawValue }
 }
@@ -16,8 +17,16 @@ public struct PhraseRoleSettingsView: View {
     @Binding private var keyNotation: KeyNotationPreference
     @Binding private var lightingTimingOffsetMillis: Int
     private let feedback: String?
+    private let dataManagement: DataManagementState
+    private let dataOperation: DataManagementOperationState
+    private let backups: [LibraryBackupRecord]
+    private let canManageData: Bool
     private let rendersInteractiveControls: Bool
     private let onMutation: @Sendable (PhraseRoleMutationRequest) -> Void
+    private let onCreateBackup: @Sendable () -> Void
+    private let onPrepareReset: @Sendable ([UInt64]) -> Void
+    private let onApplyReset: @Sendable () -> Void
+    private let onRestoreBackup: @Sendable (String) -> Void
 
     @State private var section: PhraseRoleSettingsSection
     @State private var selectedRoleID: String?
@@ -32,16 +41,32 @@ public struct PhraseRoleSettingsView: View {
         lightingTimingOffsetMillis: Binding<Int> = .constant(0),
         initialSection: PhraseRoleSettingsSection = .phraseModel,
         feedback: String? = nil,
+        dataManagement: DataManagementState = .empty,
+        dataOperation: DataManagementOperationState = .idle,
+        backups: [LibraryBackupRecord] = [],
+        canManageData: Bool = false,
         rendersInteractiveControls: Bool = true,
-        onMutation: @escaping @Sendable (PhraseRoleMutationRequest) -> Void = { _ in }
+        onMutation: @escaping @Sendable (PhraseRoleMutationRequest) -> Void = { _ in },
+        onCreateBackup: @escaping @Sendable () -> Void = {},
+        onPrepareReset: @escaping @Sendable ([UInt64]) -> Void = { _ in },
+        onApplyReset: @escaping @Sendable () -> Void = {},
+        onRestoreBackup: @escaping @Sendable (String) -> Void = { _ in }
     ) {
         self.settings = settings
         _appearance = appearance
         _keyNotation = keyNotation
         _lightingTimingOffsetMillis = lightingTimingOffsetMillis
         self.feedback = feedback
+        self.dataManagement = dataManagement
+        self.dataOperation = dataOperation
+        self.backups = backups
+        self.canManageData = canManageData
         self.rendersInteractiveControls = rendersInteractiveControls
         self.onMutation = onMutation
+        self.onCreateBackup = onCreateBackup
+        self.onPrepareReset = onPrepareReset
+        self.onApplyReset = onApplyReset
+        self.onRestoreBackup = onRestoreBackup
         _section = State(initialValue: initialSection)
         _selectedRoleID = State(initialValue: settings?.roles.first?.id)
         _renameDraft = State(initialValue: settings?.roles.first?.name ?? "")
@@ -121,6 +146,7 @@ public struct PhraseRoleSettingsView: View {
         case .general: copy("settings.general")
         case .phraseModel: "Phrase Model"
         case .planningDefaults: "Planning Defaults"
+        case .dataBackups: "Data & Backups"
         }
     }
 
@@ -129,6 +155,7 @@ public struct PhraseRoleSettingsView: View {
         case .general: "slider.horizontal.3"
         case .phraseModel: "text.badge.checkmark"
         case .planningDefaults: "point.3.connected.trianglepath.dotted"
+        case .dataBackups: "externaldrive.badge.timemachine"
         }
     }
 
@@ -162,6 +189,17 @@ public struct PhraseRoleSettingsView: View {
             phraseRoleSettings
         case .planningDefaults:
             planningDefaults
+        case .dataBackups:
+            DataBackupsSettingsView(
+                data: dataManagement,
+                operation: dataOperation,
+                backups: backups,
+                canManageData: canManageData,
+                onCreateBackup: onCreateBackup,
+                onPrepareReset: onPrepareReset,
+                onApplyReset: onApplyReset,
+                onRestoreBackup: onRestoreBackup
+            )
         }
     }
 

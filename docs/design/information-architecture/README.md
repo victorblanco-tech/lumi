@@ -18,11 +18,11 @@ that applies across providers.
 Live
 Library
   Tracks
-  Sources & Import
+  Import & Sources
 Plans (later)
 Integrations
   Overview
-  Deck Inputs
+  Pro DJ Link
   Lighting Outputs
   Diagnostics
 Settings
@@ -36,12 +36,12 @@ Settings
 ### Library
 
 `Library > Tracks` contains the persistent Track Lighting Editor and track
-browser. `Library > Sources & Import` owns source discovery, import/refresh,
+browser. `Library > Import & Sources` owns trusted USB discovery, safe synchronization,
 source health, changes/conflicts and source-specific initial phrase mapping.
 
-Rekordbox 7 is shown here as the next read-only local source. Import stays
-disabled until the isolated adapter story is complete. The deterministic demo
-source remains available for local rehearsal and automated verification.
+Only mounted USB Device Libraries are product sources. XML and direct local
+Rekordbox import are retained solely as migration internals. The deterministic
+demo source remains available for local rehearsal and automated verification.
 
 Source phrase mapping is applied only to the initial imported baseline. Edited
 Lumi phrases remain independent after import.
@@ -52,7 +52,7 @@ Lumi phrases remain independent after import.
 providers and health, then deep-links to the owning screen. It does not contain
 duplicate editable configuration or repair actions.
 
-`Deck Inputs` owns Beat Link Trigger and future implementations of the
+`Pro DJ Link` owns direct player and mixer discovery plus live transport through the
 provider-neutral `DeckSource` boundary.
 
 `Lighting Outputs` owns SoundSwitch and future output profiles. The accepted
@@ -73,14 +73,14 @@ Settings contains only cross-provider application behavior:
 - `Phrase Model`: Lumi-owned phrase types and their stable identities;
 - `Planning Defaults`: future default theme-selection and planning policies.
 
-Beat Link Trigger, SoundSwitch, MIDI routes, Rekordbox import and source mapping
+Pro DJ Link, SoundSwitch, MIDI routes, USB synchronization and source mapping
 must not return to Settings.
 
 ## Deep-link behavior
 
-- Integrations Overview → Beat Link Trigger opens `Deck Inputs`.
+- Integrations Overview → Pro DJ Link opens `Pro DJ Link`.
 - Integrations Overview → SoundSwitch opens `Lighting Outputs`.
-- Integrations Overview → Rekordbox opens `Library > Sources & Import`.
+- Integrations Overview → USB Sources opens `Library > Import & Sources`.
 - The compact technical status in Live will open Diagnostics when the later
   diagnostics story adds actionable detail.
 
@@ -88,6 +88,6 @@ must not return to Settings.
 
 - Navigation boundaries are covered by local Swift tests.
 - Existing provider-specific views are reused rather than reimplemented.
-- The native app is tested by clicking every destination and the Rekordbox
+- The native app is tested by clicking every destination and the USB Sources
   cross-workspace deep link.
 - The app remains fully offline and all user-facing copy is English.

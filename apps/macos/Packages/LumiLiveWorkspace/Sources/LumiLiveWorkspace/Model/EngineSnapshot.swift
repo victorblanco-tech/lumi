@@ -12,6 +12,7 @@ public struct EngineSnapshot: Equatable, Sendable {
     public let deckInputIntegration: DeckInputIntegrationSnapshot?
     public let midiIntegration: MidiOutputIntegrationSnapshot?
     public let midiClockIntegration: MidiClockIntegrationSnapshot?
+    public let abletonLinkIntegration: AbletonLinkIntegrationSnapshot?
     public let simulation: SimulationSnapshot?
     public let outputProvider: OutputProviderSnapshot
     public let leaderDeckID: UInt64?
@@ -33,6 +34,7 @@ public struct EngineSnapshot: Equatable, Sendable {
         deckInputIntegration: DeckInputIntegrationSnapshot? = nil,
         midiIntegration: MidiOutputIntegrationSnapshot? = nil,
         midiClockIntegration: MidiClockIntegrationSnapshot? = nil,
+        abletonLinkIntegration: AbletonLinkIntegrationSnapshot? = nil,
         simulation: SimulationSnapshot? = nil,
         outputProvider: OutputProviderSnapshot = .init(
             providerKind: "dryRun",
@@ -57,6 +59,7 @@ public struct EngineSnapshot: Equatable, Sendable {
         self.deckInputIntegration = deckInputIntegration
         self.midiIntegration = midiIntegration
         self.midiClockIntegration = midiClockIntegration
+        self.abletonLinkIntegration = abletonLinkIntegration
         self.simulation = simulation
         self.outputProvider = outputProvider
         self.leaderDeckID = leaderDeckID
@@ -86,6 +89,7 @@ public struct EngineSnapshot: Equatable, Sendable {
             deckInputIntegration: deckInputIntegration,
             midiIntegration: midiIntegration,
             midiClockIntegration: midiClockIntegration,
+            abletonLinkIntegration: abletonLinkIntegration,
             simulation: simulation,
             outputProvider: outputProvider,
             leaderDeckID: deckID,
@@ -164,6 +168,24 @@ public struct MidiClockIntegrationSnapshot: Equatable, Sendable {
         self.lastEvent = lastEvent
         self.lastError = lastError
     }
+}
+
+public struct AbletonLinkIntegrationSnapshot: Equatable, Sendable {
+    public let state: String
+    public let provider: String
+    public let helperVersion: String?
+    public let peers: UInt64
+    public let source: String?
+    public let deckNumber: UInt64?
+    public let bpmMilli: UInt64?
+    public let beatWithinBar: UInt64?
+    public let playing: Bool
+    public let generation: UInt64?
+    public let lastBeatAgeMillis: UInt64?
+    public let phaseErrorMicros: Int?
+    public let lastReanchor: String?
+    public let lastEvent: String?
+    public let lastError: String?
 }
 
 public struct DeckInputIntegrationSnapshot: Equatable, Sendable {

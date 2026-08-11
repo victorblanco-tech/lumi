@@ -8,30 +8,30 @@
 - [Epic 2A – 0.2.0 development evidence](0.2.0-epic-2a-evidence.md)
 - [0.3.0 installable release readiness](0.3.0-release-readiness.md)
 - [0.3.0 development release and known limitations](0.3.0-dev-demo-and-limitations.md)
-- [0.3.0-rc.1 release notes](0.3.0-rc.1-release-notes.md)
-- [0.3.0 stable release notes](0.3.0-release-notes.md)
+- [0.3.0 release candidate notes](0.3.0-rc.1-release-notes.md)
+- [0.3.0 release notes](0.3.0-release-notes.md)
 - [Unsigned macOS installation instructions](unsigned-macos-installation.txt)
 
 Create a locally verified, unsigned Apple Silicon disk image with:
 
 ```bash
-./scripts/package-macos-local.sh preview
+./scripts/package-macos-local.sh dev
 ```
 
 The generated DMG and SHA-256 checksum are written to `build/Releases` and are
 ignored by Git. This path intentionally uses no GitHub Actions minutes and no
 paid Apple credentials.
 
-`preview` builds the side-by-side installable **Lumi Preview** app. Use
-`./scripts/package-macos-local.sh stable` only for a deliberately promoted
-Stable build.
+The only channels are `dev`, `rc` and `release`. Their versions are respectively
+`X.Y.Z-dev-N`, `X.Y.Z-rc-N` and `X.Y.Z`; every app is named **Lumi**. Prerelease
+DMGs use the version in the bundle filename so they remain distinguishable.
 
-Before testing schema or migration work, create a checked Stable backup and—if
+Before testing schema or migration work, create a checked release backup and—if
 needed—seed an empty channel explicitly:
 
 ```bash
 ./scripts/backup-macos-user-data.sh
-./scripts/clone-macos-channel-data.sh preview
+./scripts/clone-macos-channel-data.sh rc
 ./scripts/clone-macos-channel-data.sh dev
 ```
 

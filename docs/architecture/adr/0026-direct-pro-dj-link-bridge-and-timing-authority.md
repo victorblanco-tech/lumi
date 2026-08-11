@@ -56,6 +56,10 @@ Ableton Link. The existing MIDI Clock route remains a fallback. Pro DJ Link
 input is never wired directly to Ableton Link output inside the source adapter;
 this allows Local Playback to use the same SoundSwitch timing output.
 
+ADR-0030 defines the accepted Link implementation and lifecycle: a Lumi-owned
+timing authority drives a pinned, separately executed Carabiner helper. This
+replaces BLT without coupling the Pro DJ Link input adapter to SoundSwitch.
+
 Track reconciliation is deterministic and fail closed:
 
 1. exact mounted-media identity plus Rekordbox track ID;

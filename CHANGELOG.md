@@ -1,7 +1,74 @@
 # Changelog
 
-## 0.4.0-dev
+## 0.4.0-dev-17
 
+- Een opnieuw gekoppelde trusted USB behoudt voortaan één stabiele identiteit,
+  ook wanneer een Library Rebuild nog een oude `reset-pending` bronregistratie
+  heeft achtergelaten. Dubbele USB-labels verdwijnen en Pro DJ Link-resolutie
+  blijft ondubbelzinnig.
+- Fysieke CDJ-1500X-spelers mogen bij `NO_TRACK` hun eigen playernummer blijven
+  publiceren. Deze geldige overgangsstatus stopt de lokale Lumi-engine niet
+  langer; engine-exitdetails worden bovendien zichtbaar in de lokale logs.
+
+## 0.4.0-dev-16
+
+- Lumi publiceert beat-, bar- en BPM-timing vanuit Local Playback of de directe
+  Pro DJ Link-adapter naar SoundSwitch via een beheerde Ableton Link-helper;
+  Beat Link Trigger is geen runtime-afhankelijkheid.
+- Ableton Link-timing, Lumi Virtual MIDI AutoLoop-selectie en Control One
+  handmatige bediening zijn expliciet drie parallelle SoundSwitch-inputs.
+- De timing-worker start asynchroon, coalescet achterstallige anchors, herstelt
+  een verbroken helperverbinding zelfstandig en valideert de gedeelde monotone
+  klok voordat exacte Pro DJ Link-timestamps worden gebruikt.
+- Integrations en Live Tech tonen de Link-provider, timing authority, BPM,
+  peers, phase error en eventuele degradatie zonder de realtime outputlane te
+  blokkeren.
+- Lange USB-playlistnamen blijven compact en zijn via hover volledig leesbaar.
+- De command-ID-cache wordt nu ook in geoptimaliseerde release-builds gevuld;
+  een retry met hetzelfde ID kan daardoor geen reeds toegepaste planmutatie
+  opnieuw uitvoeren of als onterechte revision conflict terugkomen.
+
+## 0.4.0-dev-15
+
+- `Settings > Data & Backups` maakt complete, kanaalgescheiden
+  `.lumibackup`-packages en kan ze na een automatische safety backup
+  terugzetten.
+- `Rebuild Library Content` toont vooraf exacte impact, bewaart gekozen
+  authored tracks direct en ruimt oude tracks, playlists, mirrors en
+  syncgeschiedenis daarna transactioneel op.
+- Creative Archive bewaart Lumi-owned phrasewerk onafhankelijk van USB- en
+  playlistindeling. Een latere USB-sync koppelt een exacte, beat-compatibele
+  track automatisch terug; ambiguïteit en afwijkende beatstructuren blijven
+  veilig `pending` of `review`.
+- Phrase Model-defaultsupgrades slaan hun versienummer nu werkelijk op; een
+  app- of backup-restart verhoogt de catalogusrevisie daardoor niet langer
+  opnieuw.
+- De gebundelde Pro DJ Link JAR en Java-runtime staan als verzegelde app-
+  resources in plaats van ongeldige losse Helper-bundles; de ad-hoc gesigneerde
+  Dev-DMG doorloopt daardoor weer de volledige mount- en signaturecheck.
+
+- USB-playlists tonen altijd een groene teller met het exacte aantal `CURRENT`
+  tracks. Gesynchroniseerde playlistnamen en aantallen blijven per trusted USB
+  offline zichtbaar; oudere full-device syncs worden expliciet als legacy
+  zonder opgeslagen playlistnamen aangeduid.
+- Exact unieke titel/artiest/BPM/duur-matches herstellen USB-tracks die eerder
+  ten onrechte als tweede canonieke identiteit werden geïmporteerd. Alleen
+  onaangepaste, automatisch aangemaakte en volledig ongerefereerde duplicaten
+  worden tijdens een volgende sync atomair opgeruimd; Lumi-edits blijven staan.
+- Library-playlists tonen hun USB-bron of legacy-herkomst, zodat gelijknamige
+  oude Rekordbox- en actuele USB-playlists niet meer te verwarren zijn.
+
+- USB Sync toont vanaf het moment van klikken in dezelfde uitgeklapte source-
+  lane een geblokkeerde `Synchronizing…`-actie, indeterminate progress en daarna
+  een blijvend succes- of foutresultaat; feedback verdwijnt niet meer buiten
+  beeld boven de bronnenlijst.
+- `NEW` tracks uit geselecteerde OneLibrary-playlists worden nu atomair als
+  canonieke Lumi-tracks geïmporteerd, inclusief beatgrid, RGB-waveform, phrases,
+  playlistrelatie en USB/Pro DJ Link-identiteit. Een succesvolle Sync maakt ze
+  daardoor direct `CURRENT` in plaats van ze alleen als unmatched te bewaren.
+- Trusted USB sources klappen voortaan direct onder hun eigen lane uit. Een
+  playlistselectie toont vóór Sync automatisch de read-only impact op unieke
+  tracks: nieuw, te vernieuwen, actueel, beschermd en te beoordelen.
 - Read-only Rekordbox Device Library-sync koppelt echte USB/SD-track-ID's aan
   canonieke Lumi-tracks en ververst beatgrid, RGB-waveform en cue-bearing
   analyserevisies; BLT MIDI v4 ondersteunt daarnaast exacte Shallow Simulator-

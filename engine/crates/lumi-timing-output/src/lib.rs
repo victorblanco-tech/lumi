@@ -1,0 +1,177 @@
+//! Provider-neutral musical timing output and managed Ableton Link adapter.
+
+#![forbid(unsafe_code)]
+
+use std::error::Error;
+use std::time::Instant;
+
+mod carabiner;
+
+pub use carabiner::{
+    CARABINER_DEFAULT_PORT, CARABINER_EXPECTED_VERSION, CarabinerConfiguration,
+    CarabinerTimingOutput,
+};
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TimingSourceKind {
+    LocalPlayback,
+    ProDjLink,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TimingDiscontinuity {
+    Continuous,
+    Started,
+    Resumed,
+    Seeked,
+    TrackChanged,
+    MasterChanged,
+}
+
+/// One immutable mapping from Lumi's selected musical source to monotonic time.
+///
+/// `observed_at_micros` is populated when the source and Link helper share a
+/// verified monotonic epoch, as they do for the Java Pro DJ Link bridge on
+/// macOS. Other sources are aligned against a fresh helper status snapshot.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct TimingAnchor {
+    pub source: TimingSourceKind,
+    pub deck_number: Option<u8>,
+    pub bpm_milli: u32,
+    pub beat_within_bar: u8,
+    pub playing: bool,
+    pub generation: u64,
+    pub discontinuity: TimingDiscontinuity,
+    pub observed_at_micros: Option<u64>,
+}
+
+impl TimingAnchor {
+    pub fn validate(self) -> Result<Self, TimingOutputValidationError> {
+        if !(20_000..=300_000).contains(&self.bpm_milli) {
+            return Err(TimingOutputValidationError::Tempo);
+        }
+        if !(1..=4).contains(&self.beat_within_bar) {
+            return Err(TimingOutputValidationError::BeatWithinBar);
+        }
+        if self.source == TimingSourceKind::ProDjLink && self.deck_number.is_none() {
+            return Err(TimingOutputValidationError::DeckRequired);
+        }
+        Ok(self)
+    }
+
+    #[must_use]
+    pub const fn phase_beat(self) -> u8 {
+        self.beat_within_bar - 1
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum TimingOutputState {
+    Stopped,
+    Starting,
+    Ready,
+    Running,
+    Degraded,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct TimingOutputStatus {
+    pub state: TimingOutputState,
+    pub provider: &'static str,
+    pub helper_version: Option<String>,
+    pub peers: u32,
+    pub source: Option<TimingSourceKind>,
+    pub deck_number: Option<u8>,
+    pub bpm_milli: Option<u32>,
+    pub beat_within_bar: Option<u8>,
+    pub playing: bool,
+    pub generation: Option<u64>,
+    pub last_anchor_at: Option<Instant>,
+    pub last_anchor_age_millis: Option<u64>,
+    pub phase_error_micros: Option<i64>,
+    pub last_reanchor: Option<TimingDiscontinuity>,
+    pub last_event: Option<String>,
+    pub last_error: Option<String>,
+}
+
+impl Default for TimingOutputStatus {
+    fn default() -> Self {
+        Self {
+            state: TimingOutputState::Stopped,
+            provider: "Carabiner",
+            helper_version: None,
+            peers: 0,
+            source: None,
+            deck_number: None,
+            bpm_milli: None,
+            beat_within_bar: None,
+            playing: false,
+            generation: None,
+            last_anchor_at: None,
+            last_anchor_age_millis: None,
+            phase_error_micros: None,
+            last_reanchor: None,
+            last_event: None,
+            last_error: None,
+        }
+    }
+}
+
+pub trait TimingOutputProvider {
+    type Error: Error + Send + Sync + 'static;
+
+    fn provider_kind(&self) -> &'static str;
+    fn publish(&mut self) -> Result<(), Self::Error>;
+    fn synchronize(&mut self, anchor: TimingAnchor) -> Result<(), Self::Error>;
+    fn hold(&mut self) -> Result<(), Self::Error>;
+    fn stop(&mut self) -> Result<(), Self::Error>;
+    fn status(&self) -> TimingOutputStatus;
+}
+
+#[derive(Clone, Copy, Debug, thiserror::Error, Eq, PartialEq)]
+pub enum TimingOutputValidationError {
+    #[error("timing BPM is outside the supported range")]
+    Tempo,
+    #[error("timing beat-within-bar must be in the range 1 through 4")]
+    BeatWithinBar,
+    #[error("Pro DJ Link timing requires a deck number")]
+    DeckRequired,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn pro_link_anchor_requires_a_deck() {
+        let anchor = TimingAnchor {
+            source: TimingSourceKind::ProDjLink,
+            deck_number: None,
+            bpm_milli: 130_000,
+            beat_within_bar: 1,
+            playing: true,
+            generation: 1,
+            discontinuity: TimingDiscontinuity::Started,
+            observed_at_micros: Some(10),
+        };
+        assert_eq!(
+            anchor.validate(),
+            Err(TimingOutputValidationError::DeckRequired)
+        );
+    }
+
+    #[test]
+    fn phase_is_zero_based_for_link_quantum() {
+        let anchor = TimingAnchor {
+            source: TimingSourceKind::LocalPlayback,
+            deck_number: None,
+            bpm_milli: 130_000,
+            beat_within_bar: 4,
+            playing: true,
+            generation: 1,
+            discontinuity: TimingDiscontinuity::Continuous,
+            observed_at_micros: None,
+        };
+        assert_eq!(anchor.phase_beat(), 3);
+    }
+}

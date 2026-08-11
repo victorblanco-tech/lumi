@@ -27,14 +27,30 @@ license metadata are verified and included in the release inventory.
 - License: https://github.com/Deep-Symmetry/beat-link/blob/main/LICENSE.md
 - Source distribution: https://github.com/Deep-Symmetry/beat-link/releases
 
-## rekordbox-pdb
+## Carabiner and Ableton Link
 
-Lumi uses the `rekordbox-pdb` Rust parser to read the classic Rekordbox Device
-Library database. Lumi's adapter exposes no write operation and opens media
-files read-only.
+Lumi packages a pinned Carabiner executable as a separately executed helper for
+publishing the Lumi-owned timing authority to an Ableton Link session. Lumi
+communicates with the helper only over its documented loopback TCP protocol;
+Beat Link Trigger is not required. Carabiner and the included Ableton Link code
+are distributed under GPL-2.0-or-later. Exact version, asset checksum and source
+location are included beside the packaged helper and in release build evidence.
 
-- Project: https://github.com/fragmede/rekordbox-pdb-rs
-- License: MIT
+- Carabiner: https://github.com/Deep-Symmetry/carabiner/tree/v1.2.0
+- Carabiner license: https://github.com/Deep-Symmetry/carabiner/blob/v1.2.0/LICENSE.md
+- Ableton Link: https://github.com/Ableton/link
+- Ableton Link license: https://github.com/Ableton/link/blob/master/LICENSE.md
+
+## OneLibrary and SQLCipher
+
+Lumi reads current Rekordbox OneLibrary USB databases through a bundled
+SQLCipher build. The database is opened read-only. The OneLibrary schema and
+shared format-key implementation were validated against the MIT-licensed
+`onelibrary-connect` project; no runtime package from that project is bundled.
+
+- OneLibrary reference: https://github.com/chrisle/onelibrary-connect (MIT)
+- SQLCipher: https://github.com/sqlcipher/sqlcipher (BSD-style license)
+- OpenSSL: https://www.openssl.org/source/license.html (Apache License 2.0)
 
 ## Crate Digger
 

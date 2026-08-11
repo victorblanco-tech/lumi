@@ -6,7 +6,7 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-rekordbox-pdb = "0.1.0"
+rusqlite = { version = "0.40.1", features = ["bundled-sqlcipher-vendored-openssl"] }
 sha2 = "0.10.9"
 thiserror = "2"
 

@@ -3,7 +3,7 @@ use std::time::{Duration, Instant};
 
 use lumi_prolink_input::{BridgeEvent, BridgeLaunchConfiguration, BridgeProcessSupervisor};
 
-const HELLO: &str = r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":1,"observedAtNanos":10,"type":"hello","payload":{"bridgeVersion":"0.4.0-dev","beatLinkVersion":"8.0.0","readOnly":true}}"#;
+const HELLO: &str = r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":1,"observedAtNanos":10,"type":"hello","payload":{"bridgeVersion":"0.4.0-dev-17","beatLinkVersion":"8.0.0","readOnly":true}}"#;
 const READY: &str = r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":2,"observedAtNanos":20,"type":"sourceStatus","payload":{"status":"ready","detail":"test bridge ready"}}"#;
 
 #[test]

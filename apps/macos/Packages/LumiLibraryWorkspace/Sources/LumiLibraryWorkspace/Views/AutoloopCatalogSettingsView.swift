@@ -12,6 +12,7 @@ public struct AutoloopCatalogSettingsView: View {
     private let catalog: AutoloopCatalogState?
     private let midiIntegration: MidiIntegrationState?
     private let midiClockIntegration: MidiClockIntegrationState?
+    private let abletonLinkIntegration: AbletonLinkIntegrationState?
     private let profile = SoundSwitchOutputProfileState.builtIn
     private let feedback: String?
     private let midiIntegrationFeedback: String?
@@ -33,6 +34,7 @@ public struct AutoloopCatalogSettingsView: View {
         catalog: AutoloopCatalogState?,
         midiIntegration: MidiIntegrationState? = nil,
         midiClockIntegration: MidiClockIntegrationState? = nil,
+        abletonLinkIntegration: AbletonLinkIntegrationState? = nil,
         feedback: String? = nil,
         midiIntegrationFeedback: String? = nil,
         rendersInteractiveControls: Bool = true,
@@ -45,6 +47,7 @@ public struct AutoloopCatalogSettingsView: View {
         self.catalog = catalog
         self.midiIntegration = midiIntegration
         self.midiClockIntegration = midiClockIntegration
+        self.abletonLinkIntegration = abletonLinkIntegration
         self.feedback = feedback
         self.midiIntegrationFeedback = midiIntegrationFeedback
         self.rendersInteractiveControls = rendersInteractiveControls
@@ -518,12 +521,15 @@ public struct AutoloopCatalogSettingsView: View {
                     inspectorValue("Protocol", midiIntegration?.midiProtocol ?? "MIDI 1.0 UMP")
                     inspectorValue("Configured Surface", "4 banks · 32 AutoLoops per bank")
                     inspectorValue(
-                        "Local Playback Timing",
-                        midiClockIntegration.map {
-                            "\($0.sourceName) · \($0.bpmDescription)"
-                        } ?? "Lumi Clock → SoundSwitch"
+                        "Beat / BPM Timing",
+                        abletonLinkIntegration.map {
+                            "\($0.provider) · \($0.bpmDescription)"
+                        } ?? "Ableton Link → SoundSwitch"
                     )
-                    inspectorValue("Live Deck Timing", "Beat Link Trigger → Ableton Link")
+                    inspectorValue(
+                        "Timing Authority",
+                        abletonLinkIntegration?.sourceDescription ?? "Local Playback or Pro DJ Link"
+                    )
                     HStack {
                         if midiIntegration?.isReady == true {
                             Button("Stop Virtual Source", action: onStopMidi)
@@ -537,13 +543,13 @@ public struct AutoloopCatalogSettingsView: View {
                         .font(LumiTypography.caption)
                         .foregroundStyle(LumiColor.textSecondary)
                     Text(
-                        midiClockIntegration?.lastError
-                            ?? midiClockIntegration?.lastEvent
-                            ?? "The Local Playback clock starts only in LIVE while audio is playing."
+                        abletonLinkIntegration?.lastError
+                            ?? abletonLinkIntegration?.lastEvent
+                            ?? "Ableton Link publishes timing independently from MIDI AutoLoop selection."
                     )
                     .font(LumiTypography.caption)
                     .foregroundStyle(
-                        midiClockIntegration?.lastError == nil
+                        abletonLinkIntegration?.lastError == nil
                             ? LumiColor.textSecondary : LumiColor.warning
                     )
                     Spacer(minLength: 0)
@@ -559,6 +565,10 @@ public struct AutoloopCatalogSettingsView: View {
                     integrationRequirement(
                         "Configured Bank and AutoLoop buttons respond deterministically",
                         complete: true
+                    )
+                    integrationRequirement(
+                        "Ableton Link timing is available to SoundSwitch",
+                        complete: abletonLinkIntegration?.isAvailable == true
                     )
                     integrationRequirement(
                         "Physical Control One remains usable in parallel",

@@ -1,0 +1,7 @@
+#include "Base.xcconfig"
+
+LUMI_DATA_DIRECTORY_NAME = Lumi RC
+LUMI_DISPLAY_NAME = Lumi
+LUMI_PRODUCT_NAME = Lumi
+LUMI_RELEASE_CHANNEL = rc
+PRODUCT_BUNDLE_IDENTIFIER = co.victorblan.tech.lumi.rc

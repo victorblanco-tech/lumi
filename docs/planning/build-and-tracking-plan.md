@@ -152,11 +152,18 @@ stabiliteitsgates blijven open**.
 - generieke MIDI-output;
 - OFF, ARMED, LIVE en PAUSED;
 - phrase-boundary execution;
-- timing-readiness voor Beat Link Trigger, Carabiner en Ableton Link;
+- timing-readiness voor de Lumi Timing Authority, managed Ableton Link output
+  en afzonderlijke MIDI Clock-fallback;
 - coexistentie met fysieke SoundSwitch-bediening;
 - veilige degradatie en emergency stop.
 
 Exit: Lumi voert betrouwbaar uit zonder de gebruikersbediening over te nemen.
+
+De actuele productionrichting gebruikt geen Beat Link Trigger. Direct Pro DJ
+Link en Local Playback voeden dezelfde Lumi-owned timing authority; ADR-0030
+legt de managed Ableton Link output naar SoundSwitch vast. Control One blijft
+een parallelle handmatige SoundSwitch-input en kan onafhankelijk als DMX-
+interface dienen.
 
 De eerste fysieke automatische licht-run en parallelle Control One-bediening
 zijn geslaagd. De Local Playback→phrase scheduler→MIDI→SoundSwitch→DMX-keten

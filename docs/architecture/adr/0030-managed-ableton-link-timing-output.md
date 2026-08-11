@@ -1,0 +1,171 @@
+# ADR-0030: Managed Ableton Link timing output
+
+- Status: **Accepted**
+- Date: **2026-08-11**
+- Refines: ADR-0015, ADR-0022 and ADR-0026
+
+## Context
+
+Lumi already receives read-only deck, master, effective-tempo and beat facts
+directly from Pro DJ Link through the supervised `lumi-prolink-bridge`. Local
+Playback provides the same normalized transport facts from Lumi's own player.
+SoundSwitch needs a continuous tempo, beat and four-beat bar timeline in
+parallel with the sparse MIDI commands which select a Bank and AutoLoop.
+
+Beat Link Trigger proved this end-to-end workflow by connecting its Pro DJ Link
+state to Carabiner and publishing an Ableton Link session. Keeping BLT in the
+production chain would duplicate deck discovery, master selection, lifecycle
+and configuration already owned by Lumi. Implementing the Ableton Link network
+protocol independently would create unnecessary interoperability and timing
+risk.
+
+The cross-platform Ableton Link library is dual-licensed under GPL-2.0-or-later
+and a proprietary license. Carabiner is a small GPL-2.0-or-later executable
+which embeds that library and exposes a documented loopback-only protocol.
+Lumi is distributed under EPL-2.0.
+
+## Decision
+
+Lumi owns a provider-neutral `TimingOutputProvider`. The first production
+adapter is `AbletonLinkTimingOutput` and communicates with a pinned, separately
+executed Carabiner helper over its loopback TCP protocol. The Lumi application
+supervises, starts and stops the helper; the user does not install or configure
+Carabiner and no Beat Link Trigger process or expression is required.
+
+Carabiner remains a separate program with its own license, notices and
+corresponding-source location. Its types and protocol do not cross the timing
+adapter boundary. A later Lumi-owned native Link helper can replace it without
+changing engine, deck-source, planning or UI contracts.
+
+The Rust engine is the single timing authority. It selects exactly one source
+timeline and publishes immutable timing anchors containing:
+
+- source and stable deck identity;
+- monotonically observed time;
+- effective BPM, including deck pitch;
+- beat-within-bar and transport generation;
+- playing state and discontinuity generation;
+- freshness and confidence.
+
+The adapter behaves as a passive follower of Lumi's selected master. It never
+appoints Ableton Link as Pro DJ Link tempo master and never sends control
+commands to physical players. Local Playback and Pro DJ Link feed the same
+output port.
+
+## Parallel SoundSwitch paths
+
+SoundSwitch receives three independent inputs:
+
+1. Ableton Link timing from Lumi: BPM, beat, bar and transport;
+2. Lumi Virtual MIDI: Bank and AutoLoop commands on planned phrase boundaries;
+3. optional Control One input: direct user overrides.
+
+SoundSwitch remains the lighting engine. Its DMX output may use Control One or
+another interface. That downstream interface is not part of Lumi's model.
+
+```text
+Pro DJ Link / Local Playback -> Lumi Timing Authority -> Ableton Link --+
+                                                                      |
+Lumi Lighting Plan ----------> Lumi Virtual MIDI ---------------------+-> SoundSwitch
+                                                                      |
+Control One manual input ---------------------------------------------+
+
+SoundSwitch -> selected DMX interface (optionally Control One) -> fixtures
+```
+
+## Timing behavior
+
+- The low-latency beat stream, not UI refresh or database work, establishes
+  phase.
+- Effective BPM changes are applied immediately while preserving phase.
+- Normal packet jitter is filtered; Lumi does not force a new Link mapping on
+  every beat.
+- Play, cue, seek, track replacement and master handoff increment a transport
+  generation and establish one new anchor on the first reliable beat.
+- A soft phase-error threshold permits smooth correction. A hard threshold or
+  explicit discontinuity performs one deterministic re-anchor.
+- Four-beat bar phase is derived from the source beat grid. A missing or stale
+  master closes automatic lighting and degrades timing readiness.
+- Start/stop synchronization mirrors the selected Lumi source; Link remains a
+  timing transport and never becomes the operation-state authority.
+- Lighting Output Offset advances or delays only the sparse MIDI command at a
+  safe phrase boundary. It does not falsify the Link timeline.
+
+The timing worker and helper are isolated from SwiftUI, waveform rendering,
+SQLite and library imports. The adapter retains at most the newest unprocessed
+anchor and coalesces older continuous observations. A transport generation is
+never replaced by an older observation.
+
+## Lifecycle and diagnostics
+
+The helper starts automatically with the output integration and is supervised
+independently from `Lumi Virtual MIDI`. Failure of one output does not remove
+the other. Readiness reports at least:
+
+- helper version and process health;
+- Link enabled state and peer count;
+- selected timing source and master deck;
+- current effective BPM, beat and bar phase;
+- last beat age, phase error and last re-anchor reason;
+- transport state and last actionable error.
+
+`Off` stops publishing authoritative transport. `Arm` locks and validates
+timing without sending lighting commands. `Start` publishes timing and executes
+planned MIDI cues. `Pause` stops cue execution while retaining observable
+source state; resumption re-anchors safely before a new automatic cue.
+
+## Acceptance gates
+
+1. Local Playback drives a complete SoundSwitch AutoLoop show without BLT.
+2. The USB-backed network simulator proves pitch changes, pause/cue/resume,
+   seeks and master changes.
+3. A one-hour soak has no cumulative phase drift or timing-worker starvation.
+4. Measured phrase-boundary output targets a p95 end-to-end error of at most
+   20 ms; the measured result is retained with the release evidence.
+5. Control One remains usable in parallel and its selected AutoLoop feedback
+   follows Lumi commands.
+6. Physical CDJ-1500X, DJM-V5, SoundSwitch, Control One and DMX acceptance
+   succeeds before the BLT fallback is removed.
+
+## Licensing and distribution
+
+- `beat-link` remains a pinned EPL-2.0 dependency of the independent Pro DJ
+  Link input bridge.
+- Beat Link Trigger is not copied, linked or bundled.
+- The pinned Carabiner executable and Ableton Link sources are inventoried with
+  their GPL notices and corresponding-source location.
+- Lumi does not claim AlphaTheta or Ableton certification or endorsement.
+- A future closed-source or proprietary Lumi distribution requires a separate
+  Ableton Link licensing decision and legal review.
+
+## Consequences
+
+- BLT can be removed after physical acceptance without losing Link timing.
+- Local Playback and physical decks exercise one timing-output implementation.
+- The GPL component remains explicit and replaceable instead of being linked
+  into the EPL Lumi executable.
+- The app bundle grows by one small native helper and release packaging gains a
+  source/notices obligation.
+
+## Rejected alternatives
+
+### Keep Beat Link Trigger as a runtime dependency
+
+Rejected because it duplicates Lumi's source, state, UI and lifecycle and
+requires user-managed expressions.
+
+### Reimplement the Ableton Link network protocol
+
+Rejected because the official implementation already solves discovery,
+consensus and timeline synchronization and independent compatibility would be
+hard to prove.
+
+### Link the GPL Ableton library directly into the Lumi executable
+
+Deferred because it creates a less clear distribution boundary. A native
+helper remains possible if its licensing and packaging are handled explicitly.
+
+### Use MIDI Clock as the only timing output
+
+Rejected as the primary route because it has weaker phase/bar semantics and
+jitter behavior. `Lumi Clock` remains a separately diagnosed fallback.

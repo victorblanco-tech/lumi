@@ -13,16 +13,15 @@ source_database="$source_directory/library.sqlite"
 backup_root="${1:-$application_support/Lumi Backups}"
 timestamp="$(date -u '+%Y%m%dT%H%M%SZ')"
 backup_directory="$backup_root/$timestamp"
-stable_preferences_domain="co.victorblan.tech.lumi"
+release_preferences_domain="co.victorblan.tech.lumi"
 
-if pgrep -x "Lumi" >/dev/null || pgrep -x "Lumi Preview" >/dev/null \
-  || pgrep -x "Lumi Dev" >/dev/null || pgrep -x "lumi-engine" >/dev/null; then
+if pgrep -x "Lumi" >/dev/null || pgrep -x "lumi-engine" >/dev/null; then
   echo "ERROR: close every Lumi channel before backing up its data." >&2
   exit 1
 fi
 
 if [[ ! -f "$source_database" ]]; then
-  echo "ERROR: Stable Lumi database not found at '$source_database'." >&2
+  echo "ERROR: Lumi release database not found at '$source_database'." >&2
   exit 1
 fi
 
@@ -35,12 +34,12 @@ if [[ "$integrity_result" != "ok" ]]; then
   exit 1
 fi
 
-if defaults read "$stable_preferences_domain" >/dev/null 2>&1 \
-  && defaults export "$stable_preferences_domain" \
+if defaults read "$release_preferences_domain" >/dev/null 2>&1 \
+  && defaults export "$release_preferences_domain" \
     "$backup_directory/preferences.plist" >/dev/null 2>&1; then
   echo "Preferences: $backup_directory/preferences.plist"
 else
-  echo "Preferences: no Stable preferences domain exists yet"
+  echo "Preferences: no release preferences domain exists yet"
 fi
 
 echo "Database: $backup_directory/library.sqlite"

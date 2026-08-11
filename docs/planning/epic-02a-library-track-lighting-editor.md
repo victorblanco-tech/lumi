@@ -394,10 +394,10 @@ intern exact dezelfde slotidentiteit.
 
 Status: **implemented and locally verified**. De primaire `Integrations`-
 navigatie is actief met Overview, Deck Inputs, Lighting Outputs en Diagnostics.
-De bestaande Beat Link Trigger- en SoundSwitch-schermen zijn zonder duplicatie
-naar hun taakgerichte bestemming verhuisd. `Library` heeft Tracks en
-Sources & Import; Rekordbox 7 staat daar klaar als disabled read-only source en
-de initiële source phrase mapping is met de bron meeverhuisd. Settings bevat
+De bestaande Pro DJ Link- en SoundSwitch-schermen zijn zonder duplicatie naar
+hun taakgerichte bestemming verhuisd. `Library` heeft Tracks en Import &
+Sources; alleen trusted Rekordbox OneLibrary USB-media zijn actuele
+library-sources. Settings bevat
 alleen General, Phrase Model en Planning Defaults. Overview deeplinkt naar de
 eigenaar van ieder component. Een grens-test voorkomt dat providerconfiguratie
 weer in Settings belandt. Het geaccepteerde ontwerp staat in
@@ -430,6 +430,16 @@ en selectie en voert één atomaire mirrortransactie uit met add, update,
 unchanged, archive en restore. Analyse blijft daarna expliciet pending. De
 volledige beslissing staat in
 [`rekordbox-xml-sync.md`](../design/library-sources/rekordbox-xml-sync.md).
+
+### E2A-23 – Back up and rebuild a USB-driven Library without losing creative work
+
+Status: **implemented and locally verified for 0.4.0-dev-15**. Settings exposes
+complete channel-isolated backups, a mandatory backup-and-review reset flow,
+optional immediate preservation of authored tracks and Creative Archive status.
+The SQLite adapter has deterministic tests for both preservation and automatic
+relinking after a clean reimport. See
+[`story-e2a-23-data-backup-library-rebuild-and-creative-relink.md`](story-e2a-09-data-backup-library-rebuild-and-creative-relink.md)
+and [ADR-0029](../architecture/adr/0029-atomic-backups-library-rebuild-and-creative-archive.md).
 
 ## 6.1 Provider-neutrale bouwvolgorde
 

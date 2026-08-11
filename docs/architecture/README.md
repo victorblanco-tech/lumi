@@ -34,6 +34,9 @@ Decision Records (ADR's) die de belangrijkste besluiten vastleggen.
 - [ADR-0025: Read-only Rekordbox Device identity and analysis sync](adr/0025-read-only-rekordbox-device-identity-and-analysis-sync.md)
 - [ADR-0026: Direct Pro DJ Link bridge and separate timing authority](adr/0026-direct-pro-dj-link-bridge-and-timing-authority.md)
 - [ADR-0027: USB-backed Pro DJ Link test player and remote control](adr/0027-usb-backed-pro-dj-link-test-player.md)
+- [ADR-0028: Trusted USB sources and monotone analysis promotion](adr/0028-trusted-usb-sources-and-monotone-analysis-promotion.md)
+- [ADR-0029: Atomic backups, Library rebuilds and Creative Archive](adr/0029-atomic-backups-library-rebuild-and-creative-archive.md)
+- [ADR-0030: Managed Ableton Link timing output](adr/0030-managed-ableton-link-timing-output.md)
 
 Release- en deploymentmanagement staat in [`docs/release`](../release/README.md).
 

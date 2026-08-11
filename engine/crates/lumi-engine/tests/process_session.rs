@@ -18,6 +18,11 @@ fn real_engine_process_starts_empty_and_serves_authenticated_product_state() {
             "LUMI_DECK_INPUT_DESTINATION_NAME",
             format!("Lumi Deck Input Process Test {}", std::process::id()),
         )
+        // This test exercises the authenticated process protocol. Keeping it
+        // independent from the host CoreMIDI daemon makes the process check
+        // deterministic on build machines and developer Macs alike.
+        .env("LUMI_DECK_INPUT_DISABLED", "1")
+        .env("LUMI_AUTO_PUBLISH_MIDI", "0")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()

@@ -1,5 +1,35 @@
 # Story E4-02: Direct Pro DJ Link input and SoundSwitch timing
 
+## 2026-08-10 — Trusted USB and integration UI refinement
+
+- `Library > Import & Sources` now presents USB sources only, with trusted,
+  connected/offline, synchronization and version-health status.
+- Trusted source rows remain as the compact permanent overview. Expanding a
+  connected row refreshes its read-only playlist index after mount/remount;
+  the 71 playlists on `DJ VIC CHRM` are selectable before Sync and the complete
+  disk is never selected implicitly.
+- Lumi standardizes new USB ingestion on Rekordbox OneLibrary. A source that
+  only contains the legacy device database is rejected with an upgrade/export
+  instruction instead of activating a long-lived compatibility path.
+- Expanding a playlist before Sync exposes each track with `Current`, `USB
+  newer`, `USB outdated`, `New` or `Review` state. Playlist rows aggregate the
+  same states, so a DJ can confirm the expected changed tracks before applying
+  anything.
+- Selected playlists are durable subscriptions. They are restored by complete
+  folder/playlist path as well as source-local ID, so a OneLibrary refresh or a
+  backup USB with different internal IDs does not silently lose the selection.
+- Track tables expose active `USB Sources` relations per canonical track; the
+  relation is queried in one bounded batch with the visible library page.
+- USB alias matching uses strict metadata first and a bounded audio-content
+  signature fallback so renamed backup tracks can resolve safely.
+- Analysis promotion is monotone: newer analysis may promote, older analysis
+  is protected, and same-date/unknown conflicts are held without overwrite.
+- `Integrations > Pro DJ Link` replaces the legacy Beat Link Trigger product
+  surface and shows discovery, equipment, addresses, traffic and capability
+  status from Lumi's own bridge.
+- Physical CDJ-1500X and DJM-V5 compatibility remains pending hardware
+  acceptance; the simulator path is verified.
+
 ## User outcome
 
 As a DJ, I can run Lumi directly beside supported Pro DJ Link decks without
@@ -22,7 +52,8 @@ This story is delivered in visible, independently testable increments:
 5. **Lighting sync** — the engine publishes master timing through an Ableton
    Link output provider while existing MIDI notes select SoundSwitch Autoloops.
 6. **Fallback and diagnostics** — source loss holds automatic output, reports a
-   single actionable diagnostic and permits an explicit fallback to BLT.
+   single actionable diagnostic and permits Local Playback without requiring
+   Beat Link Trigger.
 
 ## Build order
 
@@ -32,9 +63,14 @@ This story is delivered in visible, independently testable increments:
 - **Implemented:** versioned NDJSON envelopes on stdout and commands on stdin.
 - **Implemented:** structured stderr diagnostics and deterministic protocol fixtures.
 - **Implemented:** Rust bridge decoder, process supervisor and contract tests.
-- **Implemented:** app-owned development launch with BLT retained as fallback.
+- **Implemented:** app-owned development launch; no Beat Link Trigger process,
+  expression or runtime configuration is part of the direct production path.
+- **Implemented and app-bundled:** the bridge JAR plus a jdeps-derived Java 21
+  runtime ship inside Dev, RC and release app bundles; no host Java install is
+  required.
 - **Verified on two hosts:** Lumi discovered `LUMI-SIM` player 1 at
-  `192.168.1.61` and reached `ready` without BLT or a manually started bridge.
+  `192.168.1.61`, received a loaded live track and reached `ready` without BLT
+  or a manually started bridge.
 - Local build and verification scripts remain the development path; no paid
   GitHub Actions minutes are consumed.
 
@@ -59,22 +95,108 @@ This story is delivered in visible, independently testable increments:
 
 ### E4-02C — Identity and analysis
 
-- Mounted-media identity and Rekordbox track references.
+- **Implemented:** mounted-media identity uses the stable filesystem UUID;
+  legacy mount-specific records for the same physical USB are reconciled
+  atomically on the next successful sync.
+- **Implemented:** playlist-scoped OneLibrary inspection and sync; the complete
+  device is never implicitly selected.
+- **Implemented:** pre-sync playlist and track browsing with aggregate and
+  track-level freshness/conflict state.
+- **Implemented:** playlist subscriptions persist by full path across remounts,
+  database revisions and trusted backup media.
+- **Implemented:** one visible operation card reports scanning/syncing progress
+  and finishes with exact processed, matched, unmatched, protected and held
+  counts.
+- **Implemented:** active USB alias relations are visible as a Library column;
+  obsolete Rekordbox-provider footer copy was removed.
+- **Verified against `DJ VIC CHRM`:** a read-only mounted-device sync against a
+  temporary Dev database copy matched canonical tracks, preserved direct
+  and simulator identity, and consolidated two legacy mount records to one
+  stable source record without touching the normal Dev database.
 - Metadata, beat grid, waveform, cue list and signature retrieval.
 - Exact identity/signature reconciliation and persisted aliases.
 - Explicit ambiguous/unknown result; no realtime fuzzy auto-activation.
 
 ### E4-02D — SoundSwitch timing output
 
-- Provider-neutral engine timing authority.
-- Ableton Link publisher with tempo, beat/bar phase and start/stop behavior.
-- Local Playback and Pro DJ Link feed the same output port.
-- MIDI Clock fallback and mutually exclusive clock ownership.
-- Timing offset changes apply at a safe future boundary.
+**Implementation status for `0.4.0-dev-16`:** D1 and D2 are implemented and
+locally verified. D3 status and automatic recovery are implemented; explicit
+restart/test controls remain planned. D4 remains a physical acceptance gate.
+
+- **Architecture accepted in ADR-0030:** provider-neutral engine timing
+  authority with a managed Ableton Link output adapter.
+- Lumi owns master selection, effective BPM, beat/bar phase, transport
+  generation, freshness and correction policy. No BLT state or expression is
+  part of the production path.
+- The first adapter supervises a pinned Carabiner helper as a separate process
+  and uses its loopback-only protocol. Carabiner owns only the Link session;
+  Lumi owns every source and lighting decision.
+- Local Playback and Pro DJ Link publish identical `TimingAnchor` values into
+  the same output port.
+- Normal beat jitter is filtered. Tempo changes preserve phase; cue, seek,
+  track replacement and master handoff establish one new anchor on the first
+  reliable beat.
+- Link publishes effective BPM, beat, four-beat bar phase and start/stop.
+  `Lumi Clock` remains an independently diagnosed MIDI Clock fallback and only
+  one timing output may be authoritative.
+- Lighting Output Offset remains a phrase-boundary MIDI preroll and never
+  falsifies Link tempo or phase. A pending change becomes active on the next
+  safe phrase boundary.
+- SoundSwitch receives Ableton Link, Lumi Virtual MIDI and optional Control One
+  input in parallel. SoundSwitch alone owns the selected downstream DMX
+  interface, which may itself be Control One.
+- Timing work runs outside SwiftUI, waveform rendering and SQLite. Bounded
+  queues and latest-state diagnostics prevent UI load from delaying beat
+  publication.
+
+#### E4-02D1 — Timing contract and deterministic authority — implemented
+
+- add provider-neutral timing source, anchor, generation and health types;
+- select only the fresh Lumi lighting leader as authority;
+- cover effective-pitch BPM, beat/bar mapping, pause, resume, seek, track
+  replacement and atomic master handoff with deterministic tests;
+- fail closed when the selected source is stale or ambiguous.
+
+#### E4-02D2 — Managed Ableton Link adapter — implemented and locally verified
+
+- add an asynchronous latest-anchor adapter for Carabiner's local protocol;
+- automatically launch, supervise and stop the pinned helper;
+- validate the helper version and monotonic clock mapping before declaring
+  readiness;
+- apply tempo only on change, re-anchor only on discontinuity or measured phase
+  error, and expose peer count plus current session state;
+- retain exact GPL license, source and build provenance in the release bundle.
+
+#### E4-02D3 — Product status and recovery — partially implemented
+
+- show `Ableton Link` beside command MIDI under Lighting Outputs;
+- expose helper health, peers, source deck, effective BPM, beat/bar lock, last
+  beat age, phase error, last re-anchor and actionable error;
+- include both timing and command readiness in Tech status without conflating
+  their failure domains;
+- provide explicit restart/test controls in Diagnostics, disabled while a Live
+  show could be disturbed.
+
+Implemented status includes independent Link and MIDI readiness, helper
+version, peers, source, deck, effective BPM, beat age, phase error, last
+re-anchor and actionable failure. The helper starts without blocking app
+startup, coalesces stale observations and reconnects on the next fresh anchor.
+
+#### E4-02D4 — Physical acceptance — pending
+
+- run a complete Local Playback song into SoundSwitch without BLT;
+- prove pitch, pause/cue/resume, seek and master handoff with the USB-backed
+  network simulator;
+- perform a one-hour no-drift soak and retain timing metrics;
+- physically verify CDJ-1500X, DJM-V5, SoundSwitch, Control One and fixture DMX;
+- prove the complete path with no BLT process running.
 
 ### E4-02E — Packaging and physical acceptance
 
-- Minimal bundled Java runtime and signed helper in all macOS channels.
+- **Implemented locally:** dependency-derived bundled Java runtime, bridge JAR
+  validation and helper signing hooks in all macOS channels.
+- **Implemented locally:** pinned universal Carabiner 1.2.0 helper, checksum,
+  architecture validation, signing hook and GPL/source provenance.
 - Third-party license/source inventory and reproducible dependency lock.
 - No separately installed Java, BLT or internet dependency.
 - Physical player, mixer, SoundSwitch, Control One and DMX acceptance run.
@@ -82,7 +204,7 @@ This story is delivered in visible, independently testable increments:
 ### E4-02S — USB-backed network simulator — implemented
 
 - Development-only Mac mini player; excluded from production packaging.
-- Read-only DeviceSQL and ANLZ track catalog from the same show USB.
+- Read-only OneLibrary and ANLZ track catalog from the same show USB.
 - Real Pro DJ Link discovery, status and beat packet generation for one player.
 - Rekordbox ID, exact beat grid, play/pause, seek, pitch, master and on-air.
 - Token-protected browser controls and stable HTTP API for remote agent tests.
@@ -114,9 +236,14 @@ This story is delivered in visible, independently testable increments:
   Autoloop.
 - The same track exported to different media resolves by content signature.
 - An unknown or ambiguous track remains visible but automatic lighting is held.
-- SoundSwitch Autoloops follow tempo and bar phase while Lumi selects them over
-  the independent virtual MIDI output.
+- SoundSwitch Autoloops follow Lumi's Ableton Link tempo and bar phase while
+  Lumi selects them over the independent virtual MIDI output.
 - Control One continues to operate alongside Lumi.
+- Link timing, Lumi command MIDI and Control One are parallel SoundSwitch
+  inputs; Control One may separately remain its downstream DMX interface.
+- No cumulative phase drift occurs during the one-hour soak; measured
+  phrase-boundary output targets p95 <= 20 ms and is retained as release
+  evidence.
 - All bridge and Rust contract tests run locally without paid CI minutes.
 - Simulator packet tests and API acceptance checks run locally without paid CI
   minutes.
@@ -127,4 +254,13 @@ This story is delivered in visible, independently testable increments:
 - Replacing SoundSwitch fixture programming or DMX output.
 - A native Rust implementation of the Pro DJ Link protocol.
 - Full CDJ audio, display, media-server or remote-command emulation.
-- Removing the BLT fallback before physical acceptance succeeds.
+- Reimplementing the Ableton Link network protocol.
+- Making Ableton Link or SoundSwitch the transport authority for physical
+  decks.
+
+## Planned Pro DJ Link media presence
+
+When physical-player media-slot metadata is available, the direct Pro DJ Link
+adapter will associate a player slot with an already trusted USB identity and
+show `Connected to Player N` on that source. This is presence information only:
+it never starts a sync or changes the canonical Library implicitly.

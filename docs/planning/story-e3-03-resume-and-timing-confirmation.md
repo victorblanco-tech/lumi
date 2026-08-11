@@ -3,7 +3,7 @@
 Target milestone: **0.4.0 – next development cycle**
 Status: **In progress**
 
-## Delivered in `0.4.0-dev`
+## Delivered in `0.4.0-dev-1`
 
 - an offset requested while the Live leader is playing remains engine-owned
   pending state and cannot shift the active phrase;

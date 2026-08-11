@@ -35,6 +35,70 @@ func decodesCommandFailure() {
     #expect(failure?.retryable == true)
 }
 
+@Test("The Swift transport receives a complete mounted USB inspection snapshot")
+func receivesMountedUSBInspectionWhenProvided() async throws {
+    let environment = ProcessInfo.processInfo.environment
+    guard let executablePath = environment["LUMI_ENGINE_TEST_EXECUTABLE"],
+          let usbRoot = environment["LUMI_TEST_USB_ROOT"] else {
+        return
+    }
+
+    let supervisor = EngineProcessSupervisor()
+    let suppliedDatabasePath = environment["LUMI_TEST_LIBRARY_DATABASE"]
+    let databaseURL = suppliedDatabasePath.map(URL.init(fileURLWithPath:))
+        ?? FileManager.default.temporaryDirectory
+            .appendingPathComponent("lumi-swift-usb-\(UUID().uuidString).sqlite")
+    defer {
+        if suppliedDatabasePath == nil {
+            try? FileManager.default.removeItem(at: databaseURL)
+            try? FileManager.default.removeItem(atPath: databaseURL.path + "-wal")
+            try? FileManager.default.removeItem(atPath: databaseURL.path + "-shm")
+        }
+    }
+    do {
+        let endpoint = try await supervisor.launch(
+            engineExecutable: URL(fileURLWithPath: executablePath),
+            libraryDatabaseURL: databaseURL,
+            automaticallyPublishesMidi: false
+        )
+        _ = try await supervisor.connect(to: endpoint)
+        let snapshot = try await supervisor.send(
+            .inspectRekordboxDevice(root: usbRoot),
+            messageID: "swift-inspect-mounted-usb"
+        )
+        let encoded = try JSONEncoder().encode(snapshot)
+        if let outputPath = environment["LUMI_TEST_USB_ENVELOPE_OUTPUT"] {
+            try encoded.write(to: URL(fileURLWithPath: outputPath), options: .atomic)
+        }
+        #expect(encoded.count <= WireProtocol.maximumMessageBytes)
+        guard case let .object(library)? = snapshot.payload["library"],
+              case let .object(inspection)? = library["rekordboxDeviceInspection"],
+              case let .number(trackCount)? = inspection["trackCount"],
+              case let .number(playlistCount)? = inspection["playlistCount"] else {
+            Issue.record("Mounted USB inspection is missing from the engine snapshot")
+            await supervisor.stop()
+            return
+        }
+        #expect(trackCount > 0)
+        #expect(playlistCount > 0)
+        let statusSnapshot = try await supervisor.getSnapshot(
+            messageID: "swift-status-after-mounted-usb"
+        )
+        let encodedStatus = try JSONEncoder().encode(statusSnapshot)
+        #expect(encodedStatus.count < encoded.count)
+        guard case let .object(statusLibrary)? = statusSnapshot.payload["library"] else {
+            Issue.record("Status snapshot is missing its library state")
+            await supervisor.stop()
+            return
+        }
+        #expect(statusLibrary["rekordboxDeviceInspection"] == .null)
+        await supervisor.stop()
+    } catch {
+        await supervisor.stop()
+        throw error
+    }
+}
+
 @Test("The Swift client launches and authenticates the real Rust engine")
 func launchesRealEngine() async throws {
     let environment = ProcessInfo.processInfo.environment

@@ -27,6 +27,17 @@ pub struct ProLinkTransportSnapshot {
     pub playing: bool,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ProLinkTimingObservation {
+    pub deck_id: DeckId,
+    pub observed_at_nanos: u64,
+    pub effective_bpm_milli: u32,
+    pub beat_within_bar: u8,
+    pub playing: bool,
+    pub generation: u64,
+    pub discontinuity: bool,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct LoadedDeck {
     identity: ProLinkTrackIdentity,
@@ -41,7 +52,7 @@ pub struct ProLinkDeckSourceProvider {
     sequence: u64,
     next_track_load_id: u64,
     decks: BTreeMap<DeckId, LoadedDeck>,
-    devices: BTreeMap<u8, String>,
+    devices: BTreeMap<u8, ProLinkDiscoveredDevice>,
     signatures: BTreeMap<u8, Option<String>>,
     leader_deck_id: Option<DeckId>,
     pending_events: Vec<DomainEvent>,
@@ -52,6 +63,8 @@ pub struct ProLinkDeckSourceProvider {
     bridge_version: Option<String>,
     beat_link_version: Option<String>,
     last_error: Option<String>,
+    timing_generation: u64,
+    timing_observations: Vec<ProLinkTimingObservation>,
 }
 
 impl ProLinkDeckSourceProvider {
@@ -72,6 +85,8 @@ impl ProLinkDeckSourceProvider {
             bridge_version: None,
             beat_link_version: None,
             last_error: None,
+            timing_generation: 0,
+            timing_observations: Vec::new(),
         };
         provider.emit(
             at,
@@ -89,6 +104,7 @@ impl ProLinkDeckSourceProvider {
     ) -> Result<(), ProLinkProviderError> {
         self.received_message_count = self.received_message_count.saturating_add(1);
         self.last_bridge_sequence = Some(message.sequence);
+        let observed_at_nanos = message.observed_at_nanos;
         match message.event {
             BridgeEvent::Hello(hello) => {
                 self.bridge_version = Some(hello.bridge_version);
@@ -99,14 +115,21 @@ impl ProLinkDeckSourceProvider {
                 self.update_source_status(status, at)?;
             }
             BridgeEvent::DeviceFound(device) => {
-                self.devices
-                    .insert(device.device_number, device.device_name);
+                self.devices.insert(
+                    device.device_number,
+                    ProLinkDiscoveredDevice {
+                        name: device.device_name,
+                        address: device.address,
+                    },
+                );
             }
             BridgeEvent::DeviceLost(device) => {
                 self.devices.remove(&device.device_number);
                 self.unload_deck(DeckId::new(device.device_number), at)?;
             }
-            BridgeEvent::DeckStatus(status) => self.apply_status(status, at)?,
+            BridgeEvent::DeckStatus(status) => {
+                self.apply_status(status, observed_at_nanos, at)?;
+            }
             BridgeEvent::TrackSignature(signature) => {
                 self.signatures
                     .insert(signature.deck_number, signature.signature.clone());
@@ -118,10 +141,9 @@ impl ProLinkDeckSourceProvider {
                 self.last_error = Some(format!("{}: {}", failure.operation, failure.message));
                 self.update_source_status(DeckSourceStatus::Degraded, at)?;
             }
-            BridgeEvent::Beat(_) | BridgeEvent::TrackMetadata(_) => {
-                // Beat packets are the low-latency timing stream. Deck status
-                // remains the atomic source of track and transport identity;
-                // metadata hydration is handled by Lumi's USB/library mirror.
+            BridgeEvent::Beat(beat) => self.apply_beat(beat, observed_at_nanos)?,
+            BridgeEvent::TrackMetadata(_) => {
+                // Metadata hydration is handled by Lumi's USB/library mirror.
             }
         }
         Ok(())
@@ -152,6 +174,10 @@ impl ProLinkDeckSourceProvider {
             })
     }
 
+    pub fn drain_timing_observations(&mut self) -> Vec<ProLinkTimingObservation> {
+        std::mem::take(&mut self.timing_observations)
+    }
+
     #[must_use]
     pub fn diagnostics(&self) -> ProLinkDeckSourceDiagnostics {
         ProLinkDeckSourceDiagnostics {
@@ -178,6 +204,7 @@ impl ProLinkDeckSourceProvider {
     fn apply_status(
         &mut self,
         status: crate::DeckStatus,
+        observed_at_nanos: u64,
         at: MonotonicTime,
     ) -> Result<(), ProLinkProviderError> {
         let deck_id = DeckId::new(status.device_number);
@@ -202,7 +229,10 @@ impl ProLinkDeckSourceProvider {
             .decks
             .get(&deck_id)
             .is_none_or(|deck| deck.identity != identity);
+        let mut discontinuity = false;
         if needs_load {
+            self.advance_timing_generation()?;
+            discontinuity = true;
             self.unload_deck(deck_id, at)?;
             let track_load_id = TrackLoadId::new(self.next_track_load_id);
             self.next_track_load_id = self
@@ -274,6 +304,11 @@ impl ProLinkDeckSourceProvider {
                 )?;
             }
             if previous.beat != beat {
+                let seeked = beat < previous.beat || beat.saturating_sub(previous.beat) > 2;
+                if seeked {
+                    self.advance_timing_generation()?;
+                    discontinuity = true;
+                }
                 let observation = if beat < previous.beat {
                     DeckObservation::PlaybackPositionSeeked {
                         deck_id,
@@ -288,6 +323,10 @@ impl ProLinkDeckSourceProvider {
                     }
                 };
                 self.emit(at, observation)?;
+            }
+            if !previous.playing && status.playing {
+                self.advance_timing_generation()?;
+                discontinuity = true;
             }
             if previous.playing != status.playing {
                 self.emit(
@@ -306,6 +345,8 @@ impl ProLinkDeckSourceProvider {
             }
         }
         if status.tempo_master && self.leader_deck_id != Some(deck_id) {
+            self.advance_timing_generation()?;
+            discontinuity = true;
             let track_load_id = self
                 .decks
                 .get(&deck_id)
@@ -320,6 +361,49 @@ impl ProLinkDeckSourceProvider {
                 },
             )?;
         }
+        if status.tempo_master {
+            self.timing_observations.push(ProLinkTimingObservation {
+                deck_id,
+                observed_at_nanos,
+                effective_bpm_milli,
+                beat_within_bar: status.beat_within_bar.max(1),
+                playing: status.playing,
+                generation: self.timing_generation,
+                discontinuity,
+            });
+        }
+        Ok(())
+    }
+
+    fn apply_beat(
+        &mut self,
+        beat: crate::Beat,
+        observed_at_nanos: u64,
+    ) -> Result<(), ProLinkProviderError> {
+        if !beat.tempo_master {
+            return Ok(());
+        }
+        let deck_id = DeckId::new(beat.device_number);
+        let Some(deck) = self.decks.get(&deck_id) else {
+            return Ok(());
+        };
+        self.timing_observations.push(ProLinkTimingObservation {
+            deck_id,
+            observed_at_nanos,
+            effective_bpm_milli: bpm_milli(beat.effective_bpm)?,
+            beat_within_bar: beat.beat_within_bar,
+            playing: deck.playing,
+            generation: self.timing_generation,
+            discontinuity: false,
+        });
+        Ok(())
+    }
+
+    fn advance_timing_generation(&mut self) -> Result<(), ProLinkProviderError> {
+        self.timing_generation = self
+            .timing_generation
+            .checked_add(1)
+            .ok_or(ProLinkProviderError::TimingGenerationOverflow)?;
         Ok(())
     }
 
@@ -395,8 +479,14 @@ pub struct ProLinkDeckSourceDiagnostics {
     pub last_bridge_sequence: Option<u64>,
     pub bridge_version: Option<String>,
     pub beat_link_version: Option<String>,
-    pub discovered_devices: BTreeMap<u8, String>,
+    pub discovered_devices: BTreeMap<u8, ProLinkDiscoveredDevice>,
     pub last_error: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProLinkDiscoveredDevice {
+    pub name: String,
+    pub address: String,
 }
 
 fn source_status(condition: SourceCondition) -> DeckSourceStatus {
@@ -433,6 +523,8 @@ pub enum ProLinkProviderError {
     SequenceOverflow,
     #[error("Pro DJ Link track-load identity overflow")]
     TrackLoadIdOverflow,
+    #[error("Pro DJ Link timing generation overflow")]
+    TimingGenerationOverflow,
     #[error("Pro DJ Link loaded deck state disappeared")]
     LoadedDeckMissing,
     #[error("invalid Pro DJ Link BPM {0}")]

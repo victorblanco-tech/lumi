@@ -65,6 +65,9 @@ public struct LibrarySnapshotDecoder: Sendable {
             midiClockIntegration: try decodeMidiClockIntegration(
                 envelope.payload["midiClockIntegration"]
             ),
+            abletonLinkIntegration: try decodeAbletonLinkIntegration(
+                envelope.payload["abletonLinkIntegration"]
+            ),
             deckInputIntegration: try decodeDeckInputIntegration(
                 envelope.payload["deckInputIntegration"]
             ),
@@ -72,7 +75,142 @@ public struct LibrarySnapshotDecoder: Sendable {
                 library["rekordboxSyncPreview"]
             ),
             rekordboxMirror: try decodeRekordboxMirror(library["rekordboxMirror"]),
-            rekordboxDevices: try decodeRekordboxDevices(library["rekordboxDevices"])
+            rekordboxDevices: try decodeRekordboxDevices(library["rekordboxDevices"]),
+            rekordboxDeviceInspection: try decodeRekordboxDeviceInspection(
+                library["rekordboxDeviceInspection"]
+            ),
+            dataManagement: try decodeDataManagement(library["dataManagement"])
+        )
+    }
+
+    private func decodeDataManagement(_ value: JSONValue?) throws -> DataManagementState {
+        guard let value, value != .null else { return .empty }
+        guard case let .object(data) = value else {
+            throw LibrarySnapshotError.invalidObject
+        }
+        let candidateValues = try optionalArray(data, "resetCandidates")
+        let archiveValues = try optionalArray(data, "creativeArchives")
+        guard candidateValues.count <= 20_000, archiveValues.count <= 20_000 else {
+            throw LibrarySnapshotError.unboundedPage
+        }
+        let candidates = try candidateValues.map { value -> ResetCandidateTrack in
+            guard case let .object(track) = value else {
+                throw LibrarySnapshotError.invalidObject
+            }
+            return ResetCandidateTrack(
+                trackID: try unsigned(track, "trackId"),
+                title: try string(track, "title"),
+                artist: try string(track, "artist"),
+                timelineRevision: try unsigned(track, "timelineRevision")
+            )
+        }
+        let archives = try archiveValues.map { value -> CreativeTrackArchive in
+            guard case let .object(archive) = value else {
+                throw LibrarySnapshotError.invalidObject
+            }
+            return CreativeTrackArchive(
+                archiveID: try unsigned(archive, "archiveId"),
+                title: try string(archive, "title"),
+                artist: try string(archive, "artist"),
+                phraseCount: try unsigned(archive, "phraseCount"),
+                totalBeats: try unsigned(archive, "totalBeats"),
+                state: try string(archive, "state"),
+                restoredTrackID: optionalUnsigned(archive, "restoredTrackId")
+            )
+        }
+        let preview: LibraryResetPreview?
+        if case let .object(reset)? = data["resetPreview"] {
+            preview = LibraryResetPreview(
+                token: try string(reset, "token"),
+                trackCount: try unsigned(reset, "trackCount"),
+                playlistCount: try unsigned(reset, "playlistCount"),
+                preservedTrackCount: try unsigned(reset, "preservedTrackCount"),
+                removedTrackCount: try unsigned(reset, "removedTrackCount"),
+                archivedCreativeTrackCount: try unsigned(reset, "archivedCreativeTrackCount"),
+                preserveTrackIDs: try unsignedArray(reset, "preserveTrackIds")
+            )
+        } else {
+            preview = nil
+        }
+        return DataManagementState(
+            trackCount: try unsigned(data, "trackCount"),
+            playlistCount: try unsigned(data, "playlistCount"),
+            userEditedTrackCount: try unsigned(data, "userEditedTrackCount"),
+            creativeArchiveCount: try unsigned(data, "creativeArchiveCount"),
+            pendingArchiveCount: try unsigned(data, "pendingArchiveCount"),
+            resetCandidates: candidates,
+            creativeArchives: archives,
+            resetPreview: preview
+        )
+    }
+
+    private func decodeRekordboxDeviceInspection(
+        _ value: JSONValue?
+    ) throws -> RekordboxDeviceInspectionState? {
+        guard let value, value != .null else { return nil }
+        guard case let .object(inspection) = value,
+              case let .array(playlistValues)? = inspection["playlists"],
+              playlistValues.count <= 20_000 else {
+            throw LibrarySnapshotError.invalidObject
+        }
+        let playlists = try playlistValues.map { value -> RekordboxDevicePlaylistState in
+            guard case let .object(playlist) = value else {
+                throw LibrarySnapshotError.invalidObject
+            }
+            guard case let .object(counts)? = playlist["statusCounts"],
+                  case let .array(trackValues)? = playlist["tracks"],
+                  trackValues.count <= 20_000 else {
+                throw LibrarySnapshotError.invalidObject
+            }
+            let tracks = try trackValues.map { trackValue -> RekordboxDeviceTrackState in
+                guard case let .object(track) = trackValue else {
+                    throw LibrarySnapshotError.invalidObject
+                }
+                return RekordboxDeviceTrackState(
+                    id: try UInt32(exactly: unsigned(track, "id"))
+                        .required(.invalidNumber("track.id")),
+                    title: try string(track, "title"),
+                    artist: try string(track, "artist"),
+                    bpmMilli: try unsigned(track, "bpmMilli"),
+                    durationMillis: try unsigned(track, "durationMillis"),
+                    status: try string(track, "status"),
+                    detail: try string(track, "detail")
+                )
+            }
+            return RekordboxDevicePlaylistState(
+                id: try UInt32(exactly: unsigned(playlist, "id"))
+                    .required(.invalidNumber("playlist.id")),
+                path: try string(playlist, "path"),
+                name: try string(playlist, "name"),
+                trackCount: try unsigned(playlist, "trackCount"),
+                statusCounts: RekordboxDeviceStatusCounts(
+                    current: try unsigned(counts, "current"),
+                    usbNewer: try unsigned(counts, "usbNewer"),
+                    usbOutdated: try unsigned(counts, "usbOutdated"),
+                    notInLumi: try unsigned(counts, "notInLumi"),
+                    conflict: try unsigned(counts, "conflict")
+                ),
+                tracks: tracks
+            )
+        }
+        let playlistCount = try unsigned(inspection, "playlistCount")
+        guard playlistCount == UInt64(playlists.count),
+              Set(playlists.map(\.id)).count == playlists.count else {
+            throw LibrarySnapshotError.invalidObject
+        }
+        return RekordboxDeviceInspectionState(
+            sourceID: try string(inspection, "sourceId"),
+            displayName: try string(inspection, "displayName"),
+            databaseRevision: try string(inspection, "databaseRevision"),
+            libraryFormat: try string(inspection, "libraryFormat"),
+            databaseVersion: try string(inspection, "databaseVersion"),
+            exportedAt: try string(inspection, "exportedAt"),
+            trackCount: try unsigned(inspection, "trackCount"),
+            playlistCount: playlistCount,
+            selectedPlaylistIDs: try unsignedArray(inspection, "selectedPlaylistIds").map {
+                try UInt32(exactly: $0).required(.invalidNumber("selectedPlaylistIds"))
+            },
+            playlists: playlists
         )
     }
 
@@ -85,6 +223,10 @@ public struct LibrarySnapshotDecoder: Sendable {
             guard case let .object(device) = value else {
                 throw LibrarySnapshotError.invalidObject
             }
+            let playlistValues = try optionalArray(device, "playlists")
+            guard playlistValues.count <= 20_000 else {
+                throw LibrarySnapshotError.invalidObject
+            }
             return RekordboxDeviceState(
                 sourceID: try string(device, "sourceId"),
                 displayName: try string(device, "displayName"),
@@ -92,8 +234,26 @@ public struct LibrarySnapshotDecoder: Sendable {
                 activeTracks: try unsigned(device, "activeTracks"),
                 matchedTracks: try unsigned(device, "matchedTracks"),
                 unmatchedTracks: try unsigned(device, "unmatchedTracks"),
+                syncedAt: optionalString(device, "syncedAt") ?? "Unknown",
+                trustState: optionalString(device, "trustState") ?? "trusted",
+                currentTracks: optionalUnsigned(device, "currentTracks") ?? 0,
+                promotedTracks: optionalUnsigned(device, "promotedTracks") ?? 0,
+                protectedTracks: optionalUnsigned(device, "protectedTracks") ?? 0,
+                conflictTracks: optionalUnsigned(device, "conflictTracks") ?? 0,
                 beatGridRefresh: try boolean(device, "beatGridRefresh"),
-                cueRevisionTracked: try boolean(device, "cueRevisionTracked")
+                cueRevisionTracked: try boolean(device, "cueRevisionTracked"),
+                playlists: try playlistValues.map { value in
+                    guard case let .object(playlist) = value else {
+                        throw LibrarySnapshotError.invalidObject
+                    }
+                    return RekordboxDeviceSyncedPlaylistState(
+                        id: try UInt32(exactly: unsigned(playlist, "id"))
+                            .required(.invalidNumber("device playlist id")),
+                        libraryPlaylistID: try unsigned(playlist, "libraryPlaylistId"),
+                        name: try string(playlist, "name"),
+                        trackCount: try unsigned(playlist, "trackCount")
+                    )
+                }
             )
         }
     }
@@ -210,6 +370,22 @@ public struct LibrarySnapshotDecoder: Sendable {
               lastFrameSequence.map({ !isBLTMIDI || $0 <= 127 }) ?? true else {
             throw LibrarySnapshotError.invalidObject
         }
+        let discoveredPlayers: [ProDJLinkDeviceState]
+        if case let .array(values)? = input["discoveredPlayers"] {
+            guard values.count <= 16 else { throw LibrarySnapshotError.invalidObject }
+            discoveredPlayers = try values.map { value in
+                guard case let .object(player) = value else {
+                    throw LibrarySnapshotError.invalidObject
+                }
+                return ProDJLinkDeviceState(
+                    playerNumber: try unsigned(player, "playerNumber"),
+                    name: try string(player, "name"),
+                    address: optionalString(player, "address")
+                )
+            }
+        } else {
+            discoveredPlayers = []
+        }
         return DeckInputIntegrationState(
             state: state,
             destinationName: try strictOptionalString(input, "destinationName"),
@@ -221,7 +397,12 @@ public struct LibrarySnapshotDecoder: Sendable {
             ignoredMessageCount: try unsigned(input, "ignoredMessageCount"),
             duplicateFrameCount: try unsigned(input, "duplicateFrameCount"),
             lastDeckID: lastDeckID,
-            lastFrameSequence: lastFrameSequence
+            lastFrameSequence: lastFrameSequence,
+            sourceState: optionalString(input, "sourceState"),
+            bridgeVersion: optionalString(input, "bridgeVersion"),
+            beatLinkVersion: optionalString(input, "beatLinkVersion"),
+            discoveredPlayers: discoveredPlayers,
+            lastError: optionalString(input, "lastError")
         )
     }
 
@@ -263,6 +444,36 @@ public struct LibrarySnapshotDecoder: Sendable {
             sentTransportCount: try unsigned(clock, "sentTransportCount"),
             lastEvent: optionalString(clock, "lastEvent"),
             lastError: optionalString(clock, "lastError")
+        )
+    }
+
+    private func decodeAbletonLinkIntegration(
+        _ value: JSONValue?
+    ) throws -> AbletonLinkIntegrationState? {
+        guard let value, value != .null else { return nil }
+        guard case let .object(link) = value else {
+            throw LibrarySnapshotError.invalidObject
+        }
+        let state = try string(link, "state")
+        guard ["stopped", "starting", "ready", "running", "degraded"].contains(state) else {
+            throw LibrarySnapshotError.invalidObject
+        }
+        return AbletonLinkIntegrationState(
+            state: state,
+            provider: try string(link, "provider"),
+            helperVersion: optionalString(link, "helperVersion"),
+            peers: try unsigned(link, "peers"),
+            source: optionalString(link, "source"),
+            deckNumber: optionalUnsigned(link, "deckNumber"),
+            bpmMilli: optionalUnsigned(link, "bpmMilli"),
+            beatWithinBar: optionalUnsigned(link, "beatWithinBar"),
+            playing: try boolean(link, "playing"),
+            generation: optionalUnsigned(link, "generation"),
+            lastBeatAgeMillis: optionalUnsigned(link, "lastBeatAgeMillis"),
+            phaseErrorMicros: try strictOptionalSigned(link, "phaseErrorMicros"),
+            lastReanchor: optionalString(link, "lastReanchor"),
+            lastEvent: optionalString(link, "lastEvent"),
+            lastError: optionalString(link, "lastError")
         )
     }
 
@@ -907,7 +1118,17 @@ public struct LibrarySnapshotDecoder: Sendable {
             readiness: try LibraryReadiness(rawValue: string(readiness, "status"))
                 .required(.invalidReadiness),
             missingCapabilities: try strings(readiness, "missingCapabilities"),
-            warnings: try strings(readiness, "warnings")
+            warnings: try strings(readiness, "warnings"),
+            usbSources: try optionalArray(object, "usbSources").map { value in
+                guard case let .object(source) = value else {
+                    throw LibrarySnapshotError.invalidObject
+                }
+                return LibraryTrackUSBSource(
+                    sourceID: try string(source, "sourceId"),
+                    displayName: try string(source, "displayName"),
+                    syncDisposition: try string(source, "syncDisposition")
+                )
+            }
         )
     }
 
@@ -933,6 +1154,14 @@ public struct LibrarySnapshotDecoder: Sendable {
         return value
     }
 
+    private func optionalArray(_ values: [String: JSONValue], _ key: String) throws -> [JSONValue] {
+        guard let value = values[key] else { return [] }
+        guard case let .array(array) = value else {
+            throw LibrarySnapshotError.invalidObject
+        }
+        return array
+    }
+
     private func string(_ values: [String: JSONValue], _ key: String) throws -> String {
         guard case let .string(value)? = values[key] else {
             throw LibrarySnapshotError.missingField(key)
@@ -949,6 +1178,20 @@ public struct LibrarySnapshotDecoder: Sendable {
         return result
     }
 
+    private func unsignedArray(
+        _ values: [String: JSONValue],
+        _ key: String
+    ) throws -> [UInt64] {
+        try array(values, key).map { value in
+            guard case let .number(number) = value, number >= 0,
+                  number.rounded(.towardZero) == number,
+                  let result = UInt64(exactly: number) else {
+                throw LibrarySnapshotError.invalidNumber(key)
+            }
+            return result
+        }
+    }
+
     private func optionalUnsigned(_ values: [String: JSONValue], _ key: String) -> UInt64? {
         guard case let .number(value)? = values[key], value >= 0,
               value.rounded(.towardZero) == value else { return nil }
@@ -961,6 +1204,19 @@ public struct LibrarySnapshotDecoder: Sendable {
     ) throws -> UInt64? {
         guard let value = values[key], value != .null else { return nil }
         guard let decoded = optionalUnsigned(values, key) else {
+            throw LibrarySnapshotError.invalidNumber(key)
+        }
+        return decoded
+    }
+
+    private func strictOptionalSigned(
+        _ values: [String: JSONValue],
+        _ key: String
+    ) throws -> Int? {
+        guard let value = values[key], value != .null else { return nil }
+        guard case let .number(number) = value,
+              number.rounded(.towardZero) == number,
+              let decoded = Int(exactly: number) else {
             throw LibrarySnapshotError.invalidNumber(key)
         }
         return decoded

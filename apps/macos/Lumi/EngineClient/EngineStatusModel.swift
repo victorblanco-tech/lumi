@@ -36,6 +36,9 @@ final class EngineStatusModel: ObservableObject {
     ] = [:]
     @Published private(set) var sourceImportFeedback: String?
     @Published private(set) var sourceImportFeedbackIsError = false
+    @Published private(set) var usbSourceOperation = USBSourceOperationState.idle
+    @Published private(set) var dataManagementOperation = DataManagementOperationState.idle
+    @Published private(set) var backupRecords: [LibraryBackupRecord] = []
 
     private enum Lifecycle: Equatable {
         case stopped
@@ -63,6 +66,11 @@ final class EngineStatusModel: ObservableObject {
     private var latestSnapshot: EngineSnapshot?
     private var endpointDescription: String?
     private var protocolVersion: Int?
+    private var pendingResetBackupDatabasePath: String?
+
+    var canManageData: Bool {
+        latestSnapshot?.operationState == "off" && lifecycle == .ready
+    }
 
     func start() async {
         guard [.stopped, .disconnected, .failed].contains(lifecycle) else {
@@ -81,6 +89,7 @@ final class EngineStatusModel: ObservableObject {
         localPlaybackFeedbackIsError = false
         sourceImportFeedback = nil
         sourceImportFeedbackIsError = false
+        usbSourceOperation = .idle
 
         do {
             let executable = try engineExecutable()
@@ -100,12 +109,13 @@ final class EngineStatusModel: ObservableObject {
                 endpointDescription: endpointDescription,
                 protocolVersion: endpoint.protocolVersion
             )
-            libraryState = try libraryDecoder.decode(envelope)
+            libraryState = try decodeLibraryState(envelope)
             lifecycle = .ready
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
             startMonitoring()
             synchronizeLocalAudio(with: snapshot)
+            refreshBackupRecords()
         } catch {
             await supervisor.stop()
             lifecycle = .failed
@@ -148,9 +158,389 @@ final class EngineStatusModel: ObservableObject {
         }
     }
 
+    private enum BackupError: LocalizedError {
+        case missingDatabase
+        case invalidPackage
+        case untrustedPackage
+        case invalidPreferences
+
+        var errorDescription: String? {
+            switch self {
+            case .missingDatabase: "The Lumi library database is missing."
+            case .invalidPackage: "The selected Lumi backup is incomplete or invalid."
+            case .untrustedPackage: "Only backups created inside this Lumi channel may be restored."
+            case .invalidPreferences: "The backup contains invalid app preferences."
+            }
+        }
+    }
+
+    private func backupsDirectoryURL() throws -> URL {
+        let database = try libraryDatabaseURL()
+        let directory = database.deletingLastPathComponent().appendingPathComponent(
+            "Backups",
+            isDirectory: true
+        )
+        try FileManager.default.createDirectory(
+            at: directory,
+            withIntermediateDirectories: true
+        )
+        return directory
+    }
+
+    private func createBackupPackage(
+        reason: String,
+        summary: DataManagementState
+    ) throws -> URL {
+        let fileManager = FileManager.default
+        let database = try libraryDatabaseURL()
+        guard fileManager.fileExists(atPath: database.path) else {
+            throw BackupError.missingDatabase
+        }
+        let formatter = ISO8601DateFormatter()
+        formatter.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        let createdAt = Date()
+        let timestamp = formatter.string(from: createdAt)
+            .replacingOccurrences(of: ":", with: "-")
+        let name = "Lumi-\(timestamp)-\(reason).lumibackup"
+        let backups = try backupsDirectoryURL()
+        let finalPackage = backups.appendingPathComponent(name, isDirectory: true)
+        let temporaryPackage = backups.appendingPathComponent(
+            ".\(UUID().uuidString).partial",
+            isDirectory: true
+        )
+        try fileManager.createDirectory(
+            at: temporaryPackage,
+            withIntermediateDirectories: false
+        )
+        do {
+            for suffix in ["", "-wal", "-shm"] {
+                let source = URL(fileURLWithPath: database.path + suffix)
+                guard fileManager.fileExists(atPath: source.path) else { continue }
+                let destinationName = suffix.isEmpty ? "library.sqlite" : "library.sqlite\(suffix)"
+                try fileManager.copyItem(
+                    at: source,
+                    to: temporaryPackage.appendingPathComponent(destinationName)
+                )
+            }
+            guard let bundleIdentifier = Bundle.main.bundleIdentifier else {
+                throw BackupError.invalidPreferences
+            }
+            let preferences = UserDefaults.standard.persistentDomain(
+                forName: bundleIdentifier
+            ) ?? [:]
+            let preferenceData = try PropertyListSerialization.data(
+                fromPropertyList: preferences,
+                format: .binary,
+                options: 0
+            )
+            try preferenceData.write(
+                to: temporaryPackage.appendingPathComponent("preferences.plist"),
+                options: .atomic
+            )
+            let manifest: [String: Any] = [
+                "format": "co.victorblan.tech.lumi.backup",
+                "formatVersion": 1,
+                "createdAt": formatter.string(from: createdAt),
+                "productVersion": Bundle.main.object(
+                    forInfoDictionaryKey: "LumiProductVersion"
+                ) as? String ?? "unknown",
+                "releaseChannel": Bundle.main.object(
+                    forInfoDictionaryKey: "LumiReleaseChannel"
+                ) as? String ?? "unknown",
+                "reason": reason,
+                "modules": [
+                    "libraryAndPhrases",
+                    "lumiConfiguration",
+                    "lightingOutput",
+                    "appPreferences"
+                ],
+                "trackCount": summary.trackCount,
+                "playlistCount": summary.playlistCount,
+                "creativeArchiveCount": summary.creativeArchiveCount
+            ]
+            let manifestData = try JSONSerialization.data(
+                withJSONObject: manifest,
+                options: [.prettyPrinted, .sortedKeys]
+            )
+            try manifestData.write(
+                to: temporaryPackage.appendingPathComponent("manifest.json"),
+                options: .atomic
+            )
+            try fileManager.moveItem(at: temporaryPackage, to: finalPackage)
+            return finalPackage
+        } catch {
+            try? fileManager.removeItem(at: temporaryPackage)
+            throw error
+        }
+    }
+
+    private func validateBackupPackage(_ package: URL) throws {
+        let backups = try backupsDirectoryURL().resolvingSymlinksInPath()
+        let resolved = package.resolvingSymlinksInPath()
+        guard resolved.deletingLastPathComponent() == backups,
+              resolved.pathExtension == "lumibackup" else {
+            throw BackupError.untrustedPackage
+        }
+        let database = resolved.appendingPathComponent("library.sqlite")
+        let manifest = resolved.appendingPathComponent("manifest.json")
+        let preferences = resolved.appendingPathComponent("preferences.plist")
+        guard FileManager.default.fileExists(atPath: database.path),
+              FileManager.default.fileExists(atPath: manifest.path),
+              FileManager.default.fileExists(atPath: preferences.path) else {
+            throw BackupError.invalidPackage
+        }
+        let handle = try FileHandle(forReadingFrom: database)
+        defer { try? handle.close() }
+        guard try handle.read(upToCount: 16) == Data("SQLite format 3\0".utf8) else {
+            throw BackupError.invalidPackage
+        }
+        let manifestObject = try JSONSerialization.jsonObject(with: Data(contentsOf: manifest))
+        guard let manifestDictionary = manifestObject as? [String: Any],
+              manifestDictionary["format"] as? String == "co.victorblan.tech.lumi.backup",
+              manifestDictionary["formatVersion"] as? Int == 1 else {
+            throw BackupError.invalidPackage
+        }
+    }
+
+    private func replaceLibraryDatabase(from package: URL) throws {
+        let fileManager = FileManager.default
+        let destination = try libraryDatabaseURL()
+        let temporary = destination
+            .deletingLastPathComponent()
+            .appendingPathComponent(".restore-\(UUID().uuidString).sqlite")
+        try fileManager.copyItem(
+            at: package.appendingPathComponent("library.sqlite"),
+            to: temporary
+        )
+        for suffix in ["", "-wal", "-shm"] {
+            let target = URL(fileURLWithPath: destination.path + suffix)
+            if fileManager.fileExists(atPath: target.path) {
+                try fileManager.removeItem(at: target)
+            }
+        }
+        try fileManager.moveItem(at: temporary, to: destination)
+        for suffix in ["-wal", "-shm"] {
+            let source = package.appendingPathComponent("library.sqlite\(suffix)")
+            guard fileManager.fileExists(atPath: source.path) else { continue }
+            try fileManager.copyItem(
+                at: source,
+                to: URL(fileURLWithPath: destination.path + suffix)
+            )
+        }
+    }
+
+    private func restorePreferences(from package: URL) throws {
+        let data = try Data(contentsOf: package.appendingPathComponent("preferences.plist"))
+        let value = try PropertyListSerialization.propertyList(from: data, options: [], format: nil)
+        guard let preferences = value as? [String: Any],
+              let bundleIdentifier = Bundle.main.bundleIdentifier else {
+            throw BackupError.invalidPreferences
+        }
+        UserDefaults.standard.setPersistentDomain(preferences, forName: bundleIdentifier)
+    }
+
+    private func refreshBackupRecords() {
+        do {
+            let fileManager = FileManager.default
+            let backups = try backupsDirectoryURL()
+            let packages = try fileManager.contentsOfDirectory(
+                at: backups,
+                includingPropertiesForKeys: [.contentModificationDateKey, .fileSizeKey],
+                options: [.skipsHiddenFiles]
+            )
+            backupRecords = packages
+                .filter { $0.pathExtension == "lumibackup" }
+                .compactMap { package in
+                    guard let values = try? package.resourceValues(
+                        forKeys: [.contentModificationDateKey]
+                    ) else { return nil }
+                    let size = (try? fileManager.contentsOfDirectory(
+                        at: package,
+                        includingPropertiesForKeys: [.fileSizeKey]
+                    ))?.reduce(UInt64(0)) { partial, file in
+                        let bytes = (try? file.resourceValues(forKeys: [.fileSizeKey]).fileSize) ?? 0
+                        return partial + UInt64(max(0, bytes))
+                    } ?? 0
+                    return LibraryBackupRecord(
+                        path: package.path,
+                        name: package.deletingPathExtension().lastPathComponent,
+                        createdAt: values.contentModificationDate ?? .distantPast,
+                        sizeBytes: size
+                    )
+                }
+                .sorted { $0.createdAt > $1.createdAt }
+        } catch {
+            backupRecords = []
+        }
+    }
+
     func restart() async {
         await stop()
         await start()
+    }
+
+    func createFullBackup() async {
+        guard canManageData, !dataManagementOperation.isBusy else {
+            dataManagementOperation = .init(
+                phase: .failed,
+                title: "Backup unavailable",
+                detail: "Set Lumi to Off before creating a backup."
+            )
+            return
+        }
+        dataManagementOperation = .init(
+            phase: .backingUp,
+            title: "Creating complete backup",
+            detail: "Stopping the local engine briefly to create one consistent snapshot."
+        )
+        do {
+            let summary = libraryState.dataManagement
+            await stop()
+            let package = try createBackupPackage(reason: "manual", summary: summary)
+            await start()
+            refreshBackupRecords()
+            dataManagementOperation = .init(
+                phase: .completed,
+                title: "Backup complete",
+                detail: package.lastPathComponent
+            )
+        } catch {
+            await start()
+            dataManagementOperation = .init(
+                phase: .failed,
+                title: "Backup failed",
+                detail: error.localizedDescription
+            )
+        }
+    }
+
+    func prepareLibraryReset(preserveTrackIDs: [UInt64]) async {
+        guard canManageData, !dataManagementOperation.isBusy else {
+            dataManagementOperation = .init(
+                phase: .failed,
+                title: "Reset unavailable",
+                detail: "Set Lumi to Off before preparing a library reset."
+            )
+            return
+        }
+        dataManagementOperation = .init(
+            phase: .preparingReset,
+            title: "Preparing safe reset",
+            detail: "Creating the mandatory full backup before calculating the final impact."
+        )
+        do {
+            let summary = libraryState.dataManagement
+            await stop()
+            let package = try createBackupPackage(reason: "pre-reset", summary: summary)
+            let databasePath = package.appendingPathComponent("library.sqlite").path
+            await start()
+            let previewed = await exchangeLibraryCommand(
+                .previewLibraryReset(preserveTrackIDs: preserveTrackIDs)
+            )
+            guard previewed else {
+                pendingResetBackupDatabasePath = nil
+                dataManagementOperation = .init(
+                    phase: .failed,
+                    title: "Reset preview failed",
+                    detail: "The library changed or a selected track could not be preserved."
+                )
+                return
+            }
+            pendingResetBackupDatabasePath = databasePath
+            refreshBackupRecords()
+            dataManagementOperation = .init(
+                phase: .completed,
+                title: "Reset ready for confirmation",
+                detail: "A complete pre-reset backup was created. Review the impact before applying it."
+            )
+        } catch {
+            await start()
+            pendingResetBackupDatabasePath = nil
+            dataManagementOperation = .init(
+                phase: .failed,
+                title: "Reset preparation failed",
+                detail: error.localizedDescription
+            )
+        }
+    }
+
+    func applyPreparedLibraryReset() async {
+        guard canManageData,
+              !dataManagementOperation.isBusy,
+              let preview = libraryState.dataManagement.resetPreview,
+              let backupPath = pendingResetBackupDatabasePath else {
+            dataManagementOperation = .init(
+                phase: .failed,
+                title: "Reset unavailable",
+                detail: "Prepare and review a new reset before applying it."
+            )
+            return
+        }
+        dataManagementOperation = .init(
+            phase: .resetting,
+            title: "Resetting library content",
+            detail: "Archiving Lumi phrase work and removing the reviewed USB, playlist, and track content transactionally."
+        )
+        let applied = await exchangeLibraryCommand(
+            .applyLibraryReset(
+                expectedResetToken: preview.token,
+                backupDatabasePath: backupPath
+            )
+        )
+        if applied {
+            pendingResetBackupDatabasePath = nil
+            await restart()
+            dataManagementOperation = .init(
+                phase: .completed,
+                title: "Library reset complete",
+                detail: "Archived phrase work will relink during future USB syncs when identity and beat structure are compatible."
+            )
+        } else {
+            dataManagementOperation = .init(
+                phase: .failed,
+                title: "Library reset failed",
+                detail: "No partial reset was accepted. Prepare a fresh preview and try again."
+            )
+        }
+    }
+
+    func restoreBackup(path: String) async {
+        guard canManageData, !dataManagementOperation.isBusy else {
+            dataManagementOperation = .init(
+                phase: .failed,
+                title: "Restore unavailable",
+                detail: "Set Lumi to Off before restoring a backup."
+            )
+            return
+        }
+        dataManagementOperation = .init(
+            phase: .restoring,
+            title: "Restoring backup",
+            detail: "Creating a safety snapshot of the current library before replacement."
+        )
+        do {
+            let package = URL(fileURLWithPath: path, isDirectory: true)
+            try validateBackupPackage(package)
+            let summary = libraryState.dataManagement
+            await stop()
+            _ = try createBackupPackage(reason: "pre-restore", summary: summary)
+            try replaceLibraryDatabase(from: package)
+            try restorePreferences(from: package)
+            await start()
+            refreshBackupRecords()
+            dataManagementOperation = .init(
+                phase: .completed,
+                title: "Backup restored",
+                detail: "Library, phrase work, lighting configuration, and saved app preferences were restored. Relaunch Lumi once to apply every restored appearance preference."
+            )
+        } catch {
+            await start()
+            dataManagementOperation = .init(
+                phase: .failed,
+                title: "Restore failed",
+                detail: error.localizedDescription
+            )
+        }
     }
 
     func stop() async {
@@ -250,7 +640,9 @@ final class EngineStatusModel: ObservableObject {
             }
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
-            libraryState = decoded.1
+            libraryState = decoded.1.preservingDeviceInspection(
+                libraryState.rekordboxDeviceInspection
+            )
         } catch {
             guard generation == libraryQueryGeneration else { return }
             libraryState = .failed(
@@ -541,7 +933,7 @@ final class EngineStatusModel: ObservableObject {
             )
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
-            libraryState = try libraryDecoder.decode(snapshotEnvelope)
+            libraryState = try decodeLibraryState(snapshotEnvelope)
             guard let preview = libraryState.rekordboxSyncPreview else {
                 sourceImportFeedback = "The engine returned no Rekordbox sync preview."
                 sourceImportFeedbackIsError = true
@@ -592,7 +984,7 @@ final class EngineStatusModel: ObservableObject {
             )
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
-            libraryState = try libraryDecoder.decode(snapshotEnvelope)
+            libraryState = try decodeLibraryState(snapshotEnvelope)
             guard let mirror = libraryState.rekordboxMirror else {
                 sourceImportFeedback = "The engine applied the sync but returned no mirror status."
                 sourceImportFeedbackIsError = true
@@ -643,7 +1035,7 @@ final class EngineStatusModel: ObservableObject {
             )
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
-            libraryState = try libraryDecoder.decode(snapshotEnvelope)
+            libraryState = try decodeLibraryState(snapshotEnvelope)
             sourceImportFeedback = "Rekordbox analysis imported. \(libraryState.collectionTotal) tracks are now available in Tracks."
         } catch {
             sourceImportFeedback = (error as? LocalizedError)?.errorDescription
@@ -652,48 +1044,160 @@ final class EngineStatusModel: ObservableObject {
         }
     }
 
-    func syncRekordboxDevice(root: String) async {
-        sourceImportFeedback = "Reading the Rekordbox Device Library and analysis revisions…"
+    func inspectRekordboxDevice(root: String) async {
+        sourceImportFeedback = "Reading USB playlists without changing the Lumi library…"
         sourceImportFeedbackIsError = false
+        usbSourceOperation = USBSourceOperationState(
+            phase: .reading,
+            title: "Reading USB disk",
+            detail: "Indexing OneLibrary playlists and track update state. The disk remains read-only."
+        )
         guard lifecycle == .ready,
               let endpointDescription,
               let protocolVersion,
               await acquireInteractiveExchange() else {
-            sourceImportFeedback = "Device Library Sync could not start because the engine is not ready."
+            sourceImportFeedback = "USB inspection could not start because the engine is not ready."
             sourceImportFeedbackIsError = true
+            usbSourceOperation = USBSourceOperationState(
+                phase: .failed,
+                title: "USB scan could not start",
+                detail: sourceImportFeedback ?? "The local engine is not ready."
+            )
             return
         }
         defer { isExchangingCommand = false }
         do {
-            let envelope = try await supervisor.send(.syncRekordboxDevice(root: root))
+            let envelope = try await supervisor.send(
+                .inspectRekordboxDevice(root: root, sourceID: trustedUSBSourceID(root: root))
+            )
             if let failure = EngineCommandFailure(envelope) {
                 sourceImportFeedback = failure.message
                 sourceImportFeedbackIsError = true
+                usbSourceOperation = USBSourceOperationState(
+                    phase: .failed,
+                    title: "USB scan failed",
+                    detail: failure.message
+                )
                 return
             }
             let (snapshot, snapshotEnvelope) = try await decodeSnapshotWithRecovery(
                 envelope,
                 endpointDescription: endpointDescription,
                 protocolVersion: protocolVersion,
-                context: "Rekordbox Device Library sync"
+                context: "USB playlist inspection"
             )
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
-            libraryState = try libraryDecoder.decode(snapshotEnvelope)
+            libraryState = try decodeLibraryState(snapshotEnvelope)
+            if let inspection = libraryState.rekordboxDeviceInspection {
+                sourceImportFeedback = "USB indexed read-only: \(inspection.playlistCount) playlists and \(inspection.trackCount) tracks available. Choose playlists before Sync."
+                usbSourceOperation = USBSourceOperationState(
+                    phase: .completed,
+                    title: "USB scan complete",
+                    detail: "\(inspection.playlistCount) playlists and \(inspection.trackCount) tracks indexed read-only. Choose one or more playlists to synchronize."
+                )
+            }
+        } catch {
+            let errorDescription = String(describing: error)
+            Self.logger.error(
+                "USB inspection failed: \(errorDescription, privacy: .public)"
+            )
+            sourceImportFeedback = (error as? LocalizedError)?.errorDescription
+                ?? "The USB source could not be inspected."
+            sourceImportFeedbackIsError = true
+            usbSourceOperation = USBSourceOperationState(
+                phase: .failed,
+                title: "USB scan failed",
+                detail: sourceImportFeedback ?? "The USB source could not be inspected."
+            )
+        }
+    }
+
+    func syncRekordboxDevice(root: String, playlistIDs: [UInt32]) async {
+        sourceImportFeedback = "Synchronizing \(playlistIDs.count) selected USB playlist\(playlistIDs.count == 1 ? "" : "s") and comparing analysis revisions…"
+        sourceImportFeedbackIsError = false
+        usbSourceOperation = USBSourceOperationState(
+            phase: .synchronizing,
+            title: "Synchronizing \(playlistIDs.count) playlist\(playlistIDs.count == 1 ? "" : "s")",
+            detail: "Reading the USB read-only, importing new Lumi tracks and safely comparing existing analysis revisions."
+        )
+        guard lifecycle == .ready,
+              let endpointDescription,
+              let protocolVersion,
+              await acquireInteractiveExchange() else {
+            sourceImportFeedback = "Device Library Sync could not start because the engine is not ready."
+            sourceImportFeedbackIsError = true
+            usbSourceOperation = USBSourceOperationState(
+                phase: .failed,
+                title: "USB sync could not start",
+                detail: sourceImportFeedback ?? "The local engine is not ready."
+            )
+            return
+        }
+        defer { isExchangingCommand = false }
+        do {
+            let envelope = try await supervisor.send(
+                .syncRekordboxDevice(
+                    root: root,
+                    sourceID: trustedUSBSourceID(root: root),
+                    playlistIDs: playlistIDs
+                )
+            )
+            if let failure = EngineCommandFailure(envelope) {
+                sourceImportFeedback = failure.message
+                sourceImportFeedbackIsError = true
+                usbSourceOperation = USBSourceOperationState(
+                    phase: .failed,
+                    title: "USB sync failed",
+                    detail: failure.message
+                )
+                return
+            }
+            let (snapshot, snapshotEnvelope) = try await decodeSnapshotWithRecovery(
+                envelope,
+                endpointDescription: endpointDescription,
+                protocolVersion: protocolVersion,
+                context: "USB source sync"
+            )
+            latestSnapshot = snapshot
+            workspaceState = LiveWorkspacePresenter.ready(snapshot)
+            libraryState = try decodeLibraryState(snapshotEnvelope)
             let selectedName = URL(fileURLWithPath: root).lastPathComponent
             let device = libraryState.rekordboxDevices.first(where: {
                 $0.displayName == selectedName
             }) ?? libraryState.rekordboxDevices.first
             if let device {
-                sourceImportFeedback = "Device Library synced read-only: \(device.matchedTracks)/\(device.activeTracks) tracks matched; \(device.unmatchedTracks) safely held. Beatgrid and cue revisions are current."
+                sourceImportFeedback = "USB read completed safely: \(device.matchedTracks)/\(device.activeTracks) selected tracks are now available in Lumi; \(device.protectedTracks) older versions protected; \(device.conflictTracks) incomparable changes held for review."
+                usbSourceOperation = USBSourceOperationState(
+                    phase: .completed,
+                    title: "USB sync complete",
+                    detail: "\(device.activeTracks) unique selected tracks processed · \(device.matchedTracks) available in Lumi · \(device.unmatchedTracks) held · \(device.protectedTracks) older versions protected · \(device.conflictTracks) conflicts held."
+                )
             } else {
-                sourceImportFeedback = "Device Library synced read-only. Updated beatgrid and cue revisions are now available to Connected Decks."
+                sourceImportFeedback = "USB source synced read-only. Safe track identities are now available to Pro DJ Link."
+                usbSourceOperation = USBSourceOperationState(
+                    phase: .completed,
+                    title: "USB sync complete",
+                    detail: sourceImportFeedback ?? "Safe track identities are now available."
+                )
             }
         } catch {
             sourceImportFeedback = (error as? LocalizedError)?.errorDescription
-                ?? "The Rekordbox Device Library could not be synchronized."
+                ?? "The USB source could not be synchronized."
             sourceImportFeedbackIsError = true
+            usbSourceOperation = USBSourceOperationState(
+                phase: .failed,
+                title: "USB sync failed",
+                detail: sourceImportFeedback ?? "The USB source could not be synchronized."
+            )
         }
+    }
+
+    private func trustedUSBSourceID(root: String) -> String? {
+        let url = URL(fileURLWithPath: root, isDirectory: true)
+        guard let stable = try? url.resourceValues(forKeys: [.volumeUUIDStringKey]).volumeUUIDString,
+              !stable.isEmpty else { return nil }
+        return "usb-fs:\(stable.lowercased())"
     }
 
     func mutatePhraseRoles(_ request: PhraseRoleMutationRequest) async {
@@ -715,7 +1219,7 @@ final class EngineStatusModel: ObservableObject {
             if let failure = EngineCommandFailure(envelope) {
                 if failure.code == "phraseRoleRevisionMismatch" {
                     let refreshed = try await supervisor.getSnapshot()
-                    libraryState = try libraryDecoder.decode(refreshed)
+                    libraryState = try decodeLibraryState(refreshed)
                     phraseRoleFeedback = "Phrase roles changed elsewhere. Lumi refreshed the latest revision."
                 } else {
                     phraseRoleFeedback = failure.message
@@ -730,7 +1234,7 @@ final class EngineStatusModel: ObservableObject {
             )
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
-            libraryState = try libraryDecoder.decode(snapshotEnvelope)
+            libraryState = try decodeLibraryState(snapshotEnvelope)
             if let revision = libraryState.phraseRoleSettings?.revision {
                 phraseRoleFeedback = "Phrase-role settings saved. Revision \(revision)."
             } else {
@@ -761,7 +1265,7 @@ final class EngineStatusModel: ObservableObject {
             if let failure = EngineCommandFailure(envelope) {
                 if failure.code == "autoloopCatalogRevisionMismatch" {
                     let refreshed = try await supervisor.getSnapshot()
-                    libraryState = try libraryDecoder.decode(refreshed)
+                    libraryState = try decodeLibraryState(refreshed)
                     autoloopCatalogFeedback = "Autoloop catalog changed elsewhere. Lumi refreshed the latest revision."
                 } else {
                     autoloopCatalogFeedback = failure.message
@@ -776,7 +1280,7 @@ final class EngineStatusModel: ObservableObject {
             )
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
-            libraryState = try libraryDecoder.decode(snapshotEnvelope)
+            libraryState = try decodeLibraryState(snapshotEnvelope)
             if let revision = libraryState.autoloopCatalog?.revision {
                 autoloopCatalogFeedback = "Autoloop catalog saved. Revision \(revision)."
             } else {
@@ -859,7 +1363,7 @@ final class EngineStatusModel: ObservableObject {
             if let failure = EngineCommandFailure(envelope) {
                 if failure.kind == "revisionConflict" {
                     let refreshed = try await supervisor.getSnapshot()
-                    libraryState = try libraryDecoder.decode(refreshed)
+                    libraryState = try decodeLibraryState(refreshed)
                     timelineEditFeedback = failure.code == "autoloopCatalogRevisionMismatch"
                         ? "Autoloop catalog changed elsewhere. Lumi refreshed the latest revision."
                         : "Timeline changed elsewhere. Lumi refreshed the latest revision."
@@ -876,7 +1380,7 @@ final class EngineStatusModel: ObservableObject {
             )
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
-            libraryState = try libraryDecoder.decode(snapshotEnvelope)
+            libraryState = try decodeLibraryState(snapshotEnvelope)
             let revision = libraryState.editor?.timeline.revision
             timelineEditFeedback = revision.map { "\(success) Revision \($0)." } ?? success
         } catch {
@@ -976,7 +1480,7 @@ final class EngineStatusModel: ObservableObject {
             )
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
-            libraryState = try libraryDecoder.decode(snapshotEnvelope)
+            libraryState = try decodeLibraryState(snapshotEnvelope)
             synchronizeLocalAudio(with: snapshot)
             return true
         } catch {
@@ -1037,6 +1541,12 @@ final class EngineStatusModel: ObservableObject {
         }
     }
 
+    private func decodeLibraryState(_ envelope: MessageEnvelope) throws -> LibraryWorkspaceState {
+        try libraryDecoder.decode(envelope).preservingDeviceInspection(
+            libraryState.rekordboxDeviceInspection
+        )
+    }
+
     private func exchangeMidiCommand(_ command: EngineCommand, success: String) async {
         midiIntegrationFeedback = nil
         guard lifecycle == .ready,
@@ -1061,7 +1571,7 @@ final class EngineStatusModel: ObservableObject {
             )
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
-            libraryState = try libraryDecoder.decode(snapshotEnvelope)
+            libraryState = try decodeLibraryState(snapshotEnvelope)
             midiIntegrationFeedback = success
         } catch {
             midiIntegrationFeedback = "The MIDI command could not run: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
@@ -1614,7 +2124,10 @@ final class EngineStatusModel: ObservableObject {
                         self.workspaceState = nextWorkspaceState
                     }
                     if healthTick == 0 {
-                        guard let nextLibraryState = decoded.1 else { continue }
+                        guard let decodedLibraryState = decoded.1 else { continue }
+                        let nextLibraryState = decodedLibraryState.preservingDeviceInspection(
+                            self.libraryState.rekordboxDeviceInspection
+                        )
                         if nextLibraryState != self.libraryState {
                             self.libraryState = nextLibraryState
                         }

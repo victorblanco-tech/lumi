@@ -78,4 +78,16 @@ fn accepts_loaded_pre_roll_and_empty_deck_status() {
     decoder
         .decode_line(&empty)
         .unwrap_or_else(|error| panic!("empty deck status must decode: {error}"));
+
+    // A physical CDJ-1500X retains its own player number while briefly
+    // publishing NO_TRACK and rekordboxId 0. This is an unloaded deck, not an
+    // invalid half-loaded identity.
+    let physical_empty = empty
+        .replace("\"sequence\":3", "\"sequence\":4")
+        .replace("\"sourcePlayer\":0", "\"sourcePlayer\":2")
+        .replace("\"sourceSlot\":\"USB_SLOT\"", "\"sourceSlot\":\"NO_TRACK\"")
+        .replace("\"trackType\":\"REKORDBOX\"", "\"trackType\":\"NO_TRACK\"");
+    decoder
+        .decode_line(&physical_empty)
+        .unwrap_or_else(|error| panic!("physical empty-deck status must decode: {error}"));
 }

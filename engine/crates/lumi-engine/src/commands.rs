@@ -63,8 +63,21 @@ pub enum SessionCommand {
         include_future_child_playlists: bool,
         expected_content_sha256: String,
     },
+    InspectRekordboxDevice {
+        root: String,
+        source_id: Option<String>,
+    },
     SyncRekordboxDevice {
         root: String,
+        source_id: Option<String>,
+        playlist_ids: Vec<u32>,
+    },
+    PreviewLibraryReset {
+        preserve_track_ids: Vec<u64>,
+    },
+    ApplyLibraryReset {
+        expected_token: String,
+        backup_database_path: String,
     },
     ReconcileLibrarySource {
         track_id: u64,
@@ -209,7 +222,10 @@ impl SessionCommand {
             | Self::PreviewRekordboxXmlSync { .. }
             | Self::ApplyRekordboxXmlSync { .. }
             | Self::ImportRekordboxAnalysis { .. }
+            | Self::InspectRekordboxDevice { .. }
             | Self::SyncRekordboxDevice { .. }
+            | Self::PreviewLibraryReset { .. }
+            | Self::ApplyLibraryReset { .. }
             | Self::ReconcileLibrarySource { .. }
             | Self::EditLibraryTimeline { .. }
             | Self::SetLibraryPhraseLoopStrategy { .. }
@@ -292,8 +308,21 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
             )?,
             expected_content_sha256: string(&envelope.payload, "expectedContentSha256")?.to_owned(),
         }),
+        "inspectRekordboxDevice" => Ok(SessionCommand::InspectRekordboxDevice {
+            root: string(&envelope.payload, "root")?.to_owned(),
+            source_id: optional_string(&envelope.payload, "sourceId").map(str::to_owned),
+        }),
         "syncRekordboxDevice" => Ok(SessionCommand::SyncRekordboxDevice {
             root: string(&envelope.payload, "root")?.to_owned(),
+            source_id: optional_string(&envelope.payload, "sourceId").map(str::to_owned),
+            playlist_ids: u32_array(&envelope.payload, "playlistIds")?,
+        }),
+        "previewLibraryReset" => Ok(SessionCommand::PreviewLibraryReset {
+            preserve_track_ids: u64_array(&envelope.payload, "preserveTrackIds")?,
+        }),
+        "applyLibraryReset" => Ok(SessionCommand::ApplyLibraryReset {
+            expected_token: string(&envelope.payload, "expectedResetToken")?.to_owned(),
+            backup_database_path: string(&envelope.payload, "backupDatabasePath")?.to_owned(),
         }),
         "reconcileLibrarySource" => Ok(SessionCommand::ReconcileLibrarySource {
             track_id: positive_unsigned(&envelope.payload, "trackId")?,
@@ -832,6 +861,69 @@ fn string_array(
                 .ok_or(CommandDecodeError::InvalidField(field))
         })
         .collect()
+}
+
+fn u32_array(
+    payload: &serde_json::Map<String, Value>,
+    field: &'static str,
+) -> Result<Vec<u32>, CommandDecodeError> {
+    let values = payload
+        .get(field)
+        .and_then(Value::as_array)
+        .ok_or(CommandDecodeError::InvalidField(field))?;
+    if values.is_empty() || values.len() > 20_000 {
+        return Err(CommandDecodeError::InvalidField(field));
+    }
+    let converted = values
+        .iter()
+        .map(|value| {
+            value
+                .as_u64()
+                .and_then(|number| u32::try_from(number).ok())
+                .filter(|number| *number > 0)
+                .ok_or(CommandDecodeError::InvalidField(field))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if converted
+        .iter()
+        .collect::<std::collections::BTreeSet<_>>()
+        .len()
+        != converted.len()
+    {
+        return Err(CommandDecodeError::InvalidField(field));
+    }
+    Ok(converted)
+}
+
+fn u64_array(
+    payload: &serde_json::Map<String, Value>,
+    field: &'static str,
+) -> Result<Vec<u64>, CommandDecodeError> {
+    let values = payload
+        .get(field)
+        .and_then(Value::as_array)
+        .ok_or(CommandDecodeError::InvalidField(field))?;
+    if values.len() > 20_000 {
+        return Err(CommandDecodeError::InvalidField(field));
+    }
+    let converted = values
+        .iter()
+        .map(|value| {
+            value
+                .as_u64()
+                .filter(|number| *number > 0)
+                .ok_or(CommandDecodeError::InvalidField(field))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if converted
+        .iter()
+        .collect::<std::collections::BTreeSet<_>>()
+        .len()
+        != converted.len()
+    {
+        return Err(CommandDecodeError::InvalidField(field));
+    }
+    Ok(converted)
 }
 
 fn optional_string<'a>(

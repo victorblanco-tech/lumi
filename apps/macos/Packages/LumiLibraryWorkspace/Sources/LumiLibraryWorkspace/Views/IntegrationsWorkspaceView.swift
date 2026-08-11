@@ -113,12 +113,13 @@ public struct IntegrationsWorkspaceView: View {
         case .overview:
             overview
         case .deckInputs:
-            BeatLinkTriggerIntegrationView(integration: library.deckInputIntegration)
+            ProDJLinkIntegrationView(integration: library.deckInputIntegration)
         case .lightingOutputs:
             AutoloopCatalogSettingsView(
                 catalog: library.autoloopCatalog,
                 midiIntegration: library.midiIntegration,
                 midiClockIntegration: library.midiClockIntegration,
+                abletonLinkIntegration: library.abletonLinkIntegration,
                 feedback: autoloopFeedback,
                 midiIntegrationFeedback: midiIntegrationFeedback,
                 rendersInteractiveControls: rendersInteractiveControls,
@@ -146,22 +147,18 @@ public struct IntegrationsWorkspaceView: View {
                 HStack(spacing: LumiSpacing.medium) {
                     overviewCard(
                         title: "Deck Input",
-                        provider: "Beat Link Trigger",
+                        provider: "Pro DJ Link",
                         detail: deckInputDetail,
                         state: deckInputState,
-                        actionTitle: "Open Deck Inputs"
+                        actionTitle: "Open Pro DJ Link"
                     ) { section = .deckInputs }
-                    Image(systemName: "arrow.right")
-                        .foregroundStyle(LumiColor.textSecondary)
                     overviewCard(
                         title: "Library Source",
-                        provider: "Rekordbox 7",
-                        detail: "Not configured · read-only import planned",
-                        state: .empty,
+                        provider: "USB Sources",
+                        detail: usbSourceDetail,
+                        state: usbSourceState,
                         actionTitle: "Open in Library"
                     ) { onOpenLibrarySources() }
-                    Image(systemName: "arrow.right")
-                        .foregroundStyle(LumiColor.textSecondary)
                     overviewCard(
                         title: "Lighting Output",
                         provider: "SoundSwitch",
@@ -170,12 +167,40 @@ public struct IntegrationsWorkspaceView: View {
                         actionTitle: "Open Lighting Outputs"
                     ) { section = .lightingOutputs }
                 }
+                VStack(alignment: .leading, spacing: LumiSpacing.medium) {
+                    Text("PARALLEL SOUNDSWITCH INPUTS")
+                        .font(LumiTypography.technical.weight(.bold))
+                        .foregroundStyle(LumiColor.textSecondary)
+                    HStack(spacing: LumiSpacing.medium) {
+                        overviewCard(
+                            title: "Beat / BPM Timing",
+                            provider: "Ableton Link",
+                            detail: abletonLinkDetail,
+                            state: abletonLinkState,
+                            actionTitle: "Open Diagnostics"
+                        ) { section = .diagnostics }
+                        overviewCard(
+                            title: "AutoLoop Selection",
+                            provider: "Lumi Virtual MIDI",
+                            detail: lightingOutputDetail,
+                            state: lightingOutputState,
+                            actionTitle: "Open Lighting Outputs"
+                        ) { section = .lightingOutputs }
+                        overviewCard(
+                            title: "Manual Override",
+                            provider: "Control One",
+                            detail: "Runs beside Lumi · owned by SoundSwitch",
+                            state: .ready,
+                            actionTitle: "View Output Mapping"
+                        ) { section = .lightingOutputs }
+                    }
+                }
                 LumiPanel {
                     VStack(alignment: .leading, spacing: LumiSpacing.medium) {
                         Text("Provider Boundaries").font(LumiTypography.cardTitle)
                         Label("Deck state enters Lumi through a provider-neutral DeckSource adapter.", systemImage: "rectangle.and.arrow.down")
                         Label("Lighting commands leave Lumi through a provider-neutral MIDI output profile.", systemImage: "rectangle.and.arrow.up")
-                        Label("Rekordbox remains a read-only track source; Lumi owns edited phrases and planning data.", systemImage: "lock.shield")
+                        Label("Trusted USB sources remain read-only; Lumi owns edited phrases and planning data.", systemImage: "lock.shield")
                     }
                     .font(LumiTypography.caption)
                 }
@@ -229,7 +254,7 @@ public struct IntegrationsWorkspaceView: View {
                 }
                 LumiPanel {
                     VStack(spacing: 0) {
-                        diagnosticRow("Deck input destination", library.deckInputIntegration?.destinationName ?? "Not published", deckInputState)
+                        diagnosticRow("Pro DJ Link", proDJLinkDiagnostic, deckInputState)
                         Divider()
                         diagnosticRow("Complete deck frames", "\(library.deckInputIntegration?.committedFrameCount ?? 0)", deckInputState)
                         Divider()
@@ -241,7 +266,9 @@ public struct IntegrationsWorkspaceView: View {
                         Divider()
                         diagnosticRow("MIDI Clock ticks", "\(library.midiClockIntegration?.sentTickCount ?? 0)", clockOutputState)
                         Divider()
-                        diagnosticRow("Library provider", library.source?.name ?? "No source", library.condition.componentState)
+                        diagnosticRow("Ableton Link", abletonLinkDiagnostic, abletonLinkState)
+                        Divider()
+                        diagnosticRow("Trusted USB sources", usbSourceDetail, usbSourceState)
                     }
                 }
                 Label("Recovery actions and event logging are deliberately not duplicated on Overview.", systemImage: "wrench.and.screwdriver")
@@ -281,9 +308,29 @@ public struct IntegrationsWorkspaceView: View {
         return "\(clock.sourceName) · \(clock.state.uppercased()) · \(clock.bpmDescription)"
     }
 
+    private var abletonLinkState: LumiComponentState {
+        library.abletonLinkIntegration?.isAvailable == true ? .ready : .degraded
+    }
+
+    private var abletonLinkDetail: String {
+        guard let link = library.abletonLinkIntegration else { return "Starting managed timing provider" }
+        if let error = link.lastError { return error }
+        return "\(link.sourceDescription) · \(link.bpmDescription) · \(link.peers) peer\(link.peers == 1 ? "" : "s")"
+    }
+
+    private var abletonLinkDiagnostic: String {
+        guard let link = library.abletonLinkIntegration else { return "Status unavailable" }
+        let version = link.helperVersion.map { " · helper \($0)" } ?? ""
+        let phase = link.phaseErrorMicros.map { " · phase \($0) µs" } ?? ""
+        let age = link.lastBeatAgeMillis.map { " · beat \($0) ms ago" } ?? ""
+        let reanchor = link.lastReanchor.map { " · re-anchor \($0)" } ?? ""
+        return "\(link.state.uppercased()) · \(link.provider)\(version) · \(link.peers) peers\(age)\(phase)\(reanchor)"
+    }
+
     private var deckInputDetail: String {
         let frames = library.deckInputIntegration?.committedFrameCount ?? 0
-        return frames > 0 ? "Receiving · \(frames) complete frames" : "Published · waiting for deck frames"
+        let players = library.deckInputIntegration?.discoveredPlayers.count ?? 0
+        return frames > 0 ? "Ready · \(players) devices · \(frames) events" : "Discovering · waiting for equipment"
     }
 
     private var lightingOutputDetail: String {
@@ -291,10 +338,32 @@ public struct IntegrationsWorkspaceView: View {
         return midi.isReady ? "Ready · \(midi.sourceName)" : "\(midi.state) · \(midi.sourceName)"
     }
 
+    private var usbSourceState: LumiComponentState {
+        if library.rekordboxDevices.contains(where: { $0.conflictTracks > 0 }) { return .degraded }
+        return library.rekordboxDevices.isEmpty ? .empty : .ready
+    }
+
+    private var usbSourceDetail: String {
+        let devices = library.rekordboxDevices
+        guard !devices.isEmpty else { return "No trusted USB sources" }
+        let protected = devices.reduce(UInt64(0)) { $0 + $1.protectedTracks }
+        let conflicts = devices.reduce(UInt64(0)) { $0 + $1.conflictTracks }
+        if conflicts > 0 { return "\(devices.count) trusted · \(conflicts) changes need review" }
+        if protected > 0 { return "\(devices.count) trusted · \(protected) older versions protected" }
+        return "\(devices.count) trusted · all synchronized safely"
+    }
+
+    private var proDJLinkDiagnostic: String {
+        guard let input = library.deckInputIntegration, input.isProDJLink else {
+            return "Unavailable"
+        }
+        return "\(input.sourceState ?? input.state) · \(input.discoveredPlayers.count) devices · \(input.receivedMessageCount) events"
+    }
+
     private func sectionTitle(_ value: IntegrationsWorkspaceSection) -> String {
         switch value {
         case .overview: "Overview"
-        case .deckInputs: "Deck Inputs"
+        case .deckInputs: "Pro DJ Link"
         case .lightingOutputs: "Lighting Outputs"
         case .diagnostics: "Diagnostics"
         }

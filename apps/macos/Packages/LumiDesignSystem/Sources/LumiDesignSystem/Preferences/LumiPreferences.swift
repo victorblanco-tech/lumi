@@ -61,6 +61,8 @@ public enum LumiPreferenceKey {
         "co.victorblan.tech.lumi.rekordboxXML.followedPaths"
     public static let rekordboxDeviceRoot =
         "co.victorblan.tech.lumi.rekordboxDevice.root"
+    public static let rekordboxDevicePlaylistSelections =
+        "co.victorblan.tech.lumi.rekordboxDevice.playlist-selections"
     public static let waveformZoomAnchor =
         "co.victorblan.tech.lumi.waveform.zoom-anchor"
     public static let waveformReverseHorizontalScroll =

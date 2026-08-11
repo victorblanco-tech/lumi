@@ -14,8 +14,8 @@ mod provider;
 mod supervisor;
 
 pub use provider::{
-    ProLinkDeckSourceDiagnostics, ProLinkDeckSourceProvider, ProLinkProviderError,
-    ProLinkTrackIdentity, ProLinkTransportSnapshot,
+    ProLinkDeckSourceDiagnostics, ProLinkDeckSourceProvider, ProLinkDiscoveredDevice,
+    ProLinkProviderError, ProLinkTimingObservation, ProLinkTrackIdentity, ProLinkTransportSnapshot,
 };
 pub use supervisor::{
     BridgeLaunchConfiguration, BridgeProcessDiagnostics, BridgeProcessSupervisor,
@@ -253,7 +253,7 @@ fn validate_event(event: &BridgeEvent) -> Result<(), BridgeDecodeError> {
                     || status.source_slot.trim().is_empty()
                     || status.track_type.trim().is_empty());
             if status.device_number == 0
-                || has_track_id != has_source_player
+                || (has_track_id && !has_source_player)
                 || loaded_track_is_invalid
                 || status.beat_within_bar > 4
             {

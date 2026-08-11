@@ -4,28 +4,35 @@ set -euo pipefail
 
 script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 repository_root="$(dirname "$script_dir")"
-channel="${1:-preview}"
+channel="${1:-dev}"
 release_directory="${2:-$repository_root/build/Releases}"
 canonical_version="$(tr -d '[:space:]' < "$repository_root/VERSION")"
 cargo_bin_directory="${CARGO_HOME:-${HOME}/.cargo}/bin"
 
 case "$channel" in
-  preview)
-    build_configuration="Preview"
-    app_name="Lumi Preview"
-    expected_bundle_identifier="co.victorblan.tech.lumi.preview"
-    expected_data_directory="Lumi Preview"
-    artifact_prefix="Lumi-Preview"
+  dev)
+    build_configuration="Dev"
+    app_name="Lumi"
+    expected_bundle_identifier="co.victorblan.tech.lumi.dev"
+    expected_data_directory="Lumi Dev"
+    expected_version_pattern='^[0-9]+\.[0-9]+\.[0-9]+-dev-[1-9][0-9]*$'
     ;;
-  stable)
+  rc)
+    build_configuration="RC"
+    app_name="Lumi"
+    expected_bundle_identifier="co.victorblan.tech.lumi.rc"
+    expected_data_directory="Lumi RC"
+    expected_version_pattern='^[0-9]+\.[0-9]+\.[0-9]+-rc-[1-9][0-9]*$'
+    ;;
+  release)
     build_configuration="Release"
     app_name="Lumi"
     expected_bundle_identifier="co.victorblan.tech.lumi"
     expected_data_directory="Lumi"
-    artifact_prefix="Lumi"
+    expected_version_pattern='^[0-9]+\.[0-9]+\.[0-9]+$'
     ;;
   *)
-    echo "Usage: $0 [preview|stable] [output-directory]" >&2
+    echo "Usage: $0 [dev|rc|release] [output-directory]" >&2
     exit 64
     ;;
 esac
@@ -50,8 +57,8 @@ if [[ ! "$canonical_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$ ]]; t
   echo "ERROR: VERSION '$canonical_version' is not valid SemVer." >&2
   exit 1
 fi
-if [[ "$channel" == "stable" && "$canonical_version" == *-* ]]; then
-  echo "ERROR: Stable packaging requires a promoted version without a prerelease suffix." >&2
+if [[ ! "$canonical_version" =~ $expected_version_pattern ]]; then
+  echo "ERROR: '$channel' packaging does not accept version '$canonical_version'." >&2
   exit 1
 fi
 
@@ -106,14 +113,29 @@ cleanup() {
 }
 trap cleanup EXIT
 
-staging_directory="$temporary_root/$artifact_prefix-$canonical_version"
-packaged_app="$staging_directory/$app_name.app"
+staging_directory="$temporary_root/Lumi-$canonical_version"
+packaged_bundle_name="Lumi.app"
+if [[ "$channel" != "release" ]]; then
+  packaged_bundle_name="Lumi $canonical_version.app"
+fi
+packaged_app="$staging_directory/$packaged_bundle_name"
 packaged_helper="$packaged_app/Contents/Helpers/lumi-engine"
+packaged_prolink_bridge="$packaged_app/Contents/Resources/prolink/lumi-prolink-bridge.jar"
+packaged_prolink_java="$packaged_app/Contents/Resources/prolink-runtime/bin/java"
+packaged_link_helper="$packaged_app/Contents/Resources/link/Carabiner"
 mkdir -p "$staging_directory"
 ditto "$source_app" "$packaged_app"
 
 if [[ ! -x "$packaged_helper" ]]; then
   echo "ERROR: packaged app does not contain an executable lumi-engine helper." >&2
+  exit 1
+fi
+if [[ ! -f "$packaged_prolink_bridge" || ! -x "$packaged_prolink_java" ]]; then
+  echo "ERROR: packaged app does not contain the self-contained Pro DJ Link bridge." >&2
+  exit 1
+fi
+if [[ ! -x "$packaged_link_helper" ]]; then
+  echo "ERROR: packaged app does not contain the managed Ableton Link helper." >&2
   exit 1
 fi
 
@@ -127,6 +149,15 @@ if ! file "$packaged_helper" | grep -q 'arm64'; then
 fi
 
 codesign --force --sign - --timestamp=none "$packaged_helper"
+codesign --force --sign - --timestamp=none --options runtime "$packaged_link_helper"
+# The jlink runtime is a plain directory rather than a macOS bundle, so it
+# cannot be signed as one standalone target. Sign only the executable Mach-O
+# members; directories such as `legal/java.desktop` are resources, not bundles.
+while IFS= read -r runtime_file; do
+  if file "$runtime_file" | grep -q 'Mach-O'; then
+    codesign --force --sign - --timestamp=none "$runtime_file"
+  fi
+done < <(find "$packaged_app/Contents/Resources/prolink-runtime" -type f -print)
 codesign --force --sign - --timestamp=none --options runtime "$packaged_app"
 codesign --verify --deep --strict --verbose=2 "$packaged_app"
 
@@ -189,7 +220,7 @@ cp "$repository_root/THIRD_PARTY_NOTICES.md" \
   echo "Signing ad hoc (not Developer ID / notarized)"
 } > "$staging_directory/BUILD-INFO.txt"
 
-artifact_name="$artifact_prefix-$canonical_version-arm64.dmg"
+artifact_name="Lumi-$canonical_version-arm64.dmg"
 temporary_dmg="$temporary_root/$artifact_name"
 final_dmg="$release_directory/$artifact_name"
 checksum_file="$final_dmg.sha256"
@@ -210,8 +241,8 @@ hdiutil attach "$temporary_dmg" \
   -mountpoint "$mount_directory" \
   -quiet
 mounted=1
-codesign --verify --deep --strict --verbose=2 "$mount_directory/$app_name.app"
-test -x "$mount_directory/$app_name.app/Contents/Helpers/lumi-engine"
+codesign --verify --deep --strict --verbose=2 "$mount_directory/$packaged_bundle_name"
+test -x "$mount_directory/$packaged_bundle_name/Contents/Helpers/lumi-engine"
 hdiutil detach "$mount_directory" -quiet
 mounted=0
 

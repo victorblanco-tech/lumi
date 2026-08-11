@@ -50,6 +50,10 @@ use lumi_simulator::{
     ManualClock, MonotonicClock as _, SimulationControl, SimulatorDeckSourceProvider,
     SimulatorError,
 };
+use lumi_timing_output::{
+    CarabinerConfiguration, CarabinerTimingOutput, TimingAnchor, TimingDiscontinuity,
+    TimingOutputProvider as _, TimingOutputState, TimingSourceKind,
+};
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
 use subtle::ConstantTimeEq as _;
@@ -68,6 +72,8 @@ const SESSION_TOKEN_ENVIRONMENT_KEY: &str = "LUMI_SESSION_TOKEN";
 #[cfg(not(test))]
 const DECK_INPUT_NAME_ENVIRONMENT_KEY: &str = "LUMI_DECK_INPUT_DESTINATION_NAME";
 #[cfg(not(test))]
+const DECK_INPUT_DISABLED_ENVIRONMENT_KEY: &str = "LUMI_DECK_INPUT_DISABLED";
+#[cfg(not(test))]
 const AUTO_PUBLISH_MIDI_ENVIRONMENT_KEY: &str = "LUMI_AUTO_PUBLISH_MIDI";
 const MINIMUM_SESSION_TOKEN_BYTES: usize = 32;
 const MAXIMUM_SESSION_TOKEN_BYTES: usize = 256;
@@ -81,6 +87,8 @@ const LIBRARY_CONTEXT_CAPACITY: usize = 256;
 const PROLINK_JAVA_ENVIRONMENT_KEY: &str = "LUMI_PROLINK_JAVA";
 #[cfg(not(test))]
 const PROLINK_BRIDGE_JAR_ENVIRONMENT_KEY: &str = "LUMI_PROLINK_BRIDGE_JAR";
+#[cfg(not(test))]
+const CARABINER_EXECUTABLE_ENVIRONMENT_KEY: &str = "LUMI_CARABINER_EXECUTABLE";
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -340,18 +348,21 @@ fn initialized_runtime_for_mode(
     #[cfg(not(test))]
     if env::var(AUTO_PUBLISH_MIDI_ENVIRONMENT_KEY).as_deref() != Ok("0") {
         let _ = output_worker.enable_midi_auto_publish();
+        output_worker.enable_link_auto_publish();
     }
     #[cfg(not(test))]
     let mut deck_input = CoreMidiDestinationProvider::new();
     #[cfg(test)]
     let deck_input = CoreMidiDestinationProvider::new();
     #[cfg(not(test))]
-    deck_input
-        .publish(
-            &env::var(DECK_INPUT_NAME_ENVIRONMENT_KEY)
-                .unwrap_or_else(|_| DECK_INPUT_DESTINATION_NAME.to_owned()),
-        )
-        .map_err(|error| EngineError::Midi(error.to_string()))?;
+    if env::var(DECK_INPUT_DISABLED_ENVIRONMENT_KEY).as_deref() != Ok("1") {
+        deck_input
+            .publish(
+                &env::var(DECK_INPUT_NAME_ENVIRONMENT_KEY)
+                    .unwrap_or_else(|_| DECK_INPUT_DESTINATION_NAME.to_owned()),
+            )
+            .map_err(|error| EngineError::Midi(error.to_string()))?;
+    }
     let library_worker = LibraryWorker::demo()?;
     let autoloop_catalog = library_worker.autoloop_catalog()?;
     let mut planning_worker = PlanningWorker::new(&autoloop_catalog);
@@ -450,28 +461,72 @@ fn prolink_bridge_configuration() -> Option<BridgeLaunchConfiguration> {
     }
 
     let helper_directory = env::current_exe().ok()?.parent()?.to_path_buf();
-    let bundled_java = helper_directory.join("prolink-runtime/bin/java");
-    let bundled_jar = helper_directory.join("prolink/lumi-prolink-bridge.jar");
+    let bundled_java = helper_directory.join("../Resources/prolink-runtime/bin/java");
+    let bundled_jar = helper_directory.join("../Resources/prolink/lumi-prolink-bridge.jar");
     if bundled_java.is_file() && bundled_jar.is_file() {
         return Some(BridgeLaunchConfiguration::java_jar(
             bundled_java,
             bundled_jar,
         ));
     }
+    // Compatibility with locally built app bundles created before the runtime
+    // moved out of `Contents/Helpers` into the code-signing-safe Resources lane.
+    let legacy_bundled_java = helper_directory.join("prolink-runtime/bin/java");
+    let legacy_bundled_jar = helper_directory.join("prolink/lumi-prolink-bridge.jar");
+    if legacy_bundled_java.is_file() && legacy_bundled_jar.is_file() {
+        return Some(BridgeLaunchConfiguration::java_jar(
+            legacy_bundled_java,
+            legacy_bundled_jar,
+        ));
+    }
 
     #[cfg(debug_assertions)]
     {
-        let development_java = PathBuf::from("/usr/local/opt/openjdk@21/bin/java");
         let development_jar = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../../bridges/prolink/target/lumi-prolink-bridge.jar");
-        if development_java.is_file() && development_jar.is_file() {
-            return Some(BridgeLaunchConfiguration::java_jar(
-                development_java,
-                development_jar,
-            ));
+        for development_java in [
+            PathBuf::from("/opt/homebrew/opt/openjdk@21/bin/java"),
+            PathBuf::from("/usr/local/opt/openjdk@21/bin/java"),
+            PathBuf::from(env!("CARGO_MANIFEST_DIR")).join(
+                "../../../build/package-toolchains/temurin-21-macos-aarch64/Contents/Home/bin/java",
+            ),
+        ] {
+            if development_java.is_file() && development_jar.is_file() {
+                return Some(BridgeLaunchConfiguration::java_jar(
+                    development_java,
+                    development_jar,
+                ));
+            }
         }
     }
     None
+}
+
+#[cfg(not(test))]
+fn carabiner_configuration() -> CarabinerConfiguration {
+    let executable = env::var(CARABINER_EXECUTABLE_ENVIRONMENT_KEY)
+        .ok()
+        .map(PathBuf::from)
+        .filter(|path| path.is_file())
+        .or_else(|| {
+            let helper_directory = env::current_exe().ok()?.parent()?.to_path_buf();
+            let bundled = helper_directory.join("../Resources/link/Carabiner");
+            bundled.is_file().then_some(bundled)
+        })
+        .or_else(|| {
+            #[cfg(debug_assertions)]
+            {
+                let development = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+                    .join("../../../build/carabiner-runtime/Carabiner");
+                return development.is_file().then_some(development);
+            }
+            #[allow(unreachable_code)]
+            None
+        });
+    CarabinerConfiguration {
+        executable,
+        ..CarabinerConfiguration::default()
+    }
 }
 
 fn process_pending_source_events(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
@@ -833,24 +888,32 @@ struct OutputWorker {
     provider: DryRunLightingOutputProvider,
     midi_output: MidiOutputController<CoreMidiSourceProvider>,
     midi_clock: MidiClockController<CoreMidiSourceProvider>,
+    link_timing: CarabinerTimingOutput,
     effect_sequence: u64,
     midi_auto_publish_enabled: bool,
     timing_offset_millis: i16,
     pending_timing_offset_millis: Option<i16>,
     last_midi_publish_attempt: Option<Instant>,
+    local_timing_generation: u64,
 }
 
 impl OutputWorker {
     fn new() -> Self {
+        #[cfg(not(test))]
+        let link_configuration = carabiner_configuration();
+        #[cfg(test)]
+        let link_configuration = CarabinerConfiguration::default();
         Self {
             provider: DryRunLightingOutputProvider::default(),
             midi_output: MidiOutputController::new(CoreMidiSourceProvider::new()),
             midi_clock: MidiClockController::new(CoreMidiSourceProvider::new),
+            link_timing: CarabinerTimingOutput::new(link_configuration),
             effect_sequence: 0,
             midi_auto_publish_enabled: false,
             timing_offset_millis: 0,
             pending_timing_offset_millis: None,
             last_midi_publish_attempt: None,
+            local_timing_generation: 0,
         }
     }
 
@@ -919,6 +982,10 @@ impl OutputWorker {
         self.midi_clock.status()
     }
 
+    fn link_timing_status(&self) -> lumi_timing_output::TimingOutputStatus {
+        self.link_timing.status()
+    }
+
     fn midi_auto_publish_enabled(&self) -> bool {
         self.midi_auto_publish_enabled
     }
@@ -952,6 +1019,11 @@ impl OutputWorker {
         self.midi_auto_publish_enabled = true;
         self.last_midi_publish_attempt = Some(Instant::now());
         self.publish_midi()
+    }
+
+    #[cfg(not(test))]
+    fn enable_link_auto_publish(&mut self) {
+        let _ = self.link_timing.publish_async();
     }
 
     fn ensure_lighting_midi(&mut self) -> Result<(), EngineError> {
@@ -991,6 +1063,71 @@ impl OutputWorker {
         self.midi_clock
             .stop()
             .map_err(|error| EngineError::Midi(error.to_string()))
+    }
+
+    #[cfg(not(test))]
+    fn synchronize_prolink_timing(
+        &mut self,
+        observation: lumi_prolink_input::ProLinkTimingObservation,
+        operation: OperationState,
+    ) -> Result<(), EngineError> {
+        if matches!(operation, OperationState::Off | OperationState::Paused) {
+            if self.link_timing.status().playing {
+                self.link_timing
+                    .hold()
+                    .map_err(|error| EngineError::Timing(error.to_string()))?;
+            }
+            return Ok(());
+        }
+        self.link_timing
+            .synchronize(TimingAnchor {
+                source: TimingSourceKind::ProDjLink,
+                deck_number: Some(observation.deck_id.value()),
+                bpm_milli: observation.effective_bpm_milli,
+                beat_within_bar: observation.beat_within_bar,
+                playing: observation.playing,
+                generation: observation.generation,
+                discontinuity: if observation.discontinuity {
+                    TimingDiscontinuity::MasterChanged
+                } else {
+                    TimingDiscontinuity::Continuous
+                },
+                observed_at_micros: Some(observation.observed_at_nanos / 1_000),
+            })
+            .map_err(|error| EngineError::Timing(error.to_string()))
+    }
+
+    fn synchronize_local_link_timing(
+        &mut self,
+        deck_id: lumi_domain::DeckId,
+        anchor: crate::library::LocalPlaybackClockAnchor,
+        playing: bool,
+        force_rephase: bool,
+    ) -> Result<(), EngineError> {
+        if force_rephase {
+            self.local_timing_generation =
+                self.local_timing_generation.checked_add(1).ok_or_else(|| {
+                    EngineError::Timing("local timing generation overflow".to_owned())
+                })?;
+        }
+        self.link_timing
+            .synchronize(TimingAnchor {
+                source: TimingSourceKind::LocalPlayback,
+                deck_number: Some(deck_id.value()),
+                bpm_milli: anchor.bpm_milli,
+                beat_within_bar: u8::try_from(anchor.beat_index % 4)
+                    .unwrap_or(0)
+                    .saturating_add(1),
+                playing,
+                generation: self.local_timing_generation,
+                discontinuity: if force_rephase {
+                    TimingDiscontinuity::Seeked
+                } else {
+                    TimingDiscontinuity::Continuous
+                },
+                observed_at_micros: None,
+            })
+            .map_err(|error| EngineError::Timing(error.to_string()))
     }
 }
 
@@ -1065,6 +1202,7 @@ fn reconcile_local_midi_clock(
     runtime: &mut EngineRuntime,
     force_rephase: bool,
 ) -> Result<(), EngineError> {
+    let mut link_sync = None;
     let sync = if runtime.deck_source_mode == DeckSourceMode::LocalPlayback {
         runtime.state.state().leader_deck().and_then(|deck_id| {
             let deck = runtime.state.state().deck(deck_id)?;
@@ -1077,11 +1215,15 @@ fn reconcile_local_midi_clock(
                 .library_context(deck.track_load_id())?;
             let anchor = context
                 .clock_anchor_at_millis(transport.position_millis, deck.effective_bpm_milli())?;
+            let playing = !matches!(
+                runtime.state.state().operation(),
+                OperationState::Off | OperationState::Paused
+            ) && deck.is_playing()
+                && transport.playing;
+            link_sync = Some((deck_id, anchor, playing));
             Some(MidiClockSync {
                 bpm_milli: anchor.bpm_milli,
-                playing: runtime.state.state().operation() == OperationState::Live
-                    && deck.is_playing()
-                    && transport.playing,
+                playing: runtime.state.state().operation() == OperationState::Live && playing,
                 song_position_16th: anchor.song_position_16th,
                 delay_to_next_tick: anchor.delay_to_next_tick,
                 rephase: force_rephase,
@@ -1101,7 +1243,29 @@ fn reconcile_local_midi_clock(
         .output_worker
         .midi_clock
         .synchronize(sync)
-        .map_err(|error| EngineError::Midi(error.to_string()))
+        .map_err(|error| EngineError::Midi(error.to_string()))?;
+    if let Some((deck_id, anchor, playing)) = link_sync {
+        if matches!(
+            runtime.state.state().operation(),
+            OperationState::Off | OperationState::Paused
+        ) {
+            if runtime.output_worker.link_timing.status().playing {
+                runtime
+                    .output_worker
+                    .link_timing
+                    .hold()
+                    .map_err(|error| EngineError::Timing(error.to_string()))?;
+            }
+        } else {
+            runtime.output_worker.synchronize_local_link_timing(
+                deck_id,
+                anchor,
+                playing,
+                force_rephase,
+            )?;
+        }
+    }
+    Ok(())
 }
 
 fn process_domain_event(
@@ -1160,26 +1324,40 @@ fn handle_command(
         SessionCommand::GetLibraryTrackWaveform { track_id } => Some(*track_id),
         _ => None,
     };
+    let includes_device_inspection = matches!(
+        &command,
+        SessionCommand::InspectRekordboxDevice { .. } | SessionCommand::SyncRekordboxDevice { .. }
+    );
     if is_mutating && command_ids.contains(&envelope.message_id) {
         if is_transport_update {
             return transport_ack_envelope(runtime, response_sequence, &envelope.message_id);
         }
-        return snapshot_envelope(runtime, response_sequence, &envelope.message_id);
+        return if includes_device_inspection {
+            snapshot_envelope_with_device_inspection(
+                runtime,
+                response_sequence,
+                &envelope.message_id,
+            )
+        } else {
+            snapshot_envelope(runtime, response_sequence, &envelope.message_id)
+        };
     }
 
     if let Err(error) = apply_command(runtime, command) {
         return application_error_envelope(response_sequence, &envelope.message_id, &error);
     }
     if is_mutating {
-        debug_assert_eq!(
-            command_ids.observe(&envelope.message_id),
-            CommandDisposition::FirstSeen
-        );
+        let disposition = command_ids.observe(&envelope.message_id);
+        debug_assert_eq!(disposition, CommandDisposition::FirstSeen);
     }
     if is_transport_update {
         return transport_ack_envelope(runtime, response_sequence, &envelope.message_id);
     }
-    let mut response = snapshot_envelope(runtime, response_sequence, &envelope.message_id)?;
+    let mut response = if includes_device_inspection {
+        snapshot_envelope_with_device_inspection(runtime, response_sequence, &envelope.message_id)?
+    } else {
+        snapshot_envelope(runtime, response_sequence, &envelope.message_id)?
+    };
     if let Some(track_id) = waveform_detail_track_id {
         response.payload.insert(
             "waveformDetail".to_owned(),
@@ -1248,6 +1426,12 @@ fn pump_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), EngineE
     let at = runtime.clock.now();
     for message in messages {
         runtime.direct_deck_source.ingest(message, at)?;
+    }
+    let operation = runtime.state.state().operation();
+    for observation in runtime.direct_deck_source.drain_timing_observations() {
+        runtime
+            .output_worker
+            .synchronize_prolink_timing(observation, operation)?;
     }
     Ok(())
 }
@@ -1322,8 +1506,43 @@ fn apply_command(
             )?;
             return Ok(());
         }
-        SessionCommand::SyncRekordboxDevice { root } => {
-            runtime.library_worker.sync_rekordbox_device(root)?;
+        SessionCommand::InspectRekordboxDevice { root, source_id } => {
+            runtime
+                .library_worker
+                .inspect_rekordbox_device(root, source_id.as_deref())?;
+            return Ok(());
+        }
+        SessionCommand::SyncRekordboxDevice {
+            root,
+            source_id,
+            playlist_ids,
+        } => {
+            runtime.library_worker.sync_rekordbox_device(
+                root,
+                source_id.as_deref(),
+                &playlist_ids,
+            )?;
+            return Ok(());
+        }
+        SessionCommand::PreviewLibraryReset { preserve_track_ids } => {
+            if runtime.state.state().operation() != OperationState::Off {
+                return Err(CommandApplicationError::DataManagementRequiresOff);
+            }
+            runtime
+                .library_worker
+                .preview_library_reset(&preserve_track_ids)?;
+            return Ok(());
+        }
+        SessionCommand::ApplyLibraryReset {
+            expected_token,
+            backup_database_path,
+        } => {
+            if runtime.state.state().operation() != OperationState::Off {
+                return Err(CommandApplicationError::DataManagementRequiresOff);
+            }
+            runtime
+                .library_worker
+                .apply_library_reset(&expected_token, &backup_database_path)?;
             return Ok(());
         }
         SessionCommand::ReconcileLibrarySource {
@@ -1735,7 +1954,10 @@ fn apply_command(
         | SessionCommand::PreviewRekordboxXmlSync { .. }
         | SessionCommand::ApplyRekordboxXmlSync { .. }
         | SessionCommand::ImportRekordboxAnalysis { .. }
+        | SessionCommand::InspectRekordboxDevice { .. }
         | SessionCommand::SyncRekordboxDevice { .. }
+        | SessionCommand::PreviewLibraryReset { .. }
+        | SessionCommand::ApplyLibraryReset { .. }
         | SessionCommand::ReconcileLibrarySource { .. }
         | SessionCommand::EditLibraryTimeline { .. }
         | SessionCommand::SetLibraryPhraseLoopStrategy { .. }
@@ -1985,6 +2207,15 @@ fn application_error_envelope(
             false,
             None,
         ),
+        CommandApplicationError::DataManagementRequiresOff => error_envelope(
+            sequence,
+            correlation_id,
+            "validationFailed",
+            "dataManagementRequiresOff",
+            "Set Lumi to Off before creating, restoring, or resetting library data.",
+            false,
+            None,
+        ),
         CommandApplicationError::Mutation(mutation) => error_envelope(
             sequence,
             correlation_id,
@@ -2217,6 +2448,8 @@ enum CommandApplicationError {
     BltMidi(#[from] BltMidiError),
     #[error("the command is not valid for the active deck source")]
     WrongDeckSourceMode,
+    #[error("library backup and reset operations require Lumi to be Off")]
+    DataManagementRequiresOff,
     #[error("library command failed: {0}")]
     Library(#[from] LibraryWorkerError),
     #[error("MIDI output command failed: {0}")]
@@ -2229,6 +2462,23 @@ fn snapshot_envelope(
     runtime: &EngineRuntime,
     sequence: u64,
     correlation_id: &str,
+) -> Result<MessageEnvelope, EngineError> {
+    snapshot_envelope_internal(runtime, sequence, correlation_id, false)
+}
+
+fn snapshot_envelope_with_device_inspection(
+    runtime: &EngineRuntime,
+    sequence: u64,
+    correlation_id: &str,
+) -> Result<MessageEnvelope, EngineError> {
+    snapshot_envelope_internal(runtime, sequence, correlation_id, true)
+}
+
+fn snapshot_envelope_internal(
+    runtime: &EngineRuntime,
+    sequence: u64,
+    correlation_id: &str,
+    include_device_inspection: bool,
 ) -> Result<MessageEnvelope, EngineError> {
     let state = runtime.state.state();
     let mut payload = Map::new();
@@ -2331,6 +2581,43 @@ fn snapshot_envelope(
             "lastError": midi_clock.last_error,
         }),
     );
+    let link_timing = runtime.output_worker.link_timing_status();
+    payload.insert(
+        "abletonLinkIntegration".to_owned(),
+        json!({
+            "state": match link_timing.state {
+                TimingOutputState::Stopped => "stopped",
+                TimingOutputState::Starting => "starting",
+                TimingOutputState::Ready => "ready",
+                TimingOutputState::Running => "running",
+                TimingOutputState::Degraded => "degraded",
+            },
+            "provider": link_timing.provider,
+            "helperVersion": link_timing.helper_version,
+            "peers": link_timing.peers,
+            "source": link_timing.source.map(|source| match source {
+                TimingSourceKind::LocalPlayback => "localPlayback",
+                TimingSourceKind::ProDjLink => "proDjLink",
+            }),
+            "deckNumber": link_timing.deck_number,
+            "bpmMilli": link_timing.bpm_milli,
+            "beatWithinBar": link_timing.beat_within_bar,
+            "playing": link_timing.playing,
+            "generation": link_timing.generation,
+            "lastBeatAgeMillis": link_timing.last_anchor_age_millis,
+            "phaseErrorMicros": link_timing.phase_error_micros,
+            "lastReanchor": link_timing.last_reanchor.map(|reason| match reason {
+                TimingDiscontinuity::Continuous => "continuous",
+                TimingDiscontinuity::Started => "started",
+                TimingDiscontinuity::Resumed => "resumed",
+                TimingDiscontinuity::Seeked => "seeked",
+                TimingDiscontinuity::TrackChanged => "trackChanged",
+                TimingDiscontinuity::MasterChanged => "masterChanged",
+            }),
+            "lastEvent": link_timing.last_event,
+            "lastError": link_timing.last_error,
+        }),
+    );
     if runtime.direct_prolink_active() {
         let diagnostics = runtime.direct_deck_source.diagnostics();
         payload.insert(
@@ -2357,9 +2644,10 @@ fn snapshot_envelope(
                 "bridgeVersion": diagnostics.bridge_version,
                 "beatLinkVersion": diagnostics.beat_link_version,
                 "discoveredPlayers": diagnostics.discovered_devices.iter()
-                    .map(|(number, name)| json!({
+                    .map(|(number, device)| json!({
                         "playerNumber": number,
-                        "name": name,
+                        "name": device.name,
+                        "address": device.address,
                     }))
                     .collect::<Vec<_>>(),
                 "lastError": diagnostics.last_error
@@ -2570,7 +2858,11 @@ fn snapshot_envelope(
     payload.insert("livePlan".to_owned(), live_plan);
     payload.insert(
         "library".to_owned(),
-        runtime.library_worker.snapshot_json()?,
+        if include_device_inspection {
+            runtime.library_worker.snapshot_json()?
+        } else {
+            runtime.library_worker.status_snapshot_json()?
+        },
     );
 
     Ok(MessageEnvelope {
@@ -3032,6 +3324,8 @@ pub enum EngineError {
     DryRunOutput(#[from] DryRunOutputError),
     #[error("MIDI output failed: {0}")]
     Midi(String),
+    #[error("musical timing output failed: {0}")]
+    Timing(String),
     #[error("music library failed: {0}")]
     Library(#[from] LibraryWorkerError),
     #[error("the response sequence overflowed")]

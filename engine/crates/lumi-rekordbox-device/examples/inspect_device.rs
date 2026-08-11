@@ -18,12 +18,21 @@ fn main() -> ExitCode {
         }
     };
     println!(
-        "source={} display={} tracks={} database_revision={}",
+        "source={} display={} tracks={} playlists={} database_revision={}",
         snapshot.source_id,
         snapshot.display_name,
         snapshot.tracks.len(),
+        snapshot.playlists.len(),
         snapshot.database_revision
     );
+    for playlist in snapshot.playlists.iter().take(20) {
+        println!(
+            "playlist_id={} path={:?} tracks={}",
+            playlist.device_playlist_id,
+            playlist.path,
+            playlist.track_ids.len()
+        );
+    }
     let selected = requested_track.as_deref().and_then(|requested| {
         requested.parse::<u32>().ok().map_or_else(
             || {

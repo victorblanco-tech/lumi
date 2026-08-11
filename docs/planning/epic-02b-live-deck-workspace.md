@@ -4,9 +4,11 @@ Status: **Local Playback product slice user-accepted; BLT MIDI adapter functiona
 
 Target milestone: **0.2.0 – Deck Intelligence**
 
-## 2026-08-09 — Rekordbox Device Library POC
+## 2026-08-10 — OneLibrary USB foundation
 
-- [x] Define a read-only DeviceSQL adapter and persistent performance aliases.
+- [x] Define a read-only OneLibrary adapter and persistent performance aliases.
+- [x] Browse playlists and track-level freshness before an explicit sync.
+- [x] Restore selected playlist subscriptions by their complete folder path.
 - [x] Refresh metadata, beatgrid, RGB waveform and cue-bearing analysis
   revisions on every explicit device sync.
 - [x] Preserve Lumi-owned phrases and AutoLoop choices during that refresh.
