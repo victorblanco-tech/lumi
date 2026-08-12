@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0-dev-22
+
+- Production, RC and Dev installations now have explicit display names,
+  bundle identifiers and documented `/Applications/Lumi` channel locations so
+  all three can coexist without sharing databases or preferences.
+- Unsigned local DMGs consistently ad-hoc sign every embedded Mach-O member,
+  including Xcode 26 debug libraries, and omit incompatible hardened-runtime
+  library validation. Packaged Dev apps therefore launch normally instead of
+  showing a generic macOS compatibility error.
+- Dev and RC artifacts include their channel and full version in the app name;
+  Production remains the stable `Lumi.app`.
+
 ## 0.4.0-dev-21
 
 - Direct Pro DJ Link is now pumped by a dedicated 20 ms engine cadence instead

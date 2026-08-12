@@ -51,6 +51,7 @@ built_app_icon="$built_app/Contents/Resources/AppIcon.icns"
 built_asset_catalog="$built_app/Contents/Resources/Assets.car"
 built_product_version="$(/usr/libexec/PlistBuddy -c 'Print :LumiProductVersion' "$built_info_plist")"
 built_bundle_identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$built_info_plist")"
+built_display_name="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$built_info_plist")"
 built_channel="$(/usr/libexec/PlistBuddy -c 'Print :LumiReleaseChannel' "$built_info_plist")"
 built_data_directory="$(/usr/libexec/PlistBuddy -c 'Print :LumiDataDirectoryName' "$built_info_plist")"
 canonical_version="$(tr -d '[:space:]' < VERSION)"
@@ -61,6 +62,7 @@ if [[ "$built_product_version" != "$canonical_version" ]]; then
 fi
 
 if [[ "$built_bundle_identifier" != "co.victorblan.tech.lumi.dev" ]] \
+  || [[ "$built_display_name" != "Lumi Dev" ]] \
   || [[ "$built_channel" != "dev" ]] \
   || [[ "$built_data_directory" != "Lumi Dev" ]]; then
   echo "ERROR: Dev build does not have the isolated identity." >&2

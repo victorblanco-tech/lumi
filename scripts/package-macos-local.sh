@@ -13,6 +13,7 @@ case "$channel" in
   dev)
     build_configuration="Dev"
     app_name="Lumi"
+    expected_display_name="Lumi Dev"
     expected_bundle_identifier="co.victorblan.tech.lumi.dev"
     expected_data_directory="Lumi Dev"
     expected_version_pattern='^[0-9]+\.[0-9]+\.[0-9]+-dev-[1-9][0-9]*$'
@@ -20,6 +21,7 @@ case "$channel" in
   rc)
     build_configuration="RC"
     app_name="Lumi"
+    expected_display_name="Lumi RC"
     expected_bundle_identifier="co.victorblan.tech.lumi.rc"
     expected_data_directory="Lumi RC"
     expected_version_pattern='^[0-9]+\.[0-9]+\.[0-9]+-rc-[1-9][0-9]*$'
@@ -27,6 +29,7 @@ case "$channel" in
   release)
     build_configuration="Release"
     app_name="Lumi"
+    expected_display_name="Lumi"
     expected_bundle_identifier="co.victorblan.tech.lumi"
     expected_data_directory="Lumi"
     expected_version_pattern='^[0-9]+\.[0-9]+\.[0-9]+$'
@@ -114,10 +117,17 @@ cleanup() {
 trap cleanup EXIT
 
 staging_directory="$temporary_root/Lumi-$canonical_version"
-packaged_bundle_name="Lumi.app"
-if [[ "$channel" != "release" ]]; then
-  packaged_bundle_name="Lumi $canonical_version.app"
-fi
+case "$channel" in
+  dev)
+    packaged_bundle_name="Lumi Dev $canonical_version.app"
+    ;;
+  rc)
+    packaged_bundle_name="Lumi RC $canonical_version.app"
+    ;;
+  release)
+    packaged_bundle_name="Lumi.app"
+    ;;
+esac
 packaged_app="$staging_directory/$packaged_bundle_name"
 packaged_helper="$packaged_app/Contents/Helpers/lumi-engine"
 packaged_prolink_bridge="$packaged_app/Contents/Resources/prolink/lumi-prolink-bridge.jar"
@@ -148,24 +158,31 @@ if ! file "$packaged_helper" | grep -q 'arm64'; then
   exit 1
 fi
 
-codesign --force --sign - --timestamp=none "$packaged_helper"
-codesign --force --sign - --timestamp=none --options runtime "$packaged_link_helper"
-# The jlink runtime is a plain directory rather than a macOS bundle, so it
-# cannot be signed as one standalone target. Sign only the executable Mach-O
-# members; directories such as `legal/java.desktop` are resources, not bundles.
-while IFS= read -r runtime_file; do
-  if file "$runtime_file" | grep -q 'Mach-O'; then
-    codesign --force --sign - --timestamp=none "$runtime_file"
+# Xcode 26 emits the Dev executable together with Lumi.debug.dylib and
+# __preview.dylib. Re-sign every nested Mach-O member with the same ad-hoc
+# identity before sealing the app. A hardened-runtime ad-hoc app cannot load
+# those separately signed libraries because ad-hoc signatures have no stable
+# Team ID, so unsigned local packages deliberately omit `--options runtime`.
+while IFS= read -r packaged_file; do
+  if file "$packaged_file" | grep -q 'Mach-O'; then
+    codesign --force --sign - --timestamp=none "$packaged_file"
   fi
-done < <(find "$packaged_app/Contents/Resources/prolink-runtime" -type f -print)
-codesign --force --sign - --timestamp=none --options runtime "$packaged_app"
+done < <(find "$packaged_app/Contents" -type f -print)
+codesign --force --sign - --timestamp=none "$packaged_app"
 codesign --verify --deep --strict --verbose=2 "$packaged_app"
+
+main_signature="$(codesign -dvvv "$packaged_app/Contents/MacOS/$app_name" 2>&1)"
+if grep -q 'flags=.*runtime' <<< "$main_signature"; then
+  echo "ERROR: ad-hoc packaged executable unexpectedly retains hardened runtime." >&2
+  exit 1
+fi
 
 packaged_info_plist="$packaged_app/Contents/Info.plist"
 packaged_version="$(/usr/libexec/PlistBuddy -c 'Print :LumiProductVersion' "$packaged_info_plist")"
 packaged_marketing_version="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$packaged_info_plist")"
 packaged_build_number="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$packaged_info_plist")"
 packaged_bundle_identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$packaged_info_plist")"
+packaged_display_name="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$packaged_info_plist")"
 packaged_channel="$(/usr/libexec/PlistBuddy -c 'Print :LumiReleaseChannel' "$packaged_info_plist")"
 packaged_data_directory="$(/usr/libexec/PlistBuddy -c 'Print :LumiDataDirectoryName' "$packaged_info_plist")"
 expected_marketing_version="${canonical_version%%-*}"
@@ -184,6 +201,10 @@ if [[ "$packaged_build_number" != "$build_number" ]]; then
 fi
 if [[ "$packaged_bundle_identifier" != "$expected_bundle_identifier" ]]; then
   echo "ERROR: packaged bundle '$packaged_bundle_identifier' differs from '$expected_bundle_identifier'." >&2
+  exit 1
+fi
+if [[ "$packaged_display_name" != "$expected_display_name" ]]; then
+  echo "ERROR: packaged display name '$packaged_display_name' differs from '$expected_display_name'." >&2
   exit 1
 fi
 if [[ "$packaged_channel" != "$channel" ]]; then
