@@ -264,9 +264,18 @@ public struct LibraryWorkspaceView: View {
     }
 
     private func playlistSourceLabel(_ playlist: LibraryPlaylist) -> String {
-        if let device = state.rekordboxDevices.first(where: { device in
-            device.playlists.contains { $0.libraryPlaylistID == playlist.id }
-        }) {
+        let devices = state.rekordboxDevices.filter { device in
+            device.playlists.contains {
+                $0.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .localizedCaseInsensitiveCompare(
+                        playlist.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    ) == .orderedSame
+            }
+        }
+        if devices.count > 1 {
+            return "\(devices.count) USB sources"
+        }
+        if let device = devices.first {
             return "\(device.displayName) · USB"
         }
         if playlist.sourcePlaylistID.hasPrefix("onelibrary:") {

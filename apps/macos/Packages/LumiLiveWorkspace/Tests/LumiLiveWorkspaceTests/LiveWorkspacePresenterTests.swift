@@ -91,6 +91,57 @@ struct LiveWorkspacePresenterTests {
         #expect(state.planner.condition == .ready)
     }
 
+    @Test("Connected decks preserve Rekordbox hot-cue letters, names, loops, and colors")
+    func connectedDeckHotCuesDecode() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case var .array(decks) = payload["decks"],
+              !decks.isEmpty,
+              case var .object(deck) = decks[0],
+              case var .object(track) = deck["track"] else {
+            Issue.record("Recorded fixture must contain Deck A track data")
+            return
+        }
+        track["hotCues"] = .array([
+            .object([
+                "index": .number(1),
+                "timeMillis": .number(8_000),
+                "loopEndMillis": .null,
+                "name": .string("First drop"),
+                "colorRgb": .number(0xFF4A4A)
+            ]),
+            .object([
+                "index": .number(3),
+                "timeMillis": .number(16_000),
+                "loopEndMillis": .number(18_000),
+                "name": .string("Outro loop"),
+                "colorRgb": .number(0x45D483)
+            ])
+        ])
+        deck["track"] = .object(track)
+        decks[0] = .object(deck)
+        payload["decks"] = .array(decks)
+
+        let snapshot = try EngineSnapshotDecoder().decode(
+            MessageEnvelope(
+                protocolVersion: recorded.protocolVersion,
+                messageType: recorded.messageType,
+                messageId: recorded.messageId,
+                sequence: recorded.sequence,
+                correlationId: recorded.correlationId,
+                sentAt: recorded.sentAt,
+                payload: payload
+            ),
+            endpointDescription: "127.0.0.1:52841",
+            protocolVersion: 1
+        )
+
+        #expect(snapshot.decks[0].hotCues.map(\.letter) == ["A", "C"])
+        #expect(snapshot.decks[0].hotCues.map(\.name) == ["First drop", "Outro loop"])
+        #expect(snapshot.decks[0].hotCues.map(\.colorRGB) == [0xFF4A4A, 0x45D483])
+        #expect(snapshot.decks[0].hotCues[1].loopEndMillis == 18_000)
+    }
+
     @Test("Disabled Ableton Link is informational and never degrades Live")
     func disabledAbletonLinkIsNotAProblem() throws {
         let recorded = try recordedEnvelope()

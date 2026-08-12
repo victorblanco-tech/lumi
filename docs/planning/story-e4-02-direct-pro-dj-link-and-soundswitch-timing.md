@@ -20,6 +20,9 @@
   backup USB with different internal IDs does not silently lose the selection.
 - Track tables expose active `USB Sources` relations per canonical track; the
   relation is queried in one bounded batch with the visible library page.
+- Equal full-path playlists on primary and backup USB media render once in the
+  Library with a deduplicated canonical-track union while both USB relations
+  remain independently visible and synchronizable.
 - USB alias matching uses strict metadata first and a bounded audio-content
   signature fallback so renamed backup tracks can resolve safely.
 - Analysis promotion is monotone: newer analysis may promote, older analysis
@@ -113,7 +116,9 @@ This story is delivered in visible, independently testable increments:
   temporary Dev database copy matched canonical tracks, preserved direct
   and simulator identity, and consolidated two legacy mount records to one
   stable source record without touching the normal Dev database.
-- Metadata, beat grid, waveform, cue list and signature retrieval.
+- **Implemented in dev-24:** metadata, beat grid, waveform, hot-cue list and
+  signature retrieval. Hot-cue letter, name, loop and source RGB color persist
+  once and render consistently in Editor, Local Playback and Live Decks.
 - Exact identity/signature reconciliation and persisted aliases.
 - Explicit ambiguous/unknown result; no realtime fuzzy auto-activation.
 

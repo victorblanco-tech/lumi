@@ -83,6 +83,7 @@ struct LiveDeckSurface<Details: View>: View {
             metadata
             if isLocalPlayback { transportControls }
             if waveformPreview?.points.isEmpty == false { waveformToolbar }
+            hotCueStrip
             synchronizedDeckTimeline
             details
         }
@@ -385,6 +386,66 @@ struct LiveDeckSurface<Details: View>: View {
         .background(Color.white.opacity(0.025))
     }
 
+    @ViewBuilder
+    private var hotCueStrip: some View {
+        if !deck.hotCues.isEmpty {
+            HStack(spacing: LumiSpacing.small) {
+                Text(verbatim: "HOT CUES")
+                    .font(LumiTypography.caption.weight(.semibold))
+                    .foregroundStyle(Color.white.opacity(0.48))
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 5) {
+                        ForEach(deck.hotCues) { cue in
+                            Button {
+                                guard isLocalPlayback,
+                                      let duration = beatGridTimeline?.durationMillis,
+                                      duration > 0 else { return }
+                                onSeek(Double(cue.timeMillis) / Double(duration))
+                            } label: {
+                                hotCueBadge(cue)
+                            }
+                            .buttonStyle(.plain)
+                            .allowsHitTesting(isLocalPlayback)
+                            .help(cue.name.isEmpty
+                                ? "Hot Cue \(cue.letter)"
+                                : "Hot Cue \(cue.letter) · \(cue.name)")
+                        }
+                    }
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, LumiSpacing.small)
+            .frame(height: 30)
+            .background(Color.white.opacity(0.025))
+            .accessibilityIdentifier("lumi.deck.\(deck.deckID).hotCues")
+        }
+    }
+
+    private func hotCueBadge(_ cue: DeckHotCueSnapshot) -> some View {
+        HStack(spacing: 4) {
+            Text(verbatim: cue.letter)
+                .font(LumiTypography.technical.weight(.heavy))
+                .foregroundStyle(Color.black.opacity(0.82))
+                .frame(width: 19, height: 19)
+                .background(hotCueColor(cue.colorRGB))
+                .clipShape(RoundedRectangle(cornerRadius: 3))
+            if !cue.name.isEmpty {
+                Text(verbatim: cue.name)
+                    .font(LumiTypography.technical.weight(.semibold))
+                    .foregroundStyle(Color.white.opacity(0.8))
+                    .lineLimit(1)
+            }
+            if cue.loopEndMillis != nil {
+                Image(systemName: "repeat")
+                    .font(LumiTypography.technical.weight(.bold))
+                    .foregroundStyle(Color.white.opacity(0.56))
+            }
+        }
+        .padding(.trailing, cue.name.isEmpty && cue.loopEndMillis == nil ? 0 : 5)
+        .background(Color.white.opacity(0.05))
+        .clipShape(RoundedRectangle(cornerRadius: 4))
+    }
+
     private func metadataValue(_ label: String, value: String) -> some View {
         VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
             Text(verbatim: label)
@@ -404,7 +465,8 @@ struct LiveDeckSurface<Details: View>: View {
         playheadBeat: Double,
         renderingViewport: LumiWaveformViewport
     ) -> some View {
-        ZStack(alignment: .topLeading) {
+        let displayViewport = isMaster && usesLiveViewport ? viewport : renderingViewport
+        return ZStack(alignment: .topLeading) {
             Color.black
             if let preview = waveformPreview, !preview.points.isEmpty {
                 RGBDeckWaveform(
@@ -414,7 +476,7 @@ struct LiveDeckSurface<Details: View>: View {
                     durationBeats: deck.durationBeats,
                     beatGrid: beatGridTimeline,
                     playheadBeat: playheadBeat,
-                    viewport: isMaster && usesLiveViewport ? viewport : renderingViewport,
+                    viewport: displayViewport,
                     visualClock: scrubProgress == nil ? visualClock : nil,
                     followsLiveViewport: isMaster && usesLiveViewport
                 )
@@ -422,6 +484,7 @@ struct LiveDeckSurface<Details: View>: View {
                     .font(LumiTypography.technical)
                     .foregroundStyle(Color.white.opacity(0.56))
                     .padding(LumiSpacing.small)
+                hotCueMarkers(renderingViewport: displayViewport)
             } else {
                 ContentUnavailableView(
                     "Waveform unavailable",
@@ -493,6 +556,48 @@ struct LiveDeckSurface<Details: View>: View {
             isLocalPlayback
                 ? "Click or drag to seek. Playback continues from the selected position."
                 : "Waveform follows the connected deck."
+        )
+    }
+
+    private func hotCueMarkers(renderingViewport: LumiWaveformViewport) -> some View {
+        GeometryReader { proxy in
+            ForEach(deck.hotCues) { cue in
+                let beat = hotCueBeat(cue)
+                if beat >= renderingViewport.startBeat, beat <= renderingViewport.endBeat {
+                    let x = renderingViewport.x(forBeat: beat, width: proxy.size.width)
+                    VStack(spacing: 0) {
+                        Text(verbatim: cue.letter)
+                            .font(LumiTypography.technical.weight(.heavy))
+                            .foregroundStyle(Color.black.opacity(0.82))
+                            .frame(width: 17, height: 17)
+                            .background(hotCueColor(cue.colorRGB))
+                            .clipShape(RoundedRectangle(cornerRadius: 3))
+                        Rectangle()
+                            .fill(hotCueColor(cue.colorRGB).opacity(0.72))
+                            .frame(width: 1)
+                            .frame(maxHeight: .infinity)
+                    }
+                    .position(x: x, y: proxy.size.height / 2)
+                }
+            }
+        }
+        .allowsHitTesting(false)
+    }
+
+    private func hotCueBeat(_ cue: DeckHotCueSnapshot) -> Double {
+        if let beatGridTimeline {
+            return beatGridTimeline.beat(atTimeMillis: Double(cue.timeMillis))
+        }
+        let bpm = Double(max(1, deck.bpmMilli)) / 1_000
+        let durationMillis = Double(max(1, deck.durationBeats)) * 60_000 / bpm
+        return Double(cue.timeMillis) / durationMillis * Double(max(1, deck.durationBeats))
+    }
+
+    private func hotCueColor(_ rgb: UInt32) -> Color {
+        Color(
+            red: Double((rgb >> 16) & 0xff) / 255,
+            green: Double((rgb >> 8) & 0xff) / 255,
+            blue: Double(rgb & 0xff) / 255
         )
     }
 

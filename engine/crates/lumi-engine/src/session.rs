@@ -3481,6 +3481,10 @@ fn snapshot_envelope_internal(
                         LibraryPlanContext::beat_grid_json,
                     ),
                     "waveformPreview": waveform_preview,
+                    "hotCues": library_context.map_or(
+                        Value::Array(Vec::new()),
+                        LibraryPlanContext::hot_cues_json,
+                    ),
                     "identityFacts": metadata.identity_facts().map(|identity| json!({
                         "matchStatus": "exact",
                         "providerKind": identity.provider_kind(),

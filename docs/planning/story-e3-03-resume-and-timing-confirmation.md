@@ -14,9 +14,10 @@ Status: **In progress**
   applied value with an optional next-phrase value;
 - deterministic Rust and Swift regressions cover the boundary and presentation.
 
-The intermittent pause → cue/seek → play output reconciliation, bounded
-command-busy retry and a Settings-level engine acknowledgement remain in this
-story.
+The deterministic pause → cue/seek → play reconciliation and engine-owned
+pending/applied timing acknowledgement are implemented and remain in the local
+regression gate. Bounded client retry after a command-busy/reconnect path and
+repeat physical SoundSwitch/DMX acceptance remain.
 
 ## Physical finding
 

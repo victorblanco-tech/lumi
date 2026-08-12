@@ -454,6 +454,7 @@ pub struct StoredTrack {
     beat_grid: BeatGrid,
     waveform: Vec<WaveformPoint>,
     raw_phrases: Vec<RawPhraseObservation>,
+    hot_cues: Vec<crate::HotCue>,
 }
 
 impl StoredTrack {
@@ -471,7 +472,13 @@ impl StoredTrack {
             beat_grid,
             waveform,
             raw_phrases,
+            hot_cues: Vec::new(),
         }
+    }
+    #[must_use]
+    pub fn with_hot_cues(mut self, hot_cues: Vec<crate::HotCue>) -> Self {
+        self.hot_cues = hot_cues;
+        self
     }
     #[must_use]
     pub const fn summary(&self) -> &TrackSummary {
@@ -492,6 +499,10 @@ impl StoredTrack {
     #[must_use]
     pub fn raw_phrases(&self) -> &[RawPhraseObservation] {
         &self.raw_phrases
+    }
+    #[must_use]
+    pub fn hot_cues(&self) -> &[crate::HotCue] {
+        &self.hot_cues
     }
 }
 

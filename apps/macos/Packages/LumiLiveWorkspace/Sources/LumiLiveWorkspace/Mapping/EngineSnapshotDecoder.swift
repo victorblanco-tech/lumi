@@ -810,6 +810,10 @@ public struct EngineSnapshotDecoder: Sendable {
                 durationBeats: durationBeats
             )
         }
+        let hotCues = try decodeHotCues(
+            track["hotCues"],
+            durationMillis: beatGrid?.durationMillis
+        )
 
         let keyKnown: Bool
         if key["known"] == nil {
@@ -839,9 +843,58 @@ public struct EngineSnapshotDecoder: Sendable {
             beatGrid: beatGrid,
             phrases: phrases,
             waveformPreview: waveformPreview,
+            hotCues: hotCues,
             planEligibility: planEligibility,
             localPlayback: localPlayback
         )
+    }
+
+    private func decodeHotCues(
+        _ value: JSONValue?,
+        durationMillis: UInt64?
+    ) throws -> [DeckHotCueSnapshot] {
+        guard let value, value != .null else { return [] }
+        guard case let .array(values) = value, values.count <= 26 else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        let cues = try values.map { value -> DeckHotCueSnapshot in
+            guard case let .object(cue) = value,
+                  let indexValue = unsignedInteger(cue["index"]),
+                  let index = UInt8(exactly: indexValue),
+                  (1...26).contains(index),
+                  let timeMillis = unsignedInteger(cue["timeMillis"]),
+                  case let .string(name) = cue["name"],
+                  let colorValue = unsignedInteger(cue["colorRgb"]),
+                  let colorRGB = UInt32(exactly: colorValue),
+                  colorRGB <= 0x00ff_ffff else {
+                throw EngineSnapshotDecodingError.invalidSnapshot
+            }
+            let loopEndMillis: UInt64?
+            if cue["loopEndMillis"] == nil || cue["loopEndMillis"] == .null {
+                loopEndMillis = nil
+            } else {
+                guard let value = unsignedInteger(cue["loopEndMillis"]), value > timeMillis else {
+                    throw EngineSnapshotDecodingError.invalidSnapshot
+                }
+                loopEndMillis = value
+            }
+            guard durationMillis.map({ duration in
+                timeMillis < duration && (loopEndMillis.map { $0 <= duration } ?? true)
+            }) ?? true else {
+                throw EngineSnapshotDecodingError.invalidSnapshot
+            }
+            return DeckHotCueSnapshot(
+                index: index,
+                timeMillis: timeMillis,
+                loopEndMillis: loopEndMillis,
+                name: name,
+                colorRGB: colorRGB
+            )
+        }
+        guard Set(cues.map(\.index)).count == cues.count else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        return cues.sorted { $0.index < $1.index }
     }
 
     private func decodeDeckBeatGrid(

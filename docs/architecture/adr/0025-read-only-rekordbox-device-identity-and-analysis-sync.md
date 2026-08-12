@@ -30,10 +30,10 @@ Lumi adds a provider adapter for a mounted classic Rekordbox Device Library:
   companion set on every sync;
 - it stores a durable alias from `(device source, device track ID)` to one
   canonical Lumi track;
-- it refreshes the matched track's beatgrid and waveform atomically with that
-  alias snapshot;
-- it records cue-bearing analysis revisions now; parsing and displaying cue
-  markers is a following UI increment;
+- it refreshes the matched track's beatgrid, waveform and performance hot cues
+  atomically with that alias snapshot;
+- it normalizes hot-cue letter/index, source time, optional loop end, comment
+  and RGB color into Lumi's provider-neutral analysis model;
 - it never overwrites Lumi phrase timelines, phrase-role choices, Themes or
   track-specific AutoLoop choices.
 
@@ -61,8 +61,11 @@ interrupted or invalid sync leaves the previous known-good snapshot available.
 - Device Library Plus media is not silently treated as classic DeviceSQL. A
   future adapter can implement the same provider contract when its format is
   supported safely.
-- Cue point visualization is explicitly staged after the identity/beatgrid POC;
-  revision tracking prevents that later work from requiring a new sync model.
+- Track Editor, Local Playback and Live Decks render the same persisted hot-cue
+  facts subtly over their shared waveform and in a compact letter/name strip.
+- Upgrading an existing library invalidates only read-only analysis promotion
+  evidence, so the next explicit USB sync fills cue data without rebuilding
+  the Library or touching authored phrases and lighting configuration.
 
 ## Rejected alternatives
 

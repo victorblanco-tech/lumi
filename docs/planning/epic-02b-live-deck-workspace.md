@@ -19,8 +19,8 @@ Target milestone: **0.2.0 – Deck Intelligence**
 - [x] Add Sources & Import device selection, sync and match diagnostics.
 - [ ] Validate a full track through BLT simulation and Local/Connected Deck
   lighting output using the same canonical track.
-- [ ] Parse and display Rekordbox memory/hot cue markers from the tracked
-  analysis revision.
+- [x] Parse and display Rekordbox hot-cue markers from the tracked analysis
+  revision with their source letter, name, loop state and RGB color.
 
 ## Product outcome
 
@@ -38,6 +38,9 @@ current Live track.
   Off is white, Armed is orange, Live is red and Paused blinks orange.
 - The master card is visually dominant; `PLAN READY` is deliberately quieter.
 - Both cards show an RGB waveform, beatgrid, playhead and phrase band.
+- Both cards show subtle source-colored hot-cue markers and a compact
+  letter/name strip; Local Playback may seek to one while Live Decks remains
+  read-only and follows the physical player.
 - Editor and Live share one continuous beat-space interaction model: slider,
   vertical wheel/pinch zoom, horizontal pan, mouse/playhead zoom anchor and
   optional reversed horizontal scrolling. Phrase bands stay aligned while

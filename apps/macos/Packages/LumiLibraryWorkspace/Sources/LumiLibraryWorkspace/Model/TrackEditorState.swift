@@ -26,6 +26,33 @@ public struct TrackEditorWaveformPoint: Equatable, Sendable {
     }
 }
 
+public struct TrackEditorHotCue: Identifiable, Equatable, Sendable {
+    public var id: UInt8 { index }
+    public let index: UInt8
+    public let timeMillis: UInt64
+    public let loopEndMillis: UInt64?
+    public let name: String
+    public let colorRGB: UInt32
+
+    public init(
+        index: UInt8,
+        timeMillis: UInt64,
+        loopEndMillis: UInt64? = nil,
+        name: String,
+        colorRGB: UInt32
+    ) {
+        self.index = index
+        self.timeMillis = timeMillis
+        self.loopEndMillis = loopEndMillis
+        self.name = name
+        self.colorRGB = colorRGB
+    }
+
+    public var letter: String {
+        UnicodeScalar(64 + Int(index)).map(String.init) ?? "?"
+    }
+}
+
 public struct TrackEditorThemeVariantOverride: Equatable, Sendable {
     public let themeID: UInt64
     public let variantID: String
@@ -318,6 +345,7 @@ public struct TrackEditorAnalysis: Identifiable, Equatable, Sendable {
     public let beatsPerBar: UInt8
     public let beats: [TrackEditorBeat]
     public let waveform: [TrackEditorWaveformPoint]
+    public let hotCues: [TrackEditorHotCue]
     public let phrases: [TrackEditorPhrase]
     public let roles: [TrackEditorRole]
     public let sourcePhrases: [TrackEditorSourcePhrase]
@@ -330,6 +358,7 @@ public struct TrackEditorAnalysis: Identifiable, Equatable, Sendable {
         beatsPerBar: UInt8,
         beats: [TrackEditorBeat],
         waveform: [TrackEditorWaveformPoint],
+        hotCues: [TrackEditorHotCue] = [],
         phrases: [TrackEditorPhrase],
         roles: [TrackEditorRole],
         sourcePhrases: [TrackEditorSourcePhrase] = [],
@@ -341,6 +370,7 @@ public struct TrackEditorAnalysis: Identifiable, Equatable, Sendable {
         self.beatsPerBar = beatsPerBar
         self.beats = beats
         self.waveform = waveform
+        self.hotCues = hotCues
         self.phrases = phrases
         self.roles = roles
         self.sourcePhrases = sourcePhrases

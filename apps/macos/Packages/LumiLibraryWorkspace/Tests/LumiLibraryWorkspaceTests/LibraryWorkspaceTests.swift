@@ -795,6 +795,10 @@ struct LibraryWorkspaceTests {
         #expect(editor.beatsPerBar == 4)
         #expect(editor.totalBars == 2)
         #expect(editor.waveform.count == 3)
+        #expect(editor.hotCues.map(\.letter) == ["A", "B"])
+        #expect(editor.hotCues.map(\.name) == ["First drop", "Outro loop"])
+        #expect(editor.hotCues.map(\.colorRGB) == [0xFF4A4A, 0x45D483])
+        #expect(editor.hotCues[1].loopEndMillis == 3_500)
         #expect(editor.phrases.map(\.role) == ["Intro", "Build"])
         #expect(editor.phrases.map(\.roleID) == ["intro-outro", "buildup-1"])
         #expect(editor.timeline.revision == 1)
@@ -1088,6 +1092,7 @@ private func replacingAudioURI(
         beatsPerBar: analysis.beatsPerBar,
         beats: analysis.beats,
         waveform: analysis.waveform,
+        hotCues: analysis.hotCues,
         phrases: analysis.phrases,
         roles: analysis.roles,
         sourcePhrases: analysis.sourcePhrases,
@@ -1272,6 +1277,22 @@ private func editorValue() -> JSONValue {
             .object(["low": .number(30), "mid": .number(60), "high": .number(90)]),
             .object(["low": .number(90), "mid": .number(60), "high": .number(30)]),
             .object(["low": .number(45), "mid": .number(80), "high": .number(120)])
+        ]),
+        "hotCues": .array([
+            .object([
+                "index": .number(1),
+                "timeMillis": .number(1_500),
+                "loopEndMillis": .null,
+                "name": .string("First drop"),
+                "colorRgb": .number(0xFF4A4A)
+            ]),
+            .object([
+                "index": .number(2),
+                "timeMillis": .number(3_000),
+                "loopEndMillis": .number(3_500),
+                "name": .string("Outro loop"),
+                "colorRgb": .number(0x45D483)
+            ])
         ]),
         "phrases": .array([
             .object([

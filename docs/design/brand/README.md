@@ -9,7 +9,9 @@ sound and lighting engineer.
 - `lumi-logo-approved-concept.png` is the approved composition sheet retained
   as design evidence;
 - `lumi-mark-approved.png` is the deterministic square crop used to derive the
-  macOS app icon and the persistent in-app navigation mark;
+  macOS app icon and the persistent in-app navigation mark. Its colored
+  waveform/light geometry is optically centered inside the unchanged rounded
+  icon border (approved 2026-08-13);
 - `LumiWordmark.imageset` is the transparent, deterministic crop of the
   approved horizontal color wordmark used by the expanded navigation;
 - generated app assets live in `apps/macos/Lumi/Resources/Assets.xcassets`.

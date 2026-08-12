@@ -114,6 +114,9 @@ het Theme verandert.
   appearance, met track, Camelot-key, BPM, resterende tijd en actuele bar/beat;
 - tijdas van boven naar beneden: bar/beatgrid, continu gerenderde RGB-waveform,
   gekleurde Lumi-phrases en een compacte full-track overview eronder;
+- Rekordbox hot cues behouden letter, naam, loopstatus en RGB-kleur; ze staan
+  subtiel als markers op detail/overview en als klikbare seeklijst boven de
+  editor, zonder de phrase-editing workflow over te nemen;
 - inspector: role, start/eindmaat, origin, revision en loopstrategie;
 - preview: voorlopig Theme, reason en opgeloste dry-run-Autoloop per phrase;
 - transport: play/pause, stop, seek/scrub, vorige/volgende maat, volume en

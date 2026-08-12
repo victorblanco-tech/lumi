@@ -3,7 +3,7 @@ import Foundation
 public enum LiveWorkspaceFixtures {
     public static let readySnapshot = EngineSnapshot(
         endpoint: "127.0.0.1:52841",
-        engineVersion: "0.4.0-dev-23",
+        engineVersion: "0.4.0-dev-24",
         protocolVersion: 1,
         snapshotSequence: 42,
         stateRevision: 8,
@@ -82,6 +82,7 @@ public enum LiveWorkspaceFixtures {
                 durationBeats: 128,
                 phrases: deckPhrases(second: "verse"),
                 waveformPreview: waveform(seed: 101),
+                hotCues: hotCues(),
                 planEligibility: .readyExact,
                 localPlayback: LocalPlaybackTrackSnapshot(
                     audioURI: "lumi-demo://aurora-signal",
@@ -102,6 +103,7 @@ public enum LiveWorkspaceFixtures {
                 durationBeats: 128,
                 phrases: deckPhrases(second: "breakdown"),
                 waveformPreview: waveform(seed: 202),
+                hotCues: hotCues(),
                 planEligibility: .readyExact,
                 localPlayback: LocalPlaybackTrackSnapshot(
                     audioURI: "lumi-demo://neon-horizon",
@@ -551,6 +553,30 @@ public enum LiveWorkspaceFixtures {
             )
         }
         return DeckWaveformPreviewSnapshot(source: "library", style: "rgb", points: points)
+    }
+
+    private static func hotCues() -> [DeckHotCueSnapshot] {
+        [
+            DeckHotCueSnapshot(
+                index: 1,
+                timeMillis: 15_484,
+                name: "Breakdown",
+                colorRGB: 0x30_5A_FF
+            ),
+            DeckHotCueSnapshot(
+                index: 2,
+                timeMillis: 30_968,
+                name: "Buildup",
+                colorRGB: 0xFF_A0_00
+            ),
+            DeckHotCueSnapshot(
+                index: 3,
+                timeMillis: 46_451,
+                loopEndMillis: 54_193,
+                name: "Drop loop",
+                colorRGB: 0xE6_28_28
+            )
+        ]
     }
 
     private static let planningOptions = PlanningOptionsSnapshot(

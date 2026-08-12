@@ -8,7 +8,7 @@ use std::path::Path;
 use lumi_domain::{KeyMode, MusicalKey, PitchClass, ThemeId, TrackId};
 use lumi_library::{
     AutoloopCatalog, AutoloopCatalogError, AutoloopEntryId, AutoloopMatrixCell, AutoloopTheme,
-    AutoloopVariant, BeatGrid, BeatMarker, ImportResult, ImportedLibraryBaseline,
+    AutoloopVariant, BeatGrid, BeatMarker, HotCue, ImportResult, ImportedLibraryBaseline,
     ImportedTrackAnalysis, LibraryRepository, LibraryTrackQuery, LumiPhraseTimeline,
     PhraseInstance, PhraseLoopStrategy, PhraseRole, PhraseRoleCatalog, PhraseRoleCatalogError,
     PhraseRoleId, PhraseRoleTrackUsage, PhraseRoleUsage, PlaylistId, PlaylistPage, PlaylistSummary,
@@ -21,7 +21,7 @@ use lumi_library::{
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 use thiserror::Error;
 
-const SCHEMA_VERSION: u32 = 9;
+const SCHEMA_VERSION: u32 = 10;
 const DEFAULTS_VERSION_KEY: &str = "phrase-role-defaults-version";
 const CATALOG_REVISION_KEY: &str = "phrase-role-catalog-revision";
 const AUTOLOOP_DEFAULTS_VERSION_KEY: &str = "autoloop-catalog-defaults-version";
@@ -116,6 +116,7 @@ pub struct DeviceAnalysisUpsert {
     pub analyzed_at: String,
     pub beat_grid: BeatGrid,
     pub waveform: Vec<WaveformPoint>,
+    pub hot_cues: Vec<HotCue>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -550,8 +551,9 @@ impl SqliteLibraryRepository {
             alias.sync_disposition = "promoted-initial".to_owned();
             transaction.execute(
                 "INSERT INTO track_analysis_provenance
-                 (track_id, source_id, device_track_id, analysis_revision, analyzed_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 (track_id, source_id, device_track_id, analysis_revision, analyzed_at,
+                  hot_cues_loaded)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 1)
                  ON CONFLICT(track_id) DO NOTHING",
                 params![
                     track_id,
@@ -685,16 +687,19 @@ impl SqliteLibraryRepository {
                 &analysis.analysis_revision,
                 &analysis.beat_grid,
                 &analysis.waveform,
+                &analysis.hot_cues,
             )?;
             transaction.execute(
                 "INSERT INTO track_analysis_provenance
-                 (track_id, source_id, device_track_id, analysis_revision, analyzed_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 (track_id, source_id, device_track_id, analysis_revision, analyzed_at,
+                  hot_cues_loaded)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 1)
                  ON CONFLICT(track_id) DO UPDATE SET
                    source_id = excluded.source_id,
                    device_track_id = excluded.device_track_id,
                    analysis_revision = excluded.analysis_revision,
                    analyzed_at = excluded.analyzed_at,
+                   hot_cues_loaded = 1,
                    promoted_at = CURRENT_TIMESTAMP",
                 params![
                     to_i64(analysis.track_id.value())?,
@@ -751,23 +756,35 @@ impl SqliteLibraryRepository {
         let provenance = self
             .connection
             .query_row(
-                "SELECT analysis_revision, analyzed_at
+                "SELECT analysis_revision, analyzed_at, hot_cues_loaded
                FROM track_analysis_provenance WHERE track_id = ?1",
                 [track_id_value],
-                |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)? != 0,
+                    ))
+                },
             )
             .optional()?;
 
         if provenance
             .as_ref()
-            .is_some_and(|(revision, _)| revision == analysis_revision)
+            .is_some_and(|(revision, _, loaded)| revision == analysis_revision && !loaded)
+        {
+            return Ok(DeviceAnalysisDecision::PromoteInitial);
+        }
+        if provenance
+            .as_ref()
+            .is_some_and(|(revision, _, loaded)| revision == analysis_revision && *loaded)
             || active_revision == format!("device:{source_id}:{analysis_revision}")
             || (active_revision.starts_with("device:")
                 && active_revision.ends_with(analysis_revision))
         {
             return Ok(DeviceAnalysisDecision::Current);
         }
-        let Some((_, active_date)) = provenance else {
+        let Some((_, active_date, _)) = provenance else {
             return Ok(if active_revision.starts_with("device:") {
                 DeviceAnalysisDecision::HoldConflict
             } else {
@@ -1360,6 +1377,15 @@ impl SqliteLibraryRepository {
                     source_label TEXT NOT NULL,
                     PRIMARY KEY(track_id, phrase_index)
                 );
+                CREATE TABLE hot_cues (
+                    track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+                    cue_index INTEGER NOT NULL,
+                    time_millis INTEGER NOT NULL,
+                    loop_end_millis INTEGER,
+                    name TEXT NOT NULL,
+                    color_rgb INTEGER NOT NULL,
+                    PRIMARY KEY(track_id, cue_index)
+                );
                 CREATE TABLE phrase_roles (
                     role_id TEXT PRIMARY KEY,
                     display_name TEXT NOT NULL,
@@ -1520,6 +1546,7 @@ impl SqliteLibraryRepository {
                     device_track_id INTEGER NOT NULL,
                     analysis_revision TEXT NOT NULL,
                     analyzed_at TEXT NOT NULL,
+                    hot_cues_loaded INTEGER NOT NULL DEFAULT 0,
                     promoted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
                 CREATE TABLE creative_track_archives (
@@ -1549,7 +1576,7 @@ impl SqliteLibraryRepository {
                     loop_strategy TEXT NOT NULL,
                     PRIMARY KEY(archive_id, phrase_index)
                 );
-                PRAGMA user_version = 9;
+                PRAGMA user_version = 10;
                 COMMIT;
                 ",
             )?;
@@ -1827,6 +1854,27 @@ impl SqliteLibraryRepository {
                 COMMIT;
                 ",
             )?;
+            current = 9;
+        }
+        if current == 9 {
+            self.connection.execute_batch(
+                "
+                BEGIN IMMEDIATE;
+                CREATE TABLE hot_cues (
+                    track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+                    cue_index INTEGER NOT NULL,
+                    time_millis INTEGER NOT NULL,
+                    loop_end_millis INTEGER,
+                    name TEXT NOT NULL,
+                    color_rgb INTEGER NOT NULL,
+                    PRIMARY KEY(track_id, cue_index)
+                );
+                ALTER TABLE track_analysis_provenance
+                    ADD COLUMN hot_cues_loaded INTEGER NOT NULL DEFAULT 0;
+                PRAGMA user_version = 10;
+                COMMIT;
+                ",
+            )?;
         }
         Ok(())
     }
@@ -1895,6 +1943,23 @@ impl SqliteLibraryRepository {
                 ])?;
             }
         }
+        {
+            let mut statement = transaction.prepare(
+                "INSERT INTO hot_cues
+                 (track_id, cue_index, time_millis, loop_end_millis, name, color_rgb)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            )?;
+            for cue in track.hot_cues() {
+                statement.execute(params![
+                    track_id,
+                    i64::from(cue.index()),
+                    to_i64(cue.time_millis())?,
+                    cue.loop_end_millis().map(to_i64).transpose()?,
+                    cue.name(),
+                    i64::from(cue.color_rgb()),
+                ])?;
+            }
+        }
         Ok(())
     }
 
@@ -1909,6 +1974,7 @@ impl SqliteLibraryRepository {
             [track_id],
         )?;
         transaction.execute("DELETE FROM raw_phrases WHERE track_id = ?1", [track_id])?;
+        transaction.execute("DELETE FROM hot_cues WHERE track_id = ?1", [track_id])?;
         Ok(())
     }
 
@@ -2673,17 +2739,18 @@ impl LibraryRepository for SqliteLibraryRepository {
     }
 
     fn page_playlists(&self, request: TrackPageRequest) -> Result<PlaylistPage, Self::Error> {
-        let total = self
-            .connection
-            .query_row("SELECT COUNT(*) FROM playlists", [], |row| {
-                row.get::<_, i64>(0)
-            })?;
+        let total = self.connection.query_row(
+            "SELECT COUNT(DISTINCT LOWER(TRIM(name))) FROM playlists",
+            [],
+            |row| row.get::<_, i64>(0),
+        )?;
         let mut statement = self.connection.prepare(
-            "SELECT p.id, p.source_playlist_id, p.name, COUNT(pt.track_id)
+            "SELECT MIN(p.id), MIN(p.source_playlist_id), MIN(p.name),
+                    COUNT(DISTINCT pt.track_id)
              FROM playlists p
              LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
-             GROUP BY p.id, p.source_playlist_id, p.name
-             ORDER BY p.name COLLATE NOCASE, p.id
+             GROUP BY LOWER(TRIM(p.name))
+             ORDER BY MIN(p.name) COLLATE NOCASE, MIN(p.id)
              LIMIT ?1 OFFSET ?2",
         )?;
         let mut rows = statement.query(params![
@@ -2712,7 +2779,12 @@ impl LibraryRepository for SqliteLibraryRepository {
         request: TrackPageRequest,
     ) -> Result<TrackPage, Self::Error> {
         let total = self.connection.query_row(
-            "SELECT COUNT(*) FROM playlist_tracks WHERE playlist_id = ?1",
+            "SELECT COUNT(DISTINCT pt.track_id)
+               FROM playlist_tracks pt
+               JOIN playlists p ON p.id = pt.playlist_id
+              WHERE LOWER(TRIM(p.name)) = (
+                    SELECT LOWER(TRIM(name)) FROM playlists WHERE id = ?1
+              )",
             [to_i64(playlist_id.value())?],
             |row| row.get::<_, i64>(0),
         )?;
@@ -2721,10 +2793,20 @@ impl LibraryRepository for SqliteLibraryRepository {
                     t.key_pitch, t.key_mode, t.duration_millis, t.color_rgb,
                     t.analysis_revision, h.revision
              FROM playlist_tracks pt
+             JOIN playlists p ON p.id = pt.playlist_id
              JOIN tracks t ON t.id = pt.track_id
              LEFT JOIN timeline_heads h ON h.track_id = t.id
-             WHERE pt.playlist_id = ?1
-             ORDER BY pt.position
+             WHERE LOWER(TRIM(p.name)) = (
+                    SELECT LOWER(TRIM(name)) FROM playlists WHERE id = ?1
+             )
+             GROUP BY t.id, t.source_track_id, t.title, t.artist, t.bpm_milli,
+                      t.key_pitch, t.key_mode, t.duration_millis, t.color_rgb,
+                      t.analysis_revision, h.revision
+             ORDER BY MIN(CASE WHEN p.id = (
+                        SELECT MIN(p2.id) FROM playlists p2
+                        WHERE LOWER(TRIM(p2.name)) = LOWER(TRIM(p.name))
+                      ) THEN pt.position ELSE 2147483647 END),
+                      MIN(pt.position), t.id
              LIMIT ?2 OFFSET ?3",
         )?;
         let mut rows = statement.query(params![
@@ -2826,13 +2908,27 @@ impl LibraryRepository for SqliteLibraryRepository {
                 row.get::<_, String>(2)?,
             )?);
         }
-        Ok(Some(StoredTrack::new(
-            summary,
-            audio_uri,
-            beat_grid,
-            waveform,
-            raw_phrases,
-        )))
+        let mut cue_statement = self.connection.prepare(
+            "SELECT cue_index, time_millis, loop_end_millis, name, color_rgb
+             FROM hot_cues WHERE track_id = ?1 ORDER BY cue_index",
+        )?;
+        let mut cue_rows = cue_statement.query([to_i64(id.value())?])?;
+        let mut hot_cues = Vec::new();
+        while let Some(row) = cue_rows.next()? {
+            hot_cues.push(HotCue::try_new(
+                to_u8(row.get(0)?, "hot cue index")?,
+                from_nonnegative_i64(row.get(1)?, "hot cue time")?,
+                row.get::<_, Option<i64>>(2)?
+                    .map(|value| from_nonnegative_i64(value, "hot cue loop end"))
+                    .transpose()?,
+                row.get::<_, String>(3)?,
+                to_u32(row.get(4)?, "hot cue color")?,
+            )?);
+        }
+        Ok(Some(
+            StoredTrack::new(summary, audio_uri, beat_grid, waveform, raw_phrases)
+                .with_hot_cues(hot_cues),
+        ))
     }
 
     fn phrase_role_catalog(&self) -> Result<PhraseRoleCatalog, Self::Error> {
@@ -3599,6 +3695,7 @@ fn replace_track_analysis_in_transaction(
     analysis_revision: &str,
     beat_grid: &BeatGrid,
     waveform: &[WaveformPoint],
+    hot_cues: &[HotCue],
 ) -> Result<(), SqliteLibraryError> {
     let track_id = to_i64(track_id.value())?;
     let updated = transaction.execute(
@@ -3614,6 +3711,7 @@ fn replace_track_analysis_in_transaction(
         "DELETE FROM waveform_points WHERE track_id = ?1",
         [track_id],
     )?;
+    transaction.execute("DELETE FROM hot_cues WHERE track_id = ?1", [track_id])?;
     transaction.execute(
         "INSERT INTO beat_grids(track_id, beats_per_bar) VALUES (?1, ?2)",
         params![track_id, i64::from(beat_grid.beats_per_bar())],
@@ -3646,6 +3744,23 @@ fn replace_track_analysis_in_transaction(
                 i64::from(point.low()),
                 i64::from(point.mid()),
                 i64::from(point.high()),
+            ])?;
+        }
+    }
+    {
+        let mut statement = transaction.prepare(
+            "INSERT INTO hot_cues
+             (track_id, cue_index, time_millis, loop_end_millis, name, color_rgb)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        )?;
+        for cue in hot_cues {
+            statement.execute(params![
+                track_id,
+                i64::from(cue.index()),
+                to_i64(cue.time_millis())?,
+                cue.loop_end_millis().map(to_i64).transpose()?,
+                cue.name(),
+                i64::from(cue.color_rgb()),
             ])?;
         }
     }
@@ -4237,6 +4352,7 @@ mod fault_tests {
             analyzed_at: "2026-08-10".to_owned(),
             beat_grid: source_track.beat_grid().clone(),
             waveform: source_track.waveform().to_vec(),
+            hot_cues: source_track.hot_cues().to_vec(),
         }];
         repository.sync_device_aliases(
             "rekordbox-device:test",
@@ -4477,6 +4593,97 @@ mod fault_tests {
                 .tracks()[0]
                 .id(),
             canonical_track_id
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn identical_playlists_from_two_usb_sources_are_presented_once()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let baseline = DemoLibrarySourceProvider::curated().load_baseline()?;
+        let source_tracks = &baseline.tracks()[..2];
+        let mut repository = SqliteLibraryRepository::in_memory()?;
+        repository.import_baseline(&baseline)?;
+        let track_page = repository.page_tracks(TrackPageRequest::try_new(0, 25)?)?;
+        let canonical_track_ids = source_tracks
+            .iter()
+            .map(|source_track| {
+                track_page
+                    .tracks()
+                    .iter()
+                    .find(|track| track.source_track_id() == source_track.source_track_id())
+                    .map(lumi_library::TrackSummary::id)
+                    .ok_or("canonical track missing")
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let aliases = source_tracks
+            .iter()
+            .zip(&canonical_track_ids)
+            .enumerate()
+            .map(
+                |(offset, (source_track, canonical_track_id))| DeviceAliasUpsert {
+                    device_track_id: 90
+                        + u32::try_from(offset).expect("two fixture tracks fit u32"),
+                    simulator_signature: 0,
+                    audio_signature: format!("audio:shared:{}", 90 + offset),
+                    canonical_track_id: Some(*canonical_track_id),
+                    match_kind: "metadata+file-size".to_owned(),
+                    title: source_track.title().to_owned(),
+                    artist: source_track.artist().to_owned(),
+                    bpm_milli: source_track.bpm_milli(),
+                    duration_millis: source_track.duration_millis(),
+                    file_size: 123,
+                    metadata_revision: "metadata-v1".to_owned(),
+                    analysis_revision: "analysis-v1".to_owned(),
+                    analyzed_at: "2026-08-13".to_owned(),
+                    sync_disposition: "current".to_owned(),
+                },
+            )
+            .collect::<Vec<_>>();
+        let playlist = DevicePlaylistUpsert {
+            device_playlist_id: 77,
+            path: "Genre 5 Stars/MainStage 140+".to_owned(),
+            device_track_ids: vec![90, 91],
+        };
+        for (source_id, display_name) in [
+            ("usb-fs:chrm", "DJ VIC CHRM"),
+            ("usb-fs:gray", "DJ VIC GRAY"),
+        ] {
+            repository.sync_device_aliases(
+                source_id,
+                display_name,
+                "database-v1",
+                &mut aliases.clone(),
+                &[],
+                &[],
+                std::slice::from_ref(&playlist),
+            )?;
+        }
+
+        let page = repository.page_playlists(TrackPageRequest::try_new(0, 25)?)?;
+        let matching = page
+            .playlists()
+            .iter()
+            .filter(|playlist| playlist.name() == "Genre 5 Stars/MainStage 140+")
+            .collect::<Vec<_>>();
+        assert_eq!(matching.len(), 1);
+        assert_eq!(matching[0].track_count(), 2);
+        let tracks =
+            repository.page_playlist_tracks(matching[0].id(), TrackPageRequest::try_new(0, 25)?)?;
+        assert_eq!(tracks.total(), 2);
+        assert_eq!(
+            tracks
+                .tracks()
+                .iter()
+                .map(lumi_library::TrackSummary::id)
+                .collect::<Vec<_>>(),
+            canonical_track_ids
+        );
+        let relations = repository.device_track_source_relations(&canonical_track_ids)?;
+        assert!(
+            canonical_track_ids
+                .iter()
+                .all(|track_id| relations[track_id].len() == 2)
         );
         Ok(())
     }

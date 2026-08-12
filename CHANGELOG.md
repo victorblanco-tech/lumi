@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.0-dev-24
+
+- Rekordbox hot cues are parsed read-only from trusted USB analysis, persisted
+  provider-neutrally and shown with their original letter, name, loop state
+  and RGB color in Track Editor, Local Playback and Live Decks.
+- Existing Dev libraries retain all Lumi-authored phrases and lighting
+  configuration; their next trusted-USB sync enriches matched tracks with cue
+  data automatically.
+- Identically named playlists from primary and backup USB media are presented
+  as one canonical Library playlist with a deduplicated track union, while
+  both independent source relationships remain available for sync status.
+- The colored waveform/light mark is optically centered within the unchanged
+  app-icon border and all macOS icon/navigation renditions are regenerated.
+- Resume/seek lighting and exact Pro DJ Link AutoLoop scheduling regressions
+  remain part of the local verification gate; no UI clock enters the realtime
+  output path.
+
 ## 0.4.0-dev-23
 
 - Direct Pro DJ Link Beat packets now drive exact Lumi phrase activation after

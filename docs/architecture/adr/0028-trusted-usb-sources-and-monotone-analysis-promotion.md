@@ -32,6 +32,13 @@ Library using their full folder path and only contain tracks which resolve
 unambiguously to canonical Lumi tracks. Per-source selections are remembered;
 the complete USB is never selected implicitly.
 
+Primary and backup media may expose the same logical playlist. Persistence
+keeps the source-local playlist rows separate, but the Library presentation
+groups equal normalized full paths into one canonical row and returns the
+deduplicated union of their canonical tracks. Source status still lists every
+USB relation; the UI therefore avoids duplicate playlists without erasing
+source provenance or synchronization state.
+
 Every trusted USB uses the filesystem volume UUID as its stable source identity
 (with the existing Device Library identity as a compatibility fallback). On the
 first sync using that stable identity, Lumi atomically reconciles obsolete
@@ -70,8 +77,8 @@ bridge using the upstream `beat-link` library.
 
 ## Consequences
 
-- Connecting an older backup can never downgrade the active beatgrid or
-  waveform.
+- Connecting an older backup can never downgrade the active beatgrid,
+  waveform or hot-cue set.
 - Conflicting counters or identities are held for review rather than guessed.
 - Synchronizing a source later does not make its content newer.
 - A future review workflow can explicitly promote a held conflict without

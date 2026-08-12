@@ -391,6 +391,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
     public let beatGrid: DeckBeatGridSnapshot?
     public let phrases: [DeckPhraseSnapshot]
     public let waveformPreview: DeckWaveformPreviewSnapshot?
+    public let hotCues: [DeckHotCueSnapshot]
     public let planEligibility: DeckPlanEligibility
     public let localPlayback: LocalPlaybackTrackSnapshot?
 
@@ -414,6 +415,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
         beatGrid: DeckBeatGridSnapshot? = nil,
         phrases: [DeckPhraseSnapshot] = [],
         waveformPreview: DeckWaveformPreviewSnapshot? = nil,
+        hotCues: [DeckHotCueSnapshot] = [],
         planEligibility: DeckPlanEligibility = .autoHeld,
         localPlayback: LocalPlaybackTrackSnapshot? = nil
     ) {
@@ -434,8 +436,36 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
         self.beatGrid = beatGrid
         self.phrases = phrases
         self.waveformPreview = waveformPreview
+        self.hotCues = hotCues
         self.planEligibility = planEligibility
         self.localPlayback = localPlayback
+    }
+}
+
+public struct DeckHotCueSnapshot: Equatable, Identifiable, Sendable {
+    public var id: UInt8 { index }
+    public let index: UInt8
+    public let timeMillis: UInt64
+    public let loopEndMillis: UInt64?
+    public let name: String
+    public let colorRGB: UInt32
+
+    public init(
+        index: UInt8,
+        timeMillis: UInt64,
+        loopEndMillis: UInt64? = nil,
+        name: String,
+        colorRGB: UInt32
+    ) {
+        self.index = index
+        self.timeMillis = timeMillis
+        self.loopEndMillis = loopEndMillis
+        self.name = name
+        self.colorRGB = colorRGB
+    }
+
+    public var letter: String {
+        UnicodeScalar(64 + Int(index)).map(String.init) ?? "?"
     }
 }
 

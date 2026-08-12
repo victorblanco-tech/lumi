@@ -780,6 +780,7 @@ public struct LibrarySnapshotDecoder: Sendable {
         let beatGrid = try object(editor, "beatGrid")
         let markers = try array(beatGrid, "markers")
         let waveform = try array(editor, "waveform")
+        let hotCueValues = try optionalArray(editor, "hotCues")
         let phrases = try array(editor, "phrases")
         let roles = try array(editor, "roles")
         let sourcePhraseValues: [JSONValue]
@@ -792,6 +793,7 @@ public struct LibrarySnapshotDecoder: Sendable {
         let revisions = try array(timeline, "revisions")
         guard markers.count <= 1_000_000,
               waveform.count <= 100_000,
+              hotCueValues.count <= 26,
               phrases.count <= 10_000,
               roles.count <= 1_000,
               revisions.count <= 200,
@@ -899,8 +901,36 @@ public struct LibrarySnapshotDecoder: Sendable {
             throw LibrarySnapshotError.invalidPhraseTimeline
         }
         let audioURI = try string(editor, "audioUri")
+        let editorTrackDurationMillis = try unsigned(trackValue, "durationMillis")
         guard !audioURI.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
             throw LibrarySnapshotError.invalidAudioURI
+        }
+        let decodedHotCues = try hotCueValues.map { value -> TrackEditorHotCue in
+            guard case let .object(cue) = value else {
+                throw LibrarySnapshotError.invalidObject
+            }
+            let index = try UInt8(exactly: unsigned(cue, "index"))
+                .required(.invalidNumber("hotCue.index"))
+            let timeMillis = try unsigned(cue, "timeMillis")
+            let loopEndMillis = optionalUnsigned(cue, "loopEndMillis")
+            let colorRGB = try UInt32(exactly: unsigned(cue, "colorRgb"))
+                .required(.invalidNumber("hotCue.colorRgb"))
+            guard (1...26).contains(index),
+                  timeMillis < editorTrackDurationMillis,
+                  (loopEndMillis.map({ $0 > timeMillis && $0 <= editorTrackDurationMillis }) ?? true),
+                  colorRGB <= 0x00ff_ffff else {
+                throw LibrarySnapshotError.invalidNumber("hotCue")
+            }
+            return TrackEditorHotCue(
+                index: index,
+                timeMillis: timeMillis,
+                loopEndMillis: loopEndMillis,
+                name: try string(cue, "name"),
+                colorRGB: colorRGB
+            )
+        }
+        guard Set(decodedHotCues.map(\.index)).count == decodedHotCues.count else {
+            throw LibrarySnapshotError.invalidNumber("hotCue.index")
         }
         return TrackEditorAnalysis(
             track: try decodeTrack(.object(trackValue)),
@@ -920,6 +950,7 @@ public struct LibrarySnapshotDecoder: Sendable {
                         .required(.invalidNumber("waveform.high"))
                 )
             },
+            hotCues: decodedHotCues.sorted { $0.index < $1.index },
             phrases: decodedPhrases,
             roles: decodedRoles,
             sourcePhrases: try sourcePhraseValues.map { value in

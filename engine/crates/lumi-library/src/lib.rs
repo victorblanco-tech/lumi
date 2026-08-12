@@ -20,9 +20,9 @@ pub use autoloop_catalog::{
     AutoloopVariantMove, MissingAutoloopCell,
 };
 pub use baseline::{
-    BeatGrid, BeatGridValidationError, BeatMarker, ImportedLibraryBaseline, ImportedPlaylist,
-    ImportedTrackAnalysis, LibraryBaselineValidationError, RawPhraseObservation, TrackColor,
-    TrackValidationError, WaveformPoint,
+    BeatGrid, BeatGridValidationError, BeatMarker, HotCue, ImportedLibraryBaseline,
+    ImportedPlaylist, ImportedTrackAnalysis, LibraryBaselineValidationError, RawPhraseObservation,
+    TrackColor, TrackValidationError, WaveformPoint,
 };
 pub use identifiers::{
     AutoloopEntryId, LibrarySourceId, PhraseRoleId, PlaylistId, SourcePlaylistId, SourceRevision,

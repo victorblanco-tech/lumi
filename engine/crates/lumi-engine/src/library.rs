@@ -141,6 +141,7 @@ pub struct LibraryPlanContext {
     duration_millis: u64,
     beat_grid: lumi_library::BeatGrid,
     waveform: Vec<lumi_library::WaveformPoint>,
+    hot_cues: Vec<lumi_library::HotCue>,
     catalog: AutoloopCatalog,
     phrases: Vec<LibraryPhrasePlanContext>,
     autoloop_overrides: BTreeMap<u16, VariantId>,
@@ -237,6 +238,22 @@ impl LibraryPlanContext {
                 .map(|marker| marker.time_millis())
                 .collect::<Vec<_>>(),
         })
+    }
+
+    #[must_use]
+    pub fn hot_cues_json(&self) -> Value {
+        json!(
+            self.hot_cues
+                .iter()
+                .map(|cue| json!({
+                    "index": cue.index(),
+                    "timeMillis": cue.time_millis(),
+                    "loopEndMillis": cue.loop_end_millis(),
+                    "name": cue.name(),
+                    "colorRgb": cue.color_rgb(),
+                }))
+                .collect::<Vec<_>>()
+        )
     }
 
     #[must_use]
@@ -1101,6 +1118,10 @@ impl LibraryWorker {
                             &analysis.waveform,
                             MAX_IMPORTED_WAVEFORM_POINTS,
                         ),
+                        hot_cues: canonical_hot_cues(
+                            analysis,
+                            u64::from(device_track.duration_millis),
+                        )?,
                     })
                 })
                 .collect::<Result<Vec<_>, LibraryWorkerError>>()?
@@ -1178,7 +1199,8 @@ impl LibraryWorker {
                         beat_grid,
                         downsample_waveform(&analysis.waveform, MAX_IMPORTED_WAVEFORM_POINTS),
                         canonical_phrases(analysis, total_beats)?,
-                    )?;
+                    )?
+                    .with_hot_cues(canonical_hot_cues(analysis, duration_millis)?)?;
                     Ok(DeviceTrackImport {
                         device_track_id: device_track.device_track_id,
                         source_analysis_revision: device_track.analysis_revision.clone(),
@@ -1460,6 +1482,7 @@ impl LibraryWorker {
             duration_millis: track.summary().duration_millis(),
             beat_grid: track.beat_grid().clone(),
             waveform: track.waveform().to_vec(),
+            hot_cues: track.hot_cues().to_vec(),
             catalog,
             autoloop_overrides: BTreeMap::new(),
             phrases: timeline
@@ -2525,6 +2548,13 @@ impl LibraryWorker {
                 "mid": point.mid(),
                 "high": point.high(),
             })).collect::<Vec<_>>(),
+            "hotCues": track.hot_cues().iter().map(|cue| json!({
+                "index": cue.index(),
+                "timeMillis": cue.time_millis(),
+                "loopEndMillis": cue.loop_end_millis(),
+                "name": cue.name(),
+                "colorRgb": cue.color_rgb(),
+            })).collect::<Vec<_>>(),
             "timeline": {
                 "revision": timeline.revision().value(),
                 "baselineRevision": timeline.baseline_revision().as_str(),
@@ -3080,6 +3110,7 @@ fn rekordbox_canonical_baseline(
                 waveform,
                 phrases,
             )
+            .and_then(|track| track.with_hot_cues(canonical_hot_cues(parsed, duration_millis)?))
             .map_err(LibraryWorkerError::InvalidRekordboxTrack)
         })
         .collect::<Result<Vec<_>, _>>()?;
@@ -3139,6 +3170,31 @@ fn canonical_beat_grid(parsed: &ResolvedTrackAnalysis) -> Result<BeatGrid, Libra
         })
         .collect::<Result<Vec<_>, LibraryWorkerError>>()?;
     BeatGrid::try_new(4, markers).map_err(LibraryWorkerError::InvalidRekordboxBeatGrid)
+}
+
+fn canonical_hot_cues(
+    parsed: &ResolvedTrackAnalysis,
+    duration_millis: u64,
+) -> Result<Vec<lumi_library::HotCue>, lumi_library::TrackValidationError> {
+    parsed
+        .hot_cues
+        .iter()
+        .filter(|cue| u64::from(cue.time_millis) < duration_millis)
+        .map(|cue| {
+            let color_rgb = (u32::from(cue.color_rgb[0]) << 16)
+                | (u32::from(cue.color_rgb[1]) << 8)
+                | u32::from(cue.color_rgb[2]);
+            lumi_library::HotCue::try_new(
+                cue.index,
+                u64::from(cue.time_millis),
+                cue.loop_end_millis
+                    .map(u64::from)
+                    .filter(|end| *end <= duration_millis),
+                cue.comment.clone(),
+                color_rgb,
+            )
+        })
+        .collect()
 }
 
 fn device_track_matches(candidate: &DeviceMatchCandidate, device: &DeviceTrack) -> bool {
