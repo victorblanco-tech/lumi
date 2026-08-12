@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.0-dev-21
+
+- Direct Pro DJ Link is now pumped by a dedicated 20 ms engine cadence instead
+  of SwiftUI's 250 ms snapshot polling. Deck timing therefore continues while
+  the UI is hidden, busy or not requesting state.
+- Only beat-exact Pro DJ Link Beat packets steer advancing Ableton Link phase;
+  asynchronous deck-status frames retain metadata and stopped BPM/transport
+  recovery without impersonating beat boundaries.
+- Stale timing and a failed bridge now hold Link transport fail-closed. A fresh
+  authoritative anchor or automatically restarted bridge recovers the same
+  session without restarting Lumi or emitting a lighting burst.
+- Bounded session metrics expose received/applied/coalesced anchors, hard and
+  soft corrections, phase-error maximums, fail-closed holds, provider failures
+  and realtime engine-lane starvation in Integrations Diagnostics.
+- Pause now holds Link transport immediately, while the master deck's next
+  precise anchor continues to keep BPM and phase current with stopped output.
+
 ## 0.4.0-dev-20
 
 - An enabled Ableton Link session now continues to follow the selected Live

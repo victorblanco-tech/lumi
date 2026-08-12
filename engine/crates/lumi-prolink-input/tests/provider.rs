@@ -1,5 +1,5 @@
 use lumi_deck_source::DeckSourceProvider;
-use lumi_domain::{DeckObservation, DomainEvent, MonotonicTime};
+use lumi_domain::{DeckObservation, DeckSourceStatus, DomainEvent, MonotonicTime};
 use lumi_prolink_input::{BridgeDecoder, ProLinkDeckSourceProvider};
 
 const HELLO: &str = r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":1,"observedAtNanos":10,"type":"hello","payload":{"bridgeVersion":"0.4.0-dev-20","beatLinkVersion":"8.0.0","readOnly":true}}"#;
@@ -128,4 +128,63 @@ fn preserves_low_latency_master_beat_timestamp_for_timing_output() {
     assert_eq!(beat.effective_bpm_milli, 157_250);
     assert_eq!(beat.beat_within_bar, 2);
     assert!(beat.playing);
+}
+
+#[test]
+fn playing_status_frames_never_impersonate_precise_beat_boundaries() {
+    let mut decoder = BridgeDecoder::new();
+    let mut provider = ProLinkDeckSourceProvider::new(MonotonicTime::new(0))
+        .unwrap_or_else(|error| panic!("provider should initialize: {error}"));
+    for (line, time) in [(HELLO, 1), (READY, 2), (STATUS, 3)] {
+        let message = decoder
+            .decode_line(line)
+            .unwrap_or_else(|error| panic!("fixture should decode: {error}"));
+        provider
+            .ingest(message, MonotonicTime::new(time))
+            .unwrap_or_else(|error| panic!("message should translate: {error}"));
+    }
+    assert!(
+        provider.drain_timing_observations().is_empty(),
+        "non-beat-aligned status must not steer Link phase while playing"
+    );
+
+    let beat = decoder
+        .decode_line(BEAT)
+        .unwrap_or_else(|error| panic!("beat fixture should decode: {error}"));
+    provider
+        .ingest(beat, MonotonicTime::new(4))
+        .unwrap_or_else(|error| panic!("beat should translate: {error}"));
+    assert_eq!(provider.drain_timing_observations().len(), 1);
+}
+
+#[test]
+fn bridge_failure_is_visible_and_a_ready_event_clears_it_after_recovery() {
+    let mut decoder = BridgeDecoder::new();
+    let mut provider = ProLinkDeckSourceProvider::new(MonotonicTime::new(0))
+        .unwrap_or_else(|error| panic!("provider should initialize: {error}"));
+    provider
+        .mark_degraded("bridge exited", MonotonicTime::new(1))
+        .unwrap_or_else(|error| panic!("failure should be recorded: {error}"));
+    assert_eq!(
+        provider.diagnostics().source_status,
+        DeckSourceStatus::Degraded
+    );
+    assert_eq!(
+        provider.diagnostics().last_error.as_deref(),
+        Some("bridge exited")
+    );
+
+    for line in [HELLO, READY] {
+        let message = decoder
+            .decode_line(line)
+            .unwrap_or_else(|error| panic!("recovery fixture should decode: {error}"));
+        provider
+            .ingest(message, MonotonicTime::new(2))
+            .unwrap_or_else(|error| panic!("ready event should recover: {error}"));
+    }
+    assert_eq!(
+        provider.diagnostics().source_status,
+        DeckSourceStatus::Ready
+    );
+    assert_eq!(provider.diagnostics().last_error, None);
 }

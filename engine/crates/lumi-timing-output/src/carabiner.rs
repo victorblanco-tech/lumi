@@ -50,6 +50,7 @@ enum WorkerCommand {
     Publish(Option<mpsc::Sender<Result<(), String>>>),
     Synchronize,
     Hold,
+    FailClosed(String),
     Stop(mpsc::Sender<Result<(), String>>),
     Shutdown,
 }
@@ -143,6 +144,17 @@ impl CarabinerTimingOutput {
         });
         Ok(self.configuration.expected_version.clone())
     }
+
+    /// Stops Link transport immediately while retaining the current session.
+    ///
+    /// A fresh authoritative anchor can recover the same worker without an app
+    /// or helper restart. The reason remains visible until that recovery has
+    /// been applied successfully.
+    pub fn fail_closed(&self, reason: impl Into<String>) -> Result<(), CarabinerError> {
+        self.commands
+            .send(WorkerCommand::FailClosed(reason.into()))
+            .map_err(|_| CarabinerError::WorkerUnavailable)
+    }
 }
 
 impl TimingOutputProvider for CarabinerTimingOutput {
@@ -167,12 +179,18 @@ impl TimingOutputProvider for CarabinerTimingOutput {
         let anchor = anchor
             .validate()
             .map_err(|error| CarabinerError::InvalidAnchor(error.to_string()))?;
-        let should_wake = self
+        let previous_pending = self
             .latest_anchor
             .lock()
             .map_err(|_| CarabinerError::WorkerUnavailable)?
-            .replace(anchor)
-            .is_none();
+            .replace(anchor);
+        update_status(&self.status, |status| {
+            status.received_anchor_count = status.received_anchor_count.saturating_add(1);
+            if previous_pending.is_some() {
+                status.coalesced_anchor_count = status.coalesced_anchor_count.saturating_add(1);
+            }
+        });
+        let should_wake = previous_pending.is_none();
         if should_wake {
             self.commands
                 .send(WorkerCommand::Synchronize)
@@ -288,6 +306,22 @@ fn run_worker(
                             status.last_anchor_at = Some(Instant::now());
                             status.last_anchor_age_millis = Some(0);
                             status.phase_error_micros = outcome.phase_error_micros;
+                            status.applied_anchor_count =
+                                status.applied_anchor_count.saturating_add(1);
+                            if outcome.reanchored {
+                                status.hard_reanchor_count =
+                                    status.hard_reanchor_count.saturating_add(1);
+                            } else if outcome.corrected {
+                                status.soft_correction_count =
+                                    status.soft_correction_count.saturating_add(1);
+                            }
+                            status.max_abs_phase_error_micros =
+                                status.max_abs_phase_error_micros.max(
+                                    outcome
+                                        .phase_error_micros
+                                        .unwrap_or_default()
+                                        .unsigned_abs(),
+                                );
                             if outcome.reanchored {
                                 status.last_reanchor = Some(anchor.discontinuity);
                             }
@@ -317,6 +351,27 @@ fn run_worker(
                         status.playing = false;
                         status.last_event = Some("Ableton Link timing held safely".to_owned());
                     });
+                }
+            }
+            WorkerCommand::FailClosed(reason) => {
+                let result = session
+                    .as_mut()
+                    .map_or(Ok(()), CarabinerSession::stop_playing_now);
+                last_anchor = None;
+                match result {
+                    Ok(()) => update_status(shared_status, |status| {
+                        status.state = TimingOutputState::Degraded;
+                        status.playing = false;
+                        status.fail_closed_count = status.fail_closed_count.saturating_add(1);
+                        status.last_event = Some(
+                            "Ableton Link held because source timing became unsafe".to_owned(),
+                        );
+                        status.last_error = Some(reason);
+                    }),
+                    Err(error) => {
+                        set_degraded(shared_status, &error);
+                        session = None;
+                    }
                 }
             }
             WorkerCommand::Stop(reply) => {
@@ -422,6 +477,7 @@ struct AnchorOutcome {
     peers: u32,
     phase_error_micros: Option<i64>,
     reanchored: bool,
+    corrected: bool,
     event: String,
 }
 
@@ -472,6 +528,7 @@ fn apply_anchor(
         peers: snapshot.peers,
         phase_error_micros: Some(phase_error_micros),
         reanchored: should_reanchor,
+        corrected: !should_reanchor && phase_error_micros.abs() >= SOFT_PHASE_ERROR_MICROS,
         event: if anchor.observed_at_micros.is_some() && shared_epoch_time.is_none() {
             "Ableton Link synchronized with receive-time fallback".to_owned()
         } else if should_reanchor {
@@ -676,6 +733,7 @@ fn update_status(
 fn set_degraded(shared_status: &Arc<Mutex<TimingOutputStatus>>, error: &str) {
     update_status(shared_status, |status| {
         status.state = TimingOutputState::Degraded;
+        status.failure_count = status.failure_count.saturating_add(1);
         status.last_error = Some(error.to_owned());
     });
 }

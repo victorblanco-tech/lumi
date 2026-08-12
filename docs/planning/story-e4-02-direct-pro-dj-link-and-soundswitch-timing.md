@@ -119,11 +119,12 @@ This story is delivered in visible, independently testable increments:
 
 ### E4-02D — SoundSwitch timing output
 
-**Implementation status for `0.4.0-dev-20`:** D1 and D2 are implemented and
-locally verified. D3 status, automatic recovery and an Off-only side-effect-free
-helper self-test are implemented. The managed Link path is verified
-against SoundSwitch as a real peer for 130 → 140 BPM plus hold/start-stop. D4
-remains a complete-show and physical-hardware acceptance gate.
+**Implementation status for `0.4.0-dev-21`:** D1 and D2 are implemented and
+locally verified. D3 status, fail-closed source handling, bridge/helper
+recovery and an Off-only side-effect-free helper self-test are implemented.
+The managed Link path is verified against SoundSwitch as a real peer for
+130 → 140 BPM plus hold/start-stop. D4 remains a complete-show, soak and
+physical-hardware acceptance gate.
 
 - **Architecture accepted in ADR-0030:** provider-neutral engine timing
   authority with a managed Ableton Link output adapter.
@@ -150,6 +151,19 @@ remains a complete-show and physical-hardware acceptance gate.
 - Timing work runs outside SwiftUI, waveform rendering and SQLite. Bounded
   queues and latest-state diagnostics prevent UI load from delaying beat
   publication.
+- **Robustness implemented in dev-21:** direct input is pumped by the engine at
+  20 ms independent of UI snapshot polling; only exact Pro DJ Link beat packets
+  steer playing phase; three missing beats hold Link fail-closed; and a failed
+  bridge restarts automatically before fresh timing re-arms the session.
+- **Performance evidence implemented in dev-21:** bounded diagnostics count
+  received/applied/coalesced anchors, phase corrections, maximum phase error,
+  fail-closed/provider failures and realtime pump starvation/lateness without
+  adding unbounded logging to the show path.
+- **Network acceptance implemented and passed in dev-21:** an opt-in production
+  engine test waits for the USB-backed LAN simulator's first precise beat,
+  leaves the authenticated client completely idle for three seconds, then
+  proves that engine pumps, bridge frames and applied Link anchors all advanced
+  without SwiftUI polling.
 - **Release-blocking safety implemented in dev-18:** the direct Pro DJ Link
   helper has no Local Playback/app-start lifecycle. Selecting Live Decks first
   verifies that UDP 50000–50002 are available; a same-host Rekordbox conflict
@@ -187,6 +201,9 @@ remains a complete-show and physical-hardware acceptance gate.
   fault;
 - provide an explicit helper test in Diagnostics, disabled while a Live show
   could be disturbed and unable to join or change the shared Link session.
+- expose bounded realtime counters in Diagnostics and recover automatically
+  from stale input, helper failure and direct bridge exit without an app
+  restart.
 
 Implemented status includes independent Link and MIDI readiness, helper
 version, peers, source, deck, effective BPM, beat age, phase error, last
@@ -259,6 +276,8 @@ then drive the managed helper and reconnect it when needed.
 - All bridge and Rust contract tests run locally without paid CI minutes.
 - Simulator packet tests and API acceptance checks run locally without paid CI
   minutes.
+- The opt-in `prolink_network_acceptance` test runs only against the dedicated
+  LAN simulator and remains ignored in deterministic offline verification.
 
 ## Out of scope
 

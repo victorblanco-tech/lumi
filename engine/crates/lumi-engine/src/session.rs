@@ -61,9 +61,11 @@ use subtle::ConstantTimeEq as _;
 use thiserror::Error;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWriteExt as _};
+use tokio::io::{
+    AsyncBufRead, AsyncBufReadExt as _, AsyncRead, AsyncReadExt as _, AsyncWriteExt as _, BufReader,
+};
 use tokio::net::{TcpListener, TcpStream};
-use tokio::time::timeout;
+use tokio::time::{MissedTickBehavior, timeout};
 
 use crate::StartupReady;
 use crate::commands::{DeckSourceSelection, SessionCommand, decode_command};
@@ -81,6 +83,9 @@ const MAXIMUM_SESSION_TOKEN_BYTES: usize = 256;
 const MAXIMUM_AUTHENTICATION_BYTES: usize = 512;
 const CONNECTION_TIMEOUT: Duration = Duration::from_secs(10);
 const AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(5);
+const INTEGRATION_PUMP_INTERVAL: Duration = Duration::from_millis(20);
+const MINIMUM_PROLINK_TIMING_STALE_AFTER: Duration = Duration::from_millis(1_250);
+const MAXIMUM_PROLINK_TIMING_STALE_AFTER: Duration = Duration::from_secs(5);
 const EVENT_QUEUE_CAPACITY: usize = 256;
 const COMMAND_ID_CACHE_CAPACITY: usize = 256;
 const LIBRARY_CONTEXT_CAPACITY: usize = 256;
@@ -167,26 +172,46 @@ async fn serve_authenticated_client(
     )
     .await?;
     let mut command_ids = CommandIdCache::new(COMMAND_ID_CACHE_CAPACITY)?;
+    let mut command_reader = BufReader::new(reader);
+    let mut command_buffer = Vec::with_capacity(256);
+    let mut integration_pump = tokio::time::interval(INTEGRATION_PUMP_INTERVAL);
+    integration_pump.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    // The first interval tick is immediately ready. Consume it so deck input
+    // cadence starts after one complete interval rather than racing bootstrap.
+    integration_pump.tick().await;
 
-    while let Some(command_bytes) = read_command_line(&mut reader).await? {
-        response_sequence = response_sequence
-            .checked_add(1)
-            .ok_or(EngineError::ResponseSequenceOverflow)?;
-        let response = match MessageDecoder::decode(&command_bytes) {
-            Ok(envelope) => {
-                handle_command(runtime, &mut command_ids, &envelope, response_sequence)?
+    loop {
+        tokio::select! {
+            biased;
+            _ = integration_pump.tick() => {
+                // Pro DJ Link timing is a realtime engine responsibility. It
+                // must keep flowing when SwiftUI is busy, hidden or not asking
+                // for snapshots.
+                runtime.integration_pump_metrics.record(Instant::now());
+                process_deck_input_messages(runtime)?;
             }
-            Err(error) => error_envelope(
-                response_sequence,
-                "unknown-command",
-                "invalidCommand",
-                "invalidEnvelope",
-                &error.to_string(),
-                false,
-                None,
-            )?,
-        };
-        write_envelope(&mut writer, &response).await?;
+            command = read_command_line(&mut command_reader, &mut command_buffer) => {
+                let Some(command_bytes) = command? else { break };
+                response_sequence = response_sequence
+                    .checked_add(1)
+                    .ok_or(EngineError::ResponseSequenceOverflow)?;
+                let response = match MessageDecoder::decode(&command_bytes) {
+                    Ok(envelope) => {
+                        handle_command(runtime, &mut command_ids, &envelope, response_sequence)?
+                    }
+                    Err(error) => error_envelope(
+                        response_sequence,
+                        "unknown-command",
+                        "invalidCommand",
+                        "invalidEnvelope",
+                        &error.to_string(),
+                        false,
+                        None,
+                    )?,
+                };
+                write_envelope(&mut writer, &response).await?;
+            }
+        }
     }
 
     Ok(())
@@ -203,24 +228,36 @@ where
     Ok(())
 }
 
-async fn read_command_line<R>(reader: &mut R) -> Result<Option<Vec<u8>>, EngineError>
+async fn read_command_line<R>(
+    reader: &mut R,
+    bytes: &mut Vec<u8>,
+) -> Result<Option<Vec<u8>>, EngineError>
 where
-    R: AsyncRead + Unpin,
+    R: AsyncBufRead + Unpin,
 {
-    let mut bytes = Vec::with_capacity(256);
     loop {
-        match reader.read_u8().await {
-            Ok(b'\n') => return Ok(Some(bytes)),
-            Ok(byte) => {
-                bytes.push(byte);
-                if bytes.len() > MAX_MESSAGE_BYTES {
-                    return Err(EngineError::MessageOversized);
-                }
-            }
-            Err(error) if error.kind() == io::ErrorKind::UnexpectedEof && bytes.is_empty() => {
+        let available = reader.fill_buf().await?;
+        if available.is_empty() {
+            if bytes.is_empty() {
                 return Ok(None);
             }
-            Err(error) => return Err(EngineError::Io(error)),
+            return Err(EngineError::Io(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "command ended before a newline",
+            )));
+        }
+        let newline = available.iter().position(|byte| *byte == b'\n');
+        let payload_length = newline.unwrap_or(available.len());
+        if bytes.len().saturating_add(payload_length) > MAX_MESSAGE_BYTES {
+            return Err(EngineError::MessageOversized);
+        }
+        bytes.extend_from_slice(&available[..payload_length]);
+        let consumed = payload_length.saturating_add(usize::from(newline.is_some()));
+        reader.consume(consumed);
+        if newline.is_some() {
+            let line = bytes.clone();
+            bytes.clear();
+            return Ok(Some(line));
         }
     }
 }
@@ -256,6 +293,12 @@ struct EngineRuntime {
     #[cfg(not(test))]
     prolink_bridge: Option<BridgeProcessSupervisor>,
     prolink_start_error: Option<String>,
+    #[cfg(not(test))]
+    prolink_recovery_pending: bool,
+    #[cfg(not(test))]
+    last_prolink_restart_attempt: Option<Instant>,
+    #[cfg(not(test))]
+    prolink_restart_count: u64,
     deck_source_mode: DeckSourceMode,
     planning_worker: PlanningWorker,
     output_worker: OutputWorker,
@@ -263,6 +306,7 @@ struct EngineRuntime {
     library_worker: LibraryWorker,
     operation_sequence: u64,
     local_transports: BTreeMap<lumi_domain::DeckId, LocalTransportObservation>,
+    integration_pump_metrics: IntegrationPumpMetrics,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -271,6 +315,40 @@ struct LocalTransportObservation {
     position_millis: u64,
     playing: bool,
     observed_at: Instant,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct IntegrationPumpMetrics {
+    last_tick: Option<Instant>,
+    tick_count: u64,
+    starvation_count: u64,
+    max_lateness_micros: u64,
+}
+
+impl IntegrationPumpMetrics {
+    const fn new() -> Self {
+        Self {
+            last_tick: None,
+            tick_count: 0,
+            starvation_count: 0,
+            max_lateness_micros: 0,
+        }
+    }
+
+    fn record(&mut self, now: Instant) {
+        self.tick_count = self.tick_count.saturating_add(1);
+        if let Some(previous) = self.last_tick {
+            let elapsed = now.saturating_duration_since(previous);
+            let lateness = elapsed.saturating_sub(INTEGRATION_PUMP_INTERVAL);
+            self.max_lateness_micros = self
+                .max_lateness_micros
+                .max(u64::try_from(lateness.as_micros()).unwrap_or(u64::MAX));
+            if elapsed >= INTEGRATION_PUMP_INTERVAL.saturating_mul(2) {
+                self.starvation_count = self.starvation_count.saturating_add(1);
+            }
+        }
+        self.last_tick = Some(now);
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -283,7 +361,7 @@ enum DeckSourceMode {
 impl EngineRuntime {
     fn deck_source_kind(&self) -> &'static str {
         match self.deck_source_mode {
-            DeckSourceMode::ConnectedDecks if self.direct_prolink_active() => "directProDjLink",
+            DeckSourceMode::ConnectedDecks if self.uses_direct_prolink() => "directProDjLink",
             DeckSourceMode::ConnectedDecks => "beatLinkTriggerMidi",
             DeckSourceMode::LocalPlayback => "localPlayback",
             DeckSourceMode::Simulator => "simulator",
@@ -292,7 +370,7 @@ impl EngineRuntime {
 
     fn leader_deck_id(&self) -> Option<lumi_domain::DeckId> {
         match self.deck_source_mode {
-            DeckSourceMode::ConnectedDecks if self.direct_prolink_active() => {
+            DeckSourceMode::ConnectedDecks if self.uses_direct_prolink() => {
                 self.direct_deck_source.leader_deck_id()
             }
             DeckSourceMode::ConnectedDecks => self.connected_deck_source.leader_deck_id(),
@@ -309,6 +387,32 @@ impl EngineRuntime {
         #[cfg(test)]
         {
             false
+        }
+    }
+
+    fn uses_direct_prolink(&self) -> bool {
+        self.direct_prolink_active() || self.prolink_recovery_pending()
+    }
+
+    fn prolink_recovery_pending(&self) -> bool {
+        #[cfg(not(test))]
+        {
+            self.prolink_recovery_pending
+        }
+        #[cfg(test)]
+        {
+            false
+        }
+    }
+
+    fn prolink_restart_count(&self) -> u64 {
+        #[cfg(not(test))]
+        {
+            self.prolink_restart_count
+        }
+        #[cfg(test)]
+        {
+            0
         }
     }
 }
@@ -428,6 +532,12 @@ fn initialized_runtime_for_mode(
         #[cfg(not(test))]
         prolink_bridge,
         prolink_start_error,
+        #[cfg(not(test))]
+        prolink_recovery_pending: false,
+        #[cfg(not(test))]
+        last_prolink_restart_attempt: None,
+        #[cfg(not(test))]
+        prolink_restart_count: 0,
         deck_source_mode,
         planning_worker,
         output_worker,
@@ -435,6 +545,7 @@ fn initialized_runtime_for_mode(
         library_worker,
         operation_sequence: 0,
         local_transports: BTreeMap::new(),
+        integration_pump_metrics: IntegrationPumpMetrics::new(),
     })
 }
 
@@ -541,7 +652,7 @@ fn process_pending_source_events(runtime: &mut EngineRuntime) -> Result<(), Engi
     let leader_deck_id = runtime.leader_deck_id();
     match runtime.deck_source_mode {
         DeckSourceMode::ConnectedDecks => {
-            if runtime.direct_prolink_active() {
+            if runtime.uses_direct_prolink() {
                 for event in runtime.direct_deck_source.drain_events()? {
                     let event = hydrate_direct_library_event(runtime, event)?;
                     runtime.planning_worker.process_source_event(
@@ -904,6 +1015,10 @@ struct OutputWorker {
     pending_timing_offset_millis: Option<i16>,
     last_midi_publish_attempt: Option<Instant>,
     local_timing_generation: u64,
+    last_prolink_timing_at: Option<Instant>,
+    last_prolink_bpm_milli: Option<u32>,
+    last_prolink_playing: Option<bool>,
+    prolink_timing_stale: bool,
 }
 
 impl OutputWorker {
@@ -924,6 +1039,10 @@ impl OutputWorker {
             pending_timing_offset_millis: None,
             last_midi_publish_attempt: None,
             local_timing_generation: 0,
+            last_prolink_timing_at: None,
+            last_prolink_bpm_milli: None,
+            last_prolink_playing: None,
+            prolink_timing_stale: false,
         }
     }
 
@@ -1014,6 +1133,10 @@ impl OutputWorker {
                 .stop()
                 .map_err(|error| EngineError::Timing(error.to_string()))?;
             self.link_enabled = false;
+            self.last_prolink_timing_at = None;
+            self.last_prolink_bpm_milli = None;
+            self.last_prolink_playing = None;
+            self.prolink_timing_stale = false;
         }
         Ok(())
     }
@@ -1108,9 +1231,62 @@ impl OutputWorker {
         if !self.link_enabled {
             return Ok(());
         }
+        self.last_prolink_timing_at = Some(Instant::now());
+        self.last_prolink_bpm_milli = Some(observation.effective_bpm_milli);
+        self.last_prolink_playing = Some(observation.playing);
+        self.prolink_timing_stale = false;
         self.link_timing
             .synchronize(prolink_timing_anchor(observation, operation))
             .map_err(|error| EngineError::Timing(error.to_string()))
+    }
+
+    #[cfg(not(test))]
+    fn reconcile_prolink_timing_freshness(
+        &mut self,
+        source_status: DeckSourceStatus,
+    ) -> Result<(), EngineError> {
+        if !self.link_enabled || self.prolink_timing_stale {
+            return Ok(());
+        }
+        let Some(last_timing_at) = self.last_prolink_timing_at else {
+            return Ok(());
+        };
+        let source_unavailable = !matches!(source_status, DeckSourceStatus::Ready);
+        // A stopped master intentionally emits no beat packets. Its last
+        // authoritative hold remains valid while the bridge itself is healthy;
+        // otherwise every normal pause would be misreported as stale timing.
+        if !source_unavailable && self.last_prolink_playing == Some(false) {
+            return Ok(());
+        }
+        let stale_after = prolink_timing_stale_after(self.last_prolink_bpm_milli);
+        let age = last_timing_at.elapsed();
+        if !source_unavailable && age <= stale_after {
+            return Ok(());
+        }
+        let reason = if source_unavailable {
+            format!(
+                "Pro DJ Link source is {}; Link transport was held fail-closed",
+                deck_source_status_name(source_status)
+            )
+        } else {
+            format!(
+                "Pro DJ Link timing is stale ({} ms without an anchor); Link transport was held fail-closed",
+                age.as_millis()
+            )
+        };
+        self.fail_prolink_timing(reason)
+    }
+
+    #[cfg(not(test))]
+    fn fail_prolink_timing(&mut self, reason: impl Into<String>) -> Result<(), EngineError> {
+        if !self.link_enabled || self.prolink_timing_stale {
+            return Ok(());
+        }
+        self.link_timing
+            .fail_closed(reason)
+            .map_err(|error| EngineError::Timing(error.to_string()))?;
+        self.prolink_timing_stale = true;
+        Ok(())
     }
 
     fn synchronize_local_link_timing(
@@ -1123,6 +1299,10 @@ impl OutputWorker {
         if !self.link_enabled {
             return Ok(());
         }
+        self.last_prolink_timing_at = None;
+        self.last_prolink_bpm_milli = None;
+        self.last_prolink_playing = None;
+        self.prolink_timing_stale = false;
         if force_rephase {
             self.local_timing_generation =
                 self.local_timing_generation.checked_add(1).ok_or_else(|| {
@@ -1148,6 +1328,17 @@ impl OutputWorker {
             })
             .map_err(|error| EngineError::Timing(error.to_string()))
     }
+}
+
+fn prolink_timing_stale_after(bpm_milli: Option<u32>) -> Duration {
+    let three_beats = bpm_milli
+        .filter(|bpm| *bpm > 0)
+        .map(|bpm| Duration::from_micros(180_000_000_000_u64 / u64::from(bpm)))
+        .unwrap_or(MINIMUM_PROLINK_TIMING_STALE_AFTER);
+    three_beats.clamp(
+        MINIMUM_PROLINK_TIMING_STALE_AFTER,
+        MAXIMUM_PROLINK_TIMING_STALE_AFTER,
+    )
 }
 
 fn position_with_timing_offset(position_millis: u64, offset_millis: i32) -> u64 {
@@ -1427,14 +1618,18 @@ fn process_deck_input_messages(runtime: &mut EngineRuntime) -> Result<(), Engine
     let messages = runtime.deck_input.drain_messages();
     if runtime.deck_source_mode != DeckSourceMode::ConnectedDecks {
         #[cfg(not(test))]
-        pump_direct_prolink_bridge(runtime)?;
+        maintain_direct_prolink_bridge(runtime)?;
         return Ok(());
     }
     let at = runtime.clock.now();
-    if runtime.direct_prolink_active() {
+    #[cfg(not(test))]
+    maintain_direct_prolink_bridge(runtime)?;
+    if !runtime.uses_direct_prolink() {
         #[cfg(not(test))]
-        pump_direct_prolink_bridge(runtime)?;
-    } else {
+        if runtime.prolink_recovery_pending {
+            process_pending_source_events(runtime)?;
+            return Ok(());
+        }
         for message in messages {
             runtime.connected_deck_source.ingest(message, at)?;
         }
@@ -1449,14 +1644,59 @@ fn process_deck_input_messages(runtime: &mut EngineRuntime) -> Result<(), Engine
 }
 
 #[cfg(not(test))]
-fn pump_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
+fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
+    if runtime.prolink_recovery_pending && runtime.prolink_bridge.is_none() {
+        let retry_due = runtime
+            .last_prolink_restart_attempt
+            .is_none_or(|last_attempt| last_attempt.elapsed() >= Duration::from_secs(1));
+        if retry_due {
+            runtime.last_prolink_restart_attempt = Some(Instant::now());
+            let (bridge, error) = launch_prolink_bridge();
+            runtime.prolink_start_error = error;
+            if let Some(bridge) = bridge {
+                runtime.prolink_bridge = Some(bridge);
+                runtime.direct_deck_source = ProLinkDeckSourceProvider::new(runtime.clock.now())?;
+                runtime.prolink_recovery_pending = false;
+                runtime.prolink_restart_count = runtime.prolink_restart_count.saturating_add(1);
+                runtime.prolink_start_error = None;
+            }
+        }
+    }
+
     let Some(bridge) = runtime.prolink_bridge.as_mut() else {
         return Ok(());
     };
-    let messages = bridge.drain_messages()?;
+    let messages = match bridge.drain_messages() {
+        Ok(messages) => messages,
+        Err(error) => {
+            fail_direct_prolink_bridge(runtime, error.to_string())?;
+            return Ok(());
+        }
+    };
+    let Some(bridge) = runtime.prolink_bridge.as_mut() else {
+        return Ok(());
+    };
+    let bridge_running = match bridge.diagnostics() {
+        Ok(diagnostics) => diagnostics.running,
+        Err(error) => {
+            fail_direct_prolink_bridge(runtime, error.to_string())?;
+            return Ok(());
+        }
+    };
+    if !bridge_running {
+        fail_direct_prolink_bridge(
+            runtime,
+            "Pro DJ Link bridge stopped unexpectedly".to_owned(),
+        )?;
+        return Ok(());
+    }
+
     let at = runtime.clock.now();
     for message in messages {
-        runtime.direct_deck_source.ingest(message, at)?;
+        if let Err(error) = runtime.direct_deck_source.ingest(message, at) {
+            fail_direct_prolink_bridge(runtime, error.to_string())?;
+            return Ok(());
+        }
     }
     let operation = runtime.state.state().operation();
     for observation in runtime.direct_deck_source.drain_timing_observations() {
@@ -1464,6 +1704,28 @@ fn pump_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), EngineE
             .output_worker
             .synchronize_prolink_timing(observation, operation)?;
     }
+    runtime.output_worker.reconcile_prolink_timing_freshness(
+        runtime.direct_deck_source.diagnostics().source_status,
+    )?;
+    Ok(())
+}
+
+#[cfg(not(test))]
+fn fail_direct_prolink_bridge(
+    runtime: &mut EngineRuntime,
+    message: String,
+) -> Result<(), EngineError> {
+    let actionable = format!("{message}; Lumi will retry the Pro DJ Link bridge automatically");
+    runtime.prolink_start_error = Some(actionable.clone());
+    runtime
+        .output_worker
+        .fail_prolink_timing(actionable.clone())?;
+    let at = runtime.clock.now();
+    runtime.direct_deck_source.mark_degraded(actionable, at)?;
+    runtime.direct_deck_source.clear(at)?;
+    runtime.prolink_bridge.take();
+    runtime.prolink_recovery_pending = true;
+    runtime.last_prolink_restart_attempt = Some(Instant::now());
     Ok(())
 }
 
@@ -1899,7 +2161,7 @@ fn apply_command(
                         .clock
                         .advance(1)
                         .ok_or(CommandApplicationError::ClockOverflow)?;
-                    if runtime.direct_prolink_active() {
+                    if runtime.uses_direct_prolink() {
                         runtime.direct_deck_source.clear(at).map_err(|error| {
                             CommandApplicationError::Engine(EngineError::ProLinkProvider(error))
                         })?;
@@ -1912,11 +2174,15 @@ fn apply_command(
                     {
                         runtime.prolink_bridge.take();
                         runtime.prolink_start_error = None;
+                        runtime.prolink_recovery_pending = false;
+                        runtime.last_prolink_restart_attempt = None;
                     }
                 }
                 #[cfg(not(test))]
                 if let Some(bridge) = pending_prolink_bridge {
                     runtime.prolink_bridge = Some(bridge);
+                    runtime.prolink_recovery_pending = false;
+                    runtime.last_prolink_restart_attempt = None;
                 }
                 runtime.deck_source_mode = target;
                 process_pending_source_events(runtime).map_err(CommandApplicationError::Engine)?;
@@ -1936,7 +2202,9 @@ fn apply_command(
             command,
         } => {
             apply_operation_command(runtime, expected_revision, command)?;
-            if command == OperationCommand::Off && runtime.output_worker.link_enabled() {
+            if matches!(command, OperationCommand::Off | OperationCommand::Pause)
+                && runtime.output_worker.link_enabled()
+            {
                 runtime.output_worker.link_timing.hold().map_err(|error| {
                     CommandApplicationError::Engine(EngineError::Timing(error.to_string()))
                 })?;
@@ -2627,7 +2895,7 @@ fn snapshot_envelope_internal(
                 DeckSourceMode::Simulator => "Internal Test Source",
             },
             "status": if runtime.deck_source_mode == DeckSourceMode::ConnectedDecks {
-                if runtime.direct_prolink_active() {
+                if runtime.uses_direct_prolink() {
                     deck_source_status_name(runtime.direct_deck_source.diagnostics().source_status)
                 } else if runtime.connected_deck_source.diagnostics().committed_frame_count > 0 {
                     "ready"
@@ -2716,6 +2984,17 @@ fn snapshot_envelope_internal(
             "generation": link_timing.generation,
             "lastBeatAgeMillis": link_timing.last_anchor_age_millis,
             "phaseErrorMicros": link_timing.phase_error_micros,
+            "receivedAnchorCount": link_timing.received_anchor_count,
+            "appliedAnchorCount": link_timing.applied_anchor_count,
+            "coalescedAnchorCount": link_timing.coalesced_anchor_count,
+            "hardReanchorCount": link_timing.hard_reanchor_count,
+            "softCorrectionCount": link_timing.soft_correction_count,
+            "failClosedCount": link_timing.fail_closed_count,
+            "failureCount": link_timing.failure_count,
+            "maxAbsPhaseErrorMicros": link_timing.max_abs_phase_error_micros,
+            "enginePumpCount": runtime.integration_pump_metrics.tick_count,
+            "enginePumpStarvationCount": runtime.integration_pump_metrics.starvation_count,
+            "enginePumpMaxLatenessMicros": runtime.integration_pump_metrics.max_lateness_micros,
             "lastReanchor": link_timing.last_reanchor.map(|reason| match reason {
                 TimingDiscontinuity::Continuous => "continuous",
                 TimingDiscontinuity::Started => "started",
@@ -2728,7 +3007,7 @@ fn snapshot_envelope_internal(
             "lastError": link_timing.last_error,
         }),
     );
-    if runtime.direct_prolink_active() {
+    if runtime.uses_direct_prolink() {
         let diagnostics = runtime.direct_deck_source.diagnostics();
         payload.insert(
             "deckInputIntegration".to_owned(),
@@ -2753,6 +3032,8 @@ fn snapshot_envelope_internal(
                 "lastFrameSequence": diagnostics.last_bridge_sequence,
                 "bridgeVersion": diagnostics.bridge_version,
                 "beatLinkVersion": diagnostics.beat_link_version,
+                "recoveryPending": runtime.prolink_recovery_pending(),
+                "restartCount": runtime.prolink_restart_count(),
                 "discoveredPlayers": diagnostics.discovered_devices.iter()
                     .map(|(number, device)| json!({
                         "playerNumber": number,
@@ -2822,7 +3103,7 @@ fn snapshot_envelope_internal(
             };
             let connected_playback_position_millis =
                 if runtime.deck_source_mode == DeckSourceMode::ConnectedDecks {
-                    if runtime.direct_prolink_active() {
+                    if runtime.uses_direct_prolink() {
                         runtime
                             .direct_deck_source
                             .transport(deck.track_load_id())
@@ -3483,6 +3764,72 @@ mod tests {
 
         assert!(prolink_timing_anchor(observation, OperationState::Armed).playing);
         assert!(prolink_timing_anchor(observation, OperationState::Live).playing);
+    }
+
+    #[test]
+    fn pro_dj_link_stale_window_tracks_three_beats_with_safe_bounds() {
+        assert_eq!(
+            prolink_timing_stale_after(Some(140_000)),
+            Duration::from_micros(1_285_714)
+        );
+        assert_eq!(
+            prolink_timing_stale_after(Some(300_000)),
+            MINIMUM_PROLINK_TIMING_STALE_AFTER
+        );
+        assert_eq!(
+            prolink_timing_stale_after(Some(20_000)),
+            MAXIMUM_PROLINK_TIMING_STALE_AFTER
+        );
+        assert_eq!(
+            prolink_timing_stale_after(None),
+            MINIMUM_PROLINK_TIMING_STALE_AFTER
+        );
+    }
+
+    #[test]
+    fn integration_pump_metrics_detect_starvation_without_unbounded_samples() {
+        let mut metrics = IntegrationPumpMetrics::new();
+        let started = Instant::now();
+        metrics.record(started);
+        metrics.record(started + INTEGRATION_PUMP_INTERVAL);
+        metrics.record(started + INTEGRATION_PUMP_INTERVAL.saturating_mul(4));
+
+        assert_eq!(metrics.tick_count, 3);
+        assert_eq!(metrics.starvation_count, 1);
+        assert_eq!(
+            metrics.max_lateness_micros,
+            u64::try_from(INTEGRATION_PUMP_INTERVAL.saturating_mul(2).as_micros())
+                .unwrap_or(u64::MAX)
+        );
+    }
+
+    #[tokio::test]
+    async fn command_reader_retains_partial_input_when_timing_tick_cancels_the_read() {
+        let (mut client, server) = tokio::io::duplex(128);
+        let mut reader = BufReader::new(server);
+        let mut buffer = Vec::new();
+        client
+            .write_all(b"{\"partial\":")
+            .await
+            .unwrap_or_else(|error| panic!("partial command should write: {error}"));
+
+        let interrupted = tokio::time::timeout(
+            Duration::from_millis(5),
+            read_command_line(&mut reader, &mut buffer),
+        )
+        .await;
+        assert!(interrupted.is_err());
+        assert_eq!(buffer, b"{\"partial\":");
+
+        client
+            .write_all(b"true}\n")
+            .await
+            .unwrap_or_else(|error| panic!("remaining command should write: {error}"));
+        let line = read_command_line(&mut reader, &mut buffer)
+            .await
+            .unwrap_or_else(|error| panic!("command should complete: {error}"));
+        assert_eq!(line.as_deref(), Some(b"{\"partial\":true}".as_slice()));
+        assert!(buffer.is_empty());
     }
 
     #[test]

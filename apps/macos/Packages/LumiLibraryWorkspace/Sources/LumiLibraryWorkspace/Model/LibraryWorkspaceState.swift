@@ -246,6 +246,17 @@ public struct AbletonLinkIntegrationState: Equatable, Sendable {
     public let generation: UInt64?
     public let lastBeatAgeMillis: UInt64?
     public let phaseErrorMicros: Int?
+    public let receivedAnchorCount: UInt64
+    public let appliedAnchorCount: UInt64
+    public let coalescedAnchorCount: UInt64
+    public let hardReanchorCount: UInt64
+    public let softCorrectionCount: UInt64
+    public let failClosedCount: UInt64
+    public let failureCount: UInt64
+    public let maxAbsPhaseErrorMicros: UInt64
+    public let enginePumpCount: UInt64
+    public let enginePumpStarvationCount: UInt64
+    public let enginePumpMaxLatenessMicros: UInt64
     public let lastReanchor: String?
     public let lastEvent: String?
     public let lastError: String?
@@ -595,6 +606,8 @@ public struct DeckInputIntegrationState: Equatable, Sendable {
     public let bridgeVersion: String?
     public let beatLinkVersion: String?
     public let discoveredPlayers: [ProDJLinkDeviceState]
+    public let recoveryPending: Bool
+    public let restartCount: UInt64
     public let lastError: String?
 
     public var isReady: Bool { state == "ready" }

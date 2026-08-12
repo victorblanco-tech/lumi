@@ -402,6 +402,8 @@ public struct LibrarySnapshotDecoder: Sendable {
             bridgeVersion: optionalString(input, "bridgeVersion"),
             beatLinkVersion: optionalString(input, "beatLinkVersion"),
             discoveredPlayers: discoveredPlayers,
+            recoveryPending: optionalBoolean(input, "recoveryPending") ?? false,
+            restartCount: optionalUnsigned(input, "restartCount") ?? 0,
             lastError: optionalString(input, "lastError")
         )
     }
@@ -472,6 +474,17 @@ public struct LibrarySnapshotDecoder: Sendable {
             generation: optionalUnsigned(link, "generation"),
             lastBeatAgeMillis: optionalUnsigned(link, "lastBeatAgeMillis"),
             phaseErrorMicros: try strictOptionalSigned(link, "phaseErrorMicros"),
+            receivedAnchorCount: optionalUnsigned(link, "receivedAnchorCount") ?? 0,
+            appliedAnchorCount: optionalUnsigned(link, "appliedAnchorCount") ?? 0,
+            coalescedAnchorCount: optionalUnsigned(link, "coalescedAnchorCount") ?? 0,
+            hardReanchorCount: optionalUnsigned(link, "hardReanchorCount") ?? 0,
+            softCorrectionCount: optionalUnsigned(link, "softCorrectionCount") ?? 0,
+            failClosedCount: optionalUnsigned(link, "failClosedCount") ?? 0,
+            failureCount: optionalUnsigned(link, "failureCount") ?? 0,
+            maxAbsPhaseErrorMicros: optionalUnsigned(link, "maxAbsPhaseErrorMicros") ?? 0,
+            enginePumpCount: optionalUnsigned(link, "enginePumpCount") ?? 0,
+            enginePumpStarvationCount: optionalUnsigned(link, "enginePumpStarvationCount") ?? 0,
+            enginePumpMaxLatenessMicros: optionalUnsigned(link, "enginePumpMaxLatenessMicros") ?? 0,
             lastReanchor: optionalString(link, "lastReanchor"),
             lastEvent: optionalString(link, "lastEvent"),
             lastError: optionalString(link, "lastError")

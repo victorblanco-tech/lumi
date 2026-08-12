@@ -214,6 +214,8 @@ struct LibraryWorkspaceTests {
                     "lastFrameSequence": .number(121),
                     "bridgeVersion": .string("0.4.0-dev-20"),
                     "beatLinkVersion": .string("8.0.0"),
+                    "recoveryPending": .boolean(false),
+                    "restartCount": .number(2),
                     "discoveredPlayers": .array([
                         .object([
                             "playerNumber": .number(1),
@@ -229,6 +231,8 @@ struct LibraryWorkspaceTests {
         #expect(input.isProDJLink)
         #expect(input.discoveredPlayers.first?.name == "CDJ-1500X")
         #expect(input.discoveredPlayers.first?.address == "192.168.1.50")
+        #expect(input.recoveryPending == false)
+        #expect(input.restartCount == 2)
     }
 
     @Test("MIDI integration state decodes independently from the library catalog")
@@ -287,6 +291,17 @@ struct LibraryWorkspaceTests {
             "generation": .number(7),
             "lastBeatAgeMillis": .number(5),
             "phaseErrorMicros": .number(-350),
+            "receivedAnchorCount": .number(1_001),
+            "appliedAnchorCount": .number(1_000),
+            "coalescedAnchorCount": .number(1),
+            "hardReanchorCount": .number(2),
+            "softCorrectionCount": .number(3),
+            "failClosedCount": .number(1),
+            "failureCount": .number(0),
+            "maxAbsPhaseErrorMicros": .number(7_500),
+            "enginePumpCount": .number(10_000),
+            "enginePumpStarvationCount": .number(2),
+            "enginePumpMaxLatenessMicros": .number(21_000),
             "lastReanchor": .string("masterChanged"),
             "lastEvent": .string("Ableton Link timing locked"),
             "lastError": .null
@@ -300,6 +315,10 @@ struct LibraryWorkspaceTests {
         #expect(state.abletonLinkIntegration?.sourceDescription == "Pro DJ Link")
         #expect(state.abletonLinkIntegration?.bpmDescription == "136.500 BPM")
         #expect(state.abletonLinkIntegration?.lastReanchor == "masterChanged")
+        #expect(state.abletonLinkIntegration?.appliedAnchorCount == 1_000)
+        #expect(state.abletonLinkIntegration?.maxAbsPhaseErrorMicros == 7_500)
+        #expect(state.abletonLinkIntegration?.failClosedCount == 1)
+        #expect(state.abletonLinkIntegration?.enginePumpCount == 10_000)
     }
 
     @Test("Rekordbox sync preview decodes a bounded, hash-bound apply plan")

@@ -324,6 +324,7 @@ pub enum BridgeSupervisorError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn occupied_udp_port_fails_the_same_preflight_used_by_pro_dj_link() {
@@ -339,5 +340,23 @@ mod tests {
         };
         assert!(matches!(error, BridgeSupervisorError::NetworkConflict(_)));
         assert!(error.to_string().contains(&port.to_string()));
+    }
+
+    #[test]
+    fn an_exited_bridge_is_detected_without_blocking_the_supervisor() {
+        let configuration = BridgeLaunchConfiguration::command("/usr/bin/true", Vec::new());
+        let mut supervisor = BridgeProcessSupervisor::spawn(&configuration)
+            .unwrap_or_else(|error| panic!("test process should launch: {error}"));
+        let deadline = Instant::now() + Duration::from_secs(1);
+        loop {
+            let diagnostics = supervisor
+                .diagnostics()
+                .unwrap_or_else(|error| panic!("process should be inspectable: {error}"));
+            if !diagnostics.running {
+                break;
+            }
+            assert!(Instant::now() < deadline, "exited process stayed healthy");
+            std::thread::sleep(Duration::from_millis(5));
+        }
     }
 }

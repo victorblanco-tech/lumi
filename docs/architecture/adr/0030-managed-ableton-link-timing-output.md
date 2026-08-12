@@ -75,8 +75,12 @@ SoundSwitch -> selected DMX interface (optionally Control One) -> fixtures
 
 ## Timing behavior
 
-- The low-latency beat stream, not UI refresh or database work, establishes
-  phase.
+- The engine pumps direct deck input on a dedicated 20 ms cadence. SwiftUI's
+  snapshot polling, waveform rendering and database work never establish or
+  advance timing.
+- Only Pro DJ Link beat packets are treated as beat-exact observations while a
+  deck is playing. Asynchronous status packets may update metadata and stopped
+  BPM/transport state, but never impersonate a beat boundary.
 - Effective BPM changes are applied immediately while preserving phase.
 - Normal packet jitter is filtered; Lumi does not force a new Link mapping on
   every beat.
@@ -84,8 +88,9 @@ SoundSwitch -> selected DMX interface (optionally Control One) -> fixtures
   generation and establish one new anchor on the first reliable beat.
 - A soft phase-error threshold permits smooth correction. A hard threshold or
   explicit discontinuity performs one deterministic re-anchor.
-- Four-beat bar phase is derived from the source beat grid. A missing or stale
-  master closes automatic lighting and degrades timing readiness.
+- Four-beat bar phase is derived from the source beat grid. A missing master or
+  timing silence of three beats (bounded to 1.25–5 seconds) holds Link
+  transport fail-closed and degrades timing readiness.
 - Start/stop synchronization mirrors the selected Lumi source; Link remains a
   timing transport and never becomes the operation-state authority.
 - Lighting Output Offset advances or delays only the sparse MIDI command at a
@@ -95,6 +100,12 @@ The timing worker and helper are isolated from SwiftUI, waveform rendering,
 SQLite and library imports. The adapter retains at most the newest unprocessed
 anchor and coalesces older continuous observations. A transport generation is
 never replaced by an older observation.
+
+The Pro DJ Link bridge is supervised as an independent fault domain. Decode,
+pipe or process failure clears the stale deck authority, holds Link transport
+and schedules a bounded automatic restart. The first fresh observation after
+source or helper recovery re-establishes the same user-enabled Link session;
+no app restart or manual toggle is required.
 
 ## Lifecycle and diagnostics
 
@@ -112,6 +123,12 @@ Readiness reports at least:
 - current effective BPM, beat and bar phase;
 - last beat age, phase error and last re-anchor reason;
 - transport state and last actionable error.
+
+Bounded session diagnostics also report received, applied and coalesced timing
+anchors; hard re-anchors and soft corrections; maximum observed phase error;
+fail-closed and provider-failure counts; and engine-pump ticks, starvation and
+maximum lateness. These counters make regressions visible without logging in
+the realtime path or allowing diagnostics to grow without bound.
 
 Diagnostics offers an explicit helper self-test while Lumi is `Off`. It runs
 the pinned executable's terminating version mode and verifies the exact
@@ -155,6 +172,13 @@ The managed helper gate was first exercised against SoundSwitch as a real Link
 peer on 2026-08-11: peer discovery, 130 → 140 BPM, phase synchronization,
 start/stop and hold completed without BLT. This is evidence for gates 1–2, but
 does not replace the complete-song, one-hour or physical-DMX gates.
+
+The `0.4.0-dev-21` robustness slice added deterministic status-versus-beat
+tests, stale-source fail-closed/recovery tests, helper race recovery and
+engine-cadence starvation metrics. Its opt-in LAN acceptance test also proved
+that bridge frames and Link anchors advance through three seconds with no
+client or UI polling. The one-hour and physical-DMX gates remain release
+evidence rather than being inferred from this bounded test.
 
 ## Licensing and distribution
 

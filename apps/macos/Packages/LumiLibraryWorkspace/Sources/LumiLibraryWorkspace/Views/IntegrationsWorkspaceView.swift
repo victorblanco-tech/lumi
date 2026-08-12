@@ -360,6 +360,8 @@ public struct IntegrationsWorkspaceView: View {
                     VStack(spacing: 0) {
                         diagnosticRow("Pro DJ Link", proDJLinkDiagnostic, deckInputState)
                         Divider()
+                        diagnosticRow("Pro DJ Link recovery", proDJLinkRecoveryDiagnostic, proDJLinkRecoveryState)
+                        Divider()
                         diagnosticRow("Complete deck frames", "\(library.deckInputIntegration?.committedFrameCount ?? 0)", deckInputState)
                         Divider()
                         diagnosticRow("Lighting MIDI source", library.midiIntegration?.sourceName ?? "Not published", lightingOutputState)
@@ -371,6 +373,14 @@ public struct IntegrationsWorkspaceView: View {
                         diagnosticRow("MIDI Clock ticks", "\(library.midiClockIntegration?.sentTickCount ?? 0)", clockOutputState)
                         Divider()
                         diagnosticRow("Ableton Link", abletonLinkDiagnostic, abletonLinkState)
+                        Divider()
+                        diagnosticRow("Timing anchors", abletonLinkAnchorDiagnostic, abletonLinkState)
+                        Divider()
+                        diagnosticRow("Timing corrections", abletonLinkCorrectionDiagnostic, abletonLinkState)
+                        Divider()
+                        diagnosticRow("Realtime engine lane", realtimeTimingLaneDiagnostic, abletonLinkState)
+                        Divider()
+                        diagnosticRow("Timing safety", abletonLinkSafetyDiagnostic, abletonLinkState)
                         Divider()
                         diagnosticRow("Trusted USB sources", usbSourceDetail, usbSourceState)
                     }
@@ -416,7 +426,13 @@ public struct IntegrationsWorkspaceView: View {
     }
 
     private var deckInputState: LumiComponentState {
-        library.deckInputIntegration?.isReceiving == true ? .ready : .degraded
+        guard let input = library.deckInputIntegration else { return .loading }
+        if input.lastError != nil || input.recoveryPending { return .degraded }
+        return input.isReady ? .ready : .loading
+    }
+
+    private var proDJLinkRecoveryState: LumiComponentState {
+        library.deckInputIntegration?.recoveryPending == true ? .degraded : deckInputState
     }
 
     private var lightingOutputState: LumiComponentState {
@@ -465,6 +481,35 @@ public struct IntegrationsWorkspaceView: View {
         let age = link.lastBeatAgeMillis.map { " · beat \($0) ms ago" } ?? ""
         let reanchor = link.lastReanchor.map { " · re-anchor \($0)" } ?? ""
         return "\(link.state.uppercased()) · \(link.provider)\(version) · \(link.peers) peers\(age)\(phase)\(reanchor)"
+    }
+
+    private var abletonLinkAnchorDiagnostic: String {
+        guard let link = library.abletonLinkIntegration else { return "Status unavailable" }
+        return "\(link.appliedAnchorCount) applied / \(link.receivedAnchorCount) received · \(link.coalescedAnchorCount) safely coalesced"
+    }
+
+    private var abletonLinkCorrectionDiagnostic: String {
+        guard let link = library.abletonLinkIntegration else { return "Status unavailable" }
+        return "\(link.hardReanchorCount) hard · \(link.softCorrectionCount) soft · max \(link.maxAbsPhaseErrorMicros) µs"
+    }
+
+    private var abletonLinkSafetyDiagnostic: String {
+        guard let link = library.abletonLinkIntegration else { return "Status unavailable" }
+        return "\(link.failClosedCount) fail-closed holds · \(link.failureCount) provider failures"
+    }
+
+    private var realtimeTimingLaneDiagnostic: String {
+        guard let link = library.abletonLinkIntegration else { return "Status unavailable" }
+        let maximumMillis = Double(link.enginePumpMaxLatenessMicros) / 1_000
+        return "\(link.enginePumpCount) ticks · \(link.enginePumpStarvationCount) late · max +\(maximumMillis.formatted(.number.precision(.fractionLength(1)))) ms"
+    }
+
+    private var proDJLinkRecoveryDiagnostic: String {
+        guard let input = library.deckInputIntegration else { return "Status unavailable" }
+        if input.recoveryPending {
+            return "Retrying automatically · \(input.restartCount) completed restarts"
+        }
+        return "Ready · \(input.restartCount) automatic restarts"
     }
 
     private var deckInputDetail: String {

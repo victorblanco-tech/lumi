@@ -201,6 +201,15 @@ impl ProLinkDeckSourceProvider {
         Ok(())
     }
 
+    pub fn mark_degraded(
+        &mut self,
+        message: impl Into<String>,
+        at: MonotonicTime,
+    ) -> Result<(), ProLinkProviderError> {
+        self.last_error = Some(message.into());
+        self.update_source_status(DeckSourceStatus::Degraded, at)
+    }
+
     fn apply_status(
         &mut self,
         status: crate::DeckStatus,
@@ -230,9 +239,11 @@ impl ProLinkDeckSourceProvider {
             .get(&deck_id)
             .is_none_or(|deck| deck.identity != identity);
         let mut discontinuity = false;
+        let mut stopped_timing_changed = false;
         if needs_load {
             self.advance_timing_generation()?;
             discontinuity = true;
+            stopped_timing_changed = true;
             self.unload_deck(deck_id, at)?;
             let track_load_id = TrackLoadId::new(self.next_track_load_id);
             self.next_track_load_id = self
@@ -294,6 +305,7 @@ impl ProLinkDeckSourceProvider {
             )?;
         } else if let Some(previous) = self.decks.get(&deck_id).cloned() {
             if previous.effective_bpm_milli != effective_bpm_milli {
+                stopped_timing_changed = true;
                 self.emit(
                     at,
                     DeckObservation::PlaybackTempoChanged {
@@ -308,6 +320,7 @@ impl ProLinkDeckSourceProvider {
                 if seeked {
                     self.advance_timing_generation()?;
                     discontinuity = true;
+                    stopped_timing_changed = true;
                 }
                 let observation = if beat < previous.beat {
                     DeckObservation::PlaybackPositionSeeked {
@@ -329,6 +342,7 @@ impl ProLinkDeckSourceProvider {
                 discontinuity = true;
             }
             if previous.playing != status.playing {
+                stopped_timing_changed = true;
                 self.emit(
                     at,
                     DeckObservation::PlaybackStateChanged {
@@ -347,6 +361,7 @@ impl ProLinkDeckSourceProvider {
         if status.tempo_master && self.leader_deck_id != Some(deck_id) {
             self.advance_timing_generation()?;
             discontinuity = true;
+            stopped_timing_changed = true;
             let track_load_id = self
                 .decks
                 .get(&deck_id)
@@ -361,7 +376,11 @@ impl ProLinkDeckSourceProvider {
                 },
             )?;
         }
-        if status.tempo_master {
+        // Deck status frames describe the latest known beat but are not sent
+        // on the beat boundary. Only publish them while transport is stopped,
+        // where immediate BPM/hold state matters and phase is not advancing.
+        // Playing transport is anchored exclusively by precise Beat packets.
+        if status.tempo_master && !status.playing && stopped_timing_changed {
             self.timing_observations.push(ProLinkTimingObservation {
                 deck_id,
                 observed_at_nanos,
@@ -434,6 +453,9 @@ impl ProLinkDeckSourceProvider {
     ) -> Result<(), ProLinkProviderError> {
         if self.source_status != status {
             self.source_status = status;
+            if status == DeckSourceStatus::Ready {
+                self.last_error = None;
+            }
             self.emit(at, DeckObservation::SourceStatusChanged { status })?;
         }
         Ok(())
