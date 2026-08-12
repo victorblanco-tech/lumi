@@ -73,6 +73,45 @@ Control One manual input ---------------------------------------------+
 SoundSwitch -> selected DMX interface (optionally Control One) -> fixtures
 ```
 
+The two Lumi outputs have different responsibilities and priority. Ableton
+Link maintains SoundSwitch tempo and phase after an AutoLoop has been selected.
+`Lumi Virtual MIDI` selects the correct Bank and AutoLoop at the musical
+deadline. The latter is the release-critical realtime path: a correct BPM with
+a late or wrong AutoLoop selection is not considered successful output.
+
+## Realtime AutoLoop execution
+
+Normal phrase playback and discontinuous navigation use one engine-owned,
+provider-neutral musical timeline. Local Playback supplies an audio-clock
+anchor; Pro DJ Link supplies exact beat packets plus absolute deck-status
+position. The local Rekordbox beat grid and Lumi phrases translate those
+transport facts into the active and next lighting cue.
+
+- The engine schedules the next cue's Bank close to a known phrase boundary:
+  the SoundSwitch settle interval plus one engine-tick safety margin. It then
+  emits the AutoLoop note on the exact boundary observation. This short window
+  lets Lumi reassert its choice after ordinary manual control.
+- Bank settling and AutoLoop emission are separate non-blocking stages. No
+  fixed sleep may block deck ingestion, Link publication or another transport
+  generation.
+- Every scheduled stage carries deck, track-load, plan revision, phrase and
+  transport-generation identity. A load, seek, hotcue, beatjump or master
+  change invalidates older work before it can reach CoreMIDI.
+- A hotcue or beatjump resolves the landing beat against the exact local beat
+  grid and immediately selects the landing phrase's planned AutoLoop.
+- If its Bank is already safely armed, the landing AutoLoop is emitted on that
+  beat. If the Bank cannot satisfy its minimum settling time, Lumi arms it and
+  emits the AutoLoop on the first following exact beat. A deterministic
+  one-beat fallback is preferred over starting a SoundSwitch loop off-beat.
+- Unknown, ambiguous or non-library tracks remain visible but never infer a
+  realtime AutoLoop target.
+- Lighting Output Offset applies to the sparse AutoLoop deadline only. It does
+  not change the deck timeline or Ableton Link phase.
+
+The visual waveform, phrase band and AutoLoop plan may consume the same
+timeline through a replaceable display clock, but rendering is never an input
+to cue execution. UI frame drops therefore cannot delay or duplicate output.
+
 ## Timing behavior
 
 - The engine pumps direct deck input on a dedicated 20 ms cadence. SwiftUI's
@@ -167,6 +206,12 @@ and transport detail for troubleshooting.
    follows Lumi commands.
 6. Physical CDJ-1500X, DJM-V5, SoundSwitch, Control One and DMX acceptance
    succeeds before the BLT fallback is removed.
+7. Forward and backward hotcue/beatjump landings cancel stale output and select
+   the landing phrase's exact configured AutoLoop. An unarmed Bank falls back
+   to the next beat rather than emitting off-beat.
+8. Realtime AutoLoop evidence records scheduled, actual and delta timestamps,
+   stale-generation cancellations and fallback-beat count. Normal pre-armed
+   phrase changes target p95 <= 20 ms at the CoreMIDI boundary.
 
 The managed helper gate was first exercised against SoundSwitch as a real Link
 peer on 2026-08-11: peer discovery, 130 → 140 BPM, phase synchronization,

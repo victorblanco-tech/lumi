@@ -170,6 +170,50 @@ physical-hardware acceptance gate.
   is rejected before any bridge process or network traffic starts, without
   clearing the Local Playback session.
 
+#### E4-02D5 — Realtime AutoLoop execution and discontinuities — implemented;
+physical acceptance pending
+
+AutoLoop selection is the primary realtime output of Lumi. Ableton Link keeps
+the selected SoundSwitch loop on tempo and phase, but does not decide which
+loop must start. D5 completes that decision and execution route independently
+from SwiftUI.
+
+- normalize exact Pro DJ Link beat packets and absolute status position onto
+  the same phrase timeline used by Local Playback;
+- derive `PhraseChanged` from the exact Lumi-owned beat grid, not UI polling;
+- detect forward and backward discontinuities, including hotcue and beatjump,
+  and invalidate any older output generation;
+- schedule the next cue's Bank for the 50 ms SoundSwitch settle interval plus
+  one engine-tick safety margin before a predictable phrase boundary;
+- replace the blocking 50 ms Bank sleep with bounded non-blocking Bank and
+  AutoLoop stages;
+- trigger a safely pre-armed AutoLoop on the landing/boundary beat;
+- when a discontinuous landing needs another Bank, arm immediately and trigger
+  on the first following exact beat rather than starting off-beat;
+- retain bounded metrics for requested, pre-armed, emitted, cancelled, late and
+  one-beat-fallback cues;
+- keep Control One parallel: a manual override remains possible, while Lumi
+  reasserts its plan at the next phrase or discontinuous landing.
+
+Acceptance scenarios cover normal sequential phrases, forward hotcue to Drop,
+backward hotcue, beatjump across multiple phrases, pause/cue/play, rapid second
+seek cancelling the first target, track replacement and master handoff. Each
+scenario asserts the exact Bank/AutoLoop mapping and proves no stale command is
+emitted. Simulator network acceptance follows deterministic offline tests;
+physical SoundSwitch/DMX timing remains a D4 release gate.
+
+Implementation evidence for `0.4.0-dev-23`:
+
+- exact Pro DJ Link Beat packets activate the hydrated Lumi phrase timeline;
+- forward and backward position discontinuities are explicit seeks;
+- Bank selection and AutoLoop emission are non-blocking scheduler stages;
+- normal boundaries use a short settle-window pre-arm and exact beat output;
+- unprepared discontinuities use a next-exact-beat fallback and stale context
+  cancellation;
+- bounded scheduler counters are available in Integrations diagnostics;
+- the full local repository suite and opt-in two-host Pro DJ Link LAN timing
+  acceptance pass without GitHub Actions.
+
 #### E4-02D1 — Timing contract and deterministic authority — implemented
 
 - add provider-neutral timing source, anchor, generation and health types;
@@ -263,6 +307,10 @@ then drive the managed helper and reconnect it when needed.
 - Pitch changes update effective BPM without double application.
 - Master changes preserve the correct deck and do not select an unrelated
   Autoloop.
+- Hotcue and beatjump landings activate the destination phrase rather than
+  replaying an intermediate or previously scheduled Autoloop.
+- A safely pre-armed normal phrase boundary reaches CoreMIDI with p95 <= 20 ms;
+  a late, unarmed discontinuity uses an explicit next-beat fallback.
 - The same track exported to different media resolves by content signature.
 - An unknown or ambiguous track remains visible but automatic lighting is held.
 - SoundSwitch Autoloops follow Lumi's Ableton Link tempo and bar phase while

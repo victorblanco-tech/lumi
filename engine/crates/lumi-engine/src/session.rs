@@ -189,6 +189,9 @@ async fn serve_authenticated_client(
                 // for snapshots.
                 runtime.integration_pump_metrics.record(Instant::now());
                 process_deck_input_messages(runtime)?;
+                runtime
+                    .output_worker
+                    .service_pending_autoloop(runtime.state.state(), false);
             }
             command = read_command_line(&mut command_reader, &mut command_buffer) => {
                 let Some(command_bytes) = command? else { break };
@@ -723,6 +726,9 @@ fn hydrate_direct_library_event(
         return Ok(DomainEvent::Observation(envelope));
     };
     let (metadata, context) = connected.prepared.into_parts();
+    let _ = runtime
+        .direct_deck_source
+        .hydrate_track_metadata(track_load_id, metadata.clone());
     runtime
         .planning_worker
         .register_library_context(track_load_id, context);
@@ -1019,6 +1025,45 @@ struct OutputWorker {
     last_prolink_bpm_milli: Option<u32>,
     last_prolink_playing: Option<bool>,
     prolink_timing_stale: bool,
+    precise_autoloop_fallback: bool,
+    scheduled_prearm: Option<ScheduledPrearm>,
+    prearmed_autoloop: Option<PrearmedAutoloop>,
+    pending_autoloop: Option<PendingAutoloop>,
+    autoloop_requested_count: u64,
+    autoloop_prearmed_count: u64,
+    autoloop_emitted_count: u64,
+    autoloop_cancelled_count: u64,
+    autoloop_late_count: u64,
+    autoloop_beat_fallback_count: u64,
+}
+
+#[derive(Clone, Debug)]
+struct PrearmedAutoloop {
+    bank_number: u8,
+    selected_at: Instant,
+    deck_id: lumi_domain::DeckId,
+    track_load_id: TrackLoadId,
+    plan_revision: PlanRevision,
+    phrase_index: u16,
+}
+
+#[derive(Clone, Debug)]
+struct ScheduledPrearm {
+    bank_number: u8,
+    due_at: Instant,
+    deck_id: lumi_domain::DeckId,
+    track_load_id: TrackLoadId,
+    plan_revision: PlanRevision,
+    phrase_index: u16,
+}
+
+#[derive(Clone, Debug)]
+struct PendingAutoloop {
+    request: OutputExecutionRequest,
+    bank_number: u8,
+    autoloop_number: u8,
+    selected_at: Instant,
+    requires_precise_beat: bool,
 }
 
 impl OutputWorker {
@@ -1043,7 +1088,236 @@ impl OutputWorker {
             last_prolink_bpm_milli: None,
             last_prolink_playing: None,
             prolink_timing_stale: false,
+            precise_autoloop_fallback: false,
+            scheduled_prearm: None,
+            prearmed_autoloop: None,
+            pending_autoloop: None,
+            autoloop_requested_count: 0,
+            autoloop_prearmed_count: 0,
+            autoloop_emitted_count: 0,
+            autoloop_cancelled_count: 0,
+            autoloop_late_count: 0,
+            autoloop_beat_fallback_count: 0,
         }
+    }
+
+    fn set_precise_autoloop_fallback(&mut self, enabled: bool) {
+        self.precise_autoloop_fallback = enabled;
+        if !enabled {
+            self.scheduled_prearm = None;
+            self.prearmed_autoloop = None;
+        }
+    }
+
+    fn schedule_autoloop(
+        &mut self,
+        state: &lumi_domain::RuntimeState,
+        request: &OutputExecutionRequest,
+        bank_number: u8,
+        autoloop_number: u8,
+    ) {
+        self.autoloop_requested_count = self.autoloop_requested_count.saturating_add(1);
+        let now = Instant::now();
+        let is_safely_prearmed = self.prearmed_autoloop.as_ref().is_some_and(|prearmed| {
+            prearmed.bank_number == bank_number
+                && prearmed.deck_id == request.deck_id()
+                && prearmed.track_load_id == request.track_load_id()
+                && prearmed.plan_revision == request.plan_revision()
+                && prearmed.phrase_index == request.phrase_index()
+                && now.saturating_duration_since(prearmed.selected_at) >= BANK_SETTLE_DELAY
+        });
+        if is_safely_prearmed {
+            if self
+                .midi_output
+                .trigger_autoloop_button(autoloop_number)
+                .is_ok()
+            {
+                self.autoloop_emitted_count = self.autoloop_emitted_count.saturating_add(1);
+                self.pending_autoloop = None;
+            }
+            self.prearmed_autoloop = None;
+            return;
+        }
+
+        self.scheduled_prearm = None;
+        if self.precise_autoloop_fallback {
+            self.autoloop_late_count = self.autoloop_late_count.saturating_add(1);
+        }
+        if self.pending_autoloop.take().is_some() {
+            self.autoloop_cancelled_count = self.autoloop_cancelled_count.saturating_add(1);
+        }
+        if self.midi_output.select_bank(bank_number).is_err() {
+            return;
+        }
+        self.prearmed_autoloop = None;
+        self.pending_autoloop = Some(PendingAutoloop {
+            request: request.clone(),
+            bank_number,
+            autoloop_number,
+            selected_at: now,
+            requires_precise_beat: self.precise_autoloop_fallback,
+        });
+        self.cancel_stale_autoloop(state);
+    }
+
+    fn cancel_stale_autoloop(&mut self, state: &lumi_domain::RuntimeState) {
+        let stale = self.pending_autoloop.as_ref().is_some_and(|pending| {
+            !execution_context_is_current(state, &pending.request)
+                || state
+                    .deck(pending.request.deck_id())
+                    .and_then(lumi_domain::DeckState::phrase_index)
+                    != Some(pending.request.phrase_index())
+        });
+        if stale {
+            self.pending_autoloop = None;
+            self.autoloop_cancelled_count = self.autoloop_cancelled_count.saturating_add(1);
+        }
+    }
+
+    fn service_pending_autoloop(&mut self, state: &lumi_domain::RuntimeState, precise_beat: bool) {
+        self.service_scheduled_prearm(state);
+        self.cancel_stale_autoloop(state);
+        let ready = self.pending_autoloop.as_ref().is_some_and(|pending| {
+            (!pending.requires_precise_beat || precise_beat)
+                && pending.selected_at.elapsed() >= BANK_SETTLE_DELAY
+        });
+        if !ready {
+            return;
+        }
+        let Some(pending) = self.pending_autoloop.take() else {
+            return;
+        };
+        if self
+            .midi_output
+            .trigger_autoloop_button(pending.autoloop_number)
+            .is_ok()
+        {
+            self.autoloop_emitted_count = self.autoloop_emitted_count.saturating_add(1);
+            if pending.requires_precise_beat {
+                self.autoloop_beat_fallback_count =
+                    self.autoloop_beat_fallback_count.saturating_add(1);
+            }
+        }
+    }
+
+    fn service_scheduled_prearm(&mut self, state: &lumi_domain::RuntimeState) {
+        let stale = self.scheduled_prearm.as_ref().is_some_and(|scheduled| {
+            state.operation() != OperationState::Live
+                || state.leader_deck() != Some(scheduled.deck_id)
+                || state
+                    .deck(scheduled.deck_id)
+                    .is_none_or(|deck| deck.track_load_id() != scheduled.track_load_id)
+                || state.active_plan().is_none_or(|plan| {
+                    plan.track_load_id() != scheduled.track_load_id
+                        || plan.revision() != scheduled.plan_revision
+                })
+        });
+        if stale {
+            self.scheduled_prearm = None;
+            self.autoloop_cancelled_count = self.autoloop_cancelled_count.saturating_add(1);
+            return;
+        }
+        let ready = self
+            .scheduled_prearm
+            .as_ref()
+            .is_some_and(|scheduled| Instant::now() >= scheduled.due_at);
+        if !ready {
+            return;
+        }
+        let Some(scheduled) = self.scheduled_prearm.take() else {
+            return;
+        };
+        if self.ensure_lighting_midi().is_err()
+            || self.midi_output.status().state != MidiSourceState::Ready
+            || self.midi_output.select_bank(scheduled.bank_number).is_err()
+        {
+            return;
+        }
+        self.prearmed_autoloop = Some(PrearmedAutoloop {
+            bank_number: scheduled.bank_number,
+            selected_at: Instant::now(),
+            deck_id: scheduled.deck_id,
+            track_load_id: scheduled.track_load_id,
+            plan_revision: scheduled.plan_revision,
+            phrase_index: scheduled.phrase_index,
+        });
+        self.autoloop_prearmed_count = self.autoloop_prearmed_count.saturating_add(1);
+    }
+
+    #[cfg(not(test))]
+    fn on_precise_prolink_beat(
+        &mut self,
+        state: &lumi_domain::RuntimeState,
+        observation: lumi_prolink_input::ProLinkTimingObservation,
+    ) {
+        self.service_pending_autoloop(state, true);
+        if state.operation() != OperationState::Live
+            || state.leader_deck() != Some(observation.deck_id)
+            || !observation.playing
+        {
+            self.prearmed_autoloop = None;
+            return;
+        }
+        let Some(plan) = state.active_plan() else {
+            self.prearmed_autoloop = None;
+            return;
+        };
+        let Some(cue) = plan
+            .cues()
+            .iter()
+            .find(|cue| cue.start_beat() == observation.absolute_beat.saturating_add(1))
+        else {
+            return;
+        };
+        let Ok(Some((bank_number, _))) = automatic_midi_target(cue.action()) else {
+            return;
+        };
+        self.scheduled_prearm = Some(ScheduledPrearm {
+            bank_number,
+            due_at: Instant::now() + prolink_prearm_delay(observation.effective_bpm_milli),
+            deck_id: observation.deck_id,
+            track_load_id: plan.track_load_id(),
+            plan_revision: plan.revision(),
+            phrase_index: cue.phrase_index(),
+        });
+    }
+
+    fn prearm_current_or_first_cue(&mut self, state: &lumi_domain::RuntimeState) {
+        if state.operation() != OperationState::Live {
+            return;
+        }
+        let Some(deck_id) = state.leader_deck() else {
+            return;
+        };
+        let Some(deck) = state.deck(deck_id) else {
+            return;
+        };
+        let Some(plan) = state.active_plan() else {
+            return;
+        };
+        let phrase_index = deck.phrase_index().unwrap_or(0);
+        let Some(cue) = plan.cues().get(usize::from(phrase_index)) else {
+            return;
+        };
+        let Ok(Some((bank_number, _))) = automatic_midi_target(cue.action()) else {
+            return;
+        };
+        if self.ensure_lighting_midi().is_err()
+            || self.midi_output.status().state != MidiSourceState::Ready
+            || self.midi_output.select_bank(bank_number).is_err()
+        {
+            return;
+        }
+        self.prearmed_autoloop = Some(PrearmedAutoloop {
+            bank_number,
+            selected_at: Instant::now(),
+            deck_id,
+            track_load_id: plan.track_load_id(),
+            plan_revision: plan.revision(),
+            phrase_index,
+        });
+        self.scheduled_prearm = None;
+        self.autoloop_prearmed_count = self.autoloop_prearmed_count.saturating_add(1);
     }
 
     fn process_effects(
@@ -1067,9 +1341,12 @@ impl OutputWorker {
                             if self.midi_output.status().state == MidiSourceState::Ready {
                                 // Hardware output fails closed and reports through Tech status;
                                 // it must never stall the authoritative transport/runtime lane.
-                                let _ = self
-                                    .midi_output
-                                    .trigger_autoloop(bank_number, autoloop_number);
+                                self.schedule_autoloop(
+                                    runtime.state(),
+                                    &request,
+                                    bank_number,
+                                    autoloop_number,
+                                );
                             }
                         }
                         result
@@ -1339,6 +1616,11 @@ fn prolink_timing_stale_after(bpm_milli: Option<u32>) -> Duration {
         MINIMUM_PROLINK_TIMING_STALE_AFTER,
         MAXIMUM_PROLINK_TIMING_STALE_AFTER,
     )
+}
+
+fn prolink_prearm_delay(bpm_milli: u32) -> Duration {
+    let beat_duration = Duration::from_micros(60_000_000_000_u64 / u64::from(bpm_milli.max(1)));
+    beat_duration.saturating_sub(BANK_SETTLE_DELAY.saturating_add(INTEGRATION_PUMP_INTERVAL))
 }
 
 fn position_with_timing_offset(position_millis: u64, offset_millis: i32) -> u64 {
@@ -1615,6 +1897,9 @@ fn transport_ack_envelope(
 }
 
 fn process_deck_input_messages(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
+    runtime.output_worker.set_precise_autoloop_fallback(
+        runtime.deck_source_mode == DeckSourceMode::ConnectedDecks && runtime.uses_direct_prolink(),
+    );
     let messages = runtime.deck_input.drain_messages();
     if runtime.deck_source_mode != DeckSourceMode::ConnectedDecks {
         #[cfg(not(test))]
@@ -1698,11 +1983,18 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
             return Ok(());
         }
     }
+    // Domain events must reach planning/output before their matching precise
+    // beat is consumed. This lets a hotcue seek replace a stale trigger and
+    // then use that same beat observation as its safe beat-aligned fallback.
+    process_pending_source_events(runtime)?;
     let operation = runtime.state.state().operation();
     for observation in runtime.direct_deck_source.drain_timing_observations() {
         runtime
             .output_worker
             .synchronize_prolink_timing(observation, operation)?;
+        runtime
+            .output_worker
+            .on_precise_prolink_beat(runtime.state.state(), observation);
     }
     runtime.output_worker.reconcile_prolink_timing_freshness(
         runtime.direct_deck_source.diagnostics().source_status,
@@ -2484,7 +2776,13 @@ fn apply_operation_command(
             command,
         }),
     )
-    .map_err(CommandApplicationError::Engine)
+    .map_err(CommandApplicationError::Engine)?;
+    if command == OperationCommand::Start {
+        runtime
+            .output_worker
+            .prearm_current_or_first_cue(runtime.state.state());
+    }
+    Ok(())
 }
 
 fn application_error_envelope(
@@ -2938,6 +3236,31 @@ fn snapshot_envelope_internal(
             "timingOffsetMillis": runtime.output_worker.timing_offset_millis(),
             "pendingTimingOffsetMillis": runtime.output_worker.pending_timing_offset_millis(),
             "bankPreRollMillis": BANK_SETTLE_DELAY.as_millis(),
+            "realtimeScheduler": {
+                "mode": if runtime.output_worker.precise_autoloop_fallback {
+                    "preciseBeatFallback"
+                } else {
+                    "settleDeadline"
+                },
+                "prearmScheduled": runtime.output_worker.scheduled_prearm.as_ref().map(|scheduled| json!({
+                    "deckNumber": scheduled.deck_id.value(),
+                    "phraseIndex": scheduled.phrase_index,
+                    "bankNumber": scheduled.bank_number,
+                })),
+                "pending": runtime.output_worker.pending_autoloop.as_ref().map(|pending| json!({
+                    "deckNumber": pending.request.deck_id().value(),
+                    "phraseIndex": pending.request.phrase_index(),
+                    "bankNumber": pending.bank_number,
+                    "autoloopNumber": pending.autoloop_number,
+                    "requiresPreciseBeat": pending.requires_precise_beat,
+                })),
+                "requestedCount": runtime.output_worker.autoloop_requested_count,
+                "prearmedCount": runtime.output_worker.autoloop_prearmed_count,
+                "emittedCount": runtime.output_worker.autoloop_emitted_count,
+                "cancelledCount": runtime.output_worker.autoloop_cancelled_count,
+                "lateCount": runtime.output_worker.autoloop_late_count,
+                "beatFallbackCount": runtime.output_worker.autoloop_beat_fallback_count,
+            },
         }),
     );
     let midi_clock = runtime.output_worker.midi_clock_status();
@@ -3747,6 +4070,7 @@ mod tests {
         let observation = lumi_prolink_input::ProLinkTimingObservation {
             deck_id: lumi_domain::DeckId::new(2),
             observed_at_nanos: 12_345_000,
+            absolute_beat: 42,
             effective_bpm_milli: 155_250,
             beat_within_bar: 3,
             playing: true,
@@ -3783,6 +4107,19 @@ mod tests {
         assert_eq!(
             prolink_timing_stale_after(None),
             MINIMUM_PROLINK_TIMING_STALE_AFTER
+        );
+    }
+
+    #[test]
+    fn pro_dj_link_bank_prearm_keeps_settle_time_and_one_engine_tick() {
+        assert_eq!(
+            prolink_prearm_delay(140_000),
+            Duration::from_micros(358_571)
+        );
+        let beat_duration = Duration::from_micros(60_000_000_000_u64 / 300_000);
+        assert_eq!(
+            beat_duration.saturating_sub(prolink_prearm_delay(300_000)),
+            BANK_SETTLE_DELAY.saturating_add(INTEGRATION_PUMP_INTERVAL)
         );
     }
 

@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.0-dev-23
+
+- Direct Pro DJ Link Beat packets now drive exact Lumi phrase activation after
+  the matched USB/library metadata has hydrated the deck. Forward hotcue and
+  beat-jump discontinuities are classified as seeks and immediately resolve
+  the phrase at the landing beat.
+- Automatic SoundSwitch output no longer blocks the engine for the 50 ms Bank
+  settle interval. Lumi pre-arms the next Bank shortly before a planned phrase
+  using the settle window plus one engine-tick safety margin, then sends the
+  AutoLoop pulse on the authoritative phrase boundary.
+- An unprepared Bank after a hotcue or beat jump fails predictably to the first
+  safe exact beat after settling; stale deck, track, plan and phrase requests
+  are cancelled before MIDI can be emitted.
+- Integrations diagnostics expose bounded requested, pre-armed, emitted,
+  cancelled and beat-fallback counters for the realtime AutoLoop scheduler.
+
 ## 0.4.0-dev-22
 
 - Production, RC and Dev installations now have explicit display names,

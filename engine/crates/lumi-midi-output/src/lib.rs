@@ -634,6 +634,40 @@ where
         Ok(())
     }
 
+    /// Selects a SoundSwitch Bank without blocking for its settling interval.
+    /// The engine realtime scheduler owns the later AutoLoop deadline.
+    pub fn select_bank(&mut self, bank_number: u8) -> Result<(), MidiOutputError<P::Error>> {
+        let bank = MidiAddress::bank(bank_number).ok_or(MidiOutputError::InvalidAddress)?;
+        self.send_address_pulse(bank)?;
+        self.active_bank = Some(bank_number);
+        self.last_event = Some(format!(
+            "Pre-armed Bank {bank_number} · Ch {MIDI_CHANNEL} · Note {}",
+            bank.note()
+        ));
+        Ok(())
+    }
+
+    /// Emits only the AutoLoop button pulse. Callers must prove that the Bank
+    /// has already satisfied `BANK_SETTLE_DELAY`.
+    pub fn trigger_autoloop_button(
+        &mut self,
+        autoloop_number: u8,
+    ) -> Result<(), MidiOutputError<P::Error>> {
+        let autoloop =
+            MidiAddress::autoloop(autoloop_number).ok_or(MidiOutputError::InvalidAddress)?;
+        self.send_address_pulse(autoloop)?;
+        self.last_event = Some(format!(
+            "Triggered AutoLoop {autoloop_number} · Ch {MIDI_CHANNEL} · Note {} · Bank pre-armed",
+            autoloop.note()
+        ));
+        Ok(())
+    }
+
+    #[must_use]
+    pub const fn active_bank(&self) -> Option<u8> {
+        self.active_bank
+    }
+
     fn send_address_pulse(
         &mut self,
         address: MidiAddress,
@@ -806,6 +840,22 @@ mod tests {
         assert_eq!(controller.provider.messages[6].bytes(), [0x9f, 67, 100]);
         assert_eq!(controller.status().sent_pulse_count, 4);
         assert_eq!(controller.status().active_bank, Some(2));
+    }
+
+    #[test]
+    fn realtime_scheduler_can_split_bank_prearm_from_autoloop_pulse() {
+        let mut controller = MidiOutputController::new(RecordingProvider::default());
+        assert!(controller.publish().is_ok());
+
+        assert!(controller.select_bank(4).is_ok());
+        assert_eq!(controller.provider.messages.len(), 2);
+        assert_eq!(controller.provider.messages[0].bytes(), [0x9f, 63, 100]);
+        assert_eq!(controller.active_bank(), Some(4));
+
+        assert!(controller.trigger_autoloop_button(32).is_ok());
+        assert_eq!(controller.provider.messages.len(), 4);
+        assert_eq!(controller.provider.messages[2].bytes(), [0x9f, 95, 100]);
+        assert_eq!(controller.status().sent_pulse_count, 2);
     }
 
     #[test]

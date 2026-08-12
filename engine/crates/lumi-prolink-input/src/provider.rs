@@ -31,6 +31,7 @@ pub struct ProLinkTransportSnapshot {
 pub struct ProLinkTimingObservation {
     pub deck_id: DeckId,
     pub observed_at_nanos: u64,
+    pub absolute_beat: u32,
     pub effective_bpm_milli: u32,
     pub beat_within_bar: u8,
     pub playing: bool,
@@ -42,7 +43,10 @@ pub struct ProLinkTimingObservation {
 struct LoadedDeck {
     identity: ProLinkTrackIdentity,
     track_load_id: TrackLoadId,
+    metadata: TrackMetadata,
     beat: u32,
+    phrase_index: Option<u16>,
+    last_precise_beat: Option<u32>,
     effective_bpm_milli: u32,
     playing: bool,
 }
@@ -141,7 +145,7 @@ impl ProLinkDeckSourceProvider {
                 self.last_error = Some(format!("{}: {}", failure.operation, failure.message));
                 self.update_source_status(DeckSourceStatus::Degraded, at)?;
             }
-            BridgeEvent::Beat(beat) => self.apply_beat(beat, observed_at_nanos)?,
+            BridgeEvent::Beat(beat) => self.apply_beat(beat, observed_at_nanos, at)?,
             BridgeEvent::TrackMetadata(_) => {
                 // Metadata hydration is handled by Lumi's USB/library mirror.
             }
@@ -176,6 +180,26 @@ impl ProLinkDeckSourceProvider {
 
     pub fn drain_timing_observations(&mut self) -> Vec<ProLinkTimingObservation> {
         std::mem::take(&mut self.timing_observations)
+    }
+
+    /// Replaces provisional network metadata with the exact Lumi Library
+    /// track. The next precise beat activates its phrase timeline; hydration
+    /// itself never fabricates a musical boundary.
+    pub fn hydrate_track_metadata(
+        &mut self,
+        track_load_id: TrackLoadId,
+        metadata: TrackMetadata,
+    ) -> bool {
+        let Some(deck) = self
+            .decks
+            .values_mut()
+            .find(|deck| deck.track_load_id == track_load_id)
+        else {
+            return false;
+        };
+        deck.metadata = metadata;
+        deck.phrase_index = None;
+        true
     }
 
     #[must_use]
@@ -264,7 +288,10 @@ impl ProLinkDeckSourceProvider {
                 LoadedDeck {
                     identity,
                     track_load_id,
+                    metadata: metadata.clone(),
                     beat,
+                    phrase_index: None,
+                    last_precise_beat: None,
                     effective_bpm_milli,
                     playing: status.playing,
                 },
@@ -315,14 +342,15 @@ impl ProLinkDeckSourceProvider {
                     },
                 )?;
             }
+            let seeked = previous.beat != beat
+                && (beat < previous.beat || beat.saturating_sub(previous.beat) > 2);
             if previous.beat != beat {
-                let seeked = beat < previous.beat || beat.saturating_sub(previous.beat) > 2;
                 if seeked {
                     self.advance_timing_generation()?;
                     discontinuity = true;
                     stopped_timing_changed = true;
                 }
-                let observation = if beat < previous.beat {
+                let observation = if seeked {
                     DeckObservation::PlaybackPositionSeeked {
                         deck_id,
                         track_load_id: previous.track_load_id,
@@ -356,6 +384,28 @@ impl ProLinkDeckSourceProvider {
                 deck.beat = beat;
                 deck.effective_bpm_milli = effective_bpm_milli;
                 deck.playing = status.playing;
+                if seeked {
+                    deck.last_precise_beat = None;
+                }
+            }
+            let phrase_index = self.decks.get(&deck_id).and_then(|deck| {
+                (seeked || (!previous.playing && status.playing))
+                    .then(|| phrase_index_at(&deck.metadata, beat))
+                    .flatten()
+                    .filter(|phrase_index| Some(*phrase_index) != deck.phrase_index)
+            });
+            if let Some(phrase_index) = phrase_index {
+                if let Some(deck) = self.decks.get_mut(&deck_id) {
+                    deck.phrase_index = Some(phrase_index);
+                }
+                self.emit(
+                    at,
+                    DeckObservation::PhraseChanged {
+                        deck_id,
+                        track_load_id: previous.track_load_id,
+                        phrase_index,
+                    },
+                )?;
             }
         }
         if status.tempo_master && self.leader_deck_id != Some(deck_id) {
@@ -384,6 +434,7 @@ impl ProLinkDeckSourceProvider {
             self.timing_observations.push(ProLinkTimingObservation {
                 deck_id,
                 observed_at_nanos,
+                absolute_beat: beat,
                 effective_bpm_milli,
                 beat_within_bar: status.beat_within_bar.max(1),
                 playing: status.playing,
@@ -398,20 +449,57 @@ impl ProLinkDeckSourceProvider {
         &mut self,
         beat: crate::Beat,
         observed_at_nanos: u64,
+        at: MonotonicTime,
     ) -> Result<(), ProLinkProviderError> {
         if !beat.tempo_master {
             return Ok(());
         }
         let deck_id = DeckId::new(beat.device_number);
-        let Some(deck) = self.decks.get(&deck_id) else {
+        let Some(previous) = self.decks.get(&deck_id).cloned() else {
             return Ok(());
         };
+        let absolute_beat = precise_absolute_beat(
+            previous.beat,
+            previous.last_precise_beat,
+            beat.beat_within_bar,
+        );
+        if absolute_beat != previous.beat {
+            self.emit(
+                at,
+                DeckObservation::PlaybackPosition {
+                    deck_id,
+                    track_load_id: previous.track_load_id,
+                    beat: absolute_beat,
+                },
+            )?;
+        }
+        let phrase_index = phrase_index_at(&previous.metadata, absolute_beat)
+            .filter(|phrase_index| Some(*phrase_index) != previous.phrase_index);
+        if let Some(deck) = self.decks.get_mut(&deck_id) {
+            deck.beat = absolute_beat;
+            deck.last_precise_beat = Some(absolute_beat);
+            deck.effective_bpm_milli = bpm_milli(beat.effective_bpm)?;
+            if let Some(phrase_index) = phrase_index {
+                deck.phrase_index = Some(phrase_index);
+            }
+        }
+        if let Some(phrase_index) = phrase_index {
+            self.emit(
+                at,
+                DeckObservation::PhraseChanged {
+                    deck_id,
+                    track_load_id: previous.track_load_id,
+                    phrase_index,
+                },
+            )?;
+        }
         self.timing_observations.push(ProLinkTimingObservation {
             deck_id,
             observed_at_nanos,
+            absolute_beat,
             effective_bpm_milli: bpm_milli(beat.effective_bpm)?,
             beat_within_bar: beat.beat_within_bar,
-            playing: deck.playing,
+            playing: previous.playing,
             generation: self.timing_generation,
             discontinuity: false,
         });
@@ -537,6 +625,36 @@ fn placeholder_duration_beats(bpm_milli: u32, current_beat: u32) -> u32 {
 
 fn track_identity_key(identity: &ProLinkTrackIdentity) -> u64 {
     u64::from(identity.source_player) << 56 | u64::from(identity.rekordbox_id)
+}
+
+fn phrase_index_at(metadata: &TrackMetadata, beat: u32) -> Option<u16> {
+    metadata
+        .phrases()
+        .iter()
+        .find(|phrase| beat >= phrase.start_beat() && beat < phrase.end_beat())
+        .or_else(|| {
+            metadata
+                .phrases()
+                .last()
+                .filter(|phrase| beat >= phrase.start_beat())
+        })
+        .map(|phrase| phrase.index())
+}
+
+fn precise_absolute_beat(
+    status_beat: u32,
+    previous_precise_beat: Option<u32>,
+    beat_within_bar: u8,
+) -> u32 {
+    let remainder = u32::from(beat_within_bar.saturating_sub(1).min(3));
+    let reference = previous_precise_beat.map_or(status_beat, |beat| beat.saturating_add(1));
+    let base = reference
+        .saturating_sub(reference % 4)
+        .saturating_add(remainder);
+    [base.saturating_sub(4), base, base.saturating_add(4)]
+        .into_iter()
+        .min_by_key(|candidate| candidate.abs_diff(reference))
+        .unwrap_or(status_beat)
 }
 
 #[derive(Debug, Error)]
