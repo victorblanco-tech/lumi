@@ -98,9 +98,12 @@ never replaced by an older observation.
 
 ## Lifecycle and diagnostics
 
-The helper starts automatically with the output integration and is supervised
-independently from `Lumi Virtual MIDI`. Failure of one output does not remove
-the other. Readiness reports at least:
+The helper starts automatically on the first valid timing anchor and is
+supervised independently from `Lumi Virtual MIDI`. It does not participate in
+the Link session during app startup or while Lumi is `Off`; this prevents an
+idle helper's default tempo from changing SoundSwitch. Returning to `Off`
+stops the helper completely. Failure of one output does not remove the other.
+Readiness reports at least:
 
 - helper version and process health;
 - Link enabled state and peer count;
@@ -108,6 +111,14 @@ the other. Readiness reports at least:
 - current effective BPM, beat and bar phase;
 - last beat age, phase error and last re-anchor reason;
 - transport state and last actionable error.
+
+Diagnostics offers an explicit helper self-test while Lumi is `Off`. It runs
+the pinned executable's terminating version mode and verifies the exact
+expected version without opening a server or joining the Link session. This
+keeps the test side-effect free for SoundSwitch; runtime connection recovery
+still occurs automatically on the next valid timing anchor.
+It is rejected during `Arm`, `Start` or `Pause` so recovery cannot interrupt a
+show in progress.
 
 `Off` stops publishing authoritative transport. `Arm` locks and validates
 timing without sending lighting commands. `Start` publishes timing and executes
@@ -126,6 +137,11 @@ source state; resumption re-anchors safely before a new automatic cue.
    follows Lumi commands.
 6. Physical CDJ-1500X, DJM-V5, SoundSwitch, Control One and DMX acceptance
    succeeds before the BLT fallback is removed.
+
+The managed helper gate was first exercised against SoundSwitch as a real Link
+peer on 2026-08-11: peer discovery, 130 → 140 BPM, phase synchronization,
+start/stop and hold completed without BLT. This is evidence for gates 1–2, but
+does not replace the complete-song, one-hour or physical-DMX gates.
 
 ## Licensing and distribution
 

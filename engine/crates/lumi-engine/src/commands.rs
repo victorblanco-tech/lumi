@@ -119,6 +119,7 @@ pub enum SessionCommand {
     },
     PublishMidiSource,
     StopMidiSource,
+    TestAbletonLinkHelper,
     SetOutputTimingOffset {
         millis: i16,
     },
@@ -236,6 +237,7 @@ impl SessionCommand {
             | Self::MutateAutoloopCatalog { .. }
             | Self::PublishMidiSource
             | Self::StopMidiSource
+            | Self::TestAbletonLinkHelper
             | Self::SetOutputTimingOffset { .. }
             | Self::SendMidiLearnPulse
             | Self::SendMidiAddressLearnPulse { .. }
@@ -373,6 +375,7 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
         }),
         "publishMidiSource" => Ok(SessionCommand::PublishMidiSource),
         "stopMidiSource" => Ok(SessionCommand::StopMidiSource),
+        "testAbletonLinkHelper" => Ok(SessionCommand::TestAbletonLinkHelper),
         "setOutputTimingOffset" => {
             let millis = signed(&envelope.payload, "millis")?;
             if !(-250..=250).contains(&millis) {
@@ -986,6 +989,17 @@ impl Error for CommandDecodeError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ableton_link_helper_test_decodes_as_an_explicit_command() {
+        let envelope = command_envelope(serde_json::json!({
+            "kind": "testAbletonLinkHelper",
+        }));
+        assert_eq!(
+            decode_command(&envelope),
+            Ok(SessionCommand::TestAbletonLinkHelper)
+        );
+    }
 
     #[test]
     fn output_timing_offset_accepts_only_the_safe_signed_range() {

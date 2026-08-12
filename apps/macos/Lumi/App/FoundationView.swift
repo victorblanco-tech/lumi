@@ -154,6 +154,9 @@ struct FoundationView: View {
                         onStopMidi: {
                             Task { await engineStatus.stopMidiSource() }
                         },
+                        onTestAbletonLinkHelper: {
+                            Task { await engineStatus.testAbletonLinkHelper() }
+                        },
                         onSendMidiAddressLearnPulse: { targetKind, targetNumber in
                             Task {
                                 await engineStatus.sendMidiAddressLearnPulse(

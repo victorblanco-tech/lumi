@@ -19,6 +19,7 @@ public struct IntegrationsWorkspaceView: View {
     private let onAutoloopMutation: @Sendable (AutoloopCatalogMutationRequest) -> Void
     private let onPublishMidi: @Sendable () -> Void
     private let onStopMidi: @Sendable () -> Void
+    private let onTestAbletonLinkHelper: @Sendable () -> Void
     private let onSendMidiAddressLearnPulse: @Sendable (String, UInt16) -> Void
     private let onTriggerMidiAutoloop: @Sendable (UInt16, UInt16) -> Void
 
@@ -34,6 +35,7 @@ public struct IntegrationsWorkspaceView: View {
         onAutoloopMutation: @escaping @Sendable (AutoloopCatalogMutationRequest) -> Void = { _ in },
         onPublishMidi: @escaping @Sendable () -> Void = {},
         onStopMidi: @escaping @Sendable () -> Void = {},
+        onTestAbletonLinkHelper: @escaping @Sendable () -> Void = {},
         onSendMidiAddressLearnPulse: @escaping @Sendable (String, UInt16) -> Void = { _, _ in },
         onTriggerMidiAutoloop: @escaping @Sendable (UInt16, UInt16) -> Void = { _, _ in }
     ) {
@@ -46,6 +48,7 @@ public struct IntegrationsWorkspaceView: View {
         self.onAutoloopMutation = onAutoloopMutation
         self.onPublishMidi = onPublishMidi
         self.onStopMidi = onStopMidi
+        self.onTestAbletonLinkHelper = onTestAbletonLinkHelper
         self.onSendMidiAddressLearnPulse = onSendMidiAddressLearnPulse
         self.onTriggerMidiAutoloop = onTriggerMidiAutoloop
     }
@@ -248,7 +251,7 @@ public struct IntegrationsWorkspaceView: View {
                 VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
                     Text("Diagnostics")
                         .font(LumiTypography.cardTitle)
-                    Text("Current transport health. Traffic inspection, logs and recovery controls are planned as a dedicated follow-up story.")
+                    Text("Current transport health with a safe Ableton Link recovery check. Detailed traffic logs remain a follow-up story.")
                         .font(LumiTypography.body)
                         .foregroundStyle(LumiColor.textSecondary)
                 }
@@ -270,6 +273,20 @@ public struct IntegrationsWorkspaceView: View {
                         Divider()
                         diagnosticRow("Trusted USB sources", usbSourceDetail, usbSourceState)
                     }
+                }
+                HStack(spacing: LumiSpacing.medium) {
+                    Button("Test Ableton Link Helper", action: onTestAbletonLinkHelper)
+                        .buttonStyle(.borderedProminent)
+                        .tint(LumiColor.accent)
+                    Text("Available while Lumi is Off. Verifies the bundled helper and pinned version without joining the Link session or sending lighting commands.")
+                        .font(LumiTypography.caption)
+                        .foregroundStyle(LumiColor.textSecondary)
+                    Spacer()
+                }
+                if let midiIntegrationFeedback {
+                    Text(midiIntegrationFeedback)
+                        .font(LumiTypography.caption)
+                        .foregroundStyle(LumiColor.textSecondary)
                 }
                 Label("Recovery actions and event logging are deliberately not duplicated on Overview.", systemImage: "wrench.and.screwdriver")
                     .font(LumiTypography.caption)
@@ -309,7 +326,9 @@ public struct IntegrationsWorkspaceView: View {
     }
 
     private var abletonLinkState: LumiComponentState {
-        library.abletonLinkIntegration?.isAvailable == true ? .ready : .degraded
+        guard let link = library.abletonLinkIntegration else { return .loading }
+        if link.lastError != nil { return .degraded }
+        return link.state == "stopped" ? .empty : (link.isAvailable ? .ready : .loading)
     }
 
     private var abletonLinkDetail: String {

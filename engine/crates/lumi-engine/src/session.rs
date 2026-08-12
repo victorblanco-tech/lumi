@@ -40,6 +40,7 @@ use lumi_planner::{
 #[cfg(not(test))]
 use lumi_prolink_input::{
     BridgeLaunchConfiguration, BridgeProcessSupervisor, BridgeSupervisorError,
+    ensure_prolink_network_available,
 };
 use lumi_prolink_input::{ProLinkDeckSourceProvider, ProLinkProviderError};
 use lumi_protocol::{
@@ -341,14 +342,18 @@ fn initialized_runtime_for_mode(
     let mut connected_deck_source = BltMidiDeckSourceProvider::new(clock.now())?;
     let mut direct_deck_source = ProLinkDeckSourceProvider::new(clock.now())?;
     #[cfg(not(test))]
-    let (prolink_bridge, prolink_start_error) = launch_prolink_bridge();
+    let (prolink_bridge, prolink_start_error) =
+        if deck_source_mode == DeckSourceMode::ConnectedDecks {
+            launch_prolink_bridge()
+        } else {
+            (None, None)
+        };
     #[cfg(test)]
     let prolink_start_error = None;
     let mut output_worker = OutputWorker::new();
     #[cfg(not(test))]
     if env::var(AUTO_PUBLISH_MIDI_ENVIRONMENT_KEY).as_deref() != Ok("0") {
         let _ = output_worker.enable_midi_auto_publish();
-        output_worker.enable_link_auto_publish();
     }
     #[cfg(not(test))]
     let mut deck_input = CoreMidiDestinationProvider::new();
@@ -441,6 +446,9 @@ fn launch_prolink_bridge() -> (Option<BridgeProcessSupervisor>, Option<String>) 
             Some("The bundled Direct Pro DJ Link bridge is unavailable.".to_owned()),
         );
     };
+    if let Err(error) = ensure_prolink_network_available() {
+        return (None, Some(error.to_string()));
+    }
     match BridgeProcessSupervisor::spawn(&configuration) {
         Ok(supervisor) => (Some(supervisor), None),
         Err(error) => (None, Some(error.to_string())),
@@ -1021,9 +1029,11 @@ impl OutputWorker {
         self.publish_midi()
     }
 
-    #[cfg(not(test))]
-    fn enable_link_auto_publish(&mut self) {
-        let _ = self.link_timing.publish_async();
+    fn test_link_helper(&mut self) -> Result<(), EngineError> {
+        self.link_timing
+            .self_test_helper()
+            .map(|_| ())
+            .map_err(|error| EngineError::Timing(error.to_string()))
     }
 
     fn ensure_lighting_midi(&mut self) -> Result<(), EngineError> {
@@ -1649,6 +1659,16 @@ fn apply_command(
                 .map_err(|error| CommandApplicationError::Midi(error.to_string()))?;
             return Ok(());
         }
+        SessionCommand::TestAbletonLinkHelper => {
+            if runtime.state.state().operation() != OperationState::Off {
+                return Err(CommandApplicationError::TimingTestRequiresOff);
+            }
+            runtime
+                .output_worker
+                .test_link_helper()
+                .map_err(CommandApplicationError::Engine)?;
+            return Ok(());
+        }
         SessionCommand::SetOutputTimingOffset { millis } => {
             let defer_until_phrase = runtime.state.state().operation() == OperationState::Live
                 && runtime
@@ -1814,6 +1834,23 @@ fn apply_command(
                 DeckSourceSelection::LocalPlayback => DeckSourceMode::LocalPlayback,
             };
             if runtime.deck_source_mode != target {
+                #[cfg(not(test))]
+                let pending_prolink_bridge = if target == DeckSourceMode::ConnectedDecks
+                    && !runtime.direct_prolink_active()
+                {
+                    let (bridge, start_error) = launch_prolink_bridge();
+                    runtime.prolink_start_error = start_error;
+                    let Some(bridge) = bridge else {
+                        return Err(CommandApplicationError::ProLinkUnavailable(
+                            runtime.prolink_start_error.clone().unwrap_or_else(|| {
+                                "Pro DJ Link could not be started safely.".to_owned()
+                            }),
+                        ));
+                    };
+                    Some(bridge)
+                } else {
+                    None
+                };
                 if runtime.deck_source_mode == DeckSourceMode::LocalPlayback {
                     let at = runtime
                         .clock
@@ -1837,6 +1874,15 @@ fn apply_command(
                     }
                     process_pending_source_events(runtime)
                         .map_err(CommandApplicationError::Engine)?;
+                    #[cfg(not(test))]
+                    {
+                        runtime.prolink_bridge.take();
+                        runtime.prolink_start_error = None;
+                    }
+                }
+                #[cfg(not(test))]
+                if let Some(bridge) = pending_prolink_bridge {
+                    runtime.prolink_bridge = Some(bridge);
                 }
                 runtime.deck_source_mode = target;
                 process_pending_source_events(runtime).map_err(CommandApplicationError::Engine)?;
@@ -1856,6 +1902,11 @@ fn apply_command(
             command,
         } => {
             apply_operation_command(runtime, expected_revision, command)?;
+            if command == OperationCommand::Off {
+                runtime.output_worker.link_timing.stop().map_err(|error| {
+                    CommandApplicationError::Engine(EngineError::Timing(error.to_string()))
+                })?;
+            }
             reconcile_local_midi_clock(runtime, true).map_err(CommandApplicationError::Engine)?;
             return Ok(());
         }
@@ -1968,6 +2019,7 @@ fn apply_command(
         | SessionCommand::MutateAutoloopCatalog { .. }
         | SessionCommand::PublishMidiSource
         | SessionCommand::StopMidiSource
+        | SessionCommand::TestAbletonLinkHelper
         | SessionCommand::SetOutputTimingOffset { .. }
         | SessionCommand::SendMidiLearnPulse
         | SessionCommand::SendMidiAddressLearnPulse { .. }
@@ -2216,6 +2268,24 @@ fn application_error_envelope(
             false,
             None,
         ),
+        CommandApplicationError::TimingTestRequiresOff => error_envelope(
+            sequence,
+            correlation_id,
+            "validationFailed",
+            "timingTestRequiresOff",
+            "Set Lumi to Off before testing the Ableton Link helper.",
+            false,
+            None,
+        ),
+        CommandApplicationError::ProLinkUnavailable(message) => error_envelope(
+            sequence,
+            correlation_id,
+            "validationFailed",
+            "proDjLinkUnavailable",
+            message,
+            false,
+            None,
+        ),
         CommandApplicationError::Mutation(mutation) => error_envelope(
             sequence,
             correlation_id,
@@ -2448,8 +2518,12 @@ enum CommandApplicationError {
     BltMidi(#[from] BltMidiError),
     #[error("the command is not valid for the active deck source")]
     WrongDeckSourceMode,
+    #[error("Pro DJ Link is unavailable: {0}")]
+    ProLinkUnavailable(String),
     #[error("library backup and reset operations require Lumi to be Off")]
     DataManagementRequiresOff,
+    #[error("Ableton Link helper testing requires Lumi to be Off")]
+    TimingTestRequiresOff,
     #[error("library command failed: {0}")]
     Library(#[from] LibraryWorkerError),
     #[error("MIDI output command failed: {0}")]
@@ -3349,6 +3423,26 @@ mod tests {
         assert_eq!(position_with_timing_offset(1_000, -35), 965);
         assert_eq!(position_with_timing_offset(10, -35), 0);
         assert_eq!(position_with_timing_offset(u64::MAX - 5, 35), u64::MAX);
+    }
+
+    #[test]
+    fn pro_dj_link_preflight_failure_is_actionable_and_not_retryable() {
+        let message = "Close rekordbox before starting Pro DJ Link.";
+        let result = application_error_envelope(
+            1,
+            "select-live-decks",
+            &CommandApplicationError::ProLinkUnavailable(message.to_owned()),
+        );
+        let Ok(envelope) = result else {
+            panic!("preflight error must serialize");
+        };
+
+        assert_eq!(
+            envelope.payload.get("code"),
+            Some(&json!("proDjLinkUnavailable"))
+        );
+        assert_eq!(envelope.payload.get("message"), Some(&json!(message)));
+        assert_eq!(envelope.payload.get("retryable"), Some(&json!(false)));
     }
 
     #[test]

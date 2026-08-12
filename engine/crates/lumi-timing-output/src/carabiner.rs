@@ -55,6 +55,7 @@ enum WorkerCommand {
 }
 
 pub struct CarabinerTimingOutput {
+    configuration: CarabinerConfiguration,
     commands: mpsc::Sender<WorkerCommand>,
     latest_anchor: Arc<Mutex<Option<TimingAnchor>>>,
     worker: Option<JoinHandle<()>>,
@@ -69,13 +70,20 @@ impl CarabinerTimingOutput {
         let latest_anchor = Arc::new(Mutex::new(None));
         let worker_status = Arc::clone(&status);
         let worker_anchor = Arc::clone(&latest_anchor);
+        let worker_configuration = configuration.clone();
         let worker = thread::Builder::new()
             .name("lumi-ableton-link".to_owned())
             .spawn(move || {
-                run_worker(configuration, receiver, &worker_status, &worker_anchor);
+                run_worker(
+                    worker_configuration,
+                    receiver,
+                    &worker_status,
+                    &worker_anchor,
+                );
             })
             .ok();
         Self {
+            configuration,
             commands,
             latest_anchor,
             worker,
@@ -93,6 +101,47 @@ impl CarabinerTimingOutput {
         self.commands
             .send(WorkerCommand::Publish(None))
             .map_err(|_| CarabinerError::WorkerUnavailable)
+    }
+
+    /// Verifies the bundled helper without creating an Ableton Link peer.
+    ///
+    /// Launching the normal Carabiner server joins the shared Link session and
+    /// can therefore influence consensus tempo even while Lumi is Off. The
+    /// diagnostics self-test deliberately uses the process' terminating
+    /// `--version` mode instead.
+    pub fn self_test_helper(&self) -> Result<String, CarabinerError> {
+        let executable = self.configuration.executable.as_ref().ok_or_else(|| {
+            CarabinerError::Helper("managed executable is unavailable".to_owned())
+        })?;
+        let output = Command::new(executable)
+            .arg("--version")
+            .stdin(Stdio::null())
+            .output()
+            .map_err(|error| CarabinerError::Helper(error.to_string()))?;
+        if !output.status.success() {
+            return Err(CarabinerError::Helper(format!(
+                "version self-test exited with {}",
+                output.status
+            )));
+        }
+        let stdout = String::from_utf8(output.stdout)
+            .map_err(|_| CarabinerError::Helper("version output was not UTF-8".to_owned()))?;
+        let expected = format!("Carabiner version {}", self.configuration.expected_version);
+        if !stdout.lines().any(|line| line.trim() == expected) {
+            return Err(CarabinerError::Helper(format!(
+                "expected {}, found {}",
+                self.configuration.expected_version,
+                stdout.lines().next().unwrap_or("no version")
+            )));
+        }
+        update_status(&self.status, |status| {
+            status.state = TimingOutputState::Stopped;
+            status.helper_version = Some(self.configuration.expected_version.clone());
+            status.peers = 0;
+            status.last_event = Some("Ableton Link helper self-test passed; idle".to_owned());
+            status.last_error = None;
+        });
+        Ok(self.configuration.expected_version.clone())
     }
 }
 
@@ -284,7 +333,10 @@ fn run_worker(
                 }
                 last_anchor = None;
                 update_status(shared_status, |status| {
+                    let helper_version = status.helper_version.clone();
                     *status = TimingOutputStatus::default();
+                    status.helper_version = helper_version;
+                    status.last_event = Some("Ableton Link stopped safely".to_owned());
                 });
                 let _ = reply.send(result);
             }

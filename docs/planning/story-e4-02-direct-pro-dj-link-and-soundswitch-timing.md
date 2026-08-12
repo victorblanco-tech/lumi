@@ -119,9 +119,11 @@ This story is delivered in visible, independently testable increments:
 
 ### E4-02D — SoundSwitch timing output
 
-**Implementation status for `0.4.0-dev-16`:** D1 and D2 are implemented and
-locally verified. D3 status and automatic recovery are implemented; explicit
-restart/test controls remain planned. D4 remains a physical acceptance gate.
+**Implementation status for `0.4.0-dev-18`:** D1 and D2 are implemented and
+locally verified. D3 status, automatic recovery and an Off-only side-effect-free
+helper self-test are implemented. The managed Link path is verified
+against SoundSwitch as a real peer for 130 → 140 BPM plus hold/start-stop. D4
+remains a complete-show and physical-hardware acceptance gate.
 
 - **Architecture accepted in ADR-0030:** provider-neutral engine timing
   authority with a managed Ableton Link output adapter.
@@ -148,6 +150,11 @@ restart/test controls remain planned. D4 remains a physical acceptance gate.
 - Timing work runs outside SwiftUI, waveform rendering and SQLite. Bounded
   queues and latest-state diagnostics prevent UI load from delaying beat
   publication.
+- **Release-blocking safety implemented in dev-18:** the direct Pro DJ Link
+  helper has no Local Playback/app-start lifecycle. Selecting Live Decks first
+  verifies that UDP 50000–50002 are available; a same-host Rekordbox conflict
+  is rejected before any bridge process or network traffic starts, without
+  clearing the Local Playback session.
 
 #### E4-02D1 — Timing contract and deterministic authority — implemented
 
@@ -174,13 +181,13 @@ restart/test controls remain planned. D4 remains a physical acceptance gate.
   beat age, phase error, last re-anchor and actionable error;
 - include both timing and command readiness in Tech status without conflating
   their failure domains;
-- provide explicit restart/test controls in Diagnostics, disabled while a Live
-  show could be disturbed.
+- provide an explicit helper test in Diagnostics, disabled while a Live show
+  could be disturbed and unable to join or change the shared Link session.
 
 Implemented status includes independent Link and MIDI readiness, helper
 version, peers, source, deck, effective BPM, beat age, phase error, last
-re-anchor and actionable failure. The helper starts without blocking app
-startup, coalesces stale observations and reconnects on the next fresh anchor.
+re-anchor and actionable failure. The helper starts only on a valid timing
+anchor, coalesces stale observations and reconnects on the next fresh anchor.
 
 #### E4-02D4 — Physical acceptance — pending
 

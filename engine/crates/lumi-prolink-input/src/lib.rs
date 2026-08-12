@@ -19,7 +19,8 @@ pub use provider::{
 };
 pub use supervisor::{
     BridgeLaunchConfiguration, BridgeProcessDiagnostics, BridgeProcessSupervisor,
-    BridgeSupervisorError,
+    BridgeSupervisorError, PRO_DJ_LINK_UDP_PORTS, ProLinkNetworkConflict,
+    ensure_prolink_network_available,
 };
 
 pub const PROTOCOL_NAME: &str = "lumi-prolink-bridge";

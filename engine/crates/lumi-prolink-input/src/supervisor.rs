@@ -1,5 +1,6 @@
 use std::collections::VecDeque;
 use std::io::{BufRead, BufReader};
+use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex, mpsc};
@@ -10,6 +11,111 @@ use thiserror::Error;
 use crate::{BridgeDecodeError, BridgeDecoder, BridgeMessage};
 
 const STDERR_TAIL_CAPACITY: usize = 40;
+pub const PRO_DJ_LINK_UDP_PORTS: [u16; 3] = [50_000, 50_001, 50_002];
+
+/// Refuse to start a second Pro DJ Link application on the same network host.
+///
+/// Rekordbox Export Mode and Beat Link based applications need the same fixed
+/// UDP ports. Starting both on one interface can interrupt a track being read
+/// from rekordbox by a player, so this check deliberately fails closed before
+/// the Java bridge is launched or sends any network traffic.
+pub fn ensure_prolink_network_available() -> Result<(), BridgeSupervisorError> {
+    ensure_udp_ports_available(&PRO_DJ_LINK_UDP_PORTS)
+}
+
+fn ensure_udp_ports_available(ports: &[u16]) -> Result<(), BridgeSupervisorError> {
+    ensure_udp_ports_available_with(ports, |port| {
+        UdpSocket::bind(SocketAddrV4::new(Ipv4Addr::UNSPECIFIED, port))
+    })
+}
+
+fn ensure_udp_ports_available_with(
+    ports: &[u16],
+    bind: impl FnMut(u16) -> std::io::Result<UdpSocket>,
+) -> Result<(), BridgeSupervisorError> {
+    let (occupied_ports, owners) = occupied_udp_ports(ports, bind);
+    if !occupied_ports.is_empty() {
+        return Err(BridgeSupervisorError::NetworkConflict(
+            ProLinkNetworkConflict {
+                ports: occupied_ports,
+                owners,
+            },
+        ));
+    }
+    Ok(())
+}
+
+fn occupied_udp_ports(
+    ports: &[u16],
+    mut bind: impl FnMut(u16) -> std::io::Result<UdpSocket>,
+) -> (Vec<u16>, Vec<String>) {
+    let mut occupied_ports = Vec::new();
+    let mut owners = Vec::new();
+
+    #[cfg(target_os = "macos")]
+    for &port in ports {
+        if let Some(owner) = macos_udp_port_owner(port) {
+            occupied_ports.push(port);
+            if !owners.contains(&owner) {
+                owners.push(owner);
+            }
+        }
+    }
+
+    // Keep successful reservations alive until every port has been checked so
+    // another local process cannot claim one halfway through this preflight.
+    let mut reservations = Vec::new();
+    for &port in ports {
+        if occupied_ports.contains(&port) {
+            continue;
+        }
+        match bind(port) {
+            Ok(socket) => reservations.push(socket),
+            Err(_) => occupied_ports.push(port),
+        }
+    }
+    occupied_ports.sort_unstable();
+    occupied_ports.dedup();
+    (occupied_ports, owners)
+}
+
+#[cfg(target_os = "macos")]
+fn macos_udp_port_owner(port: u16) -> Option<String> {
+    let output = Command::new("/usr/sbin/lsof")
+        .args(["-nP", &format!("-iUDP:{port}")])
+        .output()
+        .ok()?;
+    let stdout = String::from_utf8(output.stdout).ok()?;
+    stdout
+        .lines()
+        .skip(1)
+        .find_map(|line| line.split_whitespace().next().map(str::to_owned))
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ProLinkNetworkConflict {
+    pub ports: Vec<u16>,
+    pub owners: Vec<String>,
+}
+
+impl std::fmt::Display for ProLinkNetworkConflict {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "Pro DJ Link cannot start because UDP ports {:?} are already in use",
+            self.ports
+        )?;
+        if !self.owners.is_empty() {
+            write!(formatter, " by {}", self.owners.join(", "))?;
+        }
+        write!(
+            formatter,
+            ". Close rekordbox or other Pro DJ Link software on this Mac, or run it on a different computer."
+        )
+    }
+}
+
+impl std::error::Error for ProLinkNetworkConflict {}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct BridgeLaunchConfiguration {
@@ -195,6 +301,8 @@ impl Drop for BridgeProcessSupervisor {
 
 #[derive(Debug, Error)]
 pub enum BridgeSupervisorError {
+    #[error("{0}")]
+    NetworkConflict(#[from] ProLinkNetworkConflict),
     #[error("failed to launch Pro DJ Link bridge: {0}")]
     Launch(std::io::Error),
     #[error("the Pro DJ Link bridge did not expose its {0} pipe")]
@@ -211,4 +319,25 @@ pub enum BridgeSupervisorError {
     Stop(std::io::Error),
     #[error("the Pro DJ Link bridge diagnostics lock is poisoned")]
     StderrLock,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn occupied_udp_port_fails_the_same_preflight_used_by_pro_dj_link() {
+        let port = 65_535;
+        let result = ensure_udp_ports_available_with(&[port], |_| {
+            Err(std::io::Error::new(
+                std::io::ErrorKind::AddrInUse,
+                "test reservation",
+            ))
+        });
+        let Err(error) = result else {
+            panic!("an occupied UDP port must fail closed");
+        };
+        assert!(matches!(error, BridgeSupervisorError::NetworkConflict(_)));
+        assert!(error.to_string().contains(&port.to_string()));
+    }
 }

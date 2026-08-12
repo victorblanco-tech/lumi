@@ -83,6 +83,15 @@ must not depend on fork-only behavior without an explicit follow-up ADR.
 
 ## Operational safety
 
+- The direct bridge is not launched during application startup or Local
+  Playback. It starts only after the user explicitly selects Live Decks and is
+  stopped when that mode is left.
+- Before process launch, Lumi fails closed when fixed Pro DJ Link UDP ports
+  50000, 50001 or 50002 are already owned or cannot be reserved. This prevents
+  same-host Rekordbox Export Mode or another DJ Link application from being
+  disrupted; a failed transition preserves Local Playback state.
+- Rekordbox Export Mode and Lumi Live Decks must not use the same Mac/network
+  adapter. Rekordbox may run on a different host on the DJ network.
 - Exactly one authoritative Pro DJ Link source process runs per Lumi engine.
 - BLT and the direct bridge are never selected as simultaneous authoritative
   sources.

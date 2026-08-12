@@ -826,6 +826,13 @@ final class EngineStatusModel: ObservableObject {
         )
     }
 
+    func testAbletonLinkHelper() async {
+        await exchangeMidiCommand(
+            .testAbletonLinkHelper,
+            success: "Ableton Link helper self-test passed. The Link session remains idle."
+        )
+    }
+
     func sendMidiLearnPulse() async {
         await exchangeMidiCommand(
             .sendMidiLearnPulse,

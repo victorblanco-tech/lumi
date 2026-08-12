@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.4.0-dev-18
+
+- Pro DJ Link start niet langer tijdens appstart of Local Playback. Lumi doet
+  pas na de expliciete keuze voor Live Decks mee op het DJ-netwerk en stopt de
+  bridge bij het verlaten daarvan.
+- Een harde preflight op de vaste Pro DJ Link UDP-poorten blokkeert Live Decks
+  wanneer Rekordbox of andere DJ Link-software dezelfde Mac gebruikt. Local
+  Playback en de geladen sessie blijven daarbij intact en de UI krijgt een
+  concrete herstelmelding.
+- De beheerde Ableton Link-route is fysiek met SoundSwitch als echte peer
+  gevalideerd voor 130 → 140 BPM, beat/phase, start/stop en hold zonder BLT.
+- Ableton Link neemt niet deel bij appstart of Off. De helper start pas bij een
+  geldige actieve timingbron en stopt volledig bij Off, zodat een idle
+  standaardtempo SoundSwitch niet kan veranderen.
+- Diagnostics bevat een side-effectvrije `Test Ableton Link Helper`-actie.
+  Deze is alleen toegestaan wanneer Lumi op Off staat en valideert executable
+  en gepinde versie zonder een Link-peer of lichtcommando aan te maken.
+
 ## 0.4.0-dev-17
 
 - Een opnieuw gekoppelde trusted USB behoudt voortaan één stabiele identiteit,

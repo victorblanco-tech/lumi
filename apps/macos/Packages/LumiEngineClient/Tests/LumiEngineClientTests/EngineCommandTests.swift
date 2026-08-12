@@ -4,6 +4,13 @@ import Testing
 
 @Suite("Engine command encoding")
 struct EngineCommandTests {
+    @Test("Ableton Link helper testing has an explicit command")
+    func abletonLinkRecoveryPayload() {
+        let payload = EngineCommand.testAbletonLinkHelper.payload()
+
+        #expect(payload["kind"] == .string("testAbletonLinkHelper"))
+    }
+
     @Test("Lighting timing offset preserves signed milliseconds")
     func lightingTimingOffsetPayload() {
         let payload = EngineCommand.setOutputTimingOffset(millis: -35).payload()

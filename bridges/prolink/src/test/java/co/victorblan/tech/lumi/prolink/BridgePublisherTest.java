@@ -18,7 +18,7 @@ final class BridgePublisherTest {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         BridgePublisher publisher = new BridgePublisher(output, mapper);
 
-        assertTrue(publisher.publish("hello", new BridgePayloads.Hello("0.4.0-dev-17", "8.0.0", true)));
+        assertTrue(publisher.publish("hello", new BridgePayloads.Hello("0.4.0-dev-18", "8.0.0", true)));
         assertTrue(publisher.publish("sourceStatus", new BridgePayloads.SourceStatus("starting", "test")));
         publisher.close();
 
