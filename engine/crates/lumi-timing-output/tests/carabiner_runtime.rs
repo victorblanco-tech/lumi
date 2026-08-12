@@ -34,7 +34,7 @@ fn launches_real_helper_and_publishes_a_link_timeline() {
             deck_number: Some(1),
             bpm_milli: 130_000,
             beat_within_bar: 1,
-            playing: true,
+            playing: false,
             generation: 1,
             discontinuity: TimingDiscontinuity::Started,
             observed_at_micros: None,
@@ -43,9 +43,26 @@ fn launches_real_helper_and_publishes_a_link_timeline() {
     thread::sleep(Duration::from_millis(100));
 
     let status = output.status();
-    assert_eq!(status.state, TimingOutputState::Running);
+    assert_eq!(status.state, TimingOutputState::Ready);
     assert_eq!(status.helper_version.as_deref(), Some("1.2.0"));
     assert_eq!(status.bpm_milli, Some(130_000));
+    assert!(!status.playing);
+
+    output
+        .synchronize(TimingAnchor {
+            source: TimingSourceKind::LocalPlayback,
+            deck_number: Some(1),
+            bpm_milli: 130_000,
+            beat_within_bar: 1,
+            playing: true,
+            generation: 1,
+            discontinuity: TimingDiscontinuity::Started,
+            observed_at_micros: None,
+        })
+        .unwrap_or_else(|error| panic!("transport should start: {error}"));
+    thread::sleep(Duration::from_millis(100));
+    let status = output.status();
+    assert_eq!(status.state, TimingOutputState::Running);
     assert!(status.playing);
 
     output

@@ -1108,29 +1108,8 @@ impl OutputWorker {
         if !self.link_enabled {
             return Ok(());
         }
-        if matches!(operation, OperationState::Off | OperationState::Paused) {
-            if self.link_timing.status().playing {
-                self.link_timing
-                    .hold()
-                    .map_err(|error| EngineError::Timing(error.to_string()))?;
-            }
-            return Ok(());
-        }
         self.link_timing
-            .synchronize(TimingAnchor {
-                source: TimingSourceKind::ProDjLink,
-                deck_number: Some(observation.deck_id.value()),
-                bpm_milli: observation.effective_bpm_milli,
-                beat_within_bar: observation.beat_within_bar,
-                playing: observation.playing,
-                generation: observation.generation,
-                discontinuity: if observation.discontinuity {
-                    TimingDiscontinuity::MasterChanged
-                } else {
-                    TimingDiscontinuity::Continuous
-                },
-                observed_at_micros: Some(observation.observed_at_nanos / 1_000),
-            })
+            .synchronize(prolink_timing_anchor(observation, operation))
             .map_err(|error| EngineError::Timing(error.to_string()))
     }
 
@@ -1285,27 +1264,39 @@ fn reconcile_local_midi_clock(
         .synchronize(sync)
         .map_err(|error| EngineError::Midi(error.to_string()))?;
     if let Some((deck_id, anchor, playing)) = link_sync {
-        if matches!(
-            runtime.state.state().operation(),
-            OperationState::Off | OperationState::Paused
-        ) {
-            if runtime.output_worker.link_timing.status().playing {
-                runtime
-                    .output_worker
-                    .link_timing
-                    .hold()
-                    .map_err(|error| EngineError::Timing(error.to_string()))?;
-            }
-        } else {
-            runtime.output_worker.synchronize_local_link_timing(
-                deck_id,
-                anchor,
-                playing,
-                force_rephase,
-            )?;
-        }
+        runtime.output_worker.synchronize_local_link_timing(
+            deck_id,
+            anchor,
+            playing,
+            force_rephase,
+        )?;
     }
     Ok(())
+}
+
+fn prolink_timing_anchor(
+    observation: lumi_prolink_input::ProLinkTimingObservation,
+    operation: OperationState,
+) -> TimingAnchor {
+    TimingAnchor {
+        source: TimingSourceKind::ProDjLink,
+        deck_number: Some(observation.deck_id.value()),
+        bpm_milli: observation.effective_bpm_milli,
+        beat_within_bar: observation.beat_within_bar,
+        // Lumi's lighting gate owns transport, not tempo. Off and Pause keep
+        // Link stopped while still publishing the selected master's current
+        // BPM and phase so a peer such as SoundSwitch never falls back to an
+        // unrelated/default tempo.
+        playing: observation.playing
+            && !matches!(operation, OperationState::Off | OperationState::Paused),
+        generation: observation.generation,
+        discontinuity: if observation.discontinuity {
+            TimingDiscontinuity::MasterChanged
+        } else {
+            TimingDiscontinuity::Continuous
+        },
+        observed_at_micros: Some(observation.observed_at_nanos / 1_000),
+    }
 }
 
 fn process_domain_event(
@@ -3468,6 +3459,30 @@ mod tests {
         assert_eq!(position_with_timing_offset(1_000, -35), 965);
         assert_eq!(position_with_timing_offset(10, -35), 0);
         assert_eq!(position_with_timing_offset(u64::MAX - 5, 35), u64::MAX);
+    }
+
+    #[test]
+    fn pro_dj_link_tempo_remains_authoritative_while_output_transport_is_held() {
+        let observation = lumi_prolink_input::ProLinkTimingObservation {
+            deck_id: lumi_domain::DeckId::new(2),
+            observed_at_nanos: 12_345_000,
+            effective_bpm_milli: 155_250,
+            beat_within_bar: 3,
+            playing: true,
+            generation: 7,
+            discontinuity: false,
+        };
+
+        for operation in [OperationState::Off, OperationState::Paused] {
+            let anchor = prolink_timing_anchor(observation, operation);
+            assert_eq!(anchor.bpm_milli, 155_250);
+            assert_eq!(anchor.beat_within_bar, 3);
+            assert_eq!(anchor.deck_number, Some(2));
+            assert!(!anchor.playing);
+        }
+
+        assert!(prolink_timing_anchor(observation, OperationState::Armed).playing);
+        assert!(prolink_timing_anchor(observation, OperationState::Live).playing);
     }
 
     #[test]

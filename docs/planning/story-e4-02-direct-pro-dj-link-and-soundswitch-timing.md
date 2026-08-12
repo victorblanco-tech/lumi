@@ -119,7 +119,7 @@ This story is delivered in visible, independently testable increments:
 
 ### E4-02D — SoundSwitch timing output
 
-**Implementation status for `0.4.0-dev-19`:** D1 and D2 are implemented and
+**Implementation status for `0.4.0-dev-20`:** D1 and D2 are implemented and
 locally verified. D3 status, automatic recovery and an Off-only side-effect-free
 helper self-test are implemented. The managed Link path is verified
 against SoundSwitch as a real peer for 130 → 140 BPM plus hold/start-stop. D4

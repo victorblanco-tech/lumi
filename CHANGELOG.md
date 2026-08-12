@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.0-dev-20
+
+- An enabled Ableton Link session now continues to follow the selected Live
+  master deck's effective BPM and four-beat phase while Lumi lighting is
+  `Off` or `Pause`. Only Link transport is held, so SoundSwitch no longer sees
+  a connected peer that remains at an unrelated/default BPM.
+- Local Playback uses the same rule: lighting operation state can close or
+  pause output without making the active musical tempo authority disappear.
+- Regression coverage verifies that `Off` and `Pause` retain master BPM, deck
+  identity and bar phase while publishing stopped transport.
+
 ## 0.4.0-dev-19
 
 - Ableton Link is now an explicit user-controlled integration with its own

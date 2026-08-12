@@ -126,10 +126,12 @@ user may enable it from Integrations or Live and may persist an app-start
 preference. Disabling it leaves the Link session immediately; changing the
 lighting operation state never silently changes that saved integration choice.
 
-Within an enabled Link session, `Off` and `Pause` hold authoritative transport.
-`Arm` locks and validates timing without sending lighting commands. `Start`
-publishes timing and executes planned MIDI cues. Resumption re-anchors safely
-before a new automatic cue.
+Within an enabled Link session, `Off` and `Pause` hold authoritative transport
+while the selected source's effective BPM, beat and bar phase remain current.
+This lets peers follow the musical authority without opening Lumi's lighting
+gate. `Arm` locks and validates timing without sending lighting commands.
+`Start` publishes running transport and executes planned MIDI cues. Resumption
+re-anchors safely before a new automatic cue.
 
 Live status exposes only Pro DJ Link, Light Output and Ableton Link. An
 intentionally disabled provider, Local Playback not using Pro DJ Link, or an

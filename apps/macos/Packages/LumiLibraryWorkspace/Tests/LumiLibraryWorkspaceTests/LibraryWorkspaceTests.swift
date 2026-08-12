@@ -212,7 +212,7 @@ struct LibraryWorkspaceTests {
                     "duplicateFrameCount": .number(0),
                     "lastDeckId": .number(2),
                     "lastFrameSequence": .number(121),
-                    "bridgeVersion": .string("0.4.0-dev-19"),
+                    "bridgeVersion": .string("0.4.0-dev-20"),
                     "beatLinkVersion": .string("8.0.0"),
                     "discoveredPlayers": .array([
                         .object([
