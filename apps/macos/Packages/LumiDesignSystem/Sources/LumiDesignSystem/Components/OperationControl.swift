@@ -45,6 +45,8 @@ public struct OperationControl: View {
         Button(action: action) {
             Label(label, systemImage: systemImage)
                 .font(LumiTypography.metadata.weight(.semibold))
+                .lineLimit(1)
+                .fixedSize(horizontal: true, vertical: false)
                 .frame(minHeight: LumiControlMetric.standardHeight)
                 .padding(.horizontal, LumiSpacing.small)
                 .contentShape(Rectangle())

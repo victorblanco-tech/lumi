@@ -83,7 +83,7 @@ struct LibraryWorkspaceTests {
         ])
         #expect(LibraryHubSection.allCases.map(\.rawValue) == ["tracks", "sources"])
         #expect(IntegrationsWorkspaceSection.allCases.map(\.rawValue) == [
-            "overview", "deckInputs", "lightingOutputs", "diagnostics"
+            "overview", "deckInputs", "abletonLink", "lightingOutputs", "diagnostics"
         ])
     }
 
@@ -212,7 +212,7 @@ struct LibraryWorkspaceTests {
                     "duplicateFrameCount": .number(0),
                     "lastDeckId": .number(2),
                     "lastFrameSequence": .number(121),
-                    "bridgeVersion": .string("0.4.0-dev-18"),
+                    "bridgeVersion": .string("0.4.0-dev-19"),
                     "beatLinkVersion": .string("8.0.0"),
                     "discoveredPlayers": .array([
                         .object([
@@ -274,6 +274,7 @@ struct LibraryWorkspaceTests {
     @Test("Ableton Link timing diagnostics decode independently from command MIDI")
     func decodesAbletonLinkIntegrationState() throws {
         let link: JSONValue = .object([
+            "enabled": .boolean(true),
             "state": .string("running"),
             "provider": .string("Carabiner"),
             "helperVersion": .string("1.2.0"),
@@ -295,6 +296,7 @@ struct LibraryWorkspaceTests {
         )
 
         #expect(state.abletonLinkIntegration?.isAvailable == true)
+        #expect(state.abletonLinkIntegration?.enabled == true)
         #expect(state.abletonLinkIntegration?.sourceDescription == "Pro DJ Link")
         #expect(state.abletonLinkIntegration?.bpmDescription == "136.500 BPM")
         #expect(state.abletonLinkIntegration?.lastReanchor == "masterChanged")

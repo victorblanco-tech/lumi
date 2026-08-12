@@ -4,6 +4,7 @@ import SwiftUI
 public enum IntegrationsWorkspaceSection: String, CaseIterable, Identifiable, Sendable {
     case overview
     case deckInputs
+    case abletonLink
     case lightingOutputs
     case diagnostics
 
@@ -14,40 +15,49 @@ public struct IntegrationsWorkspaceView: View {
     private let library: LibraryWorkspaceState
     private let autoloopFeedback: String?
     private let midiIntegrationFeedback: String?
+    private let abletonLinkFeedback: String?
     private let rendersInteractiveControls: Bool
     private let onOpenLibrarySources: @MainActor () -> Void
     private let onAutoloopMutation: @Sendable (AutoloopCatalogMutationRequest) -> Void
     private let onPublishMidi: @Sendable () -> Void
     private let onStopMidi: @Sendable () -> Void
+    private let onSetAbletonLinkEnabled: @Sendable (Bool) -> Void
     private let onTestAbletonLinkHelper: @Sendable () -> Void
     private let onSendMidiAddressLearnPulse: @Sendable (String, UInt16) -> Void
     private let onTriggerMidiAutoloop: @Sendable (UInt16, UInt16) -> Void
 
     @State private var section: IntegrationsWorkspaceSection
+    @Binding private var abletonLinkAutoStart: Bool
 
     public init(
         library: LibraryWorkspaceState,
         initialSection: IntegrationsWorkspaceSection = .overview,
         autoloopFeedback: String? = nil,
         midiIntegrationFeedback: String? = nil,
+        abletonLinkFeedback: String? = nil,
+        abletonLinkAutoStart: Binding<Bool> = .constant(false),
         rendersInteractiveControls: Bool = true,
         onOpenLibrarySources: @escaping @MainActor () -> Void = {},
         onAutoloopMutation: @escaping @Sendable (AutoloopCatalogMutationRequest) -> Void = { _ in },
         onPublishMidi: @escaping @Sendable () -> Void = {},
         onStopMidi: @escaping @Sendable () -> Void = {},
+        onSetAbletonLinkEnabled: @escaping @Sendable (Bool) -> Void = { _ in },
         onTestAbletonLinkHelper: @escaping @Sendable () -> Void = {},
         onSendMidiAddressLearnPulse: @escaping @Sendable (String, UInt16) -> Void = { _, _ in },
         onTriggerMidiAutoloop: @escaping @Sendable (UInt16, UInt16) -> Void = { _, _ in }
     ) {
         self.library = library
         _section = State(initialValue: initialSection)
+        _abletonLinkAutoStart = abletonLinkAutoStart
         self.autoloopFeedback = autoloopFeedback
         self.midiIntegrationFeedback = midiIntegrationFeedback
+        self.abletonLinkFeedback = abletonLinkFeedback
         self.rendersInteractiveControls = rendersInteractiveControls
         self.onOpenLibrarySources = onOpenLibrarySources
         self.onAutoloopMutation = onAutoloopMutation
         self.onPublishMidi = onPublishMidi
         self.onStopMidi = onStopMidi
+        self.onSetAbletonLinkEnabled = onSetAbletonLinkEnabled
         self.onTestAbletonLinkHelper = onTestAbletonLinkHelper
         self.onSendMidiAddressLearnPulse = onSendMidiAddressLearnPulse
         self.onTriggerMidiAutoloop = onTriggerMidiAutoloop
@@ -117,6 +127,8 @@ public struct IntegrationsWorkspaceView: View {
             overview
         case .deckInputs:
             ProDJLinkIntegrationView(integration: library.deckInputIntegration)
+        case .abletonLink:
+            abletonLink
         case .lightingOutputs:
             AutoloopCatalogSettingsView(
                 catalog: library.autoloopCatalog,
@@ -180,8 +192,8 @@ public struct IntegrationsWorkspaceView: View {
                             provider: "Ableton Link",
                             detail: abletonLinkDetail,
                             state: abletonLinkState,
-                            actionTitle: "Open Diagnostics"
-                        ) { section = .diagnostics }
+                            actionTitle: "Open Ableton Link"
+                        ) { section = .abletonLink }
                         overviewCard(
                             title: "AutoLoop Selection",
                             provider: "Lumi Virtual MIDI",
@@ -212,6 +224,95 @@ public struct IntegrationsWorkspaceView: View {
             .frame(maxWidth: 1_120, alignment: .leading)
         }
         .accessibilityIdentifier("lumi.integrations.overview")
+    }
+
+    private var abletonLink: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: LumiSpacing.xLarge) {
+                LumiPanel {
+                    VStack(alignment: .leading, spacing: LumiSpacing.large) {
+                        HStack(spacing: LumiSpacing.medium) {
+                            Image(systemName: "link")
+                                .font(.system(size: 28, weight: .semibold))
+                                .foregroundStyle(LumiColor.accent)
+                            VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+                                Text("Ableton Link")
+                                    .font(LumiTypography.cardTitle)
+                                Text("Publishes Lumi's authoritative BPM, beat and bar timing to SoundSwitch.")
+                                    .font(LumiTypography.body)
+                                    .foregroundStyle(LumiColor.textSecondary)
+                            }
+                            Spacer()
+                            Circle().fill(abletonLinkState.color).frame(width: 10, height: 10)
+                            Text(abletonLinkStatusLabel)
+                                .font(LumiTypography.metadata.weight(.semibold))
+                            Toggle(
+                                "Ableton Link",
+                                isOn: Binding(
+                                    get: { library.abletonLinkIntegration?.enabled == true },
+                                    set: onSetAbletonLinkEnabled
+                                )
+                            )
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .disabled(!rendersInteractiveControls)
+                            .accessibilityIdentifier("lumi.integrations.abletonLink.enabled")
+                        }
+
+                        Divider()
+
+                        HStack(spacing: LumiSpacing.xLarge) {
+                            linkValue("TIMING SOURCE", library.abletonLinkIntegration?.sourceDescription ?? "Automatic")
+                            linkValue("TEMPO", library.abletonLinkIntegration?.bpmDescription ?? "Waiting for source")
+                            linkValue("LINK PEERS", "\(library.abletonLinkIntegration?.peers ?? 0)")
+                            linkValue("BAR QUANTUM", "4 beats")
+                        }
+                    }
+                }
+
+                LumiPanel {
+                    VStack(alignment: .leading, spacing: LumiSpacing.large) {
+                        Text("Configuration")
+                            .font(LumiTypography.cardTitle)
+                        Toggle("Start Ableton Link when Lumi starts", isOn: $abletonLinkAutoStart)
+                            .disabled(!rendersInteractiveControls)
+                        Text("Timing source selection is automatic: Local Playback in preparation mode, and the current Pro DJ Link master in Live Decks.")
+                            .font(LumiTypography.caption)
+                            .foregroundStyle(LumiColor.textSecondary)
+                        Label(
+                            "Disabling Link leaves the shared session immediately without stopping SoundSwitch.",
+                            systemImage: "checkmark.shield"
+                        )
+                        .font(LumiTypography.caption)
+                        .foregroundStyle(LumiColor.textSecondary)
+                    }
+                }
+
+                if let feedback = abletonLinkFeedback {
+                    Text(feedback)
+                        .font(LumiTypography.metadata)
+                        .foregroundStyle(
+                            feedback.localizedCaseInsensitiveContains("could not")
+                                ? LumiColor.destructive : LumiColor.success
+                        )
+                }
+            }
+            .padding(LumiSpacing.xLarge)
+            .frame(maxWidth: 900, alignment: .leading)
+        }
+        .accessibilityIdentifier("lumi.integrations.abletonLink")
+    }
+
+    private func linkValue(_ label: String, _ value: String) -> some View {
+        VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+            Text(label)
+                .font(LumiTypography.technical.weight(.bold))
+                .foregroundStyle(LumiColor.textSecondary)
+            Text(value)
+                .font(LumiTypography.body.weight(.medium))
+                .lineLimit(1)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func overviewCard(
@@ -278,6 +379,7 @@ public struct IntegrationsWorkspaceView: View {
                     Button("Test Ableton Link Helper", action: onTestAbletonLinkHelper)
                         .buttonStyle(.borderedProminent)
                         .tint(LumiColor.accent)
+                        .disabled(library.abletonLinkIntegration?.enabled == true)
                     Text("Available while Lumi is Off. Verifies the bundled helper and pinned version without joining the Link session or sending lighting commands.")
                         .font(LumiTypography.caption)
                         .foregroundStyle(LumiColor.textSecondary)
@@ -285,6 +387,11 @@ public struct IntegrationsWorkspaceView: View {
                 }
                 if let midiIntegrationFeedback {
                     Text(midiIntegrationFeedback)
+                        .font(LumiTypography.caption)
+                        .foregroundStyle(LumiColor.textSecondary)
+                }
+                if let abletonLinkFeedback {
+                    Text(abletonLinkFeedback)
                         .font(LumiTypography.caption)
                         .foregroundStyle(LumiColor.textSecondary)
                 }
@@ -328,12 +435,26 @@ public struct IntegrationsWorkspaceView: View {
     private var abletonLinkState: LumiComponentState {
         guard let link = library.abletonLinkIntegration else { return .loading }
         if link.lastError != nil { return .degraded }
-        return link.state == "stopped" ? .empty : (link.isAvailable ? .ready : .loading)
+        if !link.enabled { return .empty }
+        return link.isAvailable ? .ready : .loading
+    }
+
+    private var abletonLinkStatusLabel: String {
+        guard let link = library.abletonLinkIntegration else { return "Unavailable" }
+        if link.lastError != nil { return "Problem" }
+        if !link.enabled { return "Off" }
+        switch link.state {
+        case "running": return "In Sync"
+        case "ready": return "On · Waiting"
+        case "starting": return "Starting"
+        default: return link.state.capitalized
+        }
     }
 
     private var abletonLinkDetail: String {
         guard let link = library.abletonLinkIntegration else { return "Starting managed timing provider" }
         if let error = link.lastError { return error }
+        if !link.enabled { return "Off · available when needed" }
         return "\(link.sourceDescription) · \(link.bpmDescription) · \(link.peers) peer\(link.peers == 1 ? "" : "s")"
     }
 
@@ -383,6 +504,7 @@ public struct IntegrationsWorkspaceView: View {
         switch value {
         case .overview: "Overview"
         case .deckInputs: "Pro DJ Link"
+        case .abletonLink: "Ableton Link"
         case .lightingOutputs: "Lighting Outputs"
         case .diagnostics: "Diagnostics"
         }
@@ -392,6 +514,7 @@ public struct IntegrationsWorkspaceView: View {
         switch value {
         case .overview: "point.3.connected.trianglepath.dotted"
         case .deckInputs: "play.square.stack.fill"
+        case .abletonLink: "link"
         case .lightingOutputs: "lightbulb.2.fill"
         case .diagnostics: "stethoscope"
         }

@@ -897,6 +897,7 @@ struct OutputWorker {
     midi_output: MidiOutputController<CoreMidiSourceProvider>,
     midi_clock: MidiClockController<CoreMidiSourceProvider>,
     link_timing: CarabinerTimingOutput,
+    link_enabled: bool,
     effect_sequence: u64,
     midi_auto_publish_enabled: bool,
     timing_offset_millis: i16,
@@ -916,6 +917,7 @@ impl OutputWorker {
             midi_output: MidiOutputController::new(CoreMidiSourceProvider::new()),
             midi_clock: MidiClockController::new(CoreMidiSourceProvider::new),
             link_timing: CarabinerTimingOutput::new(link_configuration),
+            link_enabled: false,
             effect_sequence: 0,
             midi_auto_publish_enabled: false,
             timing_offset_millis: 0,
@@ -992,6 +994,28 @@ impl OutputWorker {
 
     fn link_timing_status(&self) -> lumi_timing_output::TimingOutputStatus {
         self.link_timing.status()
+    }
+
+    fn link_enabled(&self) -> bool {
+        self.link_enabled
+    }
+
+    fn set_link_enabled(&mut self, enabled: bool) -> Result<(), EngineError> {
+        if enabled == self.link_enabled {
+            return Ok(());
+        }
+        if enabled {
+            self.link_timing
+                .publish()
+                .map_err(|error| EngineError::Timing(error.to_string()))?;
+            self.link_enabled = true;
+        } else {
+            self.link_timing
+                .stop()
+                .map_err(|error| EngineError::Timing(error.to_string()))?;
+            self.link_enabled = false;
+        }
+        Ok(())
     }
 
     fn midi_auto_publish_enabled(&self) -> bool {
@@ -1081,6 +1105,9 @@ impl OutputWorker {
         observation: lumi_prolink_input::ProLinkTimingObservation,
         operation: OperationState,
     ) -> Result<(), EngineError> {
+        if !self.link_enabled {
+            return Ok(());
+        }
         if matches!(operation, OperationState::Off | OperationState::Paused) {
             if self.link_timing.status().playing {
                 self.link_timing
@@ -1114,6 +1141,9 @@ impl OutputWorker {
         playing: bool,
         force_rephase: bool,
     ) -> Result<(), EngineError> {
+        if !self.link_enabled {
+            return Ok(());
+        }
         if force_rephase {
             self.local_timing_generation =
                 self.local_timing_generation.checked_add(1).ok_or_else(|| {
@@ -1659,8 +1689,21 @@ fn apply_command(
                 .map_err(|error| CommandApplicationError::Midi(error.to_string()))?;
             return Ok(());
         }
+        SessionCommand::SetAbletonLinkEnabled { enabled } => {
+            runtime
+                .output_worker
+                .set_link_enabled(enabled)
+                .map_err(CommandApplicationError::Engine)?;
+            if enabled && runtime.deck_source_mode == DeckSourceMode::LocalPlayback {
+                reconcile_local_midi_clock(runtime, true)
+                    .map_err(CommandApplicationError::Engine)?;
+            }
+            return Ok(());
+        }
         SessionCommand::TestAbletonLinkHelper => {
-            if runtime.state.state().operation() != OperationState::Off {
+            if runtime.state.state().operation() != OperationState::Off
+                || runtime.output_worker.link_enabled()
+            {
                 return Err(CommandApplicationError::TimingTestRequiresOff);
             }
             runtime
@@ -1902,8 +1945,8 @@ fn apply_command(
             command,
         } => {
             apply_operation_command(runtime, expected_revision, command)?;
-            if command == OperationCommand::Off {
-                runtime.output_worker.link_timing.stop().map_err(|error| {
+            if command == OperationCommand::Off && runtime.output_worker.link_enabled() {
+                runtime.output_worker.link_timing.hold().map_err(|error| {
                     CommandApplicationError::Engine(EngineError::Timing(error.to_string()))
                 })?;
             }
@@ -2019,6 +2062,7 @@ fn apply_command(
         | SessionCommand::MutateAutoloopCatalog { .. }
         | SessionCommand::PublishMidiSource
         | SessionCommand::StopMidiSource
+        | SessionCommand::SetAbletonLinkEnabled { .. }
         | SessionCommand::TestAbletonLinkHelper
         | SessionCommand::SetOutputTimingOffset { .. }
         | SessionCommand::SendMidiLearnPulse
@@ -2273,7 +2317,7 @@ fn application_error_envelope(
             correlation_id,
             "validationFailed",
             "timingTestRequiresOff",
-            "Set Lumi to Off before testing the Ableton Link helper.",
+            "Set Lumi to Off and disable Ableton Link before testing the helper.",
             false,
             None,
         ),
@@ -2522,7 +2566,7 @@ enum CommandApplicationError {
     ProLinkUnavailable(String),
     #[error("library backup and reset operations require Lumi to be Off")]
     DataManagementRequiresOff,
-    #[error("Ableton Link helper testing requires Lumi to be Off")]
+    #[error("Ableton Link helper testing requires Lumi to be Off with Link disabled")]
     TimingTestRequiresOff,
     #[error("library command failed: {0}")]
     Library(#[from] LibraryWorkerError),
@@ -2659,6 +2703,7 @@ fn snapshot_envelope_internal(
     payload.insert(
         "abletonLinkIntegration".to_owned(),
         json!({
+            "enabled": runtime.output_worker.link_enabled(),
             "state": match link_timing.state {
                 TimingOutputState::Stopped => "stopped",
                 TimingOutputState::Starting => "starting",

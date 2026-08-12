@@ -233,6 +233,7 @@ public struct MidiClockIntegrationState: Equatable, Sendable {
 }
 
 public struct AbletonLinkIntegrationState: Equatable, Sendable {
+    public let enabled: Bool
     public let state: String
     public let provider: String
     public let helperVersion: String?
@@ -249,7 +250,7 @@ public struct AbletonLinkIntegrationState: Equatable, Sendable {
     public let lastEvent: String?
     public let lastError: String?
 
-    public var isAvailable: Bool { ["ready", "running"].contains(state) }
+    public var isAvailable: Bool { enabled && ["ready", "running"].contains(state) }
     public var bpmDescription: String {
         guard let bpmMilli else { return "Waiting for timing authority" }
         return String(format: "%.3f BPM", Double(bpmMilli) / 1_000)

@@ -26,6 +26,8 @@
 	<string>$(MACOSX_DEPLOYMENT_TARGET)</string>
 	<key>LSMultipleInstancesProhibited</key>
 	<true/>
+	<key>NSLocalNetworkUsageDescription</key>
+	<string>Lumi connects to Pro DJ Link players, mixers, and Ableton Link peers on your local network.</string>
 	<key>LumiProductVersion</key>
 	<string>$(LUMI_PRODUCT_VERSION)</string>
 	<key>LumiReleaseChannel</key>

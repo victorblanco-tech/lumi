@@ -119,6 +119,9 @@ pub enum SessionCommand {
     },
     PublishMidiSource,
     StopMidiSource,
+    SetAbletonLinkEnabled {
+        enabled: bool,
+    },
     TestAbletonLinkHelper,
     SetOutputTimingOffset {
         millis: i16,
@@ -237,6 +240,7 @@ impl SessionCommand {
             | Self::MutateAutoloopCatalog { .. }
             | Self::PublishMidiSource
             | Self::StopMidiSource
+            | Self::SetAbletonLinkEnabled { .. }
             | Self::TestAbletonLinkHelper
             | Self::SetOutputTimingOffset { .. }
             | Self::SendMidiLearnPulse
@@ -375,6 +379,9 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
         }),
         "publishMidiSource" => Ok(SessionCommand::PublishMidiSource),
         "stopMidiSource" => Ok(SessionCommand::StopMidiSource),
+        "setAbletonLinkEnabled" => Ok(SessionCommand::SetAbletonLinkEnabled {
+            enabled: boolean(&envelope.payload, "enabled")?,
+        }),
         "testAbletonLinkHelper" => Ok(SessionCommand::TestAbletonLinkHelper),
         "setOutputTimingOffset" => {
             let millis = signed(&envelope.payload, "millis")?;
@@ -989,6 +996,18 @@ impl Error for CommandDecodeError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn ableton_link_enablement_decodes_as_an_explicit_boolean_command() {
+        let envelope = command_envelope(serde_json::json!({
+            "kind": "setAbletonLinkEnabled",
+            "enabled": true,
+        }));
+        assert_eq!(
+            decode_command(&envelope),
+            Ok(SessionCommand::SetAbletonLinkEnabled { enabled: true })
+        );
+    }
 
     #[test]
     fn ableton_link_helper_test_decodes_as_an_explicit_command() {

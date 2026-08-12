@@ -20,12 +20,18 @@ final class EngineStatusModel: ObservableObject {
         case localPlayback
     }
 
+    private enum IntegrationFeedbackTarget {
+        case midi
+        case abletonLink
+    }
+
     @Published private(set) var workspaceState = LiveWorkspacePresenter.stopped()
     @Published private(set) var libraryState = LibraryWorkspaceState.importing()
     @Published private(set) var timelineEditFeedback: String?
     @Published private(set) var phraseRoleFeedback: String?
     @Published private(set) var autoloopCatalogFeedback: String?
     @Published private(set) var midiIntegrationFeedback: String?
+    @Published private(set) var abletonLinkFeedback: String?
     @Published private(set) var localPlaybackFeedback: String?
     @Published private(set) var localPlaybackFeedbackIsError = false
     @Published private(set) var deckVisualClocks: [
@@ -85,6 +91,7 @@ final class EngineStatusModel: ObservableObject {
         phraseRoleFeedback = nil
         autoloopCatalogFeedback = nil
         midiIntegrationFeedback = nil
+        abletonLinkFeedback = nil
         localPlaybackFeedback = nil
         localPlaybackFeedbackIsError = false
         sourceImportFeedback = nil
@@ -567,6 +574,7 @@ final class EngineStatusModel: ObservableObject {
         phraseRoleFeedback = nil
         autoloopCatalogFeedback = nil
         midiIntegrationFeedback = nil
+        abletonLinkFeedback = nil
         localPlaybackFeedback = nil
         localPlaybackFeedbackIsError = false
         sourceImportFeedback = nil
@@ -827,9 +835,20 @@ final class EngineStatusModel: ObservableObject {
     }
 
     func testAbletonLinkHelper() async {
-        await exchangeMidiCommand(
+        await exchangeIntegrationCommand(
             .testAbletonLinkHelper,
-            success: "Ableton Link helper self-test passed. The Link session remains idle."
+            success: "Ableton Link helper self-test passed. The Link session remains idle.",
+            target: .abletonLink
+        )
+    }
+
+    func setAbletonLinkEnabled(_ enabled: Bool) async {
+        await exchangeIntegrationCommand(
+            .setAbletonLinkEnabled(enabled),
+            success: enabled
+                ? "Ableton Link started. Lumi is waiting for an active timing source."
+                : "Ableton Link stopped. Lumi left the shared Link session.",
+            target: .abletonLink
         )
     }
 
@@ -1555,33 +1574,62 @@ final class EngineStatusModel: ObservableObject {
     }
 
     private func exchangeMidiCommand(_ command: EngineCommand, success: String) async {
-        midiIntegrationFeedback = nil
+        await exchangeIntegrationCommand(command, success: success, target: .midi)
+    }
+
+    private func exchangeIntegrationCommand(
+        _ command: EngineCommand,
+        success: String,
+        target: IntegrationFeedbackTarget
+    ) async {
+        setIntegrationFeedback(nil, target: target)
         guard lifecycle == .ready,
               let endpointDescription,
               let protocolVersion,
               await acquireInteractiveExchange() else {
-            midiIntegrationFeedback = "The MIDI command could not run because the engine is not ready."
+            setIntegrationFeedback(
+                "The integration command could not run because the engine is not ready.",
+                target: target
+            )
             return
         }
         defer { isExchangingCommand = false }
         do {
             let envelope = try await supervisor.send(command)
             if let failure = EngineCommandFailure(envelope) {
-                midiIntegrationFeedback = "The MIDI command could not run: \(failure.message)"
+                setIntegrationFeedback(
+                    "The integration command could not run: \(failure.message)",
+                    target: target
+                )
                 return
             }
             let (snapshot, snapshotEnvelope) = try await decodeSnapshotWithRecovery(
                 envelope,
                 endpointDescription: endpointDescription,
                 protocolVersion: protocolVersion,
-                context: "MIDI command"
+                context: "integration command"
             )
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
             libraryState = try decodeLibraryState(snapshotEnvelope)
-            midiIntegrationFeedback = success
+            setIntegrationFeedback(success, target: target)
         } catch {
-            midiIntegrationFeedback = "The MIDI command could not run: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)"
+            setIntegrationFeedback(
+                "The integration command could not run: \((error as? LocalizedError)?.errorDescription ?? error.localizedDescription)",
+                target: target
+            )
+        }
+    }
+
+    private func setIntegrationFeedback(
+        _ message: String?,
+        target: IntegrationFeedbackTarget
+    ) {
+        switch target {
+        case .midi:
+            midiIntegrationFeedback = message
+        case .abletonLink:
+            abletonLinkFeedback = message
         }
     }
 

@@ -81,6 +81,7 @@ struct LiveWorkspacePresenterTests {
         #expect(state.output.condition == .ready)
         #expect(state.lightingMidi.condition == .ready)
         #expect(state.playbackClock.condition == .ready)
+        #expect(state.content?.abletonLinkEnabled == true)
         #expect(snapshot.abletonLinkIntegration?.provider == "Carabiner")
         #expect(snapshot.abletonLinkIntegration?.source == "localPlayback")
         #expect(snapshot.abletonLinkIntegration?.lastBeatAgeMillis == 4)
@@ -88,6 +89,105 @@ struct LiveWorkspacePresenterTests {
         #expect(snapshot.midiIntegration?.autoPublishEnabled == true)
         #expect(snapshot.midiIntegration?.timingOffsetMillis == 0)
         #expect(state.planner.condition == .ready)
+    }
+
+    @Test("Disabled Ableton Link is informational and never degrades Live")
+    func disabledAbletonLinkIsNotAProblem() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case var .object(link) = payload["abletonLinkIntegration"] else {
+            Issue.record("Recorded fixture has no Ableton Link status")
+            return
+        }
+        link["enabled"] = .boolean(false)
+        link["state"] = .string("stopped")
+        link["lastError"] = .null
+        payload["abletonLinkIntegration"] = .object(link)
+        let snapshot = try EngineSnapshotDecoder().decode(
+            MessageEnvelope(
+                protocolVersion: recorded.protocolVersion,
+                messageType: recorded.messageType,
+                messageId: recorded.messageId,
+                sequence: recorded.sequence,
+                correlationId: recorded.correlationId,
+                sentAt: recorded.sentAt,
+                payload: payload
+            ),
+            endpointDescription: "127.0.0.1:52841",
+            protocolVersion: 1
+        )
+
+        let state = LiveWorkspacePresenter.ready(snapshot)
+
+        #expect(state.condition == .ready)
+        #expect(state.playbackClock.condition == .empty)
+        #expect(state.playbackClock.detail == "Off")
+        #expect(state.content?.abletonLinkEnabled == false)
+    }
+
+    @Test("An intentionally disabled Light Output is informational")
+    func disabledLightOutputIsNotAProblem() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case var .object(midi) = payload["midiIntegration"] else {
+            Issue.record("Recorded fixture has no lighting MIDI status")
+            return
+        }
+        midi["state"] = .string("stopped")
+        midi["autoPublishEnabled"] = .boolean(false)
+        midi["lastError"] = .null
+        payload["midiIntegration"] = .object(midi)
+        let snapshot = try EngineSnapshotDecoder().decode(
+            MessageEnvelope(
+                protocolVersion: recorded.protocolVersion,
+                messageType: recorded.messageType,
+                messageId: recorded.messageId,
+                sequence: recorded.sequence,
+                correlationId: recorded.correlationId,
+                sentAt: recorded.sentAt,
+                payload: payload
+            ),
+            endpointDescription: "127.0.0.1:52841",
+            protocolVersion: 1
+        )
+
+        let state = LiveWorkspacePresenter.ready(snapshot)
+
+        #expect(state.condition == .ready)
+        #expect(state.lightingMidi.condition == .empty)
+    }
+
+    @Test("No loaded deck is an empty workspace, not a provider failure")
+    func emptyDecksAreNotAProblem() {
+        let recorded = LiveWorkspaceFixtures.readySnapshot
+        let empty = EngineSnapshot(
+            endpoint: recorded.endpoint,
+            engineVersion: recorded.engineVersion,
+            protocolVersion: recorded.protocolVersion,
+            snapshotSequence: recorded.snapshotSequence,
+            stateRevision: recorded.stateRevision,
+            operationState: recorded.operationState,
+            runtime: recorded.runtime,
+            deckSource: recorded.deckSource,
+            midiIntegration: recorded.midiIntegration,
+            midiClockIntegration: recorded.midiClockIntegration,
+            abletonLinkIntegration: recorded.abletonLinkIntegration,
+            simulation: recorded.simulation,
+            outputProvider: recorded.outputProvider,
+            leaderDeckID: nil,
+            decks: [],
+            livePlan: nil,
+            nextPlan: nil,
+            planningOptions: recorded.planningOptions,
+            timeline: recorded.timeline
+        )
+
+        let state = LiveWorkspacePresenter.ready(empty)
+
+        #expect(state.condition == .empty)
+        #expect(state.source.condition == .empty)
+        #expect(state.lightingMidi.condition == .ready)
+        #expect(state.playbackClock.condition == .ready)
     }
 
     @Test("Live timing distinguishes the applied value from the next-phrase value")
@@ -157,6 +257,37 @@ struct LiveWorkspacePresenterTests {
         #expect(state.condition == .degraded)
         #expect(state.lightingMidi.condition == .degraded)
         #expect(state.lightingMidi.detail.contains("CoreMIDI source unavailable"))
+    }
+
+    @Test("A duplicate Lumi MIDI owner is presented as an actionable user problem")
+    func duplicateMidiOwnerIsActionable() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case var .object(midi) = payload["midiIntegration"] else {
+            Issue.record("Recorded fixture has no lighting MIDI status")
+            return
+        }
+        midi["state"] = .string("stopped")
+        midi["lastError"] = .string("CoreMIDI failed: CoreMIDI unique ID collision")
+        payload["midiIntegration"] = .object(midi)
+        let snapshot = try EngineSnapshotDecoder().decode(
+            MessageEnvelope(
+                protocolVersion: recorded.protocolVersion,
+                messageType: recorded.messageType,
+                messageId: recorded.messageId,
+                sequence: recorded.sequence,
+                correlationId: recorded.correlationId,
+                sentAt: recorded.sentAt,
+                payload: payload
+            ),
+            endpointDescription: "127.0.0.1:52841",
+            protocolVersion: 1
+        )
+
+        let state = LiveWorkspacePresenter.ready(snapshot)
+
+        #expect(state.lightingMidi.condition == .degraded)
+        #expect(state.lightingMidi.detail == "Another Lumi version is using Light Output · close it and restart this app")
     }
 
     @Test("Physical Deck A and B ordering remains stable when Deck B becomes master")

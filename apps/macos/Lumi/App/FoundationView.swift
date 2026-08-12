@@ -58,6 +58,9 @@ struct FoundationView: View {
                         onLocalPlayback: { request in
                             engineStatus.runLocalPlayback(request)
                         },
+                        onSetAbletonLinkEnabled: { enabled in
+                            Task { await engineStatus.setAbletonLinkEnabled(enabled) }
+                        },
                         localPlaybackBrowser: AnyView(
                             LocalPlaybackLibraryBrowserView(
                                 state: engineStatus.libraryState,
@@ -141,6 +144,8 @@ struct FoundationView: View {
                         library: engineStatus.libraryState,
                         autoloopFeedback: engineStatus.autoloopCatalogFeedback,
                         midiIntegrationFeedback: engineStatus.midiIntegrationFeedback,
+                        abletonLinkFeedback: engineStatus.abletonLinkFeedback,
+                        abletonLinkAutoStart: $preferences.abletonLinkAutoStart,
                         onOpenLibrarySources: {
                             librarySection = .sources
                             destination = .library
@@ -153,6 +158,9 @@ struct FoundationView: View {
                         },
                         onStopMidi: {
                             Task { await engineStatus.stopMidiSource() }
+                        },
+                        onSetAbletonLinkEnabled: { enabled in
+                            Task { await engineStatus.setAbletonLinkEnabled(enabled) }
                         },
                         onTestAbletonLinkHelper: {
                             Task { await engineStatus.testAbletonLinkHelper() }

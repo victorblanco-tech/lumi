@@ -459,6 +459,7 @@ public struct LibrarySnapshotDecoder: Sendable {
             throw LibrarySnapshotError.invalidObject
         }
         return AbletonLinkIntegrationState(
+            enabled: try boolean(link, "enabled"),
             state: state,
             provider: try string(link, "provider"),
             helperVersion: optionalString(link, "helperVersion"),

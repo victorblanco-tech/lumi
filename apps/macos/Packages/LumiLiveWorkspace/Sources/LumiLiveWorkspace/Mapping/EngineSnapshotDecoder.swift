@@ -274,11 +274,13 @@ public struct EngineSnapshotDecoder: Sendable {
               ["stopped", "starting", "ready", "running", "degraded"].contains(state),
               case let .string(provider) = link["provider"],
               !provider.isEmpty,
+              case let .boolean(enabled) = link["enabled"],
               let peers = unsignedInteger(link["peers"]),
               case let .boolean(playing) = link["playing"] else {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
         return AbletonLinkIntegrationSnapshot(
+            enabled: enabled,
             state: state,
             provider: provider,
             helperVersion: try optionalString(link["helperVersion"]),

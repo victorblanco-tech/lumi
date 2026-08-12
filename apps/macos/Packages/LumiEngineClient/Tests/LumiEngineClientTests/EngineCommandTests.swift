@@ -4,6 +4,13 @@ import Testing
 
 @Suite("Engine command encoding")
 struct EngineCommandTests {
+    @Test("Ableton Link enablement has an explicit boolean command")
+    func abletonLinkEnablementPayload() {
+        let payload = EngineCommand.setAbletonLinkEnabled(true).payload()
+        #expect(payload["kind"] == .string("setAbletonLinkEnabled"))
+        #expect(payload["enabled"] == .boolean(true))
+    }
+
     @Test("Ableton Link helper testing has an explicit command")
     func abletonLinkRecoveryPayload() {
         let payload = EngineCommand.testAbletonLinkHelper.payload()

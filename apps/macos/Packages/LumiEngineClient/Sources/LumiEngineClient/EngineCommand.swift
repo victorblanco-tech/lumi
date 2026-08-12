@@ -329,6 +329,7 @@ public enum EngineCommand: Equatable, Sendable {
     )
     case publishMidiSource
     case stopMidiSource
+    case setAbletonLinkEnabled(Bool)
     case testAbletonLinkHelper
     case setOutputTimingOffset(millis: Int16)
     case sendMidiLearnPulse
@@ -519,6 +520,11 @@ public enum EngineCommand: Equatable, Sendable {
             return ["kind": .string("publishMidiSource")]
         case .stopMidiSource:
             return ["kind": .string("stopMidiSource")]
+        case let .setAbletonLinkEnabled(enabled):
+            return [
+                "kind": .string("setAbletonLinkEnabled"),
+                "enabled": .boolean(enabled)
+            ]
         case .testAbletonLinkHelper:
             return ["kind": .string("testAbletonLinkHelper")]
         case let .setOutputTimingOffset(millis):

@@ -98,11 +98,12 @@ never replaced by an older observation.
 
 ## Lifecycle and diagnostics
 
-The helper starts automatically on the first valid timing anchor and is
-supervised independently from `Lumi Virtual MIDI`. It does not participate in
-the Link session during app startup or while Lumi is `Off`; this prevents an
-idle helper's default tempo from changing SoundSwitch. Returning to `Off`
-stops the helper completely. Failure of one output does not remove the other.
+The helper starts only after explicit Link enablement or a saved auto-start
+preference and is supervised independently from `Lumi Virtual MIDI`. Merely
+launching Lumi does not join Link with the safe default. While enabled, a valid
+timing anchor supplies tempo and phase; `Off` holds transport without silently
+discarding the user's Link choice. Failure of one output does not remove the
+other.
 Readiness reports at least:
 
 - helper version and process health;
@@ -116,14 +117,24 @@ Diagnostics offers an explicit helper self-test while Lumi is `Off`. It runs
 the pinned executable's terminating version mode and verifies the exact
 expected version without opening a server or joining the Link session. This
 keeps the test side-effect free for SoundSwitch; runtime connection recovery
-still occurs automatically on the next valid timing anchor.
-It is rejected during `Arm`, `Start` or `Pause` so recovery cannot interrupt a
-show in progress.
+still occurs automatically while Link is enabled and the next valid timing
+anchor arrives. It is rejected while Link is enabled and during `Arm`, `Start`
+or `Pause`, so recovery cannot interrupt a show in progress.
 
-`Off` stops publishing authoritative transport. `Arm` locks and validates
-timing without sending lighting commands. `Start` publishes timing and executes
-planned MIDI cues. `Pause` stops cue execution while retaining observable
-source state; resumption re-anchors safely before a new automatic cue.
+Ableton Link has an explicit user-owned lifecycle and is Off by default. The
+user may enable it from Integrations or Live and may persist an app-start
+preference. Disabling it leaves the Link session immediately; changing the
+lighting operation state never silently changes that saved integration choice.
+
+Within an enabled Link session, `Off` and `Pause` hold authoritative transport.
+`Arm` locks and validates timing without sending lighting commands. `Start`
+publishes timing and executes planned MIDI cues. Resumption re-anchors safely
+before a new automatic cue.
+
+Live status exposes only Pro DJ Link, Light Output and Ableton Link. An
+intentionally disabled provider, Local Playback not using Pro DJ Link, or an
+empty deck is informational rather than degraded. Diagnostics retains helper
+and transport detail for troubleshooting.
 
 ## Acceptance gates
 

@@ -171,6 +171,7 @@ public struct MidiClockIntegrationSnapshot: Equatable, Sendable {
 }
 
 public struct AbletonLinkIntegrationSnapshot: Equatable, Sendable {
+    public let enabled: Bool
     public let state: String
     public let provider: String
     public let helperVersion: String?

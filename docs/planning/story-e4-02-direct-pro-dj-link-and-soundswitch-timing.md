@@ -119,7 +119,7 @@ This story is delivered in visible, independently testable increments:
 
 ### E4-02D — SoundSwitch timing output
 
-**Implementation status for `0.4.0-dev-18`:** D1 and D2 are implemented and
+**Implementation status for `0.4.0-dev-19`:** D1 and D2 are implemented and
 locally verified. D3 status, automatic recovery and an Off-only side-effect-free
 helper self-test are implemented. The managed Link path is verified
 against SoundSwitch as a real peer for 130 → 140 BPM plus hold/start-stop. D4
@@ -174,20 +174,25 @@ remains a complete-show and physical-hardware acceptance gate.
   error, and expose peer count plus current session state;
 - retain exact GPL license, source and build provenance in the release bundle.
 
-#### E4-02D3 — Product status and recovery — partially implemented
+#### E4-02D3 — Product status and recovery — implemented
 
-- show `Ableton Link` beside command MIDI under Lighting Outputs;
+- provide a dedicated `Integrations > Ableton Link` workspace with an explicit
+  session switch, peer/source/tempo state and an optional saved app-start
+  preference;
+- expose a compact Link switch and authoritative BPM in Live;
 - expose helper health, peers, source deck, effective BPM, beat/bar lock, last
   beat age, phase error, last re-anchor and actionable error;
-- include both timing and command readiness in Tech status without conflating
-  their failure domains;
+- consolidate Live system status to Pro DJ Link, Light Output and Ableton Link
+  without treating an empty deck or intentionally disabled integration as a
+  fault;
 - provide an explicit helper test in Diagnostics, disabled while a Live show
   could be disturbed and unable to join or change the shared Link session.
 
 Implemented status includes independent Link and MIDI readiness, helper
 version, peers, source, deck, effective BPM, beat age, phase error, last
-re-anchor and actionable failure. The helper starts only on a valid timing
-anchor, coalesces stale observations and reconnects on the next fresh anchor.
+re-anchor and actionable failure. Link is off by default and joins only after
+an explicit user action or saved auto-start preference; fresh timing anchors
+then drive the managed helper and reconnect it when needed.
 
 #### E4-02D4 — Physical acceptance — pending
 

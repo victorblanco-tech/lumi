@@ -9,7 +9,7 @@
     "kind": "stateSnapshot",
     "stateRevision": 8,
     "operationState": "armed",
-    "engineVersion": "0.4.0-dev-18",
+    "engineVersion": "0.4.0-dev-19",
     "runtimeCore": {
       "model": "singleWriterReducer",
       "health": "ready",
@@ -48,6 +48,7 @@
       "lastError": null
     },
     "abletonLinkIntegration": {
+      "enabled": true,
       "state": "running",
       "provider": "Carabiner",
       "helperVersion": "1.2.0",

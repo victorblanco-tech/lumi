@@ -3,7 +3,7 @@ import Foundation
 public enum LiveWorkspaceFixtures {
     public static let readySnapshot = EngineSnapshot(
         endpoint: "127.0.0.1:52841",
-        engineVersion: "0.4.0-dev-18",
+        engineVersion: "0.4.0-dev-19",
         protocolVersion: 1,
         snapshotSequence: 42,
         stateRevision: 8,
@@ -43,6 +43,7 @@ public enum LiveWorkspaceFixtures {
             lastError: nil
         ),
         abletonLinkIntegration: AbletonLinkIntegrationSnapshot(
+            enabled: true,
             state: "running",
             provider: "Carabiner",
             helperVersion: "1.2.0",

@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.4.0-dev-19
+
+- Ableton Link is now an explicit user-controlled integration with its own
+  `Integrations > Ableton Link` workspace, live state, peer count, timing
+  source and optional remembered app-start preference. The safe default stays
+  Off.
+- Live exposes a compact Link on/off control with the authoritative BPM when
+  timing is active. Link lifecycle is independent from the lighting
+  `Off`/`Arm`/`Start`/`Pause` state; disabling Link leaves the shared session
+  without stopping SoundSwitch.
+- Live system status is consolidated to Pro DJ Link, Light Output and Ableton
+  Link. An intentionally unused provider or an empty deck is informational;
+  only an operational failure produces `Attention`. A competing Lumi version
+  now yields an actionable Light Output message instead of a CoreMIDI error.
+- The macOS bundle now explains its Local Network permission before using Pro
+  DJ Link discovery or Ableton Link peer discovery.
+- The helper self-test remains side-effect free and is unavailable while Link
+  is enabled.
+
 ## 0.4.0-dev-18
 
 - Pro DJ Link start niet langer tijdens appstart of Local Playback. Lumi doet

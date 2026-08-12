@@ -16,6 +16,18 @@ public final class LumiPreferences {
         }
     }
 
+    /// When enabled, Lumi explicitly joins Ableton Link after its local engine
+    /// is ready. The safe default is off, so launching Lumi never changes a
+    /// shared Link session without a saved user choice.
+    public var abletonLinkAutoStart: Bool {
+        didSet {
+            userDefaults.set(
+                abletonLinkAutoStart,
+                forKey: LumiPreferenceKey.abletonLinkAutoStart
+            )
+        }
+    }
+
     /// Signed lighting-output compensation. Positive values send an AutoLoop
     /// early; negative values deliberately delay it.
     public var lightingTimingOffsetMillis: Int {
@@ -40,6 +52,9 @@ public final class LumiPreferences {
             .flatMap(AppearancePreference.init(rawValue:)) ?? .dark
         keyNotation = userDefaults.string(forKey: LumiPreferenceKey.keyNotation)
             .flatMap(KeyNotationPreference.init(rawValue:)) ?? .camelot
+        abletonLinkAutoStart = userDefaults.bool(
+            forKey: LumiPreferenceKey.abletonLinkAutoStart
+        )
         lightingTimingOffsetMillis = userDefaults
             .integer(forKey: LumiPreferenceKey.lightingTimingOffsetMillis)
             .clamped(to: -250...250)
@@ -51,6 +66,8 @@ public enum LumiPreferenceKey {
     public static let keyNotation = "co.victorblan.tech.lumi.preference.key-notation"
     public static let lightingTimingOffsetMillis =
         "co.victorblan.tech.lumi.preference.lighting-timing-offset-millis"
+    public static let abletonLinkAutoStart =
+        "co.victorblan.tech.lumi.preference.ableton-link-auto-start"
     public static let navigationAutoHide =
         "co.victorblan.tech.lumi.navigation.auto-hide"
     public static let rekordboxXMLFolder =
