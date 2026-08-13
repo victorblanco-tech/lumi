@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.0-dev-25
+
+- Removes the embedded rounded outline from the Lumi app-icon artwork so the
+  macOS-owned icon shape no longer produces an inner/double border. The
+  approved RGB waveform/light geometry stays optically centered and unchanged.
+
 ## 0.4.0-dev-24
 
 - Rekordbox hot cues are parsed read-only from trusted USB analysis, persisted
