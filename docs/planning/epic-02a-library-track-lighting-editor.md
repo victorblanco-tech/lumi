@@ -117,6 +117,8 @@ het Theme verandert.
 - Rekordbox hot cues behouden letter, naam, loopstatus en RGB-kleur; ze staan
   subtiel als markers op detail/overview en als klikbare seeklijst boven de
   editor, zonder de phrase-editing workflow over te nemen;
+- cue-sync heeft eigen bronprovenance en mag daardoor cues bijwerken zonder een
+  beschermde beatgrid/waveform of een Lumi phrase-revisie te vervangen;
 - inspector: role, start/eindmaat, origin, revision en loopstrategie;
 - preview: voorlopig Theme, reason en opgeloste dry-run-Autoloop per phrase;
 - transport: play/pause, stop, seek/scrub, vorige/volgende maat, volume en

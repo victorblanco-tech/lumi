@@ -119,6 +119,11 @@ This story is delivered in visible, independently testable increments:
 - **Implemented in dev-24:** metadata, beat grid, waveform, hot-cue list and
   signature retrieval. Hot-cue letter, name, loop and source RGB color persist
   once and render consistently in Editor, Local Playback and Live Decks.
+- **Completed and physically verified in dev-27:** current OneLibrary point
+  encoding is parsed from DAT/EXT, and hot cues use independent provenance so
+  they can enrich a held canonical analysis safely. The unchanged GRAY
+  `MainStage 140+` sync added the two expected `90s Bitch` cues while preserving
+  analysis identity, timeline revision 35 and all 17 authored phrase points.
 - Exact identity/signature reconciliation and persisted aliases.
 - Explicit ambiguous/unknown result; no realtime fuzzy auto-activation.
 

@@ -21,17 +21,19 @@ Lumi-owned phrase and AutoLoop edits.
 
 ## Decision
 
-Lumi adds a provider adapter for a mounted classic Rekordbox Device Library:
+Lumi adds a provider adapter for a mounted current Rekordbox OneLibrary device:
 
-- it opens `PIONEER/rekordbox/export.pdb` and referenced audio/analysis files
+- it opens `PIONEER/rekordbox/exportLibrary.db` and referenced
+  DAT/EXT/2EX analysis files
   only for reading;
 - it validates that every declared path remains below the selected device root;
 - it fingerprints the DeviceSQL database plus the complete DAT/EXT/2EX analysis
   companion set on every sync;
 - it stores a durable alias from `(device source, device track ID)` to one
   canonical Lumi track;
-- it refreshes the matched track's beatgrid, waveform and performance hot cues
-  atomically with that alias snapshot;
+- it refreshes matched analysis projections atomically with that alias
+  snapshot, while beatgrid/waveform promotion and hot-cue promotion retain
+  independent provenance;
 - it normalizes hot-cue letter/index, source time, optional loop end, comment
   and RGB color into Lumi's provider-neutral analysis model;
 - it never overwrites Lumi phrase timelines, phrase-role choices, Themes or
@@ -50,6 +52,12 @@ real-device ID resolution.
 
 All aliases and refreshed analyses are published in one SQLite transaction. An
 interrupted or invalid sync leaves the previous known-good snapshot available.
+Hot cues deliberately form a separate replaceable projection. This allows an
+existing canonical track whose beatgrid is held by the monotone promotion rule
+to receive current cue facts without replacing its analysis revision, waveform
+or Lumi-owned timeline. Current OneLibrary point encoding `1`, legacy point
+encoding `0` and loop encoding `2` are normalized into the same provider-neutral
+model.
 
 ## Consequences
 
@@ -58,9 +66,8 @@ interrupted or invalid sync leaves the previous known-good snapshot available.
   revisions; no manual Lumi reconfiguration is required.
 - The lighting engine never depends on UI timing or fuzzy live matching.
 - Unknown tracks continue safely as external metadata with `AUTO HELD`.
-- Device Library Plus media is not silently treated as classic DeviceSQL. A
-  future adapter can implement the same provider contract when its format is
-  supported safely.
+- Older classic DeviceSQL media is not silently accepted as OneLibrary and
+  must be upgraded/exported by a current rekordbox version first.
 - Track Editor, Local Playback and Live Decks render the same persisted hot-cue
   facts subtly over their shared waveform and in a compact letter/name strip.
 - Upgrading an existing library invalidates only read-only analysis promotion

@@ -23,8 +23,8 @@ use lumi_library::{
 use lumi_library_demo::{DemoLibraryError, DemoLibraryRevision, DemoLibrarySourceProvider};
 use lumi_library_source::MusicLibrarySourceProvider as _;
 use lumi_library_sqlite::{
-    DeviceAliasUpsert, DeviceAnalysisUpsert, DeviceMatchCandidate, DevicePlaylistUpsert,
-    DeviceTrackImport, LibraryResetImpact,
+    DeviceAliasUpsert, DeviceAnalysisUpsert, DeviceHotCueUpsert, DeviceMatchCandidate,
+    DevicePlaylistUpsert, DeviceTrackImport, LibraryResetImpact,
 };
 use lumi_library_sqlite::{SqliteLibraryError, SqliteLibraryRepository};
 use lumi_rekordbox_analysis::{
@@ -1018,6 +1018,8 @@ impl LibraryWorker {
         let mut aliases = Vec::with_capacity(snapshot.tracks.len());
         let mut matched_tracks =
             BTreeMap::<TrackId, (&DeviceTrack, lumi_library_sqlite::DeviceAnalysisDecision)>::new();
+        let mut matched_hot_cues =
+            BTreeMap::<TrackId, (&DeviceTrack, lumi_library_sqlite::DeviceAnalysisDecision)>::new();
         for (device_track, preliminary_track_id, candidate_count, match_kind) in preliminary_matches
         {
             let canonical_track_id = preliminary_track_id
@@ -1030,6 +1032,13 @@ impl LibraryWorker {
                     &device_track.analyzed_at,
                 )?;
                 matched_tracks.insert(track_id, (device_track, decision));
+                let hot_cue_decision = self.repository.device_hot_cue_decision(
+                    track_id,
+                    &snapshot.source_id,
+                    &device_track.analysis_revision,
+                    &device_track.analyzed_at,
+                )?;
+                matched_hot_cues.insert(track_id, (device_track, hot_cue_decision));
             }
             let sync_disposition = canonical_track_id
                 .and_then(|track_id| {
@@ -1075,13 +1084,25 @@ impl LibraryWorker {
             .filter(|(_, (_, decision))| decision.promotes())
             .map(|(track_id, (track, _))| (*track_id, *track))
             .collect::<BTreeMap<_, _>>();
-        let analyses = if promotable_tracks.is_empty() {
-            Vec::new()
+        let promotable_hot_cues = matched_hot_cues
+            .iter()
+            .filter(|(track_id, (_, decision))| {
+                decision.promotes() && !promotable_tracks.contains_key(track_id)
+            })
+            .map(|(track_id, (track, _))| (*track_id, *track))
+            .collect::<BTreeMap<_, _>>();
+        let analysis_tracks = promotable_tracks
+            .iter()
+            .chain(promotable_hot_cues.iter())
+            .map(|(track_id, track)| (*track_id, *track))
+            .collect::<BTreeMap<_, _>>();
+        let parsed_analyses = if analysis_tracks.is_empty() {
+            BTreeMap::new()
         } else {
             let request = ResolvedAnalysisRequest::try_new(
                 &analysis_root,
                 temporary.path().join("device-analysis"),
-                promotable_tracks
+                analysis_tracks
                     .iter()
                     .map(|(track_id, device_track)| {
                         ResolvedAnalysisTrack::try_new(
@@ -1091,41 +1112,60 @@ impl LibraryWorker {
                     })
                     .collect::<Result<Vec<_>, _>>()?,
             )?;
-            let parsed = snapshot_resolved_analysis_data(&request)?;
-            promotable_tracks
-                .iter()
-                .map(|(track_id, device_track)| {
-                    let analysis = parsed
-                        .tracks
-                        .get(&track_id.value().to_string())
-                        .ok_or_else(|| {
-                            LibraryWorkerError::MissingRekordboxTrackAnalysis(
-                                device_track.device_track_id.to_string(),
-                            )
-                        })?;
-                    Ok(DeviceAnalysisUpsert {
-                        track_id: *track_id,
-                        source_id: snapshot.source_id.clone(),
-                        device_track_id: device_track.device_track_id,
-                        analysis_revision: format!(
-                            "device:{}:{}",
-                            snapshot.source_id, device_track.analysis_revision
-                        ),
-                        source_analysis_revision: device_track.analysis_revision.clone(),
-                        analyzed_at: device_track.analyzed_at.clone(),
-                        beat_grid: canonical_beat_grid(analysis)?,
-                        waveform: downsample_waveform(
-                            &analysis.waveform,
-                            MAX_IMPORTED_WAVEFORM_POINTS,
-                        ),
-                        hot_cues: canonical_hot_cues(
-                            analysis,
-                            u64::from(device_track.duration_millis),
-                        )?,
-                    })
-                })
-                .collect::<Result<Vec<_>, LibraryWorkerError>>()?
+            snapshot_resolved_analysis_data(&request)?.tracks
         };
+        let analyses = promotable_tracks
+            .iter()
+            .map(|(track_id, device_track)| {
+                let analysis = parsed_analyses
+                    .get(&track_id.value().to_string())
+                    .ok_or_else(|| {
+                        LibraryWorkerError::MissingRekordboxTrackAnalysis(
+                            device_track.device_track_id.to_string(),
+                        )
+                    })?;
+                Ok(DeviceAnalysisUpsert {
+                    track_id: *track_id,
+                    source_id: snapshot.source_id.clone(),
+                    device_track_id: device_track.device_track_id,
+                    analysis_revision: format!(
+                        "device:{}:{}",
+                        snapshot.source_id, device_track.analysis_revision
+                    ),
+                    source_analysis_revision: device_track.analysis_revision.clone(),
+                    analyzed_at: device_track.analyzed_at.clone(),
+                    beat_grid: canonical_beat_grid(analysis)?,
+                    waveform: downsample_waveform(&analysis.waveform, MAX_IMPORTED_WAVEFORM_POINTS),
+                    hot_cues: canonical_hot_cues(
+                        analysis,
+                        u64::from(device_track.duration_millis),
+                    )?,
+                })
+            })
+            .collect::<Result<Vec<_>, LibraryWorkerError>>()?;
+        let hot_cue_updates = promotable_hot_cues
+            .iter()
+            .map(|(track_id, device_track)| {
+                let analysis = parsed_analyses
+                    .get(&track_id.value().to_string())
+                    .ok_or_else(|| {
+                        LibraryWorkerError::MissingRekordboxTrackAnalysis(
+                            device_track.device_track_id.to_string(),
+                        )
+                    })?;
+                Ok(DeviceHotCueUpsert {
+                    track_id: *track_id,
+                    source_id: snapshot.source_id.clone(),
+                    device_track_id: device_track.device_track_id,
+                    source_analysis_revision: device_track.analysis_revision.clone(),
+                    analyzed_at: device_track.analyzed_at.clone(),
+                    hot_cues: canonical_hot_cues(
+                        analysis,
+                        u64::from(device_track.duration_millis),
+                    )?,
+                })
+            })
+            .collect::<Result<Vec<_>, LibraryWorkerError>>()?;
 
         let new_device_tracks = aliases
             .iter()
@@ -1217,6 +1257,7 @@ impl LibraryWorker {
             &mut aliases,
             &new_tracks,
             &analyses,
+            &hot_cue_updates,
             &snapshot
                 .playlists
                 .iter()

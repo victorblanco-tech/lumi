@@ -21,7 +21,7 @@ use lumi_library::{
 use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
 use thiserror::Error;
 
-const SCHEMA_VERSION: u32 = 10;
+const SCHEMA_VERSION: u32 = 11;
 const DEFAULTS_VERSION_KEY: &str = "phrase-role-defaults-version";
 const CATALOG_REVISION_KEY: &str = "phrase-role-catalog-revision";
 const AUTOLOOP_DEFAULTS_VERSION_KEY: &str = "autoloop-catalog-defaults-version";
@@ -116,6 +116,16 @@ pub struct DeviceAnalysisUpsert {
     pub analyzed_at: String,
     pub beat_grid: BeatGrid,
     pub waveform: Vec<WaveformPoint>,
+    pub hot_cues: Vec<HotCue>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeviceHotCueUpsert {
+    pub track_id: TrackId,
+    pub source_id: String,
+    pub device_track_id: u32,
+    pub source_analysis_revision: String,
+    pub analyzed_at: String,
     pub hot_cues: Vec<HotCue>,
 }
 
@@ -435,6 +445,7 @@ impl SqliteLibraryRepository {
         aliases: &mut [DeviceAliasUpsert],
         new_tracks: &[DeviceTrackImport],
         analyses: &[DeviceAnalysisUpsert],
+        hot_cue_updates: &[DeviceHotCueUpsert],
         playlists: &[DevicePlaylistUpsert],
     ) -> Result<(), SqliteLibraryError> {
         let transaction = self.connection.transaction()?;
@@ -492,6 +503,10 @@ impl SqliteLibraryRepository {
                 }
                 transaction.execute(
                     "UPDATE track_analysis_provenance SET source_id = ?1 WHERE source_id = ?2",
+                    params![source_id, legacy_source_id],
+                )?;
+                transaction.execute(
+                    "UPDATE track_hot_cue_provenance SET source_id = ?1 WHERE source_id = ?2",
                     params![source_id, legacy_source_id],
                 )?;
                 transaction.execute(
@@ -554,6 +569,19 @@ impl SqliteLibraryRepository {
                  (track_id, source_id, device_track_id, analysis_revision, analyzed_at,
                   hot_cues_loaded)
                  VALUES (?1, ?2, ?3, ?4, ?5, 1)
+                 ON CONFLICT(track_id) DO NOTHING",
+                params![
+                    track_id,
+                    source_id,
+                    i64::from(imported.device_track_id),
+                    imported.source_analysis_revision,
+                    imported.analyzed_at,
+                ],
+            )?;
+            transaction.execute(
+                "INSERT INTO track_hot_cue_provenance
+                 (track_id, source_id, device_track_id, analysis_revision, analyzed_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
                  ON CONFLICT(track_id) DO NOTHING",
                 params![
                     track_id,
@@ -709,6 +737,45 @@ impl SqliteLibraryRepository {
                     analysis.analyzed_at,
                 ],
             )?;
+            transaction.execute(
+                "INSERT INTO track_hot_cue_provenance
+                 (track_id, source_id, device_track_id, analysis_revision, analyzed_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(track_id) DO UPDATE SET
+                   source_id = excluded.source_id,
+                   device_track_id = excluded.device_track_id,
+                   analysis_revision = excluded.analysis_revision,
+                   analyzed_at = excluded.analyzed_at,
+                   imported_at = CURRENT_TIMESTAMP",
+                params![
+                    to_i64(analysis.track_id.value())?,
+                    analysis.source_id,
+                    i64::from(analysis.device_track_id),
+                    analysis.source_analysis_revision,
+                    analysis.analyzed_at,
+                ],
+            )?;
+        }
+        for update in hot_cue_updates {
+            replace_hot_cues_in_transaction(&transaction, update.track_id, &update.hot_cues)?;
+            transaction.execute(
+                "INSERT INTO track_hot_cue_provenance
+                 (track_id, source_id, device_track_id, analysis_revision, analyzed_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5)
+                 ON CONFLICT(track_id) DO UPDATE SET
+                   source_id = excluded.source_id,
+                   device_track_id = excluded.device_track_id,
+                   analysis_revision = excluded.analysis_revision,
+                   analyzed_at = excluded.analyzed_at,
+                   imported_at = CURRENT_TIMESTAMP",
+                params![
+                    to_i64(update.track_id.value())?,
+                    update.source_id,
+                    i64::from(update.device_track_id),
+                    update.source_analysis_revision,
+                    update.analyzed_at,
+                ],
+            )?;
         }
         // A previous USB sync could have imported a second canonical row when
         // the same track already existed under a provider source. Once the
@@ -791,6 +858,48 @@ impl SqliteLibraryRepository {
                 DeviceAnalysisDecision::PromoteInitial
             });
         };
+        match compare_rekordbox_dates(analyzed_at, &active_date) {
+            Some(std::cmp::Ordering::Greater) => Ok(DeviceAnalysisDecision::PromoteNewer),
+            Some(std::cmp::Ordering::Less) => Ok(DeviceAnalysisDecision::ProtectOlder),
+            Some(std::cmp::Ordering::Equal) | None => Ok(DeviceAnalysisDecision::HoldConflict),
+        }
+    }
+
+    /// Hot cues are an independently replaceable Rekordbox projection. Their
+    /// provenance must not force a beat-grid or waveform promotion: a trusted
+    /// source can refresh its own cue revision, while an older backup source
+    /// remains protected by the same monotone date rule.
+    pub fn device_hot_cue_decision(
+        &self,
+        track_id: TrackId,
+        source_id: &str,
+        analysis_revision: &str,
+        analyzed_at: &str,
+    ) -> Result<DeviceAnalysisDecision, SqliteLibraryError> {
+        let provenance = self
+            .connection
+            .query_row(
+                "SELECT source_id, analysis_revision, analyzed_at
+                   FROM track_hot_cue_provenance WHERE track_id = ?1",
+                [to_i64(track_id.value())?],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, String>(2)?,
+                    ))
+                },
+            )
+            .optional()?;
+        let Some((active_source, active_revision, active_date)) = provenance else {
+            return Ok(DeviceAnalysisDecision::PromoteInitial);
+        };
+        if active_revision == analysis_revision {
+            return Ok(DeviceAnalysisDecision::Current);
+        }
+        if active_source == source_id {
+            return Ok(DeviceAnalysisDecision::PromoteNewer);
+        }
         match compare_rekordbox_dates(analyzed_at, &active_date) {
             Some(std::cmp::Ordering::Greater) => Ok(DeviceAnalysisDecision::PromoteNewer),
             Some(std::cmp::Ordering::Less) => Ok(DeviceAnalysisDecision::ProtectOlder),
@@ -1549,6 +1658,14 @@ impl SqliteLibraryRepository {
                     hot_cues_loaded INTEGER NOT NULL DEFAULT 0,
                     promoted_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
+                CREATE TABLE track_hot_cue_provenance (
+                    track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+                    source_id TEXT NOT NULL,
+                    device_track_id INTEGER NOT NULL,
+                    analysis_revision TEXT NOT NULL,
+                    analyzed_at TEXT NOT NULL,
+                    imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
                 CREATE TABLE creative_track_archives (
                     archive_id INTEGER PRIMARY KEY AUTOINCREMENT,
                     identity_key TEXT NOT NULL UNIQUE,
@@ -1576,7 +1693,7 @@ impl SqliteLibraryRepository {
                     loop_strategy TEXT NOT NULL,
                     PRIMARY KEY(archive_id, phrase_index)
                 );
-                PRAGMA user_version = 10;
+                PRAGMA user_version = 11;
                 COMMIT;
                 ",
             )?;
@@ -1875,6 +1992,46 @@ impl SqliteLibraryRepository {
                 COMMIT;
                 ",
             )?;
+            current = 10;
+        }
+        if current == 10 {
+            let can_seed_hot_cue_provenance =
+                self.table_exists("tracks")? && self.table_exists("track_analysis_provenance")?;
+            self.connection
+                .execute_batch(if can_seed_hot_cue_provenance {
+                    "
+                BEGIN IMMEDIATE;
+                CREATE TABLE track_hot_cue_provenance (
+                    track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+                    source_id TEXT NOT NULL,
+                    device_track_id INTEGER NOT NULL,
+                    analysis_revision TEXT NOT NULL,
+                    analyzed_at TEXT NOT NULL,
+                    imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                INSERT INTO track_hot_cue_provenance
+                    (track_id, source_id, device_track_id, analysis_revision, analyzed_at)
+                SELECT track_id, source_id, device_track_id, analysis_revision, analyzed_at
+                  FROM track_analysis_provenance
+                 WHERE hot_cues_loaded = 1;
+                PRAGMA user_version = 11;
+                COMMIT;
+                "
+                } else {
+                    "
+                BEGIN IMMEDIATE;
+                CREATE TABLE track_hot_cue_provenance (
+                    track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+                    source_id TEXT NOT NULL,
+                    device_track_id INTEGER NOT NULL,
+                    analysis_revision TEXT NOT NULL,
+                    analyzed_at TEXT NOT NULL,
+                    imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                PRAGMA user_version = 11;
+                COMMIT;
+                "
+                })?;
         }
         Ok(())
     }
@@ -3767,6 +3924,39 @@ fn replace_track_analysis_in_transaction(
     Ok(())
 }
 
+fn replace_hot_cues_in_transaction(
+    transaction: &Transaction<'_>,
+    track_id: TrackId,
+    hot_cues: &[HotCue],
+) -> Result<(), SqliteLibraryError> {
+    let track_id = to_i64(track_id.value())?;
+    let track_exists = transaction.query_row(
+        "SELECT EXISTS(SELECT 1 FROM tracks WHERE id = ?1)",
+        [track_id],
+        |row| row.get::<_, bool>(0),
+    )?;
+    if !track_exists {
+        return Err(SqliteLibraryError::MissingTrack);
+    }
+    transaction.execute("DELETE FROM hot_cues WHERE track_id = ?1", [track_id])?;
+    let mut statement = transaction.prepare(
+        "INSERT INTO hot_cues
+         (track_id, cue_index, time_millis, loop_end_millis, name, color_rgb)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    )?;
+    for cue in hot_cues {
+        statement.execute(params![
+            track_id,
+            i64::from(cue.index()),
+            to_i64(cue.time_millis())?,
+            cue.loop_end_millis().map(to_i64).transpose()?,
+            cue.name(),
+            i64::from(cue.color_rgb()),
+        ])?;
+    }
+    Ok(())
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CreativeArchiveRelinkState {
     Restored,
@@ -4246,15 +4436,15 @@ fn search_pattern(search: &str) -> String {
 #[cfg(test)]
 mod fault_tests {
     use lumi_library::{
-        ImportedLibraryBaseline, ImportedTrackAnalysis, LibraryRepository, SourceRevision,
+        HotCue, ImportedLibraryBaseline, ImportedTrackAnalysis, LibraryRepository, SourceRevision,
         TrackPageRequest,
     };
     use lumi_library_demo::DemoLibrarySourceProvider;
     use lumi_library_source::MusicLibrarySourceProvider;
 
     use super::{
-        DeviceAliasUpsert, DeviceAnalysisDecision, DeviceAnalysisUpsert, DevicePlaylistUpsert,
-        DeviceTrackImport, SqliteLibraryRepository,
+        DeviceAliasUpsert, DeviceAnalysisDecision, DeviceAnalysisUpsert, DeviceHotCueUpsert,
+        DevicePlaylistUpsert, DeviceTrackImport, SqliteLibraryRepository,
     };
 
     #[test]
@@ -4314,6 +4504,89 @@ mod fault_tests {
     }
 
     #[test]
+    fn device_hot_cues_enrich_a_track_without_replacing_its_analysis()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let baseline = DemoLibrarySourceProvider::curated().load_baseline()?;
+        let source_track = &baseline.tracks()[0];
+        let mut repository = SqliteLibraryRepository::in_memory()?;
+        repository.import_baseline(&baseline)?;
+        let track_id = repository
+            .page_tracks(TrackPageRequest::try_new(0, 25)?)?
+            .tracks()
+            .iter()
+            .find(|track| track.source_track_id() == source_track.source_track_id())
+            .ok_or("stored source track not found")?
+            .id();
+        let before = repository.track(track_id)?.ok_or("stored track missing")?;
+        let cue = HotCue::try_new(1, 12_500, None, "Drop", 0x00ff_3366)?;
+        let mut aliases = vec![DeviceAliasUpsert {
+            device_track_id: 1_256,
+            simulator_signature: 0,
+            canonical_track_id: Some(track_id),
+            match_kind: "metadata+file-size".to_owned(),
+            title: source_track.title().to_owned(),
+            artist: source_track.artist().to_owned(),
+            bpm_milli: source_track.bpm_milli(),
+            duration_millis: source_track.duration_millis(),
+            file_size: 123,
+            metadata_revision: "metadata-v1".to_owned(),
+            analysis_revision: "analysis-v1".to_owned(),
+            audio_signature: "audio:test:1256".to_owned(),
+            analyzed_at: "2026-08-13".to_owned(),
+            sync_disposition: "held-conflict".to_owned(),
+        }];
+
+        assert_eq!(
+            repository.device_hot_cue_decision(
+                track_id,
+                "usb-fs:gray",
+                "analysis-v1",
+                "2026-08-13",
+            )?,
+            DeviceAnalysisDecision::PromoteInitial
+        );
+        repository.sync_device_aliases(
+            "usb-fs:gray",
+            "DJ VIC GRAY",
+            "database-v1",
+            &mut aliases,
+            &[],
+            &[],
+            &[DeviceHotCueUpsert {
+                track_id,
+                source_id: "usb-fs:gray".to_owned(),
+                device_track_id: 1_256,
+                source_analysis_revision: "analysis-v1".to_owned(),
+                analyzed_at: "2026-08-13".to_owned(),
+                hot_cues: vec![cue.clone()],
+            }],
+            &[],
+        )?;
+
+        let after = repository
+            .track(track_id)?
+            .ok_or("enriched track missing")?;
+        assert_eq!(
+            after.summary().source_revision(),
+            before.summary().source_revision()
+        );
+        assert_eq!(after.beat_grid(), before.beat_grid());
+        assert_eq!(after.waveform(), before.waveform());
+        assert_eq!(after.raw_phrases(), before.raw_phrases());
+        assert_eq!(after.hot_cues(), &[cue]);
+        assert_eq!(
+            repository.device_hot_cue_decision(
+                track_id,
+                "usb-fs:gray",
+                "analysis-v1",
+                "2026-08-13",
+            )?,
+            DeviceAnalysisDecision::Current
+        );
+        Ok(())
+    }
+
+    #[test]
     fn device_alias_resolves_real_and_simulated_identity_and_archives_on_resync()
     -> Result<(), Box<dyn std::error::Error>> {
         let baseline = DemoLibrarySourceProvider::curated().load_baseline()?;
@@ -4361,6 +4634,7 @@ mod fault_tests {
             &mut aliases,
             &[],
             &analyses,
+            &[],
             &[DevicePlaylistUpsert {
                 device_playlist_id: 77,
                 path: "Sets/90s Dance/90s Club".to_owned(),
@@ -4444,6 +4718,7 @@ mod fault_tests {
             &[],
             &[],
             &[],
+            &[],
         )?;
         assert!(repository.resolve_device_alias(1_256, 0)?.is_none());
         assert!(
@@ -4511,6 +4786,7 @@ mod fault_tests {
                 analysis: imported_analysis,
             }],
             &[],
+            &[],
             &[DevicePlaylistUpsert {
                 device_playlist_id: 77,
                 path: "MainStage 140+".to_owned(),
@@ -4564,6 +4840,7 @@ mod fault_tests {
             "Test USB",
             "database-repaired",
             &mut aliases,
+            &[],
             &[],
             &[],
             &[DevicePlaylistUpsert {
@@ -4656,6 +4933,7 @@ mod fault_tests {
                 &mut aliases.clone(),
                 &[],
                 &[],
+                &[],
                 std::slice::from_ref(&playlist),
             )?;
         }
@@ -4731,6 +5009,7 @@ mod fault_tests {
             &mut legacy_aliases,
             &[],
             &[],
+            &[],
             std::slice::from_ref(&playlist),
         )?;
         let mut stable_aliases = vec![alias];
@@ -4739,6 +5018,7 @@ mod fault_tests {
             "DJ VIC CHRM",
             "database-v1",
             &mut stable_aliases,
+            &[],
             &[],
             &[],
             &[playlist],
@@ -4804,6 +5084,7 @@ mod fault_tests {
             &[],
             &[],
             &[],
+            &[],
         )?;
         repository.connection.execute(
             "UPDATE device_library_sources
@@ -4818,6 +5099,7 @@ mod fault_tests {
             "DJ VIC GRAY",
             "database-after-reset",
             &mut stable_aliases,
+            &[],
             &[],
             &[],
             &[],

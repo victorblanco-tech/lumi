@@ -63,7 +63,10 @@ func receivesMountedUSBInspectionWhenProvided() async throws {
         )
         _ = try await supervisor.connect(to: endpoint)
         let snapshot = try await supervisor.send(
-            .inspectRekordboxDevice(root: usbRoot),
+            .inspectRekordboxDevice(
+                root: usbRoot,
+                sourceID: environment["LUMI_TEST_USB_SOURCE_ID"]
+            ),
             messageID: "swift-inspect-mounted-usb"
         )
         let encoded = try JSONEncoder().encode(snapshot)
@@ -92,6 +95,59 @@ func receivesMountedUSBInspectionWhenProvided() async throws {
             return
         }
         #expect(statusLibrary["rekordboxDeviceInspection"] == .null)
+        await supervisor.stop()
+    } catch {
+        await supervisor.stop()
+        throw error
+    }
+}
+
+@Test("A selected trusted USB playlist enriches an existing track with Rekordbox hot cues")
+func syncsMountedUSBHotCuesWhenProvided() async throws {
+    let environment = ProcessInfo.processInfo.environment
+    guard let executablePath = environment["LUMI_ENGINE_TEST_EXECUTABLE"],
+          let usbRoot = environment["LUMI_TEST_USB_ROOT"],
+          let sourceID = environment["LUMI_TEST_USB_SOURCE_ID"],
+          let playlistText = environment["LUMI_TEST_USB_PLAYLIST_ID"],
+          let playlistID = UInt32(playlistText),
+          let databasePath = environment["LUMI_TEST_LIBRARY_DATABASE"] else {
+        return
+    }
+
+    let supervisor = EngineProcessSupervisor()
+    do {
+        let endpoint = try await supervisor.launch(
+            engineExecutable: URL(fileURLWithPath: executablePath),
+            libraryDatabaseURL: URL(fileURLWithPath: databasePath),
+            automaticallyPublishesMidi: false
+        )
+        _ = try await supervisor.connect(to: endpoint)
+        _ = try await supervisor.send(
+            .syncRekordboxDevice(
+                root: usbRoot,
+                sourceID: sourceID,
+                playlistIDs: [playlistID]
+            ),
+            messageID: "swift-sync-mounted-usb-hot-cues"
+        )
+        let search = try await supervisor.send(
+            .queryLibrary(search: "90s Bitch", playlistID: nil, offset: 0, limit: 25),
+            messageID: "swift-search-hot-cue-track"
+        )
+        #expect(libraryTrackTitles(search) == ["90s Bitch - Extended Mix"])
+        let editor = try await supervisor.send(
+            .openLibraryTrackEditor(trackID: requiredFirstLibraryTrackID(search)),
+            messageID: "swift-open-hot-cue-track"
+        )
+        #expect(libraryEditorArrayCount(editor, field: "hotCues") == 2)
+        #expect(libraryEditorArrayCount(editor, field: "phrases") == 17)
+        #expect(libraryEditorTimelineRevision(editor) == 35)
+        if let outputPath = environment["LUMI_TEST_USB_SYNC_ENVELOPE_OUTPUT"] {
+            try JSONEncoder().encode(editor).write(
+                to: URL(fileURLWithPath: outputPath),
+                options: .atomic
+            )
+        }
         await supervisor.stop()
     } catch {
         await supervisor.stop()

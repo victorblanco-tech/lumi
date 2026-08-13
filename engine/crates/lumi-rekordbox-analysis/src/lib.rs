@@ -858,7 +858,10 @@ fn parse_legacy_hot_cues(body: &[u8]) -> Result<Vec<AnalysisHotCue>, AnalysisErr
         }
         let index = u8::try_from(hot_cue).map_err(|_| AnalysisError::MalformedAnalysisFile)?;
         let cue_type = entry[28];
-        if !matches!(cue_type, 0 | 2) {
+        // Current OneLibrary exports encode hot-cue points as `1`, while
+        // older device exports and memory points can use `0`. Loops remain
+        // `2` in both formats.
+        if !matches!(cue_type, 0 | 1 | 2) {
             return Err(AnalysisError::MalformedAnalysisFile);
         }
         let time_millis = be_u32(entry, 32)?;
@@ -903,7 +906,7 @@ fn parse_extended_hot_cues(body: &[u8]) -> Result<Vec<AnalysisHotCue>, AnalysisE
         if hot_cue != 0 {
             let index = u8::try_from(hot_cue).map_err(|_| AnalysisError::MalformedAnalysisFile)?;
             let cue_type = entry[16];
-            if !matches!(cue_type, 0 | 2) {
+            if !matches!(cue_type, 0 | 1 | 2) {
                 return Err(AnalysisError::MalformedAnalysisFile);
             }
             let time_millis = be_u32(entry, 20)?;
@@ -1334,6 +1337,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn mounted_analysis_set_reports_hot_cues_when_provided()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let Ok(dat_path) = std::env::var("LUMI_TEST_ANALYSIS_DAT") else {
+            return Ok(());
+        };
+        let dat_path = PathBuf::from(dat_path);
+        let mut merged = ParsedAnalysisFile::default();
+        for path in [
+            dat_path.clone(),
+            dat_path.with_extension("EXT"),
+            dat_path.with_extension("2EX"),
+        ] {
+            if !path.is_file() {
+                continue;
+            }
+            let parsed = parse_analysis_file(&read_bounded(&path, 16 * 1024 * 1024)?)?;
+            merged.merge(parsed);
+        }
+        assert!(!merged.hot_cues.is_empty());
+        Ok(())
+    }
+
+    #[test]
     fn authoritative_resolved_set_is_snapshotted_without_path_matching()
     -> Result<(), Box<dyn std::error::Error>> {
         let test_root = unique_test_root("resolved")?;
@@ -1732,7 +1758,7 @@ mod tests {
         entry[4..8].copy_from_slice(&28_u32.to_be_bytes());
         entry[8..12].copy_from_slice(&56_u32.to_be_bytes());
         entry[12..16].copy_from_slice(&index.to_be_bytes());
-        entry[28] = 0;
+        entry[28] = 1;
         entry[32..36].copy_from_slice(&time_millis.to_be_bytes());
         body
     }
@@ -1758,7 +1784,7 @@ mod tests {
         entry[4..8].copy_from_slice(&16_u32.to_be_bytes());
         entry[8..12].copy_from_slice(&(entry_bytes as u32).to_be_bytes());
         entry[12..16].copy_from_slice(&index.to_be_bytes());
-        entry[16] = if loop_end_millis.is_some() { 2 } else { 0 };
+        entry[16] = if loop_end_millis.is_some() { 2 } else { 1 };
         entry[20..24].copy_from_slice(&time_millis.to_be_bytes());
         entry[24..28].copy_from_slice(&loop_end_millis.unwrap_or_default().to_be_bytes());
         entry[40..44].copy_from_slice(&(comment_bytes.len() as u32).to_be_bytes());

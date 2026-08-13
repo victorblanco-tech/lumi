@@ -22,7 +22,7 @@ use rusqlite::Connection;
 #[test]
 fn migrates_an_empty_database() -> Result<(), Box<dyn Error>> {
     let repository = SqliteLibraryRepository::in_memory()?;
-    assert_eq!(repository.schema_version()?, 10);
+    assert_eq!(repository.schema_version()?, 11);
     assert_eq!(
         repository
             .page_tracks(TrackPageRequest::try_new(0, 25)?)?
@@ -88,7 +88,7 @@ fn migrates_version_one_timeline_history_without_losing_rows() -> Result<(), Box
     }
 
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 10);
+    assert_eq!(repository.schema_version()?, 11);
     drop(repository);
     let connection = Connection::open(&path)?;
     let reason: String = connection.query_row(
@@ -145,7 +145,7 @@ fn migrates_version_two_phrase_roles_into_an_unseeded_catalog() -> Result<(), Bo
     }
 
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 10);
+    assert_eq!(repository.schema_version()?, 11);
     let catalog = repository.phrase_role_catalog()?;
     assert_eq!(catalog.revision(), 0);
     assert_eq!(catalog.defaults_version(), 0);
@@ -188,7 +188,7 @@ fn migrates_version_three_into_an_unseeded_autoloop_catalog() -> Result<(), Box<
     }
 
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 10);
+    assert_eq!(repository.schema_version()?, 11);
     let catalog = repository.autoloop_catalog()?;
     assert_eq!(catalog.revision(), 0);
     assert_eq!(catalog.defaults_version(), 0);

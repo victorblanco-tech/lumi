@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0-dev-27
+
+- Trusted OneLibrary USB sync now imports current Rekordbox hot-cue points,
+  including the point encoding used by current exports, with their letter,
+  timestamp, name and RGB color.
+- Hot cues have independent source provenance and can enrich or refresh a
+  matched track without promoting or replacing its protected beatgrid,
+  waveform, Lumi phrase timeline or lighting configuration.
+- Schema 11 migrates existing Dev libraries in place. A real GRAY playlist
+  sync verified two cues for `90s Bitch`, while timeline revision 35 and all
+  17 authored phrase points remained unchanged.
+
 ## 0.4.0-dev-26
 
 - The DMG Finder shortcut now targets the channel-specific installation

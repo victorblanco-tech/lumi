@@ -67,6 +67,12 @@ as ordering evidence:
 5. a different revision with an equal, missing or invalid date is
    `held-conflict` and is not applied.
 
+Beatgrid/waveform provenance and hot-cue provenance are evaluated separately.
+The same trusted source may refresh its cue revision without forcing a held
+beatgrid conflict; a different or older backup source remains subject to the
+same date ordering. Cue enrichment only replaces provider-owned cue rows and
+never changes the track analysis revision, waveform, beatgrid or Lumi timeline.
+
 Sync persists provenance and the disposition per USB alias atomically. The UI
 shows indexed, matched, current, promoted, protected and conflict counts.
 Unmatched or ambiguous tracks remain held and cannot drive automatic output.
@@ -78,7 +84,7 @@ bridge using the upstream `beat-link` library.
 ## Consequences
 
 - Connecting an older backup can never downgrade the active beatgrid,
-  waveform or hot-cue set.
+  waveform or independently versioned hot-cue set.
 - Conflicting counters or identities are held for review rather than guessed.
 - Synchronizing a source later does not make its content newer.
 - A future review workflow can explicitly promote a held conflict without
