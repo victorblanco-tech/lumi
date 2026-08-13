@@ -44,20 +44,20 @@ public enum TrackEditorFixtures {
                 TrackEditorHotCue(
                     index: 1,
                     timeMillis: 8_000,
-                    name: "First breakdown",
+                    name: "",
                     colorRGB: 0x30_5A_FF
                 ),
                 TrackEditorHotCue(
                     index: 2,
                     timeMillis: 16_000,
-                    name: "Buildup",
+                    name: "",
                     colorRGB: 0xFF_A0_00
                 ),
                 TrackEditorHotCue(
                     index: 3,
                     timeMillis: 24_000,
                     loopEndMillis: 28_000,
-                    name: "Drop loop",
+                    name: "",
                     colorRGB: 0xE6_28_28
                 )
             ],

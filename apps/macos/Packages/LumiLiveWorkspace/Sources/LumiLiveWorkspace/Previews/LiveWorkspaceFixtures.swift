@@ -3,7 +3,7 @@ import Foundation
 public enum LiveWorkspaceFixtures {
     public static let readySnapshot = EngineSnapshot(
         endpoint: "127.0.0.1:52841",
-        engineVersion: "0.4.0-dev-27",
+        engineVersion: "0.4.0-dev-28",
         protocolVersion: 1,
         snapshotSequence: 42,
         stateRevision: 8,
@@ -560,20 +560,20 @@ public enum LiveWorkspaceFixtures {
             DeckHotCueSnapshot(
                 index: 1,
                 timeMillis: 15_484,
-                name: "Breakdown",
+                name: "",
                 colorRGB: 0x30_5A_FF
             ),
             DeckHotCueSnapshot(
                 index: 2,
                 timeMillis: 30_968,
-                name: "Buildup",
+                name: "",
                 colorRGB: 0xFF_A0_00
             ),
             DeckHotCueSnapshot(
                 index: 3,
                 timeMillis: 46_451,
                 loopEndMillis: 54_193,
-                name: "Drop loop",
+                name: "",
                 colorRGB: 0xE6_28_28
             )
         ]

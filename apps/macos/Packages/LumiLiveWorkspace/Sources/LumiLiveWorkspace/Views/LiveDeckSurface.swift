@@ -406,9 +406,7 @@ struct LiveDeckSurface<Details: View>: View {
                             }
                             .buttonStyle(.plain)
                             .allowsHitTesting(isLocalPlayback)
-                            .help(cue.name.isEmpty
-                                ? "Hot Cue \(cue.letter)"
-                                : "Hot Cue \(cue.letter) · \(cue.name)")
+                            .help("Hot Cue \(cue.letter)")
                         }
                     }
                 }
@@ -422,28 +420,12 @@ struct LiveDeckSurface<Details: View>: View {
     }
 
     private func hotCueBadge(_ cue: DeckHotCueSnapshot) -> some View {
-        HStack(spacing: 4) {
-            Text(verbatim: cue.letter)
-                .font(LumiTypography.technical.weight(.heavy))
-                .foregroundStyle(Color.black.opacity(0.82))
-                .frame(width: 19, height: 19)
-                .background(hotCueColor(cue.colorRGB))
-                .clipShape(RoundedRectangle(cornerRadius: 3))
-            if !cue.name.isEmpty {
-                Text(verbatim: cue.name)
-                    .font(LumiTypography.technical.weight(.semibold))
-                    .foregroundStyle(Color.white.opacity(0.8))
-                    .lineLimit(1)
-            }
-            if cue.loopEndMillis != nil {
-                Image(systemName: "repeat")
-                    .font(LumiTypography.technical.weight(.bold))
-                    .foregroundStyle(Color.white.opacity(0.56))
-            }
-        }
-        .padding(.trailing, cue.name.isEmpty && cue.loopEndMillis == nil ? 0 : 5)
-        .background(Color.white.opacity(0.05))
-        .clipShape(RoundedRectangle(cornerRadius: 4))
+        Text(verbatim: cue.letter)
+            .font(LumiTypography.technical.weight(.heavy))
+            .foregroundStyle(Color.black.opacity(0.82))
+            .frame(width: 19, height: 19)
+            .background(hotCueColor(cue.colorRGB))
+            .clipShape(RoundedRectangle(cornerRadius: 3))
     }
 
     private func metadataValue(_ label: String, value: String) -> some View {

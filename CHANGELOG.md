@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0-dev-28
+
+- Hot-cue controls now show only the authoritative Rekordbox letter and color
+  in the Track Editor, Local Playback and Live Decks.
+- Cue names and loop metadata remain preserved in the model, but Lumi no
+  longer invents or exposes descriptive labels in the compact cue strip.
+
 ## 0.4.0-dev-27
 
 - Trusted OneLibrary USB sync now imports current Rekordbox hot-cue points,

@@ -157,25 +157,15 @@ public struct TrackLightingEditorView: View {
                                 audio.seek(toMillis: cue.timeMillis)
                                 revealPlayhead()
                             } label: {
-                                HStack(spacing: 5) {
-                                    Text(cue.letter)
-                                        .font(LumiTypography.technical.weight(.heavy))
-                                        .foregroundStyle(Color.black.opacity(0.82))
-                                        .frame(width: 20, height: 20)
-                                        .background(hotCueColor(cue.colorRGB))
-                                        .clipShape(RoundedRectangle(cornerRadius: 3))
-                                    if !cue.name.isEmpty {
-                                        Text(cue.name)
-                                            .font(LumiTypography.technical.weight(.semibold))
-                                            .lineLimit(1)
-                                    }
-                                }
-                                .padding(.trailing, cue.name.isEmpty ? 0 : 7)
-                                .background(Color.white.opacity(0.055))
-                                .clipShape(RoundedRectangle(cornerRadius: 4))
+                                Text(cue.letter)
+                                    .font(LumiTypography.technical.weight(.heavy))
+                                    .foregroundStyle(Color.black.opacity(0.82))
+                                    .frame(width: 20, height: 20)
+                                    .background(hotCueColor(cue.colorRGB))
+                                    .clipShape(RoundedRectangle(cornerRadius: 3))
                             }
                             .buttonStyle(.plain)
-                            .help(cue.name.isEmpty ? "Hot Cue \(cue.letter)" : "Hot Cue \(cue.letter) · \(cue.name)")
+                            .help("Hot Cue \(cue.letter)")
                         }
                     }
                 }
