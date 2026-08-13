@@ -211,6 +211,11 @@ De versie promoveert zonder codefork van `X.Y.Z-dev-N`, via `X.Y.Z-rc-N`, naar
 SQLite-backup van de release; een bestaand kanaal wordt nooit stilzwijgend
 overschreven.
 
+De lokale DMG bevat per kanaal een eigen Finder-sleepbestemming. Production
+installeert onder `/Applications/Lumi`, RC onder `/Applications/Lumi/RC` en Dev
+onder `/Applications/Lumi/Dev`; geen enkel prereleasekanaal wijst naar de root
+van `/Applications`.
+
 | Channel | Bron | Doel | Automatisch? |
 |---|---|---|---:|
 | PR validation | iedere PR | volledige lokale `./scripts/verify.sh` | lokaal |

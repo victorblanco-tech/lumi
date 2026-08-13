@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.4.0-dev-26
+
+- The DMG Finder shortcut now targets the channel-specific installation
+  directory instead of the Applications root: Production uses `Lumi`, RC uses
+  `Lumi/RC` and Dev uses `Lumi/Dev`.
+- Package verification rejects a disk image whose drag target does not match
+  its release channel.
+
 ## 0.4.0-dev-25
 
 - Removes the embedded rounded outline from the Lumi app-icon artwork so the

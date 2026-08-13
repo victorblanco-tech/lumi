@@ -15,7 +15,9 @@ data and preferences:
 - RC: /Applications/Lumi/RC/Lumi RC <version>.app
 
 1. Create the matching channel folder above if it does not exist yet.
-2. Drag the Lumi app in this disk image into that channel folder.
+2. Drag the Lumi app onto the channel-specific Applications shortcut in this
+   disk image. Dev points to /Applications/Lumi/Dev, RC to
+   /Applications/Lumi/RC and Production to /Applications/Lumi.
 3. Open the channel folder and try to start Lumi once.
 4. If macOS blocks the app, open System Settings > Privacy & Security.
 5. Find the Lumi message in Security and choose Open Anyway.

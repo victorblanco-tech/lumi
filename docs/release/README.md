@@ -20,7 +20,10 @@ Create a locally verified, unsigned Apple Silicon disk image with:
 
 The generated DMG and SHA-256 checksum are written to `build/Releases` and are
 ignored by Git. This path intentionally uses no GitHub Actions minutes and no
-paid Apple credentials.
+paid Apple credentials. Its drag target is channel-specific: Production uses
+`/Applications/Lumi`, RC uses `/Applications/Lumi/RC` and Dev uses
+`/Applications/Lumi/Dev`; it never points prerelease apps at the Applications
+root.
 
 The only channels are `dev`, `rc` and `release`. Their versions are respectively
 `X.Y.Z-dev-N`, `X.Y.Z-rc-N` and `X.Y.Z`; every app is named **Lumi**. Prerelease

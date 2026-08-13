@@ -17,6 +17,8 @@ case "$channel" in
     expected_bundle_identifier="co.victorblan.tech.lumi.dev"
     expected_data_directory="Lumi Dev"
     expected_version_pattern='^[0-9]+\.[0-9]+\.[0-9]+-dev-[1-9][0-9]*$'
+    install_directory="/Applications/Lumi/Dev"
+    install_shortcut_name="Applications - Lumi - Dev"
     ;;
   rc)
     build_configuration="RC"
@@ -25,6 +27,8 @@ case "$channel" in
     expected_bundle_identifier="co.victorblan.tech.lumi.rc"
     expected_data_directory="Lumi RC"
     expected_version_pattern='^[0-9]+\.[0-9]+\.[0-9]+-rc-[1-9][0-9]*$'
+    install_directory="/Applications/Lumi/RC"
+    install_shortcut_name="Applications - Lumi - RC"
     ;;
   release)
     build_configuration="Release"
@@ -33,6 +37,8 @@ case "$channel" in
     expected_bundle_identifier="co.victorblan.tech.lumi"
     expected_data_directory="Lumi"
     expected_version_pattern='^[0-9]+\.[0-9]+\.[0-9]+$'
+    install_directory="/Applications/Lumi"
+    install_shortcut_name="Applications - Lumi"
     ;;
   *)
     echo "Usage: $0 [dev|rc|release] [output-directory]" >&2
@@ -216,7 +222,7 @@ if [[ "$packaged_data_directory" != "$expected_data_directory" ]]; then
   exit 1
 fi
 
-ln -s /Applications "$staging_directory/Applications"
+ln -s "$install_directory" "$staging_directory/$install_shortcut_name"
 cp "$repository_root/docs/release/unsigned-macos-installation.txt" \
   "$staging_directory/README - Install $app_name.txt"
 cp "$repository_root/LICENSE" "$staging_directory/LICENSE.txt"
@@ -264,6 +270,10 @@ hdiutil attach "$temporary_dmg" \
 mounted=1
 codesign --verify --deep --strict --verbose=2 "$mount_directory/$packaged_bundle_name"
 test -x "$mount_directory/$packaged_bundle_name/Contents/Helpers/lumi-engine"
+if [[ "$(readlink "$mount_directory/$install_shortcut_name")" != "$install_directory" ]]; then
+  echo "ERROR: packaged install shortcut does not target '$install_directory'." >&2
+  exit 1
+fi
 hdiutil detach "$mount_directory" -quiet
 mounted=0
 
