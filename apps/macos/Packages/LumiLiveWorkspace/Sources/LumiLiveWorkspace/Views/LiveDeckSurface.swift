@@ -457,6 +457,14 @@ struct LiveDeckSurface<Details: View>: View {
                     waveformID: deck.trackLoadID,
                     durationBeats: deck.durationBeats,
                     beatGrid: beatGridTimeline,
+                    hotCues: deck.hotCues.map {
+                        WaveformHotCueMarker(
+                            index: $0.index,
+                            letter: $0.letter,
+                            beat: hotCueBeat($0),
+                            colorRGB: $0.colorRGB
+                        )
+                    },
                     playheadBeat: playheadBeat,
                     viewport: displayViewport,
                     visualClock: scrubProgress == nil ? visualClock : nil,
@@ -466,7 +474,6 @@ struct LiveDeckSurface<Details: View>: View {
                     .font(LumiTypography.technical)
                     .foregroundStyle(Color.white.opacity(0.56))
                     .padding(LumiSpacing.small)
-                hotCueMarkers(renderingViewport: displayViewport)
             } else {
                 ContentUnavailableView(
                     "Waveform unavailable",
@@ -485,8 +492,16 @@ struct LiveDeckSurface<Details: View>: View {
                     .overlay {
                         LumiWaveformInteractionMonitor(
                             onScroll: { deltaX in
+                                // Once follow is suspended, every trackpad event
+                                // must build on the viewport produced by the
+                                // previous event. Reusing the captured live
+                                // viewport made a gesture repeatedly jump from
+                                // one stale origin and feel unresponsive.
+                                let panOrigin = usesLiveViewport
+                                    ? renderingViewport
+                                    : viewport
                                 let navigation = LiveDeckViewportPolicy.manualPan(
-                                    renderedViewport: renderingViewport,
+                                    renderedViewport: panOrigin,
                                     deltaPixels: deltaX,
                                     width: proxy.size.width,
                                     reversesDirection: reversesHorizontalScroll
@@ -542,31 +557,6 @@ struct LiveDeckSurface<Details: View>: View {
                 ? "Click or drag to seek. Playback continues from the selected position."
                 : "Waveform follows the connected deck."
         )
-    }
-
-    private func hotCueMarkers(renderingViewport: LumiWaveformViewport) -> some View {
-        GeometryReader { proxy in
-            ForEach(deck.hotCues) { cue in
-                let beat = hotCueBeat(cue)
-                if beat >= renderingViewport.startBeat, beat <= renderingViewport.endBeat {
-                    let x = renderingViewport.x(forBeat: beat, width: proxy.size.width)
-                    VStack(spacing: 0) {
-                        Text(verbatim: cue.letter)
-                            .font(LumiTypography.hotCueLetter)
-                            .foregroundStyle(Color.black.opacity(0.82))
-                            .frame(width: 17, height: 17)
-                            .background(hotCueColor(cue.colorRGB))
-                            .clipShape(RoundedRectangle(cornerRadius: 3))
-                        Rectangle()
-                            .fill(hotCueColor(cue.colorRGB).opacity(0.72))
-                            .frame(width: 1)
-                            .frame(maxHeight: .infinity)
-                    }
-                    .position(x: x, y: proxy.size.height / 2)
-                }
-            }
-        }
-        .allowsHitTesting(false)
     }
 
     private func hotCueBeat(_ cue: DeckHotCueSnapshot) -> Double {
@@ -1056,6 +1046,7 @@ private struct RGBDeckWaveform: View {
     let waveformID: UInt64
     let durationBeats: UInt64
     let beatGrid: LiveBeatGridTimeline?
+    let hotCues: [WaveformHotCueMarker]
     let playheadBeat: Double
     let viewport: LumiWaveformViewport
     let visualClock: DeckVisualClockSnapshot?
@@ -1068,6 +1059,7 @@ private struct RGBDeckWaveform: View {
         waveformID: UInt64,
         durationBeats: UInt64,
         beatGrid: LiveBeatGridTimeline?,
+        hotCues: [WaveformHotCueMarker],
         playheadBeat: Double,
         viewport: LumiWaveformViewport,
         visualClock: DeckVisualClockSnapshot?,
@@ -1078,6 +1070,7 @@ private struct RGBDeckWaveform: View {
         self.waveformID = waveformID
         self.durationBeats = durationBeats
         self.beatGrid = beatGrid
+        self.hotCues = hotCues
         self.playheadBeat = playheadBeat
         self.viewport = viewport
         self.visualClock = visualClock
@@ -1090,6 +1083,7 @@ private struct RGBDeckWaveform: View {
                 RGBWaveformLayerView(
                     rasterImage: rasterImage,
                     motion: motionPlan,
+                    hotCues: hotCues,
                     viewportWidth: proxy.size.width
                 )
             }
@@ -1214,6 +1208,13 @@ private struct RGBDeckWaveform: View {
         return context.makeImage()
     }
 
+}
+
+private struct WaveformHotCueMarker: Equatable {
+    let index: UInt8
+    let letter: String
+    let beat: Double
+    let colorRGB: UInt32
 }
 
 struct LiveWaveformMotionPlan: Equatable {
@@ -1354,6 +1355,7 @@ private struct WaveformRasterKey: Hashable {
 private struct RGBWaveformLayerView: NSViewRepresentable {
     let rasterImage: CGImage
     let motion: LiveWaveformMotionPlan
+    let hotCues: [WaveformHotCueMarker]
     let viewportWidth: CGFloat
 
     func makeNSView(context: Context) -> RGBWaveformLayerHostView {
@@ -1364,6 +1366,7 @@ private struct RGBWaveformLayerView: NSViewRepresentable {
         nsView.update(
             rasterImage: rasterImage,
             motion: motion,
+            hotCues: hotCues,
             viewportWidth: viewportWidth
         )
     }
@@ -1375,6 +1378,8 @@ private final class RGBWaveformLayerHostView: NSView {
     private let playheadCapLayer = CALayer()
     private var rasterImage: CGImage?
     private var motion: LiveWaveformMotionPlan?
+    private var hotCues: [WaveformHotCueMarker] = []
+    private var hotCueLayers: [(line: CALayer, badge: CATextLayer)] = []
     private var viewportWidth: CGFloat = 0
     private var animationIdentity: LiveWaveformMotionPlan.AnimationIdentity?
     private var appliedBoundsSize = CGSize.zero
@@ -1417,18 +1422,24 @@ private final class RGBWaveformLayerHostView: NSView {
     func update(
         rasterImage: CGImage,
         motion: LiveWaveformMotionPlan,
+        hotCues: [WaveformHotCueMarker],
         viewportWidth: CGFloat
     ) {
         let imageChanged = self.rasterImage !== rasterImage
         let motionChanged = animationIdentity != motion.animationIdentity
         let widthChanged = abs(self.viewportWidth - viewportWidth) > 0.5
+        let hotCuesChanged = self.hotCues != hotCues
         self.rasterImage = rasterImage
         self.motion = motion
+        self.hotCues = hotCues
         self.viewportWidth = viewportWidth
         if imageChanged {
             waveformLayer.contents = rasterImage
         }
-        if imageChanged || motionChanged || widthChanged {
+        if hotCuesChanged {
+            rebuildHotCueLayers()
+        }
+        if imageChanged || motionChanged || widthChanged || hotCuesChanged {
             animationIdentity = motion.animationIdentity
             applyCurrentState(restartAnimation: true)
         }
@@ -1456,6 +1467,7 @@ private final class RGBWaveformLayerHostView: NSView {
         CATransaction.setDisableActions(true)
         waveformLayer.bounds = CGRect(x: 0, y: 0, width: fullTrackWidth, height: height)
         waveformLayer.position = CGPoint(x: waveformX, y: 0)
+        layoutHotCueLayers(fullTrackWidth: fullTrackWidth, height: height, motion: motion)
         playheadLayer.bounds = CGRect(x: 0, y: 0, width: 2, height: height)
         playheadLayer.position = CGPoint(x: playheadX - 1, y: 0)
         playheadCapLayer.bounds = CGRect(x: 0, y: 0, width: 6, height: 7)
@@ -1482,6 +1494,52 @@ private final class RGBWaveformLayerHostView: NSView {
             width: width,
             duration: remainingDuration
         )
+    }
+
+    private func rebuildHotCueLayers() {
+        hotCueLayers.forEach {
+            $0.line.removeFromSuperlayer()
+            $0.badge.removeFromSuperlayer()
+        }
+        hotCueLayers = hotCues.map { cue in
+            let color = NSColor(
+                red: CGFloat((cue.colorRGB >> 16) & 0xff) / 255,
+                green: CGFloat((cue.colorRGB >> 8) & 0xff) / 255,
+                blue: CGFloat(cue.colorRGB & 0xff) / 255,
+                alpha: 1
+            )
+            let line = CALayer()
+            line.anchorPoint = .zero
+            line.backgroundColor = color.withAlphaComponent(0.72).cgColor
+            let badge = CATextLayer()
+            badge.anchorPoint = .zero
+            badge.string = cue.letter
+            badge.font = NSFont.monospacedSystemFont(ofSize: 10, weight: .semibold)
+            badge.fontSize = 10
+            badge.alignmentMode = .center
+            badge.foregroundColor = NSColor.black.withAlphaComponent(0.82).cgColor
+            badge.backgroundColor = color.cgColor
+            badge.cornerRadius = 3
+            badge.contentsScale = NSScreen.main?.backingScaleFactor ?? 2
+            waveformLayer.addSublayer(line)
+            waveformLayer.addSublayer(badge)
+            return (line, badge)
+        }
+    }
+
+    private func layoutHotCueLayers(
+        fullTrackWidth: CGFloat,
+        height: CGFloat,
+        motion: LiveWaveformMotionPlan
+    ) {
+        for (index, layers) in hotCueLayers.enumerated() where index < hotCues.count {
+            let cue = hotCues[index]
+            let x = fullTrackWidth * CGFloat(cue.beat / max(1, motion.totalBeats))
+            layers.line.bounds = CGRect(x: 0, y: 0, width: 1, height: height)
+            layers.line.position = CGPoint(x: x - 0.5, y: 0)
+            layers.badge.bounds = CGRect(x: 0, y: 0, width: 17, height: 17)
+            layers.badge.position = CGPoint(x: x - 8.5, y: 0)
+        }
     }
 
     private func animateWaveform(

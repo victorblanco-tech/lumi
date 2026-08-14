@@ -4898,9 +4898,9 @@ mod fault_tests {
             .zip(&canonical_track_ids)
             .enumerate()
             .map(
-                |(offset, (source_track, canonical_track_id))| DeviceAliasUpsert {
-                    device_track_id: 90
-                        + u32::try_from(offset).expect("two fixture tracks fit u32"),
+                |(offset, (source_track, canonical_track_id))| -> Result<_, std::num::TryFromIntError> {
+                    Ok(DeviceAliasUpsert {
+                    device_track_id: 90 + u32::try_from(offset)?,
                     simulator_signature: 0,
                     audio_signature: format!("audio:shared:{}", 90 + offset),
                     canonical_track_id: Some(*canonical_track_id),
@@ -4914,9 +4914,9 @@ mod fault_tests {
                     analysis_revision: "analysis-v1".to_owned(),
                     analyzed_at: "2026-08-13".to_owned(),
                     sync_disposition: "current".to_owned(),
-                },
+                })},
             )
-            .collect::<Vec<_>>();
+            .collect::<Result<Vec<_>, _>>()?;
         let playlist = DevicePlaylistUpsert {
             device_playlist_id: 77,
             path: "Genre 5 Stars/MainStage 140+".to_owned(),

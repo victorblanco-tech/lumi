@@ -861,7 +861,7 @@ fn parse_legacy_hot_cues(body: &[u8]) -> Result<Vec<AnalysisHotCue>, AnalysisErr
         // Current OneLibrary exports encode hot-cue points as `1`, while
         // older device exports and memory points can use `0`. Loops remain
         // `2` in both formats.
-        if !matches!(cue_type, 0 | 1 | 2) {
+        if !matches!(cue_type, 0..=2) {
             return Err(AnalysisError::MalformedAnalysisFile);
         }
         let time_millis = be_u32(entry, 32)?;
@@ -906,7 +906,7 @@ fn parse_extended_hot_cues(body: &[u8]) -> Result<Vec<AnalysisHotCue>, AnalysisE
         if hot_cue != 0 {
             let index = u8::try_from(hot_cue).map_err(|_| AnalysisError::MalformedAnalysisFile)?;
             let cue_type = entry[16];
-            if !matches!(cue_type, 0 | 1 | 2) {
+            if !matches!(cue_type, 0..=2) {
                 return Err(AnalysisError::MalformedAnalysisFile);
             }
             let time_millis = be_u32(entry, 20)?;

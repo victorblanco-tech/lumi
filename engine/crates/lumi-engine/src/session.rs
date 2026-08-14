@@ -4903,7 +4903,7 @@ mod tests {
     }
 
     #[test]
-    fn local_playback_executes_first_phrase_once_and_activates_a_paused_seek_on_resume() {
+    fn local_playback_reasserts_a_restarted_phrase_and_activates_a_paused_seek_on_resume() {
         let mut runtime =
             initialized_runtime_for_mode(ManualClock::new(0), DeckSourceMode::LocalPlayback)
                 .unwrap_or_else(|error| panic!("local product runtime must initialize: {error}"));
@@ -4982,7 +4982,7 @@ mod tests {
                 },
             );
         }
-        assert_eq!(runtime.output_worker.provider.records().count(), 1);
+        assert_eq!(runtime.output_worker.provider.records().count(), 2);
         assert_eq!(runtime.output_worker.timing_offset_millis(), 0);
         assert_eq!(
             runtime.output_worker.pending_timing_offset_millis(),
@@ -4998,7 +4998,7 @@ mod tests {
                 playing: false,
             },
         );
-        assert_eq!(runtime.output_worker.provider.records().count(), 1);
+        assert_eq!(runtime.output_worker.provider.records().count(), 2);
         assert_eq!(runtime.output_worker.timing_offset_millis(), 0);
         assert_eq!(
             runtime.output_worker.pending_timing_offset_millis(),
@@ -5013,7 +5013,7 @@ mod tests {
                 playing: true,
             },
         );
-        assert_eq!(runtime.output_worker.provider.records().count(), 2);
+        assert_eq!(runtime.output_worker.provider.records().count(), 3);
         assert_eq!(runtime.output_worker.timing_offset_millis(), 20);
         assert_eq!(runtime.output_worker.pending_timing_offset_millis(), None);
     }

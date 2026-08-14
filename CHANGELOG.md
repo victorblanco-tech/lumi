@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.0-dev-32
+
+- A real Live Deck `stopped → playing` edge now restores the current planned
+  AutoLoop exactly once, including when playback starts from a later Hot Cue;
+  repeated playing packets remain idempotent.
+- `Pause → Start` now reasserts the current AutoLoop because Pause deliberately
+  closes the physical output gate. Lumi no longer stays dark until the next
+  phrase after an operational pause.
+- Operation buttons acknowledge their requested state immediately while the
+  revision-safe engine command completes, with the authoritative response still
+  owning success or rollback.
+- Live Deck horizontal navigation accumulates from the user's last manual
+  viewport instead of repeatedly panning from a stale follow position.
+- Hot-cue lines and badges are children of the same Core Animation layer as the
+  RGB waveform, so they remain locked to their Rekordbox position during Live
+  follow, manual scrolling and zoom.
+
 ## 0.4.0-dev-31
 
 - Entering Start while the current Master is already playing now executes its

@@ -3,6 +3,18 @@
 Target milestone: **0.4.0 – next development cycle**
 Status: **Implemented; physical acceptance pending**
 
+## Delivered in `0.4.0-dev-32`
+
+- a Live Deck that changes from stopped to playing reasserts the current cue
+  once, even when cued inside the track, while duplicate playing observations
+  remain side-effect free;
+- Pause still closes output deliberately, and Start now restores the current
+  AutoLoop rather than waiting for a later phrase;
+- the macOS controls present the requested valid operation state immediately
+  while the revision-safe engine acknowledgement completes;
+- deterministic domain and engine regressions cover initial play, transport
+  restart, operational Pause/Start, repeated packets and paused seek/resume.
+
 ## Delivered in `0.4.0-dev-31`
 
 - entering Start while the current Master is already playing executes that
@@ -10,8 +22,8 @@ Status: **Implemented; physical acceptance pending**
   phrase change;
 - an unprepared direct-deck Start settles the Bank non-blockingly and emits the
   AutoLoop on the first safe exact beat;
-- repeated Start or ordinary pause/resume in the same phrase remains
-  deduplicated, while a paused seek still activates its destination;
+- repeated transport packets remain deduplicated, while a real playback restart
+  or operational Pause/Start restores the current AutoLoop;
 - the user-facing timing sign is now temporal and unambiguous: negative sends
   early, zero targets the boundary and positive sends late;
 - the former positive-early preference is migrated once without changing the
@@ -51,8 +63,9 @@ parallel Control One feedback. It also exposed two bounded follow-up items:
 - cue/seek while paused never emits skipped cues or a burst of output;
 - the current bank and AutoLoop are safely reasserted at resume when output
   continuity requires it;
-- ordinary pause/play without a cue change does not duplicate a valid active
-  AutoLoop;
+- ordinary repeated playing observations do not duplicate output; a true
+  stopped-to-playing generation and Pause-to-Start do reassert output because
+  the preceding stop/pause may have closed SoundSwitch playback;
 - switching Library ↔ Live cannot suppress the resume reconciliation;
 - the desired timing offset and engine-applied timing offset are modelled
   separately;

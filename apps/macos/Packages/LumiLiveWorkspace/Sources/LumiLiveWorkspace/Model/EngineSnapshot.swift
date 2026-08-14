@@ -100,6 +100,35 @@ public struct EngineSnapshot: Equatable, Sendable {
             timeline: timeline
         )
     }
+
+    public func optimisticallySettingOperationState(_ state: String) -> Self {
+        guard ["off", "armed", "live", "paused"].contains(state),
+              operationState != state else {
+            return self
+        }
+        return Self(
+            endpoint: endpoint,
+            engineVersion: engineVersion,
+            protocolVersion: protocolVersion,
+            snapshotSequence: snapshotSequence,
+            stateRevision: stateRevision,
+            operationState: state,
+            runtime: runtime,
+            deckSource: deckSource,
+            deckInputIntegration: deckInputIntegration,
+            midiIntegration: midiIntegration,
+            midiClockIntegration: midiClockIntegration,
+            abletonLinkIntegration: abletonLinkIntegration,
+            simulation: simulation,
+            outputProvider: outputProvider,
+            leaderDeckID: leaderDeckID,
+            decks: decks,
+            livePlan: livePlan,
+            nextPlan: nextPlan,
+            planningOptions: planningOptions,
+            timeline: timeline
+        )
+    }
 }
 
 public struct MidiOutputIntegrationSnapshot: Equatable, Sendable {

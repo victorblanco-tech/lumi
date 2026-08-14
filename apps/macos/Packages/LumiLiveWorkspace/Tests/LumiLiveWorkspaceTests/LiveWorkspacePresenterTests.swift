@@ -722,6 +722,47 @@ struct LiveWorkspacePresenterTests {
         #expect(abs(navigation.viewport.startBeat - (renderedViewport.startBeat + 16)) < 0.001)
     }
 
+    @Test("A Live horizontal gesture accumulates from the prior manual viewport")
+    func manualHorizontalNavigationAccumulates() {
+        let liveViewport = LiveDeckViewportPolicy.live(
+            playheadBeat: 400,
+            totalBeats: 1_024,
+            visibleBeats: 160
+        )
+        let first = LiveDeckViewportPolicy.manualPan(
+            renderedViewport: liveViewport,
+            deltaPixels: 50,
+            width: 1_000,
+            reversesDirection: false
+        )
+        let second = LiveDeckViewportPolicy.manualPan(
+            renderedViewport: first.viewport,
+            deltaPixels: 50,
+            width: 1_000,
+            reversesDirection: false
+        )
+
+        #expect(first.usesLiveViewport == false)
+        #expect(second.usesLiveViewport == false)
+        #expect(abs(second.viewport.startBeat - (liveViewport.startBeat + 16)) < 0.001)
+    }
+
+    @Test("Operation controls can acknowledge a valid target before the engine round trip")
+    func operationStateCanBePresentedOptimistically() throws {
+        let snapshot = LiveWorkspaceFixtures.readySnapshot
+            .optimisticallySettingOperationState("off")
+        let armed = snapshot.optimisticallySettingOperationState("armed")
+
+        #expect(snapshot.operationState == "off")
+        #expect(armed.operationState == "armed")
+        #expect(armed.stateRevision == snapshot.stateRevision)
+
+        let live = armed.optimisticallySettingOperationState("live")
+        #expect(live.operationState == "live")
+        #expect(live.livePlan == armed.livePlan)
+        #expect(live.decks == armed.decks)
+    }
+
     @Test("Live AutoLoop plan exposes active, next, and future status with output details")
     func liveAutoloopStatusIsExplicit() throws {
         let content = try #require(LiveWorkspaceFixtures.ready.content)

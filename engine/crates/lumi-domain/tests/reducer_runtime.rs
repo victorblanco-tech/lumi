@@ -192,13 +192,62 @@ fn live_phrase_execution_requires_playback_and_deduplicates_the_same_cue() {
     assert_eq!(stopped.decision, DecisionReason::PhraseChanged);
     assert!(stopped.effects.is_empty());
 
-    submit_and_process(&mut runtime, playback_state(4, 10, true, 4));
-    let first = submit_and_process(&mut runtime, phrase_changed(5, 10, 0, 5));
+    let first = submit_and_process(&mut runtime, playback_state(4, 10, true, 4));
     assert_eq!(first.decision, DecisionReason::PhraseExecutionScheduled);
     assert!(matches!(first.effects.as_slice(), [Effect::ExecuteCue(_)]));
 
-    let duplicate = submit_and_process(&mut runtime, phrase_changed(6, 10, 0, 6));
+    let duplicate = submit_and_process(&mut runtime, phrase_changed(5, 10, 0, 5));
     assert_eq!(duplicate.decision, DecisionReason::PhraseExecutionSkipped);
+    assert!(duplicate.effects.is_empty());
+
+    let repeated_playing = submit_and_process(&mut runtime, playback_state(6, 10, true, 6));
+    assert_eq!(
+        repeated_playing.decision,
+        DecisionReason::PlaybackStateChanged
+    );
+    assert!(repeated_playing.effects.is_empty());
+}
+
+#[test]
+fn live_deck_restart_from_a_cued_position_reasserts_the_current_autoloop_once() {
+    let mut runtime = started_runtime(48);
+    submit_and_process(&mut runtime, track_loaded(1, 10, 100, 1));
+    submit_and_process(
+        &mut runtime,
+        plan_result(1, plan(PlanRevision::initial(), TrackLoadId::new(10))),
+    );
+    submit_and_process(&mut runtime, leader_changed(2, 10, 2));
+    submit_and_process(&mut runtime, phrase_changed(3, 10, 0, 3));
+
+    let revision = runtime.state().revision();
+    submit_and_process(
+        &mut runtime,
+        command_event(1, revision, OperationCommand::Arm),
+    );
+    let revision = runtime.state().revision();
+    submit_and_process(
+        &mut runtime,
+        command_event(2, revision, OperationCommand::Start),
+    );
+
+    let first_start = submit_and_process(&mut runtime, playback_state(4, 10, true, 4));
+    assert!(matches!(
+        first_start.effects.as_slice(),
+        [Effect::ExecuteCue(_)]
+    ));
+
+    submit_and_process(&mut runtime, seek_position(5, 10, 24, 5));
+    let stopped = submit_and_process(&mut runtime, playback_state(6, 10, false, 6));
+    assert!(stopped.effects.is_empty());
+
+    let restarted = submit_and_process(&mut runtime, playback_state(7, 10, true, 7));
+    assert_eq!(restarted.decision, DecisionReason::PhraseExecutionScheduled);
+    assert!(matches!(
+        restarted.effects.as_slice(),
+        [Effect::ExecuteCue(_)]
+    ));
+
+    let duplicate = submit_and_process(&mut runtime, playback_state(8, 10, true, 8));
     assert!(duplicate.effects.is_empty());
 }
 
@@ -299,10 +348,12 @@ fn start_while_the_master_is_already_playing_executes_its_current_phrase_once() 
         &mut runtime,
         command_event(4, revision, OperationCommand::Start),
     );
-    assert!(
-        resumed.effects.is_empty(),
-        "ordinary pause/resume must not replay an already active AutoLoop"
-    );
+    assert!(matches!(
+        resumed.effects.as_slice(),
+        [Effect::ExecuteCue(_)]
+    ));
+    let duplicate = submit_and_process(&mut runtime, phrase_changed(5, 10, 0, 5));
+    assert!(duplicate.effects.is_empty());
 }
 
 #[test]

@@ -253,22 +253,48 @@ fn reduce_observation(
             deck_id,
             track_load_id,
             playing,
-        } => match state.decks.get_mut(deck_id) {
-            Some(deck) if deck.track_load_id() == *track_load_id => {
-                deck.playing = *playing;
-                deck.last_observed_at = event.observed_at;
-                if !playing
-                    && deck.beat() == 0
-                    && state
+        } => {
+            let accepted = match state.decks.get_mut(deck_id) {
+                Some(deck) if deck.track_load_id() == *track_load_id => {
+                    let started = !deck.is_playing() && *playing;
+                    deck.playing = *playing;
+                    deck.last_observed_at = event.observed_at;
+                    Some((started, deck.phrase_index))
+                }
+                _ => None,
+            };
+            match accepted {
+                None => DecisionReason::TrackLoadMismatch,
+                Some((_, _)) if !playing => {
+                    // A real deck transport stop closes the current playback
+                    // generation. SoundSwitch may also have stopped its active
+                    // AutoLoop, so the same Lumi cue must be eligible for the
+                    // next stopped -> playing edge, including from a Hot Cue.
+                    if state
                         .last_scheduled_cue
                         .is_some_and(|scheduled| scheduled.0 == *deck_id)
-                {
-                    state.last_scheduled_cue = None;
+                    {
+                        state.last_scheduled_cue = None;
+                    }
+                    DecisionReason::PlaybackStateChanged
                 }
-                DecisionReason::PlaybackStateChanged
+                Some((true, Some(phrase_index))) if state.operation == OperationState::Live => {
+                    if let Some(effect) = execution_effect(
+                        state,
+                        *deck_id,
+                        *track_load_id,
+                        phrase_index,
+                        event.observed_at,
+                    )? {
+                        effects.push(effect);
+                        DecisionReason::PhraseExecutionScheduled
+                    } else {
+                        DecisionReason::PlaybackStateChanged
+                    }
+                }
+                Some(_) => DecisionReason::PlaybackStateChanged,
             }
-            _ => DecisionReason::TrackLoadMismatch,
-        },
+        }
         DeckObservation::TrackUnloaded {
             deck_id,
             track_load_id,
@@ -478,10 +504,11 @@ fn reduce_command(
         .command_sequences
         .insert(event.client_id, event.sequence);
     state.operation = target;
-    if target == OperationState::Off {
-        // Off closes the physical output gate, but the prepared plan remains
-        // visible and ready. Re-arming must not require a deck/leader change to
-        // recover the plan for the currently loaded track.
+    if matches!(target, OperationState::Paused | OperationState::Off) {
+        // Pause and Off close the physical output gate, but the prepared plan
+        // remains visible and ready. Starting again must restore the current
+        // AutoLoop immediately; waiting for a later phrase boundary would leave
+        // the show dark after an explicitly requested output pause.
         state.last_scheduled_cue = None;
     }
     let effects = if matches!(target, OperationState::Paused | OperationState::Off) {

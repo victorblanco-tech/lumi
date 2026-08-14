@@ -1730,9 +1730,11 @@ final class EngineStatusModel: ObservableObject {
         }
         defer { isExchangingCommand = false }
         let presentationSnapshot = switch request {
+        case let .setOperationState(state, _):
+            current.optimisticallySettingOperationState(state)
         case let .setLocalPlaybackLeader(deckID, _):
             current.optimisticallySettingLocalPlaybackLeader(deckID)
-        default:
+        case .selectDeckSourceMode:
             current
         }
         workspaceState = LiveWorkspacePresenter.ready(

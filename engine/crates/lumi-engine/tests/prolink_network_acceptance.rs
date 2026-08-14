@@ -126,6 +126,142 @@ fn direct_timing_continues_while_the_client_is_idle() {
     remove_database(&database);
 }
 
+/// Reproduces the physical failure sequence reported from Live Decks: Lumi is
+/// already in Start while the Master is cued and stopped, then deck playback
+/// begins. The current phrase must execute before any later phrase transition.
+/// Operational Pause/Start must subsequently restore that same phrase once.
+#[test]
+#[ignore = "requires the Lumi Pro DJ Link network simulator and a synced Dev library"]
+fn stopped_live_deck_start_and_operation_resume_restore_the_current_autoloop() {
+    if std::env::var("LUMI_RUN_PROLINK_OUTPUT_TEST").as_deref() != Ok("1") {
+        return;
+    }
+
+    simulator_control("pause", None);
+    simulator_control("seek", Some("60000"));
+    simulator_control("master", Some("on"));
+    simulator_control("on-air", Some("on"));
+
+    let database = temporary_database_path();
+    seed_network_database(&database);
+    let mut child = start_engine(&database);
+    let mut connection = connect_and_authenticate(&mut child);
+    let initial = read_response(&mut connection);
+    let mut sequence = 1_u64;
+    let mut snapshot = exchange(
+        &mut connection,
+        &command(
+            "select-connected-decks-output",
+            sequence,
+            json!({
+                "kind": "selectDeckSourceMode",
+                "mode": "connectedDecks",
+                "expectedStateRevision": required_u64(&initial.payload, "stateRevision"),
+            }),
+        ),
+    );
+    sequence = sequence.saturating_add(1);
+
+    let deadline = Instant::now() + Duration::from_secs(15);
+    loop {
+        let has_stopped_master = snapshot
+            .payload
+            .get("leaderDeckId")
+            .and_then(Value::as_u64)
+            .is_some()
+            && snapshot
+                .payload
+                .get("decks")
+                .and_then(Value::as_array)
+                .is_some_and(|decks| {
+                    decks.iter().any(|deck| {
+                        deck.get("playing").and_then(Value::as_bool) == Some(false)
+                            && deck.get("planEligibility").and_then(Value::as_str)
+                                == Some("readyExact")
+                    })
+                })
+            && snapshot
+                .payload
+                .get("livePlan")
+                .is_some_and(Value::is_object);
+        if has_stopped_master {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "simulated Master did not become a stopped, exactly matched planned deck"
+        );
+        thread::sleep(Duration::from_millis(200));
+        snapshot = exchange(
+            &mut connection,
+            &command(
+                "wait-for-planned-master",
+                sequence,
+                json!({ "kind": "getSnapshot" }),
+            ),
+        );
+        sequence = sequence.saturating_add(1);
+    }
+
+    for (message_id, state) in [("arm-output", "armed"), ("start-output", "live")] {
+        snapshot = exchange(
+            &mut connection,
+            &command(
+                message_id,
+                sequence,
+                json!({
+                    "kind": "setOperationState",
+                    "operationState": state,
+                    "expectedStateRevision": required_u64(&snapshot.payload, "stateRevision"),
+                }),
+            ),
+        );
+        sequence = sequence.saturating_add(1);
+        assert_eq!(
+            snapshot
+                .payload
+                .get("operationState")
+                .and_then(Value::as_str),
+            Some(state)
+        );
+    }
+
+    let baseline = output_record_count(&snapshot);
+    simulator_control("play", None);
+    snapshot = wait_for_output_count(
+        &mut connection,
+        &mut sequence,
+        baseline.saturating_add(1),
+        "deck playback start",
+    );
+    assert_eq!(output_record_count(&snapshot), baseline.saturating_add(1));
+
+    for (message_id, state) in [("pause-output", "paused"), ("resume-output", "live")] {
+        snapshot = exchange(
+            &mut connection,
+            &command(
+                message_id,
+                sequence,
+                json!({
+                    "kind": "setOperationState",
+                    "operationState": state,
+                    "expectedStateRevision": required_u64(&snapshot.payload, "stateRevision"),
+                }),
+            ),
+        );
+        sequence = sequence.saturating_add(1);
+    }
+    assert_eq!(output_record_count(&snapshot), baseline.saturating_add(2));
+
+    simulator_control("pause", None);
+    drop(connection);
+    let status = child
+        .wait()
+        .unwrap_or_else(|error| panic!("engine should exit after disconnect: {error}"));
+    assert!(status.success());
+    remove_database(&database);
+}
+
 fn start_engine(database: &Path) -> Child {
     let mut command = Command::new(env!("CARGO_BIN_EXE_lumi-engine"));
     command
@@ -203,6 +339,63 @@ fn required_u64(value: &serde_json::Map<String, Value>, field: &str) -> u64 {
         .get(field)
         .and_then(Value::as_u64)
         .unwrap_or_else(|| panic!("{field} should be an unsigned integer"))
+}
+
+fn output_record_count(snapshot: &MessageEnvelope) -> u64 {
+    required_u64(
+        required_object(&snapshot.payload, "outputProvider"),
+        "recordCount",
+    )
+}
+
+fn wait_for_output_count(
+    connection: &mut TcpStream,
+    sequence: &mut u64,
+    expected: u64,
+    reason: &str,
+) -> MessageEnvelope {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let snapshot = exchange(
+            connection,
+            &command(
+                "wait-for-output",
+                *sequence,
+                json!({ "kind": "getSnapshot" }),
+            ),
+        );
+        *sequence = sequence.saturating_add(1);
+        if output_record_count(&snapshot) >= expected {
+            return snapshot;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "current AutoLoop was not executed after {reason}"
+        );
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn seed_network_database(destination: &Path) {
+    let source = std::env::var("LUMI_PROLINK_NETWORK_DATABASE").unwrap_or_else(|_| {
+        panic!("LUMI_PROLINK_NETWORK_DATABASE must point to the synced Dev DB")
+    });
+    fs::copy(&source, destination)
+        .unwrap_or_else(|error| panic!("synced Dev database should copy from {source}: {error}"));
+}
+
+fn simulator_control(command: &str, argument: Option<&str>) {
+    let script =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../scripts/prolink-simulatorctl.sh");
+    let mut process = Command::new(script);
+    process.arg(command);
+    if let Some(argument) = argument {
+        process.arg(argument);
+    }
+    let status = process
+        .status()
+        .unwrap_or_else(|error| panic!("simulator {command} should launch: {error}"));
+    assert!(status.success(), "simulator {command} should succeed");
 }
 
 fn temporary_database_path() -> PathBuf {

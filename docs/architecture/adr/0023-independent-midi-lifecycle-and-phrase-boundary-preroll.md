@@ -81,6 +81,10 @@ same timing while its displayed sign changes.
   phrase exactly once. If its Bank is not ready yet, Lumi settles the Bank and
   emits on the first following exact beat; it never waits silently for the next
   phrase boundary.
+- A real deck stopped-to-playing edge starts a new playback generation. Lumi
+  makes the current phrase eligible again and reasserts it exactly once; repeated
+  playing observations are idempotent. Operational Pause follows the same rule
+  because it explicitly closes the output gate and Start must restore the show.
 - A negative offset cannot retroactively move that initial Start pulse into the
   past. Predictive offset timing applies to the following known boundary.
 - Direct connected-deck timing remains subject to physical SoundSwitch/DMX
