@@ -421,7 +421,7 @@ struct LiveDeckSurface<Details: View>: View {
 
     private func hotCueBadge(_ cue: DeckHotCueSnapshot) -> some View {
         Text(verbatim: cue.letter)
-            .font(LumiTypography.technical.weight(.heavy))
+            .font(LumiTypography.hotCueLetter)
             .foregroundStyle(Color.black.opacity(0.82))
             .frame(width: 19, height: 19)
             .background(hotCueColor(cue.colorRGB))
@@ -485,11 +485,14 @@ struct LiveDeckSurface<Details: View>: View {
                     .overlay {
                         LumiWaveformInteractionMonitor(
                             onScroll: { deltaX in
-                                let direction = reversesHorizontalScroll ? -1.0 : 1.0
-                                viewport = renderingViewport.panned(
-                                    byPixels: deltaX * direction,
-                                    width: proxy.size.width
+                                let navigation = LiveDeckViewportPolicy.manualPan(
+                                    renderedViewport: renderingViewport,
+                                    deltaPixels: deltaX,
+                                    width: proxy.size.width,
+                                    reversesDirection: reversesHorizontalScroll
                                 )
+                                viewport = navigation.viewport
+                                usesLiveViewport = navigation.usesLiveViewport
                             },
                             onZoom: { delta, pointerFraction in
                                 zoomFromScroll(delta, pointerFraction: pointerFraction)
@@ -549,7 +552,7 @@ struct LiveDeckSurface<Details: View>: View {
                     let x = renderingViewport.x(forBeat: beat, width: proxy.size.width)
                     VStack(spacing: 0) {
                         Text(verbatim: cue.letter)
-                            .font(LumiTypography.technical.weight(.heavy))
+                            .font(LumiTypography.hotCueLetter)
                             .foregroundStyle(Color.black.opacity(0.82))
                             .frame(width: 17, height: 17)
                             .background(hotCueColor(cue.colorRGB))

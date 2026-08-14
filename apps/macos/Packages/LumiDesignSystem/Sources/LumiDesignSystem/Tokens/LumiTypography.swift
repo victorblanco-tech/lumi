@@ -8,4 +8,5 @@ public enum LumiTypography {
     public static let metadata = Font.callout
     public static let caption = Font.caption
     public static let technical = Font.caption.monospacedDigit()
+    public static let hotCueLetter = Font.system(size: 10, weight: .heavy, design: .rounded)
 }

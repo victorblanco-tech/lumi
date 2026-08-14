@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0-dev-29
+
+- Manual horizontal navigation in Local Playback now suspends automatic Live
+  waveform follow instead of being immediately overwritten by it. Navigation
+  starts from the currently rendered track position and normal follow resumes
+  on the next playback start.
+- Hot-cue letters use one shared, subtly smaller typography token in the Track
+  Editor, Local Playback and Live Decks while retaining their existing hit area.
+
 ## 0.4.0-dev-28
 
 - Hot-cue controls now show only the authoritative Rekordbox letter and color

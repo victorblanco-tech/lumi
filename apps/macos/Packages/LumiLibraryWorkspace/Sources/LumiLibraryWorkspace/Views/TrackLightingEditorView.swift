@@ -158,7 +158,7 @@ public struct TrackLightingEditorView: View {
                                 revealPlayhead()
                             } label: {
                                 Text(cue.letter)
-                                    .font(LumiTypography.technical.weight(.heavy))
+                                    .font(LumiTypography.hotCueLetter)
                                     .foregroundStyle(Color.black.opacity(0.82))
                                     .frame(width: 20, height: 20)
                                     .background(hotCueColor(cue.colorRGB))
@@ -1108,7 +1108,7 @@ public struct TrackLightingEditorView: View {
             context.fill(Path(roundedRect: badge, cornerRadius: 3), with: .color(color))
             context.draw(
                 Text(cue.letter)
-                    .font(LumiTypography.technical.weight(.heavy))
+                    .font(LumiTypography.hotCueLetter)
                     .foregroundColor(.black.opacity(0.82)),
                 at: CGPoint(x: x, y: 33),
                 anchor: .center

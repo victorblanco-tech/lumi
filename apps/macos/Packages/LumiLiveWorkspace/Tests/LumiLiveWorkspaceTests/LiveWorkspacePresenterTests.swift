@@ -703,6 +703,25 @@ struct LiveWorkspacePresenterTests {
         #expect(abs(viewport.x(forBeat: 400, width: 800) - 176) < 0.001)
     }
 
+    @Test("Manual horizontal navigation suspends Live follow without losing the rendered position")
+    func manualHorizontalNavigationSuspendsLiveFollow() {
+        let renderedViewport = LiveDeckViewportPolicy.live(
+            playheadBeat: 400,
+            totalBeats: 1_024,
+            visibleBeats: 160
+        )
+        let navigation = LiveDeckViewportPolicy.manualPan(
+            renderedViewport: renderedViewport,
+            deltaPixels: 100,
+            width: 1_000,
+            reversesDirection: false
+        )
+
+        #expect(navigation.usesLiveViewport == false)
+        #expect(navigation.viewport.visibleBeats == 160)
+        #expect(abs(navigation.viewport.startBeat - (renderedViewport.startBeat + 16)) < 0.001)
+    }
+
     @Test("Live AutoLoop plan exposes active, next, and future status with output details")
     func liveAutoloopStatusIsExplicit() throws {
         let content = try #require(LiveWorkspaceFixtures.ready.content)
