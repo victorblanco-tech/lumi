@@ -247,19 +247,62 @@ fn off_closes_output_without_discarding_the_prepared_leader_plan() {
         command_event(4, revision, OperationCommand::Arm),
     );
     let revision = runtime.state().revision();
-    submit_and_process(
+    let restarted = submit_and_process(
         &mut runtime,
         command_event(5, revision, OperationCommand::Start),
     );
-    let rescheduled = submit_and_process(&mut runtime, phrase_changed(5, 10, 0, 5));
-    assert_eq!(
-        rescheduled.decision,
-        DecisionReason::PhraseExecutionScheduled
-    );
     assert!(matches!(
-        rescheduled.effects.as_slice(),
+        restarted.effects.as_slice(),
         [Effect::ExecuteCue(_)]
     ));
+    let rescheduled = submit_and_process(&mut runtime, phrase_changed(5, 10, 0, 5));
+    assert_eq!(rescheduled.decision, DecisionReason::PhraseExecutionSkipped);
+    assert!(rescheduled.effects.is_empty());
+}
+
+#[test]
+fn start_while_the_master_is_already_playing_executes_its_current_phrase_once() {
+    let mut runtime = started_runtime(48);
+    submit_and_process(&mut runtime, track_loaded(1, 10, 100, 1));
+    submit_and_process(
+        &mut runtime,
+        plan_result(1, plan(PlanRevision::initial(), TrackLoadId::new(10))),
+    );
+    submit_and_process(&mut runtime, leader_changed(2, 10, 2));
+    submit_and_process(&mut runtime, playback_state(3, 10, true, 3));
+    submit_and_process(&mut runtime, phrase_changed(4, 10, 0, 4));
+
+    let revision = runtime.state().revision();
+    let armed = submit_and_process(
+        &mut runtime,
+        command_event(1, revision, OperationCommand::Arm),
+    );
+    assert!(armed.effects.is_empty());
+
+    let revision = runtime.state().revision();
+    let started = submit_and_process(
+        &mut runtime,
+        command_event(2, revision, OperationCommand::Start),
+    );
+    assert!(matches!(
+        started.effects.as_slice(),
+        [Effect::ExecuteCue(_)]
+    ));
+
+    let revision = runtime.state().revision();
+    submit_and_process(
+        &mut runtime,
+        command_event(3, revision, OperationCommand::Pause),
+    );
+    let revision = runtime.state().revision();
+    let resumed = submit_and_process(
+        &mut runtime,
+        command_event(4, revision, OperationCommand::Start),
+    );
+    assert!(
+        resumed.effects.is_empty(),
+        "ordinary pause/resume must not replay an already active AutoLoop"
+    );
 }
 
 #[test]

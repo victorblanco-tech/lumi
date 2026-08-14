@@ -1,9 +1,26 @@
 {
-  "engineVersion": "0.4.0-dev-30",
+  "engineVersion": "0.4.0-dev-31",
   "leaderBeat": 128,
   "leaderDeckId": 2,
   "operationState": "live",
   "outputEffects": [
+    {
+      "action": {
+        "category": "ambient",
+        "kind": "applyLook",
+        "loopBank": 1,
+        "loopSlot": 2,
+        "sceneId": 2,
+        "sceneName": "Star Wash",
+        "themeId": 4,
+        "themeName": "Ultraviolet"
+      },
+      "commandId": 1,
+      "phraseIndex": 0,
+      "planRevision": 1,
+      "scheduledAt": 0,
+      "status": "simulated"
+    },
     {
       "action": {
         "category": "ambient",
@@ -15,7 +32,7 @@
         "themeId": 2,
         "themeName": "Deep Ocean"
       },
-      "commandId": 1,
+      "commandId": 2,
       "phraseIndex": 0,
       "planRevision": 3,
       "scheduledAt": 0,
@@ -32,7 +49,7 @@
         "themeId": 2,
         "themeName": "Deep Ocean"
       },
-      "commandId": 2,
+      "commandId": 3,
       "phraseIndex": 1,
       "planRevision": 3,
       "scheduledAt": 250,
@@ -49,7 +66,7 @@
         "themeId": 2,
         "themeName": "Deep Ocean"
       },
-      "commandId": 3,
+      "commandId": 4,
       "phraseIndex": 2,
       "planRevision": 3,
       "scheduledAt": 1500,
@@ -66,15 +83,15 @@
         "themeId": 2,
         "themeName": "Deep Ocean"
       },
-      "commandId": 4,
+      "commandId": 5,
       "phraseIndex": 3,
       "planRevision": 3,
       "scheduledAt": 1500,
       "status": "simulated"
     }
   ],
-  "outputRecordCount": 4,
-  "pausedOutputCount": 2,
+  "outputRecordCount": 5,
+  "pausedOutputCount": 3,
   "plan": {
     "lockedCue": {
       "action": {
@@ -101,8 +118,8 @@
     "speed": 64
   },
   "timeline": {
-    "entryCount": 160,
-    "lastSequence": 160,
-    "simulatedOutputEntries": 4
+    "entryCount": 161,
+    "lastSequence": 161,
+    "simulatedOutputEntries": 5
   }
 }

@@ -488,6 +488,20 @@ fn reduce_command(
         vec![Effect::EnsureOutputClosed {
             reason: DecisionReason::OperationTransitionAccepted,
         }]
+    } else if target == OperationState::Live {
+        let current = state.leader_deck.and_then(|deck_id| {
+            let deck = state.decks.get(&deck_id)?;
+            deck.is_playing()
+                .then_some((deck_id, deck.track_load_id(), deck.phrase_index?))
+        });
+        current
+            .map(|(deck_id, track_load_id, phrase_index)| {
+                execution_effect(state, deck_id, track_load_id, phrase_index, event.issued_at)
+            })
+            .transpose()?
+            .into_iter()
+            .flatten()
+            .collect()
     } else {
         Vec::new()
     };

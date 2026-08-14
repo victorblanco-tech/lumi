@@ -248,7 +248,7 @@ public struct PhraseRoleSettingsView: View {
             VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
                 Text("Lighting timing offset")
                     .font(LumiTypography.body.weight(.semibold))
-                Text("Compensate MIDI and SoundSwitch latency. Positive values trigger early; negative values trigger late. During Live playback, changes activate on the next phrase.")
+                Text("Compensate MIDI and SoundSwitch latency. Negative values trigger early; positive values trigger late. During Live playback, changes activate on the next phrase.")
                     .font(LumiTypography.metadata)
                     .foregroundStyle(LumiColor.textSecondary)
             }

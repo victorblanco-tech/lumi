@@ -198,8 +198,13 @@ from SwiftUI.
 - replace the blocking 50 ms Bank sleep with bounded non-blocking Bank and
   AutoLoop stages;
 - trigger a safely pre-armed AutoLoop on the landing/boundary beat;
+- when Lumi enters Start while its Master is already playing, execute the
+  current planned phrase once instead of waiting for another phrase event;
 - when a discontinuous landing needs another Bank, arm immediately and trigger
   on the first following exact beat rather than starting off-beat;
+- interpret output offset as a real signed time delta: negative is early and
+  positive is late; predict negative direct-deck offsets from exact future beat
+  packets and delay positive offsets with the non-blocking scheduler;
 - retain bounded metrics for requested, pre-armed, emitted, cancelled, late and
   one-beat-fallback cues;
 - keep Control One parallel: a manual override remains possible, while Lumi
@@ -223,6 +228,16 @@ Implementation evidence for `0.4.0-dev-23`:
 - bounded scheduler counters are available in Integrations diagnostics;
 - the full local repository suite and opt-in two-host Pro DJ Link LAN timing
   acceptance pass without GitHub Actions.
+
+Additional implementation evidence for `0.4.0-dev-31`:
+
+- deterministic domain coverage proves Start catches up the current playing
+  phrase once and retains deduplication across pause/resume;
+- direct Pro DJ Link offset scheduling is calculated from effective BPM and an
+  exact future beat, including the maximum supported early offset at high BPM;
+- Local Playback and direct decks share the same negative-early/positive-late
+  convention, while the engine keeps MIDI scheduling independent from SwiftUI;
+- existing Dev preferences migrate once from the former inverse sign.
 
 #### E4-02D1 — Timing contract and deterministic authority — implemented
 

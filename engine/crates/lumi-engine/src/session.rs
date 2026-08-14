@@ -1027,7 +1027,9 @@ struct OutputWorker {
     prolink_timing_stale: bool,
     precise_autoloop_fallback: bool,
     scheduled_prearm: Option<ScheduledPrearm>,
+    scheduled_early_trigger: Option<ScheduledEarlyTrigger>,
     prearmed_autoloop: Option<PrearmedAutoloop>,
+    predictively_triggered: Option<AutoloopExecutionIdentity>,
     pending_autoloop: Option<PendingAutoloop>,
     autoloop_requested_count: u64,
     autoloop_prearmed_count: u64,
@@ -1058,11 +1060,37 @@ struct ScheduledPrearm {
 }
 
 #[derive(Clone, Debug)]
+struct ScheduledEarlyTrigger {
+    autoloop_number: u8,
+    due_at: Instant,
+    identity: AutoloopExecutionIdentity,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct AutoloopExecutionIdentity {
+    deck_id: lumi_domain::DeckId,
+    track_load_id: TrackLoadId,
+    plan_revision: PlanRevision,
+    phrase_index: u16,
+}
+
+impl AutoloopExecutionIdentity {
+    fn from_request(request: &OutputExecutionRequest) -> Self {
+        Self {
+            deck_id: request.deck_id(),
+            track_load_id: request.track_load_id(),
+            plan_revision: request.plan_revision(),
+            phrase_index: request.phrase_index(),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
 struct PendingAutoloop {
     request: OutputExecutionRequest,
     bank_number: u8,
     autoloop_number: u8,
-    selected_at: Instant,
+    due_at: Instant,
     requires_precise_beat: bool,
 }
 
@@ -1090,7 +1118,9 @@ impl OutputWorker {
             prolink_timing_stale: false,
             precise_autoloop_fallback: false,
             scheduled_prearm: None,
+            scheduled_early_trigger: None,
             prearmed_autoloop: None,
+            predictively_triggered: None,
             pending_autoloop: None,
             autoloop_requested_count: 0,
             autoloop_prearmed_count: 0,
@@ -1105,7 +1135,9 @@ impl OutputWorker {
         self.precise_autoloop_fallback = enabled;
         if !enabled {
             self.scheduled_prearm = None;
+            self.scheduled_early_trigger = None;
             self.prearmed_autoloop = None;
+            self.predictively_triggered = None;
         }
     }
 
@@ -1118,6 +1150,19 @@ impl OutputWorker {
     ) {
         self.autoloop_requested_count = self.autoloop_requested_count.saturating_add(1);
         let now = Instant::now();
+        let identity = AutoloopExecutionIdentity::from_request(request);
+        self.scheduled_early_trigger = None;
+        if self.predictively_triggered == Some(identity) {
+            // The physical AutoLoop pulse already left before the phrase
+            // boundary according to the negative user offset. The domain
+            // effect still records the execution exactly once, but must not
+            // send a second MIDI pulse at the boundary.
+            self.predictively_triggered = None;
+            self.pending_autoloop = None;
+            self.prearmed_autoloop = None;
+            return;
+        }
+        self.predictively_triggered = None;
         let is_safely_prearmed = self.prearmed_autoloop.as_ref().is_some_and(|prearmed| {
             prearmed.bank_number == bank_number
                 && prearmed.deck_id == request.deck_id()
@@ -1126,7 +1171,12 @@ impl OutputWorker {
                 && prearmed.phrase_index == request.phrase_index()
                 && now.saturating_duration_since(prearmed.selected_at) >= BANK_SETTLE_DELAY
         });
-        if is_safely_prearmed {
+        let delayed_after_boundary = if self.precise_autoloop_fallback {
+            positive_timing_delay(self.timing_offset_millis)
+        } else {
+            Duration::ZERO
+        };
+        if is_safely_prearmed && delayed_after_boundary.is_zero() {
             if self
                 .midi_output
                 .trigger_autoloop_button(autoloop_number)
@@ -1135,6 +1185,17 @@ impl OutputWorker {
                 self.autoloop_emitted_count = self.autoloop_emitted_count.saturating_add(1);
                 self.pending_autoloop = None;
             }
+            self.prearmed_autoloop = None;
+            return;
+        }
+        if is_safely_prearmed {
+            self.pending_autoloop = Some(PendingAutoloop {
+                request: request.clone(),
+                bank_number,
+                autoloop_number,
+                due_at: now + delayed_after_boundary,
+                requires_precise_beat: false,
+            });
             self.prearmed_autoloop = None;
             return;
         }
@@ -1154,8 +1215,9 @@ impl OutputWorker {
             request: request.clone(),
             bank_number,
             autoloop_number,
-            selected_at: now,
-            requires_precise_beat: self.precise_autoloop_fallback,
+            due_at: now + BANK_SETTLE_DELAY.max(delayed_after_boundary),
+            requires_precise_beat: self.precise_autoloop_fallback
+                && delayed_after_boundary.is_zero(),
         });
         self.cancel_stale_autoloop(state);
     }
@@ -1176,10 +1238,10 @@ impl OutputWorker {
 
     fn service_pending_autoloop(&mut self, state: &lumi_domain::RuntimeState, precise_beat: bool) {
         self.service_scheduled_prearm(state);
+        self.service_scheduled_early_trigger(state);
         self.cancel_stale_autoloop(state);
         let ready = self.pending_autoloop.as_ref().is_some_and(|pending| {
-            (!pending.requires_precise_beat || precise_beat)
-                && pending.selected_at.elapsed() >= BANK_SETTLE_DELAY
+            (!pending.requires_precise_beat || precise_beat) && Instant::now() >= pending.due_at
         });
         if !ready {
             return;
@@ -1244,6 +1306,59 @@ impl OutputWorker {
         self.autoloop_prearmed_count = self.autoloop_prearmed_count.saturating_add(1);
     }
 
+    fn service_scheduled_early_trigger(&mut self, state: &lumi_domain::RuntimeState) {
+        let stale = self
+            .scheduled_early_trigger
+            .as_ref()
+            .is_some_and(|scheduled| {
+                state.operation() != OperationState::Live
+                    || state.leader_deck() != Some(scheduled.identity.deck_id)
+                    || state.deck(scheduled.identity.deck_id).is_none_or(|deck| {
+                        deck.track_load_id() != scheduled.identity.track_load_id
+                            || deck
+                                .phrase_index()
+                                .is_some_and(|current| current >= scheduled.identity.phrase_index)
+                    })
+                    || state.active_plan().is_none_or(|plan| {
+                        plan.track_load_id() != scheduled.identity.track_load_id
+                            || plan.revision() != scheduled.identity.plan_revision
+                    })
+            });
+        if stale {
+            self.scheduled_early_trigger = None;
+            self.autoloop_cancelled_count = self.autoloop_cancelled_count.saturating_add(1);
+            return;
+        }
+        let Some(scheduled) = self.scheduled_early_trigger.as_ref() else {
+            return;
+        };
+        if Instant::now() < scheduled.due_at {
+            return;
+        }
+        let safely_prearmed = self.prearmed_autoloop.as_ref().is_some_and(|prearmed| {
+            prearmed.deck_id == scheduled.identity.deck_id
+                && prearmed.track_load_id == scheduled.identity.track_load_id
+                && prearmed.plan_revision == scheduled.identity.plan_revision
+                && prearmed.phrase_index == scheduled.identity.phrase_index
+                && prearmed.selected_at.elapsed() >= BANK_SETTLE_DELAY
+        });
+        if !safely_prearmed {
+            return;
+        }
+        let Some(scheduled) = self.scheduled_early_trigger.take() else {
+            return;
+        };
+        if self
+            .midi_output
+            .trigger_autoloop_button(scheduled.autoloop_number)
+            .is_ok()
+        {
+            self.autoloop_emitted_count = self.autoloop_emitted_count.saturating_add(1);
+            self.predictively_triggered = Some(scheduled.identity);
+        }
+        self.prearmed_autoloop = None;
+    }
+
     #[cfg(not(test))]
     fn on_precise_prolink_beat(
         &mut self,
@@ -1255,35 +1370,81 @@ impl OutputWorker {
             || state.leader_deck() != Some(observation.deck_id)
             || !observation.playing
         {
+            self.scheduled_prearm = None;
+            self.scheduled_early_trigger = None;
             self.prearmed_autoloop = None;
+            self.predictively_triggered = None;
             return;
         }
         let Some(plan) = state.active_plan() else {
+            self.scheduled_prearm = None;
+            self.scheduled_early_trigger = None;
             self.prearmed_autoloop = None;
+            self.predictively_triggered = None;
             return;
         };
-        let Some(cue) = plan
+        let scheduling_offset_millis = self.scheduling_timing_offset_millis();
+        let Some((cue, bank_delay, trigger_delay)) = plan
             .cues()
             .iter()
-            .find(|cue| cue.start_beat() == observation.absolute_beat.saturating_add(1))
+            .filter(|cue| cue.start_beat() > observation.absolute_beat)
+            .find_map(|cue| {
+                let beats_until = cue.start_beat().saturating_sub(observation.absolute_beat);
+                prolink_predictive_delays(
+                    beats_until,
+                    observation.effective_bpm_milli,
+                    scheduling_offset_millis,
+                )
+                .map(|(bank_delay, trigger_delay)| (cue, bank_delay, trigger_delay))
+            })
         else {
             return;
         };
-        let Ok(Some((bank_number, _))) = automatic_midi_target(cue.action()) else {
+        let Ok(Some((bank_number, autoloop_number))) = automatic_midi_target(cue.action()) else {
             return;
         };
+        let identity = AutoloopExecutionIdentity {
+            deck_id: observation.deck_id,
+            track_load_id: plan.track_load_id(),
+            plan_revision: plan.revision(),
+            phrase_index: cue.phrase_index(),
+        };
+        let already_preparing = self.scheduled_prearm.as_ref().is_some_and(|scheduled| {
+            scheduled.deck_id == identity.deck_id
+                && scheduled.track_load_id == identity.track_load_id
+                && scheduled.plan_revision == identity.plan_revision
+                && scheduled.phrase_index == identity.phrase_index
+        }) || self.prearmed_autoloop.as_ref().is_some_and(|prearmed| {
+            prearmed.deck_id == identity.deck_id
+                && prearmed.track_load_id == identity.track_load_id
+                && prearmed.plan_revision == identity.plan_revision
+                && prearmed.phrase_index == identity.phrase_index
+        }) || self
+            .scheduled_early_trigger
+            .as_ref()
+            .is_some_and(|scheduled| scheduled.identity == identity)
+            || self.predictively_triggered == Some(identity);
+        if already_preparing {
+            return;
+        }
         self.scheduled_prearm = Some(ScheduledPrearm {
             bank_number,
-            due_at: Instant::now() + prolink_prearm_delay(observation.effective_bpm_milli),
+            due_at: Instant::now() + bank_delay,
             deck_id: observation.deck_id,
             track_load_id: plan.track_load_id(),
             plan_revision: plan.revision(),
             phrase_index: cue.phrase_index(),
         });
+        self.scheduled_early_trigger =
+            (scheduling_offset_millis < 0).then_some(ScheduledEarlyTrigger {
+                autoloop_number,
+                due_at: Instant::now() + trigger_delay,
+                identity,
+            });
     }
 
     fn prearm_current_or_first_cue(&mut self, state: &lumi_domain::RuntimeState) {
-        if state.operation() != OperationState::Live {
+        if state.operation() != OperationState::Live || self.pending_autoloop.is_some() {
             return;
         }
         let Some(deck_id) = state.leader_deck() else {
@@ -1328,6 +1489,11 @@ impl OutputWorker {
         for effect in effects {
             let (result, completed_at) = match effect {
                 lumi_domain::Effect::EnsureOutputClosed { .. } => {
+                    self.scheduled_prearm = None;
+                    self.scheduled_early_trigger = None;
+                    self.prearmed_autoloop = None;
+                    self.predictively_triggered = None;
+                    self.pending_autoloop = None;
                     (EffectResult::OutputGateClosed, MonotonicTime::new(0))
                 }
                 lumi_domain::Effect::ExecuteCue(request) => {
@@ -1428,6 +1594,11 @@ impl OutputWorker {
 
     fn pending_timing_offset_millis(&self) -> Option<i16> {
         self.pending_timing_offset_millis
+    }
+
+    fn scheduling_timing_offset_millis(&self) -> i16 {
+        self.pending_timing_offset_millis
+            .unwrap_or(self.timing_offset_millis)
     }
 
     fn request_timing_offset_millis(&mut self, millis: i16, defer_until_phrase: bool) {
@@ -1618,16 +1789,39 @@ fn prolink_timing_stale_after(bpm_milli: Option<u32>) -> Duration {
     )
 }
 
-fn prolink_prearm_delay(bpm_milli: u32) -> Duration {
+fn positive_timing_delay(offset_millis: i16) -> Duration {
+    u64::try_from(offset_millis.max(0))
+        .map(Duration::from_millis)
+        .unwrap_or(Duration::ZERO)
+}
+
+fn negative_timing_advance(offset_millis: i16) -> Duration {
+    Duration::from_millis(u64::from(offset_millis.min(0).unsigned_abs()))
+}
+
+fn prolink_predictive_delays(
+    beats_until: u32,
+    bpm_milli: u32,
+    offset_millis: i16,
+) -> Option<(Duration, Duration)> {
+    if beats_until == 0 {
+        return None;
+    }
     let beat_duration = Duration::from_micros(60_000_000_000_u64 / u64::from(bpm_milli.max(1)));
-    beat_duration.saturating_sub(BANK_SETTLE_DELAY.saturating_add(INTEGRATION_PUMP_INTERVAL))
+    let target_delay = beat_duration.saturating_mul(beats_until);
+    let trigger_delay = target_delay.saturating_sub(negative_timing_advance(offset_millis));
+    let preparation = BANK_SETTLE_DELAY.saturating_add(INTEGRATION_PUMP_INTERVAL);
+    if trigger_delay < preparation || trigger_delay > preparation.saturating_add(beat_duration) {
+        return None;
+    }
+    Some((trigger_delay.saturating_sub(preparation), trigger_delay))
 }
 
 fn position_with_timing_offset(position_millis: u64, offset_millis: i32) -> u64 {
     if offset_millis >= 0 {
-        position_millis.saturating_add(u64::from(offset_millis.unsigned_abs()))
-    } else {
         position_millis.saturating_sub(u64::from(offset_millis.unsigned_abs()))
+    } else {
+        position_millis.saturating_add(u64::from(offset_millis.unsigned_abs()))
     }
 }
 
@@ -2353,9 +2547,9 @@ fn apply_command(
             let _ = runtime.output_worker.ensure_lighting_midi();
             let output_position_millis = if playing {
                 position_with_timing_offset(
-                    position_millis,
-                    i32::from(runtime.output_worker.timing_offset_millis())
-                        + i32::try_from(BANK_SETTLE_DELAY.as_millis()).unwrap_or(50),
+                    position_millis
+                        .saturating_add(u64::try_from(BANK_SETTLE_DELAY.as_millis()).unwrap_or(50)),
+                    i32::from(runtime.output_worker.scheduling_timing_offset_millis()),
                 )
             } else {
                 position_millis
@@ -4066,11 +4260,15 @@ mod tests {
     use lumi_simulator::{SimulationControl, SimulationSpeed};
 
     #[test]
-    fn signed_output_timing_offset_advances_or_delays_without_underflow() {
-        assert_eq!(position_with_timing_offset(1_000, 35), 1_035);
-        assert_eq!(position_with_timing_offset(1_000, -35), 965);
-        assert_eq!(position_with_timing_offset(10, -35), 0);
-        assert_eq!(position_with_timing_offset(u64::MAX - 5, 35), u64::MAX);
+    fn negative_output_timing_offset_advances_and_positive_delays() {
+        assert_eq!(position_with_timing_offset(1_000, -35), 1_035);
+        assert_eq!(position_with_timing_offset(1_000, 35), 965);
+        assert_eq!(position_with_timing_offset(10, 35), 0);
+        assert_eq!(position_with_timing_offset(u64::MAX - 5, -35), u64::MAX);
+        assert_eq!(positive_timing_delay(35), Duration::from_millis(35));
+        assert_eq!(positive_timing_delay(-35), Duration::ZERO);
+        assert_eq!(negative_timing_advance(-35), Duration::from_millis(35));
+        assert_eq!(negative_timing_advance(35), Duration::ZERO);
     }
 
     #[test]
@@ -4119,16 +4317,33 @@ mod tests {
     }
 
     #[test]
-    fn pro_dj_link_bank_prearm_keeps_settle_time_and_one_engine_tick() {
+    fn pro_dj_link_predictive_schedule_respects_signed_user_offset() {
+        let beat_at_140 = Duration::from_micros(60_000_000_000_u64 / 140_000);
+        let (bank, trigger) = prolink_predictive_delays(1, 140_000, 0)
+            .unwrap_or_else(|| panic!("one beat must provide enough preparation"));
+        assert_eq!(trigger, beat_at_140);
+        assert_eq!(bank, Duration::from_micros(358_571));
+
+        let (early_bank, early_trigger) = prolink_predictive_delays(1, 140_000, -20)
+            .unwrap_or_else(|| panic!("negative offset must schedule before the boundary"));
+        assert_eq!(early_trigger, beat_at_140 - Duration::from_millis(20));
+        assert_eq!(early_bank, Duration::from_micros(338_571));
+
+        let (late_bank, late_boundary) = prolink_predictive_delays(1, 140_000, 20)
+            .unwrap_or_else(|| panic!("positive offset still pre-arms for the boundary"));
+        assert_eq!(late_boundary, beat_at_140);
+        assert_eq!(late_bank, bank);
+        assert_eq!(positive_timing_delay(20), Duration::from_millis(20));
+
+        let beat_at_300 = Duration::from_micros(60_000_000_000_u64 / 300_000);
+        assert!(prolink_predictive_delays(1, 300_000, -250).is_none());
+        let (two_beat_bank, two_beat_trigger) = prolink_predictive_delays(2, 300_000, -250)
+            .unwrap_or_else(|| panic!("maximum early offset must schedule two beats ahead"));
         assert_eq!(
-            prolink_prearm_delay(140_000),
-            Duration::from_micros(358_571)
+            two_beat_trigger,
+            beat_at_300.saturating_mul(2) - Duration::from_millis(250)
         );
-        let beat_duration = Duration::from_micros(60_000_000_000_u64 / 300_000);
-        assert_eq!(
-            beat_duration.saturating_sub(prolink_prearm_delay(300_000)),
-            BANK_SETTLE_DELAY.saturating_add(INTEGRATION_PUMP_INTERVAL)
-        );
+        assert_eq!(two_beat_bank, Duration::from_millis(80));
     }
 
     #[test]
@@ -4307,7 +4522,7 @@ mod tests {
             .output_effects()
             .cloned()
             .collect::<Vec<_>>();
-        assert_eq!(results.len(), 4);
+        assert_eq!(results.len(), 5);
         assert!(
             results
                 .iter()
@@ -4421,6 +4636,7 @@ mod tests {
             .unwrap_or_else(|| panic!("leader change must activate the prepared plan"));
         assert_eq!(active.track_id(), lumi_domain::TrackId::new(1));
         let cue_count = active.cues().len();
+        let active_track_load_id = active.track_load_id();
         apply_current_session_command(&mut runtime, |expected_revision| {
             SessionCommand::SetSimulationSpeed {
                 expected_revision,
@@ -4435,10 +4651,11 @@ mod tests {
         });
 
         let results = runtime.state.state().output_effects().collect::<Vec<_>>();
-        assert_eq!(results.len(), cue_count);
+        assert_eq!(results.len(), cue_count + 1);
         assert_eq!(
             results
                 .iter()
+                .filter(|result| result.request().track_load_id() == active_track_load_id)
                 .map(|result| result.request().phrase_index())
                 .collect::<Vec<_>>(),
             (0..u16::try_from(cue_count)
@@ -4450,10 +4667,15 @@ mod tests {
         assert!(
             completed.payload["outputEffects"]
                 .as_array()
-                .is_some_and(|effects| effects.iter().all(|effect| {
-                    effect["status"] == "simulated"
-                        && effect["libraryResolution"]["dryRunEntry"]["id"].is_string()
-                }))
+                .is_some_and(|effects| {
+                    effects
+                        .iter()
+                        .filter(|effect| effect["trackLoadId"] == active_track_load_id.value())
+                        .all(|effect| {
+                            effect["status"] == "simulated"
+                                && effect["libraryResolution"]["dryRunEntry"]["id"].is_string()
+                        })
+                })
         );
         let evidence = canonical_library_simulation_evidence(
             &preview.payload,
@@ -4480,6 +4702,8 @@ mod tests {
         assert_eq!(runtime.output_worker.provider.records().count(), 0);
 
         apply_operation(&mut runtime, 2, OperationCommand::Start);
+        let records_after_start = runtime.output_worker.provider.records().count();
+        assert_eq!(records_after_start, 1);
         apply_operation(&mut runtime, 3, OperationCommand::Pause);
         apply_simulation_control(
             &mut runtime,
@@ -4492,7 +4716,10 @@ mod tests {
         if let Err(error) = process_pending_source_events(&mut runtime) {
             panic!("test source events must process: {error}");
         }
-        assert_eq!(runtime.output_worker.provider.records().count(), 0);
+        assert_eq!(
+            runtime.output_worker.provider.records().count(),
+            records_after_start
+        );
         assert_eq!(runtime.state.state().operation(), OperationState::Paused);
     }
 
@@ -4653,7 +4880,8 @@ mod tests {
         else {
             panic!("live leader change must create the first output request");
         };
-        assert_eq!(runtime.output_worker.provider.records().count(), 1);
+        let records_before_stale = runtime.output_worker.provider.records().count();
+        assert_eq!(records_before_stale, 2);
 
         apply_operation(&mut runtime, 3, OperationCommand::Pause);
         if let Err(error) = runtime.output_worker.process_effects(
@@ -4663,7 +4891,10 @@ mod tests {
             panic!("stale output must be recorded safely: {error}");
         }
 
-        assert_eq!(runtime.output_worker.provider.records().count(), 1);
+        assert_eq!(
+            runtime.output_worker.provider.records().count(),
+            records_before_stale
+        );
         let Some(last) = runtime.state.state().output_effects().last() else {
             panic!("skipped output must be retained");
         };
@@ -4822,7 +5053,7 @@ mod tests {
         });
 
         assert_eq!(runtime.state.state().operation(), OperationState::Live);
-        assert_eq!(runtime.output_worker.provider.records().count(), 4);
+        assert_eq!(runtime.output_worker.provider.records().count(), 5);
         assert!(
             runtime
                 .state
@@ -4862,7 +5093,7 @@ mod tests {
         let sixteen = semantic_output_order(SimulationSpeed::Sixteen, 4_000);
         let sixty_four = semantic_output_order(SimulationSpeed::SixtyFour, 1_000);
         assert_eq!(sixteen, sixty_four);
-        assert_eq!(sixteen.len(), 4);
+        assert_eq!(sixteen.len(), 5);
     }
 
     #[test]
@@ -5307,6 +5538,7 @@ mod tests {
             .as_array()
             .unwrap_or_else(|| panic!("golden evidence requires output effects"))
             .iter()
+            .filter(|effect| effect["libraryResolution"]["dryRunEntry"]["id"].is_string())
             .map(|effect| {
                 json!({
                     "phraseIndex": effect["phraseIndex"],

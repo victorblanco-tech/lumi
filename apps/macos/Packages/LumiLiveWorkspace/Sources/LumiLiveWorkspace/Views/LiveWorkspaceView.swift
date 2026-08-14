@@ -326,7 +326,7 @@ public struct LiveWorkspaceView: View {
                 VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
                     Text("Lighting timing offset")
                         .font(LumiTypography.sectionTitle)
-                    Text("Positive sends AutoLoops early; negative sends them late.")
+                    Text("Negative sends AutoLoops early; positive sends them late.")
                         .font(LumiTypography.metadata)
                         .foregroundStyle(LumiColor.textSecondary)
                     Text(timingConfirmationDetail)
@@ -1255,7 +1255,7 @@ private struct PlanSelectionControl: View {
 #Preview("Ready · Dark") {
     LiveWorkspaceView(
         state: LiveWorkspaceFixtures.ready,
-        productVersion: "0.4.0-dev-30",
+        productVersion: "0.4.0-dev-31",
         appearance: .constant(.dark),
         keyNotation: .constant(.camelot)
     )
@@ -1266,7 +1266,7 @@ private struct PlanSelectionControl: View {
 #Preview("Fallback · Light") {
     LiveWorkspaceView(
         state: LiveWorkspaceFixtures.fallback,
-        productVersion: "0.4.0-dev-30",
+        productVersion: "0.4.0-dev-31",
         appearance: .constant(.light),
         keyNotation: .constant(.classic)
     )

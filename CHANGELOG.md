@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.0-dev-31
+
+- Entering Start while the current Master is already playing now executes its
+  current planned phrase exactly once. Lumi no longer waits silently for the
+  next phrase change; an unprepared direct-deck target settles its Bank and
+  emits on the first safe exact beat.
+- Lighting Output Offset now uses the natural signed convention: a negative
+  value sends early, zero targets the phrase boundary and a positive value
+  sends late. Existing Dev preferences are migrated once so their physical
+  compensation remains unchanged.
+- Direct Pro DJ Link predicts negative offsets from exact future beat packets;
+  positive offsets and Bank settling use bounded non-blocking timers. Pending
+  changes participate in the very next phrase transition without moving
+  timing work into SwiftUI.
+- Canonical dry-run evidence now includes the deliberate current-phrase output
+  produced when Start is entered during active playback.
+
 ## 0.4.0-dev-30
 
 - Direct Pro DJ Link now accepts the exact empty-deck sentinel emitted by a

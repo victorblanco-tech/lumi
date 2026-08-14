@@ -28,8 +28,8 @@ public final class LumiPreferences {
         }
     }
 
-    /// Signed lighting-output compensation. Positive values send an AutoLoop
-    /// early; negative values deliberately delay it.
+    /// Signed lighting-output compensation. Negative values send an AutoLoop
+    /// early; positive values deliberately delay it.
     public var lightingTimingOffsetMillis: Int {
         didSet {
             let clampedValue = lightingTimingOffsetMillis.clamped(to: -250...250)
@@ -55,9 +55,27 @@ public final class LumiPreferences {
         abletonLinkAutoStart = userDefaults.bool(
             forKey: LumiPreferenceKey.abletonLinkAutoStart
         )
-        lightingTimingOffsetMillis = userDefaults
+        let storedTimingOffset = userDefaults
             .integer(forKey: LumiPreferenceKey.lightingTimingOffsetMillis)
             .clamped(to: -250...250)
+        let usesNaturalSignedConvention = userDefaults.integer(
+            forKey: LumiPreferenceKey.lightingTimingOffsetConventionVersion
+        ) >= 2
+        lightingTimingOffsetMillis = usesNaturalSignedConvention
+            ? storedTimingOffset
+            : -storedTimingOffset
+        if !usesNaturalSignedConvention {
+            // Dev versions through 30 exposed the inverse sign. Preserve the
+            // user's physical compensation while moving to -early / +late.
+            userDefaults.set(
+                lightingTimingOffsetMillis,
+                forKey: LumiPreferenceKey.lightingTimingOffsetMillis
+            )
+            userDefaults.set(
+                2,
+                forKey: LumiPreferenceKey.lightingTimingOffsetConventionVersion
+            )
+        }
     }
 }
 
@@ -66,6 +84,8 @@ public enum LumiPreferenceKey {
     public static let keyNotation = "co.victorblan.tech.lumi.preference.key-notation"
     public static let lightingTimingOffsetMillis =
         "co.victorblan.tech.lumi.preference.lighting-timing-offset-millis"
+    public static let lightingTimingOffsetConventionVersion =
+        "co.victorblan.tech.lumi.preference.lighting-timing-offset-convention-version"
     public static let abletonLinkAutoStart =
         "co.victorblan.tech.lumi.preference.ableton-link-auto-start"
     public static let navigationAutoHide =

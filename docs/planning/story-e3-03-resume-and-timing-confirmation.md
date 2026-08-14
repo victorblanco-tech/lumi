@@ -1,7 +1,23 @@
 # Story E3-03 – deterministic resume and confirmed lighting timing
 
 Target milestone: **0.4.0 – next development cycle**
-Status: **In progress**
+Status: **Implemented; physical acceptance pending**
+
+## Delivered in `0.4.0-dev-31`
+
+- entering Start while the current Master is already playing executes that
+  track's current planned phrase exactly once instead of waiting for a later
+  phrase change;
+- an unprepared direct-deck Start settles the Bank non-blockingly and emits the
+  AutoLoop on the first safe exact beat;
+- repeated Start or ordinary pause/resume in the same phrase remains
+  deduplicated, while a paused seek still activates its destination;
+- the user-facing timing sign is now temporal and unambiguous: negative sends
+  early, zero targets the boundary and positive sends late;
+- the former positive-early preference is migrated once without changing the
+  user's physical compensation;
+- pending timing changes are used to schedule the very next phrase transition,
+  then become the acknowledged applied value at that boundary.
 
 ## Delivered in `0.4.0-dev-1`
 
@@ -43,7 +59,7 @@ parallel Control One feedback. It also exposed two bounded follow-up items:
 - Settings shows one central applied, pending or failed confirmation;
 - both deck surfaces show the applied value as a small, non-shifting technical
   detail;
-- a timing change during playback affects subsequent cue scheduling and never
+- a timing change during playback affects the next cue scheduling and never
   retroactively replays a cue;
 - retries are bounded and cannot block or delay real-time lighting output.
 
