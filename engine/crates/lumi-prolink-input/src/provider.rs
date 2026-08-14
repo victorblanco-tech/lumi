@@ -247,7 +247,11 @@ impl ProLinkDeckSourceProvider {
         }
         let track_bpm_milli = bpm_milli(status.track_bpm)?;
         let effective_bpm_milli = bpm_milli(status.effective_bpm)?;
-        let beat = status.beat_number.saturating_sub(1);
+        // Protocol validation guarantees a non-negative beat for loaded
+        // tracks. Beat Link's unloaded `-1` sentinel returns above.
+        let beat = u32::try_from(status.beat_number)
+            .map_err(|_| ProLinkProviderError::InvalidBeatNumber(status.beat_number))?
+            .saturating_sub(1);
         let identity = ProLinkTrackIdentity {
             rekordbox_id: status.rekordbox_id,
             source_player: status.source_player,
@@ -669,6 +673,8 @@ pub enum ProLinkProviderError {
     LoadedDeckMissing,
     #[error("invalid Pro DJ Link BPM {0}")]
     InvalidBpm(f64),
+    #[error("invalid Pro DJ Link beat number {0}")]
+    InvalidBeatNumber(i64),
     #[error("invalid Pro DJ Link track metadata: {0}")]
     InvalidTrack(#[from] lumi_domain::TrackValidationError),
 }

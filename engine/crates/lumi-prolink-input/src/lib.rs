@@ -95,7 +95,10 @@ pub struct DeckStatus {
     pub rekordbox_id: u32,
     pub track_bpm: f64,
     pub effective_bpm: f64,
-    pub beat_number: u32,
+    /// Beat Link uses `-1` while a physical player has no track loaded.
+    /// Loaded-track frames are validated as non-negative before they enter
+    /// Lumi's unsigned domain timeline.
+    pub beat_number: i64,
     pub beat_within_bar: u8,
     pub raw_pitch: i32,
 }
@@ -251,6 +254,7 @@ fn validate_event(event: &BridgeEvent) -> Result<(), BridgeDecodeError> {
             let loaded_track_is_invalid = has_track_id
                 && (!valid_bpm(status.track_bpm)
                     || !valid_bpm(status.effective_bpm)
+                    || status.beat_number < 0
                     || status.source_slot.trim().is_empty()
                     || status.track_type.trim().is_empty());
             if status.device_number == 0

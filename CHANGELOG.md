@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0-dev-30
+
+- Direct Pro DJ Link now accepts the exact empty-deck sentinel emitted by a
+  physical CDJ-1500X (`beatNumber -1`, beat zero and placeholder BPM 655.35)
+  without classifying it as corrupt protocol data or restarting the bridge.
+- Pro DJ Link bridge failures retain their actionable cause across automatic
+  recovery attempts and include the helper's latest diagnostic line. The
+  status clears only after the direct deck source is genuinely ready.
+- Restoring a stable direct deck source also restores the authoritative timing
+  anchors consumed by Ableton Link; no simulator or Beat Link Trigger path is
+  involved.
+
 ## 0.4.0-dev-29
 
 - Manual horizontal navigation in Local Playback now suspends automatic Live

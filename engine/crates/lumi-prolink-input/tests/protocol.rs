@@ -73,7 +73,7 @@ fn accepts_loaded_pre_roll_and_empty_deck_status() {
         .replace("\"sequence\":2", "\"sequence\":3")
         .replace("\"sourcePlayer\":2", "\"sourcePlayer\":0")
         .replace("\"rekordboxId\":1842", "\"rekordboxId\":0")
-        .replace("\"trackBpm\":136.0", "\"trackBpm\":655.35")
+        .replace("\"trackBpm\":130.0", "\"trackBpm\":655.35")
         .replace("\"effectiveBpm\":136.5", "\"effectiveBpm\":0.0");
     decoder
         .decode_line(&empty)
@@ -90,4 +90,33 @@ fn accepts_loaded_pre_roll_and_empty_deck_status() {
     decoder
         .decode_line(&physical_empty)
         .unwrap_or_else(|error| panic!("physical empty-deck status must decode: {error}"));
+}
+
+#[test]
+fn accepts_physical_cdj_unloaded_sentinel_observed_on_the_wire() {
+    let mut decoder = BridgeDecoder::new();
+    decoder
+        .decode_line(HELLO)
+        .unwrap_or_else(|error| panic!("hello fixture must decode: {error}"));
+
+    let unloaded = DECK_STATUS
+        .replace("\"sourcePlayer\":2", "\"sourcePlayer\":0")
+        .replace("\"sourceSlot\":\"USB_SLOT\"", "\"sourceSlot\":\"NO_TRACK\"")
+        .replace("\"trackType\":\"REKORDBOX\"", "\"trackType\":\"NO_TRACK\"")
+        .replace("\"rekordboxId\":1842", "\"rekordboxId\":0")
+        .replace("\"trackBpm\":130.0", "\"trackBpm\":655.35")
+        .replace("\"effectiveBpm\":136.5", "\"effectiveBpm\":655.35")
+        .replace("\"beatNumber\":169", "\"beatNumber\":-1")
+        .replace("\"beatWithinBar\":1", "\"beatWithinBar\":0");
+
+    let message = decoder
+        .decode_line(&unloaded)
+        .unwrap_or_else(|error| panic!("real CDJ unloaded sentinel must decode: {error}"));
+    let BridgeEvent::DeckStatus(status) = message.event else {
+        panic!("expected deck status");
+    };
+    assert_eq!(status.rekordbox_id, 0);
+    assert_eq!(status.beat_number, -1);
+    assert_eq!(status.track_bpm, 655.35);
+    assert_eq!(status.effective_bpm, 655.35);
 }

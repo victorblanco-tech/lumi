@@ -1943,7 +1943,6 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
                 runtime.direct_deck_source = ProLinkDeckSourceProvider::new(runtime.clock.now())?;
                 runtime.prolink_recovery_pending = false;
                 runtime.prolink_restart_count = runtime.prolink_restart_count.saturating_add(1);
-                runtime.prolink_start_error = None;
             }
         }
     }
@@ -1961,18 +1960,19 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
     let Some(bridge) = runtime.prolink_bridge.as_mut() else {
         return Ok(());
     };
-    let bridge_running = match bridge.diagnostics() {
-        Ok(diagnostics) => diagnostics.running,
+    let bridge_diagnostics = match bridge.diagnostics() {
+        Ok(diagnostics) => diagnostics,
         Err(error) => {
             fail_direct_prolink_bridge(runtime, error.to_string())?;
             return Ok(());
         }
     };
-    if !bridge_running {
-        fail_direct_prolink_bridge(
-            runtime,
-            "Pro DJ Link bridge stopped unexpectedly".to_owned(),
-        )?;
+    if !bridge_diagnostics.running {
+        let stderr_detail = bridge_diagnostics.stderr_tail.last().map_or_else(
+            || "Pro DJ Link bridge stopped unexpectedly".to_owned(),
+            |line| format!("Pro DJ Link bridge stopped unexpectedly: {line}"),
+        );
+        fail_direct_prolink_bridge(runtime, stderr_detail)?;
         return Ok(());
     }
 
@@ -1982,6 +1982,9 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
             fail_direct_prolink_bridge(runtime, error.to_string())?;
             return Ok(());
         }
+    }
+    if runtime.direct_deck_source.diagnostics().source_status == DeckSourceStatus::Ready {
+        runtime.prolink_start_error = None;
     }
     // Domain events must reach planning/output before their matching precise
     // beat is consumed. This lets a hotcue seek replace a stale trigger and
@@ -2008,6 +2011,7 @@ fn fail_direct_prolink_bridge(
     message: String,
 ) -> Result<(), EngineError> {
     let actionable = format!("{message}; Lumi will retry the Pro DJ Link bridge automatically");
+    eprintln!("Direct Pro DJ Link failure: {actionable}");
     runtime.prolink_start_error = Some(actionable.clone());
     runtime
         .output_worker

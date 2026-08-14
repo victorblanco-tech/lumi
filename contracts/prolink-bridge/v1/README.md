@@ -15,6 +15,9 @@ active musical beat. Empty-deck status always carries Rekordbox ID zero. Some
 physical players, including CDJ-1500X, retain their own player number while
 publishing `NO_TRACK`; others publish source player zero. Both forms mean the
 deck is unloaded, and their placeholder BPM fields are deliberately ignored.
+An unloaded physical player can additionally publish Beat Link's exact
+sentinels: `beatNumber` `-1`, `beatWithinBar` `0`, and BPM `655.35`. These are
+valid only with Rekordbox ID zero and must never restart the bridge.
 
 `observedAtNanos` is helper-process monotonic evidence. It is used for ordering
 and latency diagnostics, not as a wall-clock timestamp.
