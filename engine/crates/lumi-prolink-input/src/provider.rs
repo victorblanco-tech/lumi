@@ -25,6 +25,7 @@ pub struct ProLinkTransportSnapshot {
     pub beat: u32,
     pub effective_bpm_milli: u32,
     pub playing: bool,
+    pub discontinuity_revision: u64,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -49,6 +50,7 @@ struct LoadedDeck {
     last_precise_beat: Option<u32>,
     effective_bpm_milli: u32,
     playing: bool,
+    discontinuity_revision: u64,
 }
 
 pub struct ProLinkDeckSourceProvider {
@@ -175,6 +177,7 @@ impl ProLinkDeckSourceProvider {
                 beat: deck.beat,
                 effective_bpm_milli: deck.effective_bpm_milli,
                 playing: deck.playing,
+                discontinuity_revision: deck.discontinuity_revision,
             })
     }
 
@@ -298,6 +301,7 @@ impl ProLinkDeckSourceProvider {
                     last_precise_beat: None,
                     effective_bpm_milli,
                     playing: status.playing,
+                    discontinuity_revision: self.timing_generation,
                 },
             );
             self.emit(
@@ -390,6 +394,9 @@ impl ProLinkDeckSourceProvider {
                 deck.playing = status.playing;
                 if seeked {
                     deck.last_precise_beat = None;
+                }
+                if discontinuity {
+                    deck.discontinuity_revision = self.timing_generation;
                 }
             }
             let phrase_index = self.decks.get(&deck_id).and_then(|deck| {

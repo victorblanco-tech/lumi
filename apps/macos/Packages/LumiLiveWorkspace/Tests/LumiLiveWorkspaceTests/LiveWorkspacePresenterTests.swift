@@ -571,6 +571,37 @@ struct LiveWorkspacePresenterTests {
         #expect(snapshot.decks[0].beatGrid?.timesMillis == [60, 447, 901, 1_300])
     }
 
+    @Test("Recorded Live decks decode transport discontinuity revisions")
+    func liveDeckDecodesTransportRevision() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case var .array(decks) = payload["decks"],
+              case var .object(deck) = decks[0] else {
+            Issue.record("Recorded deck fixture is malformed")
+            return
+        }
+        deck["transportRevision"] = .number(42)
+        decks[0] = .object(deck)
+        payload["decks"] = .array(decks)
+        let envelope = MessageEnvelope(
+            protocolVersion: recorded.protocolVersion,
+            messageType: recorded.messageType,
+            messageId: recorded.messageId,
+            sequence: recorded.sequence,
+            correlationId: recorded.correlationId,
+            sentAt: recorded.sentAt,
+            payload: payload
+        )
+
+        let snapshot = try EngineSnapshotDecoder().decode(
+            envelope,
+            endpointDescription: "127.0.0.1:52841",
+            protocolVersion: 1
+        )
+
+        #expect(snapshot.decks[0].transportRevision == 42)
+    }
+
     @Test("Recorded Live decks accept a final Rekordbox marker past the audio duration")
     func liveDeckAcceptsRekordboxTrailingBeatMarker() throws {
         let recorded = try recordedEnvelope()
@@ -638,6 +669,48 @@ struct LiveWorkspacePresenterTests {
         )
 
         #expect(first.animationIdentity == nextPoll.animationIdentity)
+    }
+
+    @Test("Transport discontinuities restart waveform motion at the authoritative position")
+    func transportDiscontinuityRestartsWaveformMotion() {
+        let beforeSeek = DeckVisualClockSnapshot(
+            trackLoadID: 7,
+            positionMillis: 118_000,
+            durationMillis: 120_000,
+            playing: true,
+            anchoredAtReferenceTime: 100,
+            discontinuityRevision: 11
+        )
+        let afterSeek = DeckVisualClockSnapshot(
+            trackLoadID: 7,
+            positionMillis: 1_000,
+            durationMillis: 120_000,
+            playing: true,
+            anchoredAtReferenceTime: 101,
+            discontinuityRevision: 12
+        )
+        let before = LiveWaveformMotionPlan(
+            waveformID: 7,
+            totalBeats: 512,
+            viewportStartBeat: 352,
+            visibleBeats: 160,
+            followsLiveViewport: true,
+            fallbackPlayheadBeat: 500,
+            visualClock: beforeSeek
+        )
+        let after = LiveWaveformMotionPlan(
+            waveformID: 7,
+            totalBeats: 512,
+            viewportStartBeat: 352,
+            visibleBeats: 160,
+            followsLiveViewport: true,
+            fallbackPlayheadBeat: 4,
+            visualClock: afterSeek
+        )
+
+        #expect(before.animationIdentity != after.animationIdentity)
+        #expect(after.playheadBeat(at: Date(timeIntervalSinceReferenceDate: 101)) < 10)
+        #expect(after.startBeat(for: 4) == 0)
     }
 
     @Test("One-time library waveform detail accepts the full high-resolution payload")
@@ -745,6 +818,25 @@ struct LiveWorkspacePresenterTests {
         #expect(first.usesLiveViewport == false)
         #expect(second.usesLiveViewport == false)
         #expect(abs(second.viewport.startBeat - (liveViewport.startBeat + 16)) < 0.001)
+    }
+
+    @Test("An authoritative Live Deck seek resumes follow after manual navigation")
+    func authoritativeSeekResumesLiveFollow() {
+        #expect(LiveDeckViewportPolicy.resumesFollow(
+            previousDiscontinuityRevision: 7,
+            currentDiscontinuityRevision: 8,
+            isMaster: true
+        ))
+        #expect(!LiveDeckViewportPolicy.resumesFollow(
+            previousDiscontinuityRevision: 8,
+            currentDiscontinuityRevision: 8,
+            isMaster: true
+        ))
+        #expect(!LiveDeckViewportPolicy.resumesFollow(
+            previousDiscontinuityRevision: 7,
+            currentDiscontinuityRevision: 8,
+            isMaster: false
+        ))
     }
 
     @Test("Operation controls can acknowledge a valid target before the engine round trip")

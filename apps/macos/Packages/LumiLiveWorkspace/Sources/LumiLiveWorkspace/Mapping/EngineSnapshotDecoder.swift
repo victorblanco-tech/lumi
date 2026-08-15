@@ -774,6 +774,7 @@ public struct EngineSnapshotDecoder: Sendable {
                 throw EngineSnapshotDecodingError.invalidSnapshot
             }
         }
+        let transportRevision = unsignedInteger(deck["transportRevision"]) ?? 0
 
         let phrases = try phrasePayloads.map(decodeDeckPhrase)
         let phraseTimelineIsValid = phrases.isEmpty
@@ -838,6 +839,7 @@ public struct EngineSnapshotDecoder: Sendable {
             beat: beat,
             playing: playing,
             playbackPositionMillis: playbackPositionMillis,
+            transportRevision: transportRevision,
             phraseIndex: phraseIndex,
             durationBeats: durationBeats,
             beatGrid: beatGrid,

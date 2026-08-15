@@ -162,6 +162,10 @@ fn exact_beats_activate_hydrated_phrases_and_forward_seek_is_explicit() {
     .unwrap_or_else(|error| panic!("metadata should be valid: {error}"));
     assert!(provider.hydrate_track_metadata(lumi_domain::TrackLoadId::new(1), metadata));
     let _ = provider.drain_events();
+    let initial_revision = provider
+        .transport(lumi_domain::TrackLoadId::new(1))
+        .unwrap_or_else(|| panic!("loaded deck should expose transport"))
+        .discontinuity_revision;
 
     let boundary = decoder
         .decode_line(
@@ -201,6 +205,25 @@ fn exact_beats_activate_hydrated_phrases_and_forward_seek_is_explicit() {
         DomainEvent::Observation(envelope)
             if matches!(envelope.observation, DeckObservation::PhraseChanged { phrase_index: 1, .. })
     )));
+    let forward_seek_revision = provider
+        .transport(lumi_domain::TrackLoadId::new(1))
+        .unwrap_or_else(|| panic!("seeked deck should expose transport"))
+        .discontinuity_revision;
+    assert!(forward_seek_revision > initial_revision);
+
+    let backward_seek = decoder
+        .decode_line(
+            r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":6,"observedAtNanos":43000000,"type":"deckStatus","payload":{"deviceNumber":1,"deviceName":"LUMI-SIM","playing":true,"paused":false,"cued":false,"tempoMaster":true,"onAir":true,"sourcePlayer":1,"sourceSlot":"USB_SLOT","trackType":"REKORDBOX","rekordboxId":1256,"trackBpm":155.0,"effectiveBpm":157.25,"beatNumber":1,"beatWithinBar":1,"rawPitch":1082458112}}"#,
+        )
+        .unwrap_or_else(|error| panic!("backward seek should decode: {error}"));
+    provider
+        .ingest(backward_seek, MonotonicTime::new(7))
+        .unwrap_or_else(|error| panic!("backward seek should translate: {error}"));
+    let backward_seek_revision = provider
+        .transport(lumi_domain::TrackLoadId::new(1))
+        .unwrap_or_else(|| panic!("backward-seeked deck should expose transport"))
+        .discontinuity_revision;
+    assert!(backward_seek_revision > forward_seek_revision);
 }
 
 #[test]

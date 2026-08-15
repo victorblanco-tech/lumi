@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.0-dev-33
+
+- Direct Pro DJ Link publishes an explicit transport revision for every load,
+  playback restart and forward/backward seek. The revision remains independent
+  from snapshot polling and UI rendering.
+- A Master Live Deck automatically resumes waveform follow after an
+  authoritative Hot Cue, beatjump or seek, including Pause → Start followed by
+  a jump from the track end back to the beginning.
+- Core Animation treats a transport revision as a new motion anchor, removing
+  the stale end-of-track animation before rendering the new playhead position.
+- Deterministic Swift coverage and the real two-host LAN acceptance test now
+  prove the complete end → beginning reconciliation path.
+- Canonical dry-run evidence now records the deliberate current-phrase
+  reassertion introduced by Pause → Start instead of retaining the older
+  pre-resume transcript.
+
 ## 0.4.0-dev-32
 
 - A real Live Deck `stopped → playing` edge now restores the current planned

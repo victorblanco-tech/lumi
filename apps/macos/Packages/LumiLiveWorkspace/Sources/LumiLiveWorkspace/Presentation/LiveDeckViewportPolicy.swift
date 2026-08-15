@@ -47,4 +47,17 @@ enum LiveDeckViewportPolicy {
             false
         )
     }
+
+    static func resumesFollow(
+        previousDiscontinuityRevision: UInt64?,
+        currentDiscontinuityRevision: UInt64?,
+        isMaster: Bool
+    ) -> Bool {
+        guard isMaster,
+              let previousDiscontinuityRevision,
+              let currentDiscontinuityRevision else {
+            return false
+        }
+        return currentDiscontinuityRevision != previousDiscontinuityRevision
+    }
 }

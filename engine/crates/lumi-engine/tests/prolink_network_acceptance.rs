@@ -253,6 +253,37 @@ fn stopped_live_deck_start_and_operation_resume_restore_the_current_autoloop() {
     }
     assert_eq!(output_record_count(&snapshot), baseline.saturating_add(2));
 
+    simulator_control("seek", Some("280000"));
+    let near_end_snapshot = wait_for_playback_position(
+        &mut connection,
+        &mut sequence,
+        |position| position >= 270_000,
+        "seek near track end after Pause/Start",
+    );
+    let near_end_revision = deck_transport_revision(&near_end_snapshot);
+    simulator_control("seek", Some("1000"));
+    snapshot = wait_for_playback_position(
+        &mut connection,
+        &mut sequence,
+        |position| position <= 10_000,
+        "backward seek to track start after Pause/Start",
+    );
+    assert!(
+        snapshot
+            .payload
+            .get("decks")
+            .and_then(Value::as_array)
+            .and_then(|decks| decks.first())
+            .and_then(|deck| deck.get("beat"))
+            .and_then(Value::as_u64)
+            .is_some_and(|beat| beat < 40),
+        "the authoritative deck beat must also regress to the track start"
+    );
+    assert!(
+        deck_transport_revision(&snapshot) > near_end_revision,
+        "the backward seek must publish a new transport revision for visual consumers"
+    );
+
     simulator_control("pause", None);
     drop(connection);
     let status = child
@@ -374,6 +405,52 @@ fn wait_for_output_count(
         );
         thread::sleep(Duration::from_millis(50));
     }
+}
+
+fn wait_for_playback_position(
+    connection: &mut TcpStream,
+    sequence: &mut u64,
+    accepted: impl Fn(u64) -> bool,
+    reason: &str,
+) -> MessageEnvelope {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        let snapshot = exchange(
+            connection,
+            &command(
+                "wait-for-position",
+                *sequence,
+                json!({ "kind": "getSnapshot" }),
+            ),
+        );
+        *sequence = sequence.saturating_add(1);
+        let position = snapshot
+            .payload
+            .get("decks")
+            .and_then(Value::as_array)
+            .and_then(|decks| decks.first())
+            .and_then(|deck| deck.get("playbackPositionMillis"))
+            .and_then(Value::as_u64);
+        if position.is_some_and(&accepted) {
+            return snapshot;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "deck position did not follow {reason}"
+        );
+        thread::sleep(Duration::from_millis(50));
+    }
+}
+
+fn deck_transport_revision(snapshot: &MessageEnvelope) -> u64 {
+    snapshot
+        .payload
+        .get("decks")
+        .and_then(Value::as_array)
+        .and_then(|decks| decks.first())
+        .and_then(|deck| deck.get("transportRevision"))
+        .and_then(Value::as_u64)
+        .unwrap_or_else(|| panic!("deck snapshot should expose transportRevision"))
 }
 
 fn seed_network_database(destination: &Path) {

@@ -239,6 +239,18 @@ Additional implementation evidence for `0.4.0-dev-31`:
   convention, while the engine keeps MIDI scheduling independent from SwiftUI;
 - existing Dev preferences migrate once from the former inverse sign.
 
+Additional implementation evidence for `0.4.0-dev-33`:
+
+- the direct provider increments a monotone transport revision on track load,
+  stopped-to-playing and every detected forward or backward seek;
+- the engine exposes that revision without coupling the deck-source adapter to
+  SwiftUI;
+- the Master Live waveform resumes follow and replaces its Core Animation
+  anchor when the revision changes, even after manual navigation;
+- deterministic presentation tests and a real LAN simulator run prove
+  Pause → Start → seek near end → seek to beginning returns position, beat and
+  visible waveform motion to the track start.
+
 #### E4-02D1 — Timing contract and deterministic authority — implemented
 
 - add provider-neutral timing source, anchor, generation and health types;

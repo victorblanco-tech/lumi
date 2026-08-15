@@ -376,6 +376,7 @@ public struct DeckVisualClockSnapshot: Equatable, Sendable {
     public let playing: Bool
     public let anchoredAtReferenceTime: TimeInterval
     public let playbackRate: Double
+    public let discontinuityRevision: UInt64
 
     public init(
         trackLoadID: UInt64,
@@ -383,7 +384,8 @@ public struct DeckVisualClockSnapshot: Equatable, Sendable {
         durationMillis: UInt64,
         playing: Bool,
         anchoredAtReferenceTime: TimeInterval,
-        playbackRate: Double = 1
+        playbackRate: Double = 1,
+        discontinuityRevision: UInt64 = 0
     ) {
         self.trackLoadID = trackLoadID
         self.positionMillis = positionMillis
@@ -391,6 +393,7 @@ public struct DeckVisualClockSnapshot: Equatable, Sendable {
         self.playing = playing
         self.anchoredAtReferenceTime = anchoredAtReferenceTime
         self.playbackRate = max(0, playbackRate)
+        self.discontinuityRevision = discontinuityRevision
     }
 
     public func positionMillis(at date: Date) -> Double {
@@ -415,6 +418,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
     public let beat: UInt64
     public let playing: Bool
     public let playbackPositionMillis: UInt64?
+    public let transportRevision: UInt64
     public let phraseIndex: UInt64?
     public let durationBeats: UInt64
     public let beatGrid: DeckBeatGridSnapshot?
@@ -439,6 +443,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
         beat: UInt64,
         playing: Bool = false,
         playbackPositionMillis: UInt64? = nil,
+        transportRevision: UInt64 = 0,
         phraseIndex: UInt64?,
         durationBeats: UInt64 = 0,
         beatGrid: DeckBeatGridSnapshot? = nil,
@@ -460,6 +465,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
         self.beat = beat
         self.playing = playing
         self.playbackPositionMillis = playbackPositionMillis
+        self.transportRevision = transportRevision
         self.phraseIndex = phraseIndex
         self.durationBeats = durationBeats
         self.beatGrid = beatGrid

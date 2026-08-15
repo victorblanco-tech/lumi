@@ -1,5 +1,5 @@
 {
-  "engineVersion": "0.4.0-dev-32",
+  "engineVersion": "0.4.0-dev-33",
   "leaderBeat": 128,
   "leaderDeckId": 2,
   "operationState": "live",
@@ -57,6 +57,23 @@
     },
     {
       "action": {
+        "category": "break",
+        "kind": "applyLook",
+        "loopBank": 5,
+        "loopSlot": 1,
+        "sceneId": 9,
+        "sceneName": "Deep Space",
+        "themeId": 2,
+        "themeName": "Deep Ocean"
+      },
+      "commandId": 4,
+      "phraseIndex": 1,
+      "planRevision": 3,
+      "scheduledAt": 750,
+      "status": "simulated"
+    },
+    {
+      "action": {
         "category": "build",
         "kind": "applyLook",
         "loopBank": 3,
@@ -66,7 +83,7 @@
         "themeId": 2,
         "themeName": "Deep Ocean"
       },
-      "commandId": 4,
+      "commandId": 5,
       "phraseIndex": 2,
       "planRevision": 3,
       "scheduledAt": 1500,
@@ -83,14 +100,14 @@
         "themeId": 2,
         "themeName": "Deep Ocean"
       },
-      "commandId": 5,
+      "commandId": 6,
       "phraseIndex": 3,
       "planRevision": 3,
       "scheduledAt": 1500,
       "status": "simulated"
     }
   ],
-  "outputRecordCount": 5,
+  "outputRecordCount": 6,
   "pausedOutputCount": 3,
   "plan": {
     "lockedCue": {
@@ -118,8 +135,8 @@
     "speed": 64
   },
   "timeline": {
-    "entryCount": 161,
-    "lastSequence": 161,
-    "simulatedOutputEntries": 5
+    "entryCount": 162,
+    "lastSequence": 162,
+    "simulatedOutputEntries": 6
   }
 }

@@ -1896,7 +1896,8 @@ final class EngineStatusModel: ObservableObject {
             positionMillis: transport.positionMillis,
             durationMillis: transport.durationMillis,
             playing: transport.playing,
-            anchoredAtReferenceTime: Date.timeIntervalSinceReferenceDate
+            anchoredAtReferenceTime: Date.timeIntervalSinceReferenceDate,
+            discontinuityRevision: transport.discontinuityRevision
         )
         deckVisualClocks = clocks
     }
@@ -1918,6 +1919,7 @@ final class EngineStatusModel: ObservableObject {
             if let existing = deckVisualClocks[deck.deckID],
                existing.trackLoadID == deck.trackLoadID,
                existing.playing == deck.playing,
+               existing.discontinuityRevision == deck.transportRevision,
                deck.playing,
                abs(existing.playbackRate - playbackRate) < 0.005,
                abs(
@@ -1933,7 +1935,8 @@ final class EngineStatusModel: ObservableObject {
                 durationMillis: beatGrid.durationMillis,
                 playing: deck.playing,
                 anchoredAtReferenceTime: anchoredAt,
-                playbackRate: playbackRate
+                playbackRate: playbackRate,
+                discontinuityRevision: deck.transportRevision
             ))
         })
     }

@@ -114,6 +114,14 @@ struct LiveDeckSurface<Details: View>: View {
             guard !wasPlaying, isPlaying, isMaster, !usesLiveViewport else { return }
             activateDefaultLiveViewport()
         }
+        .onChange(of: visualClock?.discontinuityRevision) { previous, current in
+            guard LiveDeckViewportPolicy.resumesFollow(
+                previousDiscontinuityRevision: previous,
+                currentDiscontinuityRevision: current,
+                isMaster: isMaster
+            ) else { return }
+            activateDefaultLiveViewport()
+        }
         .task(id: isMaster && operationStatus.pulses) {
             masterEmphasis = 1
             guard isMaster, operationStatus.pulses else { return }
@@ -1260,6 +1268,7 @@ struct LiveWaveformMotionPlan: Equatable {
             playing: visualClock?.playing,
             anchoredAtReferenceTime: visualClock?.anchoredAtReferenceTime,
             playbackRate: visualClock?.playbackRate,
+            discontinuityRevision: visualClock?.discontinuityRevision,
             fallbackPlayheadBeat: hasAuthoritativeClock ? nil : fallbackPlayheadBeat,
             beatGridMarkerCount: beatGrid?.timesMillis.count ?? 0
         )
@@ -1336,6 +1345,7 @@ struct LiveWaveformMotionPlan: Equatable {
         let playing: Bool?
         let anchoredAtReferenceTime: TimeInterval?
         let playbackRate: Double?
+        let discontinuityRevision: UInt64?
         let fallbackPlayheadBeat: Double?
         let beatGridMarkerCount: Int
     }

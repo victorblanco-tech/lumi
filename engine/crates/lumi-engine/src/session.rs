@@ -3641,6 +3641,16 @@ fn snapshot_envelope_internal(
                 } else {
                     None
                 };
+            let connected_transport_revision = (runtime.deck_source_mode
+                == DeckSourceMode::ConnectedDecks
+                && runtime.uses_direct_prolink())
+            .then(|| {
+                runtime
+                    .direct_deck_source
+                    .transport(deck.track_load_id())
+                    .map(|transport| transport.discontinuity_revision)
+            })
+            .flatten();
             let plan_eligibility = if library_context.is_some() {
                 "readyExact"
             } else if state
@@ -3658,6 +3668,7 @@ fn snapshot_envelope_internal(
                 "effectiveBpmMilli": deck.effective_bpm_milli(),
                 "playing": deck.is_playing(),
                 "playbackPositionMillis": connected_playback_position_millis,
+                "transportRevision": connected_transport_revision,
                 "phraseIndex": deck.phrase_index(),
                 "planEligibility": plan_eligibility,
                 "localPlayback": local_playback,
