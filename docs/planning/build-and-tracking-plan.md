@@ -179,6 +179,14 @@ aangesloten verlichting open. De concrete status staat in
 - persistence, migraties, recovery en diagnostics;
 - signing, notarization en installeerbare Apple Silicon DMG.
 
+De eerstvolgende actieve hardeningstap is
+[Epic E4-03 – Show-grade hardening](epic-04-show-grade-hardening.md). Deze epic
+brengt de bestaande werkende keten gecontroleerd naar releasekwaliteit in vier
+fases: lokale regressie- en securitybaseline, een geïsoleerde realtime
+AutoLoop-lane, reconnectable service plus transactioneel dataherstel, en ten
+slotte delta-UI/maintainability/release-hardening. `0.4.0-rc-1` wordt niet
+gepromoveerd voordat de P0-gates van deze epic aantoonbaar zijn gehaald.
+
 Exit: Lumi installeert en herstelt betrouwbaar op een schone Mac.
 
 Een eerste ondertekende en genotariseerde Apple Silicon DMG wordt naar voren

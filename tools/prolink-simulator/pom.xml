@@ -6,7 +6,7 @@
 
     <groupId>co.victorblan.tech.lumi</groupId>
     <artifactId>lumi-prolink-simulator</artifactId>
-    <version>0.4.0-dev-33</version>
+    <version>0.4.0-dev-34</version>
     <name>Lumi Pro DJ Link Simulator</name>
     <description>Development-only USB-backed Pro DJ Link player simulator.</description>
     <url>https://github.com/victorblanco-tech/lumi</url>
@@ -24,7 +24,7 @@
         <maven.compiler.release>21</maven.compiler.release>
         <beat-link.version>8.0.0</beat-link.version>
         <crate-digger.version>0.2.1</crate-digger.version>
-        <jackson.version>2.18.3</jackson.version>
+        <jackson.version>2.18.9</jackson.version>
         <junit.version>5.11.4</junit.version>
     </properties>
 

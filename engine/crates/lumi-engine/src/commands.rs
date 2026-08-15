@@ -31,7 +31,9 @@ pub enum DeckSourceSelection {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SessionCommand {
-    GetSnapshot,
+    GetSnapshot {
+        include_library: bool,
+    },
     QueryLibrary {
         search: String,
         playlist_id: Option<u64>,
@@ -207,7 +209,7 @@ impl SessionCommand {
     pub const fn is_mutating(&self) -> bool {
         !matches!(
             self,
-            Self::GetSnapshot
+            Self::GetSnapshot { .. }
                 | Self::QueryLibrary { .. }
                 | Self::OpenLibraryTrackEditor { .. }
                 | Self::GetLibraryTrackWaveform { .. }
@@ -217,7 +219,7 @@ impl SessionCommand {
 
     pub const fn context(&self) -> Option<PlanCommandContext> {
         match self {
-            Self::GetSnapshot
+            Self::GetSnapshot { .. }
             | Self::QueryLibrary { .. }
             | Self::OpenLibraryTrackEditor { .. }
             | Self::GetLibraryTrackWaveform { .. }
@@ -272,7 +274,9 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
     }
     let kind = string(&envelope.payload, "kind")?;
     match kind {
-        "getSnapshot" => Ok(SessionCommand::GetSnapshot),
+        "getSnapshot" => Ok(SessionCommand::GetSnapshot {
+            include_library: optional_boolean(&envelope.payload, "includeLibrary")?.unwrap_or(true),
+        }),
         "queryLibrary" => Ok(SessionCommand::QueryLibrary {
             search: library_search(&envelope.payload)?,
             playlist_id: optional_unsigned(&envelope.payload, "playlistId")?,
@@ -850,6 +854,20 @@ fn boolean(
         .ok_or(CommandDecodeError::InvalidField(field))
 }
 
+fn optional_boolean(
+    payload: &serde_json::Map<String, Value>,
+    field: &'static str,
+) -> Result<Option<bool>, CommandDecodeError> {
+    payload
+        .get(field)
+        .map(|value| {
+            value
+                .as_bool()
+                .ok_or(CommandDecodeError::InvalidField(field))
+        })
+        .transpose()
+}
+
 fn string_array(
     payload: &serde_json::Map<String, Value>,
     field: &'static str,
@@ -996,6 +1014,39 @@ impl Error for CommandDecodeError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn snapshot_defaults_to_full_but_accepts_an_explicit_live_projection() {
+        let full = command_envelope(serde_json::json!({
+            "kind": "getSnapshot",
+        }));
+        assert_eq!(
+            decode_command(&full),
+            Ok(SessionCommand::GetSnapshot {
+                include_library: true,
+            })
+        );
+
+        let live = command_envelope(serde_json::json!({
+            "kind": "getSnapshot",
+            "includeLibrary": false,
+        }));
+        assert_eq!(
+            decode_command(&live),
+            Ok(SessionCommand::GetSnapshot {
+                include_library: false,
+            })
+        );
+
+        let invalid = command_envelope(serde_json::json!({
+            "kind": "getSnapshot",
+            "includeLibrary": "no",
+        }));
+        assert_eq!(
+            decode_command(&invalid),
+            Err(CommandDecodeError::InvalidField("includeLibrary"))
+        );
+    }
 
     #[test]
     fn ableton_link_enablement_decodes_as_an_explicit_boolean_command() {

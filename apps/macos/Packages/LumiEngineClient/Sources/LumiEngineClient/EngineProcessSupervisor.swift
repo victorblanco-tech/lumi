@@ -100,10 +100,14 @@ public actor EngineProcessSupervisor {
     }
 
     public func getSnapshot(
+        includeLibrary: Bool = true,
         messageID: String = "cmd-\(UUID().uuidString)"
     ) async throws -> MessageEnvelope {
         try await exchange(
-            payload: ["kind": .string("getSnapshot")],
+            payload: [
+                "kind": .string("getSnapshot"),
+                "includeLibrary": .boolean(includeLibrary),
+            ],
             messageID: messageID
         )
     }

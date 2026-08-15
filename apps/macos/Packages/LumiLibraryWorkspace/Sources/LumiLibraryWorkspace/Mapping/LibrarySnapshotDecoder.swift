@@ -404,6 +404,17 @@ public struct LibrarySnapshotDecoder: Sendable {
             discoveredPlayers: discoveredPlayers,
             recoveryPending: optionalBoolean(input, "recoveryPending") ?? false,
             restartCount: optionalUnsigned(input, "restartCount") ?? 0,
+            ingressQueueCapacity: optionalUnsigned(input, "ingressQueueCapacity") ?? 0,
+            ingressQueueDepth: optionalUnsigned(input, "ingressQueueDepth") ?? 0,
+            ingressQueueHighWater: optionalUnsigned(input, "ingressQueueHighWater") ?? 0,
+            ingressCoalescedMessageCount: optionalUnsigned(
+                input,
+                "ingressCoalescedMessageCount"
+            ) ?? 0,
+            ingressCriticalSaturationCount: optionalUnsigned(
+                input,
+                "ingressCriticalSaturationCount"
+            ) ?? 0,
             lastError: optionalString(input, "lastError")
         )
     }

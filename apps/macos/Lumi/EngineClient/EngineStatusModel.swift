@@ -2159,11 +2159,13 @@ final class EngineStatusModel: ObservableObject {
                 guard connectedDecks || healthTick == 0 else { continue }
                 guard await self.acquireInteractiveExchange() else { continue }
                 do {
-                    let envelope = try await self.supervisor.getSnapshot()
+                    let decodeLibrary = healthTick == 0
+                    let envelope = try await self.supervisor.getSnapshot(
+                        includeLibrary: decodeLibrary
+                    )
                     self.isExchangingCommand = false
                     let snapshotDecoder = self.snapshotDecoder
                     let libraryDecoder = self.libraryDecoder
-                    let decodeLibrary = healthTick == 0
                     let decoded = try await Task.detached(priority: .utility) {
                         (
                             try snapshotDecoder.decode(

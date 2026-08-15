@@ -608,6 +608,11 @@ public struct DeckInputIntegrationState: Equatable, Sendable {
     public let discoveredPlayers: [ProDJLinkDeviceState]
     public let recoveryPending: Bool
     public let restartCount: UInt64
+    public let ingressQueueCapacity: UInt64
+    public let ingressQueueDepth: UInt64
+    public let ingressQueueHighWater: UInt64
+    public let ingressCoalescedMessageCount: UInt64
+    public let ingressCriticalSaturationCount: UInt64
     public let lastError: String?
 
     public var isReady: Bool { state == "ready" }

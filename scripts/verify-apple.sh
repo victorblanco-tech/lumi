@@ -17,6 +17,8 @@ fi
 
 cd "$repository_root"
 
+"$script_dir/check-apple-test-exclusivity.sh"
+
 # The native process integration and app bundle both require the real local
 # engine binary. Portable Rust lint, tests, migrations, and release benchmarks
 # intentionally remain in verify-rust.sh so they can run on a Linux runner.

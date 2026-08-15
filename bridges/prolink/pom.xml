@@ -6,7 +6,7 @@
 
     <groupId>co.victorblan.tech.lumi</groupId>
     <artifactId>lumi-prolink-bridge</artifactId>
-    <version>0.4.0-dev-33</version>
+    <version>0.4.0-dev-34</version>
     <name>Lumi Pro DJ Link Bridge</name>
     <description>Supervised read-only Pro DJ Link input bridge for Lumi.</description>
     <url>https://github.com/victorblanco-tech/lumi</url>
@@ -23,7 +23,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.release>21</maven.compiler.release>
         <beat-link.version>8.0.0</beat-link.version>
-        <jackson.version>2.18.3</jackson.version>
+        <jackson.version>2.18.9</jackson.version>
         <junit.version>5.11.4</junit.version>
     </properties>
 

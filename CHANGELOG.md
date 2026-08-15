@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.0-dev-34
+
+- Pro DJ Link bridge ingress is bounded to 512 decoded messages. Continuous
+  deck status and metadata can be safely coalesced, while exact beats,
+  lifecycle events and errors remain ordered and fail closed on saturation.
+- Live Deck polling uses a lean snapshot three out of four cycles and refreshes
+  library data once per second, reducing the measured p95 snapshot construction
+  time from 1.178 ms to 0.221 ms and payload from 50,409 to 20,799 bytes.
+- Diagnostics exposes Pro DJ Link queue depth, capacity, high-water mark,
+  coalesced traffic and critical saturation count.
+- Child Pro DJ Link and Ableton Link helpers no longer inherit the Lumi session
+  credential.
+- Local functional, technical, security and show/lab gates are explicit and
+  GitHub Actions remains reserved for deliberate release verification.
+- Jackson is updated to 2.18.9 and Maven dependencies now participate in
+  Dependabot and the local OSV security gate.
+
 ## 0.4.0-dev-33
 
 - Direct Pro DJ Link publishes an explicit transport revision for every load,

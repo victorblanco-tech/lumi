@@ -2026,6 +2026,12 @@ fn handle_command(
         &command,
         SessionCommand::InspectRekordboxDevice { .. } | SessionCommand::SyncRekordboxDevice { .. }
     );
+    let includes_library = !matches!(
+        &command,
+        SessionCommand::GetSnapshot {
+            include_library: false
+        }
+    );
     if is_mutating && command_ids.contains(&envelope.message_id) {
         if is_transport_update {
             return transport_ack_envelope(runtime, response_sequence, &envelope.message_id);
@@ -2053,8 +2059,10 @@ fn handle_command(
     }
     let mut response = if includes_device_inspection {
         snapshot_envelope_with_device_inspection(runtime, response_sequence, &envelope.message_id)?
-    } else {
+    } else if includes_library {
         snapshot_envelope(runtime, response_sequence, &envelope.message_id)?
+    } else {
+        snapshot_envelope_without_library(runtime, response_sequence, &envelope.message_id)?
     };
     if let Some(track_id) = waveform_detail_track_id {
         response.payload.insert(
@@ -2170,6 +2178,14 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
         return Ok(());
     }
 
+    runtime.direct_deck_source.record_ingress_metrics(
+        bridge_diagnostics.queue_capacity,
+        bridge_diagnostics.queue_depth,
+        bridge_diagnostics.queue_high_water,
+        bridge_diagnostics.coalesced_message_count,
+        bridge_diagnostics.critical_saturation_count,
+    );
+
     let at = runtime.clock.now();
     for message in messages {
         if let Err(error) = runtime.direct_deck_source.ingest(message, at) {
@@ -2224,7 +2240,7 @@ fn apply_command(
     command: SessionCommand,
 ) -> Result<(), CommandApplicationError> {
     match command {
-        SessionCommand::GetSnapshot => return Ok(()),
+        SessionCommand::GetSnapshot { .. } => return Ok(()),
         SessionCommand::QueryLibrary {
             search,
             playlist_id,
@@ -2788,7 +2804,7 @@ fn apply_command(
     };
 
     let revised = match command {
-        SessionCommand::GetSnapshot
+        SessionCommand::GetSnapshot { .. }
         | SessionCommand::QueryLibrary { .. }
         | SessionCommand::OpenLibraryTrackEditor { .. }
         | SessionCommand::GetLibraryTrackWaveform { .. }
@@ -3336,7 +3352,15 @@ fn snapshot_envelope(
     sequence: u64,
     correlation_id: &str,
 ) -> Result<MessageEnvelope, EngineError> {
-    snapshot_envelope_internal(runtime, sequence, correlation_id, false)
+    snapshot_envelope_internal(runtime, sequence, correlation_id, false, true)
+}
+
+fn snapshot_envelope_without_library(
+    runtime: &EngineRuntime,
+    sequence: u64,
+    correlation_id: &str,
+) -> Result<MessageEnvelope, EngineError> {
+    snapshot_envelope_internal(runtime, sequence, correlation_id, false, false)
 }
 
 fn snapshot_envelope_with_device_inspection(
@@ -3344,7 +3368,7 @@ fn snapshot_envelope_with_device_inspection(
     sequence: u64,
     correlation_id: &str,
 ) -> Result<MessageEnvelope, EngineError> {
-    snapshot_envelope_internal(runtime, sequence, correlation_id, true)
+    snapshot_envelope_internal(runtime, sequence, correlation_id, true, true)
 }
 
 fn snapshot_envelope_internal(
@@ -3352,6 +3376,7 @@ fn snapshot_envelope_internal(
     sequence: u64,
     correlation_id: &str,
     include_device_inspection: bool,
+    include_library: bool,
 ) -> Result<MessageEnvelope, EngineError> {
     let state = runtime.state.state();
     let mut payload = Map::new();
@@ -3555,6 +3580,11 @@ fn snapshot_envelope_internal(
                 "beatLinkVersion": diagnostics.beat_link_version,
                 "recoveryPending": runtime.prolink_recovery_pending(),
                 "restartCount": runtime.prolink_restart_count(),
+                "ingressQueueCapacity": diagnostics.ingress_queue_capacity,
+                "ingressQueueDepth": diagnostics.ingress_queue_depth,
+                "ingressQueueHighWater": diagnostics.ingress_queue_high_water,
+                "ingressCoalescedMessageCount": diagnostics.ingress_coalesced_message_count,
+                "ingressCriticalSaturationCount": diagnostics.ingress_critical_saturation_count,
                 "discoveredPlayers": diagnostics.discovered_devices.iter()
                     .map(|(number, device)| json!({
                         "playerNumber": number,
@@ -3783,14 +3813,16 @@ fn snapshot_envelope_internal(
         .transpose()?
         .unwrap_or(Value::Null);
     payload.insert("livePlan".to_owned(), live_plan);
-    payload.insert(
-        "library".to_owned(),
-        if include_device_inspection {
-            runtime.library_worker.snapshot_json()?
-        } else {
-            runtime.library_worker.status_snapshot_json()?
-        },
-    );
+    if include_library {
+        payload.insert(
+            "library".to_owned(),
+            if include_device_inspection {
+                runtime.library_worker.snapshot_json()?
+            } else {
+                runtime.library_worker.status_snapshot_json()?
+            },
+        );
+    }
 
     Ok(MessageEnvelope {
         protocol_version: PROTOCOL_VERSION,
@@ -5137,6 +5169,85 @@ mod tests {
             timeline
                 .windows(2)
                 .all(|entries| entries[0].sequence() < entries[1].sequence())
+        );
+    }
+
+    #[test]
+    fn full_snapshot_projection_has_a_measured_bounded_baseline() {
+        let runtime = initialized_runtime()
+            .unwrap_or_else(|error| panic!("test engine must initialize: {error}"));
+        let mut samples_micros = Vec::with_capacity(250);
+        let mut live_samples_micros = Vec::with_capacity(250);
+        let mut maximum_payload_bytes = 0_usize;
+        let mut maximum_live_payload_bytes = 0_usize;
+
+        for sequence in 1..=260_u64 {
+            let started = Instant::now();
+            let snapshot = snapshot_envelope(&runtime, sequence, "snapshot-baseline")
+                .unwrap_or_else(|error| panic!("snapshot projection must succeed: {error}"));
+            let encoded = serde_json::to_vec(&snapshot)
+                .unwrap_or_else(|error| panic!("snapshot encoding must succeed: {error}"));
+            if sequence > 10 {
+                samples_micros
+                    .push(u64::try_from(started.elapsed().as_micros()).unwrap_or(u64::MAX));
+                maximum_payload_bytes = maximum_payload_bytes.max(encoded.len());
+            }
+
+            let live_started = Instant::now();
+            let live_snapshot =
+                snapshot_envelope_without_library(&runtime, sequence, "live-snapshot-baseline")
+                    .unwrap_or_else(|error| {
+                        panic!("live snapshot projection must succeed: {error}")
+                    });
+            assert!(!live_snapshot.payload.contains_key("library"));
+            let live_encoded = serde_json::to_vec(&live_snapshot)
+                .unwrap_or_else(|error| panic!("live snapshot encoding must succeed: {error}"));
+            if sequence > 10 {
+                live_samples_micros
+                    .push(u64::try_from(live_started.elapsed().as_micros()).unwrap_or(u64::MAX));
+                maximum_live_payload_bytes = maximum_live_payload_bytes.max(live_encoded.len());
+            }
+        }
+
+        samples_micros.sort_unstable();
+        let percentile = |percent: usize| {
+            let index = samples_micros
+                .len()
+                .saturating_mul(percent)
+                .div_ceil(100)
+                .saturating_sub(1);
+            samples_micros[index]
+        };
+        let p50 = percentile(50);
+        let p95 = percentile(95);
+        let p99 = percentile(99);
+        let maximum = *samples_micros.last().unwrap_or(&0);
+        live_samples_micros.sort_unstable();
+        let live_p95 = live_samples_micros[live_samples_micros
+            .len()
+            .saturating_mul(95)
+            .div_ceil(100)
+            .saturating_sub(1)];
+        eprintln!(
+            "Engine snapshot baseline: samples={} full_p50={}us full_p95={}us full_p99={}us full_max={}us full_payload={}bytes live_p95={}us live_payload={}bytes",
+            samples_micros.len(),
+            p50,
+            p95,
+            p99,
+            maximum,
+            maximum_payload_bytes,
+            live_p95,
+            maximum_live_payload_bytes,
+        );
+
+        assert!(p95 <= 25_000, "full snapshot p95 exceeded 25 ms");
+        assert!(
+            maximum_payload_bytes <= 2_000_000,
+            "full snapshot exceeded the 2 MB protocol safety budget"
+        );
+        assert!(
+            maximum_live_payload_bytes < maximum_payload_bytes,
+            "the Live projection must be smaller than the full library snapshot"
         );
     }
 

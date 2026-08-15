@@ -216,6 +216,11 @@ struct LibraryWorkspaceTests {
                     "beatLinkVersion": .string("8.0.0"),
                     "recoveryPending": .boolean(false),
                     "restartCount": .number(2),
+                    "ingressQueueCapacity": .number(512),
+                    "ingressQueueDepth": .number(3),
+                    "ingressQueueHighWater": .number(24),
+                    "ingressCoalescedMessageCount": .number(800),
+                    "ingressCriticalSaturationCount": .number(0),
                     "discoveredPlayers": .array([
                         .object([
                             "playerNumber": .number(1),
@@ -233,6 +238,11 @@ struct LibraryWorkspaceTests {
         #expect(input.discoveredPlayers.first?.address == "192.168.1.50")
         #expect(input.recoveryPending == false)
         #expect(input.restartCount == 2)
+        #expect(input.ingressQueueCapacity == 512)
+        #expect(input.ingressQueueDepth == 3)
+        #expect(input.ingressQueueHighWater == 24)
+        #expect(input.ingressCoalescedMessageCount == 800)
+        #expect(input.ingressCriticalSaturationCount == 0)
     }
 
     @Test("MIDI integration state decodes independently from the library catalog")

@@ -364,6 +364,8 @@ public struct IntegrationsWorkspaceView: View {
                         Divider()
                         diagnosticRow("Complete deck frames", "\(library.deckInputIntegration?.committedFrameCount ?? 0)", deckInputState)
                         Divider()
+                        diagnosticRow("Pro DJ Link ingress", proDJLinkIngressDiagnostic, proDJLinkIngressState)
+                        Divider()
                         diagnosticRow("Lighting MIDI source", library.midiIntegration?.sourceName ?? "Not published", lightingOutputState)
                         Divider()
                         diagnosticRow("MIDI test pulses", "\(library.midiIntegration?.sentPulseCount ?? 0)", lightingOutputState)
@@ -433,6 +435,11 @@ public struct IntegrationsWorkspaceView: View {
 
     private var proDJLinkRecoveryState: LumiComponentState {
         library.deckInputIntegration?.recoveryPending == true ? .degraded : deckInputState
+    }
+
+    private var proDJLinkIngressState: LumiComponentState {
+        guard let input = library.deckInputIntegration else { return .loading }
+        return input.ingressCriticalSaturationCount > 0 ? .degraded : deckInputState
     }
 
     private var lightingOutputState: LumiComponentState {
@@ -510,6 +517,14 @@ public struct IntegrationsWorkspaceView: View {
             return "Retrying automatically · \(input.restartCount) completed restarts"
         }
         return "Ready · \(input.restartCount) automatic restarts"
+    }
+
+    private var proDJLinkIngressDiagnostic: String {
+        guard let input = library.deckInputIntegration else { return "Status unavailable" }
+        guard input.isProDJLink, input.ingressQueueCapacity > 0 else {
+            return "Waiting for direct Pro DJ Link bridge"
+        }
+        return "\(input.ingressQueueDepth)/\(input.ingressQueueCapacity) queued · peak \(input.ingressQueueHighWater) · \(input.ingressCoalescedMessageCount) coalesced · \(input.ingressCriticalSaturationCount) critical saturation"
     }
 
     private var deckInputDetail: String {

@@ -69,6 +69,11 @@ pub struct ProLinkDeckSourceProvider {
     bridge_version: Option<String>,
     beat_link_version: Option<String>,
     last_error: Option<String>,
+    ingress_queue_capacity: usize,
+    ingress_queue_depth: usize,
+    ingress_queue_high_water: usize,
+    ingress_coalesced_message_count: u64,
+    ingress_critical_saturation_count: u64,
     timing_generation: u64,
     timing_observations: Vec<ProLinkTimingObservation>,
 }
@@ -91,6 +96,11 @@ impl ProLinkDeckSourceProvider {
             bridge_version: None,
             beat_link_version: None,
             last_error: None,
+            ingress_queue_capacity: 0,
+            ingress_queue_depth: 0,
+            ingress_queue_high_water: 0,
+            ingress_coalesced_message_count: 0,
+            ingress_critical_saturation_count: 0,
             timing_generation: 0,
             timing_observations: Vec::new(),
         };
@@ -216,7 +226,27 @@ impl ProLinkDeckSourceProvider {
             beat_link_version: self.beat_link_version.clone(),
             discovered_devices: self.devices.clone(),
             last_error: self.last_error.clone(),
+            ingress_queue_capacity: self.ingress_queue_capacity,
+            ingress_queue_depth: self.ingress_queue_depth,
+            ingress_queue_high_water: self.ingress_queue_high_water,
+            ingress_coalesced_message_count: self.ingress_coalesced_message_count,
+            ingress_critical_saturation_count: self.ingress_critical_saturation_count,
         }
+    }
+
+    pub fn record_ingress_metrics(
+        &mut self,
+        capacity: usize,
+        depth: usize,
+        high_water: usize,
+        coalesced_message_count: u64,
+        critical_saturation_count: u64,
+    ) {
+        self.ingress_queue_capacity = capacity;
+        self.ingress_queue_depth = depth;
+        self.ingress_queue_high_water = high_water;
+        self.ingress_coalesced_message_count = coalesced_message_count;
+        self.ingress_critical_saturation_count = critical_saturation_count;
     }
 
     pub fn clear(&mut self, at: MonotonicTime) -> Result<(), ProLinkProviderError> {
@@ -602,6 +632,11 @@ pub struct ProLinkDeckSourceDiagnostics {
     pub beat_link_version: Option<String>,
     pub discovered_devices: BTreeMap<u8, ProLinkDiscoveredDevice>,
     pub last_error: Option<String>,
+    pub ingress_queue_capacity: usize,
+    pub ingress_queue_depth: usize,
+    pub ingress_queue_high_water: usize,
+    pub ingress_coalesced_message_count: u64,
+    pub ingress_critical_saturation_count: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

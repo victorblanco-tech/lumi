@@ -3,14 +3,15 @@ use std::io::{BufRead, BufReader};
 use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
-use std::sync::{Arc, Mutex, mpsc};
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use thiserror::Error;
 
-use crate::{BridgeDecodeError, BridgeDecoder, BridgeMessage};
+use crate::{BridgeDecodeError, BridgeDecoder, BridgeEvent, BridgeMessage};
 
 const STDERR_TAIL_CAPACITY: usize = 40;
+const PROCESS_OUTPUT_CAPACITY: usize = 512;
 pub const PRO_DJ_LINK_UDP_PORTS: [u16; 3] = [50_000, 50_001, 50_002];
 
 /// Refuse to start a second Pro DJ Link application on the same network host.
@@ -149,28 +150,116 @@ impl BridgeLaunchConfiguration {
 pub struct BridgeProcessDiagnostics {
     pub running: bool,
     pub last_sequence: Option<u64>,
+    pub queue_capacity: usize,
+    pub queue_depth: usize,
+    pub queue_high_water: usize,
+    pub coalesced_message_count: u64,
+    pub critical_saturation_count: u64,
     pub stderr_tail: Vec<String>,
 }
 
-enum ProcessOutput {
-    Line(String),
-    StdoutClosed,
-    ReadFailed(String),
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum CoalescingKey {
+    DeckStatus(u8),
+    TrackMetadata(u8),
+    TrackSignature(u8),
+}
+
+fn coalescing_key(message: &BridgeMessage) -> Option<CoalescingKey> {
+    match &message.event {
+        BridgeEvent::DeckStatus(status) => Some(CoalescingKey::DeckStatus(status.device_number)),
+        BridgeEvent::TrackMetadata(metadata) => {
+            Some(CoalescingKey::TrackMetadata(metadata.deck_number))
+        }
+        BridgeEvent::TrackSignature(signature) => {
+            Some(CoalescingKey::TrackSignature(signature.deck_number))
+        }
+        BridgeEvent::Hello(_)
+        | BridgeEvent::SourceStatus(_)
+        | BridgeEvent::DeviceFound(_)
+        | BridgeEvent::DeviceLost(_)
+        | BridgeEvent::Beat(_)
+        | BridgeEvent::Error(_) => None,
+    }
+}
+
+struct ProcessOutputQueue {
+    messages: VecDeque<BridgeMessage>,
+    capacity: usize,
+    high_water: usize,
+    coalesced_message_count: u64,
+    critical_saturation_count: u64,
+    last_sequence: Option<u64>,
+    terminal_error: Option<String>,
+    stdout_closed: bool,
+}
+
+impl ProcessOutputQueue {
+    fn new(capacity: usize) -> Self {
+        Self {
+            messages: VecDeque::with_capacity(capacity),
+            capacity,
+            high_water: 0,
+            coalesced_message_count: 0,
+            critical_saturation_count: 0,
+            last_sequence: None,
+            terminal_error: None,
+            stdout_closed: false,
+        }
+    }
+
+    fn push(&mut self, message: BridgeMessage) -> bool {
+        self.last_sequence = Some(message.sequence);
+        if let Some(key) = coalescing_key(&message)
+            && let Some(index) = self
+                .messages
+                .iter()
+                .position(|queued| coalescing_key(queued) == Some(key))
+        {
+            self.messages.remove(index);
+            self.coalesced_message_count = self.coalesced_message_count.saturating_add(1);
+        }
+
+        if self.messages.len() == self.capacity {
+            if let Some(index) = self
+                .messages
+                .iter()
+                .position(|queued| coalescing_key(queued).is_some())
+            {
+                self.messages.remove(index);
+                self.coalesced_message_count = self.coalesced_message_count.saturating_add(1);
+            } else {
+                self.critical_saturation_count = self.critical_saturation_count.saturating_add(1);
+                self.terminal_error = Some(format!(
+                    "bounded Pro DJ Link ingress saturated at {} critical messages",
+                    self.capacity
+                ));
+                return false;
+            }
+        }
+
+        self.messages.push_back(message);
+        self.high_water = self.high_water.max(self.messages.len());
+        true
+    }
+
+    fn fail(&mut self, message: String) {
+        self.terminal_error = Some(message);
+    }
 }
 
 pub struct BridgeProcessSupervisor {
     child: Child,
     stdin: Option<ChildStdin>,
-    output: mpsc::Receiver<ProcessOutput>,
-    decoder: BridgeDecoder,
+    output: Arc<Mutex<ProcessOutputQueue>>,
     stderr_tail: Arc<Mutex<VecDeque<String>>>,
-    stdout_closed: bool,
 }
 
 impl BridgeProcessSupervisor {
     pub fn spawn(configuration: &BridgeLaunchConfiguration) -> Result<Self, BridgeSupervisorError> {
         let mut child = Command::new(&configuration.executable)
             .args(&configuration.arguments)
+            .env_remove("LUMI_SESSION_TOKEN")
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
@@ -186,24 +275,44 @@ impl BridgeProcessSupervisor {
             .take()
             .ok_or(BridgeSupervisorError::MissingPipe("stderr"))?;
 
-        let (sender, output) = mpsc::channel();
+        let output = Arc::new(Mutex::new(ProcessOutputQueue::new(PROCESS_OUTPUT_CAPACITY)));
+        let output_lines = Arc::clone(&output);
         thread::Builder::new()
             .name("lumi-prolink-stdout".to_owned())
             .spawn(move || {
+                let mut decoder = BridgeDecoder::new();
                 for line in BufReader::new(stdout).lines() {
                     match line {
                         Ok(line) => {
-                            if sender.send(ProcessOutput::Line(line)).is_err() {
+                            let message = match decoder.decode_line(&line) {
+                                Ok(message) => message,
+                                Err(error) => {
+                                    if let Ok(mut queue) = output_lines.lock() {
+                                        queue.fail(format!(
+                                            "invalid Pro DJ Link bridge message: {error}"
+                                        ));
+                                    }
+                                    return;
+                                }
+                            };
+                            let Ok(mut queue) = output_lines.lock() else {
+                                return;
+                            };
+                            if !queue.push(message) {
                                 return;
                             }
                         }
                         Err(error) => {
-                            let _ = sender.send(ProcessOutput::ReadFailed(error.to_string()));
+                            if let Ok(mut queue) = output_lines.lock() {
+                                queue.fail(error.to_string());
+                            }
                             return;
                         }
                     }
                 }
-                let _ = sender.send(ProcessOutput::StdoutClosed);
+                if let Ok(mut queue) = output_lines.lock() {
+                    queue.stdout_closed = true;
+                }
             })
             .map_err(BridgeSupervisorError::ReaderThread)?;
 
@@ -228,42 +337,31 @@ impl BridgeProcessSupervisor {
             child,
             stdin,
             output,
-            decoder: BridgeDecoder::new(),
             stderr_tail,
-            stdout_closed: false,
         })
     }
 
     pub fn drain_messages(&mut self) -> Result<Vec<BridgeMessage>, BridgeSupervisorError> {
-        let mut messages = Vec::new();
-        loop {
-            match self.output.try_recv() {
-                Ok(ProcessOutput::Line(line)) => {
-                    messages.push(self.decoder.decode_line(&line)?);
-                }
-                Ok(ProcessOutput::StdoutClosed) => {
-                    self.stdout_closed = true;
-                }
-                Ok(ProcessOutput::ReadFailed(message)) => {
-                    return Err(BridgeSupervisorError::Read(message));
-                }
-                Err(mpsc::TryRecvError::Empty) => break,
-                Err(mpsc::TryRecvError::Disconnected) => {
-                    self.stdout_closed = true;
-                    break;
-                }
-            }
+        let mut output = self
+            .output
+            .lock()
+            .map_err(|_| BridgeSupervisorError::OutputLock)?;
+        if let Some(message) = output.terminal_error.take() {
+            return Err(BridgeSupervisorError::Read(message));
         }
-        Ok(messages)
+        Ok(output.messages.drain(..).collect())
     }
 
     pub fn diagnostics(&mut self) -> Result<BridgeProcessDiagnostics, BridgeSupervisorError> {
-        let running = self
+        let process_running = self
             .child
             .try_wait()
             .map_err(BridgeSupervisorError::Status)?
-            .is_none()
-            && !self.stdout_closed;
+            .is_none();
+        let output = self
+            .output
+            .lock()
+            .map_err(|_| BridgeSupervisorError::OutputLock)?;
         let stderr_tail = self
             .stderr_tail
             .lock()
@@ -272,8 +370,13 @@ impl BridgeProcessSupervisor {
             .cloned()
             .collect();
         Ok(BridgeProcessDiagnostics {
-            running,
-            last_sequence: self.decoder.last_sequence(),
+            running: process_running && !output.stdout_closed && output.terminal_error.is_none(),
+            last_sequence: output.last_sequence,
+            queue_capacity: output.capacity,
+            queue_depth: output.messages.len(),
+            queue_high_water: output.high_water,
+            coalesced_message_count: output.coalesced_message_count,
+            critical_saturation_count: output.critical_saturation_count,
             stderr_tail,
         })
     }
@@ -319,6 +422,8 @@ pub enum BridgeSupervisorError {
     Stop(std::io::Error),
     #[error("the Pro DJ Link bridge diagnostics lock is poisoned")]
     StderrLock,
+    #[error("the Pro DJ Link bridge output lock is poisoned")]
+    OutputLock,
 }
 
 #[cfg(test)]
@@ -358,5 +463,105 @@ mod tests {
             assert!(Instant::now() < deadline, "exited process stayed healthy");
             std::thread::sleep(Duration::from_millis(5));
         }
+    }
+
+    fn deck_status_message(sequence: u64, device_number: u8, beat_number: i64) -> BridgeMessage {
+        BridgeMessage {
+            sequence,
+            observed_at_nanos: sequence,
+            event: BridgeEvent::DeckStatus(crate::DeckStatus {
+                device_number,
+                device_name: format!("Player {device_number}"),
+                playing: true,
+                paused: false,
+                cued: false,
+                tempo_master: device_number == 1,
+                on_air: true,
+                source_player: device_number,
+                source_slot: "usb".to_owned(),
+                track_type: "rekordbox".to_owned(),
+                rekordbox_id: 42,
+                track_bpm: 140.0,
+                effective_bpm: 140.0,
+                beat_number,
+                beat_within_bar: 1,
+                raw_pitch: 0,
+            }),
+        }
+    }
+
+    fn beat_message(sequence: u64) -> BridgeMessage {
+        BridgeMessage {
+            sequence,
+            observed_at_nanos: sequence,
+            event: BridgeEvent::Beat(crate::Beat {
+                device_number: 1,
+                device_name: "Player 1".to_owned(),
+                effective_bpm: 140.0,
+                beat_within_bar: 1,
+                tempo_master: true,
+            }),
+        }
+    }
+
+    #[test]
+    fn continuous_status_is_coalesced_but_exact_beats_keep_order() {
+        let mut queue = ProcessOutputQueue::new(4);
+        assert!(queue.push(deck_status_message(1, 1, 1)));
+        assert!(queue.push(beat_message(2)));
+        assert!(queue.push(deck_status_message(3, 1, 2)));
+        assert!(queue.push(beat_message(4)));
+
+        assert_eq!(queue.messages.len(), 3);
+        assert_eq!(queue.coalesced_message_count, 1);
+        assert_eq!(queue.last_sequence, Some(4));
+        assert!(matches!(queue.messages[0].event, BridgeEvent::Beat(_)));
+        assert!(matches!(
+            queue.messages[1].event,
+            BridgeEvent::DeckStatus(_)
+        ));
+        assert!(matches!(queue.messages[2].event, BridgeEvent::Beat(_)));
+    }
+
+    #[test]
+    fn all_critical_saturation_fails_closed_without_growing() {
+        let mut queue = ProcessOutputQueue::new(2);
+        assert!(queue.push(beat_message(1)));
+        assert!(queue.push(beat_message(2)));
+        assert!(!queue.push(beat_message(3)));
+
+        assert_eq!(queue.messages.len(), 2);
+        assert_eq!(queue.high_water, 2);
+        assert_eq!(queue.critical_saturation_count, 1);
+        assert!(queue.terminal_error.is_some());
+    }
+
+    #[test]
+    fn fifty_thousand_status_updates_remain_constant_space_and_within_budget() {
+        let mut queue = ProcessOutputQueue::new(PROCESS_OUTPUT_CAPACITY);
+        let started = Instant::now();
+        for sequence in 1..=50_000_u64 {
+            assert!(queue.push(deck_status_message(
+                sequence,
+                1,
+                i64::try_from(sequence).unwrap_or(i64::MAX),
+            )));
+        }
+        let elapsed = started.elapsed();
+
+        eprintln!(
+            "Pro DJ Link bounded ingress benchmark: updates=50000 elapsed={elapsed:?} depth={} high_water={} coalesced={}",
+            queue.messages.len(),
+            queue.high_water,
+            queue.coalesced_message_count,
+        );
+        assert_eq!(queue.messages.len(), 1);
+        assert_eq!(queue.high_water, 1);
+        assert_eq!(queue.coalesced_message_count, 49_999);
+        assert_eq!(queue.critical_saturation_count, 0);
+        assert!(
+            elapsed < Duration::from_secs(1),
+            "status coalescing exceeded its one-second debug-build budget"
+        );
     }
 }

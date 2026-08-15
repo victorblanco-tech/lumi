@@ -116,6 +116,7 @@ impl CarabinerTimingOutput {
         })?;
         let output = Command::new(executable)
             .arg("--version")
+            .env_remove("LUMI_SESSION_TOKEN")
             .stdin(Stdio::null())
             .output()
             .map_err(|error| CarabinerError::Helper(error.to_string()))?;
@@ -458,6 +459,7 @@ fn connect_or_launch(
         .arg(format!("--port={}", configuration.port))
         .arg("--poll=10")
         .arg("--daemon")
+        .env_remove("LUMI_SESSION_TOKEN")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null())
