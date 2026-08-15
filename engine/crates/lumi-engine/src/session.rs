@@ -29,8 +29,8 @@ use lumi_midi_coremidi::{
     CoreMidiDestinationProvider, CoreMidiSourceProvider, MidiDestinationState,
 };
 use lumi_midi_output::{
-    BANK_SETTLE_DELAY, MidiClockController, MidiClockState, MidiClockSync, MidiOutputController,
-    MidiSourceState,
+    BANK_SETTLE_DELAY, MidiClockController, MidiClockState, MidiClockSync, MidiSourceState,
+    RealtimeMidiController,
 };
 use lumi_output_dry_run::{DryRunLightingOutputProvider, DryRunOutputError};
 use lumi_planner::{
@@ -81,7 +81,6 @@ const AUTO_PUBLISH_MIDI_ENVIRONMENT_KEY: &str = "LUMI_AUTO_PUBLISH_MIDI";
 const MINIMUM_SESSION_TOKEN_BYTES: usize = 32;
 const MAXIMUM_SESSION_TOKEN_BYTES: usize = 256;
 const MAXIMUM_AUTHENTICATION_BYTES: usize = 512;
-const CONNECTION_TIMEOUT: Duration = Duration::from_secs(10);
 const AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(5);
 const INTEGRATION_PUMP_INTERVAL: Duration = Duration::from_millis(20);
 const MINIMUM_PROLINK_TIMING_STALE_AFTER: Duration = Duration::from_millis(1_250);
@@ -102,7 +101,8 @@ struct SessionAuthentication {
     session_token: String,
 }
 
-/// Runs one app-scoped engine session until its authenticated client disconnects.
+/// Runs one channel-scoped engine service. UI clients may disconnect and
+/// reconnect sequentially without resetting show state or duplicating MIDI.
 pub async fn run() -> Result<(), EngineError> {
     let session_token =
         env::var(SESSION_TOKEN_ENVIRONMENT_KEY).map_err(|_| EngineError::MissingSessionToken)?;
@@ -113,15 +113,37 @@ pub async fn run() -> Result<(), EngineError> {
     let endpoint = listener.local_addr()?;
     write_startup_record(endpoint.port())?;
 
-    let (stream, peer) = timeout(CONNECTION_TIMEOUT, listener.accept())
-        .await
-        .map_err(|_| EngineError::ConnectionTimeout)??;
-
-    if !peer.ip().is_loopback() {
-        return Err(EngineError::NonLoopbackPeer);
+    let mut idle_pump = tokio::time::interval(INTEGRATION_PUMP_INTERVAL);
+    idle_pump.set_missed_tick_behavior(MissedTickBehavior::Skip);
+    idle_pump.tick().await;
+    loop {
+        let accepted = tokio::select! {
+            accepted = listener.accept() => Some(accepted?),
+            _ = idle_pump.tick() => {
+                runtime.integration_pump_metrics.record(Instant::now());
+                process_deck_input_messages(&mut runtime)?;
+                runtime
+                    .output_worker
+                    .service_pending_autoloop(runtime.state.state(), false);
+                None
+            }
+        };
+        let Some((stream, peer)) = accepted else {
+            continue;
+        };
+        if !peer.ip().is_loopback() {
+            continue;
+        }
+        match serve_authenticated_client(stream, &session_token, &mut runtime).await {
+            Ok(())
+            | Err(EngineError::AuthenticationTimeout)
+            | Err(EngineError::AuthenticationOversized)
+            | Err(EngineError::InvalidAuthentication)
+            | Err(EngineError::AuthenticationRejected)
+            | Err(EngineError::Io(_)) => {}
+            Err(error) => return Err(error),
+        }
     }
-
-    serve_authenticated_client(stream, &session_token, &mut runtime).await
 }
 
 fn validate_session_token(session_token: &str) -> Result<(), EngineError> {
@@ -307,6 +329,7 @@ struct EngineRuntime {
     output_worker: OutputWorker,
     deck_input: CoreMidiDestinationProvider,
     library_worker: LibraryWorker,
+    library_revision: u64,
     operation_sequence: u64,
     local_transports: BTreeMap<lumi_domain::DeckId, LocalTransportObservation>,
     integration_pump_metrics: IntegrationPumpMetrics,
@@ -546,6 +569,7 @@ fn initialized_runtime_for_mode(
         output_worker,
         deck_input,
         library_worker,
+        library_revision: 1,
         operation_sequence: 0,
         local_transports: BTreeMap::new(),
         integration_pump_metrics: IntegrationPumpMetrics::new(),
@@ -1011,7 +1035,7 @@ fn planner_for_theme_options(
 
 struct OutputWorker {
     provider: DryRunLightingOutputProvider,
-    midi_output: MidiOutputController<CoreMidiSourceProvider>,
+    midi_output: RealtimeMidiController<CoreMidiSourceProvider>,
     midi_clock: MidiClockController<CoreMidiSourceProvider>,
     link_timing: CarabinerTimingOutput,
     link_enabled: bool,
@@ -1026,6 +1050,7 @@ struct OutputWorker {
     last_prolink_playing: Option<bool>,
     prolink_timing_stale: bool,
     precise_autoloop_fallback: bool,
+    realtime_generation: u64,
     scheduled_prearm: Option<ScheduledPrearm>,
     scheduled_early_trigger: Option<ScheduledEarlyTrigger>,
     prearmed_autoloop: Option<PrearmedAutoloop>,
@@ -1061,7 +1086,6 @@ struct ScheduledPrearm {
 
 #[derive(Clone, Debug)]
 struct ScheduledEarlyTrigger {
-    autoloop_number: u8,
     due_at: Instant,
     identity: AutoloopExecutionIdentity,
 }
@@ -1102,7 +1126,7 @@ impl OutputWorker {
         let link_configuration = CarabinerConfiguration::default();
         Self {
             provider: DryRunLightingOutputProvider::default(),
-            midi_output: MidiOutputController::new(CoreMidiSourceProvider::new()),
+            midi_output: RealtimeMidiController::new(CoreMidiSourceProvider::new),
             midi_clock: MidiClockController::new(CoreMidiSourceProvider::new),
             link_timing: CarabinerTimingOutput::new(link_configuration),
             link_enabled: false,
@@ -1117,6 +1141,7 @@ impl OutputWorker {
             last_prolink_playing: None,
             prolink_timing_stale: false,
             precise_autoloop_fallback: false,
+            realtime_generation: 0,
             scheduled_prearm: None,
             scheduled_early_trigger: None,
             prearmed_autoloop: None,
@@ -1138,7 +1163,16 @@ impl OutputWorker {
             self.scheduled_early_trigger = None;
             self.prearmed_autoloop = None;
             self.predictively_triggered = None;
+            let _ = self.midi_output.cancel_all();
         }
+    }
+
+    fn begin_realtime_generation(&mut self) -> Option<u64> {
+        self.realtime_generation = self.realtime_generation.checked_add(1)?;
+        self.midi_output
+            .set_generation(self.realtime_generation)
+            .ok()?;
+        Some(self.realtime_generation)
     }
 
     fn schedule_autoloop(
@@ -1151,8 +1185,11 @@ impl OutputWorker {
         self.autoloop_requested_count = self.autoloop_requested_count.saturating_add(1);
         let now = Instant::now();
         let identity = AutoloopExecutionIdentity::from_request(request);
-        self.scheduled_early_trigger = None;
-        if self.predictively_triggered == Some(identity) {
+        let predictively_scheduled = self
+            .scheduled_early_trigger
+            .as_ref()
+            .is_some_and(|scheduled| scheduled.identity == identity);
+        if self.predictively_triggered == Some(identity) || predictively_scheduled {
             // The physical AutoLoop pulse already left before the phrase
             // boundary according to the negative user offset. The domain
             // effect still records the execution exactly once, but must not
@@ -1160,8 +1197,11 @@ impl OutputWorker {
             self.predictively_triggered = None;
             self.pending_autoloop = None;
             self.prearmed_autoloop = None;
+            self.scheduled_early_trigger = None;
+            self.autoloop_emitted_count = self.autoloop_emitted_count.saturating_add(1);
             return;
         }
+        self.scheduled_early_trigger = None;
         self.predictively_triggered = None;
         let is_safely_prearmed = self.prearmed_autoloop.as_ref().is_some_and(|prearmed| {
             prearmed.bank_number == bank_number
@@ -1179,7 +1219,7 @@ impl OutputWorker {
         if is_safely_prearmed && delayed_after_boundary.is_zero() {
             if self
                 .midi_output
-                .trigger_autoloop_button(autoloop_number)
+                .schedule_autoloop(self.realtime_generation, autoloop_number, now)
                 .is_ok()
             {
                 self.autoloop_emitted_count = self.autoloop_emitted_count.saturating_add(1);
@@ -1189,11 +1229,19 @@ impl OutputWorker {
             return;
         }
         if is_safely_prearmed {
+            let due_at = now + delayed_after_boundary;
+            if self
+                .midi_output
+                .schedule_autoloop(self.realtime_generation, autoloop_number, due_at)
+                .is_err()
+            {
+                return;
+            }
             self.pending_autoloop = Some(PendingAutoloop {
                 request: request.clone(),
                 bank_number,
                 autoloop_number,
-                due_at: now + delayed_after_boundary,
+                due_at,
                 requires_precise_beat: false,
             });
             self.prearmed_autoloop = None;
@@ -1207,15 +1255,31 @@ impl OutputWorker {
         if self.pending_autoloop.take().is_some() {
             self.autoloop_cancelled_count = self.autoloop_cancelled_count.saturating_add(1);
         }
-        if self.midi_output.select_bank(bank_number).is_err() {
+        let Some(generation) = self.begin_realtime_generation() else {
+            return;
+        };
+        if self
+            .midi_output
+            .schedule_bank(generation, bank_number, now)
+            .is_err()
+        {
             return;
         }
         self.prearmed_autoloop = None;
+        let due_at = now + BANK_SETTLE_DELAY.max(delayed_after_boundary);
+        if (!self.precise_autoloop_fallback || !delayed_after_boundary.is_zero())
+            && self
+                .midi_output
+                .schedule_autoloop(generation, autoloop_number, due_at)
+                .is_err()
+        {
+            return;
+        }
         self.pending_autoloop = Some(PendingAutoloop {
             request: request.clone(),
             bank_number,
             autoloop_number,
-            due_at: now + BANK_SETTLE_DELAY.max(delayed_after_boundary),
+            due_at,
             requires_precise_beat: self.precise_autoloop_fallback
                 && delayed_after_boundary.is_zero(),
         });
@@ -1232,6 +1296,7 @@ impl OutputWorker {
         });
         if stale {
             self.pending_autoloop = None;
+            let _ = self.midi_output.cancel_all();
             self.autoloop_cancelled_count = self.autoloop_cancelled_count.saturating_add(1);
         }
     }
@@ -1249,11 +1314,18 @@ impl OutputWorker {
         let Some(pending) = self.pending_autoloop.take() else {
             return;
         };
-        if self
-            .midi_output
-            .trigger_autoloop_button(pending.autoloop_number)
-            .is_ok()
-        {
+        let emitted = if pending.requires_precise_beat {
+            self.midi_output
+                .schedule_autoloop(
+                    self.realtime_generation,
+                    pending.autoloop_number,
+                    Instant::now(),
+                )
+                .is_ok()
+        } else {
+            true
+        };
+        if emitted {
             self.autoloop_emitted_count = self.autoloop_emitted_count.saturating_add(1);
             if pending.requires_precise_beat {
                 self.autoloop_beat_fallback_count =
@@ -1276,6 +1348,7 @@ impl OutputWorker {
         });
         if stale {
             self.scheduled_prearm = None;
+            let _ = self.midi_output.cancel_all();
             self.autoloop_cancelled_count = self.autoloop_cancelled_count.saturating_add(1);
             return;
         }
@@ -1290,8 +1363,7 @@ impl OutputWorker {
             return;
         };
         if self.ensure_lighting_midi().is_err()
-            || self.midi_output.status().state != MidiSourceState::Ready
-            || self.midi_output.select_bank(scheduled.bank_number).is_err()
+            || self.midi_output.status().source.state != MidiSourceState::Ready
         {
             return;
         }
@@ -1326,6 +1398,7 @@ impl OutputWorker {
             });
         if stale {
             self.scheduled_early_trigger = None;
+            let _ = self.midi_output.cancel_all();
             self.autoloop_cancelled_count = self.autoloop_cancelled_count.saturating_add(1);
             return;
         }
@@ -1348,14 +1421,8 @@ impl OutputWorker {
         let Some(scheduled) = self.scheduled_early_trigger.take() else {
             return;
         };
-        if self
-            .midi_output
-            .trigger_autoloop_button(scheduled.autoloop_number)
-            .is_ok()
-        {
-            self.autoloop_emitted_count = self.autoloop_emitted_count.saturating_add(1);
-            self.predictively_triggered = Some(scheduled.identity);
-        }
+        self.autoloop_emitted_count = self.autoloop_emitted_count.saturating_add(1);
+        self.predictively_triggered = Some(scheduled.identity);
         self.prearmed_autoloop = None;
     }
 
@@ -1370,6 +1437,7 @@ impl OutputWorker {
             || state.leader_deck() != Some(observation.deck_id)
             || !observation.playing
         {
+            let _ = self.midi_output.cancel_all();
             self.scheduled_prearm = None;
             self.scheduled_early_trigger = None;
             self.prearmed_autoloop = None;
@@ -1377,6 +1445,7 @@ impl OutputWorker {
             return;
         }
         let Some(plan) = state.active_plan() else {
+            let _ = self.midi_output.cancel_all();
             self.scheduled_prearm = None;
             self.scheduled_early_trigger = None;
             self.prearmed_autoloop = None;
@@ -1427,9 +1496,29 @@ impl OutputWorker {
         if already_preparing {
             return;
         }
+        let Some(generation) = self.begin_realtime_generation() else {
+            return;
+        };
+        let now = Instant::now();
+        if self
+            .midi_output
+            .schedule_bank(generation, bank_number, now + bank_delay)
+            .is_err()
+        {
+            return;
+        }
+        if scheduling_offset_millis < 0
+            && self
+                .midi_output
+                .schedule_autoloop(generation, autoloop_number, now + trigger_delay)
+                .is_err()
+        {
+            let _ = self.midi_output.cancel_all();
+            return;
+        }
         self.scheduled_prearm = Some(ScheduledPrearm {
             bank_number,
-            due_at: Instant::now() + bank_delay,
+            due_at: now + bank_delay,
             deck_id: observation.deck_id,
             track_load_id: plan.track_load_id(),
             plan_revision: plan.revision(),
@@ -1437,8 +1526,7 @@ impl OutputWorker {
         });
         self.scheduled_early_trigger =
             (scheduling_offset_millis < 0).then_some(ScheduledEarlyTrigger {
-                autoloop_number,
-                due_at: Instant::now() + trigger_delay,
+                due_at: now + trigger_delay,
                 identity,
             });
     }
@@ -1464,7 +1552,7 @@ impl OutputWorker {
             return;
         };
         if self.ensure_lighting_midi().is_err()
-            || self.midi_output.status().state != MidiSourceState::Ready
+            || self.midi_output.status().source.state != MidiSourceState::Ready
             || self.midi_output.select_bank(bank_number).is_err()
         {
             return;
@@ -1489,6 +1577,7 @@ impl OutputWorker {
         for effect in effects {
             let (result, completed_at) = match effect {
                 lumi_domain::Effect::EnsureOutputClosed { .. } => {
+                    let _ = self.midi_output.cancel_all();
                     self.scheduled_prearm = None;
                     self.scheduled_early_trigger = None;
                     self.prearmed_autoloop = None;
@@ -1504,7 +1593,7 @@ impl OutputWorker {
                             automatic_midi_target(request.action())?
                         {
                             let _ = self.ensure_lighting_midi();
-                            if self.midi_output.status().state == MidiSourceState::Ready {
+                            if self.midi_output.status().source.state == MidiSourceState::Ready {
                                 // Hardware output fails closed and reports through Tech status;
                                 // it must never stall the authoritative transport/runtime lane.
                                 self.schedule_autoloop(
@@ -1547,6 +1636,10 @@ impl OutputWorker {
     }
 
     fn midi_status(&self) -> lumi_midi_output::MidiSourceStatus {
+        self.midi_output.status().source
+    }
+
+    fn realtime_midi_status(&self) -> lumi_midi_output::RealtimeMidiStatus {
         self.midi_output.status()
     }
 
@@ -1633,7 +1726,7 @@ impl OutputWorker {
 
     fn ensure_lighting_midi(&mut self) -> Result<(), EngineError> {
         if self.midi_auto_publish_enabled
-            && self.midi_output.status().state != MidiSourceState::Ready
+            && self.midi_output.status().source.state != MidiSourceState::Ready
         {
             let now = Instant::now();
             if self.last_midi_publish_attempt.is_some_and(|attempt| {
@@ -2014,6 +2107,7 @@ fn handle_command(
     };
 
     let is_mutating = command.is_mutating();
+    let changes_library_revision = command.changes_library_revision();
     let is_transport_update = matches!(
         &command,
         SessionCommand::UpdateLocalPlaybackTransport { .. }
@@ -2049,6 +2143,9 @@ fn handle_command(
 
     if let Err(error) = apply_command(runtime, command) {
         return application_error_envelope(response_sequence, &envelope.message_id, &error);
+    }
+    if changes_library_revision {
+        runtime.library_revision = runtime.library_revision.saturating_add(1);
     }
     if is_mutating {
         let disposition = command_ids.observe(&envelope.message_id);
@@ -2342,6 +2439,32 @@ fn apply_command(
             runtime
                 .library_worker
                 .apply_library_reset(&expected_token, &backup_database_path)?;
+            return Ok(());
+        }
+        SessionCommand::CreateLibraryBackup { destination } => {
+            if runtime.state.state().operation() != OperationState::Off {
+                return Err(CommandApplicationError::Engine(
+                    EngineError::LibraryBackupRequiresOff,
+                ));
+            }
+            runtime
+                .library_worker
+                .create_consistent_backup(std::path::Path::new(&destination))?;
+            return Ok(());
+        }
+        SessionCommand::RestoreLibraryBackup { source, rollback } => {
+            if runtime.state.state().operation() != OperationState::Off {
+                return Err(CommandApplicationError::Engine(
+                    EngineError::LibraryBackupRequiresOff,
+                ));
+            }
+            runtime.library_worker.restore_consistent_backup(
+                std::path::Path::new(&source),
+                std::path::Path::new(&rollback),
+            )?;
+            let catalog = runtime.library_worker.autoloop_catalog()?;
+            runtime.planning_worker.synchronize_themes(&catalog);
+            runtime.planning_worker.library_contexts.clear();
             return Ok(());
         }
         SessionCommand::ReconcileLibrarySource {
@@ -2817,6 +2940,8 @@ fn apply_command(
         | SessionCommand::SyncRekordboxDevice { .. }
         | SessionCommand::PreviewLibraryReset { .. }
         | SessionCommand::ApplyLibraryReset { .. }
+        | SessionCommand::CreateLibraryBackup { .. }
+        | SessionCommand::RestoreLibraryBackup { .. }
         | SessionCommand::ReconcileLibrarySource { .. }
         | SessionCommand::EditLibraryTimeline { .. }
         | SessionCommand::SetLibraryPhraseLoopStrategy { .. }
@@ -3383,6 +3508,10 @@ fn snapshot_envelope_internal(
     payload.insert("kind".to_owned(), Value::String("stateSnapshot".to_owned()));
     payload.insert("stateRevision".to_owned(), json!(state.revision().value()));
     payload.insert(
+        "libraryRevision".to_owned(),
+        json!(runtime.library_revision),
+    );
+    payload.insert(
         "operationState".to_owned(),
         Value::String(operation_state_name(state.operation()).to_owned()),
     );
@@ -3442,6 +3571,7 @@ fn snapshot_envelope_internal(
         );
     }
     let midi_output = runtime.output_worker.midi_status();
+    let realtime_midi = runtime.output_worker.realtime_midi_status();
     payload.insert(
         "midiIntegration".to_owned(),
         json!({
@@ -3483,6 +3613,20 @@ fn snapshot_envelope_internal(
                 "cancelledCount": runtime.output_worker.autoloop_cancelled_count,
                 "lateCount": runtime.output_worker.autoloop_late_count,
                 "beatFallbackCount": runtime.output_worker.autoloop_beat_fallback_count,
+                "lane": {
+                    "queueCapacity": realtime_midi.queue_capacity,
+                    "queueDepth": realtime_midi.queue_depth,
+                    "queueHighWater": realtime_midi.queue_high_water,
+                    "scheduledCount": realtime_midi.scheduled_count,
+                    "emittedCount": realtime_midi.emitted_count,
+                    "cancelledCount": realtime_midi.cancelled_count,
+                    "saturationCount": realtime_midi.saturation_count,
+                    "latencySampleCount": realtime_midi.latency_sample_count,
+                    "latencyP50Micros": realtime_midi.latency_p50_micros,
+                    "latencyP95Micros": realtime_midi.latency_p95_micros,
+                    "latencyP99Micros": realtime_midi.latency_p99_micros,
+                    "latencyMaxMicros": realtime_midi.latency_max_micros,
+                },
             },
         }),
     );
@@ -4230,8 +4374,6 @@ pub enum EngineError {
     MissingSessionToken,
     #[error("the app-scoped session token has an invalid length")]
     InvalidSessionToken,
-    #[error("timed out waiting for the local app connection")]
-    ConnectionTimeout,
     #[error("timed out waiting for session authentication")]
     AuthenticationTimeout,
     #[error("session authentication exceeds the maximum size")]
@@ -4287,6 +4429,8 @@ pub enum EngineError {
     Timing(String),
     #[error("music library failed: {0}")]
     Library(#[from] LibraryWorkerError),
+    #[error("library backup and restore require Lumi to be Off")]
+    LibraryBackupRequiresOff,
     #[error("the response sequence overflowed")]
     ResponseSequenceOverflow,
     #[error("the command ID cache could not initialize: {0}")]

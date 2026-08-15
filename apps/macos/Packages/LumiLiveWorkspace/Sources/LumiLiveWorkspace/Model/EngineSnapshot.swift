@@ -143,6 +143,7 @@ public struct MidiOutputIntegrationSnapshot: Equatable, Sendable {
     public let timingOffsetMillis: Int
     public let pendingTimingOffsetMillis: Int?
     public let bankPreRollMillis: UInt64
+    public let realtimeLane: RealtimeMidiOutputLaneSnapshot?
 
     public init(
         state: String,
@@ -155,7 +156,8 @@ public struct MidiOutputIntegrationSnapshot: Equatable, Sendable {
         autoPublishEnabled: Bool,
         timingOffsetMillis: Int,
         pendingTimingOffsetMillis: Int? = nil,
-        bankPreRollMillis: UInt64 = 50
+        bankPreRollMillis: UInt64 = 50,
+        realtimeLane: RealtimeMidiOutputLaneSnapshot? = nil
     ) {
         self.state = state
         self.sourceName = sourceName
@@ -168,6 +170,20 @@ public struct MidiOutputIntegrationSnapshot: Equatable, Sendable {
         self.timingOffsetMillis = timingOffsetMillis
         self.pendingTimingOffsetMillis = pendingTimingOffsetMillis
         self.bankPreRollMillis = bankPreRollMillis
+        self.realtimeLane = realtimeLane
+    }
+}
+
+public struct RealtimeMidiOutputLaneSnapshot: Equatable, Sendable {
+    public let queueCapacity: UInt64
+    public let queueDepth: UInt64
+    public let queueHighWater: UInt64
+    public let saturationCount: UInt64
+    public let latencySampleCount: UInt64
+    public let latencyP95Micros: UInt64
+
+    public var isHealthy: Bool {
+        saturationCount == 0 && (latencySampleCount == 0 || latencyP95Micros <= 20_000)
     }
 }
 

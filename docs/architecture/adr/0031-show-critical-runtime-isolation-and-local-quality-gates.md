@@ -122,3 +122,23 @@ and scoped credentials.
   regression risk.
 - **Rely only on CI:** costly, slower, hardware-blind and currently less
   deterministic than a controlled local Mac/lab gate.
+
+## Implementation note — `0.4.0-dev-35`
+
+The first implementation of this decision is complete behind the existing
+ports. `RealtimeMidiController` owns a bounded command channel, the CoreMIDI
+provider and deadline dispatch on one dedicated thread. Engine commands publish
+immutable scheduled work and generation invalidation; no snapshot, SQLite, USB
+or SwiftUI work runs on that thread. Its bounded health and latency histogram
+are exposed to Diagnostics and Live readiness.
+
+Library state now carries a monotonic revision, allowing lean transport polling
+without rebuilding or decoding unchanged library/editor data. Backup and
+restore moved to the owning SQLite connection and use online backup, validation,
+atomic staging and rollback.
+
+The macOS lifecycle is deliberately delivered in two steps. Dev-35 implements
+the reversible reconnect adapter: a channel-specific persistent engine accepts
+sequential authenticated UI sessions and survives UI relaunch. Promotion to a
+login-capable `SMAppService` remains a pre-RC lifecycle task; the adapter does
+not claim automatic restart after an engine-process crash.

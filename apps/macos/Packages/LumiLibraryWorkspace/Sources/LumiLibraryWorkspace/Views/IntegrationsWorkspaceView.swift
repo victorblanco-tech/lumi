@@ -370,6 +370,8 @@ public struct IntegrationsWorkspaceView: View {
                         Divider()
                         diagnosticRow("MIDI test pulses", "\(library.midiIntegration?.sentPulseCount ?? 0)", lightingOutputState)
                         Divider()
+                        diagnosticRow("AutoLoop realtime output", realtimeMidiDiagnostic, realtimeMidiState)
+                        Divider()
                         diagnosticRow("Local Playback clock", clockDiagnostic, clockOutputState)
                         Divider()
                         diagnosticRow("MIDI Clock ticks", "\(library.midiClockIntegration?.sentTickCount ?? 0)", clockOutputState)
@@ -443,7 +445,21 @@ public struct IntegrationsWorkspaceView: View {
     }
 
     private var lightingOutputState: LumiComponentState {
-        library.midiIntegration?.isReady == true ? .ready : .degraded
+        guard let midi = library.midiIntegration, midi.isReady else { return .degraded }
+        return midi.realtimeLane?.isHealthy == false ? .degraded : .ready
+    }
+
+    private var realtimeMidiState: LumiComponentState {
+        guard let lane = library.midiIntegration?.realtimeLane else { return .loading }
+        return lane.isHealthy ? .ready : .degraded
+    }
+
+    private var realtimeMidiDiagnostic: String {
+        guard let lane = library.midiIntegration?.realtimeLane else {
+            return "Waiting for realtime output lane"
+        }
+        let p95 = Double(lane.latencyP95Micros) / 1_000
+        return "\(lane.queueDepth)/\(lane.queueCapacity) queued · peak \(lane.queueHighWater) · p95 \(p95.formatted(.number.precision(.fractionLength(1)))) ms · \(lane.saturationCount) saturation"
     }
 
     private var clockOutputState: LumiComponentState {

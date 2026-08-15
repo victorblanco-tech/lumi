@@ -3,7 +3,9 @@
 #![forbid(unsafe_code)]
 
 use std::collections::{BTreeMap, BTreeSet};
-use std::path::Path;
+use std::fs;
+use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use lumi_domain::{KeyMode, MusicalKey, PitchClass, ThemeId, TrackId};
 use lumi_library::{
@@ -18,7 +20,8 @@ use lumi_library::{
     TimelineRevisionPage, TimelineRevisionReason, TimelineRevisionSummary, TrackColor, TrackPage,
     TrackPageRequest, TrackSummary, VariantId, WaveformPoint, normalize_source_label,
 };
-use rusqlite::{Connection, OptionalExtension, Row, Transaction, params};
+use rusqlite::backup::Backup;
+use rusqlite::{Connection, OpenFlags, OptionalExtension, Row, Transaction, params};
 use thiserror::Error;
 
 const SCHEMA_VERSION: u32 = 11;
@@ -228,6 +231,89 @@ impl SqliteLibraryRepository {
 
     pub fn in_memory() -> Result<Self, SqliteLibraryError> {
         Self::from_connection(Connection::open_in_memory()?)
+    }
+
+    /// Creates a coherent SQLite snapshot while this repository remains the
+    /// sole database owner. WAL pages are copied through SQLite's backup API;
+    /// callers never need to copy `-wal` or `-shm` files.
+    pub fn create_consistent_backup(
+        &self,
+        destination: impl AsRef<Path>,
+    ) -> Result<(), SqliteLibraryError> {
+        let destination = destination.as_ref();
+        let staging = backup_staging_path(destination);
+        if staging.exists() {
+            fs::remove_file(&staging)?;
+        }
+        if destination.exists() {
+            return Err(SqliteLibraryError::BackupDestinationExists(
+                destination.display().to_string(),
+            ));
+        }
+        let result = (|| {
+            let mut target = Connection::open(&staging)?;
+            Backup::new(&self.connection, &mut target)?.run_to_completion(
+                128,
+                Duration::from_millis(2),
+                None,
+            )?;
+            validate_backup_connection(&target)?;
+            drop(target);
+            fs::rename(&staging, destination)?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&staging);
+        }
+        result
+    }
+
+    pub fn validate_backup(path: impl AsRef<Path>) -> Result<(), SqliteLibraryError> {
+        let connection = Connection::open_with_flags(
+            path,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        validate_backup_connection(&connection)
+    }
+
+    /// Restores a validated backup into the live owning connection. A coherent
+    /// rollback snapshot is created first and is replayed automatically if the
+    /// incoming copy or its post-restore integrity check fails.
+    pub fn restore_consistent_backup(
+        &mut self,
+        source: impl AsRef<Path>,
+        rollback: impl AsRef<Path>,
+    ) -> Result<(), SqliteLibraryError> {
+        let source = source.as_ref();
+        let rollback = rollback.as_ref();
+        Self::validate_backup(source)?;
+        self.create_consistent_backup(rollback)?;
+        let incoming = Connection::open_with_flags(
+            source,
+            OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+        )?;
+        let restore_result = (|| {
+            Backup::new(&incoming, &mut self.connection)?.run_to_completion(
+                128,
+                Duration::from_millis(2),
+                None,
+            )?;
+            validate_backup_connection(&self.connection)
+        })();
+        if let Err(error) = restore_result {
+            let safety = Connection::open_with_flags(
+                rollback,
+                OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
+            )?;
+            Backup::new(&safety, &mut self.connection)?.run_to_completion(
+                128,
+                Duration::from_millis(2),
+                None,
+            )?;
+            validate_backup_connection(&self.connection)?;
+            return Err(error);
+        }
+        Ok(())
     }
 
     /// Returns imported tracks that have source phrases but no Lumi timeline.
@@ -4055,10 +4141,46 @@ fn compare_rekordbox_dates(incoming: &str, active: &str) -> Option<std::cmp::Ord
     (valid(incoming) && valid(active)).then(|| incoming.cmp(active))
 }
 
+fn backup_staging_path(destination: &Path) -> PathBuf {
+    let mut value = destination.as_os_str().to_os_string();
+    value.push(".partial");
+    PathBuf::from(value)
+}
+
+fn validate_backup_connection(connection: &Connection) -> Result<(), SqliteLibraryError> {
+    let integrity: String = connection.query_row("PRAGMA quick_check", [], |row| row.get(0))?;
+    if integrity != "ok" {
+        return Err(SqliteLibraryError::IntegrityCheckFailed(integrity));
+    }
+    let schema: u32 = connection.query_row("PRAGMA user_version", [], |row| row.get(0))?;
+    if schema > SCHEMA_VERSION {
+        return Err(SqliteLibraryError::UnsupportedSchema(schema));
+    }
+    let required_tables: u32 = connection.query_row(
+        "SELECT COUNT(*) FROM sqlite_master
+          WHERE type = 'table'
+            AND name IN ('tracks', 'phrase_roles', 'autoloop_themes', 'timeline_heads')",
+        [],
+        |row| row.get(0),
+    )?;
+    if required_tables != 4 {
+        return Err(SqliteLibraryError::CorruptData(
+            "backup is missing required creative or lighting tables".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
 #[derive(Debug, Error)]
 pub enum SqliteLibraryError {
     #[error("SQLite library error: {0}")]
     Sqlite(#[from] rusqlite::Error),
+    #[error("SQLite backup I/O failed: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("backup destination already exists: {0}")]
+    BackupDestinationExists(String),
+    #[error("SQLite integrity check failed: {0}")]
+    IntegrityCheckFailed(String),
     #[error("library schema version {0} is newer than this Lumi build supports")]
     UnsupportedSchema(u32),
     #[error("invalid library identifier: {0}")]

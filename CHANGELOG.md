@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.4.0-dev-35
+
+- SoundSwitch Bank and AutoLoop deadlines run on a dedicated, bounded realtime
+  MIDI thread instead of the engine polling loop. Generation invalidation
+  prevents stale output after seeks, hotcues, master handoffs, Pause or Off.
+- Diagnostics exposes realtime queue depth, high-water mark, scheduling counts,
+  saturation and p50/p95/p99/max latency; unhealthy timing can no longer leave
+  the Live lighting status green.
+- Engine snapshots carry a library revision. The macOS client only requests and
+  decodes the full library projection when that revision changes.
+- The engine accepts authenticated sequential UI connections and the macOS app
+  reconnects to the existing channel-specific process after UI relaunch while
+  preserving operation state.
+- Backup and restore are engine-owned and use SQLite's online backup API,
+  integrity/schema validation, atomic staging and a validated rollback copy.
+- Dev packaging now includes an SPDX 2.3 SBOM beside the checksum, licence,
+  notices and trademark policy.
+- A configurable AutoLoop soak test and an enforced one-hour RC entry point
+  retain correctness and latency evidence without treating a short Dev run as
+  release evidence.
+
 ## 0.4.0-dev-34
 
 - Pro DJ Link bridge ingress is bounded to 512 decoded messages. Continuous

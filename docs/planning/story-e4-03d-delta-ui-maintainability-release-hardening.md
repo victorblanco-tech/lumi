@@ -1,6 +1,6 @@
 # Story E4-03D: Delta UI, maintainability and release hardening
 
-- Status: **Ready after E4-03B/C contracts**
+- Status: **Implementation complete — Instruments and public signing pending**
 - Priority: **P1 High**
 - Effort: **8**
 - Components: Engine, Protocol, macOS, Security, Delivery
@@ -74,3 +74,18 @@ security posture.
 
 The UI does not become the realtime clock. Delta updates improve display and
 maintainability only; all lighting correctness remains engine-owned.
+
+## Dev-35 implementation result
+
+- snapshots expose a monotonic library revision and the macOS monitor requests
+  the full library projection only after that revision changes;
+- realtime MIDI health is projected as a compact diagnostic and participates
+  in Live readiness without putting scheduling logic in SwiftUI;
+- helper environments remain allowlisted and exclude the Lumi IPC credential;
+- local packaging emits checksum, licence, notices and an SPDX 2.3 SBOM;
+- full Apple verification covers the application bundle, engine client,
+  library workspace, Live workspace and visual evidence.
+
+The measured snapshot budgets remain within the accepted baseline. A retained
+two-deck Instruments profile and hardened-runtime/notarized public packaging are
+release work; private Dev distribution remains ad-hoc signed by design.

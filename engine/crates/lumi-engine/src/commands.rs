@@ -81,6 +81,13 @@ pub enum SessionCommand {
         expected_token: String,
         backup_database_path: String,
     },
+    CreateLibraryBackup {
+        destination: String,
+    },
+    RestoreLibraryBackup {
+        source: String,
+        rollback: String,
+    },
     ReconcileLibrarySource {
         track_id: u64,
         expected_revision: u64,
@@ -232,6 +239,8 @@ impl SessionCommand {
             | Self::SyncRekordboxDevice { .. }
             | Self::PreviewLibraryReset { .. }
             | Self::ApplyLibraryReset { .. }
+            | Self::CreateLibraryBackup { .. }
+            | Self::RestoreLibraryBackup { .. }
             | Self::ReconcileLibrarySource { .. }
             | Self::EditLibraryTimeline { .. }
             | Self::SetLibraryPhraseLoopStrategy { .. }
@@ -265,6 +274,25 @@ impl SessionCommand {
             | Self::SetCueLock { context, .. }
             | Self::RegeneratePlan { context } => Some(*context),
         }
+    }
+
+    pub const fn changes_library_revision(&self) -> bool {
+        matches!(
+            self,
+            Self::ApplyRekordboxXmlSync { .. }
+                | Self::ImportRekordboxAnalysis { .. }
+                | Self::SyncRekordboxDevice { .. }
+                | Self::ApplyLibraryReset { .. }
+                | Self::RestoreLibraryBackup { .. }
+                | Self::ReconcileLibrarySource { .. }
+                | Self::EditLibraryTimeline { .. }
+                | Self::SetLibraryPhraseLoopStrategy { .. }
+                | Self::UndoLibraryTimeline { .. }
+                | Self::RedoLibraryTimeline { .. }
+                | Self::RestoreLibraryTimelineRevision { .. }
+                | Self::MutatePhraseRoleCatalog { .. }
+                | Self::MutateAutoloopCatalog { .. }
+        )
     }
 }
 
@@ -333,6 +361,13 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
         "applyLibraryReset" => Ok(SessionCommand::ApplyLibraryReset {
             expected_token: string(&envelope.payload, "expectedResetToken")?.to_owned(),
             backup_database_path: string(&envelope.payload, "backupDatabasePath")?.to_owned(),
+        }),
+        "createLibraryBackup" => Ok(SessionCommand::CreateLibraryBackup {
+            destination: string(&envelope.payload, "destination")?.to_owned(),
+        }),
+        "restoreLibraryBackup" => Ok(SessionCommand::RestoreLibraryBackup {
+            source: string(&envelope.payload, "source")?.to_owned(),
+            rollback: string(&envelope.payload, "rollback")?.to_owned(),
         }),
         "reconcileLibrarySource" => Ok(SessionCommand::ReconcileLibrarySource {
             track_id: positive_unsigned(&envelope.payload, "trackId")?,

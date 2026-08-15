@@ -1,6 +1,6 @@
 # Epic E4-03: Show-grade hardening
 
-- Status: **Ready for build**
+- Status: **Dev implementation complete — RC/lab evidence pending**
 - Phase: **4 – macOS Beta (`0.4.0`)**
 - Priority: **P0 Critical**
 - Target: **before `0.4.0-rc-1`**
@@ -106,3 +106,25 @@ Each story gets one parent issue/sub-issue relationship in GitHub Projects.
 Evidence is stored under a versioned `docs/release/0.4.0-*` record or as a small
 machine-readable artifact referenced from the pull request. Raw audio and
 copyrighted Rekordbox data are never committed.
+
+## Dev-35 implementation result
+
+Version `0.4.0-dev-35` completes the code hardening slice for this epic:
+
+- a dedicated bounded realtime MIDI execution lane owns Bank and AutoLoop
+  deadlines and cancels obsolete generations;
+- the engine exposes realtime queue and latency health so a failed lane cannot
+  produce a false-green Live status;
+- library reads are revisioned and unchanged library/editor state is excluded
+  from high-frequency polling;
+- SQLite backup and restore are executed by the owning engine with integrity,
+  schema, staging and rollback validation;
+- the current macOS adapter reconnects to a channel-specific persistent engine
+  after UI relaunch without resetting show state;
+- checksum, licence, notices and SPDX SBOM are included in the Dev artifact.
+
+The retained evidence is documented in
+[`0.4.0-dev-35-show-grade-hardening.md`](../release/0.4.0-dev-35-show-grade-hardening.md).
+Promotion of the lifecycle adapter to `SMAppService`, a one-hour soak,
+Instruments evidence and the physical CDJ/SoundSwitch/DMX run remain explicit
+pre-RC work. They are not silently claimed by the successful Dev gates.

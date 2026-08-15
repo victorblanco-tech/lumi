@@ -252,7 +252,23 @@ struct LibraryWorkspaceTests {
             "sourceName": .string("Lumi Virtual MIDI"),
             "protocol": .string("MIDI 1.0 UMP"),
             "sentPulseCount": .number(1),
-            "lastEvent": .string("Learn pulse sent")
+            "lastEvent": .string("Learn pulse sent"),
+            "realtimeScheduler": .object([
+                "lane": .object([
+                    "queueCapacity": .number(64),
+                    "queueDepth": .number(0),
+                    "queueHighWater": .number(3),
+                    "scheduledCount": .number(20),
+                    "emittedCount": .number(18),
+                    "cancelledCount": .number(2),
+                    "saturationCount": .number(0),
+                    "latencySampleCount": .number(18),
+                    "latencyP50Micros": .number(800),
+                    "latencyP95Micros": .number(2_100),
+                    "latencyP99Micros": .number(3_000),
+                    "latencyMaxMicros": .number(3_200)
+                ])
+            ])
         ])
         let state = try LibrarySnapshotDecoder().decode(
             envelope(trackValues: [trackValue()], midiIntegration: midi)
@@ -261,6 +277,8 @@ struct LibraryWorkspaceTests {
         #expect(state.midiIntegration?.isReady == true)
         #expect(state.midiIntegration?.sourceName == "Lumi Virtual MIDI")
         #expect(state.midiIntegration?.sentPulseCount == 1)
+        #expect(state.midiIntegration?.realtimeLane?.isHealthy == true)
+        #expect(state.midiIntegration?.realtimeLane?.latencyP95Micros == 2_100)
     }
 
     @Test("Local Playback MIDI Clock diagnostics decode independently")

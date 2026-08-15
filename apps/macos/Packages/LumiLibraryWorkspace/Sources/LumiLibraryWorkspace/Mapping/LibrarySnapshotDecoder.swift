@@ -433,7 +433,30 @@ public struct LibrarySnapshotDecoder: Sendable {
             sourceName: try string(midi, "sourceName"),
             midiProtocol: try string(midi, "protocol"),
             sentPulseCount: try unsigned(midi, "sentPulseCount"),
-            lastEvent: optionalString(midi, "lastEvent")
+            lastEvent: optionalString(midi, "lastEvent"),
+            realtimeLane: try decodeRealtimeMidiLane(midi["realtimeScheduler"])
+        )
+    }
+
+    private func decodeRealtimeMidiLane(_ value: JSONValue?) throws -> RealtimeMidiLaneState? {
+        guard let value, value != .null else { return nil }
+        guard case let .object(scheduler) = value,
+              case let .object(lane)? = scheduler["lane"] else {
+            throw LibrarySnapshotError.invalidObject
+        }
+        return RealtimeMidiLaneState(
+            queueCapacity: try unsigned(lane, "queueCapacity"),
+            queueDepth: try unsigned(lane, "queueDepth"),
+            queueHighWater: try unsigned(lane, "queueHighWater"),
+            scheduledCount: try unsigned(lane, "scheduledCount"),
+            emittedCount: try unsigned(lane, "emittedCount"),
+            cancelledCount: try unsigned(lane, "cancelledCount"),
+            saturationCount: try unsigned(lane, "saturationCount"),
+            latencySampleCount: try unsigned(lane, "latencySampleCount"),
+            latencyP50Micros: try unsigned(lane, "latencyP50Micros"),
+            latencyP95Micros: try unsigned(lane, "latencyP95Micros"),
+            latencyP99Micros: try unsigned(lane, "latencyP99Micros"),
+            latencyMaxMicros: try unsigned(lane, "latencyMaxMicros")
         )
     }
 

@@ -1,6 +1,6 @@
 # Story E4-03A: Regression baseline and security floor
 
-- Status: **In progress — local gates and first retained baseline implemented**
+- Status: **Done for Dev — RC/lab evidence remains at epic level**
 - Priority: **P0 Critical**
 - Effort: **5**
 - Components: Delivery, Engine, macOS, Pro DJ Link, Security
@@ -96,5 +96,14 @@ Implemented in `0.4.0-dev-34`:
   - engine runtime during the UI acceptance: one startup lateness of 60.1 ms
     over 28,925 ticks, zero fail-closed holds and zero provider failures.
 
-The one-hour RC soak and retained active-show CoreMIDI timing histogram remain
-open; therefore this story is intentionally not marked Done.
+Completed in `0.4.0-dev-35`:
+
+- functional, technical, security and Apple application gates pass locally;
+- the real UI was exercised through Integrations, Live operation state and an
+  engine-owned backup using accessibility automation;
+- concurrent monitor and interactive IPC exchanges have a real-process framing
+  regression test;
+- the packaged artifact contains an SPDX 2.3 SBOM.
+
+The one-hour soak and physical-show evidence remain release gates owned by the
+epic, not missing Dev implementation in this story.

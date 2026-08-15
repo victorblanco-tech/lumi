@@ -1,6 +1,6 @@
 # Story E4-03C: Engine service and data recovery
 
-- Status: **Ready after E4-03B runtime contract**
+- Status: **Migration adapter complete — SMAppService promotion pending**
 - Priority: **P0 Critical**
 - Effort: **8**
 - Components: Engine, macOS, Persistence, Delivery
@@ -70,3 +70,22 @@ an active database writer.
 Service migration must be delivered behind a reversible launch adapter. The
 existing Dev data is backed up and validated before the first ownership switch;
 automatic destructive cleanup is not allowed.
+
+## Dev-35 implementation result
+
+- the Rust engine accepts sequential authenticated UI sessions while retaining
+  runtime and operation state between connections;
+- the macOS supervisor stores a channel-specific endpoint/token record with
+  owner-only token permissions and reconnects to the live process;
+- monitor and interactive commands are serialized through one exchange lease,
+  preventing actor reentrancy from corrupting protocol framing;
+- a real-process test and an interactive Dev UI quit/relaunch prove that the
+  engine PID and Armed state survive the window process;
+- backup and restore now execute on the library-owning engine through SQLite's
+  backup API with integrity/schema checks, atomic staging and rollback;
+- WAL backup, corrupt input and live restore/rollback have repository tests.
+
+This is the reversible lifecycle adapter required before service migration. It
+does not yet register a login-capable LaunchAgent through `SMAppService`, so
+automatic engine restart after an engine crash and that final ADR-0003 service
+promotion remain open before RC.

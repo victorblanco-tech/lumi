@@ -97,4 +97,23 @@ struct EngineCommandTests {
                 == .string("/Backups/Lumi-pre-reset.lumibackup/library.sqlite")
         )
     }
+
+    @Test("Backup and restore stay inside the authenticated engine protocol")
+    func engineOwnedBackupPayloads() {
+        let backup = EngineCommand.createLibraryBackup(
+            destination: "/Backups/Lumi.lumibackup/library.sqlite"
+        ).payload()
+        #expect(backup["kind"] == .string("createLibraryBackup"))
+        #expect(
+            backup["destination"] == .string("/Backups/Lumi.lumibackup/library.sqlite")
+        )
+
+        let restore = EngineCommand.restoreLibraryBackup(
+            source: "/Backups/Lumi.lumibackup/library.sqlite",
+            rollback: "/Backups/.rollback/library.sqlite"
+        ).payload()
+        #expect(restore["kind"] == .string("restoreLibraryBackup"))
+        #expect(restore["source"] == .string("/Backups/Lumi.lumibackup/library.sqlite"))
+        #expect(restore["rollback"] == .string("/Backups/.rollback/library.sqlite"))
+    }
 }

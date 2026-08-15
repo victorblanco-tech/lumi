@@ -33,6 +33,91 @@ fn migrates_an_empty_database() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
+fn engine_owned_backup_is_coherent_while_wal_repository_remains_open() -> Result<(), Box<dyn Error>>
+{
+    let live_path = temporary_database_path()?;
+    let backup_path = temporary_database_path()?;
+    let baseline = DemoLibrarySourceProvider::curated().load_baseline()?;
+    let mut repository = SqliteLibraryRepository::open(&live_path)?;
+    repository.import_baseline(&baseline)?;
+
+    repository.create_consistent_backup(&backup_path)?;
+    SqliteLibraryRepository::validate_backup(&backup_path)?;
+    let restored = SqliteLibraryRepository::open(&backup_path)?;
+    assert_eq!(
+        restored
+            .page_tracks(TrackPageRequest::try_new(0, 1)?)?
+            .total(),
+        baseline.tracks().len() as u64
+    );
+
+    let _ = std::fs::remove_file(live_path);
+    let _ = std::fs::remove_file(backup_path);
+    Ok(())
+}
+
+#[test]
+fn corrupt_or_future_backup_is_rejected_before_live_data_changes() -> Result<(), Box<dyn Error>> {
+    let live_path = temporary_database_path()?;
+    let corrupt_path = temporary_database_path()?;
+    let rollback_path = temporary_database_path()?;
+    let baseline = DemoLibrarySourceProvider::curated().load_baseline()?;
+    let mut repository = SqliteLibraryRepository::open(&live_path)?;
+    repository.import_baseline(&baseline)?;
+    std::fs::write(&corrupt_path, b"not a sqlite database")?;
+
+    assert!(
+        repository
+            .restore_consistent_backup(&corrupt_path, &rollback_path)
+            .is_err()
+    );
+    assert_eq!(
+        repository
+            .page_tracks(TrackPageRequest::try_new(0, 1)?)?
+            .total(),
+        baseline.tracks().len() as u64
+    );
+    assert!(!rollback_path.exists());
+
+    let _ = std::fs::remove_file(live_path);
+    let _ = std::fs::remove_file(corrupt_path);
+    Ok(())
+}
+
+#[test]
+fn successful_live_restore_replaces_data_and_retains_a_valid_rollback() -> Result<(), Box<dyn Error>>
+{
+    let live_path = temporary_database_path()?;
+    let backup_path = temporary_database_path()?;
+    let rollback_path = temporary_database_path()?;
+    let initial =
+        DemoLibrarySourceProvider::curated_revision(DemoLibraryRevision::V1).load_baseline()?;
+    let mut repository = SqliteLibraryRepository::open(&live_path)?;
+    repository.import_baseline(&initial)?;
+    let track_id = repository.track_ids_missing_timelines(1)?[0];
+    let track = repository.track(track_id)?.ok_or("track")?;
+    repository.create_consistent_backup(&backup_path)?;
+    repository.append_timeline_revision(&source_timeline(track_id, &track)?, None)?;
+    assert!(repository.timeline_head(track_id)?.is_some());
+
+    repository.restore_consistent_backup(&backup_path, &rollback_path)?;
+    assert_eq!(
+        repository
+            .page_tracks(TrackPageRequest::try_new(0, 1)?)?
+            .total(),
+        initial.tracks().len() as u64
+    );
+    assert!(repository.timeline_head(track_id)?.is_none());
+    let rollback = SqliteLibraryRepository::open(&rollback_path)?;
+    assert!(rollback.timeline_head(track_id)?.is_some());
+
+    let _ = std::fs::remove_file(live_path);
+    let _ = std::fs::remove_file(backup_path);
+    let _ = std::fs::remove_file(rollback_path);
+    Ok(())
+}
+
+#[test]
 fn missing_timeline_query_returns_only_tracks_that_still_need_mapping() -> Result<(), Box<dyn Error>>
 {
     let baseline = DemoLibrarySourceProvider::curated().load_baseline()?;

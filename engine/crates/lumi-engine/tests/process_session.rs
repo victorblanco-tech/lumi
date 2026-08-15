@@ -2,7 +2,7 @@ use std::io::{BufRead as _, BufReader, Write as _};
 use std::net::TcpStream;
 use std::process::{Command, Stdio};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use lumi_engine::StartupReady;
 use lumi_protocol::{MessageDecoder, MessageEnvelope, MessageType, PROTOCOL_VERSION};
@@ -217,24 +217,32 @@ fn real_engine_process_starts_empty_and_serves_authenticated_product_state() {
     );
     drop(connection);
 
-    let deadline = Instant::now() + Duration::from_secs(2);
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                assert!(status.success());
-                break;
-            }
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
-            Ok(None) => {
-                let _ = child.kill();
-                panic!("engine did not exit after its client disconnected");
-            }
-            Err(error) => {
-                let _ = child.kill();
-                panic!("failed to inspect engine process: {error}");
-            }
-        }
-    }
+    thread::sleep(Duration::from_millis(40));
+    assert!(
+        child.try_wait().is_ok_and(|status| status.is_none()),
+        "the engine service must outlive a UI client"
+    );
+    let mut reconnected = TcpStream::connect((ready.host.as_str(), ready.port))
+        .unwrap_or_else(|error| panic!("failed to reconnect to engine: {error}"));
+    writeln!(reconnected, "{{\"sessionToken\":\"{TEST_SESSION_TOKEN}\"}}")
+        .unwrap_or_else(|error| panic!("failed to reauthenticate: {error}"));
+    let mut reconnect_snapshot = String::new();
+    BufReader::new(&reconnected)
+        .read_line(&mut reconnect_snapshot)
+        .unwrap_or_else(|error| panic!("failed to read reconnect snapshot: {error}"));
+    let reconnect_snapshot = MessageDecoder::decode(reconnect_snapshot.as_bytes())
+        .unwrap_or_else(|error| panic!("invalid reconnect snapshot: {error}"));
+    assert_eq!(
+        reconnect_snapshot.payload.get("operationState"),
+        Some(&Value::String("armed".to_owned()))
+    );
+    assert_eq!(
+        reconnect_snapshot.payload.get("stateRevision"),
+        armed.payload.get("stateRevision")
+    );
+    drop(reconnected);
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn command(message_id: &str, sequence: u64, payload: Value) -> Value {

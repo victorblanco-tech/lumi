@@ -196,22 +196,44 @@ public struct MidiIntegrationState: Equatable, Sendable {
     public let midiProtocol: String
     public let sentPulseCount: UInt64
     public let lastEvent: String?
+    public let realtimeLane: RealtimeMidiLaneState?
 
     public init(
         state: String,
         sourceName: String,
         midiProtocol: String,
         sentPulseCount: UInt64,
-        lastEvent: String?
+        lastEvent: String?,
+        realtimeLane: RealtimeMidiLaneState? = nil
     ) {
         self.state = state
         self.sourceName = sourceName
         self.midiProtocol = midiProtocol
         self.sentPulseCount = sentPulseCount
         self.lastEvent = lastEvent
+        self.realtimeLane = realtimeLane
     }
 
     public var isReady: Bool { state == "ready" }
+}
+
+public struct RealtimeMidiLaneState: Equatable, Sendable {
+    public let queueCapacity: UInt64
+    public let queueDepth: UInt64
+    public let queueHighWater: UInt64
+    public let scheduledCount: UInt64
+    public let emittedCount: UInt64
+    public let cancelledCount: UInt64
+    public let saturationCount: UInt64
+    public let latencySampleCount: UInt64
+    public let latencyP50Micros: UInt64
+    public let latencyP95Micros: UInt64
+    public let latencyP99Micros: UInt64
+    public let latencyMaxMicros: UInt64
+
+    public var isHealthy: Bool {
+        saturationCount == 0 && (latencySampleCount == 0 || latencyP95Micros <= 20_000)
+    }
 }
 
 public struct MidiClockIntegrationState: Equatable, Sendable {

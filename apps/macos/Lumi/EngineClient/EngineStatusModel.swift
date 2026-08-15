@@ -70,6 +70,7 @@ final class EngineStatusModel: ObservableObject {
     private var libraryQueryGeneration: UInt64 = 0
     private var isDrainingLibraryQueries = false
     private var latestSnapshot: EngineSnapshot?
+    private var lastLibraryRevision: UInt64?
     private var endpointDescription: String?
     private var protocolVersion: Int?
     private var pendingResetBackupDatabasePath: String?
@@ -117,6 +118,7 @@ final class EngineStatusModel: ObservableObject {
                 protocolVersion: endpoint.protocolVersion
             )
             libraryState = try decodeLibraryState(envelope)
+            lastLibraryRevision = libraryRevision(in: envelope)
             lifecycle = .ready
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
@@ -170,6 +172,7 @@ final class EngineStatusModel: ObservableObject {
         case invalidPackage
         case untrustedPackage
         case invalidPreferences
+        case engineRejected
 
         var errorDescription: String? {
             switch self {
@@ -177,6 +180,7 @@ final class EngineStatusModel: ObservableObject {
             case .invalidPackage: "The selected Lumi backup is incomplete or invalid."
             case .untrustedPackage: "Only backups created inside this Lumi channel may be restored."
             case .invalidPreferences: "The backup contains invalid app preferences."
+            case .engineRejected: "The engine rejected the transactional backup or restore."
             }
         }
     }
@@ -197,7 +201,7 @@ final class EngineStatusModel: ObservableObject {
     private func createBackupPackage(
         reason: String,
         summary: DataManagementState
-    ) throws -> URL {
+    ) async throws -> URL {
         let fileManager = FileManager.default
         let database = try libraryDatabaseURL()
         guard fileManager.fileExists(atPath: database.path) else {
@@ -220,14 +224,12 @@ final class EngineStatusModel: ObservableObject {
             withIntermediateDirectories: false
         )
         do {
-            for suffix in ["", "-wal", "-shm"] {
-                let source = URL(fileURLWithPath: database.path + suffix)
-                guard fileManager.fileExists(atPath: source.path) else { continue }
-                let destinationName = suffix.isEmpty ? "library.sqlite" : "library.sqlite\(suffix)"
-                try fileManager.copyItem(
-                    at: source,
-                    to: temporaryPackage.appendingPathComponent(destinationName)
-                )
+            let databaseSnapshot = temporaryPackage.appendingPathComponent("library.sqlite")
+            let response = try await supervisor.send(
+                .createLibraryBackup(destination: databaseSnapshot.path)
+            )
+            guard response.messageType == .snapshot else {
+                throw BackupError.engineRejected
             }
             guard let bundleIdentifier = Bundle.main.bundleIdentifier else {
                 throw BackupError.invalidPreferences
@@ -309,33 +311,6 @@ final class EngineStatusModel: ObservableObject {
         }
     }
 
-    private func replaceLibraryDatabase(from package: URL) throws {
-        let fileManager = FileManager.default
-        let destination = try libraryDatabaseURL()
-        let temporary = destination
-            .deletingLastPathComponent()
-            .appendingPathComponent(".restore-\(UUID().uuidString).sqlite")
-        try fileManager.copyItem(
-            at: package.appendingPathComponent("library.sqlite"),
-            to: temporary
-        )
-        for suffix in ["", "-wal", "-shm"] {
-            let target = URL(fileURLWithPath: destination.path + suffix)
-            if fileManager.fileExists(atPath: target.path) {
-                try fileManager.removeItem(at: target)
-            }
-        }
-        try fileManager.moveItem(at: temporary, to: destination)
-        for suffix in ["-wal", "-shm"] {
-            let source = package.appendingPathComponent("library.sqlite\(suffix)")
-            guard fileManager.fileExists(atPath: source.path) else { continue }
-            try fileManager.copyItem(
-                at: source,
-                to: URL(fileURLWithPath: destination.path + suffix)
-            )
-        }
-    }
-
     private func restorePreferences(from package: URL) throws {
         let data = try Data(contentsOf: package.appendingPathComponent("preferences.plist"))
         let value = try PropertyListSerialization.propertyList(from: data, options: [], format: nil)
@@ -398,13 +373,11 @@ final class EngineStatusModel: ObservableObject {
         dataManagementOperation = .init(
             phase: .backingUp,
             title: "Creating complete backup",
-            detail: "Stopping the local engine briefly to create one consistent snapshot."
+            detail: "The engine is creating one consistent SQLite snapshot while it remains online."
         )
         do {
             let summary = libraryState.dataManagement
-            await stop()
-            let package = try createBackupPackage(reason: "manual", summary: summary)
-            await start()
+            let package = try await createBackupPackage(reason: "manual", summary: summary)
             refreshBackupRecords()
             dataManagementOperation = .init(
                 phase: .completed,
@@ -412,7 +385,6 @@ final class EngineStatusModel: ObservableObject {
                 detail: package.lastPathComponent
             )
         } catch {
-            await start()
             dataManagementOperation = .init(
                 phase: .failed,
                 title: "Backup failed",
@@ -437,10 +409,8 @@ final class EngineStatusModel: ObservableObject {
         )
         do {
             let summary = libraryState.dataManagement
-            await stop()
-            let package = try createBackupPackage(reason: "pre-reset", summary: summary)
+            let package = try await createBackupPackage(reason: "pre-reset", summary: summary)
             let databasePath = package.appendingPathComponent("library.sqlite").path
-            await start()
             let previewed = await exchangeLibraryCommand(
                 .previewLibraryReset(preserveTrackIDs: preserveTrackIDs)
             )
@@ -461,7 +431,6 @@ final class EngineStatusModel: ObservableObject {
                 detail: "A complete pre-reset backup was created. Review the impact before applying it."
             )
         } catch {
-            await start()
             pendingResetBackupDatabasePath = nil
             dataManagementOperation = .init(
                 phase: .failed,
@@ -529,11 +498,35 @@ final class EngineStatusModel: ObservableObject {
             let package = URL(fileURLWithPath: path, isDirectory: true)
             try validateBackupPackage(package)
             let summary = libraryState.dataManagement
-            await stop()
-            _ = try createBackupPackage(reason: "pre-restore", summary: summary)
-            try replaceLibraryDatabase(from: package)
+            _ = try await createBackupPackage(reason: "pre-restore", summary: summary)
+            let rollbackPackage = try backupsDirectoryURL().appendingPathComponent(
+                ".\(UUID().uuidString).rollback",
+                isDirectory: true
+            )
+            try FileManager.default.createDirectory(
+                at: rollbackPackage,
+                withIntermediateDirectories: false
+            )
+            defer { try? FileManager.default.removeItem(at: rollbackPackage) }
+            let response = try await supervisor.send(
+                .restoreLibraryBackup(
+                    source: package.appendingPathComponent("library.sqlite").path,
+                    rollback: rollbackPackage.appendingPathComponent("library.sqlite").path
+                )
+            )
+            guard response.messageType == .snapshot else {
+                throw BackupError.engineRejected
+            }
             try restorePreferences(from: package)
-            await start()
+            latestSnapshot = try snapshotDecoder.decode(
+                response,
+                endpointDescription: endpointDescription ?? "local engine",
+                protocolVersion: protocolVersion ?? WireProtocol.version
+            )
+            libraryState = try decodeLibraryState(response)
+            if let latestSnapshot {
+                workspaceState = LiveWorkspacePresenter.ready(latestSnapshot)
+            }
             refreshBackupRecords()
             dataManagementOperation = .init(
                 phase: .completed,
@@ -541,7 +534,6 @@ final class EngineStatusModel: ObservableObject {
                 detail: "Library, phrase work, lighting configuration, and saved app preferences were restored. Relaunch Lumi once to apply every restored appearance preference."
             )
         } catch {
-            await start()
             dataManagementOperation = .init(
                 phase: .failed,
                 title: "Restore failed",
@@ -567,6 +559,7 @@ final class EngineStatusModel: ObservableObject {
         await supervisor.stop()
         lifecycle = .stopped
         latestSnapshot = nil
+        lastLibraryRevision = nil
         endpointDescription = nil
         protocolVersion = nil
         workspaceState = LiveWorkspacePresenter.stopped()
@@ -1126,7 +1119,7 @@ final class EngineStatusModel: ObservableObject {
         } catch {
             let errorDescription = String(describing: error)
             Self.logger.error(
-                "USB inspection failed: \(errorDescription, privacy: .public)"
+                "USB inspection failed: \(errorDescription, privacy: .private(mask: .hash))"
             )
             sourceImportFeedback = (error as? LocalizedError)?.errorDescription
                 ?? "The USB source could not be inspected."
@@ -1535,7 +1528,7 @@ final class EngineStatusModel: ObservableObject {
             return (snapshot, envelope)
         } catch {
             Self.logger.error(
-                "Snapshot decode failed after \(context, privacy: .public); requesting authoritative recovery snapshot: \(error.localizedDescription, privacy: .public)"
+                "Snapshot decode failed after \(context, privacy: .public); requesting authoritative recovery snapshot: \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             let recoveryEnvelope = try await supervisor.getSnapshot()
             let snapshot = try await Task.detached(priority: .userInitiated) {
@@ -1571,6 +1564,16 @@ final class EngineStatusModel: ObservableObject {
         try libraryDecoder.decode(envelope).preservingDeviceInspection(
             libraryState.rekordboxDeviceInspection
         )
+    }
+
+    private func libraryRevision(in envelope: MessageEnvelope) -> UInt64? {
+        guard case let .number(value) = envelope.payload["libraryRevision"],
+              value.isFinite,
+              value >= 0,
+              value.rounded(.towardZero) == value else {
+            return nil
+        }
+        return UInt64(value)
     }
 
     private func exchangeMidiCommand(_ command: EngineCommand, success: String) async {
@@ -2080,7 +2083,7 @@ final class EngineStatusModel: ObservableObject {
             )
             if let failure = EngineCommandFailure(envelope) {
                 Self.logger.error(
-                    "Local transport update rejected for deck \(transport.deckID): \(failure.message, privacy: .public)"
+                    "Local transport update rejected for deck \(transport.deckID): \(failure.message, privacy: .private(mask: .hash))"
                 )
                 return
             }
@@ -2093,7 +2096,7 @@ final class EngineStatusModel: ObservableObject {
             }
         } catch {
             Self.logger.error(
-                "Local transport exchange failed for deck \(transport.deckID): \(error.localizedDescription, privacy: .public)"
+                "Local transport exchange failed for deck \(transport.deckID): \(error.localizedDescription, privacy: .private(mask: .hash))"
             )
             // Audio remains local and the next transport sample retries safely.
         }
@@ -2159,10 +2162,13 @@ final class EngineStatusModel: ObservableObject {
                 guard connectedDecks || healthTick == 0 else { continue }
                 guard await self.acquireInteractiveExchange() else { continue }
                 do {
-                    let decodeLibrary = healthTick == 0
-                    let envelope = try await self.supervisor.getSnapshot(
-                        includeLibrary: decodeLibrary
-                    )
+                    var envelope = try await self.supervisor.getSnapshot(includeLibrary: false)
+                    var observedLibraryRevision = self.libraryRevision(in: envelope)
+                    let decodeLibrary = observedLibraryRevision != self.lastLibraryRevision
+                    if decodeLibrary {
+                        envelope = try await self.supervisor.getSnapshot(includeLibrary: true)
+                        observedLibraryRevision = self.libraryRevision(in: envelope)
+                    }
                     self.isExchangingCommand = false
                     let snapshotDecoder = self.snapshotDecoder
                     let libraryDecoder = self.libraryDecoder
@@ -2186,18 +2192,27 @@ final class EngineStatusModel: ObservableObject {
                         self.workspaceState = nextWorkspaceState
                     }
                     if healthTick == 0 {
-                        guard let decodedLibraryState = decoded.1 else { continue }
+                        guard decodeLibrary, let decodedLibraryState = decoded.1 else { continue }
                         let nextLibraryState = decodedLibraryState.preservingDeviceInspection(
                             self.libraryState.rekordboxDeviceInspection
                         )
                         if nextLibraryState != self.libraryState {
                             self.libraryState = nextLibraryState
                         }
+                        self.lastLibraryRevision = observedLibraryRevision
+                    } else if decodeLibrary, let decodedLibraryState = decoded.1 {
+                        let nextLibraryState = decodedLibraryState.preservingDeviceInspection(
+                            self.libraryState.rekordboxDeviceInspection
+                        )
+                        if nextLibraryState != self.libraryState {
+                            self.libraryState = nextLibraryState
+                        }
+                        self.lastLibraryRevision = observedLibraryRevision
                     }
                 } catch {
                     self.isExchangingCommand = false
                     Self.logger.error(
-                        "Engine snapshot monitor failed: \(error.localizedDescription, privacy: .public)"
+                        "Engine snapshot monitor failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
                     )
                     // The one-second process health check owns disconnect state. A
                     // single missed polling frame must not disturb Live UI.

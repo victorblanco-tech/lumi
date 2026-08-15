@@ -60,6 +60,7 @@ const MAX_DECK_WAVEFORM_DETAIL_POINTS: usize = 16_384;
 
 pub struct LibraryWorker {
     repository: SqliteLibraryRepository,
+    database_path: Option<std::path::PathBuf>,
     source_id: String,
     source_kind: String,
     source_name: String,
@@ -563,11 +564,13 @@ pub enum AutoloopCatalogMutation {
 
 impl LibraryWorker {
     pub fn demo() -> Result<Self, LibraryWorkerError> {
-        let repository = match std::env::var_os(DATABASE_PATH_ENVIRONMENT) {
+        let database_path =
+            std::env::var_os(DATABASE_PATH_ENVIRONMENT).map(std::path::PathBuf::from);
+        let repository = match database_path.as_ref() {
             Some(path) => SqliteLibraryRepository::open(path)?,
             None => SqliteLibraryRepository::in_memory()?,
         };
-        Self::demo_with_repository(repository)
+        Self::demo_with_repository(repository, database_path)
     }
 
     pub fn autoloop_catalog(&self) -> Result<AutoloopCatalog, LibraryWorkerError> {
@@ -576,11 +579,15 @@ impl LibraryWorker {
 
     #[cfg(test)]
     fn demo_at(path: &std::path::Path) -> Result<Self, LibraryWorkerError> {
-        Self::demo_with_repository(SqliteLibraryRepository::open(path)?)
+        Self::demo_with_repository(
+            SqliteLibraryRepository::open(path)?,
+            Some(path.to_path_buf()),
+        )
     }
 
     fn demo_with_repository(
         mut repository: SqliteLibraryRepository,
+        database_path: Option<std::path::PathBuf>,
     ) -> Result<Self, LibraryWorkerError> {
         let provider = DemoLibrarySourceProvider::curated();
         let baseline = provider.load_baseline()?;
@@ -623,6 +630,7 @@ impl LibraryWorker {
         seed_default_autoloop_catalog(&mut repository)?;
         let mut worker = Self {
             repository,
+            database_path,
             source_id: persisted_source.id().as_str().to_owned(),
             source_kind: persisted_source.kind().to_owned(),
             source_name: persisted_source.display_name().to_owned(),
@@ -644,6 +652,67 @@ impl LibraryWorker {
             worker.remap_untouched_source_timelines()?;
         }
         Ok(worker)
+    }
+
+    pub fn create_consistent_backup(
+        &self,
+        destination: &std::path::Path,
+    ) -> Result<(), LibraryWorkerError> {
+        self.validate_backup_location(destination)?;
+        self.repository.create_consistent_backup(destination)?;
+        Ok(())
+    }
+
+    pub fn restore_consistent_backup(
+        &mut self,
+        source: &std::path::Path,
+        rollback: &std::path::Path,
+    ) -> Result<(), LibraryWorkerError> {
+        self.validate_backup_location(source)?;
+        self.validate_backup_location(rollback)?;
+        self.repository
+            .restore_consistent_backup(source, rollback)?;
+        self.pending_source_refresh = None;
+        self.pending_rekordbox_preview = None;
+        self.pending_rekordbox_diff = None;
+        self.last_rekordbox_apply = None;
+        self.pending_device_inspection = None;
+        self.pending_library_reset = None;
+        let persisted = self
+            .repository
+            .library_source(&lumi_library::LibrarySourceId::try_new(&self.source_id)?)?
+            .ok_or(LibraryWorkerError::MissingLibrarySource)?;
+        self.source_id = persisted.id().as_str().to_owned();
+        self.source_kind = persisted.kind().to_owned();
+        self.source_name = persisted.display_name().to_owned();
+        self.source_revision = persisted.revision().as_str().to_owned();
+        seed_default_role_catalog(&mut self.repository)?;
+        seed_default_autoloop_catalog(&mut self.repository)?;
+        self.ensure_imported_timelines()?;
+        Ok(())
+    }
+
+    fn validate_backup_location(&self, path: &std::path::Path) -> Result<(), LibraryWorkerError> {
+        let database = self
+            .database_path
+            .as_ref()
+            .ok_or(LibraryWorkerError::BackupUnavailable)?;
+        let root = database
+            .parent()
+            .ok_or(LibraryWorkerError::BackupUnavailable)?
+            .join("Backups");
+        let parent = path
+            .parent()
+            .ok_or(LibraryWorkerError::UntrustedBackupPath)?;
+        let package_parent = parent
+            .parent()
+            .ok_or(LibraryWorkerError::UntrustedBackupPath)?;
+        if package_parent != root
+            || path.file_name().and_then(|value| value.to_str()) != Some("library.sqlite")
+        {
+            return Err(LibraryWorkerError::UntrustedBackupPath);
+        }
+        Ok(())
     }
 
     pub fn query(&mut self, search: String, playlist_id: Option<u64>, offset: u32, limit: u16) {
@@ -3641,6 +3710,10 @@ pub enum LibraryWorkerError {
     MissingLibraryResetBackup,
     #[error("the automatic pre-reset backup is not a valid SQLite library")]
     InvalidLibraryResetBackup,
+    #[error("engine-owned backups require a persistent channel database")]
+    BackupUnavailable,
+    #[error("backup path is outside this Lumi channel's managed Backups directory")]
+    UntrustedBackupPath,
     #[error("the track editor selection changed")]
     EditorTrackMismatch,
     #[error("the selected track has no Lumi timeline")]

@@ -287,6 +287,7 @@ public enum LiveWorkspacePresenter {
         let lightingHasProblem = snapshot.midiIntegration?.lastError != nil
             || (snapshot.midiIntegration?.autoPublishEnabled == true
                 && snapshot.midiIntegration?.state != "ready")
+            || snapshot.midiIntegration?.realtimeLane?.isHealthy == false
         let linkHasProblem = snapshot.abletonLinkIntegration?.enabled == true
             && (snapshot.abletonLinkIntegration?.state == "degraded"
                 || snapshot.abletonLinkIntegration?.lastError != nil)
@@ -395,6 +396,7 @@ public enum LiveWorkspacePresenter {
         guard let midi = snapshot.midiIntegration else { return .degraded }
         if midi.lastError != nil { return .degraded }
         if !midi.autoPublishEnabled { return .empty }
+        if midi.realtimeLane?.isHealthy == false { return .degraded }
         return midi.state == "ready" ? healthy : .degraded
     }
 

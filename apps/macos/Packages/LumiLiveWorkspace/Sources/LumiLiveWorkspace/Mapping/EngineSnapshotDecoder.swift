@@ -236,7 +236,34 @@ public struct EngineSnapshotDecoder: Sendable {
             autoPublishEnabled: autoPublishEnabled,
             timingOffsetMillis: timingOffsetMillis,
             pendingTimingOffsetMillis: pendingTimingOffsetMillis,
-            bankPreRollMillis: bankPreRollMillis
+            bankPreRollMillis: bankPreRollMillis,
+            realtimeLane: try decodeRealtimeMidiLane(midi["realtimeScheduler"])
+        )
+    }
+
+    private func decodeRealtimeMidiLane(
+        _ value: JSONValue?
+    ) throws -> RealtimeMidiOutputLaneSnapshot? {
+        guard let value, value != .null else { return nil }
+        guard case let .object(scheduler) = value,
+              case let .object(lane)? = scheduler["lane"],
+              let queueCapacity = unsignedInteger(lane["queueCapacity"]),
+              let queueDepth = unsignedInteger(lane["queueDepth"]),
+              let queueHighWater = unsignedInteger(lane["queueHighWater"]),
+              let saturationCount = unsignedInteger(lane["saturationCount"]),
+              let latencySampleCount = unsignedInteger(lane["latencySampleCount"]),
+              let latencyP95Micros = unsignedInteger(lane["latencyP95Micros"]),
+              queueDepth <= queueCapacity,
+              queueHighWater <= queueCapacity else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        return RealtimeMidiOutputLaneSnapshot(
+            queueCapacity: queueCapacity,
+            queueDepth: queueDepth,
+            queueHighWater: queueHighWater,
+            saturationCount: saturationCount,
+            latencySampleCount: latencySampleCount,
+            latencyP95Micros: latencyP95Micros
         )
     }
 

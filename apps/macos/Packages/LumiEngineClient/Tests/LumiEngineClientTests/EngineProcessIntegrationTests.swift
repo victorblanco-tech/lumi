@@ -634,6 +634,55 @@ func launchesRealEngine() async throws {
     }
 }
 
+@Test("Concurrent monitor and interactive exchanges remain framed and correlated")
+func serializesConcurrentEngineExchanges() async throws {
+    let environment = ProcessInfo.processInfo.environment
+    guard let executablePath = environment["LUMI_ENGINE_TEST_EXECUTABLE"] else {
+        Issue.record("LUMI_ENGINE_TEST_EXECUTABLE is required")
+        return
+    }
+
+    let supervisor = EngineProcessSupervisor()
+    let databaseURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("lumi-swift-concurrent-\(UUID().uuidString).sqlite")
+    defer {
+        try? FileManager.default.removeItem(at: databaseURL)
+        try? FileManager.default.removeItem(atPath: databaseURL.path + "-wal")
+        try? FileManager.default.removeItem(atPath: databaseURL.path + "-shm")
+        try? FileManager.default.removeItem(
+            at: databaseURL.deletingLastPathComponent().appendingPathComponent(
+                ".\(databaseURL.lastPathComponent).engine-service.json"
+            )
+        )
+    }
+
+    do {
+        let endpoint = try await supervisor.launch(
+            engineExecutable: URL(fileURLWithPath: executablePath),
+            libraryDatabaseURL: databaseURL,
+            automaticallyPublishesMidi: false
+        )
+        _ = try await supervisor.connect(to: endpoint)
+        async let monitor = supervisor.getSnapshot(
+            includeLibrary: false,
+            messageID: "concurrent-monitor"
+        )
+        async let interactive = supervisor.getSnapshot(
+            includeLibrary: true,
+            messageID: "concurrent-interactive"
+        )
+        let (monitorResponse, interactiveResponse) = try await (monitor, interactive)
+        #expect(monitorResponse.correlationId == "concurrent-monitor")
+        #expect(interactiveResponse.correlationId == "concurrent-interactive")
+        #expect(monitorResponse.messageType == .snapshot)
+        #expect(interactiveResponse.messageType == .snapshot)
+        await supervisor.stop()
+    } catch {
+        await supervisor.stop()
+        throw error
+    }
+}
+
 @Test("A library track keeps its exact Lumi identity through Local Playback and output planning")
 func loadsLibraryTrackIntoLocalPlayback() async throws {
     let environment = ProcessInfo.processInfo.environment

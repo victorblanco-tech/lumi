@@ -295,6 +295,8 @@ public enum EngineCommand: Equatable, Sendable {
     case syncRekordboxDevice(root: String, sourceID: String? = nil, playlistIDs: [UInt32])
     case previewLibraryReset(preserveTrackIDs: [UInt64])
     case applyLibraryReset(expectedResetToken: String, backupDatabasePath: String)
+    case createLibraryBackup(destination: String)
+    case restoreLibraryBackup(source: String, rollback: String)
     case reconcileLibrarySource(
         trackID: UInt64,
         expectedTimelineRevision: UInt64,
@@ -459,6 +461,17 @@ public enum EngineCommand: Equatable, Sendable {
                 "kind": .string("applyLibraryReset"),
                 "expectedResetToken": .string(expectedResetToken),
                 "backupDatabasePath": .string(backupDatabasePath)
+            ]
+        case let .createLibraryBackup(destination):
+            return [
+                "kind": .string("createLibraryBackup"),
+                "destination": .string(destination)
+            ]
+        case let .restoreLibraryBackup(source, rollback):
+            return [
+                "kind": .string("restoreLibraryBackup"),
+                "source": .string(source),
+                "rollback": .string(rollback)
             ]
         case let .reconcileLibrarySource(trackID, expectedRevision, strategy):
             var payload = strategy.payload

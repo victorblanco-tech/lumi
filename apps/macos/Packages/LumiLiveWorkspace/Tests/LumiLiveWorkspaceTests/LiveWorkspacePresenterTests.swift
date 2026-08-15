@@ -208,6 +208,44 @@ struct LiveWorkspacePresenterTests {
         #expect(state.lightingMidi.condition == .empty)
     }
 
+    @Test("Realtime lighting saturation degrades Live tech readiness")
+    func realtimeLightingSaturationDegradesReadiness() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case var .object(midi) = payload["midiIntegration"] else {
+            Issue.record("Recorded fixture has no lighting MIDI status")
+            return
+        }
+        midi["realtimeScheduler"] = .object([
+            "lane": .object([
+                "queueCapacity": .number(64),
+                "queueDepth": .number(64),
+                "queueHighWater": .number(64),
+                "saturationCount": .number(1),
+                "latencySampleCount": .number(20),
+                "latencyP95Micros": .number(2_000)
+            ])
+        ])
+        payload["midiIntegration"] = .object(midi)
+        let snapshot = try EngineSnapshotDecoder().decode(
+            MessageEnvelope(
+                protocolVersion: recorded.protocolVersion,
+                messageType: recorded.messageType,
+                messageId: recorded.messageId,
+                sequence: recorded.sequence,
+                correlationId: recorded.correlationId,
+                sentAt: recorded.sentAt,
+                payload: payload
+            ),
+            endpointDescription: "127.0.0.1:52841",
+            protocolVersion: 1
+        )
+
+        let state = LiveWorkspacePresenter.ready(snapshot)
+        #expect(snapshot.midiIntegration?.realtimeLane?.isHealthy == false)
+        #expect(state.lightingMidi.condition == .degraded)
+    }
+
     @Test("No loaded deck is an empty workspace, not a provider failure")
     func emptyDecksAreNotAProblem() {
         let recorded = LiveWorkspaceFixtures.readySnapshot
