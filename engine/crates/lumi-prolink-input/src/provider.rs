@@ -11,6 +11,7 @@ use crate::{BridgeEvent, BridgeMessage, SourceCondition};
 
 const SOURCE_ID: u64 = 31;
 const DEFAULT_TRACK_MINUTES: u32 = 10;
+const POSITION_CONTINUITY_TOLERANCE_BEATS: f64 = 2.25;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProLinkTrackIdentity {
@@ -48,6 +49,7 @@ struct LoadedDeck {
     beat: u32,
     phrase_index: Option<u16>,
     last_precise_beat: Option<u32>,
+    last_position_observed_at_nanos: u64,
     effective_bpm_milli: u32,
     playing: bool,
     discontinuity_revision: u64,
@@ -329,6 +331,7 @@ impl ProLinkDeckSourceProvider {
                     beat,
                     phrase_index: None,
                     last_precise_beat: None,
+                    last_position_observed_at_nanos: observed_at_nanos,
                     effective_bpm_milli,
                     playing: status.playing,
                     discontinuity_revision: self.timing_generation,
@@ -381,27 +384,37 @@ impl ProLinkDeckSourceProvider {
                 )?;
             }
             let seeked = previous.beat != beat
-                && (beat < previous.beat || beat.saturating_sub(previous.beat) > 2);
+                && position_is_discontinuous(
+                    previous.beat,
+                    beat,
+                    previous.last_position_observed_at_nanos,
+                    observed_at_nanos,
+                    previous.effective_bpm_milli,
+                    previous.playing,
+                );
             if previous.beat != beat {
                 if seeked {
                     self.advance_timing_generation()?;
                     discontinuity = true;
                     stopped_timing_changed = true;
+                    self.emit(
+                        at,
+                        DeckObservation::PlaybackPositionSeeked {
+                            deck_id,
+                            track_load_id: previous.track_load_id,
+                            beat,
+                        },
+                    )?;
+                } else if !previous.playing {
+                    self.emit(
+                        at,
+                        DeckObservation::PlaybackPosition {
+                            deck_id,
+                            track_load_id: previous.track_load_id,
+                            beat,
+                        },
+                    )?;
                 }
-                let observation = if seeked {
-                    DeckObservation::PlaybackPositionSeeked {
-                        deck_id,
-                        track_load_id: previous.track_load_id,
-                        beat,
-                    }
-                } else {
-                    DeckObservation::PlaybackPosition {
-                        deck_id,
-                        track_load_id: previous.track_load_id,
-                        beat,
-                    }
-                };
-                self.emit(at, observation)?;
             }
             if !previous.playing && status.playing {
                 self.advance_timing_generation()?;
@@ -419,7 +432,15 @@ impl ProLinkDeckSourceProvider {
                 )?;
             }
             if let Some(deck) = self.decks.get_mut(&deck_id) {
-                deck.beat = beat;
+                // Playing status frames are not beat-boundary facts and may
+                // arrive after a newer precise Beat packet. Never let such a
+                // frame rewind the canonical timeline. It may advance the
+                // internal baseline after missed Beat packets, while the Live
+                // UI and lighting output remain driven by precise beats.
+                if seeked || !previous.playing || beat >= previous.beat {
+                    deck.beat = beat;
+                }
+                deck.last_position_observed_at_nanos = observed_at_nanos;
                 deck.effective_bpm_milli = effective_bpm_milli;
                 deck.playing = status.playing;
                 if seeked {
@@ -519,6 +540,7 @@ impl ProLinkDeckSourceProvider {
         if let Some(deck) = self.decks.get_mut(&deck_id) {
             deck.beat = absolute_beat;
             deck.last_precise_beat = Some(absolute_beat);
+            deck.last_position_observed_at_nanos = observed_at_nanos;
             deck.effective_bpm_milli = bpm_milli(beat.effective_bpm)?;
             if let Some(phrase_index) = phrase_index {
                 deck.phrase_index = Some(phrase_index);
@@ -693,7 +715,8 @@ fn precise_absolute_beat(
     beat_within_bar: u8,
 ) -> u32 {
     let remainder = u32::from(beat_within_bar.saturating_sub(1).min(3));
-    let reference = previous_precise_beat.map_or(status_beat, |beat| beat.saturating_add(1));
+    let reference =
+        previous_precise_beat.map_or(status_beat, |beat| status_beat.max(beat.saturating_add(1)));
     let base = reference
         .saturating_sub(reference % 4)
         .saturating_add(remainder);
@@ -701,6 +724,24 @@ fn precise_absolute_beat(
         .into_iter()
         .min_by_key(|candidate| candidate.abs_diff(reference))
         .unwrap_or(status_beat)
+}
+
+fn position_is_discontinuous(
+    previous_beat: u32,
+    candidate_beat: u32,
+    previous_observed_at_nanos: u64,
+    observed_at_nanos: u64,
+    effective_bpm_milli: u32,
+    playing: bool,
+) -> bool {
+    if !playing {
+        return previous_beat != candidate_beat;
+    }
+    let elapsed_nanos = observed_at_nanos.saturating_sub(previous_observed_at_nanos);
+    let expected_progress =
+        elapsed_nanos as f64 * f64::from(effective_bpm_milli) / 1_000.0 / 60_000_000_000.0;
+    let expected_beat = f64::from(previous_beat) + expected_progress;
+    (f64::from(candidate_beat) - expected_beat).abs() > POSITION_CONTINUITY_TOLERANCE_BEATS
 }
 
 #[derive(Debug, Error)]
@@ -719,4 +760,66 @@ pub enum ProLinkProviderError {
     InvalidBeatNumber(i64),
     #[error("invalid Pro DJ Link track metadata: {0}")]
     InvalidTrack(#[from] lumi_domain::TrackValidationError),
+}
+
+#[cfg(test)]
+mod timing_tests {
+    use super::{position_is_discontinuous, precise_absolute_beat};
+
+    #[test]
+    fn delayed_status_progress_is_not_misclassified_as_a_seek() {
+        assert!(!position_is_discontinuous(
+            17,
+            23,
+            1_000_000_000,
+            3_300_000_000,
+            155_000,
+            true,
+        ));
+    }
+
+    #[test]
+    fn late_status_frame_cannot_rewind_a_playing_timeline() {
+        assert!(!position_is_discontinuous(
+            23,
+            22,
+            1_000_000_000,
+            1_050_000_000,
+            155_000,
+            true,
+        ));
+    }
+
+    #[test]
+    fn hotcue_and_loop_wrap_remain_explicit_discontinuities() {
+        assert!(position_is_discontinuous(
+            23,
+            27,
+            1_000_000_000,
+            1_010_000_000,
+            155_000,
+            true,
+        ));
+        assert!(position_is_discontinuous(
+            180,
+            32,
+            1_000_000_000,
+            1_010_000_000,
+            155_000,
+            true,
+        ));
+        assert!(position_is_discontinuous(
+            23,
+            24,
+            1_000_000_000,
+            1_010_000_000,
+            155_000,
+            false,
+        ));
+    }
+
+    #[test]
+    fn status_baseline_recovers_after_missed_precise_beats() {
+        assert_eq!(precise_absolute_beat(22, Some(17), 4), 23);
+    }
 }

@@ -164,3 +164,19 @@ load, or Master handoff; stable playback and pitch changes preserve monotonic
 phase. A local fake-Carabiner regression sends conflicting continuous beat
 phases and asserts that no additional `force-beat-at-time` or
 `request-beat-at-time` command is emitted.
+
+### Dev-42 false-seek and helper-lifecycle correction
+
+The remaining intermittent scrub was traced one boundary earlier: delayed
+deck-status progress could exceed the old fixed two-beat threshold and falsely
+advance the transport generation. Dev-42 validates that progress using elapsed
+monotonic time and effective BPM. While playing, only precise Beat packets
+publish beat boundaries; a late status packet cannot rewind their canonical
+position. Provider-level regressions prove that delayed normal progress emits
+neither a seek nor a Link anchor, while real Hot Cues, seeks and loop wraps
+remain discontinuities.
+
+The real bundled-Carabiner regression now also drops the timing provider
+without calling Stop and waits for its isolated control port to close. Together
+with installed-app normal-Quit and forced-UI-exit checks, this is the acceptance
+evidence that SoundSwitch cannot retain a Lumi-owned ghost Link session.

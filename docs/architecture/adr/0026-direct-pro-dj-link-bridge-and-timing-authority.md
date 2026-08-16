@@ -44,8 +44,16 @@ The bridge publishes source facts only:
 - original and effective BPM, beat number and beat within bar;
 - playback position and transport discontinuities;
 - Rekordbox media slot and track identity;
-- metadata, artwork references, cue points, beat grid and waveforms;
-- Beat Link `SignatureFinder` signatures when available.
+- mounted-player/slot and Rekordbox track identity from passive deck status;
+- exact beat events and transport discontinuities.
+
+Track metadata, cue points, beat grids and waveforms are hydrated from Lumi's
+trusted, read-only USB mirror. The live bridge deliberately does not start Beat
+Link's `MetadataFinder`/`SignatureFinder` query chain. Those active media
+queries need a free virtual player number and can otherwise enter a repeated
+failure loop when every player number is occupied. Keeping content resolution
+out of the realtime bridge prevents that retry pressure from competing with
+beat ingestion and lighting dispatch.
 
 The Rust adapter translates bridge messages into Lumi-owned deck observations.
 No Beat Link, Java or Pioneer-specific type crosses the adapter boundary.
@@ -63,10 +71,9 @@ replaces BLT without coupling the Pro DJ Link input adapter to SoundSwitch.
 Track reconciliation is deterministic and fail closed:
 
 1. exact mounted-media identity plus Rekordbox track ID;
-2. exact detailed-waveform/beat-grid track signature;
-3. a persisted user-confirmed alias;
-4. a unique scored metadata candidate;
-5. otherwise `Unknown Track`, with automatic lighting held.
+2. a persisted user-confirmed alias;
+3. a unique scored metadata candidate from trusted imported media;
+4. otherwise `Unknown Track`, with automatic lighting held.
 
 ## Licensing and dependency policy
 

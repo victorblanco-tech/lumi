@@ -7,11 +7,6 @@ import org.deepsymmetry.beatlink.DeviceAnnouncementListener;
 import org.deepsymmetry.beatlink.DeviceFinder;
 import org.deepsymmetry.beatlink.DeviceUpdate;
 import org.deepsymmetry.beatlink.VirtualCdj;
-import org.deepsymmetry.beatlink.data.MetadataFinder;
-import org.deepsymmetry.beatlink.data.SearchableItem;
-import org.deepsymmetry.beatlink.data.SignatureFinder;
-import org.deepsymmetry.beatlink.data.TrackMetadata;
-
 import java.util.Objects;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -62,12 +57,6 @@ final class BeatLinkRuntime implements AutoCloseable {
                         beat.isTempoMaster()
                 )
         ));
-        MetadataFinder.getInstance().addTrackMetadataListener(this::metadataChanged);
-        SignatureFinder.getInstance().addSignatureListener(update -> publisher.publish(
-                "trackSignature",
-                new BridgePayloads.TrackSignature(update.player, update.signature)
-        ));
-
         DeviceFinder.getInstance().start();
         publisher.publish("sourceStatus", new BridgePayloads.SourceStatus(
                 "discovering", "Waiting for a supported Pro DJ Link device"
@@ -94,7 +83,13 @@ final class BeatLinkRuntime implements AutoCloseable {
                     throw new IllegalStateException("Beat Link could not claim a virtual player session");
                 }
                 BeatFinder.getInstance().start();
-                SignatureFinder.getInstance().start();
+                // Lumi resolves track content from its trusted, read-only USB mirror.
+                // Starting SignatureFinder also starts Beat Link's active metadata,
+                // waveform and beat-grid queries. On a fully occupied four-player
+                // network those queries cannot claim a player number and retry in a
+                // tight loop. Deck status already supplies the mounted-player/slot
+                // and Rekordbox ID needed by Lumi, so keep this realtime bridge
+                // passive with respect to media content.
                 sessionReady = true;
                 publisher.publish("sourceStatus", new BridgePayloads.SourceStatus(
                         "ready", "Direct Pro DJ Link session is receiving deck status and beat data"
@@ -144,35 +139,6 @@ final class BeatLinkRuntime implements AutoCloseable {
         ));
     }
 
-    private void metadataChanged(org.deepsymmetry.beatlink.data.TrackMetadataUpdate update) {
-        TrackMetadata metadata = update.metadata;
-        if (metadata == null) {
-            publisher.publish("trackMetadata", new BridgePayloads.TrackMetadata(
-                    update.player, false, null, null, null, null,
-                    null, null, null, null, null, null
-            ));
-            return;
-        }
-        publisher.publish("trackMetadata", new BridgePayloads.TrackMetadata(
-                update.player,
-                true,
-                metadata.trackReference.player,
-                metadata.trackReference.slot.name(),
-                metadata.trackType.name(),
-                metadata.trackReference.rekordboxId,
-                metadata.getTitle(),
-                label(metadata.getArtist()),
-                metadata.getDuration(),
-                metadata.getTempo() / 100.0,
-                label(metadata.getKey()),
-                metadata.getColor() == null ? null : metadata.getColor().label
-        ));
-    }
-
-    private static String label(SearchableItem item) {
-        return item == null ? null : item.label;
-    }
-
     private void publishFailure(String operation, Exception failure) {
         String message = failure.getMessage() == null
                 ? failure.getClass().getSimpleName()
@@ -187,8 +153,6 @@ final class BeatLinkRuntime implements AutoCloseable {
             return;
         }
         lifecycleExecutor.shutdownNow();
-        SignatureFinder.getInstance().stop();
-        MetadataFinder.getInstance().stop();
         BeatFinder.getInstance().stop();
         VirtualCdj.getInstance().stop();
         DeviceFinder.getInstance().stop();

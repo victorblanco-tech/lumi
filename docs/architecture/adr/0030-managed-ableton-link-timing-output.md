@@ -225,6 +225,24 @@ that bridge frames and Link anchors advance through three seconds with no
 client or UI polling. The one-hour and physical-DMX gates remain release
 evidence rather than being inferred from this bounded test.
 
+## Implementation correction — `0.4.0-dev-42`
+
+Deck-status packets and precise Beat packets are independent asynchronous
+streams. A playing status position is therefore compared with the expected
+progress derived from elapsed monotonic time and effective BPM. Ordinary
+multi-beat progress is not a seek merely because more than two Beat packets
+were delayed or coalesced. A late status packet also cannot rewind the
+canonical position established by a newer precise Beat packet. Only a real
+out-of-envelope seek, Hot Cue, beatjump or loop wrap advances the transport
+generation and permits a new Link anchor.
+
+The managed foreground helper is part of the app-owned process tree. Runtime
+drop terminates and waits for that exact child; normal macOS Quit and an
+unexpected UI disconnect both tear down the engine first. A real-helper
+regression verifies that the control endpoint closes without a separate Stop
+command. This prevents SoundSwitch from retaining a ghost Link peer after Lumi
+has exited.
+
 ## Licensing and distribution
 
 - `beat-link` remains a pinned EPL-2.0 dependency of the independent Pro DJ

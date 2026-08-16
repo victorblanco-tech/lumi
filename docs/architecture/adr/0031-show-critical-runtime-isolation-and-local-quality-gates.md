@@ -240,3 +240,19 @@ belongs to an earlier process. Externally configured adapters remain possible
 through an explicit configuration boundary rather than accidental port reuse.
 Port selection stays inside `20000...32767`, because Carabiner rejects larger
 ephemeral ports even though macOS may assign them when binding port zero.
+
+## Implementation correction — `0.4.0-dev-42`
+
+The input-side transport generation now has the same monotonicity guarantee as
+the Link adapter. Playing deck-status positions are classified against elapsed
+time and effective BPM rather than a fixed beat delta. A delayed normal status
+cannot create a false seek, invalidate a prepared realtime item or authorize a
+Link re-anchor. Out-of-order status cannot rewind the precise-beat baseline.
+Provider-level tests exercise both cases through the complete bridge decoder
+and domain-observation boundary.
+
+The direct bridge no longer starts Beat Link media/signature discovery. Trusted
+USB mirrors remain the sole metadata, waveform, beat-grid, cue and phrase
+source, while the realtime bridge consumes only device, status and precise
+Beat facts. This removes an unnecessary retry fault domain from occupied
+physical networks without changing the show-critical input contract.

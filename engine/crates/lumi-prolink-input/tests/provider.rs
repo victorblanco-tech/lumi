@@ -254,6 +254,100 @@ fn playing_status_frames_never_impersonate_precise_beat_boundaries() {
 }
 
 #[test]
+fn delayed_playing_status_progress_does_not_create_a_transport_discontinuity() {
+    let mut decoder = BridgeDecoder::new();
+    let mut provider = ProLinkDeckSourceProvider::new(MonotonicTime::new(0))
+        .unwrap_or_else(|error| panic!("provider should initialize: {error}"));
+    for (line, time) in [(HELLO, 1), (READY, 2), (STATUS, 3), (BEAT, 4)] {
+        let message = decoder
+            .decode_line(line)
+            .unwrap_or_else(|error| panic!("fixture should decode: {error}"));
+        provider
+            .ingest(message, MonotonicTime::new(time))
+            .unwrap_or_else(|error| panic!("message should translate: {error}"));
+    }
+    let _ = provider.drain_events();
+    let _ = provider.drain_timing_observations();
+    let before = provider
+        .transport(lumi_domain::TrackLoadId::new(1))
+        .unwrap_or_else(|| panic!("loaded deck should expose transport"));
+
+    // Six beats of ordinary progress after roughly 2.3 seconds at 157.25 BPM.
+    // The old fixed `> 2 beats` heuristic classified this as a seek whenever
+    // precise Beat packets were delayed or coalesced before the next status.
+    let delayed_status = decoder
+        .decode_line(
+            r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":5,"observedAtNanos":2330000000,"type":"deckStatus","payload":{"deviceNumber":1,"deviceName":"LUMI-SIM","playing":true,"paused":false,"cued":false,"tempoMaster":true,"onAir":true,"sourcePlayer":1,"sourceSlot":"USB_SLOT","trackType":"REKORDBOX","rekordboxId":1256,"trackBpm":155.0,"effectiveBpm":157.25,"beatNumber":24,"beatWithinBar":4,"rawPitch":1082458112}}"#,
+        )
+        .unwrap_or_else(|error| panic!("delayed status should decode: {error}"));
+    provider
+        .ingest(delayed_status, MonotonicTime::new(5))
+        .unwrap_or_else(|error| panic!("delayed status should translate: {error}"));
+
+    let observations = provider
+        .drain_events()
+        .unwrap_or_else(|error| panic!("events should drain: {error}"));
+    assert!(
+        observations.iter().all(|event| !matches!(
+            event,
+            DomainEvent::Observation(envelope)
+                if matches!(envelope.observation, DeckObservation::PlaybackPositionSeeked { .. })
+        )),
+        "ordinary elapsed-time progress must never look like a seek"
+    );
+    assert!(
+        provider.drain_timing_observations().is_empty(),
+        "an asynchronous playing status must not emit a new Link anchor"
+    );
+    let after = provider
+        .transport(lumi_domain::TrackLoadId::new(1))
+        .unwrap_or_else(|| panic!("loaded deck should retain transport"));
+    assert_eq!(after.discontinuity_revision, before.discontinuity_revision);
+    assert_eq!(after.beat, 23);
+}
+
+#[test]
+fn a_late_playing_status_frame_cannot_rewind_the_canonical_deck_beat() {
+    let mut decoder = BridgeDecoder::new();
+    let mut provider = ProLinkDeckSourceProvider::new(MonotonicTime::new(0))
+        .unwrap_or_else(|error| panic!("provider should initialize: {error}"));
+    for (line, time) in [(HELLO, 1), (READY, 2), (STATUS, 3), (BEAT, 4)] {
+        let message = decoder
+            .decode_line(line)
+            .unwrap_or_else(|error| panic!("fixture should decode: {error}"));
+        provider
+            .ingest(message, MonotonicTime::new(time))
+            .unwrap_or_else(|error| panic!("message should translate: {error}"));
+    }
+    let _ = provider.drain_events();
+    let before = provider
+        .transport(lumi_domain::TrackLoadId::new(1))
+        .unwrap_or_else(|| panic!("loaded deck should expose transport"));
+    assert_eq!(before.beat, 17);
+
+    let late_status = decoder
+        .decode_line(
+            r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":5,"observedAtNanos":50000000,"type":"deckStatus","payload":{"deviceNumber":1,"deviceName":"LUMI-SIM","playing":true,"paused":false,"cued":false,"tempoMaster":true,"onAir":true,"sourcePlayer":1,"sourceSlot":"USB_SLOT","trackType":"REKORDBOX","rekordboxId":1256,"trackBpm":155.0,"effectiveBpm":157.25,"beatNumber":17,"beatWithinBar":1,"rawPitch":1082458112}}"#,
+        )
+        .unwrap_or_else(|error| panic!("late status should decode: {error}"));
+    provider
+        .ingest(late_status, MonotonicTime::new(5))
+        .unwrap_or_else(|error| panic!("late status should translate: {error}"));
+
+    let after = provider
+        .transport(lumi_domain::TrackLoadId::new(1))
+        .unwrap_or_else(|| panic!("loaded deck should retain transport"));
+    assert_eq!(after.beat, 17);
+    assert_eq!(after.discontinuity_revision, before.discontinuity_revision);
+    assert!(
+        provider
+            .drain_events()
+            .unwrap_or_else(|error| panic!("events should drain: {error}"))
+            .is_empty()
+    );
+}
+
+#[test]
 fn bridge_failure_is_visible_and_a_ready_event_clears_it_after_recovery() {
     let mut decoder = BridgeDecoder::new();
     let mut provider = ProLinkDeckSourceProvider::new(MonotonicTime::new(0))

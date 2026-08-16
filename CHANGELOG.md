@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.0-dev-42
+
+- Kept the direct Pro DJ Link bridge passive for media content so occupied
+  player numbers cannot cause an active metadata retry storm while realtime
+  beat and lighting output remain enabled.
+- Classifies playing deck-status position changes against elapsed time and
+  effective BPM instead of a fixed two-beat jump. Delayed normal progress can
+  no longer impersonate a seek, advance the transport generation or re-anchor
+  SoundSwitch's running AutoLoop.
+- Prevents a late asynchronous deck-status frame from rewinding the canonical
+  beat established by a newer precise Beat packet.
+- Adds provider-level delayed/out-of-order status regressions and a real-helper
+  lifecycle regression proving that dropping Lumi's managed Link output closes
+  its owned Carabiner peer without an explicit Stop command.
+
 ## 0.4.0-dev-41
 
 - Keeps the running Ableton Link timeline monotonic during ordinary Pro DJ
