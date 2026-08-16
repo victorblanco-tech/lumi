@@ -2,6 +2,7 @@ use std::io::{BufRead, BufReader, Write};
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
@@ -61,6 +62,7 @@ pub struct CarabinerTimingOutput {
     latest_anchor: Arc<Mutex<Option<TimingAnchor>>>,
     worker: Option<JoinHandle<()>>,
     status: Arc<Mutex<TimingOutputStatus>>,
+    shutting_down: Arc<AtomicBool>,
 }
 
 impl CarabinerTimingOutput {
@@ -72,6 +74,8 @@ impl CarabinerTimingOutput {
         let worker_status = Arc::clone(&status);
         let worker_anchor = Arc::clone(&latest_anchor);
         let worker_configuration = configuration.clone();
+        let shutting_down = Arc::new(AtomicBool::new(false));
+        let worker_shutting_down = Arc::clone(&shutting_down);
         let worker = thread::Builder::new()
             .name("lumi-ableton-link".to_owned())
             .spawn(move || {
@@ -80,6 +84,7 @@ impl CarabinerTimingOutput {
                     receiver,
                     &worker_status,
                     &worker_anchor,
+                    &worker_shutting_down,
                 );
             })
             .ok();
@@ -89,6 +94,7 @@ impl CarabinerTimingOutput {
             latest_anchor,
             worker,
             status,
+            shutting_down,
         }
     }
 
@@ -233,6 +239,7 @@ impl TimingOutputProvider for CarabinerTimingOutput {
 
 impl Drop for CarabinerTimingOutput {
     fn drop(&mut self) {
+        self.shutting_down.store(true, Ordering::Release);
         let _ = self.commands.send(WorkerCommand::Shutdown);
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
@@ -245,12 +252,16 @@ fn run_worker(
     receiver: mpsc::Receiver<WorkerCommand>,
     shared_status: &Arc<Mutex<TimingOutputStatus>>,
     latest_anchor: &Arc<Mutex<Option<TimingAnchor>>>,
+    shutting_down: &Arc<AtomicBool>,
 ) {
     let mut session: Option<CarabinerSession> = None;
     let mut owned_child: Option<Child> = None;
     let mut last_anchor: Option<TimingAnchor> = None;
 
     while let Ok(command) = receiver.recv() {
+        if shutting_down.load(Ordering::Acquire) && !matches!(&command, WorkerCommand::Shutdown) {
+            continue;
+        }
         match command {
             WorkerCommand::Publish(reply) => {
                 update_status(shared_status, |status| {

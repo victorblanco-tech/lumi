@@ -30,7 +30,7 @@ use lumi_midi_coremidi::{
 };
 use lumi_midi_output::{
     BANK_SETTLE_DELAY, MidiClockController, MidiClockState, MidiClockSync, MidiSourceState,
-    RealtimeMidiController,
+    RealtimeMidiActionKind, RealtimeMidiController,
 };
 use lumi_output_dry_run::{DryRunLightingOutputProvider, DryRunOutputError};
 use lumi_planner::{
@@ -72,6 +72,7 @@ use crate::commands::{DeckSourceSelection, SessionCommand, decode_command};
 use crate::library::{LibraryPlanContext, LibraryWorker, LibraryWorkerError, ResolvedLibraryCue};
 
 const SESSION_TOKEN_ENVIRONMENT_KEY: &str = "LUMI_SESSION_TOKEN";
+const EXIT_AFTER_CLIENT_DISCONNECT_ENVIRONMENT_KEY: &str = "LUMI_EXIT_AFTER_CLIENT_DISCONNECT";
 #[cfg(not(test))]
 const DECK_INPUT_NAME_ENVIRONMENT_KEY: &str = "LUMI_DECK_INPUT_DESTINATION_NAME";
 #[cfg(not(test))]
@@ -119,6 +120,8 @@ pub async fn run() -> Result<(), EngineError> {
     let session_token =
         env::var(SESSION_TOKEN_ENVIRONMENT_KEY).map_err(|_| EngineError::MissingSessionToken)?;
     validate_session_token(&session_token)?;
+    let exit_after_client_disconnect =
+        env::var(EXIT_AFTER_CLIENT_DISCONNECT_ENVIRONMENT_KEY).as_deref() == Ok("1");
     let mut runtime = initialized_product_runtime()?;
 
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
@@ -153,6 +156,7 @@ pub async fn run() -> Result<(), EngineError> {
             .await
         {
             Ok(AuthenticatedClientExit::Shutdown) => break,
+            Ok(AuthenticatedClientExit::Disconnected) if exit_after_client_disconnect => break,
             Ok(AuthenticatedClientExit::Disconnected)
             | Err(EngineError::AuthenticationTimeout)
             | Err(EngineError::AuthenticationOversized)
@@ -1111,6 +1115,10 @@ struct ScheduledPrearm {
 struct ScheduledEarlyTrigger {
     due_at: Instant,
     identity: AutoloopExecutionIdentity,
+    autoloop_number: u8,
+    lane_emitted_count_at_schedule: u64,
+    #[cfg_attr(test, allow(dead_code))]
+    effective_bpm_milli: u32,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1198,6 +1206,15 @@ impl OutputWorker {
         Some(self.realtime_generation)
     }
 
+    #[cfg_attr(test, allow(dead_code))]
+    fn active_realtime_generation(&mut self) -> Option<u64> {
+        if self.realtime_generation == 0 {
+            self.begin_realtime_generation()
+        } else {
+            Some(self.realtime_generation)
+        }
+    }
+
     fn schedule_autoloop(
         &mut self,
         state: &lumi_domain::RuntimeState,
@@ -1212,7 +1229,7 @@ impl OutputWorker {
             .scheduled_early_trigger
             .as_ref()
             .is_some_and(|scheduled| scheduled.identity == identity);
-        if self.predictively_triggered == Some(identity) || predictively_scheduled {
+        if self.predictively_triggered == Some(identity) {
             // The physical AutoLoop pulse already left before the phrase
             // boundary according to the negative user offset. The domain
             // effect still records the execution exactly once, but must not
@@ -1224,6 +1241,14 @@ impl OutputWorker {
             self.autoloop_emitted_count = self.autoloop_emitted_count.saturating_add(1);
             return;
         }
+        if predictively_scheduled {
+            // A deadline is not an emission receipt. Deck status can report
+            // the new phrase a few milliseconds before the scheduled MIDI
+            // deadline. Keep that deadline alive and let the realtime lane
+            // emit it; treating "scheduled" as "sent" can otherwise suppress
+            // both the prepared pulse and the boundary fallback.
+            return;
+        }
         self.scheduled_early_trigger = None;
         self.predictively_triggered = None;
         let is_safely_prearmed = self.prearmed_autoloop.as_ref().is_some_and(|prearmed| {
@@ -1233,7 +1258,8 @@ impl OutputWorker {
                 && prearmed.plan_revision == request.plan_revision()
                 && prearmed.phrase_index == request.phrase_index()
                 && now.saturating_duration_since(prearmed.selected_at) >= BANK_SETTLE_DELAY
-        });
+        }) || self.midi_output.status().source.active_bank
+            == Some(bank_number);
         let delayed_after_boundary = if self.precise_autoloop_fallback {
             positive_timing_delay(self.timing_offset_millis)
         } else {
@@ -1290,11 +1316,10 @@ impl OutputWorker {
         }
         self.prearmed_autoloop = None;
         let due_at = now + BANK_SETTLE_DELAY.max(delayed_after_boundary);
-        if (!self.precise_autoloop_fallback || !delayed_after_boundary.is_zero())
-            && self
-                .midi_output
-                .schedule_autoloop(generation, autoloop_number, due_at)
-                .is_err()
+        if self
+            .midi_output
+            .schedule_autoloop(generation, autoloop_number, due_at)
+            .is_err()
         {
             return;
         }
@@ -1303,8 +1328,10 @@ impl OutputWorker {
             bank_number,
             autoloop_number,
             due_at,
-            requires_precise_beat: self.precise_autoloop_fallback
-                && delayed_after_boundary.is_zero(),
+            // The dedicated MIDI lane owns the post-bank deadline. Waiting
+            // for another Pro DJ Link beat here adds up to a full beat after
+            // starts and hotcue jumps without improving phase safety.
+            requires_precise_beat: false,
         });
         self.cancel_stale_autoloop(state);
     }
@@ -1410,9 +1437,10 @@ impl OutputWorker {
                     || state.leader_deck() != Some(scheduled.identity.deck_id)
                     || state.deck(scheduled.identity.deck_id).is_none_or(|deck| {
                         deck.track_load_id() != scheduled.identity.track_load_id
-                            || deck
-                                .phrase_index()
-                                .is_some_and(|current| current >= scheduled.identity.phrase_index)
+                            || predictive_deadline_is_stale_for_phrase(
+                                deck.phrase_index(),
+                                scheduled.identity.phrase_index,
+                            )
                     })
                     || state.active_plan().is_none_or(|plan| {
                         plan.track_load_id() != scheduled.identity.track_load_id
@@ -1439,6 +1467,13 @@ impl OutputWorker {
                 && prearmed.selected_at.elapsed() >= BANK_SETTLE_DELAY
         });
         if !safely_prearmed {
+            return;
+        }
+        let lane_status = self.midi_output.status();
+        let dispatched = lane_status.emitted_count > scheduled.lane_emitted_count_at_schedule
+            && lane_status.last_emitted_action == Some(RealtimeMidiActionKind::Autoloop)
+            && lane_status.last_emitted_number == Some(scheduled.autoloop_number);
+        if !dispatched {
             return;
         }
         let Some(scheduled) = self.scheduled_early_trigger.take() else {
@@ -1507,7 +1542,9 @@ impl OutputWorker {
             .as_ref()
             .is_some_and(|scheduled| {
                 scheduled.identity == identity
-                    && deadline_drift_exceeds_tolerance(
+                    && prediction_requires_reschedule(
+                        scheduled.effective_bpm_milli,
+                        observation.effective_bpm_milli,
                         scheduled.due_at,
                         now + trigger_delay,
                         PROLINK_PREDICTION_RESCHEDULE_TOLERANCE,
@@ -1538,7 +1575,17 @@ impl OutputWorker {
             self.scheduled_prearm = None;
             self.scheduled_early_trigger = None;
         }
-        let Some(generation) = self.begin_realtime_generation() else {
+        // Successive phrase cues belong to the same transport generation.
+        // Advancing the generation exactly on a phrase boundary can cancel
+        // the previous cue while its deadline is due but the realtime worker
+        // has not dispatched it yet. Only a true prediction replacement
+        // invalidates the old generation.
+        let generation = if prediction_drifted {
+            self.begin_realtime_generation()
+        } else {
+            self.active_realtime_generation()
+        };
+        let Some(generation) = generation else {
             return;
         };
         if self
@@ -1569,6 +1616,9 @@ impl OutputWorker {
             (scheduling_offset_millis <= 0).then_some(ScheduledEarlyTrigger {
                 due_at: now + trigger_delay,
                 identity,
+                autoloop_number,
+                lane_emitted_count_at_schedule: self.midi_output.status().emitted_count,
+                effective_bpm_milli: observation.effective_bpm_milli,
             });
     }
 
@@ -1964,6 +2014,24 @@ fn deadline_drift_exceeds_tolerance(
     } else {
         candidate.duration_since(current) > tolerance
     }
+}
+
+fn prediction_requires_reschedule(
+    scheduled_bpm_milli: u32,
+    observed_bpm_milli: u32,
+    current: Instant,
+    candidate: Instant,
+    tolerance: Duration,
+) -> bool {
+    scheduled_bpm_milli != observed_bpm_milli
+        && deadline_drift_exceeds_tolerance(current, candidate, tolerance)
+}
+
+const fn predictive_deadline_is_stale_for_phrase(
+    current_phrase_index: Option<u16>,
+    scheduled_phrase_index: u16,
+) -> bool {
+    matches!(current_phrase_index, Some(current) if current > scheduled_phrase_index)
 }
 
 fn position_with_timing_offset(position_millis: u64, offset_millis: i32) -> u64 {
@@ -3693,6 +3761,19 @@ fn snapshot_envelope_internal(
                     "latencyP95Micros": realtime_midi.latency_p95_micros,
                     "latencyP99Micros": realtime_midi.latency_p99_micros,
                     "latencyMaxMicros": realtime_midi.latency_max_micros,
+                    "lastScheduledAction": realtime_midi.last_scheduled_action.map(|action| match action {
+                        RealtimeMidiActionKind::Bank => "bank",
+                        RealtimeMidiActionKind::Autoloop => "autoloop",
+                    }),
+                    "lastScheduledNumber": realtime_midi.last_scheduled_number,
+                    "lastScheduledLeadMicros": realtime_midi.last_scheduled_lead_micros,
+                    "lastEmittedAction": realtime_midi.last_emitted_action.map(|action| match action {
+                        RealtimeMidiActionKind::Bank => "bank",
+                        RealtimeMidiActionKind::Autoloop => "autoloop",
+                    }),
+                    "lastEmittedNumber": realtime_midi.last_emitted_number,
+                    "lastDispatchLatenessMicros": realtime_midi.last_dispatch_lateness_micros,
+                    "lateDispatchCount": realtime_midi.late_dispatch_count,
                 },
             },
         }),
@@ -4624,6 +4705,32 @@ mod tests {
             beat_at_300.saturating_mul(2) - Duration::from_millis(250)
         );
         assert_eq!(two_beat_bank, Duration::from_millis(80));
+    }
+
+    #[test]
+    fn stable_tempo_packet_jitter_does_not_replace_a_prepared_deadline() {
+        let deadline = Instant::now() + Duration::from_secs(2);
+        assert!(!prediction_requires_reschedule(
+            140_000,
+            140_000,
+            deadline,
+            deadline + Duration::from_millis(250),
+            PROLINK_PREDICTION_RESCHEDULE_TOLERANCE,
+        ));
+        assert!(prediction_requires_reschedule(
+            140_000,
+            145_000,
+            deadline,
+            deadline - Duration::from_millis(80),
+            PROLINK_PREDICTION_RESCHEDULE_TOLERANCE,
+        ));
+    }
+
+    #[test]
+    fn entering_the_scheduled_phrase_keeps_its_midi_deadline_alive() {
+        assert!(!predictive_deadline_is_stale_for_phrase(Some(4), 4));
+        assert!(!predictive_deadline_is_stale_for_phrase(Some(3), 4));
+        assert!(predictive_deadline_is_stale_for_phrase(Some(5), 4));
     }
 
     #[test]

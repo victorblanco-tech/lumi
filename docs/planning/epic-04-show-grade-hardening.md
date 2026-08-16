@@ -155,3 +155,9 @@ Version `0.4.0-dev-39` adds four-bar direct Pro DJ Link deadline preparation,
 monotonic connected-deck presentation, build-exact service ownership and
 graceful helper teardown. See
 [`0.4.0-dev-39-prolink-autoloop-stability.md`](../release/0.4.0-dev-39-prolink-autoloop-stability.md).
+
+Version `0.4.0-dev-40` corrects the phrase-boundary cancellation race found in
+the physical SoundSwitch soak, removes next-beat waiting from discontinuity
+fallback, adds action-specific deadline telemetry and makes the desktop app the
+bounded lifecycle owner of engine, Pro DJ Link and Ableton Link helpers. See
+[`0.4.0-dev-40-output-deadlines-and-clean-shutdown.md`](../release/0.4.0-dev-40-output-deadlines-and-clean-shutdown.md).

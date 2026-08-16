@@ -180,3 +180,27 @@ beatjump, load or Master discontinuity changes the revision and remains
 immediate. AppKit root-host sizing is configured from `viewDidMoveToWindow`,
 after the real `NSHostingView` exists, rather than racing window creation from
 SwiftUI `onAppear`.
+
+## Implementation correction — `0.4.0-dev-40`
+
+Physical SoundSwitch testing showed that deadline ownership also requires a
+strict distinction between **scheduled** and **emitted**. A Pro DJ Link status
+or phrase event may arrive on either side of the already prepared deadline.
+Entering the target phrase therefore keeps that deadline alive; only an actual
+realtime-lane dispatch receipt suppresses the boundary fallback. Preparing the
+following phrase reuses the current transport generation and cannot cancel a
+due pulse. Generations advance only when transport context or a changed-tempo
+prediction invalidates queued work.
+
+After a start, Hot Cue or beatjump with no safely selected Bank, the realtime
+lane emits the AutoLoop exactly after the Bank's 50 ms settle deadline. It does
+not wait for the next deck beat. This is the first safe boundary available to
+the output adapter and is explicitly counted as late/preparation fallback.
+
+The release also reverses the temporary persistent-UI adapter decision for the
+current desktop product. Until `SMAppService` provides a separately managed
+service lifecycle, the Lumi macOS process owns the engine, Pro DJ Link bridge
+and Carabiner helper as one process tree. Last-window close and Quit perform a
+graceful stop with a bounded forced fallback; an unexpected client disconnect
+causes the app-owned engine to tear down. Link anchors queued before shutdown
+cannot relaunch a helper after teardown begins.

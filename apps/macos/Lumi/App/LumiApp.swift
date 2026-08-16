@@ -4,8 +4,18 @@ import SwiftUI
 
 @main
 struct LumiApp: App {
-    @StateObject private var engineStatus = EngineStatusModel()
+    @NSApplicationDelegateAdaptor(LumiApplicationDelegate.self)
+    private var applicationDelegate
+    @StateObject private var engineStatus: EngineStatusModel
     @State private var preferences = LumiPreferences()
+
+    init() {
+        let engineStatus = EngineStatusModel()
+        _engineStatus = StateObject(wrappedValue: engineStatus)
+        applicationDelegate.shutdown = {
+            await engineStatus.stop()
+        }
+    }
 
     var body: some Scene {
         WindowGroup {
@@ -36,6 +46,28 @@ struct LumiApp: App {
                 }
         }
         .defaultSize(width: 1_280, height: 820)
+    }
+}
+
+@MainActor
+final class LumiApplicationDelegate: NSObject, NSApplicationDelegate {
+    var shutdown: (() async -> Void)?
+    private var terminationInProgress = false
+
+    func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
+        true
+    }
+
+    func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
+        guard !terminationInProgress, let shutdown else {
+            return .terminateNow
+        }
+        terminationInProgress = true
+        Task { @MainActor in
+            await shutdown()
+            sender.reply(toApplicationShouldTerminate: true)
+        }
+        return .terminateLater
     }
 }
 

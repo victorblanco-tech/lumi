@@ -119,3 +119,19 @@ final beat packet. A deterministic regression accepts beat 16 and rejects beat
 and plan changes. Orange Live warnings identify the exact provider whose timing
 or output health is degraded. Evidence is recorded in
 [`0.4.0-dev-39-prolink-autoloop-stability.md`](../release/0.4.0-dev-39-prolink-autoloop-stability.md).
+
+### Dev-40 boundary-race and lifecycle correction
+
+The physical loop soak identified three timing races not represented by the
+original lane-only latency test. Dev-40 now verifies that phrase entry does not
+cancel its prepared deadline, that preparing the next phrase in the same
+transport generation preserves the due pulse, and that a start/Hot Cue without
+a prepared Bank uses an exact 50 ms lane deadline rather than the next beat.
+Stable-tempo packet jitter cannot churn generations; changed BPM still replaces
+a meaningfully drifted prediction.
+
+Diagnostics retain the action kind and address, scheduling lead, last dispatch
+lateness and number of dispatches above 20 ms. This separates delay before lane
+submission from CoreMIDI dispatch delay during physical acceptance testing.
+The accompanying app lifecycle test must also prove that no engine, bridge,
+Carabiner or Ableton Link peer remains after Quit.

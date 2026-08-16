@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.4.0-dev-40
+
+- Keeps a prepared AutoLoop deadline alive when Pro DJ Link reports entry into
+  that phrase just before the CoreMIDI deadline; scheduled output is no longer
+  mistaken for an already emitted pulse.
+- Keeps successive phrase deadlines in one transport generation so preparing
+  the next phrase cannot cancel the pulse that is due for the current phrase.
+- Uses the isolated MIDI lane's 50 ms post-bank deadline after starts, Hot Cues
+  and beatjumps instead of waiting for another Pro DJ Link beat.
+- Reschedules prepared output only for an actual BPM change, not for ordinary
+  network/bridge arrival jitter at a stable tempo.
+- Adds action-specific scheduling and dispatch telemetry, including deadline
+  lead, dispatch lateness and a count above the 20 ms show-critical budget.
+- Makes the macOS app own its engine and helpers through termination. Closing
+  the last window or Quit waits for graceful teardown and force-stops an
+  unresponsive engine; an unexpected UI disconnect also ends the app-owned
+  service.
+- Prevents queued Link anchors from relaunching Carabiner while shutdown is in
+  progress and fixes a queue-depth accounting race in realtime diagnostics.
+
 ## 0.4.0-dev-39
 
 - Pre-schedules an exact Pro DJ Link phrase transition up to four bars ahead

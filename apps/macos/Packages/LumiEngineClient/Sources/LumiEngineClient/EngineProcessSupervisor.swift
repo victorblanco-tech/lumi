@@ -110,6 +110,10 @@ public actor EngineProcessSupervisor {
         var environment = ProcessInfo.processInfo.environment
         environment["LUMI_SESSION_TOKEN"] = token
         environment["LUMI_AUTO_PUBLISH_MIDI"] = automaticallyPublishesMidi ? "1" : "0"
+        // An app-owned engine must not survive a UI crash or forced exit. A
+        // normal Quit still uses the graceful stop path below; an unexpected
+        // client disconnect makes the engine tear down its owned helpers.
+        environment["LUMI_EXIT_AFTER_CLIENT_DISCONNECT"] = "1"
         if let libraryDatabaseURL {
             environment["LUMI_LIBRARY_DATABASE_PATH"] = libraryDatabaseURL.path
         }
@@ -188,10 +192,12 @@ public actor EngineProcessSupervisor {
         await transport.close()
 
         if let process, process.isRunning {
-            process.terminate()
-            process.waitUntilExit()
+            await terminateProcess(process.processIdentifier)
+            if !process.isRunning {
+                process.waitUntilExit()
+            }
         } else if let attachedProcessID, processIsRunning(attachedProcessID) {
-            _ = Darwin.kill(attachedProcessID, SIGTERM)
+            await terminateProcess(attachedProcessID)
         }
         if let serviceRecordURL {
             try? FileManager.default.removeItem(at: serviceRecordURL)
@@ -200,6 +206,25 @@ public actor EngineProcessSupervisor {
         attachedProcessID = nil
         sessionToken = nil
         commandSequence = 0
+    }
+
+    private func terminateProcess(_ processID: Int32) async {
+        guard processIsRunning(processID) else { return }
+        _ = Darwin.kill(processID, SIGTERM)
+        let clock = ContinuousClock()
+        let gracefulDeadline = clock.now.advanced(by: .seconds(5))
+        while processIsRunning(processID), clock.now < gracefulDeadline {
+            try? await Task.sleep(for: .milliseconds(25))
+        }
+        guard processIsRunning(processID) else { return }
+        Self.logger.fault(
+            "Lumi engine pid \(processID) ignored graceful termination; forcing exit"
+        )
+        _ = Darwin.kill(processID, SIGKILL)
+        let forcedDeadline = clock.now.advanced(by: .seconds(2))
+        while processIsRunning(processID), clock.now < forcedDeadline {
+            try? await Task.sleep(for: .milliseconds(25))
+        }
     }
 
     private func exchange(

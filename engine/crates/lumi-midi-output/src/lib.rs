@@ -15,6 +15,7 @@ const MIDI_CHANNEL_ZERO_BASED: u8 = MIDI_CHANNEL - 1;
 const BANK_NOTE_BASE: u8 = 60;
 const AUTOLOOP_NOTE_BASE: u8 = 64;
 pub const BANK_SETTLE_DELAY: Duration = Duration::from_millis(50);
+const REALTIME_LATE_DISPATCH_THRESHOLD: Duration = Duration::from_millis(20);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MidiAddressKind {
@@ -521,6 +522,13 @@ pub struct RealtimeMidiStatus {
     pub latency_p95_micros: u64,
     pub latency_p99_micros: u64,
     pub latency_max_micros: u64,
+    pub last_scheduled_action: Option<RealtimeMidiActionKind>,
+    pub last_scheduled_number: Option<u8>,
+    pub last_scheduled_lead_micros: Option<u64>,
+    pub last_emitted_action: Option<RealtimeMidiActionKind>,
+    pub last_emitted_number: Option<u8>,
+    pub last_dispatch_lateness_micros: Option<u64>,
+    pub late_dispatch_count: u64,
 }
 
 impl Default for RealtimeMidiStatus {
@@ -546,8 +554,21 @@ impl Default for RealtimeMidiStatus {
             latency_p95_micros: 0,
             latency_p99_micros: 0,
             latency_max_micros: 0,
+            last_scheduled_action: None,
+            last_scheduled_number: None,
+            last_scheduled_lead_micros: None,
+            last_emitted_action: None,
+            last_emitted_number: None,
+            last_dispatch_lateness_micros: None,
+            late_dispatch_count: 0,
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RealtimeMidiActionKind {
+    Bank,
+    Autoloop,
 }
 
 #[derive(Debug, thiserror::Error, Eq, PartialEq)]
@@ -732,23 +753,31 @@ where
     }
 
     fn try_send(&self, command: RealtimeMidiCommand) -> Result<(), RealtimeMidiError> {
+        // Reserve the diagnostic queue slot before publishing the command.
+        // Incrementing after `try_send` races the worker's decrement and can
+        // leave a false non-zero depth forever when the worker is faster than
+        // the calling thread.
+        update_realtime_status(&self.status, |status| {
+            status.queue_depth = status.queue_depth.saturating_add(1);
+            status.queue_high_water = status.queue_high_water.max(status.queue_depth);
+        });
         match self.commands.try_send(command) {
-            Ok(()) => {
-                update_realtime_status(&self.status, |status| {
-                    status.queue_depth = status.queue_depth.saturating_add(1);
-                    status.queue_high_water = status.queue_high_water.max(status.queue_depth);
-                });
-                Ok(())
-            }
+            Ok(()) => Ok(()),
             Err(mpsc::TrySendError::Full(_)) => {
                 update_realtime_status(&self.status, |status| {
+                    status.queue_depth = status.queue_depth.saturating_sub(1);
                     status.saturation_count = status.saturation_count.saturating_add(1);
                     status.source.last_error =
                         Some("Realtime MIDI lane saturated; output failed closed".to_owned());
                 });
                 Err(RealtimeMidiError::QueueSaturated)
             }
-            Err(mpsc::TrySendError::Disconnected(_)) => Err(RealtimeMidiError::WorkerUnavailable),
+            Err(mpsc::TrySendError::Disconnected(_)) => {
+                update_realtime_status(&self.status, |status| {
+                    status.queue_depth = status.queue_depth.saturating_sub(1);
+                });
+                Err(RealtimeMidiError::WorkerUnavailable)
+            }
         }
     }
 }
@@ -1073,9 +1102,15 @@ fn run_realtime_midi_worker<P>(
                                 );
                             });
                         } else {
+                            let (kind, number) = realtime_action_identity(item.action);
+                            let lead = item.deadline.saturating_duration_since(Instant::now());
                             scheduled.push(item);
                             update_realtime_status(shared_status, |status| {
                                 status.scheduled_count = status.scheduled_count.saturating_add(1);
+                                status.last_scheduled_action = Some(kind);
+                                status.last_scheduled_number = Some(number);
+                                status.last_scheduled_lead_micros =
+                                    Some(u64::try_from(lead.as_micros()).unwrap_or(u64::MAX));
                             });
                         }
                     }
@@ -1107,6 +1142,7 @@ fn run_realtime_midi_worker<P>(
                 });
                 due.sort_by_key(|item| item.deadline);
                 for item in due {
+                    let (kind, number) = realtime_action_identity(item.action);
                     let result = match item.action {
                         RealtimeMidiAction::SelectBank(bank) => controller.select_bank(bank),
                         RealtimeMidiAction::TriggerAutoloop(autoloop) => {
@@ -1122,6 +1158,13 @@ fn run_realtime_midi_worker<P>(
                     update_realtime_status(shared_status, |status| {
                         if result.is_ok() {
                             status.emitted_count = status.emitted_count.saturating_add(1);
+                            status.last_emitted_action = Some(kind);
+                            status.last_emitted_number = Some(number);
+                        }
+                        status.last_dispatch_lateness_micros = Some(micros);
+                        if elapsed > REALTIME_LATE_DISPATCH_THRESHOLD {
+                            status.late_dispatch_count =
+                                status.late_dispatch_count.saturating_add(1);
                         }
                         update_latency_distribution(status, &latencies);
                     });
@@ -1134,6 +1177,13 @@ fn run_realtime_midi_worker<P>(
                 return;
             }
         }
+    }
+}
+
+const fn realtime_action_identity(action: RealtimeMidiAction) -> (RealtimeMidiActionKind, u8) {
+    match action {
+        RealtimeMidiAction::SelectBank(number) => (RealtimeMidiActionKind::Bank, number),
+        RealtimeMidiAction::TriggerAutoloop(number) => (RealtimeMidiActionKind::Autoloop, number),
     }
 }
 
@@ -1368,6 +1418,37 @@ mod tests {
         assert_eq!(status.source.sent_pulse_count, 0);
         assert_eq!(status.emitted_count, 0);
         assert_eq!(status.cancelled_count, 1);
+    }
+
+    #[test]
+    fn realtime_lane_keeps_due_phrase_pulse_when_next_phrase_is_prepared() {
+        let lane = RealtimeMidiController::new(RecordingProvider::default);
+        assert!(lane.publish().is_ok());
+        assert!(lane.set_generation(12).is_ok());
+        let now = Instant::now();
+        assert!(
+            lane.schedule_autoloop(12, 7, now + Duration::from_millis(30))
+                .is_ok()
+        );
+        thread::sleep(Duration::from_millis(25));
+        assert!(
+            lane.schedule_bank(12, 2, now + Duration::from_millis(120))
+                .is_ok()
+        );
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while lane.status().emitted_count < 2 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(2));
+        }
+        let status = lane.status();
+        assert_eq!(status.emitted_count, 2);
+        assert_eq!(status.cancelled_count, 0);
+        assert_eq!(status.source.sent_pulse_count, 2);
+        assert_eq!(
+            status.last_emitted_action,
+            Some(RealtimeMidiActionKind::Bank)
+        );
+        assert_eq!(status.last_emitted_number, Some(2));
     }
 
     #[test]
