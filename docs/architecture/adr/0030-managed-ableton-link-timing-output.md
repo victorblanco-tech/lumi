@@ -243,6 +243,21 @@ regression verifies that the control endpoint closes without a separate Stop
 command. This prevents SoundSwitch from retaining a ghost Link peer after Lumi
 has exited.
 
+## Implementation correction — `0.4.0-dev-43`
+
+The UI window and the channel engine no longer share one ordinary-Quit
+lifetime. Every authenticated client disconnect first transitions the engine
+to Off, stops local clock publication and leaves Ableton Link. The engine then
+continues only as an inactive, reconnectable owner of stable CoreMIDI
+endpoints. Link helper command and child-process waits are bounded; a failed
+cleanup is retained as diagnostic state and cannot tear down those MIDI
+endpoints as a secondary effect.
+
+This resolves two lifecycle hazards at their correct boundaries: Carabiner
+cannot survive as a ghost Link peer, while SoundSwitch does not see virtual
+MIDI devices removed and recreated for an ordinary Lumi UI session. The final
+signed `SMAppService` login/crash lifecycle remains ADR-0003 work.
+
 ## Licensing and distribution
 
 - `beat-link` remains a pinned EPL-2.0 dependency of the independent Pro DJ

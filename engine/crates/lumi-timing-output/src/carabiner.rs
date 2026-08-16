@@ -14,6 +14,10 @@ use crate::{
 pub const CARABINER_DEFAULT_PORT: u16 = 17_001;
 pub const CARABINER_EXPECTED_VERSION: &str = "1.2.0";
 const COMMAND_TIMEOUT: Duration = Duration::from_millis(300);
+const WORKER_RESPONSE_TIMEOUT: Duration = Duration::from_secs(2);
+const CHILD_TERMINATION_TIMEOUT: Duration = Duration::from_millis(750);
+const WORKER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
+const PROCESS_POLL_INTERVAL: Duration = Duration::from_millis(10);
 const START_RETRIES: usize = 30;
 const START_RETRY_DELAY: Duration = Duration::from_millis(50);
 const MAX_SHARED_EPOCH_SKEW_MICROS: u64 = 5_000_000;
@@ -180,7 +184,7 @@ impl TimingOutputProvider for CarabinerTimingOutput {
             .send(WorkerCommand::Publish(Some(reply)))
             .map_err(|_| CarabinerError::WorkerUnavailable)?;
         response
-            .recv()
+            .recv_timeout(WORKER_RESPONSE_TIMEOUT)
             .map_err(|_| CarabinerError::WorkerUnavailable)?
             .map_err(CarabinerError::Helper)
     }
@@ -220,10 +224,15 @@ impl TimingOutputProvider for CarabinerTimingOutput {
         self.commands
             .send(WorkerCommand::Stop(reply))
             .map_err(|_| CarabinerError::WorkerUnavailable)?;
-        response
-            .recv()
-            .map_err(|_| CarabinerError::WorkerUnavailable)?
-            .map_err(CarabinerError::Helper)
+        match response.recv_timeout(WORKER_RESPONSE_TIMEOUT) {
+            Ok(result) => result.map_err(CarabinerError::Helper),
+            Err(_) => {
+                // Fail safe: an unresponsive helper must not survive as a
+                // ghost Link peer merely because its worker missed a reply.
+                terminate_owned_child(&self.owned_child);
+                Err(CarabinerError::WorkerUnavailable)
+            }
+        }
     }
 
     fn status(&self) -> TimingOutputStatus {
@@ -246,12 +255,20 @@ impl Drop for CarabinerTimingOutput {
         // Do not rely only on the worker command queue during process
         // teardown. The worker may be inside a bounded socket exchange while
         // the macOS supervisor's graceful-exit deadline is already running.
-        // Killing the exact owned child closes that socket and makes the join
-        // deterministic; a helper that Lumi merely connected to is untouched.
+        // Killing the exact owned child closes that socket; a helper that Lumi
+        // merely connected to is untouched. Every wait is bounded because the
+        // macOS app supervisor must never have to SIGKILL the engine and leave
+        // a child Link peer behind.
         terminate_owned_child(&self.owned_child);
         let _ = self.commands.send(WorkerCommand::Shutdown);
         if let Some(worker) = self.worker.take() {
-            let _ = worker.join();
+            let deadline = Instant::now() + WORKER_SHUTDOWN_TIMEOUT;
+            while !worker.is_finished() && Instant::now() < deadline {
+                thread::sleep(PROCESS_POLL_INTERVAL);
+            }
+            if worker.is_finished() {
+                let _ = worker.join();
+            }
         }
     }
 }
@@ -457,9 +474,7 @@ fn connect_or_launch(
         match child.try_wait() {
             Ok(Some(_)) => *owned_child = None,
             Ok(None) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                *owned_child = None;
+                terminate_child(owned_child);
             }
             Err(_) => *owned_child = None,
         }
@@ -490,12 +505,32 @@ fn managed_helper_arguments(port: u16) -> [String; 2] {
 }
 
 fn terminate_owned_child(owned_child: &Arc<Mutex<Option<Child>>>) {
-    let Ok(mut owned_child) = owned_child.lock() else {
+    let mut owned_child = match owned_child.lock() {
+        Ok(guard) => guard,
+        Err(poisoned) => poisoned.into_inner(),
+    };
+    terminate_child(&mut owned_child);
+}
+
+fn terminate_child(child_slot: &mut Option<Child>) {
+    let Some(mut child) = child_slot.take() else {
         return;
     };
-    if let Some(mut child) = owned_child.take() {
-        let _ = child.kill();
-        let _ = child.wait();
+    if matches!(child.try_wait(), Ok(Some(_))) {
+        return;
+    }
+    // Never follow a failed kill with blocking wait(): that exact sequence can
+    // wait forever on a still-running helper. Poll try_wait after a successful
+    // kill so the child is normally reaped, but preserve a hard upper bound.
+    if child.kill().is_err() {
+        return;
+    }
+    let deadline = Instant::now() + CHILD_TERMINATION_TIMEOUT;
+    while Instant::now() < deadline {
+        match child.try_wait() {
+            Ok(Some(_)) | Err(_) => return,
+            Ok(None) => thread::sleep(PROCESS_POLL_INTERVAL),
+        }
     }
 }
 
@@ -798,5 +833,36 @@ mod tests {
         let arguments = managed_helper_arguments(17_001);
         assert_eq!(arguments, ["--port=17001", "--poll=10"]);
         assert!(!arguments.iter().any(|argument| argument == "--daemon"));
+    }
+
+    #[test]
+    fn owned_child_termination_is_bounded_and_reaps_the_process() {
+        let child = Command::new("sleep")
+            .arg("60")
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap_or_else(|error| panic!("test child should launch: {error}"));
+        let process_id = child.id();
+        let mut slot = Some(child);
+        let started = Instant::now();
+
+        terminate_child(&mut slot);
+
+        assert!(slot.is_none());
+        assert!(started.elapsed() < CHILD_TERMINATION_TIMEOUT + Duration::from_millis(250));
+        let still_running = Command::new("kill")
+            .args(["-0", &process_id.to_string()])
+            .stdin(Stdio::null())
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status()
+            .unwrap_or_else(|error| panic!("process liveness probe should run: {error}"))
+            .success();
+        assert!(
+            !still_running,
+            "terminated helper must not survive as a ghost peer"
+        );
     }
 }

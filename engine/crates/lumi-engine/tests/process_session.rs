@@ -11,7 +11,7 @@ use serde_json::{Value, json};
 const TEST_SESSION_TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef";
 
 #[test]
-fn real_engine_process_starts_empty_and_serves_authenticated_product_state() {
+fn real_engine_process_serves_state_and_fails_safe_between_ui_clients() {
     let mut child = match Command::new(env!("CARGO_BIN_EXE_lumi-engine"))
         .env("LUMI_SESSION_TOKEN", TEST_SESSION_TOKEN)
         .env(
@@ -241,11 +241,11 @@ fn real_engine_process_starts_empty_and_serves_authenticated_product_state() {
         .unwrap_or_else(|error| panic!("invalid reconnect snapshot: {error}"));
     assert_eq!(
         reconnect_snapshot.payload.get("operationState"),
-        Some(&Value::String("armed".to_owned()))
+        Some(&Value::String("off".to_owned()))
     );
     assert_eq!(
         reconnect_snapshot.payload.get("stateRevision"),
-        armed.payload.get("stateRevision")
+        Some(&Value::from(4))
     );
     drop(reconnected);
     let _ = child.kill();

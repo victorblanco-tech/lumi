@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.4.0-dev-43
+
+- Keeps the channel engine and its `Lumi Virtual MIDI`/`Lumi Clock`
+  endpoints alive across ordinary UI Quit and relaunch, preventing CoreMIDI
+  device-topology churn while SoundSwitch and Control One are running.
+- Moves the show to Off and leaves Ableton Link on every authenticated UI
+  disconnect, including an unexpected UI exit; the persistent engine may not
+  continue lighting output without a client.
+- Reattaches the next UI session to the exact running engine service and
+  preserves build-exact replacement for upgrades.
+- Bounds Carabiner command, shutdown and child-process waits so a blocked
+  helper cannot make the macOS supervisor force-kill the engine and leave a
+  ghost Link peer.
+- Refreshes integration diagnostics from lightweight runtime snapshots even
+  when the Library revision has not changed.
+- Adds real-engine disconnect/reattach and bounded child-termination
+  regressions. Physical CDJ/SoundSwitch evidence retained zero late or
+  saturated AutoLoop dispatches while SoundSwitch remained responsive through
+  UI Quit and reattach.
+
 ## 0.4.0-dev-42
 
 - Kept the direct Pro DJ Link bridge passive for media content so occupied

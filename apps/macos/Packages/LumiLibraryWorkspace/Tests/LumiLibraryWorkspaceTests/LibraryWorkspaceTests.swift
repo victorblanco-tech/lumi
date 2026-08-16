@@ -349,6 +349,52 @@ struct LibraryWorkspaceTests {
         #expect(state.abletonLinkIntegration?.enginePumpCount == 10_000)
     }
 
+    @Test("Lightweight snapshots refresh integration telemetry without replacing library state")
+    func refreshesRuntimeIntegrationsWithoutReplacingLibrary() throws {
+        let decoder = LibrarySnapshotDecoder()
+        let original = try decoder.decode(envelope(trackValues: [trackValue()]))
+        let runtime = envelope(
+            trackValues: [],
+            abletonLinkIntegration: .object([
+                "enabled": .boolean(true),
+                "state": .string("running"),
+                "provider": .string("Carabiner"),
+                "helperVersion": .string("1.2.0"),
+                "peers": .number(1),
+                "source": .string("proDjLink"),
+                "deckNumber": .number(1),
+                "bpmMilli": .number(155_000),
+                "beatWithinBar": .number(2),
+                "playing": .boolean(true),
+                "generation": .number(9),
+                "lastBeatAgeMillis": .number(4),
+                "phaseErrorMicros": .number(120),
+                "receivedAnchorCount": .number(5_700),
+                "appliedAnchorCount": .number(5_650),
+                "coalescedAnchorCount": .number(50),
+                "hardReanchorCount": .number(3),
+                "softCorrectionCount": .number(0),
+                "failClosedCount": .number(0),
+                "failureCount": .number(0),
+                "maxAbsPhaseErrorMicros": .number(8_000),
+                "enginePumpCount": .number(12_000),
+                "enginePumpStarvationCount": .number(0),
+                "enginePumpMaxLatenessMicros": .number(4_000),
+                "lastReanchor": .string("trackChanged"),
+                "lastEvent": .string("Ableton Link timing locked"),
+                "lastError": .null
+            ])
+        )
+
+        let refreshed = try decoder.refreshingRuntimeIntegrations(in: original, from: runtime)
+
+        #expect(refreshed.page == original.page)
+        #expect(refreshed.playlists == original.playlists)
+        #expect(refreshed.collectionTotal == original.collectionTotal)
+        #expect(refreshed.abletonLinkIntegration?.bpmMilli == 155_000)
+        #expect(refreshed.abletonLinkIntegration?.receivedAnchorCount == 5_700)
+    }
+
     @Test("Rekordbox sync preview decodes a bounded, hash-bound apply plan")
     func decodesRekordboxSyncPreview() throws {
         let state = try LibrarySnapshotDecoder().decode(

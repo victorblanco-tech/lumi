@@ -161,3 +161,10 @@ the physical SoundSwitch soak, removes next-beat waiting from discontinuity
 fallback, adds action-specific deadline telemetry and makes the desktop app the
 bounded lifecycle owner of engine, Pro DJ Link and Ableton Link helpers. See
 [`0.4.0-dev-40-output-deadlines-and-clean-shutdown.md`](../release/0.4.0-dev-40-output-deadlines-and-clean-shutdown.md).
+
+Version `0.4.0-dev-43` bounds Link-helper teardown, keeps channel-owned
+CoreMIDI endpoints stable across UI sessions and makes every client disconnect
+fail-safe to Off with Link disabled. A physical CDJ/SoundSwitch run and exact
+engine-PID reattach prove that SoundSwitch stays responsive without duplicate
+MIDI ownership. See
+[`0.4.0-dev-43-stable-midi-service-lifecycle.md`](../release/0.4.0-dev-43-stable-midi-service-lifecycle.md).

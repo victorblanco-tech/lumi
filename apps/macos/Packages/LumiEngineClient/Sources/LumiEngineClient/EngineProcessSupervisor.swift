@@ -110,10 +110,11 @@ public actor EngineProcessSupervisor {
         var environment = ProcessInfo.processInfo.environment
         environment["LUMI_SESSION_TOKEN"] = token
         environment["LUMI_AUTO_PUBLISH_MIDI"] = automaticallyPublishesMidi ? "1" : "0"
-        // An app-owned engine must not survive a UI crash or forced exit. A
-        // normal Quit still uses the graceful stop path below; an unexpected
-        // client disconnect makes the engine tear down its owned helpers.
-        environment["LUMI_EXIT_AFTER_CLIENT_DISCONNECT"] = "1"
+        // Keep the channel engine alive across sequential UI sessions. The
+        // engine itself fail-safes to Off and leaves Link whenever its
+        // authenticated client disconnects, while retaining stable CoreMIDI
+        // endpoints for consumers such as SoundSwitch.
+        environment["LUMI_EXIT_AFTER_CLIENT_DISCONNECT"] = "0"
         if let libraryDatabaseURL {
             environment["LUMI_LIBRARY_DATABASE_PATH"] = libraryDatabaseURL.path
         }
@@ -186,6 +187,16 @@ public actor EngineProcessSupervisor {
 
     public func isRunning() -> Bool {
         process?.isRunning == true || attachedProcessID.map(processIsRunning) == true
+    }
+
+    /// Disconnects this UI session without terminating the channel engine.
+    ///
+    /// The Rust service owns the fail-safe transition to Off on authenticated
+    /// client disconnect. Keeping the process alive prevents CoreMIDI endpoint
+    /// removal/recreation while a lighting application is running.
+    public func detachKeepingServiceAlive() async {
+        await transport.close()
+        commandSequence = 0
     }
 
     public func stop() async {

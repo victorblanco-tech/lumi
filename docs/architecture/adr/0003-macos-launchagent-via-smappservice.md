@@ -28,6 +28,30 @@ Lumi gebruikt geen root-LaunchDaemon voor de normale runtime.
 - Signing, bundle-layout en installatie moeten de helper correct meenemen.
 - Zonder ingelogde gebruiker draait Lumi niet; dat is passend voor een DJ-tool.
 
+## Reversible migration adapter — `0.4.0-dev-43`
+
+Tot de ondertekende `SMAppService`-promotie gereed is, gebruikt Lumi een
+channel-specifieke, niet-geprivilegieerde engine service met een
+owner-only loopbacktoken en build-exact service record.
+
+- Een gewone UI Quit beëindigt niet langer de engine en verwijdert daardoor
+  niet de CoreMIDI-endpoints terwijl SoundSwitch draait.
+- De engine zet zichzelf bij iedere authenticated client disconnect eerst
+  fail-safe op Off, stopt MIDI Clock en verlaat Ableton Link. Alleen de
+  inactieve virtuele MIDI-endpoints en passieve deck/library-service blijven
+  bestaan.
+- Heropenen koppelt aan exact dezelfde Dev/RC/Prod-channelengine. Een andere
+  build vervangt de oude service gecontroleerd; kanalen delen geen database,
+  token, endpoint of service record.
+- Deze adapter geeft nog geen automatische login-start of crash-restart. Dat
+  blijft expliciet onderdeel van de `SMAppService`-acceptatie voor RC.
+
+Deze tussenstap is noodzakelijk omdat fysieke diagnose een interne
+SoundSwitch 2.10.3 Control One/JLC1 device-resetdeadlock aantoonde wanneer
+virtuele CoreMIDI-devices tijdens een actieve SoundSwitch-sessie verdwenen of
+opnieuw verschenen. Stabiele endpoint ownership verwijdert die normale
+UI-lifecycletrigger zonder showveiligheid op te geven.
+
 ## Afgewezen alternatieven
 
 ### Root-LaunchDaemon

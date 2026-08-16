@@ -5,6 +5,43 @@ import LumiProtocol
 public struct LibrarySnapshotDecoder: Sendable {
     public init() {}
 
+    /// Refreshes runtime integration telemetry from a lightweight snapshot
+    /// without replacing the already-loaded library page and editor state.
+    public func refreshingRuntimeIntegrations(
+        in state: LibraryWorkspaceState,
+        from envelope: MessageEnvelope
+    ) throws -> LibraryWorkspaceState {
+        LibraryWorkspaceState(
+            condition: state.condition,
+            providerKind: state.providerKind,
+            source: state.source,
+            capabilities: state.capabilities,
+            collectionTotal: state.collectionTotal,
+            playlists: state.playlists,
+            query: state.query,
+            page: state.page,
+            editor: state.editor,
+            phraseRoleSettings: state.phraseRoleSettings,
+            autoloopCatalog: state.autoloopCatalog,
+            midiIntegration: try decodeMidiIntegration(envelope.payload["midiIntegration"]),
+            midiClockIntegration: try decodeMidiClockIntegration(
+                envelope.payload["midiClockIntegration"]
+            ),
+            abletonLinkIntegration: try decodeAbletonLinkIntegration(
+                envelope.payload["abletonLinkIntegration"]
+            ),
+            deckInputIntegration: try decodeDeckInputIntegration(
+                envelope.payload["deckInputIntegration"]
+            ),
+            rekordboxSyncPreview: state.rekordboxSyncPreview,
+            rekordboxMirror: state.rekordboxMirror,
+            rekordboxDevices: state.rekordboxDevices,
+            rekordboxDeviceInspection: state.rekordboxDeviceInspection,
+            dataManagement: state.dataManagement,
+            diagnostic: state.diagnostic
+        )
+    }
+
     public func decode(_ envelope: MessageEnvelope) throws -> LibraryWorkspaceState {
         guard envelope.messageType == .snapshot,
               case let .object(library)? = envelope.payload["library"] else {

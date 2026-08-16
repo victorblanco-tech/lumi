@@ -180,3 +180,22 @@ The real bundled-Carabiner regression now also drops the timing provider
 without calling Stop and waits for its isolated control port to close. Together
 with installed-app normal-Quit and forced-UI-exit checks, this is the acceptance
 evidence that SoundSwitch cannot retain a Lumi-owned ghost Link session.
+
+### Dev-43 physical output and lifecycle evidence
+
+The physical Player 1 loop retained 3,548 complete direct Pro DJ Link frames
+with ingress peak 3/512 and no critical saturation. The AutoLoop realtime lane
+recorded peak 3/64, p95 5.1 ms, last 3.4 ms, zero dispatches above budget and
+zero saturation while SoundSwitch reported one 155 BPM Link peer and Control
+One connected.
+
+The final packaged binary repeated the result over 570 complete frames and six
+MIDI pulses: ingress peak 3/512, AutoLoop peak 3/64, p95 5.1 ms, last 1.2 ms,
+zero late dispatches, zero saturation and zero provider failures.
+
+An exact SoundSwitch thread sample also exposed a separate failure mode: its
+main thread joined the Control One/JLC1 storage reset while the LED worker held
+the matching recursive lock after a MIDI device-list change. Dev-43 avoids that
+normal trigger by retaining the engine-owned virtual MIDI endpoints across UI
+Quit/relaunch. Output still fails safe because client disconnect moves Lumi to
+Off before leaving Link.

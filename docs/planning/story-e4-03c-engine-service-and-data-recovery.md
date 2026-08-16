@@ -1,6 +1,6 @@
 # Story E4-03C: Engine service and data recovery
 
-- Status: **Migration adapter complete — SMAppService promotion pending**
+- Status: **Reconnectable adapter physically verified — SMAppService promotion pending**
 - Priority: **P0 Critical**
 - Effort: **8**
 - Components: Engine, macOS, Persistence, Delivery
@@ -89,3 +89,35 @@ This is the reversible lifecycle adapter required before service migration. It
 does not yet register a login-capable LaunchAgent through `SMAppService`, so
 automatic engine restart after an engine crash and that final ADR-0003 service
 promotion remain open before RC.
+
+## Dev-43 lifecycle correction and evidence
+
+The temporary app-owned teardown introduced in Dev-40 removed ghost helpers but
+also removed and recreated CoreMIDI devices on every UI session. A physical
+SoundSwitch 2.10.3/Control One process sample showed that device-list churn can
+deadlock SoundSwitch inside its JLC1 reset path even when Lumi's realtime lane
+is healthy.
+
+Dev-43 restores reconnectable channel-engine ownership with a stricter safety
+contract:
+
+- ordinary Quit and unexpected authenticated-client disconnect both transition
+  operation to Off, invalidate output, stop local clock and leave Link;
+- the engine and its two virtual MIDI endpoints remain stable and idle;
+- UI relaunch attaches to the exact engine PID and current snapshot;
+- an incompatible build still retires the old engine before replacement;
+- bounded helper cleanup cannot block app termination or leave a ghost Link
+  peer;
+- a real-engine Swift regression proves Live -> disconnect -> Off -> exact
+  endpoint reattach -> explicit shutdown.
+
+Final packaged acceptance used engine PID 49208 before and after UI
+Quit/relaunch.
+Carabiner exited on Quit, SoundSwitch's Link peer disappeared, the same engine
+and Pro DJ Link bridge remained, and SoundSwitch plus Control One stayed
+responsive. Relaunch created only a fresh Link helper, restored the 155 BPM
+peer and allowed Off -> Arm -> Start without replacing MIDI endpoints.
+
+Still open for RC: register the engine through `SMAppService`, expose its Login
+Item state, prove login launch/crash restart and complete the one-hour plus
+physical-DMX evidence gates.

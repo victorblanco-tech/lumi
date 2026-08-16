@@ -691,6 +691,75 @@ func serializesConcurrentEngineExchanges() async throws {
     }
 }
 
+@Test("A UI disconnect parks and reuses the channel engine without MIDI endpoint churn")
+func parksAndReattachesChannelEngine() async throws {
+    let environment = ProcessInfo.processInfo.environment
+    guard let executablePath = environment["LUMI_ENGINE_TEST_EXECUTABLE"] else {
+        Issue.record("LUMI_ENGINE_TEST_EXECUTABLE is required")
+        return
+    }
+
+    let firstSupervisor = EngineProcessSupervisor()
+    let secondSupervisor = EngineProcessSupervisor()
+    let databaseURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("lumi-swift-parked-service-\(UUID().uuidString).sqlite")
+    defer {
+        try? FileManager.default.removeItem(at: databaseURL)
+        try? FileManager.default.removeItem(atPath: databaseURL.path + "-wal")
+        try? FileManager.default.removeItem(atPath: databaseURL.path + "-shm")
+        try? FileManager.default.removeItem(
+            at: databaseURL.deletingLastPathComponent().appendingPathComponent(
+                ".\(databaseURL.lastPathComponent).engine-service.json"
+            )
+        )
+    }
+
+    do {
+        let firstEndpoint = try await firstSupervisor.launch(
+            engineExecutable: URL(fileURLWithPath: executablePath),
+            libraryDatabaseURL: databaseURL,
+            automaticallyPublishesMidi: false
+        )
+        var snapshot = try await firstSupervisor.connect(to: firstEndpoint)
+        snapshot = try await firstSupervisor.send(
+            .setOperationState(
+                "armed",
+                expectedStateRevision: requiredStateRevision(snapshot)
+            ),
+            messageID: "swift-park-arm"
+        )
+        snapshot = try await firstSupervisor.send(
+            .setOperationState(
+                "live",
+                expectedStateRevision: requiredStateRevision(snapshot)
+            ),
+            messageID: "swift-park-live"
+        )
+        #expect(operationState(snapshot) == "live")
+
+        await firstSupervisor.detachKeepingServiceAlive()
+        try await Task.sleep(for: .milliseconds(75))
+        #expect(await firstSupervisor.isRunning())
+
+        let secondEndpoint = try await secondSupervisor.launch(
+            engineExecutable: URL(fileURLWithPath: executablePath),
+            libraryDatabaseURL: databaseURL,
+            automaticallyPublishesMidi: false
+        )
+        #expect(secondEndpoint.host == firstEndpoint.host)
+        #expect(secondEndpoint.port == firstEndpoint.port)
+        snapshot = try await secondSupervisor.connect(to: secondEndpoint)
+        #expect(operationState(snapshot) == "off")
+        #expect(midiIntegrationState(snapshot) == "stopped")
+        await secondSupervisor.stop()
+        #expect(await !secondSupervisor.isRunning())
+    } catch {
+        await secondSupervisor.stop()
+        await firstSupervisor.stop()
+        throw error
+    }
+}
+
 @Test("A library track keeps its exact Lumi identity through Local Playback and output planning")
 func loadsLibraryTrackIntoLocalPlayback() async throws {
     let environment = ProcessInfo.processInfo.environment

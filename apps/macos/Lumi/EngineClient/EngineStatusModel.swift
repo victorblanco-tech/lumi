@@ -556,7 +556,43 @@ final class EngineStatusModel: ObservableObject {
         localAudioControllers.removeAll()
         deckVisualClocks = [:]
         isExchangingCommand = false
-        await supervisor.stop()
+        let canParkService = lifecycle == .ready
+        if canParkService, let snapshot = latestSnapshot {
+            do {
+                _ = try await supervisor.send(
+                    .setOperationState(
+                        "off",
+                        expectedStateRevision: snapshot.stateRevision
+                    )
+                )
+                Self.logger.info("Moved Lumi to Off before UI disconnect")
+            } catch {
+                // The engine repeats this fail-safe transition when the
+                // authenticated loopback client disconnects.
+                Self.logger.error(
+                    "Could not move Lumi to Off before UI disconnect: \(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
+            }
+        }
+        if canParkService,
+           latestSnapshot?.abletonLinkIntegration?.enabled == true {
+            do {
+                _ = try await supervisor.send(.setAbletonLinkEnabled(false))
+                Self.logger.info("Left Ableton Link session before engine shutdown")
+            } catch {
+                // Engine teardown remains authoritative. This best-effort
+                // command gives the managed helper a graceful fast path while
+                // the Rust owner still guarantees bounded forced cleanup.
+                Self.logger.error(
+                    "Could not leave Ableton Link before UI disconnect: \(error.localizedDescription, privacy: .private(mask: .hash))"
+                )
+            }
+        }
+        if canParkService {
+            await supervisor.detachKeepingServiceAlive()
+        } else {
+            await supervisor.stop()
+        }
         lifecycle = .stopped
         latestSnapshot = nil
         lastLibraryRevision = nil
@@ -2199,6 +2235,15 @@ final class EngineStatusModel: ObservableObject {
                         envelope = try await self.supervisor.getSnapshot(includeLibrary: true)
                         observedLibraryRevision = self.libraryRevision(in: envelope)
                     }
+                    let refreshedRuntimeState: LibraryWorkspaceState?
+                    if healthTick == 0, !decodeLibrary {
+                        refreshedRuntimeState = try self.libraryDecoder.refreshingRuntimeIntegrations(
+                            in: self.libraryState,
+                            from: envelope
+                        )
+                    } else {
+                        refreshedRuntimeState = nil
+                    }
                     self.isExchangingCommand = false
                     let snapshotDecoder = self.snapshotDecoder
                     let libraryDecoder = self.libraryDecoder
@@ -2235,10 +2280,16 @@ final class EngineStatusModel: ObservableObject {
                         self.workspaceState = nextWorkspaceState
                     }
                     if healthTick == 0 {
-                        guard decodeLibrary, let decodedLibraryState = decoded.1 else { continue }
-                        let nextLibraryState = decodedLibraryState.preservingDeviceInspection(
-                            self.libraryState.rekordboxDeviceInspection
-                        )
+                        let nextLibraryState: LibraryWorkspaceState
+                        if decodeLibrary, let decodedLibraryState = decoded.1 {
+                            nextLibraryState = decodedLibraryState.preservingDeviceInspection(
+                                self.libraryState.rekordboxDeviceInspection
+                            )
+                        } else if let refreshedRuntimeState {
+                            nextLibraryState = refreshedRuntimeState
+                        } else {
+                            continue
+                        }
                         if nextLibraryState != self.libraryState {
                             self.libraryState = nextLibraryState
                         }

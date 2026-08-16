@@ -164,8 +164,10 @@ pub async fn run() -> Result<(), EngineError> {
         {
             Ok(AuthenticatedClientExit::Shutdown) => break,
             Ok(AuthenticatedClientExit::Disconnected) if exit_after_client_disconnect => break,
-            Ok(AuthenticatedClientExit::Disconnected)
-            | Err(EngineError::AuthenticationTimeout)
+            Ok(AuthenticatedClientExit::Disconnected) => {
+                park_runtime_after_client_disconnect(&mut runtime)?;
+            }
+            Err(EngineError::AuthenticationTimeout)
             | Err(EngineError::AuthenticationOversized)
             | Err(EngineError::InvalidAuthentication)
             | Err(EngineError::AuthenticationRejected)
@@ -173,6 +175,22 @@ pub async fn run() -> Result<(), EngineError> {
             Err(error) => return Err(error),
         }
     }
+    Ok(())
+}
+
+/// A disconnected UI must never leave show output or Link running. The engine
+/// process and its CoreMIDI endpoints deliberately remain alive so external
+/// lighting software does not observe device-topology churn between ordinary
+/// Lumi window sessions.
+fn park_runtime_after_client_disconnect(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
+    let revision = runtime.state.state().revision();
+    apply_operation_command(runtime, revision, OperationCommand::Off)
+        .map_err(|error| EngineError::ClientDisconnectParking(error.to_string()))?;
+    // Integration cleanup is bounded and best-effort here. A helper failure
+    // must be visible in diagnostics, but must not tear down the engine and
+    // thereby remove the stable CoreMIDI endpoints we are preserving.
+    let _ = runtime.output_worker.set_link_enabled(false);
+    let _ = reconcile_local_midi_clock(runtime, true);
     Ok(())
 }
 
@@ -1785,14 +1803,17 @@ impl OutputWorker {
                 .map_err(|error| EngineError::Timing(error.to_string()))?;
             self.link_enabled = true;
         } else {
-            self.link_timing
-                .stop()
-                .map_err(|error| EngineError::Timing(error.to_string()))?;
+            let stop_result = self.link_timing.stop();
+            // The managed adapter owns a bounded forced-cleanup fallback. Its
+            // logical session must be disabled even when that fallback is
+            // reported as an error, otherwise a later Enable command would
+            // incorrectly no-op against a helper that has already gone away.
             self.link_enabled = false;
             self.last_prolink_timing_at = None;
             self.last_prolink_bpm_milli = None;
             self.last_prolink_playing = None;
             self.prolink_timing_stale = false;
+            stop_result.map_err(|error| EngineError::Timing(error.to_string()))?;
         }
         Ok(())
     }
@@ -4608,6 +4629,8 @@ pub enum EngineError {
     Midi(String),
     #[error("musical timing output failed: {0}")]
     Timing(String),
+    #[error("the runtime could not fail-safe after its UI disconnected: {0}")]
+    ClientDisconnectParking(String),
     #[error("music library failed: {0}")]
     Library(#[from] LibraryWorkerError),
     #[error("library backup and restore require Lumi to be Off")]

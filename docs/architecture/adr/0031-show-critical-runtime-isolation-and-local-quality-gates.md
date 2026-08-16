@@ -256,3 +256,19 @@ USB mirrors remain the sole metadata, waveform, beat-grid, cue and phrase
 source, while the realtime bridge consumes only device, status and precise
 Beat facts. This removes an unnecessary retry fault domain from occupied
 physical networks without changing the show-critical input contract.
+
+## Implementation correction — `0.4.0-dev-43`
+
+Physical process sampling separated output-lane health from a third-party MIDI
+device-list failure. Lumi sustained bounded Pro DJ Link ingress and sub-budget
+CoreMIDI dispatch while SoundSwitch's main thread was blocked joining its
+Control One/JLC1 storage worker during a MIDI device reset. Starting
+SoundSwitch after Lumi's endpoints were stable removed the hang for the same
+Link and AutoLoop workload.
+
+The channel engine therefore retains virtual MIDI endpoint ownership across UI
+sessions. Disconnect is an explicit safety boundary: operation becomes Off,
+pending output is invalidated, local clock stops and Link leaves before the UI
+transport closes. Reattachment reuses the exact engine process and cannot
+duplicate endpoints. An incompatible build is still replaced rather than
+attached, preserving build-exact process ownership.
