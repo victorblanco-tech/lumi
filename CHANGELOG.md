@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.4.0-dev-41
+
+- Keeps the running Ableton Link timeline monotonic during ordinary Pro DJ
+  Link beat traffic. UDP receive-time jitter is measured but can no longer
+  request or force phase corrections on every beat.
+- Re-anchors Link exactly once for real musical discontinuities: initial
+  start/resume, Hot Cue or seek, track load, and Master handoff. Continuous
+  pitch/BPM changes update tempo while preserving phase.
+- Adds a regression that injects deliberately conflicting continuous beat
+  phases and proves that only the initial discontinuity can emit a Carabiner
+  phase command.
+
 ## 0.4.0-dev-40
 
 - Keeps a prepared AutoLoop deadline alive when Pro DJ Link reports entry into
@@ -19,6 +31,9 @@
   service.
 - Prevents queued Link anchors from relaunching Carabiner while shutdown is in
   progress and fixes a queue-depth accounting race in realtime diagnostics.
+- Gives every app-owned Link helper a free isolated control endpoint inside
+  Carabiner's accepted port range, avoiding cross-version ownership and helper
+  startup failures on larger macOS ephemeral ports.
 
 ## 0.4.0-dev-39
 

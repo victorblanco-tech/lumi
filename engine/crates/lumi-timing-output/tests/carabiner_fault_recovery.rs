@@ -98,6 +98,54 @@ fn a_fresh_anchor_queued_during_fail_closed_recovery_is_not_lost() {
     assert_eq!(server.connection_count(), 1);
 }
 
+#[test]
+fn continuous_udp_beat_jitter_never_rewinds_the_link_timeline() {
+    let server = FakeCarabiner::start();
+    let mut output = CarabinerTimingOutput::new(CarabinerConfiguration {
+        executable: None,
+        port: server.port,
+        expected_version: "1.2.0".to_owned(),
+    });
+    output
+        .publish()
+        .unwrap_or_else(|error| panic!("fake helper should publish: {error}"));
+    output
+        .synchronize(anchor(1, 155_000, true, TimingDiscontinuity::Started))
+        .unwrap_or_else(|error| panic!("initial anchor should synchronize: {error}"));
+    wait_until(Duration::from_secs(1), || {
+        output.status().applied_anchor_count == 1
+    });
+
+    for beat_within_bar in [2, 4, 1, 3, 1, 4] {
+        let mut continuous = anchor(1, 155_000, true, TimingDiscontinuity::Continuous);
+        continuous.beat_within_bar = beat_within_bar;
+        let expected = output.status().applied_anchor_count.saturating_add(1);
+        output
+            .synchronize(continuous)
+            .unwrap_or_else(|error| panic!("continuous anchor should synchronize: {error}"));
+        wait_until(Duration::from_secs(1), || {
+            output.status().applied_anchor_count >= expected
+        });
+    }
+
+    let status = output.status();
+    assert_eq!(status.hard_reanchor_count, 1);
+    assert_eq!(status.soft_correction_count, 0);
+    let phase_commands = server
+        .commands()
+        .into_iter()
+        .filter(|command| {
+            command.starts_with("force-beat-at-time ")
+                || command.starts_with("request-beat-at-time ")
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        phase_commands.len(),
+        1,
+        "only the initial discontinuity may move Link phase"
+    );
+}
+
 fn anchor(
     generation: u64,
     bpm_milli: u32,

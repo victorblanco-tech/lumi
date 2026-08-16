@@ -215,3 +215,28 @@ The owner also terminates its tracked helper before joining the timing worker;
 this closes in-flight loopback I/O and prevents the app supervisor's bounded
 fallback from orphaning the child. An externally supplied helper is not owned
 and is therefore never killed by Lumi.
+
+## Implementation correction — `0.4.0-dev-41`
+
+Direct Pro DJ Link Beat packets remain authoritative for show-critical
+AutoLoop deadlines, but their local receive timestamps are not a stable clock
+discipline signal. Network and scheduler jitter must never continuously steer
+the shared Ableton Link phase. Doing so caused SoundSwitch AutoLoop progress to
+move backwards and forwards even while the CDJ transport itself was stable.
+
+The timing-output adapter therefore owns a monotonic Link projection after the
+first valid anchor. Continuous beat observations may update BPM while
+preserving that projection, and their phase error remains diagnostic only.
+Only a new timing generation, an explicit track/master/seek discontinuity, or
+a stopped-to-running transport transition may force one new phase anchor.
+AutoLoop MIDI scheduling remains driven by the exact Pro DJ Link beat and is
+not coupled to Link's presentation or phase-correction policy.
+
+Each app-owned engine also selects an isolated loopback control port for its
+managed Carabiner process. The TCP port is not part of Ableton Link discovery;
+it only controls the local helper. Dev, RC and Prod can therefore coexist, and
+a new engine cannot silently attach to an orphaned helper whose `Child` handle
+belongs to an earlier process. Externally configured adapters remain possible
+through an explicit configuration boundary rather than accidental port reuse.
+Port selection stays inside `20000...32767`, because Carabiner rejects larger
+ephemeral ports even though macOS may assign them when binding port zero.

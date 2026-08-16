@@ -705,8 +705,30 @@ fn carabiner_configuration() -> CarabinerConfiguration {
         });
     CarabinerConfiguration {
         executable,
+        // Carabiner's TCP port is an internal control channel, not the
+        // Ableton Link network port. Give each app-owned engine a fresh local
+        // endpoint so Dev, RC and Prod cannot attach to an orphan or to each
+        // other's helper. A process that launches this helper will therefore
+        // always retain the Child handle required for deterministic teardown.
+        port: available_loopback_port().unwrap_or(lumi_timing_output::CARABINER_DEFAULT_PORT),
         ..CarabinerConfiguration::default()
     }
+}
+
+#[cfg(not(test))]
+fn available_loopback_port() -> Option<u16> {
+    available_loopback_port_in(20_000..=32_767)
+}
+
+fn available_loopback_port_in(ports: impl IntoIterator<Item = u16>) -> Option<u16> {
+    // Carabiner validates its gflags port value as a signed 15-bit integer.
+    // Asking macOS for port 0 commonly returns an ephemeral port above 32767,
+    // which makes the helper exit before opening its control socket. Stay in
+    // Carabiner's accepted range while still reserving a fresh endpoint per
+    // engine process.
+    ports
+        .into_iter()
+        .find(|port| std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, *port)).is_ok())
 }
 
 fn process_pending_source_events(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
@@ -4604,6 +4626,17 @@ mod tests {
     use lumi_library::AutoloopTheme;
     use lumi_output_dry_run::canonical_output_transcript;
     use lumi_simulator::{SimulationControl, SimulationSpeed};
+
+    #[test]
+    fn carabiner_control_port_stays_inside_helpers_valid_range() {
+        let Some(port) = available_loopback_port_in(20_000..=32_767) else {
+            panic!("test host should expose a free Carabiner control port");
+        };
+
+        assert!((20_000..=32_767).contains(&port));
+        assert!(std::net::TcpListener::bind((Ipv4Addr::LOCALHOST, port)).is_ok());
+        assert_eq!(available_loopback_port_in(std::iter::empty()), None);
+    }
 
     #[test]
     fn negative_output_timing_offset_advances_and_positive_delays() {

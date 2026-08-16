@@ -149,3 +149,18 @@ The owned child handle is shared with the output object's drop path. Shutdown
 terminates that exact process before joining the worker, so an in-flight helper
 socket exchange cannot outlive the macOS graceful-exit budget. The real bundled
 Carabiner lifecycle test must leave no process on its isolated test port.
+
+### Dev-41 monotonic Link correction
+
+Physical SoundSwitch acceptance exposed that trigger latency and continuous
+Link phase are separate concerns. Phrase and AutoLoop triggers were timely,
+while 575 hard and 238 soft Link corrections over 843 applied anchors made the
+active SoundSwitch AutoLoop scrub backwards and forwards. The maximum observed
+correction was 768 ms.
+
+Dev-41 makes continuous Pro DJ Link phase error observational only. The Link
+timeline is changed once for initial start/resume, a Hot Cue or seek, track
+load, or Master handoff; stable playback and pitch changes preserve monotonic
+phase. A local fake-Carabiner regression sends conflicting continuous beat
+phases and asserts that no additional `force-beat-at-time` or
+`request-beat-at-time` command is emitted.

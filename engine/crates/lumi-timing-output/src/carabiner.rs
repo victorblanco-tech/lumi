@@ -16,8 +16,6 @@ pub const CARABINER_EXPECTED_VERSION: &str = "1.2.0";
 const COMMAND_TIMEOUT: Duration = Duration::from_millis(300);
 const START_RETRIES: usize = 30;
 const START_RETRY_DELAY: Duration = Duration::from_millis(50);
-const SOFT_PHASE_ERROR_MICROS: i64 = 8_000;
-const HARD_PHASE_ERROR_MICROS: i64 = 25_000;
 const MAX_SHARED_EPOCH_SKEW_MICROS: u64 = 5_000_000;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -534,14 +532,21 @@ fn apply_anchor(
     let current_phase = positive_modulo(snapshot.beat, 4.0);
     let phase_beats = shortest_phase_delta(current_phase, expected_phase, 4.0);
     let phase_error_micros = (phase_beats * micros_per_beat).round() as i64;
-    let should_reanchor = generation_changed
-        || explicit_discontinuity
-        || phase_error_micros.abs() >= HARD_PHASE_ERROR_MICROS;
+    // Beat packets reach Lumi over UDP and their receive timestamps therefore
+    // contain network and scheduler jitter. They are precise enough to launch
+    // show-critical AutoLoop deadlines, but continuously steering the shared
+    // Link phase from every receive timestamp makes the Link timeline jump
+    // backwards and forwards. SoundSwitch exposes that as an AutoLoop whose
+    // progress repeatedly scrubs across beats.
+    //
+    // Once established, a continuous Link timeline is monotonic and owns its
+    // own projection. Re-anchor only when the musical timeline genuinely
+    // changes. Tempo updates are still applied above without moving phase.
+    let should_reanchor =
+        generation_changed || explicit_discontinuity || (transport_changed && anchor.playing);
 
     if should_reanchor {
         session.force_beat_at_time(target_phase, anchor_time)?;
-    } else if phase_error_micros.abs() >= SOFT_PHASE_ERROR_MICROS {
-        session.request_beat_at_time(target_phase, anchor_time)?;
     }
 
     if transport_changed || generation_changed {
@@ -556,7 +561,7 @@ fn apply_anchor(
         peers: snapshot.peers,
         phase_error_micros: Some(phase_error_micros),
         reanchored: should_reanchor,
-        corrected: !should_reanchor && phase_error_micros.abs() >= SOFT_PHASE_ERROR_MICROS,
+        corrected: false,
         event: if anchor.observed_at_micros.is_some() && shared_epoch_time.is_none() {
             "Ableton Link synchronized with receive-time fallback".to_owned()
         } else if should_reanchor {
@@ -663,14 +668,6 @@ impl CarabinerSession {
     fn force_beat_at_time(&mut self, beat: f64, when_micros: u64) -> Result<(), String> {
         self.command(
             &format!("force-beat-at-time {beat:.6} {when_micros} 4"),
-            "status ",
-        )?;
-        Ok(())
-    }
-
-    fn request_beat_at_time(&mut self, beat: f64, when_micros: u64) -> Result<(), String> {
-        self.command(
-            &format!("request-beat-at-time {beat:.6} {when_micros} 4"),
             "status ",
         )?;
         Ok(())
