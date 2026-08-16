@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.0-dev-38
+
+- Removes the duplicate Hot Cue rows from Live Decks and the Track Editor.
+  Rekordbox cue letters and colours now appear only as compact markers above
+  their exact waveform position.
+- Moves Live waveform, phrase and AutoLoop-plan motion onto Core Animation and
+  keeps equivalent visual clocks stable across routine engine polls.
+- Removes a macOS hosting-view minimum-size feedback loop that kept SwiftUI
+  continuously laying out the application. In the same connected Live state,
+  measured UI CPU fell from 74–99% to predominantly below 1%.
+- Keeps all visual interpolation outside the dedicated realtime MIDI lane. A
+  60-second release soak measured 5.038 ms p95 dispatch latency with no queue
+  saturation.
+
 ## 0.4.0-dev-37
 
 - Keeps Off, Arm, Start, Pause and Off responsive while high-rate Pro DJ Link

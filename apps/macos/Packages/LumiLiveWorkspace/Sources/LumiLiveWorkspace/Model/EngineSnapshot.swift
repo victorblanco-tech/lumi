@@ -419,6 +419,35 @@ public struct DeckVisualClockSnapshot: Equatable, Sendable {
             : 0
         return min(Double(durationMillis), Double(positionMillis) + elapsed)
     }
+
+    /// Returns whether this monotonic presentation clock can keep rendering
+    /// without replacing it from the next authoritative deck poll.
+    public func remainsValid(
+        trackLoadID authoritativeTrackLoadID: UInt64,
+        positionMillis authoritativePositionMillis: UInt64,
+        durationMillis authoritativeDurationMillis: UInt64,
+        playing authoritativePlaying: Bool,
+        playbackRate authoritativePlaybackRate: Double,
+        discontinuityRevision authoritativeDiscontinuityRevision: UInt64,
+        at referenceTime: TimeInterval,
+        maximumPlayingDriftMillis: Double = 250
+    ) -> Bool {
+        guard trackLoadID == authoritativeTrackLoadID,
+              playing == authoritativePlaying,
+              discontinuityRevision == authoritativeDiscontinuityRevision,
+              durationMillis == authoritativeDurationMillis,
+              abs(playbackRate - authoritativePlaybackRate) < 0.005 else {
+            return false
+        }
+        if !playing {
+            return positionMillis == authoritativePositionMillis
+        }
+        return abs(
+            positionMillis(
+                at: Date(timeIntervalSinceReferenceDate: referenceTime)
+            ) - Double(authoritativePositionMillis)
+        ) < maximumPlayingDriftMillis
+    }
 }
 
 public struct DeckSnapshot: Equatable, Identifiable, Sendable {

@@ -219,7 +219,6 @@ struct FoundationView: View {
         }
         .background(LumiColor.canvas)
         .tint(LumiColor.accent)
-        .frame(minWidth: 1_180, minHeight: 620)
         .accessibilityIdentifier("lumi.app.shell")
     }
 

@@ -6,7 +6,7 @@
 
     <groupId>co.victorblan.tech.lumi</groupId>
     <artifactId>lumi-prolink-bridge</artifactId>
-  <version>0.4.0-dev-37</version>
+  <version>0.4.0-dev-38</version>
     <name>Lumi Pro DJ Link Bridge</name>
     <description>Supervised read-only Pro DJ Link input bridge for Lumi.</description>
     <url>https://github.com/victorblanco-tech/lumi</url>

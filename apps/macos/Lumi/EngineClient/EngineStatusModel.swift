@@ -1907,41 +1907,48 @@ final class EngineStatusModel: ObservableObject {
 
     private func synchronizeConnectedDeckVisualClocks(with snapshot: EngineSnapshot) {
         let anchoredAt = Date.timeIntervalSinceReferenceDate
-        deckVisualClocks = Dictionary(uniqueKeysWithValues: snapshot.decks.compactMap { deck in
-            guard let positionMillis = deck.playbackPositionMillis,
-                  let beatGrid = deck.beatGrid,
-                  beatGrid.durationMillis > 0 else {
-                return nil
+        let nextVisualClocks: [UInt64: DeckVisualClockSnapshot] = Dictionary(
+            uniqueKeysWithValues: snapshot.decks.compactMap { deck in
+                guard let positionMillis = deck.playbackPositionMillis,
+                      let beatGrid = deck.beatGrid,
+                      beatGrid.durationMillis > 0 else {
+                    return nil
+                }
+                let boundedPosition = min(positionMillis, beatGrid.durationMillis)
+                let playbackRate = connectedPlaybackRate(
+                    effectiveBPMMilli: deck.bpmMilli,
+                    positionMillis: boundedPosition,
+                    beatTimesMillis: beatGrid.timesMillis
+                )
+                if let existing = deckVisualClocks[deck.deckID],
+                   existing.remainsValid(
+                       trackLoadID: deck.trackLoadID,
+                       positionMillis: boundedPosition,
+                       durationMillis: beatGrid.durationMillis,
+                       playing: deck.playing,
+                       playbackRate: playbackRate,
+                       discontinuityRevision: deck.transportRevision,
+                       at: anchoredAt
+                   ) {
+                    return (deck.deckID, existing)
+                }
+                return (deck.deckID, DeckVisualClockSnapshot(
+                    trackLoadID: deck.trackLoadID,
+                    positionMillis: boundedPosition,
+                    durationMillis: beatGrid.durationMillis,
+                    playing: deck.playing,
+                    anchoredAtReferenceTime: anchoredAt,
+                    playbackRate: playbackRate,
+                    discontinuityRevision: deck.transportRevision
+                ))
             }
-            let boundedPosition = min(positionMillis, beatGrid.durationMillis)
-            let playbackRate = connectedPlaybackRate(
-                effectiveBPMMilli: deck.bpmMilli,
-                positionMillis: boundedPosition,
-                beatTimesMillis: beatGrid.timesMillis
-            )
-            if let existing = deckVisualClocks[deck.deckID],
-               existing.trackLoadID == deck.trackLoadID,
-               existing.playing == deck.playing,
-               existing.discontinuityRevision == deck.transportRevision,
-               deck.playing,
-               abs(existing.playbackRate - playbackRate) < 0.005,
-               abs(
-                   existing.positionMillis(
-                       at: Date(timeIntervalSinceReferenceDate: anchoredAt)
-                   ) - Double(boundedPosition)
-               ) < 250 {
-                return (deck.deckID, existing)
-            }
-            return (deck.deckID, DeckVisualClockSnapshot(
-                trackLoadID: deck.trackLoadID,
-                positionMillis: boundedPosition,
-                durationMillis: beatGrid.durationMillis,
-                playing: deck.playing,
-                anchoredAtReferenceTime: anchoredAt,
-                playbackRate: playbackRate,
-                discontinuityRevision: deck.transportRevision
-            ))
-        })
+        )
+        // Connected-deck snapshots arrive four times per second, while the
+        // waveform itself advances on Core Animation. Re-publishing the same
+        // clock dictionary invalidated the complete Live SwiftUI hierarchy on
+        // every poll even when the existing monotonic clock was still valid.
+        guard nextVisualClocks != deckVisualClocks else { return }
+        deckVisualClocks = nextVisualClocks
     }
 
     private func connectedPlaybackRate(
@@ -2185,10 +2192,23 @@ final class EngineStatusModel: ObservableObject {
                     let snapshot = decoded.0
                     guard snapshot.snapshotSequence >= (self.latestSnapshot?.snapshotSequence ?? 0)
                     else { continue }
+                    let previousSnapshot = self.latestSnapshot
                     self.latestSnapshot = snapshot
                     self.synchronizeLocalAudio(with: snapshot)
                     let nextWorkspaceState = LiveWorkspacePresenter.ready(snapshot)
-                    if nextWorkspaceState != self.workspaceState {
+                    let immediateRefreshReason = self.livePresentationImmediateRefreshReason(
+                        from: previousSnapshot,
+                        to: snapshot
+                    )
+                    // Direct Pro DJ Link is polled at 4 Hz so the client always
+                    // has a fresh command revision and can detect transport
+                    // discontinuities. The visual waveform and plan clocks run
+                    // independently on Core Animation. Routine counters and
+                    // positions therefore stay out of the large SwiftUI tree;
+                    // provider health, transport discontinuities, phrases and
+                    // plan changes are still published immediately.
+                    if nextWorkspaceState != self.workspaceState,
+                       immediateRefreshReason != nil {
                         self.workspaceState = nextWorkspaceState
                     }
                     if healthTick == 0 {
@@ -2219,6 +2239,103 @@ final class EngineStatusModel: ObservableObject {
                 }
             }
         }
+    }
+
+    private func livePresentationImmediateRefreshReason(
+        from previous: EngineSnapshot?,
+        to current: EngineSnapshot
+    ) -> String? {
+        guard let previous else { return "initial" }
+        if previous.operationState != current.operationState
+            || previous.deckSource != current.deckSource
+            || previous.leaderDeckID != current.leaderDeckID
+            || previous.livePlan != current.livePlan
+            || previous.nextPlan != current.nextPlan
+            || previous.planningOptions != current.planningOptions
+            || previous.runtime.health != current.runtime.health
+            || previous.outputProvider.providerKind != current.outputProvider.providerKind
+            || previous.outputProvider.status != current.outputProvider.status {
+            return "session"
+        }
+
+        if previous.decks.count != current.decks.count { return "deck-count" }
+        for deck in current.decks {
+            guard let old = previous.decks.first(where: { $0.deckID == deck.deckID }) else {
+                return "deck-membership"
+            }
+            if old.trackLoadID != deck.trackLoadID
+                || old.title != deck.title
+                || old.artist != deck.artist
+                || old.bpmMilli != deck.bpmMilli
+                || old.pitchClass != deck.pitchClass
+                || old.keyMode != deck.keyMode
+                || old.keyKnown != deck.keyKnown
+                || old.playing != deck.playing
+                || old.transportRevision != deck.transportRevision
+                || old.phraseIndex != deck.phraseIndex
+                || old.durationBeats != deck.durationBeats
+                || old.phrases != deck.phrases
+                || old.hotCues != deck.hotCues
+                || old.planEligibility != deck.planEligibility {
+                return "deck-\(deck.deckID)"
+            }
+        }
+
+        switch (previous.deckInputIntegration, current.deckInputIntegration) {
+        case let (old?, new?):
+            if old.state != new.state
+                || old.destinationName != new.destinationName
+                || old.protocolName != new.protocolName
+                || old.protocolVersion != new.protocolVersion {
+                return "deck-input"
+            }
+        case (nil, nil):
+            break
+        default:
+            return "deck-input"
+        }
+
+        switch (previous.midiIntegration, current.midiIntegration) {
+        case let (old?, new?):
+            if old.state != new.state
+                || old.sourceName != new.sourceName
+                || old.lastError != new.lastError
+                || old.activeBank != new.activeBank
+                || old.autoPublishEnabled != new.autoPublishEnabled
+                || old.timingOffsetMillis != new.timingOffsetMillis
+                || old.pendingTimingOffsetMillis != new.pendingTimingOffsetMillis
+                || old.bankPreRollMillis != new.bankPreRollMillis
+                || old.realtimeLane?.isHealthy != new.realtimeLane?.isHealthy
+                || old.realtimeLane?.saturationCount
+                    != new.realtimeLane?.saturationCount {
+                return "midi-output"
+            }
+        case (nil, nil):
+            break
+        default:
+            return "midi-output"
+        }
+
+        switch (previous.abletonLinkIntegration, current.abletonLinkIntegration) {
+        case let (old?, new?):
+            if old.enabled != new.enabled
+                || old.state != new.state
+                || old.provider != new.provider
+                || old.peers != new.peers
+                || old.source != new.source
+                || old.deckNumber != new.deckNumber
+                || old.bpmMilli != new.bpmMilli
+                || old.playing != new.playing
+                || old.lastError != new.lastError {
+                return "ableton-link"
+            }
+        case (nil, nil):
+            break
+        default:
+            return "ableton-link"
+        }
+
+        return nil
     }
 }
 

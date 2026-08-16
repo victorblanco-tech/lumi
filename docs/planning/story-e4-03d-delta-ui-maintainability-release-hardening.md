@@ -89,3 +89,22 @@ maintainability only; all lighting correctness remains engine-owned.
 The measured snapshot budgets remain within the accepted baseline. A retained
 two-deck Instruments profile and hardened-runtime/notarized public packaging are
 release work; private Dev distribution remains ad-hoc signed by design.
+
+## Dev-38 UI performance result
+
+- Live waveform, phrase and AutoLoop-plan motion share one Core Animation
+  visual clock while the Editor retains its independent free-navigation model;
+- routine equivalent playing and paused deck polls preserve that visual clock
+  and do not republish the large Live SwiftUI tree;
+- redundant nested SwiftUI minimum-size frames were replaced by one AppKit
+  window minimum. In the same connected Live state, UI process CPU samples
+  changed from 74–99% to `0.0, 0.1, 0.2, 2.9, 0.3, 0.2, 0.4, 0.5, 0.5, 0.3%`;
+- Hot Cue rows no longer add a second scrollable presentation. Only compact,
+  source-coloured letter markers remain above their waveform position;
+- a 60-second release-mode realtime MIDI soak scheduled 2,265 items, emitted
+  2,146, deliberately cancelled 119 stale items, recorded zero saturation and
+  measured p50 64 microseconds, p95 5.038 ms, p99 5.065 ms and max 5.719 ms.
+
+Physical SoundSwitch/Control One/DMX capture is still required before RC; this
+Dev measurement proves the application boundary and does not claim lamp-side
+latency.

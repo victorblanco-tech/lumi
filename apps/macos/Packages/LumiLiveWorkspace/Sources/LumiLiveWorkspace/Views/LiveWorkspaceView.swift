@@ -76,7 +76,6 @@ public struct LiveWorkspaceView: View {
             }
         }
         .background(LumiColor.canvas)
-        .frame(minWidth: 760, minHeight: 560)
         .accessibilityIdentifier("lumi.live.workspace")
         .overlay {
             if let content = state.content,
@@ -1255,7 +1254,7 @@ private struct PlanSelectionControl: View {
 #Preview("Ready · Dark") {
     LiveWorkspaceView(
         state: LiveWorkspaceFixtures.ready,
-        productVersion: "0.4.0-dev-37",
+        productVersion: "0.4.0-dev-38",
         appearance: .constant(.dark),
         keyNotation: .constant(.camelot)
     )
@@ -1266,7 +1265,7 @@ private struct PlanSelectionControl: View {
 #Preview("Fallback · Light") {
     LiveWorkspaceView(
         state: LiveWorkspaceFixtures.fallback,
-        productVersion: "0.4.0-dev-37",
+        productVersion: "0.4.0-dev-38",
         appearance: .constant(.light),
         keyNotation: .constant(.classic)
     )

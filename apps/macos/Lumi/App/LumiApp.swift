@@ -15,6 +15,10 @@ struct LumiApp: App {
             )
                 .onAppear {
                     MacApplicationAppearance.apply(preferences.appearance)
+                    Task { @MainActor in
+                        await Task.yield()
+                        MacApplicationWindow.configureMinimumSize()
+                    }
                 }
                 .onChange(of: preferences.appearance) { _, appearance in
                     MacApplicationAppearance.apply(appearance)
@@ -35,6 +39,15 @@ struct LumiApp: App {
                 }
         }
         .defaultSize(width: 1_280, height: 820)
+    }
+}
+
+@MainActor
+private enum MacApplicationWindow {
+    static func configureMinimumSize() {
+        for window in NSApplication.shared.windows where window.canBecomeMain {
+            window.contentMinSize = NSSize(width: 1_180, height: 620)
+        }
     }
 }
 

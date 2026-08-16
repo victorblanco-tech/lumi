@@ -497,6 +497,65 @@ struct LiveWorkspacePresenterTests {
         #expect(pitched.positionMillis(at: Date(timeIntervalSinceReferenceDate: 101)) == 2_100)
     }
 
+    @Test("Connected visual clock survives equivalent playing and paused deck polls")
+    func connectedVisualClockSuppressesEquivalentPolls() {
+        let playing = DeckVisualClockSnapshot(
+            trackLoadID: 7,
+            positionMillis: 1_000,
+            durationMillis: 10_000,
+            playing: true,
+            anchoredAtReferenceTime: 100,
+            playbackRate: 1.1,
+            discontinuityRevision: 3
+        )
+        #expect(playing.remainsValid(
+            trackLoadID: 7,
+            positionMillis: 2_110,
+            durationMillis: 10_000,
+            playing: true,
+            playbackRate: 1.1,
+            discontinuityRevision: 3,
+            at: 101
+        ))
+        #expect(!playing.remainsValid(
+            trackLoadID: 7,
+            positionMillis: 3_000,
+            durationMillis: 10_000,
+            playing: true,
+            playbackRate: 1.1,
+            discontinuityRevision: 3,
+            at: 101
+        ))
+
+        let paused = DeckVisualClockSnapshot(
+            trackLoadID: 7,
+            positionMillis: 4_000,
+            durationMillis: 10_000,
+            playing: false,
+            anchoredAtReferenceTime: 100,
+            playbackRate: 1.1,
+            discontinuityRevision: 4
+        )
+        #expect(paused.remainsValid(
+            trackLoadID: 7,
+            positionMillis: 4_000,
+            durationMillis: 10_000,
+            playing: false,
+            playbackRate: 1.1,
+            discontinuityRevision: 4,
+            at: 200
+        ))
+        #expect(!paused.remainsValid(
+            trackLoadID: 7,
+            positionMillis: 4_001,
+            durationMillis: 10_000,
+            playing: false,
+            playbackRate: 1.1,
+            discontinuityRevision: 4,
+            at: 200
+        ))
+    }
+
     @Test("Live waveform motion keeps a constant fixed playhead while the waveform scrolls")
     func liveWaveformMotionKeepsFixedPlayhead() {
         let motion = LiveWaveformMotionPlan(

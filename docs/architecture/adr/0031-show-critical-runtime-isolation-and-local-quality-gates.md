@@ -142,3 +142,17 @@ the reversible reconnect adapter: a channel-specific persistent engine accepts
 sequential authenticated UI sessions and survives UI relaunch. Promotion to a
 login-capable `SMAppService` remains a pre-RC lifecycle task; the adapter does
 not claim automatic restart after an engine-process crash.
+
+## Implementation note — `0.4.0-dev-38`
+
+Live presentation follows the same isolation boundary. Waveform, phrase and
+AutoLoop-plan interpolation use Core Animation from an immutable visual-clock
+anchor. Routine 4 Hz deck polls do not republish an equivalent SwiftUI tree;
+only session, transport, phrase, plan, input or output changes do. The model
+still refreshes authoritative state immediately after seeks, Hot Cues, loads,
+master handoffs and output-health changes.
+
+Application minimum sizing is owned once by the AppKit window instead of by
+nested SwiftUI root frames. This avoids a hosting-view size-constraint feedback
+loop observed on macOS 26 without weakening the minimum supported layout. None
+of these presentation clocks can schedule, cancel or authorize MIDI output.

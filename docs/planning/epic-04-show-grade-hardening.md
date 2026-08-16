@@ -143,3 +143,10 @@ high-rate deck telemetry. A beat or position update can no longer invalidate a
 valid Off → Arm, Arm/Pause → Start, Live → Pause or safety Off transition. The
 decision and regression evidence are captured in
 [`0.4.0-dev-37-live-operation-controls.md`](../release/0.4.0-dev-37-live-operation-controls.md).
+
+Version `0.4.0-dev-38` completes the current Delta UI slice: Live presentation
+uses stable Core Animation clocks, routine polls no longer republish equivalent
+state, and an AppKit-owned minimum window size removes the measured macOS
+hosting-view layout loop. Realtime MIDI remained isolated and below its budget
+in the retained release soak. Evidence is recorded in
+[`0.4.0-dev-38-live-rendering-and-output-timing.md`](../release/0.4.0-dev-38-live-rendering-and-output-timing.md).

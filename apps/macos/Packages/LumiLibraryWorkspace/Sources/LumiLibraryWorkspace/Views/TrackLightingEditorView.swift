@@ -84,7 +84,6 @@ public struct TrackLightingEditorView: View {
             Divider().overlay(Color.white.opacity(0.12))
             transport
             editToolbar
-            hotCueStrip
             sourceReconciliationPanel
             HStack(spacing: 12) {
                 VStack(spacing: 10) {
@@ -141,41 +140,6 @@ public struct TrackLightingEditorView: View {
             )
         }
         .onDisappear { audio.shutdown() }
-    }
-
-    @ViewBuilder
-    private var hotCueStrip: some View {
-        if !analysis.hotCues.isEmpty {
-            HStack(spacing: 10) {
-                Text("HOT CUES")
-                    .font(LumiTypography.technical.weight(.bold))
-                    .foregroundStyle(secondary)
-                ScrollView(.horizontal, showsIndicators: false) {
-                    HStack(spacing: 6) {
-                        ForEach(analysis.hotCues) { cue in
-                            Button {
-                                audio.seek(toMillis: cue.timeMillis)
-                                revealPlayhead()
-                            } label: {
-                                Text(cue.letter)
-                                    .font(LumiTypography.hotCueLetter)
-                                    .foregroundStyle(Color.black.opacity(0.82))
-                                    .frame(width: 20, height: 20)
-                                    .background(hotCueColor(cue.colorRGB))
-                                    .clipShape(RoundedRectangle(cornerRadius: 3))
-                            }
-                            .buttonStyle(.plain)
-                            .help("Hot Cue \(cue.letter)")
-                        }
-                    }
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(.horizontal, 20)
-            .frame(height: 32)
-            .background(panel.opacity(0.72))
-            .accessibilityIdentifier("lumi.trackEditor.hotCues")
-        }
     }
 
     private var header: some View {
