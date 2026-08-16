@@ -253,10 +253,6 @@ public struct EngineSnapshotDecoder: Sendable {
               let saturationCount = unsignedInteger(lane["saturationCount"]),
               let latencySampleCount = unsignedInteger(lane["latencySampleCount"]),
               let latencyP95Micros = unsignedInteger(lane["latencyP95Micros"]),
-              let lastDispatchLatenessMicros = unsignedInteger(
-                  lane["lastDispatchLatenessMicros"]
-              ),
-              let lateDispatchCount = unsignedInteger(lane["lateDispatchCount"]),
               queueDepth <= queueCapacity,
               queueHighWater <= queueCapacity else {
             throw EngineSnapshotDecodingError.invalidSnapshot
@@ -268,8 +264,10 @@ public struct EngineSnapshotDecoder: Sendable {
             saturationCount: saturationCount,
             latencySampleCount: latencySampleCount,
             latencyP95Micros: latencyP95Micros,
-            lastDispatchLatenessMicros: lastDispatchLatenessMicros,
-            lateDispatchCount: lateDispatchCount
+            lastDispatchLatenessMicros: unsignedInteger(
+                lane["lastDispatchLatenessMicros"]
+            ) ?? 0,
+            lateDispatchCount: unsignedInteger(lane["lateDispatchCount"]) ?? 0
         )
     }
 

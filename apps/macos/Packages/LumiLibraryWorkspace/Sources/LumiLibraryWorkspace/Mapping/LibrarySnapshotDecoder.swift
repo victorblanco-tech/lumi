@@ -457,8 +457,11 @@ public struct LibrarySnapshotDecoder: Sendable {
             latencyP95Micros: try unsigned(lane, "latencyP95Micros"),
             latencyP99Micros: try unsigned(lane, "latencyP99Micros"),
             latencyMaxMicros: try unsigned(lane, "latencyMaxMicros"),
-            lastDispatchLatenessMicros: try unsigned(lane, "lastDispatchLatenessMicros"),
-            lateDispatchCount: try unsigned(lane, "lateDispatchCount")
+            lastDispatchLatenessMicros: optionalUnsigned(
+                lane,
+                "lastDispatchLatenessMicros"
+            ) ?? 0,
+            lateDispatchCount: optionalUnsigned(lane, "lateDispatchCount") ?? 0
         )
     }
 
