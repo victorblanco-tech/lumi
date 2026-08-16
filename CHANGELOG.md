@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0-dev-36
+
+- Keeps trusted USB media bound to the exact filesystem volume identity instead
+  of conflating backup devices by their visible name or cloned database.
+- Presents a connected USB's current volume name during inspection so a stale
+  trusted label is corrected before the next synchronization persists it.
+- Resolves duplicate GRAY/CHRM Rekordbox aliases when every active alias agrees
+  on the same canonical Lumi track, while conflicting aliases still fail closed.
+
 ## 0.4.0-dev-35
 
 - SoundSwitch Bank and AutoLoop deadlines run on a dedicated, bounded realtime

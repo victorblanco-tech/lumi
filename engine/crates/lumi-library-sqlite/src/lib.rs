@@ -1009,8 +1009,7 @@ impl SqliteLibraryRepository {
                FROM device_library_track_aliases a
                JOIN device_library_sources s ON s.source_id = a.source_id
               WHERE {predicate} AND a.archived = 0 AND a.canonical_track_id IS NOT NULL
-              ORDER BY s.synced_at DESC, a.source_id
-              LIMIT 2"
+              ORDER BY s.synced_at DESC, a.source_id"
         );
         let mut statement = self.connection.prepare(&sql)?;
         let rows = statement.query_map([i64::from(value)], |row| {
@@ -1032,11 +1031,20 @@ impl SqliteLibraryRepository {
                 match_kind: row.get(5)?,
             })
         })?;
-        let resolved = rows.collect::<Result<Vec<_>, _>>()?;
-        if resolved.len() != 1 {
+        let mut resolved = rows.collect::<Result<Vec<_>, _>>()?;
+        let Some(newest) = resolved.first() else {
+            return Ok(None);
+        };
+        // Backup USB media can legitimately expose the same Rekordbox track
+        // identity. It is only ambiguous when those aliases disagree about
+        // the canonical Lumi track; duplicate agreement is positive evidence.
+        if resolved
+            .iter()
+            .any(|candidate| candidate.canonical_track_id != newest.canonical_track_id)
+        {
             return Ok(None);
         }
-        Ok(resolved.into_iter().next())
+        Ok(Some(resolved.remove(0)))
     }
 
     pub fn device_source_summaries(&self) -> Result<Vec<DeviceSourceSummary>, SqliteLibraryError> {
@@ -5060,6 +5068,18 @@ mod fault_tests {
             )?;
         }
 
+        for (device_track_id, canonical_track_id) in
+            [90_u32, 91].into_iter().zip(&canonical_track_ids)
+        {
+            assert_eq!(
+                repository
+                    .resolve_device_alias(device_track_id, 0)?
+                    .ok_or("shared backup USB alias did not resolve")?
+                    .canonical_track_id,
+                *canonical_track_id
+            );
+        }
+
         let page = repository.page_playlists(TrackPageRequest::try_new(0, 25)?)?;
         let matching = page
             .playlists()
@@ -5085,6 +5105,55 @@ mod fault_tests {
                 .iter()
                 .all(|track_id| relations[track_id].len() == 2)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn conflicting_usb_aliases_fail_closed() -> Result<(), Box<dyn std::error::Error>> {
+        let baseline = DemoLibrarySourceProvider::curated().load_baseline()?;
+        let mut repository = SqliteLibraryRepository::in_memory()?;
+        repository.import_baseline(&baseline)?;
+        let canonical = repository
+            .page_tracks(TrackPageRequest::try_new(0, 25)?)?
+            .tracks()
+            .iter()
+            .take(2)
+            .map(lumi_library::TrackSummary::id)
+            .collect::<Vec<_>>();
+        assert_eq!(canonical.len(), 2);
+
+        for (source_id, canonical_track_id) in
+            ["usb-fs:gray", "usb-fs:chrm"].into_iter().zip(canonical)
+        {
+            let mut aliases = vec![DeviceAliasUpsert {
+                device_track_id: 1_256,
+                simulator_signature: 0,
+                audio_signature: "audio:ambiguous:1256".to_owned(),
+                canonical_track_id: Some(canonical_track_id),
+                match_kind: "metadata+file-size".to_owned(),
+                title: "Ambiguous".to_owned(),
+                artist: "Test".to_owned(),
+                bpm_milli: 140_000,
+                duration_millis: 180_000,
+                file_size: 123,
+                metadata_revision: "metadata-v1".to_owned(),
+                analysis_revision: "analysis-v1".to_owned(),
+                analyzed_at: "2026-08-16".to_owned(),
+                sync_disposition: "current".to_owned(),
+            }];
+            repository.sync_device_aliases(
+                source_id,
+                source_id,
+                "database-v1",
+                &mut aliases,
+                &[],
+                &[],
+                &[],
+                &[],
+            )?;
+        }
+
+        assert!(repository.resolve_device_alias(1_256, 0)?.is_none());
         Ok(())
     }
 

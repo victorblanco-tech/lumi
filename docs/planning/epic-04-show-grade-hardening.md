@@ -128,3 +128,12 @@ The retained evidence is documented in
 Promotion of the lifecycle adapter to `SMAppService`, a one-hour soak,
 Instruments evidence and the physical CDJ/SoundSwitch/DMX run remain explicit
 pre-RC work. They are not silently claimed by the successful Dev gates.
+
+## Dev-36 USB/live resolution correction
+
+Version `0.4.0-dev-36` removes the trusted-media blocker discovered before the
+physical run: stable USB sources no longer alias by display name, and GRAY plus
+CHRM aliases may jointly resolve a Live track when both agree on its canonical
+Lumi identity. Conflicts remain fail-closed. Evidence and migration behavior
+are recorded in
+[`0.4.0-dev-36-usb-identity-and-live-resolution.md`](../release/0.4.0-dev-36-usb-identity-and-live-resolution.md).

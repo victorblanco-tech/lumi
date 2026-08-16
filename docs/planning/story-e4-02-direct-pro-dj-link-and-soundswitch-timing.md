@@ -336,6 +336,20 @@ then drive the managed helper and reconnect it when needed.
   advances the fixed waveform playhead, active phrase and active/next Autoloop
   statuses from the same authoritative deck clock.
 
+### E4-02S2 — Trusted backup USB identity — implemented in dev-36
+
+- Stable `usb-fs:` sources match mounted media only by the exact filesystem
+  volume UUID; equal names or cloned database revisions cannot conflate GRAY
+  and CHRM.
+- A stale trusted display label is replaced by the current inspected volume
+  label and persisted by the next selected-playlist sync.
+- Multiple active USB aliases for one Rekordbox ID resolve when they unanimously
+  identify the same canonical Lumi track.
+- Conflicting aliases continue to fail closed and produce an external track
+  without automatic lighting.
+- Regression coverage includes same-name stable media, legacy identity
+  migration, unanimous backup aliases and a deliberate alias conflict.
+
 ## Acceptance criteria
 
 - Lumi starts and stops the bridge automatically with the engine.

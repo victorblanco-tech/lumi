@@ -255,6 +255,10 @@ public struct LibrarySourcesWorkspaceView: View {
     private func usbSourceRow(_ device: RekordboxDeviceState) -> some View {
         let mounted = mountedURL(for: device) != nil
         let selected = selectedUSBSourceID == device.sourceID
+        let displayName = USBSourceIdentityResolver.displayName(
+            for: device,
+            inspection: selected ? library.rekordboxDeviceInspection : nil
+        )
         return Button {
             if selected {
                 selectedUSBSourceID = nil
@@ -270,7 +274,7 @@ public struct LibrarySourcesWorkspaceView: View {
                     .foregroundStyle(mounted ? LumiColor.success : LumiColor.textSecondary)
                     .frame(width: 28)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(device.displayName).font(LumiTypography.cardTitle)
+                    Text(displayName).font(LumiTypography.cardTitle)
                     Text("TRUSTED · \(shortRevision(device.databaseRevision))")
                         .font(LumiTypography.technical)
                         .foregroundStyle(LumiColor.textSecondary)
@@ -343,11 +347,15 @@ public struct LibrarySourcesWorkspaceView: View {
     @ViewBuilder
     private func selectedUSBInspector(device: RekordboxDeviceState?) -> some View {
         if let device {
+            let displayName = USBSourceIdentityResolver.displayName(
+                for: device,
+                inspection: activeDeviceInspection
+            )
             LumiPanel {
                 VStack(alignment: .leading, spacing: LumiSpacing.large) {
                     HStack(alignment: .top) {
                         VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-                            Text(device.displayName).font(LumiTypography.sectionTitle)
+                            Text(displayName).font(LumiTypography.sectionTitle)
                             Text("Trusted USB source · last synchronized \(formattedSyncDate(device.syncedAt))")
                                 .font(LumiTypography.caption)
                                 .foregroundStyle(LumiColor.textSecondary)
@@ -1368,10 +1376,7 @@ public struct LibrarySourcesWorkspaceView: View {
 
     private var provisionalUSBInspection: RekordboxDeviceInspectionState? {
         guard let inspection = library.rekordboxDeviceInspection else { return nil }
-        let alreadyTrusted = visibleUSBDevices.contains {
-            $0.sourceID == inspection.sourceID
-                || $0.displayName.caseInsensitiveCompare(inspection.displayName) == .orderedSame
-        }
+        let alreadyTrusted = visibleUSBDevices.contains { $0.sourceID == inspection.sourceID }
         return alreadyTrusted ? nil : inspection
     }
 
@@ -1414,11 +1419,9 @@ public struct LibrarySourcesWorkspaceView: View {
         guard let inspection = library.rekordboxDeviceInspection else { return nil }
         if inspection.sourceID == selectedUSBSourceID { return inspection }
         guard let selectedUSBSource else { return nil }
-        let sameTrustedIdentity = inspection.sourceID == selectedUSBSource.sourceID
-        let sameMountedDevice = inspection.displayName.caseInsensitiveCompare(
-            selectedUSBSource.displayName
-        ) == .orderedSame
-        guard sameTrustedIdentity || sameMountedDevice else { return nil }
+        guard USBSourceIdentityResolver.inspection(inspection, matches: selectedUSBSource) else {
+            return nil
+        }
         return inspection
     }
 
@@ -1489,10 +1492,13 @@ public struct LibrarySourcesWorkspaceView: View {
         guard FileManager.default.fileExists(
             atPath: url.appendingPathComponent("PIONEER/rekordbox/exportLibrary.db").path
         ) else { return }
-        guard let device = visibleUSBDevices.first(where: {
-            $0.sourceID == volumeSourceID(url)
-                || $0.displayName.caseInsensitiveCompare(url.lastPathComponent) == .orderedSame
-        }) else { return }
+        let volume = mountedIdentity(url)
+        guard let sourceID = USBSourceIdentityResolver.selectedSourceID(
+            for: volume,
+            devices: visibleUSBDevices
+        ), let device = visibleUSBDevices.first(where: { $0.sourceID == sourceID }) else {
+            return
+        }
         selectedUSBSourceID = device.sourceID
         rekordboxDeviceRoot = url.path
         onDeviceInspect(url.path)
@@ -1509,10 +1515,7 @@ public struct LibrarySourcesWorkspaceView: View {
             includingResourceValuesForKeys: [.volumeNameKey],
             options: [.skipHiddenVolumes]
         )?.first { url in
-            let name = (try? url.resourceValues(forKeys: [.volumeNameKey]).volumeName)
-                ?? url.lastPathComponent
-            let identityMatches = volumeSourceID(url) == device.sourceID
-            return (identityMatches || name.caseInsensitiveCompare(device.displayName) == .orderedSame)
+            return USBSourceIdentityResolver.volume(mountedIdentity(url), matches: device)
                 && FileManager.default.fileExists(
                     atPath: url.appendingPathComponent("PIONEER/rekordbox/exportLibrary.db").path
                 )
@@ -1523,6 +1526,13 @@ public struct LibrarySourcesWorkspaceView: View {
         guard let stable = try? url.resourceValues(forKeys: [.volumeUUIDStringKey]).volumeUUIDString,
               !stable.isEmpty else { return nil }
         return "usb-fs:\(stable.lowercased())"
+    }
+
+    private func mountedIdentity(_ url: URL) -> MountedUSBIdentity {
+        MountedUSBIdentity(
+            sourceID: volumeSourceID(url),
+            displayName: volumeDisplayName(url)
+        )
     }
 
     private func deviceSyncState(_ device: RekordboxDeviceState) -> LumiComponentState {
@@ -1578,9 +1588,13 @@ public struct LibrarySourcesWorkspaceView: View {
     }
 
     private var selectedDeviceSummary: RekordboxDeviceState? {
-        let displayName = URL(fileURLWithPath: rekordboxDeviceRoot).lastPathComponent
-        return visibleUSBDevices.first(where: { $0.displayName == displayName })
-            ?? visibleUSBDevices.first
+        guard !rekordboxDeviceRoot.isEmpty else { return nil }
+        let volume = mountedIdentity(URL(fileURLWithPath: rekordboxDeviceRoot, isDirectory: true))
+        guard let sourceID = USBSourceIdentityResolver.selectedSourceID(
+            for: volume,
+            devices: visibleUSBDevices
+        ) else { return nil }
+        return visibleUSBDevices.first { $0.sourceID == sourceID }
     }
 
     private var isDeviceSyncFeedback: Bool {
@@ -1712,12 +1726,10 @@ public struct LibrarySourcesWorkspaceView: View {
     private func inspectRekordboxDevice(at url: URL) {
         usbSelectionFeedback = nil
         rekordboxDeviceRoot = url.path
-        let volumeID = volumeSourceID(url)
-        let displayName = volumeDisplayName(url)
-        selectedUSBSourceID = visibleUSBDevices.first {
-            $0.sourceID == volumeID
-                || $0.displayName.caseInsensitiveCompare(displayName) == .orderedSame
-        }?.sourceID ?? volumeID
+        selectedUSBSourceID = USBSourceIdentityResolver.selectedSourceID(
+            for: mountedIdentity(url),
+            devices: visibleUSBDevices
+        )
         selectedUSBPlaylistIDs = []
         usbPlaylistSearch = ""
         onDeviceInspect(url.path)
