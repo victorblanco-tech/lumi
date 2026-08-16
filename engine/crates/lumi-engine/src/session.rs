@@ -84,8 +84,15 @@ const MAXIMUM_SESSION_TOKEN_BYTES: usize = 256;
 const MAXIMUM_AUTHENTICATION_BYTES: usize = 512;
 const AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(5);
 const INTEGRATION_PUMP_INTERVAL: Duration = Duration::from_millis(20);
-const MINIMUM_PROLINK_TIMING_STALE_AFTER: Duration = Duration::from_millis(1_250);
-const MAXIMUM_PROLINK_TIMING_STALE_AFTER: Duration = Duration::from_secs(5);
+// Physical CDJs can occasionally omit a few UDP beat packets even while deck
+// status keeps flowing. Carabiner and the realtime AutoLoop lane both keep a
+// deterministic tempo/phase projection during such a short gap, so failing
+// closed after only three beats caused false Link dropouts on a healthy LAN.
+// Eight beats tolerates transient packet loss without hiding an actual source
+// outage; the four-bar predictive AutoLoop schedule remains the authority.
+const MINIMUM_PROLINK_TIMING_STALE_AFTER: Duration = Duration::from_secs(3);
+const MAXIMUM_PROLINK_TIMING_STALE_AFTER: Duration = Duration::from_secs(8);
+const PROLINK_TIMING_STALE_BEATS: u64 = 8;
 // Prepare a complete four-bar phrase transition while exact Pro DJ Link beats
 // are healthy. The realtime MIDI lane then owns the deadline, so a short
 // network or bridge gap immediately before the phrase cannot make the pulse
@@ -1963,11 +1970,15 @@ impl OutputWorker {
 }
 
 fn prolink_timing_stale_after(bpm_milli: Option<u32>) -> Duration {
-    let three_beats = bpm_milli
+    let beat_window = bpm_milli
         .filter(|bpm| *bpm > 0)
-        .map(|bpm| Duration::from_micros(180_000_000_000_u64 / u64::from(bpm)))
+        .map(|bpm| {
+            Duration::from_micros(
+                60_000_000_000_u64.saturating_mul(PROLINK_TIMING_STALE_BEATS) / u64::from(bpm),
+            )
+        })
         .unwrap_or(MINIMUM_PROLINK_TIMING_STALE_AFTER);
-    three_beats.clamp(
+    beat_window.clamp(
         MINIMUM_PROLINK_TIMING_STALE_AFTER,
         MAXIMUM_PROLINK_TIMING_STALE_AFTER,
     )
@@ -4632,10 +4643,10 @@ mod tests {
     }
 
     #[test]
-    fn pro_dj_link_stale_window_tracks_three_beats_with_safe_bounds() {
+    fn pro_dj_link_stale_window_tracks_eight_beats_with_safe_bounds() {
         assert_eq!(
             prolink_timing_stale_after(Some(140_000)),
-            Duration::from_micros(1_285_714)
+            Duration::from_micros(3_428_571)
         );
         assert_eq!(
             prolink_timing_stale_after(Some(300_000)),

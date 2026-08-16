@@ -181,6 +181,8 @@ public struct RealtimeMidiOutputLaneSnapshot: Equatable, Sendable {
     public let saturationCount: UInt64
     public let latencySampleCount: UInt64
     public let latencyP95Micros: UInt64
+    public let lastDispatchLatenessMicros: UInt64
+    public let lateDispatchCount: UInt64
 
     public var isHealthy: Bool {
         saturationCount == 0 && (latencySampleCount == 0 || latencyP95Micros <= 20_000)

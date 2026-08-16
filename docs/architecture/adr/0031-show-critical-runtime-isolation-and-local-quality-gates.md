@@ -204,3 +204,10 @@ and Carabiner helper as one process tree. Last-window close and Quit perform a
 graceful stop with a bounded forced fallback; an unexpected client disconnect
 causes the app-owned engine to tear down. Link anchors queued before shutdown
 cannot relaunch a helper after teardown begins.
+
+The managed Link helper must not daemonize. A daemonized Carabiner forks away
+from the engine's `Child` handle and survives a correct Rust drop path. Lumi
+therefore owns the foreground helper process and waits for it during teardown.
+Likewise, direct Pro DJ Link freshness tolerates eight missing beat packets
+(bounded to 3–8 seconds): the realtime lighting lane continues its immutable
+four-bar-ahead deadline, while a sustained outage still holds Link fail-closed.

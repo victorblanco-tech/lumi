@@ -135,3 +135,12 @@ lateness and number of dispatches above 20 ms. This separates delay before lane
 submission from CoreMIDI dispatch delay during physical acceptance testing.
 The accompanying app lifecycle test must also prove that no engine, bridge,
 Carabiner or Ableton Link peer remains after Quit.
+
+The first physical Dev-40 soak then exposed two environment-only lifecycle
+conditions. Short runs of missing UDP beats no longer toggle Link fail-closed:
+the stale window is eight beats, clamped to 3–8 seconds, while the already
+prepared four-bar AutoLoop deadline remains authoritative. The managed
+Carabiner helper also runs in the foreground so its actual process remains a
+child of the engine and is killed and waited during teardown. Live and
+Diagnostics expose last dispatch lateness and the cumulative count above the
+20 ms budget for hardware acceptance.

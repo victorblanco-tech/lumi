@@ -230,6 +230,8 @@ public struct RealtimeMidiLaneState: Equatable, Sendable {
     public let latencyP95Micros: UInt64
     public let latencyP99Micros: UInt64
     public let latencyMaxMicros: UInt64
+    public let lastDispatchLatenessMicros: UInt64
+    public let lateDispatchCount: UInt64
 
     public var isHealthy: Bool {
         saturationCount == 0 && (latencySampleCount == 0 || latencyP95Micros <= 20_000)

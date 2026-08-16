@@ -467,9 +467,10 @@ fn connect_or_launch(
         }
     }
     let child = Command::new(executable)
-        .arg(format!("--port={}", configuration.port))
-        .arg("--poll=10")
-        .arg("--daemon")
+        .args(managed_helper_arguments(configuration.port))
+        // Keep the helper in the foreground when Lumi owns it. `--daemon`
+        // forks away from the tracked `Child`, which made the real Link peer
+        // survive app shutdown as an orphan adopted by launchd.
         .env_remove("LUMI_SESSION_TOKEN")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
@@ -484,6 +485,10 @@ fn connect_or_launch(
         thread::sleep(START_RETRY_DELAY);
     }
     Err("managed Carabiner did not open its loopback port".to_owned())
+}
+
+fn managed_helper_arguments(port: u16) -> [String; 2] {
+    [format!("--port={port}"), "--poll=10".to_owned()]
 }
 
 struct AnchorOutcome {
@@ -779,5 +784,12 @@ mod tests {
         let micros_per_beat = 60_000_000.0 / 130.0;
         let phase = projected_phase(2.0, micros_per_beat, 1_000_000, 1_010_000);
         assert!((phase - 2.021_666_666).abs() < 0.000_001);
+    }
+
+    #[test]
+    fn managed_helper_stays_in_foreground_for_owned_lifecycle() {
+        let arguments = managed_helper_arguments(17_001);
+        assert_eq!(arguments, ["--port=17001", "--poll=10"]);
+        assert!(!arguments.iter().any(|argument| argument == "--daemon"));
     }
 }

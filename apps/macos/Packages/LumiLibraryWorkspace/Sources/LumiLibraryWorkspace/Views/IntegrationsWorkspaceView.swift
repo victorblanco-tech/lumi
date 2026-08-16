@@ -459,7 +459,8 @@ public struct IntegrationsWorkspaceView: View {
             return "Waiting for realtime output lane"
         }
         let p95 = Double(lane.latencyP95Micros) / 1_000
-        return "\(lane.queueDepth)/\(lane.queueCapacity) queued · peak \(lane.queueHighWater) · p95 \(p95.formatted(.number.precision(.fractionLength(1)))) ms · \(lane.saturationCount) saturation"
+        let last = Double(lane.lastDispatchLatenessMicros) / 1_000
+        return "\(lane.queueDepth)/\(lane.queueCapacity) queued · peak \(lane.queueHighWater) · p95 \(p95.formatted(.number.precision(.fractionLength(1)))) ms · last \(last.formatted(.number.precision(.fractionLength(1)))) ms · \(lane.lateDispatchCount) late · \(lane.saturationCount) saturation"
     }
 
     private var clockOutputState: LumiComponentState {
