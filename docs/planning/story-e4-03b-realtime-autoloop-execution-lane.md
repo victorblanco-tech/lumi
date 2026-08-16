@@ -144,3 +144,8 @@ Carabiner helper also runs in the foreground so its actual process remains a
 child of the engine and is killed and waited during teardown. Live and
 Diagnostics expose last dispatch lateness and the cumulative count above the
 20 ms budget for hardware acceptance.
+
+The owned child handle is shared with the output object's drop path. Shutdown
+terminates that exact process before joining the worker, so an in-flight helper
+socket exchange cannot outlive the macOS graceful-exit budget. The real bundled
+Carabiner lifecycle test must leave no process on its isolated test port.

@@ -63,6 +63,7 @@ pub struct CarabinerTimingOutput {
     worker: Option<JoinHandle<()>>,
     status: Arc<Mutex<TimingOutputStatus>>,
     shutting_down: Arc<AtomicBool>,
+    owned_child: Arc<Mutex<Option<Child>>>,
 }
 
 impl CarabinerTimingOutput {
@@ -76,6 +77,8 @@ impl CarabinerTimingOutput {
         let worker_configuration = configuration.clone();
         let shutting_down = Arc::new(AtomicBool::new(false));
         let worker_shutting_down = Arc::clone(&shutting_down);
+        let owned_child = Arc::new(Mutex::new(None));
+        let worker_owned_child = Arc::clone(&owned_child);
         let worker = thread::Builder::new()
             .name("lumi-ableton-link".to_owned())
             .spawn(move || {
@@ -85,6 +88,7 @@ impl CarabinerTimingOutput {
                     &worker_status,
                     &worker_anchor,
                     &worker_shutting_down,
+                    &worker_owned_child,
                 );
             })
             .ok();
@@ -95,6 +99,7 @@ impl CarabinerTimingOutput {
             worker,
             status,
             shutting_down,
+            owned_child,
         }
     }
 
@@ -240,6 +245,12 @@ impl TimingOutputProvider for CarabinerTimingOutput {
 impl Drop for CarabinerTimingOutput {
     fn drop(&mut self) {
         self.shutting_down.store(true, Ordering::Release);
+        // Do not rely only on the worker command queue during process
+        // teardown. The worker may be inside a bounded socket exchange while
+        // the macOS supervisor's graceful-exit deadline is already running.
+        // Killing the exact owned child closes that socket and makes the join
+        // deterministic; a helper that Lumi merely connected to is untouched.
+        terminate_owned_child(&self.owned_child);
         let _ = self.commands.send(WorkerCommand::Shutdown);
         if let Some(worker) = self.worker.take() {
             let _ = worker.join();
@@ -253,9 +264,9 @@ fn run_worker(
     shared_status: &Arc<Mutex<TimingOutputStatus>>,
     latest_anchor: &Arc<Mutex<Option<TimingAnchor>>>,
     shutting_down: &Arc<AtomicBool>,
+    owned_child: &Arc<Mutex<Option<Child>>>,
 ) {
     let mut session: Option<CarabinerSession> = None;
-    let mut owned_child: Option<Child> = None;
     let mut last_anchor: Option<TimingAnchor> = None;
 
     while let Ok(command) = receiver.recv() {
@@ -269,12 +280,7 @@ fn run_worker(
                     status.last_event = Some("Starting managed Ableton Link output".to_owned());
                     status.last_error = None;
                 });
-                let result = open_session(
-                    &configuration,
-                    &mut owned_child,
-                    &mut session,
-                    shared_status,
-                );
+                let result = open_session(&configuration, owned_child, &mut session, shared_status);
                 if let Err(error) = &result {
                     set_degraded(shared_status, error);
                 }
@@ -286,12 +292,8 @@ fn run_worker(
                 let anchor = latest_anchor.lock().ok().and_then(|mut value| value.take());
                 let Some(anchor) = anchor else { continue };
                 if session.is_none()
-                    && let Err(error) = open_session(
-                        &configuration,
-                        &mut owned_child,
-                        &mut session,
-                        shared_status,
-                    )
+                    && let Err(error) =
+                        open_session(&configuration, owned_child, &mut session, shared_status)
                 {
                     set_degraded(shared_status, &error);
                     continue;
@@ -394,10 +396,7 @@ fn run_worker(
                     .as_mut()
                     .map_or(Ok(()), CarabinerSession::stop_playing_now);
                 session = None;
-                if let Some(mut child) = owned_child.take() {
-                    let _ = child.kill();
-                    let _ = child.wait();
-                }
+                terminate_owned_child(owned_child);
                 last_anchor = None;
                 update_status(shared_status, |status| {
                     let helper_version = status.helper_version.clone();
@@ -411,19 +410,20 @@ fn run_worker(
         }
     }
 
-    if let Some(mut child) = owned_child {
-        let _ = child.kill();
-        let _ = child.wait();
-    }
+    terminate_owned_child(owned_child);
 }
 
 fn open_session(
     configuration: &CarabinerConfiguration,
-    owned_child: &mut Option<Child>,
+    owned_child: &Arc<Mutex<Option<Child>>>,
     session: &mut Option<CarabinerSession>,
     shared_status: &Arc<Mutex<TimingOutputStatus>>,
 ) -> Result<(), String> {
-    let mut connected = connect_or_launch(configuration, owned_child)?;
+    let mut owned_child = owned_child
+        .lock()
+        .map_err(|_| "managed Carabiner child lock is poisoned".to_owned())?;
+    let mut connected = connect_or_launch(configuration, &mut owned_child)?;
+    drop(owned_child);
     let version = connected.version()?;
     if version != configuration.expected_version {
         return Err(format!(
@@ -489,6 +489,16 @@ fn connect_or_launch(
 
 fn managed_helper_arguments(port: u16) -> [String; 2] {
     [format!("--port={port}"), "--poll=10".to_owned()]
+}
+
+fn terminate_owned_child(owned_child: &Arc<Mutex<Option<Child>>>) {
+    let Ok(mut owned_child) = owned_child.lock() else {
+        return;
+    };
+    if let Some(mut child) = owned_child.take() {
+        let _ = child.kill();
+        let _ = child.wait();
+    }
 }
 
 struct AnchorOutcome {

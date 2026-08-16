@@ -211,3 +211,7 @@ therefore owns the foreground helper process and waits for it during teardown.
 Likewise, direct Pro DJ Link freshness tolerates eight missing beat packets
 (bounded to 3–8 seconds): the realtime lighting lane continues its immutable
 four-bar-ahead deadline, while a sustained outage still holds Link fail-closed.
+The owner also terminates its tracked helper before joining the timing worker;
+this closes in-flight loopback I/O and prevents the app supervisor's bounded
+fallback from orphaning the child. An externally supplied helper is not owned
+and is therefore never killed by Lumi.
