@@ -248,6 +248,10 @@ public struct DeckInputIntegrationSnapshot: Equatable, Sendable {
     public let duplicateFrameCount: UInt64
     public let lastDeckID: UInt64?
     public let lastFrameSequence: UInt64?
+    public let precisePositionMessageCount: UInt64
+    public let authoritativePositionCount: UInt64
+    public let positionDiscontinuityCount: UInt64
+    public let positionAuthorityReady: Bool
 
     public init(
         state: String,
@@ -260,7 +264,11 @@ public struct DeckInputIntegrationSnapshot: Equatable, Sendable {
         ignoredMessageCount: UInt64,
         duplicateFrameCount: UInt64,
         lastDeckID: UInt64?,
-        lastFrameSequence: UInt64?
+        lastFrameSequence: UInt64?,
+        precisePositionMessageCount: UInt64 = 0,
+        authoritativePositionCount: UInt64 = 0,
+        positionDiscontinuityCount: UInt64 = 0,
+        positionAuthorityReady: Bool = false
     ) {
         self.state = state
         self.destinationName = destinationName
@@ -273,6 +281,10 @@ public struct DeckInputIntegrationSnapshot: Equatable, Sendable {
         self.duplicateFrameCount = duplicateFrameCount
         self.lastDeckID = lastDeckID
         self.lastFrameSequence = lastFrameSequence
+        self.precisePositionMessageCount = precisePositionMessageCount
+        self.authoritativePositionCount = authoritativePositionCount
+        self.positionDiscontinuityCount = positionDiscontinuityCount
+        self.positionAuthorityReady = positionAuthorityReady
     }
 }
 

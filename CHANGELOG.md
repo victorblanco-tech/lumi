@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.4.0-dev-44
+
+- Makes modern-player `PrecisePosition` the only Pro DJ Link authority for
+  playback position, phrase selection and automatic lighting output. Lumi maps
+  playback milliseconds through the trusted local Rekordbox beat grid.
+- Keeps bar-relative Beat packets timing-only. A Beat arriving before the
+  matching status after a Hot Cue can no longer combine a new bar position
+  with an old absolute track position and select the wrong phrase.
+- Holds automatic output fail-closed when exact position authority is missing
+  or older than 250 ms. Future Bank and AutoLoop MIDI remains represented as
+  guarded deadlines and is released only against a fresh matching transport
+  generation.
+- Updates Ableton Link tempo directly from playing deck status without
+  re-anchoring phase, improving pitch-slider response while preserving a
+  monotonic Link timeline.
+- Adds provider and scheduler regressions for the exact Hot Cue race and shows
+  exact-position readiness in Live and Integration Diagnostics.
+- Treats delayed-but-forward precise-position callbacks as receive jitter, not
+  seeks. Physical acceptance processed 19,620 exact positions and emitted
+  25/25 scheduled pulses with zero late dispatches, saturation or Link errors;
+  a Hot Cue A landing emitted only Intro's configured AutoLoop.
+- The corrected packaged build classified only the real CDJ loop wraps across
+  a further 7,821 exact positions. Its final SoundSwitch soak emitted 26 MIDI
+  events with zero late dispatches, cancellations, saturation or Link errors
+  and a maximum measured dispatch latency of 153 microseconds.
+
 ## 0.4.0-dev-43
 
 - Keeps the channel engine and its `Lumi Virtual MIDI`/`Lumi Clock`

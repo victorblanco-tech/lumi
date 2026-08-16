@@ -161,6 +161,7 @@ pub struct BridgeProcessDiagnostics {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CoalescingKey {
     DeckStatus(u8),
+    PrecisePosition(u8),
     TrackMetadata(u8),
     TrackSignature(u8),
 }
@@ -168,6 +169,9 @@ enum CoalescingKey {
 fn coalescing_key(message: &BridgeMessage) -> Option<CoalescingKey> {
     match &message.event {
         BridgeEvent::DeckStatus(status) => Some(CoalescingKey::DeckStatus(status.device_number)),
+        BridgeEvent::PrecisePosition(position) => {
+            Some(CoalescingKey::PrecisePosition(position.device_number))
+        }
         BridgeEvent::TrackMetadata(metadata) => {
             Some(CoalescingKey::TrackMetadata(metadata.deck_number))
         }

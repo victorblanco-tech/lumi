@@ -272,3 +272,35 @@ pending output is invalidated, local clock stops and Link leaves before the UI
 transport closes. Reattachment reuses the exact engine process and cannot
 duplicate endpoints. An incompatible build is still replaced rather than
 attached, preserving build-exact process ownership.
+
+## Implementation correction — `0.4.0-dev-44`
+
+Physical Hot Cue testing disproved the earlier assumption that a Pro DJ Link
+Beat packet is an exact absolute-position observation. It contains a musical
+beat and bar-relative position, but may arrive before the asynchronous deck
+status that reports the new absolute track position. Combining both streams
+could therefore authorize a valid future phrase from the old position after a
+Hot Cue landed in Intro.
+
+For modern players, Beat Link's `PrecisePosition` callback is now the only
+authority for connected-deck playback position, seek detection, phrase
+selection and automatic lighting output. Its playback milliseconds are mapped
+through Lumi's trusted local Rekordbox beat grid. Beat packets remain the
+low-latency timing input for Ableton Link, while playing deck status may update
+tempo without changing Link phase. Neither can authorize a phrase.
+
+Prediction is retained without allowing stale MIDI to escape: future Bank and
+AutoLoop work is stored as guarded deadlines, not provider commands. At each
+release deadline the source, deck, track load and transport generation must
+still match and exact position authority must be no older than 250 ms. Missing
+or stale authority cancels the item fail-closed. A precise-position
+discontinuity invalidates every older queued generation before the landing
+phrase is evaluated.
+
+Precise-position continuity is intentionally asymmetric. A UDP/callback sample
+that still advances but arrives behind its wall-clock projection is ordinary
+receive jitter and may not create a timing generation. A materially backward
+position or a forward position ahead of elapsed time remains an explicit
+Hot Cue, loop or beat-jump discontinuity. This prevents late network delivery
+from continuously re-anchoring Link while preserving fail-closed cancellation
+for real transport changes.

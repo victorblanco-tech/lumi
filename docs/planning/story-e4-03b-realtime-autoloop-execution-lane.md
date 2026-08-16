@@ -199,3 +199,37 @@ the matching recursive lock after a MIDI device-list change. Dev-43 avoids that
 normal trigger by retaining the engine-owned virtual MIDI endpoints across UI
 Quit/relaunch. Output still fails safe because client disconnect moves Lumi to
 Off before leaving Link.
+
+### Dev-44 exact-position authorization
+
+Version `0.4.0-dev-44` closes the physical Hot Cue race in which a new
+bar-relative Beat could arrive before the deck status carrying its new absolute
+position. Modern-player `PrecisePosition` playback milliseconds are mapped
+through the trusted local beat grid and are now the sole authority for phrase
+and AutoLoop selection. Beat and status observations continue to serve timing,
+transport and tempo but cannot authorize light output.
+
+Future output is retained as a deadline only. Bank or AutoLoop MIDI is released
+when that deadline is due and only if a matching exact position observation is
+at most 250 ms old. A Hot Cue, seek, beatjump, track load or Master generation
+change invalidates the old generation before the landing phrase can emit.
+Provider regressions reproduce the original ordering (new Beat, stale status,
+then exact Hot Cue position) and prove that Bridge cannot be emitted for an
+Intro landing.
+
+The physical dev-44 soak additionally proved that delayed precise-position
+callbacks can move monotonically forward while trailing wall-clock elapsed
+time. This receive jitter must not create a discontinuity. Only a materially
+backward position or a forward jump ahead of elapsed time advances the
+generation; late forward progress remains continuous. The three-minute run
+processed 19,620 exact positions and emitted 25/25 scheduled pulses with zero
+late dispatches, cancellations, saturation or Link failures (maximum measured
+dispatch latency 4.634 ms).
+
+The corrected packaged build repeated this against physical Player 1 and
+SoundSwitch. A source-only run classified exactly one real 98.710-second loop
+wrap across 2,614 exact positions. A final three-minute output run processed
+5,207 exact positions, classified exactly two physical loop wraps and emitted
+26 MIDI events with zero late dispatches, cancellations, saturation or Link
+failures. Maximum dispatch latency was 153 microseconds, after which operation
+was Off, Link had zero peers and SoundSwitch remained responsive.

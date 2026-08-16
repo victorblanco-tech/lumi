@@ -5,6 +5,8 @@ use lumi_prolink_input::{
 const HELLO: &str = include_str!("../../../../contracts/prolink-bridge/v1/fixtures/hello.json");
 const DECK_STATUS: &str =
     include_str!("../../../../contracts/prolink-bridge/v1/fixtures/deck-status.json");
+const PRECISE_POSITION: &str =
+    include_str!("../../../../contracts/prolink-bridge/v1/fixtures/precise-position.json");
 
 #[test]
 fn decodes_versioned_hello_and_rich_deck_status() {
@@ -26,6 +28,28 @@ fn decodes_versioned_hello_and_rich_deck_status() {
     assert_eq!(status.beat_number, 169);
     assert!(status.tempo_master);
     assert_eq!(decoder.last_sequence(), Some(2));
+}
+
+#[test]
+fn decodes_modern_player_precise_position() {
+    let mut decoder = BridgeDecoder::new();
+    decoder
+        .decode_line(HELLO)
+        .unwrap_or_else(|error| panic!("hello fixture must decode: {error}"));
+    decoder
+        .decode_line(DECK_STATUS)
+        .unwrap_or_else(|error| panic!("deck fixture must decode: {error}"));
+    let message = decoder
+        .decode_line(PRECISE_POSITION)
+        .unwrap_or_else(|error| panic!("precise position must decode: {error}"));
+    let BridgeEvent::PrecisePosition(position) = message.event else {
+        panic!("expected precise position");
+    };
+    assert_eq!(position.device_number, 2);
+    assert_eq!(position.playback_position_millis, 42_750);
+    assert_eq!(position.effective_bpm, 136.5);
+    assert_eq!(position.beat_within_bar, 1);
+    assert!(position.tempo_master);
 }
 
 #[test]

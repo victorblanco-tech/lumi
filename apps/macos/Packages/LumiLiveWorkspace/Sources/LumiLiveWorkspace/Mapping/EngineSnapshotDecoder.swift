@@ -353,6 +353,11 @@ public struct EngineSnapshotDecoder: Sendable {
         let destinationName = try optionalString(input["destinationName"])
         let lastDeckID = try optionalUnsignedInteger(input["lastDeckId"])
         let lastFrameSequence = try optionalUnsignedInteger(input["lastFrameSequence"])
+        let positionAuthorityReady = if case let .boolean(value) = input["positionAuthorityReady"] {
+            value
+        } else {
+            false
+        }
         let isBLTMIDI = protocolName == "BLT MIDI Deck Frame"
         guard destinationName?.isEmpty != true,
               lastDeckID.map({ (1...4).contains($0) }) ?? true,
@@ -370,7 +375,11 @@ public struct EngineSnapshotDecoder: Sendable {
             ignoredMessageCount: ignoredMessageCount,
             duplicateFrameCount: duplicateFrameCount,
             lastDeckID: lastDeckID,
-            lastFrameSequence: lastFrameSequence
+            lastFrameSequence: lastFrameSequence,
+            precisePositionMessageCount: unsignedInteger(input["precisePositionMessageCount"]) ?? 0,
+            authoritativePositionCount: unsignedInteger(input["authoritativePositionCount"]) ?? 0,
+            positionDiscontinuityCount: unsignedInteger(input["positionDiscontinuityCount"]) ?? 0,
+            positionAuthorityReady: positionAuthorityReady
         )
     }
 

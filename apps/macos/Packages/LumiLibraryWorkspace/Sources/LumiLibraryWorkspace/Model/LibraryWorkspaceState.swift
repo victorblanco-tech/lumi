@@ -637,6 +637,10 @@ public struct DeckInputIntegrationState: Equatable, Sendable {
     public let ingressQueueHighWater: UInt64
     public let ingressCoalescedMessageCount: UInt64
     public let ingressCriticalSaturationCount: UInt64
+    public let precisePositionMessageCount: UInt64
+    public let authoritativePositionCount: UInt64
+    public let positionDiscontinuityCount: UInt64
+    public let positionAuthorityReady: Bool
     public let lastError: String?
 
     public var isReady: Bool { state == "ready" }

@@ -452,6 +452,19 @@ public struct LibrarySnapshotDecoder: Sendable {
                 input,
                 "ingressCriticalSaturationCount"
             ) ?? 0,
+            precisePositionMessageCount: optionalUnsigned(
+                input,
+                "precisePositionMessageCount"
+            ) ?? 0,
+            authoritativePositionCount: optionalUnsigned(
+                input,
+                "authoritativePositionCount"
+            ) ?? 0,
+            positionDiscontinuityCount: optionalUnsigned(
+                input,
+                "positionDiscontinuityCount"
+            ) ?? 0,
+            positionAuthorityReady: optionalBoolean(input, "positionAuthorityReady") ?? false,
             lastError: optionalString(input, "lastError")
         )
     }

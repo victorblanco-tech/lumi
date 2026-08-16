@@ -282,8 +282,13 @@ public enum LiveWorkspacePresenter {
     ) -> LiveWorkspaceState {
         let content = content(from: snapshot)
         let derivedCondition: LiveWorkspaceCondition
+        let usesDirectProDJLink = snapshot.deckInputIntegration?.protocolName == "lumi-prolink-bridge"
+        let exactPositionMissing = usesDirectProDJLink
+            && !snapshot.decks.isEmpty
+            && snapshot.operationState == "live"
+            && snapshot.deckInputIntegration?.positionAuthorityReady != true
         let proDJLinkHasProblem = snapshot.deckSource.mode == "connectedDecks"
-            && snapshot.deckInputIntegration?.state != "ready"
+            && (snapshot.deckInputIntegration?.state != "ready" || exactPositionMissing)
         let lightingHasProblem = snapshot.midiIntegration?.lastError != nil
             || (snapshot.midiIntegration?.autoPublishEnabled == true
                 && snapshot.midiIntegration?.state != "ready")
@@ -413,7 +418,16 @@ public enum LiveWorkspacePresenter {
         healthy: ProviderCondition
     ) -> ProviderCondition {
         guard snapshot.deckSource.mode == "connectedDecks" else { return .empty }
-        return snapshot.deckInputIntegration?.state == "ready" ? healthy : .degraded
+        guard let input = snapshot.deckInputIntegration, input.state == "ready" else {
+            return .degraded
+        }
+        if input.protocolName == "lumi-prolink-bridge",
+           !snapshot.decks.isEmpty,
+           snapshot.operationState == "live",
+           !input.positionAuthorityReady {
+            return .degraded
+        }
+        return healthy
     }
 
     private static func deckSourceDetail(_ snapshot: EngineSnapshot) -> String {
@@ -429,7 +443,10 @@ public enum LiveWorkspacePresenter {
         }
         let messageKind = isDirectProLink ? "bridge events" : "MIDI messages"
         let lastDeck = input.lastDeckID.map { " · last deck \($0)" } ?? ""
-        return "\(snapshot.deckSource.displayName) · \(endpoint) · \(input.receivedMessageCount) \(messageKind) · \(input.committedFrameCount) frames\(lastDeck)"
+        let exactPosition = isDirectProLink
+            ? " · exact position \(input.positionAuthorityReady ? "ready" : "waiting")"
+            : ""
+        return "\(snapshot.deckSource.displayName) · \(endpoint) · \(input.receivedMessageCount) \(messageKind) · \(input.committedFrameCount) frames\(lastDeck)\(exactPosition)"
     }
 
     private static func plannerDetail(_ snapshot: EngineSnapshot) -> String {
@@ -533,6 +550,12 @@ public enum LiveWorkspacePresenter {
             if snapshot.deckSource.mode == "connectedDecks",
                snapshot.deckInputIntegration?.state != "ready" {
                 return "Pro DJ Link data was interrupted. Exact live timing is recovering."
+            }
+            if snapshot.deckInputIntegration?.protocolName == "lumi-prolink-bridge",
+               !snapshot.decks.isEmpty,
+               snapshot.operationState == "live",
+               snapshot.deckInputIntegration?.positionAuthorityReady != true {
+                return "Exact CDJ position is unavailable. Automatic light output is held to prevent a wrong AutoLoop."
             }
             if let error = snapshot.midiIntegration?.lastError {
                 return "Light Output needs attention: \(error)"

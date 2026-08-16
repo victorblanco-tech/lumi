@@ -21,3 +21,10 @@ valid only with Rekordbox ID zero and must never restart the bridge.
 
 `observedAtNanos` is helper-process monotonic evidence. It is used for ordering
 and latency diagnostics, not as a wall-clock timestamp.
+
+Modern-player `precisePosition` events carry the exact playback position in
+milliseconds. Lumi maps that value through its trusted local beat grid; only
+that mapped position may authorize a phrase change or automatic light output.
+The lower-frequency `deckStatus` and bar-relative `beat` events remain useful
+for discovery, transport, tempo and Ableton Link phase, but cannot independently
+authorize an AutoLoop after a hotcue or seek.

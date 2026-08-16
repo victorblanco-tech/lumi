@@ -1276,7 +1276,11 @@ struct LiveWorkspacePresenterTests {
             "ignoredMessageCount": .number(0),
             "duplicateFrameCount": .number(0),
             "lastDeckId": .number(4),
-            "lastFrameSequence": .number(340)
+            "lastFrameSequence": .number(340),
+            "precisePositionMessageCount": .number(280),
+            "authoritativePositionCount": .number(278),
+            "positionDiscontinuityCount": .number(3),
+            "positionAuthorityReady": .boolean(true)
         ])
         let envelope = MessageEnvelope(
             protocolVersion: recorded.protocolVersion,
@@ -1297,6 +1301,9 @@ struct LiveWorkspacePresenterTests {
         #expect(snapshot.deckInputIntegration?.protocolName == "lumi-prolink-bridge")
         #expect(snapshot.deckInputIntegration?.lastFrameSequence == 340)
         #expect(snapshot.deckInputIntegration?.lastDeckID == 4)
+        #expect(snapshot.deckInputIntegration?.positionAuthorityReady == true)
+        #expect(snapshot.deckInputIntegration?.authoritativePositionCount == 278)
+        #expect(snapshot.deckInputIntegration?.positionDiscontinuityCount == 3)
     }
 
     @Test("Malformed optional BLT diagnostics fail strict decoding")

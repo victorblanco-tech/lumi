@@ -14,8 +14,9 @@ mod provider;
 mod supervisor;
 
 pub use provider::{
-    ProLinkDeckSourceDiagnostics, ProLinkDeckSourceProvider, ProLinkDiscoveredDevice,
-    ProLinkProviderError, ProLinkTimingObservation, ProLinkTrackIdentity, ProLinkTransportSnapshot,
+    ProLinkAuthoritativePosition, ProLinkDeckSourceDiagnostics, ProLinkDeckSourceProvider,
+    ProLinkDiscoveredDevice, ProLinkPrecisePositionObservation, ProLinkProviderError,
+    ProLinkTimingObservation, ProLinkTrackIdentity, ProLinkTransportSnapshot,
 };
 pub use supervisor::{
     BridgeLaunchConfiguration, BridgeProcessDiagnostics, BridgeProcessSupervisor,
@@ -41,6 +42,7 @@ pub enum BridgeEvent {
     DeviceLost(Device),
     DeckStatus(DeckStatus),
     Beat(Beat),
+    PrecisePosition(PrecisePosition),
     TrackMetadata(TrackMetadata),
     TrackSignature(TrackSignature),
     Error(BridgeFailure),
@@ -108,6 +110,17 @@ pub struct DeckStatus {
 pub struct Beat {
     pub device_number: u8,
     pub device_name: String,
+    pub effective_bpm: f64,
+    pub beat_within_bar: u8,
+    pub tempo_master: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PrecisePosition {
+    pub device_number: u8,
+    pub device_name: String,
+    pub playback_position_millis: u64,
     pub effective_bpm: f64,
     pub beat_within_bar: u8,
     pub tempo_master: bool,
@@ -224,6 +237,7 @@ fn decode_event(message_type: &str, payload: Value) -> Result<BridgeEvent, Bridg
         "deviceLost" => decode_payload(payload).map(BridgeEvent::DeviceLost),
         "deckStatus" => decode_payload(payload).map(BridgeEvent::DeckStatus),
         "beat" => decode_payload(payload).map(BridgeEvent::Beat),
+        "precisePosition" => decode_payload(payload).map(BridgeEvent::PrecisePosition),
         "trackMetadata" => decode_payload(payload).map(BridgeEvent::TrackMetadata),
         "trackSignature" => decode_payload(payload).map(BridgeEvent::TrackSignature),
         "error" => decode_payload(payload).map(BridgeEvent::Error),
@@ -271,6 +285,16 @@ fn validate_event(event: &BridgeEvent) -> Result<(), BridgeDecodeError> {
                 || !(1..=4).contains(&beat.beat_within_bar)
             {
                 return Err(BridgeDecodeError::InvalidPayload("beat"));
+            }
+        }
+        BridgeEvent::PrecisePosition(position) => {
+            if position.device_number == 0
+                || position.device_name.trim().is_empty()
+                || !valid_bpm(position.effective_bpm)
+                || position.beat_within_bar > 4
+                || position.playback_position_millis > 24 * 60 * 60 * 1_000
+            {
+                return Err(BridgeDecodeError::InvalidPayload("precisePosition"));
             }
         }
         BridgeEvent::TrackMetadata(metadata) => {

@@ -168,3 +168,9 @@ fail-safe to Off with Link disabled. A physical CDJ/SoundSwitch run and exact
 engine-PID reattach prove that SoundSwitch stays responsive without duplicate
 MIDI ownership. See
 [`0.4.0-dev-43-stable-midi-service-lifecycle.md`](../release/0.4.0-dev-43-stable-midi-service-lifecycle.md).
+
+Version `0.4.0-dev-44` makes exact modern-player position a mandatory
+authorization boundary for connected-deck lighting. Bar-relative Beat and
+asynchronous status can no longer combine across a Hot Cue to select a stale
+phrase, and guarded deadlines fail closed when exact position is stale. See
+[`0.4.0-dev-44-exact-position-autoloop-authority.md`](../release/0.4.0-dev-44-exact-position-autoloop-authority.md).

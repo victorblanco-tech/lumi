@@ -58,6 +58,18 @@ public struct ProDJLinkIntegrationView: View {
                 statusRow("Network state", integration?.sourceState?.uppercased() ?? "WAITING")
                 statusRow("Detected devices", "\(integration?.discoveredPlayers.count ?? 0)")
                 statusRow("Traffic", "\(integration?.receivedMessageCount ?? 0) bridge events")
+                statusRow(
+                    "Exact position authority",
+                    integration?.positionAuthorityReady == true
+                        ? "READY · \(integration?.authoritativePositionCount ?? 0) positions"
+                        : "WAITING · automatic output held"
+                )
+                if let integration, integration.positionDiscontinuityCount > 0 {
+                    statusRow(
+                        "Hotcues / seeks",
+                        "\(integration.positionDiscontinuityCount) safely invalidated"
+                    )
+                }
                 if let bridgeVersion = integration?.bridgeVersion,
                    let beatLinkVersion = integration?.beatLinkVersion {
                     statusRow("Runtime", "Lumi bridge \(bridgeVersion) · beat-link \(beatLinkVersion)")

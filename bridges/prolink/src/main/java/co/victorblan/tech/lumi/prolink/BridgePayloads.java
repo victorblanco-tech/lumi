@@ -43,6 +43,16 @@ final class BridgePayloads {
     ) {
     }
 
+    record PrecisePosition(
+            int deviceNumber,
+            String deviceName,
+            long playbackPositionMillis,
+            double effectiveBpm,
+            int beatWithinBar,
+            boolean tempoMaster
+    ) {
+    }
+
     record TrackMetadata(
             int deckNumber,
             boolean available,

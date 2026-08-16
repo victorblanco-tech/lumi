@@ -128,14 +128,14 @@ fn preserves_low_latency_master_beat_timestamp_for_timing_output() {
         .unwrap_or_else(|| panic!("master beat should become a timing observation"));
     assert_eq!(beat.deck_id.value(), 1);
     assert_eq!(beat.observed_at_nanos, 40_000_000);
-    assert_eq!(beat.absolute_beat, 17);
+    assert_eq!(beat.absolute_beat, 16);
     assert_eq!(beat.effective_bpm_milli, 157_250);
     assert_eq!(beat.beat_within_bar, 2);
     assert!(beat.playing);
 }
 
 #[test]
-fn exact_beats_activate_hydrated_phrases_and_forward_seek_is_explicit() {
+fn bar_relative_beats_never_activate_phrases_and_status_seeks_remain_explicit() {
     let mut decoder = BridgeDecoder::new();
     let mut provider = ProLinkDeckSourceProvider::new(MonotonicTime::new(0))
         .unwrap_or_else(|error| panic!("provider should initialize: {error}"));
@@ -178,10 +178,10 @@ fn exact_beats_activate_hydrated_phrases_and_forward_seek_is_explicit() {
     let observations = provider
         .drain_events()
         .unwrap_or_else(|error| panic!("events should drain: {error}"));
-    assert!(observations.iter().any(|event| matches!(
+    assert!(observations.iter().all(|event| !matches!(
         event,
         DomainEvent::Observation(envelope)
-            if matches!(envelope.observation, DeckObservation::PhraseChanged { phrase_index: 0, .. })
+            if matches!(envelope.observation, DeckObservation::PhraseChanged { .. })
     )));
 
     let seek = decoder
@@ -200,10 +200,10 @@ fn exact_beats_activate_hydrated_phrases_and_forward_seek_is_explicit() {
         DomainEvent::Observation(envelope)
             if matches!(envelope.observation, DeckObservation::PlaybackPositionSeeked { beat: 32, .. })
     )));
-    assert!(observations.iter().any(|event| matches!(
+    assert!(observations.iter().all(|event| !matches!(
         event,
         DomainEvent::Observation(envelope)
-            if matches!(envelope.observation, DeckObservation::PhraseChanged { phrase_index: 1, .. })
+            if matches!(envelope.observation, DeckObservation::PhraseChanged { .. })
     )));
     let forward_seek_revision = provider
         .transport(lumi_domain::TrackLoadId::new(1))
@@ -224,6 +224,112 @@ fn exact_beats_activate_hydrated_phrases_and_forward_seek_is_explicit() {
         .unwrap_or_else(|| panic!("backward-seeked deck should expose transport"))
         .discontinuity_revision;
     assert!(backward_seek_revision > forward_seek_revision);
+}
+
+#[test]
+fn precise_position_overrides_a_stale_beat_after_hotcue_before_output_planning() {
+    let mut decoder = BridgeDecoder::new();
+    let mut provider = ProLinkDeckSourceProvider::new(MonotonicTime::new(0))
+        .unwrap_or_else(|error| panic!("provider should initialize: {error}"));
+    for (line, time) in [(HELLO, 1), (READY, 2), (STATUS, 3)] {
+        let message = decoder
+            .decode_line(line)
+            .unwrap_or_else(|error| panic!("fixture should decode: {error}"));
+        provider
+            .ingest(message, MonotonicTime::new(time))
+            .unwrap_or_else(|error| panic!("message should translate: {error}"));
+    }
+    let metadata = TrackMetadata::try_new(
+        TrackId::new(99),
+        "Hotcue regression".to_owned(),
+        "Lumi".to_owned(),
+        155_000,
+        MusicalKey::new(PitchClass::C, KeyMode::Minor),
+        64,
+        vec![
+            TrackPhrase::new(0, 0, 32, PhraseKind::Intro),
+            TrackPhrase::new(1, 32, 64, PhraseKind::Breakdown),
+        ],
+    )
+    .unwrap_or_else(|error| panic!("metadata should be valid: {error}"));
+    assert!(provider.hydrate_track_metadata(lumi_domain::TrackLoadId::new(1), metadata));
+    let _ = provider.drain_events();
+
+    let bridge_position = decoder
+        .decode_line(
+            r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":4,"observedAtNanos":100000000,"type":"precisePosition","payload":{"deviceNumber":1,"deviceName":"CDJ-1500X","playbackPositionMillis":10000,"effectiveBpm":157.25,"beatWithinBar":1,"tempoMaster":true}}"#,
+        )
+        .unwrap_or_else(|error| panic!("precise position should decode: {error}"));
+    provider
+        .ingest(bridge_position, MonotonicTime::new(4))
+        .unwrap_or_else(|error| panic!("precise position should queue: {error}"));
+    let bridge_position = provider
+        .drain_precise_position_observations()
+        .pop()
+        .unwrap_or_else(|| panic!("precise position should be retained"));
+    provider
+        .apply_authoritative_position(bridge_position, 32, MonotonicTime::new(5))
+        .unwrap_or_else(|error| panic!("position should apply: {error}"));
+    let _ = provider.drain_events();
+
+    // A bar-relative beat can race ahead of the position packet after the DJ
+    // presses Hotcue A. It must not advance or select a phrase by itself.
+    let raced_beat = decoder
+        .decode_line(
+            r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":5,"observedAtNanos":110000000,"type":"beat","payload":{"deviceNumber":1,"deviceName":"CDJ-1500X","effectiveBpm":157.25,"beatWithinBar":1,"tempoMaster":true}}"#,
+        )
+        .unwrap_or_else(|error| panic!("raced beat should decode: {error}"));
+    provider
+        .ingest(raced_beat, MonotonicTime::new(6))
+        .unwrap_or_else(|error| panic!("raced beat should translate: {error}"));
+    assert!(
+        provider
+            .drain_events()
+            .unwrap_or_else(|error| panic!("events should drain: {error}"))
+            .is_empty(),
+        "a beat without absolute position may not authorize Bridge"
+    );
+
+    let intro_position = decoder
+        .decode_line(
+            r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":6,"observedAtNanos":120000000,"type":"precisePosition","payload":{"deviceNumber":1,"deviceName":"CDJ-1500X","playbackPositionMillis":0,"effectiveBpm":157.25,"beatWithinBar":1,"tempoMaster":true}}"#,
+        )
+        .unwrap_or_else(|error| panic!("hotcue position should decode: {error}"));
+    provider
+        .ingest(intro_position, MonotonicTime::new(7))
+        .unwrap_or_else(|error| panic!("hotcue position should queue: {error}"));
+    let intro_position = provider
+        .drain_precise_position_observations()
+        .pop()
+        .unwrap_or_else(|| panic!("hotcue position should be retained"));
+    let applied = provider
+        .apply_authoritative_position(intro_position, 0, MonotonicTime::new(8))
+        .unwrap_or_else(|error| panic!("hotcue position should apply: {error}"))
+        .unwrap_or_else(|| panic!("loaded track should accept its position"));
+    assert!(applied.discontinuity);
+    let observations = provider
+        .drain_events()
+        .unwrap_or_else(|error| panic!("events should drain: {error}"));
+    assert!(observations.iter().any(|event| matches!(
+        event,
+        DomainEvent::Observation(envelope)
+            if matches!(envelope.observation, DeckObservation::PlaybackPositionSeeked { beat: 0, .. })
+    )));
+    assert!(observations.iter().any(|event| matches!(
+        event,
+        DomainEvent::Observation(envelope)
+            if matches!(envelope.observation, DeckObservation::PhraseChanged { phrase_index: 0, .. })
+    )));
+    let timing = provider.drain_timing_observations();
+    assert_eq!(
+        timing.len(),
+        1,
+        "obsolete pre-hotcue timing must be discarded"
+    );
+    assert_eq!(timing[0].absolute_beat, 0);
+    assert_eq!(timing[0].beat_within_bar, 1);
+    assert_eq!(timing[0].effective_bpm_milli, 157_250);
+    assert!(timing[0].discontinuity, "Link must re-anchor exactly once");
 }
 
 #[test]
@@ -251,6 +357,46 @@ fn playing_status_frames_never_impersonate_precise_beat_boundaries() {
         .ingest(beat, MonotonicTime::new(4))
         .unwrap_or_else(|error| panic!("beat should translate: {error}"));
     assert_eq!(provider.drain_timing_observations().len(), 1);
+}
+
+#[test]
+fn playing_tempo_change_updates_link_without_authorizing_a_phrase() {
+    let mut decoder = BridgeDecoder::new();
+    let mut provider = ProLinkDeckSourceProvider::new(MonotonicTime::new(0))
+        .unwrap_or_else(|error| panic!("provider should initialize: {error}"));
+    for (line, time) in [(HELLO, 1), (READY, 2), (STATUS, 3)] {
+        let message = decoder
+            .decode_line(line)
+            .unwrap_or_else(|error| panic!("fixture should decode: {error}"));
+        provider
+            .ingest(message, MonotonicTime::new(time))
+            .unwrap_or_else(|error| panic!("message should translate: {error}"));
+    }
+    let _ = provider.drain_events();
+    let tempo = decoder
+        .decode_line(
+            r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":4,"observedAtNanos":50000000,"type":"deckStatus","payload":{"deviceNumber":1,"deviceName":"LUMI-SIM","playing":true,"paused":false,"cued":false,"tempoMaster":true,"onAir":true,"sourcePlayer":1,"sourceSlot":"USB_SLOT","trackType":"REKORDBOX","rekordboxId":1256,"trackBpm":155.0,"effectiveBpm":160.0,"beatNumber":17,"beatWithinBar":1,"rawPitch":1082458112}}"#,
+        )
+        .unwrap_or_else(|error| panic!("tempo status should decode: {error}"));
+    provider
+        .ingest(tempo, MonotonicTime::new(4))
+        .unwrap_or_else(|error| panic!("tempo status should translate: {error}"));
+
+    let timing = provider.drain_timing_observations();
+    assert_eq!(timing.len(), 1);
+    assert_eq!(timing[0].effective_bpm_milli, 160_000);
+    assert!(!timing[0].discontinuity);
+    assert!(
+        provider
+            .drain_events()
+            .unwrap_or_else(|error| panic!("events should drain: {error}"))
+            .iter()
+            .all(|event| !matches!(
+                event,
+                DomainEvent::Observation(envelope)
+                    if matches!(envelope.observation, DeckObservation::PhraseChanged { .. })
+            ))
+    );
 }
 
 #[test]
@@ -323,7 +469,7 @@ fn a_late_playing_status_frame_cannot_rewind_the_canonical_deck_beat() {
     let before = provider
         .transport(lumi_domain::TrackLoadId::new(1))
         .unwrap_or_else(|| panic!("loaded deck should expose transport"));
-    assert_eq!(before.beat, 17);
+    assert_eq!(before.beat, 16);
 
     let late_status = decoder
         .decode_line(
@@ -337,7 +483,7 @@ fn a_late_playing_status_frame_cannot_rewind_the_canonical_deck_beat() {
     let after = provider
         .transport(lumi_domain::TrackLoadId::new(1))
         .unwrap_or_else(|| panic!("loaded deck should retain transport"));
-    assert_eq!(after.beat, 17);
+    assert_eq!(after.beat, 16);
     assert_eq!(after.discontinuity_revision, before.discontinuity_revision);
     assert!(
         provider

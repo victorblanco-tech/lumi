@@ -221,6 +221,10 @@ struct LibraryWorkspaceTests {
                     "ingressQueueHighWater": .number(24),
                     "ingressCoalescedMessageCount": .number(800),
                     "ingressCriticalSaturationCount": .number(0),
+                    "precisePositionMessageCount": .number(4_000),
+                    "authoritativePositionCount": .number(3_950),
+                    "positionDiscontinuityCount": .number(6),
+                    "positionAuthorityReady": .boolean(true),
                     "discoveredPlayers": .array([
                         .object([
                             "playerNumber": .number(1),
@@ -243,6 +247,10 @@ struct LibraryWorkspaceTests {
         #expect(input.ingressQueueHighWater == 24)
         #expect(input.ingressCoalescedMessageCount == 800)
         #expect(input.ingressCriticalSaturationCount == 0)
+        #expect(input.precisePositionMessageCount == 4_000)
+        #expect(input.authoritativePositionCount == 3_950)
+        #expect(input.positionDiscontinuityCount == 6)
+        #expect(input.positionAuthorityReady)
     }
 
     @Test("MIDI integration state decodes independently from the library catalog")

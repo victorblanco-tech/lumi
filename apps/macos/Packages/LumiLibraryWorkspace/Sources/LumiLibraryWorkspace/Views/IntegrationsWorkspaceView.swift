@@ -364,6 +364,12 @@ public struct IntegrationsWorkspaceView: View {
                         Divider()
                         diagnosticRow("Complete deck frames", "\(library.deckInputIntegration?.committedFrameCount ?? 0)", deckInputState)
                         Divider()
+                        diagnosticRow(
+                            "Exact CDJ positions",
+                            exactPositionDiagnostic,
+                            library.deckInputIntegration?.positionAuthorityReady == true ? .ready : .stale
+                        )
+                        Divider()
                         diagnosticRow("Pro DJ Link ingress", proDJLinkIngressDiagnostic, proDJLinkIngressState)
                         Divider()
                         diagnosticRow("Lighting MIDI source", library.midiIntegration?.sourceName ?? "Not published", lightingOutputState)
@@ -542,6 +548,16 @@ public struct IntegrationsWorkspaceView: View {
             return "Waiting for direct Pro DJ Link bridge"
         }
         return "\(input.ingressQueueDepth)/\(input.ingressQueueCapacity) queued · peak \(input.ingressQueueHighWater) · \(input.ingressCoalescedMessageCount) coalesced · \(input.ingressCriticalSaturationCount) critical saturation"
+    }
+
+    private var exactPositionDiagnostic: String {
+        guard let input = library.deckInputIntegration, input.isProDJLink else {
+            return "Waiting for Pro DJ Link"
+        }
+        if input.positionAuthorityReady {
+            return "READY · \(input.authoritativePositionCount) mapped · \(input.positionDiscontinuityCount) hotcues/seeks safely invalidated"
+        }
+        return "WAITING · automatic output held"
     }
 
     private var deckInputDetail: String {

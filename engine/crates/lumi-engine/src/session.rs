@@ -93,12 +93,13 @@ const INTEGRATION_PUMP_INTERVAL: Duration = Duration::from_millis(20);
 const MINIMUM_PROLINK_TIMING_STALE_AFTER: Duration = Duration::from_secs(3);
 const MAXIMUM_PROLINK_TIMING_STALE_AFTER: Duration = Duration::from_secs(8);
 const PROLINK_TIMING_STALE_BEATS: u64 = 8;
-// Prepare a complete four-bar phrase transition while exact Pro DJ Link beats
-// are healthy. The realtime MIDI lane then owns the deadline, so a short
-// network or bridge gap immediately before the phrase cannot make the pulse
-// seconds late. Transport discontinuities invalidate the generation below.
+// Prepare the identity and deadline up to four bars ahead, but release Bank
+// and AutoLoop MIDI only against a fresh exact CDJ position. This retains
+// predictable timing without letting a queued old-phrase action escape after
+// a hotcue or seek. Transport discontinuities invalidate the generation below.
 const PROLINK_AUTOLOOP_PREDICTION_HORIZON_BEATS: u32 = 16;
 const PROLINK_PREDICTION_RESCHEDULE_TOLERANCE: Duration = Duration::from_millis(10);
+const PROLINK_POSITION_AUTHORITY_MAX_AGE: Duration = Duration::from_millis(250);
 const EVENT_QUEUE_CAPACITY: usize = 256;
 const COMMAND_ID_CACHE_CAPACITY: usize = 256;
 const LIBRARY_CONTEXT_CAPACITY: usize = 256;
@@ -1136,6 +1137,7 @@ struct OutputWorker {
     autoloop_cancelled_count: u64,
     autoloop_late_count: u64,
     autoloop_beat_fallback_count: u64,
+    authoritative_position: Option<AuthoritativePositionReceipt>,
 }
 
 #[derive(Clone, Debug)]
@@ -1156,6 +1158,7 @@ struct ScheduledPrearm {
     track_load_id: TrackLoadId,
     plan_revision: PlanRevision,
     phrase_index: u16,
+    source_generation: u64,
 }
 
 #[derive(Clone, Debug)]
@@ -1163,9 +1166,16 @@ struct ScheduledEarlyTrigger {
     due_at: Instant,
     identity: AutoloopExecutionIdentity,
     autoloop_number: u8,
-    lane_emitted_count_at_schedule: u64,
+    source_generation: u64,
     #[cfg_attr(test, allow(dead_code))]
     effective_bpm_milli: u32,
+}
+
+#[derive(Clone, Copy, Debug)]
+struct AuthoritativePositionReceipt {
+    deck_id: lumi_domain::DeckId,
+    source_generation: u64,
+    received_at: Instant,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1231,6 +1241,7 @@ impl OutputWorker {
             autoloop_cancelled_count: 0,
             autoloop_late_count: 0,
             autoloop_beat_fallback_count: 0,
+            authoritative_position: None,
         }
     }
 
@@ -1241,6 +1252,7 @@ impl OutputWorker {
             self.scheduled_early_trigger = None;
             self.prearmed_autoloop = None;
             self.predictively_triggered = None;
+            self.authoritative_position = None;
             let _ = self.midi_output.cancel_all();
         }
     }
@@ -1251,6 +1263,20 @@ impl OutputWorker {
             .set_generation(self.realtime_generation)
             .ok()?;
         Some(self.realtime_generation)
+    }
+
+    #[cfg_attr(test, allow(dead_code))]
+    fn invalidate_prolink_prediction(&mut self) {
+        let _ = self.begin_realtime_generation();
+        let _ = self.midi_output.cancel_all();
+        self.scheduled_prearm = None;
+        self.scheduled_early_trigger = None;
+        self.prearmed_autoloop = None;
+        self.predictively_triggered = None;
+        self.authoritative_position = None;
+        if self.pending_autoloop.take().is_some() {
+            self.autoloop_cancelled_count = self.autoloop_cancelled_count.saturating_add(1);
+        }
     }
 
     #[cfg_attr(test, allow(dead_code))]
@@ -1270,6 +1296,17 @@ impl OutputWorker {
         autoloop_number: u8,
     ) {
         self.autoloop_requested_count = self.autoloop_requested_count.saturating_add(1);
+        if self.precise_autoloop_fallback
+            && !self.has_fresh_position_authority(request.deck_id(), None)
+        {
+            // Operation Start and phrase effects can be produced by the
+            // reducer independently from the Pro DJ Link callback. Connected
+            // deck hardware output still requires a recent exact position;
+            // never let a cached phrase turn into MIDI after position loss.
+            let _ = self.midi_output.cancel_all();
+            self.autoloop_cancelled_count = self.autoloop_cancelled_count.saturating_add(1);
+            return;
+        }
         let now = Instant::now();
         let identity = AutoloopExecutionIdentity::from_request(request);
         let predictively_scheduled = self
@@ -1459,8 +1496,23 @@ impl OutputWorker {
         let Some(scheduled) = self.scheduled_prearm.take() else {
             return;
         };
+        let authority_is_fresh =
+            self.has_fresh_position_authority(scheduled.deck_id, Some(scheduled.source_generation));
+        if !authority_is_fresh {
+            let _ = self.midi_output.cancel_all();
+            self.autoloop_cancelled_count = self.autoloop_cancelled_count.saturating_add(1);
+            return;
+        }
         if self.ensure_lighting_midi().is_err()
             || self.midi_output.status().source.state != MidiSourceState::Ready
+            || self
+                .midi_output
+                .schedule_bank(
+                    self.realtime_generation,
+                    scheduled.bank_number,
+                    Instant::now(),
+                )
+                .is_err()
         {
             return;
         }
@@ -1503,6 +1555,18 @@ impl OutputWorker {
         let Some(scheduled) = self.scheduled_early_trigger.as_ref() else {
             return;
         };
+        let authority_is_fresh = self.has_fresh_position_authority(
+            scheduled.identity.deck_id,
+            Some(scheduled.source_generation),
+        );
+        if !authority_is_fresh {
+            if Instant::now() >= scheduled.due_at {
+                self.scheduled_early_trigger = None;
+                let _ = self.midi_output.cancel_all();
+                self.autoloop_cancelled_count = self.autoloop_cancelled_count.saturating_add(1);
+            }
+            return;
+        }
         if Instant::now() < scheduled.due_at {
             return;
         }
@@ -1516,27 +1580,36 @@ impl OutputWorker {
         if !safely_prearmed {
             return;
         }
-        let lane_status = self.midi_output.status();
-        let dispatched = lane_status.emitted_count > scheduled.lane_emitted_count_at_schedule
-            && lane_status.last_emitted_action == Some(RealtimeMidiActionKind::Autoloop)
-            && lane_status.last_emitted_number == Some(scheduled.autoloop_number);
-        if !dispatched {
-            return;
-        }
         let Some(scheduled) = self.scheduled_early_trigger.take() else {
             return;
         };
+        if self
+            .midi_output
+            .schedule_autoloop(
+                self.realtime_generation,
+                scheduled.autoloop_number,
+                Instant::now(),
+            )
+            .is_err()
+        {
+            return;
+        }
         self.autoloop_emitted_count = self.autoloop_emitted_count.saturating_add(1);
         self.predictively_triggered = Some(scheduled.identity);
         self.prearmed_autoloop = None;
     }
 
     #[cfg(not(test))]
-    fn on_precise_prolink_beat(
+    fn on_authoritative_prolink_position(
         &mut self,
         state: &lumi_domain::RuntimeState,
-        observation: lumi_prolink_input::ProLinkTimingObservation,
+        observation: lumi_prolink_input::ProLinkAuthoritativePosition,
     ) {
+        self.authoritative_position = Some(AuthoritativePositionReceipt {
+            deck_id: observation.deck_id,
+            source_generation: observation.generation,
+            received_at: Instant::now(),
+        });
         self.service_pending_autoloop(state, true);
         if state.operation() != OperationState::Live
             || state.leader_deck() != Some(observation.deck_id)
@@ -1635,22 +1708,7 @@ impl OutputWorker {
         let Some(generation) = generation else {
             return;
         };
-        if self
-            .midi_output
-            .schedule_bank(generation, bank_number, now + bank_delay)
-            .is_err()
-        {
-            return;
-        }
-        if scheduling_offset_millis <= 0
-            && self
-                .midi_output
-                .schedule_autoloop(generation, autoloop_number, now + trigger_delay)
-                .is_err()
-        {
-            let _ = self.midi_output.cancel_all();
-            return;
-        }
+        debug_assert_eq!(generation, self.realtime_generation);
         self.scheduled_prearm = Some(ScheduledPrearm {
             bank_number,
             due_at: now + bank_delay,
@@ -1658,15 +1716,29 @@ impl OutputWorker {
             track_load_id: plan.track_load_id(),
             plan_revision: plan.revision(),
             phrase_index: cue.phrase_index(),
+            source_generation: observation.generation,
         });
         self.scheduled_early_trigger =
             (scheduling_offset_millis <= 0).then_some(ScheduledEarlyTrigger {
                 due_at: now + trigger_delay,
                 identity,
                 autoloop_number,
-                lane_emitted_count_at_schedule: self.midi_output.status().emitted_count,
+                source_generation: observation.generation,
                 effective_bpm_milli: observation.effective_bpm_milli,
             });
+    }
+
+    fn has_fresh_position_authority(
+        &self,
+        deck_id: lumi_domain::DeckId,
+        source_generation: Option<u64>,
+    ) -> bool {
+        position_authority_is_fresh(
+            self.authoritative_position,
+            deck_id,
+            source_generation,
+            Instant::now(),
+        )
     }
 
     fn prearm_current_or_first_cue(&mut self, state: &lumi_domain::RuntimeState) {
@@ -2081,6 +2153,20 @@ fn prediction_requires_reschedule(
         && deadline_drift_exceeds_tolerance(current, candidate, tolerance)
 }
 
+fn position_authority_is_fresh(
+    authority: Option<AuthoritativePositionReceipt>,
+    deck_id: lumi_domain::DeckId,
+    source_generation: Option<u64>,
+    now: Instant,
+) -> bool {
+    authority.is_some_and(|authority| {
+        authority.deck_id == deck_id
+            && source_generation.is_none_or(|generation| authority.source_generation == generation)
+            && now.saturating_duration_since(authority.received_at)
+                <= PROLINK_POSITION_AUTHORITY_MAX_AGE
+    })
+}
+
 const fn predictive_deadline_is_stale_for_phrase(
     current_phrase_index: Option<u16>,
     scheduled_phrase_index: u16,
@@ -2471,18 +2557,50 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
     if runtime.direct_deck_source.diagnostics().source_status == DeckSourceStatus::Ready {
         runtime.prolink_start_error = None;
     }
-    // Domain events must reach planning/output before their matching precise
-    // beat is consumed. This lets a hotcue seek replace a stale trigger and
-    // then use that same beat observation as its safe beat-aligned fallback.
+    // Load/status events must hydrate the exact local beat grid before a
+    // PrecisePosition packet is mapped. A CDJ beat packet carries only its
+    // position within the bar; it is deliberately not allowed to authorize a
+    // phrase or AutoLoop decision.
     process_pending_source_events(runtime)?;
+    let precise_positions = runtime
+        .direct_deck_source
+        .drain_precise_position_observations();
+    for position in precise_positions {
+        let Some(context) = runtime
+            .planning_worker
+            .library_context(position.track_load_id)
+        else {
+            runtime.output_worker.invalidate_prolink_prediction();
+            continue;
+        };
+        let absolute_beat = context.beat_at_millis(position.playback_position_millis);
+        let Some(authoritative) = runtime.direct_deck_source.apply_authoritative_position(
+            position,
+            absolute_beat,
+            runtime.clock.now(),
+        )?
+        else {
+            continue;
+        };
+        if authoritative.discontinuity {
+            // Cancel the old phrase deadline before the seek/hotcue event can
+            // generate a replacement. This is the hard output barrier that
+            // prevents a previously prepared Bridge from escaping at Intro.
+            runtime.output_worker.invalidate_prolink_prediction();
+        }
+        // Record the new exact authority before its PhraseChanged event can
+        // produce an output effect. This lets the landing phrase pass the
+        // hardware gate while every older generation is already cancelled.
+        runtime
+            .output_worker
+            .on_authoritative_prolink_position(runtime.state.state(), authoritative);
+        process_pending_source_events(runtime)?;
+    }
     let operation = runtime.state.state().operation();
     for observation in runtime.direct_deck_source.drain_timing_observations() {
         runtime
             .output_worker
             .synchronize_prolink_timing(observation, operation)?;
-        runtime
-            .output_worker
-            .on_precise_prolink_beat(runtime.state.state(), observation);
     }
     runtime.output_worker.reconcile_prolink_timing_freshness(
         runtime.direct_deck_source.diagnostics().source_status,
@@ -3931,6 +4049,10 @@ fn snapshot_envelope_internal(
                 "ingressQueueHighWater": diagnostics.ingress_queue_high_water,
                 "ingressCoalescedMessageCount": diagnostics.ingress_coalesced_message_count,
                 "ingressCriticalSaturationCount": diagnostics.ingress_critical_saturation_count,
+                "precisePositionMessageCount": diagnostics.precise_position_message_count,
+                "authoritativePositionCount": diagnostics.authoritative_position_count,
+                "positionDiscontinuityCount": diagnostics.position_discontinuity_count,
+                "positionAuthorityReady": diagnostics.position_authority_ready,
                 "discoveredPlayers": diagnostics.discovered_devices.iter()
                     .map(|(number, device)| json!({
                         "playerNumber": number,
@@ -4791,6 +4913,39 @@ mod tests {
             deadline - Duration::from_millis(80),
             PROLINK_PREDICTION_RESCHEDULE_TOLERANCE,
         ));
+    }
+
+    #[test]
+    fn connected_output_requires_fresh_exact_position_from_the_same_generation() {
+        let now = Instant::now();
+        let deck = lumi_domain::DeckId::new(1);
+        let authority = AuthoritativePositionReceipt {
+            deck_id: deck,
+            source_generation: 7,
+            received_at: now - Duration::from_millis(100),
+        };
+        assert!(position_authority_is_fresh(
+            Some(authority),
+            deck,
+            Some(7),
+            now,
+        ));
+        assert!(!position_authority_is_fresh(
+            Some(authority),
+            deck,
+            Some(8),
+            now,
+        ));
+        assert!(!position_authority_is_fresh(
+            Some(AuthoritativePositionReceipt {
+                received_at: now - Duration::from_millis(251),
+                ..authority
+            }),
+            deck,
+            Some(7),
+            now,
+        ));
+        assert!(!position_authority_is_fresh(None, deck, None, now));
     }
 
     #[test]

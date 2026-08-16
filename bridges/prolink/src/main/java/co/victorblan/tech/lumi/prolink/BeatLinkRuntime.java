@@ -57,6 +57,22 @@ final class BeatLinkRuntime implements AutoCloseable {
                         beat.isTempoMaster()
                 )
         ));
+        // Modern players such as the CDJ-1500X publish their exact transport
+        // position independently from the beat packet. Lumi uses this fact as
+        // the sole authority for phrase changes and AutoLoop decisions. A beat
+        // packet contains only the beat within the bar and cannot distinguish
+        // normal playback from a hotcue jump before the next CdjStatus frame.
+        BeatFinder.getInstance().addPrecisePositionListener(position -> publisher.publish(
+                "precisePosition",
+                new BridgePayloads.PrecisePosition(
+                        position.getDeviceNumber(),
+                        position.getDeviceName(),
+                        position.getPlaybackPosition(),
+                        position.getEffectiveTempo(),
+                        position.getBeatWithinBar(),
+                        position.isTempoMaster()
+                )
+        ));
         DeviceFinder.getInstance().start();
         publisher.publish("sourceStatus", new BridgePayloads.SourceStatus(
                 "discovering", "Waiting for a supported Pro DJ Link device"
