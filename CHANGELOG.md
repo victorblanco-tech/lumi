@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0-dev-37
+
+- Keeps Off, Arm, Start, Pause and Off responsive while high-rate Pro DJ Link
+  telemetry advances the global runtime revision. Operation controls now use
+  the current operation transition as their concurrency boundary instead of
+  rejecting a valid command because a beat or position update arrived first.
+- Adds a deterministic regression test that advances deck state between the UI
+  snapshot and Arm command and proves that Lumi still enters Armed.
+
 ## 0.4.0-dev-36
 
 - Keeps trusted USB media bound to the exact filesystem volume identity instead

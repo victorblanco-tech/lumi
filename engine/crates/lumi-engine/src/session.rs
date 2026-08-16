@@ -3085,7 +3085,7 @@ fn apply_operation_command(
     expected_revision: lumi_domain::StateRevision,
     command: OperationCommand,
 ) -> Result<(), CommandApplicationError> {
-    validate_state_revision(runtime, expected_revision)?;
+    let actual_revision = runtime.state.state().revision();
     let from = runtime.state.state().operation();
     let valid = matches!(
         (from, command),
@@ -3098,6 +3098,17 @@ fn apply_operation_command(
             | (_, OperationCommand::Off)
     );
     if !valid {
+        // Preserve the revision-conflict contract for a command that is no
+        // longer meaningful in the current operation state. A valid operation
+        // transition, however, must not be rejected merely because high-rate
+        // deck telemetry advanced the global runtime revision between the UI
+        // snapshot and this localhost command.
+        if actual_revision != expected_revision {
+            return Err(CommandApplicationError::StateRevisionConflict {
+                expected: expected_revision,
+                actual: actual_revision,
+            });
+        }
         return Err(CommandApplicationError::InvalidOperationTransition { from, command });
     }
     runtime.operation_sequence = runtime
@@ -3110,7 +3121,7 @@ fn apply_operation_command(
         DomainEvent::UserCommand(UserCommandEnvelope {
             client_id: ClientId::new(1),
             sequence: CommandSequence::new(runtime.operation_sequence),
-            expected_state_revision: expected_revision,
+            expected_state_revision: actual_revision,
             issued_at: runtime.clock.now(),
             command,
         }),
@@ -4908,6 +4919,29 @@ mod tests {
             records_after_start
         );
         assert_eq!(runtime.state.state().operation(), OperationState::Paused);
+    }
+
+    #[test]
+    fn operation_control_survives_unrelated_deck_revision_churn() {
+        let mut runtime = initialized_runtime()
+            .unwrap_or_else(|error| panic!("test engine must initialize: {error}"));
+        let ui_revision = runtime.state.state().revision();
+
+        // A playing Pro DJ Link deck can advance the global state revision
+        // after the UI rendered Off but before its Arm command arrives.
+        apply_simulation_control(&mut runtime, SimulationControl::AdvanceLeader);
+        assert_ne!(runtime.state.state().revision(), ui_revision);
+        assert_eq!(runtime.state.state().operation(), OperationState::Off);
+
+        apply_session_command(
+            &mut runtime,
+            SessionCommand::SetOperationState {
+                expected_revision: ui_revision,
+                command: OperationCommand::Arm,
+            },
+        );
+
+        assert_eq!(runtime.state.state().operation(), OperationState::Armed);
     }
 
     #[test]

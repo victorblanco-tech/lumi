@@ -137,3 +137,9 @@ CHRM aliases may jointly resolve a Live track when both agree on its canonical
 Lumi identity. Conflicts remain fail-closed. Evidence and migration behavior
 are recorded in
 [`0.4.0-dev-36-usb-identity-and-live-resolution.md`](../release/0.4.0-dev-36-usb-identity-and-live-resolution.md).
+
+Version `0.4.0-dev-37` separates Live operation-control concurrency from
+high-rate deck telemetry. A beat or position update can no longer invalidate a
+valid Off → Arm, Arm/Pause → Start, Live → Pause or safety Off transition. The
+decision and regression evidence are captured in
+[`0.4.0-dev-37-live-operation-controls.md`](../release/0.4.0-dev-37-live-operation-controls.md).
