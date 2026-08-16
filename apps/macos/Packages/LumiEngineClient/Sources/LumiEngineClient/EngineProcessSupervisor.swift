@@ -2,6 +2,7 @@ import Foundation
 import LumiProtocol
 import OSLog
 import Darwin
+import CryptoKit
 
 public actor EngineProcessSupervisor {
     private static let logger = Logger(
@@ -23,6 +24,14 @@ public actor EngineProcessSupervisor {
         let sessionToken: String
         let processID: Int32
         let productVersion: String
+        let serviceIdentity: ServiceIdentity?
+    }
+
+    private struct ServiceIdentity: Codable, Equatable {
+        let productVersion: String
+        let buildNumber: String
+        let engineExecutablePath: String
+        let engineExecutableSHA256: String
     }
 
     public init(transport: any EngineTransport = LoopbackEngineTransport()) {
@@ -37,6 +46,7 @@ public actor EngineProcessSupervisor {
         guard FileManager.default.isExecutableFile(atPath: engineExecutable.path) else {
             throw EngineClientError.executableMissing
         }
+        let serviceIdentity = try makeServiceIdentity(engineExecutable: engineExecutable)
 
         if let libraryDatabaseURL {
             let serviceRecordName = libraryDatabaseURL.lastPathComponent == "library.sqlite"
@@ -48,7 +58,8 @@ public actor EngineProcessSupervisor {
             serviceRecordURL = recordURL
             if let record = readServiceRecord(at: recordURL),
                record.endpoint.protocolVersion == WireProtocol.version,
-               processIsRunning(record.processID) {
+               processIsRunning(record.processID),
+               record.serviceIdentity == serviceIdentity {
                 sessionToken = record.sessionToken
                 attachedProcessID = record.processID
                 commandSequence = 0
@@ -56,6 +67,13 @@ public actor EngineProcessSupervisor {
                     "Attaching to Lumi engine service pid \(record.processID) version \(record.productVersion, privacy: .public)"
                 )
                 return record.endpoint
+            }
+            if let record = readServiceRecord(at: recordURL),
+               processIsRunning(record.processID) {
+                Self.logger.notice(
+                    "Replacing stale Lumi engine service pid \(record.processID) version \(record.productVersion, privacy: .public)"
+                )
+                try await retireServiceProcess(record.processID)
             }
             try? FileManager.default.removeItem(at: recordURL)
         }
@@ -118,9 +136,8 @@ public actor EngineProcessSupervisor {
                         endpoint: endpoint,
                         sessionToken: token,
                         processID: process.processIdentifier,
-                        productVersion: Bundle.main.object(
-                            forInfoDictionaryKey: "LumiProductVersion"
-                        ) as? String ?? "unknown"
+                        productVersion: serviceIdentity.productVersion,
+                        serviceIdentity: serviceIdentity
                     ),
                     to: serviceRecordURL
                 )
@@ -255,6 +272,43 @@ public actor EngineProcessSupervisor {
 
     private func processIsRunning(_ processID: Int32) -> Bool {
         processID > 1 && (Darwin.kill(processID, 0) == 0 || errno == EPERM)
+    }
+
+    private func retireServiceProcess(_ processID: Int32) async throws {
+        guard processIsRunning(processID) else { return }
+        guard Darwin.kill(processID, SIGTERM) == 0 || errno == ESRCH else {
+            throw EngineClientError.serviceHandoverTimedOut
+        }
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(10))
+        while processIsRunning(processID), clock.now < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        guard !processIsRunning(processID) else {
+            throw EngineClientError.serviceHandoverTimedOut
+        }
+    }
+
+    private func makeServiceIdentity(engineExecutable: URL) throws -> ServiceIdentity {
+        let executableData: Data
+        do {
+            executableData = try Data(contentsOf: engineExecutable, options: [.mappedIfSafe])
+        } catch {
+            throw EngineClientError.executableMissing
+        }
+        let digest = SHA256.hash(data: executableData)
+            .map { String(format: "%02x", $0) }
+            .joined()
+        return ServiceIdentity(
+            productVersion: Bundle.main.object(
+                forInfoDictionaryKey: "LumiProductVersion"
+            ) as? String ?? "unknown",
+            buildNumber: Bundle.main.object(
+                forInfoDictionaryKey: "CFBundleVersion"
+            ) as? String ?? "unknown",
+            engineExecutablePath: engineExecutable.resolvingSymlinksInPath().path,
+            engineExecutableSHA256: digest
+        )
     }
 
     private func validate(endpoint: EngineEndpoint) throws {

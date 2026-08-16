@@ -13,6 +13,7 @@ public enum EngineClientError: Error, Equatable, LocalizedError, Sendable {
     case connectionClosed
     case invalidInitialSnapshot
     case commandSequenceOverflow
+    case serviceHandoverTimedOut
 
     public var errorDescription: String? {
         switch self {
@@ -40,6 +41,8 @@ public enum EngineClientError: Error, Equatable, LocalizedError, Sendable {
             "The Lumi engine did not provide a valid initial snapshot."
         case .commandSequenceOverflow:
             "The local command sequence overflowed. Restart Lumi before sending more edits."
+        case .serviceHandoverTimedOut:
+            "The previous Lumi engine did not stop safely. Close other Lumi versions and try again."
         }
     }
 }

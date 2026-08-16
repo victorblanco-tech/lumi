@@ -1,4 +1,4 @@
-use std::io::{BufRead as _, BufReader, Write as _};
+use std::io::{BufRead as _, BufReader, Read as _, Write as _};
 use std::net::TcpStream;
 use std::process::{Command, Stdio};
 use std::thread;
@@ -45,7 +45,14 @@ fn real_engine_process_starts_empty_and_serves_authenticated_product_state() {
         Ok(ready) => ready,
         Err(error) => {
             let _ = child.kill();
-            panic!("invalid startup record: {error}");
+            let mut stderr_text = String::new();
+            if let Some(mut stderr) = child.stderr.take() {
+                let _ = stderr.read_to_string(&mut stderr_text);
+            }
+            let exit_status = child.wait().ok();
+            panic!(
+                "invalid startup record: {error}; exit status: {exit_status:?}; stderr: {stderr_text}"
+            );
         }
     };
 

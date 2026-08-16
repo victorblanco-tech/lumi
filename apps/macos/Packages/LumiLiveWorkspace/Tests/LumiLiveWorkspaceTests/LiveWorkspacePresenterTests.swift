@@ -517,7 +517,7 @@ struct LiveWorkspacePresenterTests {
             discontinuityRevision: 3,
             at: 101
         ))
-        #expect(!playing.remainsValid(
+        #expect(playing.remainsValid(
             trackLoadID: 7,
             positionMillis: 3_000,
             durationMillis: 10_000,
@@ -525,6 +525,24 @@ struct LiveWorkspacePresenterTests {
             playbackRate: 1.1,
             discontinuityRevision: 3,
             at: 101
+        ))
+        #expect(playing.remainsValid(
+            trackLoadID: 7,
+            positionMillis: 250,
+            durationMillis: 10_000,
+            playing: true,
+            playbackRate: 1.1,
+            discontinuityRevision: 3,
+            at: 103
+        ))
+        #expect(!playing.remainsValid(
+            trackLoadID: 7,
+            positionMillis: 250,
+            durationMillis: 10_000,
+            playing: true,
+            playbackRate: 1.1,
+            discontinuityRevision: 4,
+            at: 103
         ))
 
         let paused = DeckVisualClockSnapshot(

@@ -85,6 +85,12 @@ const AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(5);
 const INTEGRATION_PUMP_INTERVAL: Duration = Duration::from_millis(20);
 const MINIMUM_PROLINK_TIMING_STALE_AFTER: Duration = Duration::from_millis(1_250);
 const MAXIMUM_PROLINK_TIMING_STALE_AFTER: Duration = Duration::from_secs(5);
+// Prepare a complete four-bar phrase transition while exact Pro DJ Link beats
+// are healthy. The realtime MIDI lane then owns the deadline, so a short
+// network or bridge gap immediately before the phrase cannot make the pulse
+// seconds late. Transport discontinuities invalidate the generation below.
+const PROLINK_AUTOLOOP_PREDICTION_HORIZON_BEATS: u32 = 16;
+const PROLINK_PREDICTION_RESCHEDULE_TOLERANCE: Duration = Duration::from_millis(10);
 const EVENT_QUEUE_CAPACITY: usize = 256;
 const COMMAND_ID_CACHE_CAPACITY: usize = 256;
 const LIBRARY_CONTEXT_CAPACITY: usize = 256;
@@ -101,6 +107,12 @@ struct SessionAuthentication {
     session_token: String,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum AuthenticatedClientExit {
+    Disconnected,
+    Shutdown,
+}
+
 /// Runs one channel-scoped engine service. UI clients may disconnect and
 /// reconnect sequentially without resetting show state or duplicating MIDI.
 pub async fn run() -> Result<(), EngineError> {
@@ -112,12 +124,15 @@ pub async fn run() -> Result<(), EngineError> {
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
     let endpoint = listener.local_addr()?;
     write_startup_record(endpoint.port())?;
+    let mut termination =
+        tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
 
     let mut idle_pump = tokio::time::interval(INTEGRATION_PUMP_INTERVAL);
     idle_pump.set_missed_tick_behavior(MissedTickBehavior::Skip);
     idle_pump.tick().await;
     loop {
         let accepted = tokio::select! {
+            _ = termination.recv() => break,
             accepted = listener.accept() => Some(accepted?),
             _ = idle_pump.tick() => {
                 runtime.integration_pump_metrics.record(Instant::now());
@@ -134,8 +149,11 @@ pub async fn run() -> Result<(), EngineError> {
         if !peer.ip().is_loopback() {
             continue;
         }
-        match serve_authenticated_client(stream, &session_token, &mut runtime).await {
-            Ok(())
+        match serve_authenticated_client(stream, &session_token, &mut runtime, &mut termination)
+            .await
+        {
+            Ok(AuthenticatedClientExit::Shutdown) => break,
+            Ok(AuthenticatedClientExit::Disconnected)
             | Err(EngineError::AuthenticationTimeout)
             | Err(EngineError::AuthenticationOversized)
             | Err(EngineError::InvalidAuthentication)
@@ -144,6 +162,7 @@ pub async fn run() -> Result<(), EngineError> {
             Err(error) => return Err(error),
         }
     }
+    Ok(())
 }
 
 fn validate_session_token(session_token: &str) -> Result<(), EngineError> {
@@ -172,7 +191,8 @@ async fn serve_authenticated_client(
     stream: TcpStream,
     expected_token: &str,
     runtime: &mut EngineRuntime,
-) -> Result<(), EngineError> {
+    termination: &mut tokio::signal::unix::Signal,
+) -> Result<AuthenticatedClientExit, EngineError> {
     let (mut reader, mut writer) = stream.into_split();
     let authentication_bytes = timeout(
         AUTHENTICATION_TIMEOUT,
@@ -205,6 +225,9 @@ async fn serve_authenticated_client(
     loop {
         tokio::select! {
             biased;
+            _ = termination.recv() => {
+                return Ok(AuthenticatedClientExit::Shutdown);
+            }
             _ = integration_pump.tick() => {
                 // Pro DJ Link timing is a realtime engine responsibility. It
                 // must keep flowing when SwiftUI is busy, hidden or not asking
@@ -216,7 +239,9 @@ async fn serve_authenticated_client(
                     .service_pending_autoloop(runtime.state.state(), false);
             }
             command = read_command_line(&mut command_reader, &mut command_buffer) => {
-                let Some(command_bytes) = command? else { break };
+                let Some(command_bytes) = command? else {
+                    return Ok(AuthenticatedClientExit::Disconnected);
+                };
                 response_sequence = response_sequence
                     .checked_add(1)
                     .ok_or(EngineError::ResponseSequenceOverflow)?;
@@ -238,8 +263,6 @@ async fn serve_authenticated_client(
             }
         }
     }
-
-    Ok(())
 }
 
 async fn write_envelope<W>(writer: &mut W, envelope: &MessageEnvelope) -> Result<(), EngineError>
@@ -1478,6 +1501,18 @@ impl OutputWorker {
             plan_revision: plan.revision(),
             phrase_index: cue.phrase_index(),
         };
+        let now = Instant::now();
+        let prediction_drifted = self
+            .scheduled_early_trigger
+            .as_ref()
+            .is_some_and(|scheduled| {
+                scheduled.identity == identity
+                    && deadline_drift_exceeds_tolerance(
+                        scheduled.due_at,
+                        now + trigger_delay,
+                        PROLINK_PREDICTION_RESCHEDULE_TOLERANCE,
+                    )
+            });
         let already_preparing = self.scheduled_prearm.as_ref().is_some_and(|scheduled| {
             scheduled.deck_id == identity.deck_id
                 && scheduled.track_load_id == identity.track_load_id
@@ -1493,13 +1528,19 @@ impl OutputWorker {
             .as_ref()
             .is_some_and(|scheduled| scheduled.identity == identity)
             || self.predictively_triggered == Some(identity);
-        if already_preparing {
+        if already_preparing && !prediction_drifted {
             return;
+        }
+        if prediction_drifted {
+            // Pitch changes alter the absolute phrase deadline. Replacing the
+            // generation before the Bank has fired keeps a four-bar forecast
+            // accurate without allowing the earlier deadline to leak out.
+            self.scheduled_prearm = None;
+            self.scheduled_early_trigger = None;
         }
         let Some(generation) = self.begin_realtime_generation() else {
             return;
         };
-        let now = Instant::now();
         if self
             .midi_output
             .schedule_bank(generation, bank_number, now + bank_delay)
@@ -1507,7 +1548,7 @@ impl OutputWorker {
         {
             return;
         }
-        if scheduling_offset_millis < 0
+        if scheduling_offset_millis <= 0
             && self
                 .midi_output
                 .schedule_autoloop(generation, autoloop_number, now + trigger_delay)
@@ -1525,7 +1566,7 @@ impl OutputWorker {
             phrase_index: cue.phrase_index(),
         });
         self.scheduled_early_trigger =
-            (scheduling_offset_millis < 0).then_some(ScheduledEarlyTrigger {
+            (scheduling_offset_millis <= 0).then_some(ScheduledEarlyTrigger {
                 due_at: now + trigger_delay,
                 identity,
             });
@@ -1900,14 +1941,29 @@ fn prolink_predictive_delays(
     if beats_until == 0 {
         return None;
     }
+    if beats_until > PROLINK_AUTOLOOP_PREDICTION_HORIZON_BEATS {
+        return None;
+    }
     let beat_duration = Duration::from_micros(60_000_000_000_u64 / u64::from(bpm_milli.max(1)));
     let target_delay = beat_duration.saturating_mul(beats_until);
     let trigger_delay = target_delay.saturating_sub(negative_timing_advance(offset_millis));
     let preparation = BANK_SETTLE_DELAY.saturating_add(INTEGRATION_PUMP_INTERVAL);
-    if trigger_delay < preparation || trigger_delay > preparation.saturating_add(beat_duration) {
+    if trigger_delay < preparation {
         return None;
     }
     Some((trigger_delay.saturating_sub(preparation), trigger_delay))
+}
+
+fn deadline_drift_exceeds_tolerance(
+    current: Instant,
+    candidate: Instant,
+    tolerance: Duration,
+) -> bool {
+    if current >= candidate {
+        current.duration_since(candidate) > tolerance
+    } else {
+        candidate.duration_since(current) > tolerance
+    }
 }
 
 fn position_with_timing_offset(position_millis: u64, offset_millis: i32) -> u64 {
@@ -4532,6 +4588,32 @@ mod tests {
         assert_eq!(late_boundary, beat_at_140);
         assert_eq!(late_bank, bank);
         assert_eq!(positive_timing_delay(20), Duration::from_millis(20));
+
+        let (sixteen_beat_bank, sixteen_beat_trigger) =
+            prolink_predictive_delays(16, 140_000, -200)
+                .unwrap_or_else(|| panic!("a prepared plan must survive a temporary beat gap"));
+        assert_eq!(
+            sixteen_beat_trigger,
+            beat_at_140.saturating_mul(16) - Duration::from_millis(200)
+        );
+        assert_eq!(
+            sixteen_beat_bank,
+            sixteen_beat_trigger
+                .saturating_sub(BANK_SETTLE_DELAY.saturating_add(INTEGRATION_PUMP_INTERVAL))
+        );
+        assert!(prolink_predictive_delays(17, 140_000, -200).is_none());
+
+        let deadline = Instant::now();
+        assert!(!deadline_drift_exceeds_tolerance(
+            deadline,
+            deadline + Duration::from_millis(10),
+            PROLINK_PREDICTION_RESCHEDULE_TOLERANCE,
+        ));
+        assert!(deadline_drift_exceeds_tolerance(
+            deadline,
+            deadline + Duration::from_millis(11),
+            PROLINK_PREDICTION_RESCHEDULE_TOLERANCE,
+        ));
 
         let beat_at_300 = Duration::from_micros(60_000_000_000_u64 / 300_000);
         assert!(prolink_predictive_delays(1, 300_000, -250).is_none());

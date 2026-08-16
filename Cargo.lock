@@ -134,6 +134,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "errno"
+version = "0.3.14"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
+dependencies = [
+ "libc",
+ "windows-sys",
+]
+
+[[package]]
 name = "fallible-iterator"
 version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -253,7 +263,7 @@ dependencies = [
 
 [[package]]
 name = "lumi-blt-midi"
-version = "0.4.0-dev-38"
+version = "0.4.0-dev-39"
 dependencies = [
  "lumi-deck-source",
  "lumi-domain",
@@ -263,18 +273,18 @@ dependencies = [
 
 [[package]]
 name = "lumi-deck-source"
-version = "0.4.0-dev-38"
+version = "0.4.0-dev-39"
 dependencies = [
  "lumi-domain",
 ]
 
 [[package]]
 name = "lumi-domain"
-version = "0.4.0-dev-38"
+version = "0.4.0-dev-39"
 
 [[package]]
 name = "lumi-engine"
-version = "0.4.0-dev-38"
+version = "0.4.0-dev-39"
 dependencies = [
  "lumi-blt-midi",
  "lumi-deck-source",
@@ -307,14 +317,14 @@ dependencies = [
 
 [[package]]
 name = "lumi-library"
-version = "0.4.0-dev-38"
+version = "0.4.0-dev-39"
 dependencies = [
  "lumi-domain",
 ]
 
 [[package]]
 name = "lumi-library-demo"
-version = "0.4.0-dev-38"
+version = "0.4.0-dev-39"
 dependencies = [
  "lumi-domain",
  "lumi-library",
@@ -326,14 +336,14 @@ dependencies = [
 
 [[package]]
 name = "lumi-library-source"
-version = "0.4.0-dev-38"
+version = "0.4.0-dev-39"
 dependencies = [
  "lumi-library",
 ]
 
 [[package]]
 name = "lumi-library-sqlite"
-version = "0.4.0-dev-38"
+version = "0.4.0-dev-39"
 dependencies = [
  "lumi-domain",
  "lumi-library",
@@ -346,14 +356,14 @@ dependencies = [
 
 [[package]]
 name = "lumi-lighting-output"
-version = "0.4.0-dev-38"
+version = "0.4.0-dev-39"
 dependencies = [
  "lumi-domain",
 ]
 
 [[package]]
 name = "lumi-local-playback"
-version = "0.4.0-dev-38"
+version = "0.4.0-dev-39"
 dependencies = [
  "lumi-deck-source",
  "lumi-domain",
@@ -362,7 +372,7 @@ dependencies = [
 
 [[package]]
 name = "lumi-midi-coremidi"
-version = "0.4.0-dev-38"
+version = "0.4.0-dev-39"
 dependencies = [
  "coremidi-rs",
  "lumi-midi-output",
@@ -371,14 +381,14 @@ dependencies = [
 
 [[package]]
 name = "lumi-midi-output"
-version = "0.4.0-dev-38"
+version = "0.4.0-dev-39"
 dependencies = [
  "thiserror",
 ]
 
 [[package]]
 name = "lumi-output-dry-run"
-version = "0.4.0-dev-38"
+version = "0.4.0-dev-39"
 dependencies = [
  "lumi-domain",
  "lumi-lighting-output",
@@ -388,7 +398,7 @@ dependencies = [
 
 [[package]]
 name = "lumi-planner"
-version = "0.4.0-dev-38"
+version = "0.4.0-dev-39"
 dependencies = [
  "lumi-domain",
  "serde",
@@ -397,7 +407,7 @@ dependencies = [
 
 [[package]]
 name = "lumi-prolink-input"
-version = "0.4.0-dev-38"
+version = "0.4.0-dev-39"
 dependencies = [
  "lumi-deck-source",
  "lumi-domain",
@@ -408,7 +418,7 @@ dependencies = [
 
 [[package]]
 name = "lumi-protocol"
-version = "0.4.0-dev-38"
+version = "0.4.0-dev-39"
 dependencies = [
  "serde",
  "serde_json",
@@ -416,7 +426,7 @@ dependencies = [
 
 [[package]]
 name = "lumi-rekordbox-analysis"
-version = "0.4.0-dev-38"
+version = "0.4.0-dev-39"
 dependencies = [
  "lumi-rekordbox-xml",
  "sha2",
@@ -425,7 +435,7 @@ dependencies = [
 
 [[package]]
 name = "lumi-rekordbox-device"
-version = "0.4.0-dev-38"
+version = "0.4.0-dev-39"
 dependencies = [
  "rusqlite",
  "sha2",
@@ -434,7 +444,7 @@ dependencies = [
 
 [[package]]
 name = "lumi-rekordbox-resolver"
-version = "0.4.0-dev-38"
+version = "0.4.0-dev-39"
 dependencies = [
  "lumi-rekordbox-analysis",
  "lumi-rekordbox-xml",
@@ -445,7 +455,7 @@ dependencies = [
 
 [[package]]
 name = "lumi-rekordbox-xml"
-version = "0.4.0-dev-38"
+version = "0.4.0-dev-39"
 dependencies = [
  "quick-xml",
  "serde",
@@ -455,7 +465,7 @@ dependencies = [
 
 [[package]]
 name = "lumi-simulator"
-version = "0.4.0-dev-38"
+version = "0.4.0-dev-39"
 dependencies = [
  "lumi-deck-source",
  "lumi-domain",
@@ -465,7 +475,7 @@ dependencies = [
 
 [[package]]
 name = "lumi-timing-output"
-version = "0.4.0-dev-38"
+version = "0.4.0-dev-39"
 dependencies = [
  "thiserror",
 ]
@@ -668,6 +678,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f8fadd59c855ef2080decdef8ff161eb6661b86933c9d82e5ba29dc602a55aba"
 
 [[package]]
+name = "signal-hook-registry"
+version = "1.4.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c4db69cba1110affc0e9f7bcd48bbf87b3f4fc7c61fc9155afd4c469eb3d6c1b"
+dependencies = [
+ "errno",
+ "libc",
+]
+
+[[package]]
 name = "smallvec"
 version = "1.15.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -783,6 +803,7 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys",

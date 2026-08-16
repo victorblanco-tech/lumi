@@ -150,3 +150,8 @@ state, and an AppKit-owned minimum window size removes the measured macOS
 hosting-view layout loop. Realtime MIDI remained isolated and below its budget
 in the retained release soak. Evidence is recorded in
 [`0.4.0-dev-38-live-rendering-and-output-timing.md`](../release/0.4.0-dev-38-live-rendering-and-output-timing.md).
+
+Version `0.4.0-dev-39` adds four-bar direct Pro DJ Link deadline preparation,
+monotonic connected-deck presentation, build-exact service ownership and
+graceful helper teardown. See
+[`0.4.0-dev-39-prolink-autoloop-stability.md`](../release/0.4.0-dev-39-prolink-autoloop-stability.md).

@@ -80,6 +80,16 @@ fn realtime_lane_configurable_soak_retains_correctness_and_latency() -> Result<(
         }
     }
 
+    // Generation changes are deliberately fire-and-forget on the caller lane;
+    // the single realtime worker still processes them in FIFO order. Give the
+    // final invalidation command the same bounded drain opportunity as emitted
+    // actions before evaluating the counters.
+    let cancellation_deadline = Instant::now() + Duration::from_millis(300);
+    while lane.status().cancelled_count < expected_cancelled
+        && Instant::now() < cancellation_deadline
+    {
+        thread::sleep(Duration::from_millis(1));
+    }
     let status = lane.status();
     println!(
         "AutoLoop soak: duration={}s scheduled={} emitted={} cancelled={} saturation={} p50={}us p95={}us p99={}us max={}us highWater={}",

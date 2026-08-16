@@ -109,3 +109,13 @@ Completed in `0.4.0-dev-35`:
 `./scripts/verify-rc-soak.sh` rejects durations below one hour. That one-hour
 run and the physical CDJ/SoundSwitch/DMX timing capture are required before RC,
 but do not block completion of the implementation.
+
+### Dev-39 physical-CDJ correction
+
+A prepared direct Pro DJ Link transition is now placed on the isolated MIDI
+deadline lane up to sixteen beats before the phrase, instead of relying on the
+final beat packet. A deterministic regression accepts beat 16 and rejects beat
+17, while existing generation tests protect seeks, Hot Cues, Master handoffs
+and plan changes. Orange Live warnings identify the exact provider whose timing
+or output health is degraded. Evidence is recorded in
+[`0.4.0-dev-39-prolink-autoloop-stability.md`](../release/0.4.0-dev-39-prolink-autoloop-stability.md).

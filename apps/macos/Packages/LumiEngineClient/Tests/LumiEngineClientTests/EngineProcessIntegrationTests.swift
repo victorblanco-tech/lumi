@@ -614,8 +614,16 @@ func launchesRealEngine() async throws {
                 expectedStateRevision: requiredStateRevision(played)
             )
         )
-        #expect(deckSourceMode(connected) == "connectedDecks")
-        #expect(deckCount(connected) == 0)
+        if let failure = EngineCommandFailure(connected) {
+            // A standalone engine binary intentionally has no packaged Java
+            // bridge. Verify that this environment limitation fails closed;
+            // the full app-bundle gate separately verifies Direct Pro DJ Link.
+            #expect(failure.code == "proDjLinkUnavailable")
+            #expect(!failure.message.isEmpty)
+        } else {
+            #expect(deckSourceMode(connected) == "connectedDecks")
+            #expect(deckCount(connected) == 0)
+        }
         #expect(await supervisor.isRunning())
         await supervisor.stop()
         #expect(await !supervisor.isRunning())

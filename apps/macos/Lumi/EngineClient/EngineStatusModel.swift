@@ -1932,9 +1932,27 @@ final class EngineStatusModel: ObservableObject {
                    ) {
                     return (deck.deckID, existing)
                 }
+                let visualPosition: UInt64
+                if let existing = deckVisualClocks[deck.deckID],
+                   existing.trackLoadID == deck.trackLoadID,
+                   existing.discontinuityRevision == deck.transportRevision,
+                   existing.playing,
+                   deck.playing {
+                    // A pitch update may require a new presentation rate, but
+                    // it must never rewind the waveform from a delayed poll.
+                    let predicted = existing.positionMillis(
+                        at: Date(timeIntervalSinceReferenceDate: anchoredAt)
+                    )
+                    visualPosition = max(
+                        boundedPosition,
+                        UInt64(min(Double(beatGrid.durationMillis), predicted))
+                    )
+                } else {
+                    visualPosition = boundedPosition
+                }
                 return (deck.deckID, DeckVisualClockSnapshot(
                     trackLoadID: deck.trackLoadID,
-                    positionMillis: boundedPosition,
+                    positionMillis: visualPosition,
                     durationMillis: beatGrid.durationMillis,
                     playing: deck.playing,
                     anchoredAtReferenceTime: anchoredAt,
@@ -1984,7 +2002,12 @@ final class EngineStatusModel: ObservableObject {
         guard snapshot.deckSource.mode == "localPlayback" else {
             localAudioControllers.values.forEach { $0.shutdown() }
             localAudioControllers.removeAll()
-            localPlaybackWaveforms = [:]
+            // `@Published` emits even for an equal assignment. Clearing this
+            // already-empty dictionary on every connected-deck poll forced the
+            // complete Live SwiftUI hierarchy through layout at 4 Hz.
+            if !localPlaybackWaveforms.isEmpty {
+                localPlaybackWaveforms = [:]
+            }
             if snapshot.deckSource.mode == "connectedDecks" {
                 synchronizeConnectedDeckVisualClocks(with: snapshot)
             } else {

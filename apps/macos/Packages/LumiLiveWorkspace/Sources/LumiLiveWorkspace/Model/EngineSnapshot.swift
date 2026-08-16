@@ -430,7 +430,7 @@ public struct DeckVisualClockSnapshot: Equatable, Sendable {
         playbackRate authoritativePlaybackRate: Double,
         discontinuityRevision authoritativeDiscontinuityRevision: UInt64,
         at referenceTime: TimeInterval,
-        maximumPlayingDriftMillis: Double = 250
+        maximumPlayingDriftMillis _: Double = 250
     ) -> Bool {
         guard trackLoadID == authoritativeTrackLoadID,
               playing == authoritativePlaying,
@@ -442,11 +442,14 @@ public struct DeckVisualClockSnapshot: Equatable, Sendable {
         if !playing {
             return positionMillis == authoritativePositionMillis
         }
-        return abs(
-            positionMillis(
-                at: Date(timeIntervalSinceReferenceDate: referenceTime)
-            ) - Double(authoritativePositionMillis)
-        ) < maximumPlayingDriftMillis
+        // A connected deck poll is observation data, not a transport command.
+        // Pro DJ Link packets can arrive late or briefly out of order; replacing
+        // this monotonic clock from such a poll made the Live waveform jump
+        // backwards. A real seek/hot-cue increments discontinuityRevision and
+        // is already rejected by the guard above.
+        _ = authoritativePositionMillis
+        _ = referenceTime
+        return true
     }
 }
 

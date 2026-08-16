@@ -341,7 +341,10 @@ public enum LiveWorkspacePresenter {
                 condition: abletonLinkCondition(snapshot, healthy: healthyProviderCondition)
             ),
             content: content,
-            diagnostic: diagnostic ?? defaultDiagnostic(for: derivedCondition),
+            diagnostic: diagnostic ?? defaultDiagnostic(
+                for: derivedCondition,
+                snapshot: snapshot
+            ),
             planInteraction: planInteraction,
             sessionInteraction: sessionInteraction
         )
@@ -512,15 +515,35 @@ public enum LiveWorkspacePresenter {
     }
 
     private static func defaultDiagnostic(
-        for condition: LiveWorkspaceCondition
+        for condition: LiveWorkspaceCondition,
+        snapshot: EngineSnapshot
     ) -> String? {
         switch condition {
         case .fallback:
-            "Phrase analysis is incomplete. Lumi prepared a safe hold plan."
+            return "Phrase analysis is incomplete. Lumi prepared a safe hold plan."
         case .degraded:
-            "Live data is available, but one or more providers need attention."
+            if snapshot.runtime.health != "ready" {
+                return "The Lumi engine is not ready. Automatic light output is held safe."
+            }
+            if snapshot.deckSource.mode == "connectedDecks",
+               snapshot.deckInputIntegration?.state != "ready" {
+                return "Pro DJ Link data was interrupted. Exact live timing is recovering."
+            }
+            if let error = snapshot.midiIntegration?.lastError {
+                return "Light Output needs attention: \(error)"
+            }
+            if snapshot.midiIntegration?.realtimeLane?.isHealthy == false {
+                return "Light Output missed its realtime latency target. Check Diagnostics before continuing."
+            }
+            if let error = snapshot.abletonLinkIntegration?.lastError {
+                return "Ableton Link needs attention: \(error)"
+            }
+            if snapshot.abletonLinkIntegration?.state == "degraded" {
+                return "Ableton Link timing is recovering after an interrupted Pro DJ Link beat stream."
+            }
+            return "A live provider needs attention. Open Tech status for details."
         default:
-            nil
+            return nil
         }
     }
 }

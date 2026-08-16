@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.4.0-dev-39
+
+- Pre-schedules an exact Pro DJ Link phrase transition up to four bars ahead
+  on the isolated realtime MIDI lane. A short beat-packet or UI interruption
+  immediately before the boundary can no longer delay a prepared AutoLoop by
+  seconds; seek, Hot Cue, plan and Master generations still cancel stale work.
+- Keeps the connected-deck presentation clock monotonic across delayed or
+  out-of-order transport polls, while explicit transport revisions still make
+  real seeks and Hot Cues jump immediately.
+- Disables continuous sizing on the actual root hosting controller and view
+  only after the app window exists, removing the dominant macOS 26 layout loop
+  measured in the installed Live view.
+- Stops publishing an unchanged empty local-waveform cache on every 4 Hz
+  connected-deck poll; the same physical two-player Live view fell from about
+  74% to 3% CPU while paused and measured 12.4–18.8% during a warm physical
+  Player 1 run.
+- Makes persistent engine attachment build-exact and adds graceful SIGTERM
+  shutdown, preventing old Lumi, Pro DJ Link and Ableton Link helpers from
+  surviving into the next Dev version.
+- Replaces generic orange Live warnings with the exact affected provider and
+  recovery action.
+
 ## 0.4.0-dev-38
 
 - Removes the duplicate Hot Cue rows from Live Decks and the Track Editor.

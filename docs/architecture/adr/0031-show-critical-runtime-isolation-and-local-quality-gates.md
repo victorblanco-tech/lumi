@@ -156,3 +156,27 @@ Application minimum sizing is owned once by the AppKit window instead of by
 nested SwiftUI root frames. This avoids a hosting-view size-constraint feedback
 loop observed on macOS 26 without weakening the minimum supported layout. None
 of these presentation clocks can schedule, cancel or authorize MIDI output.
+
+## Implementation note — `0.4.0-dev-39`
+
+Physical CDJ testing exposed two gaps in the first implementation. First, an
+AutoLoop was only delegated to the realtime lane during approximately the last
+beat before its phrase. Losing that exact observation meant the domain learned
+about the phrase later and could emit seconds late even though the plan had
+been ready for minutes. Direct Pro DJ Link now delegates the immutable Bank and
+AutoLoop deadline up to sixteen beats ahead. The lane owns that absolute
+deadline; plan, track-load, transport and Master generations still invalidate
+obsolete work immediately.
+
+Second, a new UI process could attach to a persistent engine from a different
+Dev build. Service identity therefore includes release channel version, build,
+resolved executable and executable SHA-256. Replacement uses graceful SIGTERM,
+which the Rust service handles inside both idle and connected loops so Pro DJ
+Link and Ableton Link child supervisors are dropped before the process exits.
+
+The connected-deck visual clock is monotonic within one transport revision.
+Delayed or out-of-order status polls cannot rewind it; a real seek, Hot Cue,
+beatjump, load or Master discontinuity changes the revision and remains
+immediate. AppKit root-host sizing is configured from `viewDidMoveToWindow`,
+after the real `NSHostingView` exists, rather than racing window creation from
+SwiftUI `onAppear`.
