@@ -64,3 +64,14 @@ This leaves no unfinished implementation story. Closure and RC promotion are
 still intentionally blocked on the one-hour Wi-Fi/Ethernet runs and physical
 CDJ-1500X/SoundSwitch/Control One/DMX observation, which cannot be manufactured
 by an automated simulator run.
+
+## Dev-56 installed UI acceptance
+
+The DMG-installed native app was exercised against the `cdj-1500x` LAN
+simulator and the real SoundSwitch UI. Start selected the current phrase,
+forward/backward landings selected the matching AutoLoop, pitch followed
+`155.0 -> 161.5 -> 151.9`, and the lanes kept operating while Lumi was in the
+background. The final runtime snapshot showed one Link peer, zero late
+AutoLoop output, zero queue saturation and zero provider failures. UI Quit
+removed the Link peer while leaving the same launchd engine safely parked;
+reopening attached to that existing process.
