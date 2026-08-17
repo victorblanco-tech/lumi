@@ -18,6 +18,8 @@ const PRECISE_POSITION_SEEK_TOLERANCE_MILLIS: u64 = 750;
 const PRECISE_POSITION_DISCONTINUITY_CONFIRMATIONS: u8 = 3;
 const PRECISE_POSITION_HOT_CUE_CONFIRMATIONS: u8 = 2;
 const PRECISE_POSITION_STATUS_TOLERANCE_BEATS: u32 = 1;
+const STATUS_DISCONTINUITY_CONFIRMATIONS: u8 = 3;
+const STATUS_DISCONTINUITY_MAX_AGE_NANOS: u64 = 1_000_000_000;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProLinkTrackIdentity {
@@ -75,6 +77,9 @@ struct LoadedDeck {
     metadata: TrackMetadata,
     beat: u32,
     last_status_beat: u32,
+    last_status_observed_at_nanos: u64,
+    pending_status_discontinuity: Option<PendingStatusDiscontinuity>,
+    last_status_discontinuity: Option<StatusDiscontinuity>,
     phrase_index: Option<u16>,
     precise_position_seen: bool,
     last_precise_position_millis: Option<u64>,
@@ -95,12 +100,23 @@ struct PendingPreciseDiscontinuity {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct StatusDiscontinuity {
+    absolute_beat: u32,
+    observed_at_nanos: u64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct PendingStatusDiscontinuity {
+    absolute_beat: u32,
+    observed_at_nanos: u64,
+    confirmation_count: u8,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct PrecisePositionCandidate {
     playback_position_millis: u64,
     absolute_beat: u32,
     observed_at_nanos: u64,
-    last_status_beat: u32,
-    known_hot_cue_target: bool,
     track_bpm_milli: u32,
     effective_bpm_milli: u32,
     playing: bool,
@@ -311,23 +327,22 @@ impl ProLinkDeckSourceProvider {
                     playback_position_millis: observation.playback_position_millis,
                     absolute_beat,
                     observed_at_nanos: observation.observed_at_nanos,
-                    last_status_beat: previous.last_status_beat,
-                    known_hot_cue_target,
                     track_bpm_milli: previous.metadata.bpm_milli(),
                     effective_bpm_milli: observation.effective_bpm_milli,
                     playing: previous.playing,
                 },
             );
-            let corroborated_by_status = pending.absolute_beat.abs_diff(previous.last_status_beat)
-                <= PRECISE_POSITION_STATUS_TOLERANCE_BEATS;
+            let corroborated_by_status = status_corroborates_discontinuity(
+                previous.last_status_discontinuity,
+                pending.absolute_beat,
+                observation.observed_at_nanos,
+            );
             let required_confirmations = if known_hot_cue_target {
                 PRECISE_POSITION_HOT_CUE_CONFIRMATIONS
             } else {
                 PRECISE_POSITION_DISCONTINUITY_CONFIRMATIONS
             };
-            if pending.confirmation_count < required_confirmations
-                || (!known_hot_cue_target && !corroborated_by_status)
-            {
+            if pending.confirmation_count < required_confirmations || !corroborated_by_status {
                 if let Some(deck) = self.decks.get_mut(&observation.deck_id) {
                     deck.pending_precise_discontinuity = Some(pending);
                 }
@@ -336,10 +351,12 @@ impl ProLinkDeckSourceProvider {
                 // too jittery to steer an Ableton Link clock directly. Never
                 // turn one noisy sample into a transport generation. A real
                 // hotcue/seek persists on the new timeline. Imported hot-cue
-                // targets need two exact packets; arbitrary seeks and loop
-                // wraps additionally need the independent CdjStatus beat to
-                // corroborate their landing point. This prevents a coherent
-                // cluster of precise-position noise from scrubbing the show.
+                // targets need two exact packets; every jump also needs an
+                // independently observed discontinuity in CdjStatus itself.
+                // Merely matching the latest normal status beat is not
+                // corroboration: that mistake allowed a coherent cluster of
+                // precise-position jitter to scrub the Link timeline during
+                // ordinary playback.
                 return Ok(None);
             }
             true
@@ -378,6 +395,10 @@ impl ProLinkDeckSourceProvider {
             deck.last_precise_position_millis = Some(observation.playback_position_millis);
             deck.last_precise_position_observed_at_nanos = Some(observation.observed_at_nanos);
             deck.pending_precise_discontinuity = None;
+            if seeked {
+                deck.pending_status_discontinuity = None;
+                deck.last_status_discontinuity = None;
+            }
             deck.last_position_observed_at_nanos = observation.observed_at_nanos;
             deck.effective_bpm_milli = observation.effective_bpm_milli;
             if seeked {
@@ -563,6 +584,9 @@ impl ProLinkDeckSourceProvider {
                     metadata: metadata.clone(),
                     beat,
                     last_status_beat: beat,
+                    last_status_observed_at_nanos: observed_at_nanos,
+                    pending_status_discontinuity: None,
+                    last_status_discontinuity: None,
                     phrase_index: None,
                     precise_position_seen: false,
                     last_precise_position_millis: None,
@@ -631,6 +655,16 @@ impl ProLinkDeckSourceProvider {
                     previous.effective_bpm_milli,
                     previous.playing,
                 );
+            let status_discontinuity_candidate = previous.playing
+                && status.playing
+                && position_is_discontinuous(
+                    previous.last_status_beat,
+                    beat,
+                    previous.last_status_observed_at_nanos,
+                    observed_at_nanos,
+                    previous.effective_bpm_milli,
+                    true,
+                );
             if previous.beat != beat {
                 if seeked {
                     self.advance_timing_generation()?;
@@ -682,7 +716,38 @@ impl ProLinkDeckSourceProvider {
                     deck.beat = beat;
                 }
                 deck.last_position_observed_at_nanos = observed_at_nanos;
-                deck.last_status_beat = beat;
+                if status_discontinuity_candidate {
+                    let pending = confirmed_status_discontinuity(
+                        previous.pending_status_discontinuity,
+                        beat,
+                        observed_at_nanos,
+                        effective_bpm_milli,
+                    );
+                    if pending.confirmation_count >= STATUS_DISCONTINUITY_CONFIRMATIONS {
+                        deck.last_status_beat = beat;
+                        deck.last_status_observed_at_nanos = observed_at_nanos;
+                        deck.pending_status_discontinuity = None;
+                        deck.last_status_discontinuity = Some(StatusDiscontinuity {
+                            absolute_beat: beat,
+                            observed_at_nanos,
+                        });
+                    } else {
+                        // Keep the last accepted status baseline until a
+                        // coherent new absolute timeline is independently
+                        // established. One reordered status packet may never
+                        // validate a precise-position cluster.
+                        deck.pending_status_discontinuity = Some(pending);
+                    }
+                } else {
+                    deck.last_status_beat = beat;
+                    deck.last_status_observed_at_nanos = observed_at_nanos;
+                    deck.pending_status_discontinuity = None;
+                    deck.last_status_discontinuity =
+                        previous.last_status_discontinuity.filter(|candidate| {
+                            observed_at_nanos.abs_diff(candidate.observed_at_nanos)
+                                <= STATUS_DISCONTINUITY_MAX_AGE_NANOS
+                        });
+                }
                 deck.effective_bpm_milli = effective_bpm_milli;
                 deck.playing = status.playing;
                 if discontinuity {
@@ -1035,11 +1100,6 @@ fn confirmed_precise_discontinuity(
     let confirmation_count = pending
         .filter(|pending| {
             pending.absolute_beat.abs_diff(candidate.absolute_beat) <= 1
-                && (candidate.known_hot_cue_target
-                    || pending.absolute_beat.abs_diff(candidate.last_status_beat)
-                        <= PRECISE_POSITION_STATUS_TOLERANCE_BEATS
-                    || candidate.absolute_beat.abs_diff(candidate.last_status_beat)
-                        <= PRECISE_POSITION_STATUS_TOLERANCE_BEATS)
                 && !position_millis_is_discontinuous(
                     Some(pending.playback_position_millis),
                     candidate.playback_position_millis,
@@ -1055,6 +1115,43 @@ fn confirmed_precise_discontinuity(
         playback_position_millis: candidate.playback_position_millis,
         absolute_beat: candidate.absolute_beat,
         observed_at_nanos: candidate.observed_at_nanos,
+        confirmation_count,
+    }
+}
+
+fn status_corroborates_discontinuity(
+    status: Option<StatusDiscontinuity>,
+    absolute_beat: u32,
+    observed_at_nanos: u64,
+) -> bool {
+    status.is_some_and(|status| {
+        status.absolute_beat.abs_diff(absolute_beat) <= PRECISE_POSITION_STATUS_TOLERANCE_BEATS
+            && observed_at_nanos.abs_diff(status.observed_at_nanos)
+                <= STATUS_DISCONTINUITY_MAX_AGE_NANOS
+    })
+}
+
+fn confirmed_status_discontinuity(
+    pending: Option<PendingStatusDiscontinuity>,
+    absolute_beat: u32,
+    observed_at_nanos: u64,
+    effective_bpm_milli: u32,
+) -> PendingStatusDiscontinuity {
+    let confirmation_count = pending
+        .filter(|pending| {
+            !position_is_discontinuous(
+                pending.absolute_beat,
+                absolute_beat,
+                pending.observed_at_nanos,
+                observed_at_nanos,
+                effective_bpm_milli,
+                true,
+            )
+        })
+        .map_or(1, |pending| pending.confirmation_count.saturating_add(1));
+    PendingStatusDiscontinuity {
+        absolute_beat,
+        observed_at_nanos,
         confirmation_count,
     }
 }
@@ -1081,22 +1178,20 @@ pub enum ProLinkProviderError {
 mod timing_tests {
     use super::{
         PRECISE_POSITION_DISCONTINUITY_CONFIRMATIONS, PrecisePositionCandidate,
-        confirmed_precise_discontinuity, position_is_discontinuous,
-        position_millis_is_discontinuous, precise_absolute_beat,
+        STATUS_DISCONTINUITY_CONFIRMATIONS, StatusDiscontinuity, confirmed_precise_discontinuity,
+        confirmed_status_discontinuity, position_is_discontinuous,
+        position_millis_is_discontinuous, precise_absolute_beat, status_corroborates_discontinuity,
     };
 
     fn candidate(
         playback_position_millis: u64,
         absolute_beat: u32,
         observed_at_nanos: u64,
-        last_status_beat: u32,
     ) -> PrecisePositionCandidate {
         PrecisePositionCandidate {
             playback_position_millis,
             absolute_beat,
             observed_at_nanos,
-            last_status_beat,
-            known_hot_cue_target: false,
             track_bpm_milli: 155_000,
             effective_bpm_milli: 155_000,
             playing: true,
@@ -1157,19 +1252,19 @@ mod timing_tests {
 
     #[test]
     fn precise_position_discontinuity_needs_a_stable_new_timeline() {
-        let first = confirmed_precise_discontinuity(None, candidate(24_000, 64, 1_000_000_000, 64));
+        let first = confirmed_precise_discontinuity(None, candidate(24_000, 64, 1_000_000_000));
         assert_eq!(first.confirmation_count, 1);
 
         // A packet from the old timeline arriving between jump candidates
         // breaks consensus instead of producing a transport generation.
         let reordered =
-            confirmed_precise_discontinuity(Some(first), candidate(40_030, 104, 1_030_000_000, 64));
+            confirmed_precise_discontinuity(Some(first), candidate(40_030, 104, 1_030_000_000));
         assert_eq!(reordered.confirmation_count, 1);
 
         let second =
-            confirmed_precise_discontinuity(Some(first), candidate(24_030, 64, 1_030_000_000, 64));
+            confirmed_precise_discontinuity(Some(first), candidate(24_030, 64, 1_030_000_000));
         let third =
-            confirmed_precise_discontinuity(Some(second), candidate(24_060, 64, 1_060_000_000, 64));
+            confirmed_precise_discontinuity(Some(second), candidate(24_060, 64, 1_060_000_000));
         assert_eq!(second.confirmation_count, 2);
         assert_eq!(
             third.confirmation_count,
@@ -1178,26 +1273,56 @@ mod timing_tests {
     }
 
     #[test]
-    fn arbitrary_position_cluster_waits_for_independent_status_corroboration() {
-        let first =
-            confirmed_precise_discontinuity(None, candidate(24_000, 64, 1_000_000_000, 120));
-        let still_unconfirmed =
-            confirmed_precise_discontinuity(Some(first), candidate(24_030, 64, 1_030_000_000, 120));
-        assert_eq!(still_unconfirmed.confirmation_count, 1);
-
-        let status_confirmed = confirmed_precise_discontinuity(
-            Some(still_unconfirmed),
-            candidate(24_060, 64, 1_060_000_000, 64),
-        );
-        let ready = confirmed_precise_discontinuity(
-            Some(status_confirmed),
-            candidate(24_090, 64, 1_090_000_000, 64),
-        );
-        assert_eq!(status_confirmed.confirmation_count, 2);
+    fn precise_position_consensus_is_independent_from_status_corroboration() {
+        let first = confirmed_precise_discontinuity(None, candidate(24_000, 64, 1_000_000_000));
+        let second =
+            confirmed_precise_discontinuity(Some(first), candidate(24_030, 64, 1_030_000_000));
+        let ready =
+            confirmed_precise_discontinuity(Some(second), candidate(24_060, 64, 1_060_000_000));
+        assert_eq!(second.confirmation_count, 2);
         assert_eq!(
             ready.confirmation_count,
             PRECISE_POSITION_DISCONTINUITY_CONFIRMATIONS
         );
+    }
+
+    #[test]
+    fn only_an_independent_recent_status_jump_corroborates_a_position_jump() {
+        assert!(
+            !status_corroborates_discontinuity(None, 64, 1_100_000_000),
+            "a latest normal status beat is not evidence of a transport jump"
+        );
+        let jump = StatusDiscontinuity {
+            absolute_beat: 64,
+            observed_at_nanos: 1_000_000_000,
+        };
+        assert!(status_corroborates_discontinuity(
+            Some(jump),
+            65,
+            1_100_000_000
+        ));
+        assert!(!status_corroborates_discontinuity(
+            Some(jump),
+            64,
+            2_100_000_001
+        ));
+        assert!(!status_corroborates_discontinuity(
+            Some(jump),
+            70,
+            1_100_000_000
+        ));
+    }
+
+    #[test]
+    fn status_jump_requires_its_own_coherent_timeline() {
+        let first = confirmed_status_discontinuity(None, 64, 1_000_000_000, 155_000);
+        let reordered = confirmed_status_discontinuity(Some(first), 120, 1_030_000_000, 155_000);
+        assert_eq!(reordered.confirmation_count, 1);
+
+        let second = confirmed_status_discontinuity(Some(first), 64, 1_030_000_000, 155_000);
+        let ready = confirmed_status_discontinuity(Some(second), 64, 1_060_000_000, 155_000);
+        assert_eq!(second.confirmation_count, 2);
+        assert_eq!(ready.confirmation_count, STATUS_DISCONTINUITY_CONFIRMATIONS);
     }
 
     #[test]

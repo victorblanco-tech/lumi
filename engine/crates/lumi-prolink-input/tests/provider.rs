@@ -292,7 +292,7 @@ fn precise_position_overrides_a_stale_beat_after_hotcue_before_output_planning()
 
     let mut applied = None;
     for (sequence, observed_at_nanos, position_millis, at) in
-        [(6, 120_000_000, 0, 7), (7, 150_000_000, 30, 8)]
+        [(6, 120_000_000, 0, 7), (10, 170_000_000, 50, 8)]
     {
         let intro_position = decoder
             .decode_line(&format!(
@@ -309,6 +309,25 @@ fn precise_position_overrides_a_stale_beat_after_hotcue_before_output_planning()
         applied = provider
             .apply_authoritative_position(intro_position, 0, true, MonotonicTime::new(at + 10))
             .unwrap_or_else(|error| panic!("hotcue position should apply: {error}"));
+        if sequence == 6 {
+            // Precise packets alone are deliberately insufficient. The
+            // independent absolute CdjStatus timeline must also show the
+            // actual jump; a normal status frame that merely matches a noisy
+            // position is not transport corroboration.
+            for (status_sequence, status_nanos) in
+                [(7, 130_000_000), (8, 145_000_000), (9, 160_000_000)]
+            {
+                let landing_status = decoder
+                    .decode_line(&format!(
+                        r#"{{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":{status_sequence},"observedAtNanos":{status_nanos},"type":"deckStatus","payload":{{"deviceNumber":1,"deviceName":"CDJ-1500X","playing":true,"paused":false,"cued":false,"tempoMaster":true,"onAir":true,"sourcePlayer":1,"sourceSlot":"USB_SLOT","trackType":"REKORDBOX","rekordboxId":1256,"trackBpm":155.0,"effectiveBpm":157.25,"beatNumber":1,"beatWithinBar":1,"rawPitch":1082458112}}}}"#,
+                    ))
+                    .unwrap_or_else(|error| panic!("hotcue status should decode: {error}"));
+                provider
+                    .ingest(landing_status, MonotonicTime::new(18))
+                    .unwrap_or_else(|error| panic!("hotcue status should translate: {error}"));
+                let _ = provider.drain_events();
+            }
+        }
     }
     let applied = applied.unwrap_or_else(|| panic!("stable hotcue timeline should be confirmed"));
     assert!(applied.discontinuity);

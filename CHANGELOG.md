@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.4.0-dev-47
+
+- Requires a coherent multi-frame `CdjStatus` timeline to show an independently
+  detected transport discontinuity before any precise-position cluster can
+  re-anchor Ableton Link or replace the active AutoLoop plan. One reordered
+  status packet or a normal status beat that merely agrees with a jittering
+  position is no longer treated as corroboration.
+- Applies the same independent-status gate to imported Hot Cues. Known cue
+  targets retain the two-precise-packet confirmation count, but correctness now
+  takes precedence over accepting an unverified low-latency jump.
+- Adds regressions separating precise-position consensus from independent
+  status-jump consensus, including reordered status, age and landing-beat
+  bounds.
+- Records the invalidated dev-46 short-soak result: a later continuous physical
+  run produced seven false Link re-anchors in 45 seconds despite zero late or
+  saturated MIDI dispatches.
+- Passes a packaged physical three-wrap soak: exactly one discontinuity and
+  one hard Link re-anchor per observed CDJ loop wrap across 6,637 exact
+  positions, with MIDI p95 `0.1 ms`, zero late dispatches and zero saturation.
+
 ## 0.4.0-dev-46
 
 - Corrects precise-position continuity for pitched playback: track-time

@@ -342,3 +342,36 @@ The source adapter now also requires a movement of more than two mapped beats
 before a millisecond discontinuity can become a transport epoch. Small precise
 position corrections remain presentation observations and never have show-wide
 timing consequences.
+
+## Implementation correction — `0.4.0-dev-47`
+
+The longer dev-46 physical run invalidated its short-soak acceptance. During
+45 seconds of one continuous physical CDJ loop, Lumi created seven transport
+generations and seven hard Link re-anchors while the realtime MIDI lane still
+reported zero late dispatches and zero saturation. SoundSwitch exposed those
+re-anchors as an AutoLoop progress bar that scrubbed forwards and backwards.
+
+The architectural error was in the meaning of corroboration. Dev-46 accepted a
+precise-position cluster when its landing beat matched the latest normal
+`CdjStatus` beat. Agreement between two descriptions of the current position is
+not evidence that a transport jump occurred. Dev-47 records discontinuity on
+the independent absolute status timeline itself. Because a single status frame
+can also be reordered, that timeline must establish the new landing point for
+three coherent frames before it becomes evidence. A position jump is accepted
+only when that recent status-jump consensus lands within one beat. This gate
+also applies to known Hot Cues; they keep two precise confirmations but no
+longer bypass independent transport evidence.
+
+SwiftUI remains outside this path. The app can issue explicit operator commands
+such as Arm, Start, Pause, Off and timing-offset changes, but window activation,
+rendering and waveform animation cannot create a transport generation, Link
+re-anchor or MIDI command. The engine currently remains a separately scheduled
+child process owned by the app supervisor; promotion to launchd-managed
+`SMAppService` is still pending and is a lifecycle improvement, not the fix for
+this timing-authority defect.
+
+The packaged physical acceptance then held the invariant for three consecutive
+CDJ-1500X long-loop wraps: both accepted discontinuities and hard Link
+re-anchors advanced exactly once per wrap across 6,637 mapped exact positions.
+The separate MIDI lane remained at p95 `0.1 ms` with zero late dispatches and
+zero saturation while SoundSwitch stayed responsive in the foreground.

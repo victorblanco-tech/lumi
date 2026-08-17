@@ -184,3 +184,8 @@ Version `0.4.0-dev-46` corrects pitched-playback projection and requires an
 independent deck-status beat for arbitrary transport jumps, while known Hot
 Cues retain a bounded two-packet path. See
 [`0.4.0-dev-46-independent-position-authority.md`](../release/0.4.0-dev-46-independent-position-authority.md).
+
+Version `0.4.0-dev-47` corrects the meaning of independent corroboration. The
+status timeline must itself show a recent jump to the candidate landing beat;
+ordinary status agreement cannot validate precise-position jitter. See
+[`0.4.0-dev-47-independent-status-discontinuity.md`](../release/0.4.0-dev-47-independent-status-discontinuity.md).

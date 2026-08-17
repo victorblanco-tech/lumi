@@ -264,3 +264,21 @@ arbitrary jump targets against the latest absolute `CdjStatus` beat. Known
 imported Hot Cues retain a two-packet fast path. A rejected position cluster
 never reaches the realtime worker; a confirmed generation still invalidates
 all older deadlines before the landing phrase can emit.
+
+### Dev-47 independent status-discontinuity gate
+
+A longer physical dev-46 run disproved “latest status beat matches the
+candidate” as corroboration: seven false generations and Link re-anchors were
+observed in 45 seconds of continuous playback, while CoreMIDI remained at zero
+late and zero saturated dispatches. Dev-47 now requires the status timeline
+itself to establish a recent discontinuous new timeline at the same landing
+beat for three coherent status frames. One reordered status frame and normal
+progressing status can never validate precise-position jitter. This gate
+applies to loop wraps, beatjumps, seeks and known Hot Cues; known cues need two
+precise confirmations, arbitrary jumps need three.
+
+The packaged physical acceptance processed 6,637 exact positions across three
+complete CDJ-1500X long-loop wraps. Discontinuities and hard Link re-anchors
+both advanced exactly once per wrap; 37 MIDI pulses retained p95 `0.1 ms`, zero
+late dispatches and zero saturation while SoundSwitch remained responsive.
+Physical Hot Cue acceptance remains open; the sequence is regression-tested.
