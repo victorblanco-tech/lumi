@@ -221,8 +221,8 @@ struct LiveDeckSurface<Details: View>: View {
         .frame(minWidth: 90, minHeight: LumiControlMetric.compactHeight)
         .accessibilityLabel(
             pendingLightingTimingOffsetMillis.map {
-                "Lighting timing \(applied) saved, \(String(format: "%+d ms", $0)) pending; dev-51 output remains on the phrase boundary"
-            } ?? "Lighting timing \(applied) saved; dev-51 output remains on the phrase boundary"
+                "Lighting timing \(applied) saved, \(String(format: "%+d ms", $0)) pending; output remains on the phrase boundary"
+            } ?? "Lighting timing \(applied) saved; output remains on the phrase boundary"
         )
         .accessibilityIdentifier("lumi.deck.lightingTiming")
     }

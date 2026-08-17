@@ -313,7 +313,7 @@ struct LiveWorkspacePresenterTests {
         #expect(state.content?.pendingLightingTimingOffsetMillis == 20)
         #expect(state.lightingMidi.detail.contains("+0 ms saved"))
         #expect(state.lightingMidi.detail.contains("+20 ms pending for next phrase"))
-        #expect(state.lightingMidi.detail.contains("dev-51 boundary output"))
+        #expect(state.lightingMidi.detail.contains("phrase-boundary output"))
     }
 
     @Test("Tech degrades when the lighting MIDI source is unavailable")

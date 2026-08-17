@@ -1,8 +1,8 @@
 # Story E5-03: Explicit playback epochs, hotcues and output offset
 
-- Status: **Refined; waiting for E5-02**
+- Status: **Refined; waiting for dev-52 SoundSwitch compatibility evidence**
 - Priority: **P0 Critical**
-- Target: `0.4.0-dev-52`
+- Target: `0.4.0-dev-53`
 - GitHub tracking: [#119](https://github.com/victorblanco-tech/lumi/issues/119)
 
 ## Outcome

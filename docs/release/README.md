@@ -12,6 +12,7 @@
 - [0.3.0 release notes](0.3.0-release-notes.md)
 - [0.4.0-dev-50 isolated Ableton Link Relay](0.4.0-dev-50-isolated-link-relay.md)
 - [0.4.0-dev-51 exactly-once AutoLoop output](0.4.0-dev-51-exactly-once-autoloop-output.md)
+- [0.4.0-dev-52 SoundSwitch MIDI 1.0 compatibility](0.4.0-dev-52-soundswitch-midi-compatibility.md)
 - [Unsigned macOS installation instructions](unsigned-macos-installation.txt)
 
 Create a locally verified, unsigned Apple Silicon disk image with:

@@ -2,7 +2,7 @@
 
 - Status: **Refined; waiting for E5-03**
 - Priority: **P0 Critical**
-- Target: `0.4.0-dev-53`
+- Target: `0.4.0-dev-54`
 - GitHub tracking: [#120](https://github.com/victorblanco-tech/lumi/issues/120)
 
 ## Outcome

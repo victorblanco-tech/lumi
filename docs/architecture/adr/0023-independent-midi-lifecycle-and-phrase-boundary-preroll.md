@@ -107,3 +107,24 @@ domains. Losing one cannot silently remove the other.
 
 Rejected because visible UI work is less important than phrase-boundary output
 timing during Live playback.
+
+## SoundSwitch compatibility correction — `0.4.0-dev-52`
+
+The first persistent-service implementation published `Lumi Virtual MIDI` as a
+CoreMIDI MIDI 1.0 UMP endpoint and delivered UMP event lists. macOS and a second
+CoreMIDI monitor continued to receive the exact Bank and AutoLoop messages, but
+SoundSwitch could silently stop consuming that source after an initially
+successful run. The Lumi realtime lane therefore looked healthy while the
+actual lighting consumer received nothing.
+
+`Lumi Virtual MIDI` and `Lumi Clock` now use CoreMIDI's classic MIDI 1.0 source
+and `MIDIPacketList` delivery path. Note On and Note Off are separate packets in
+one immediate packet list. This is the compatibility boundary used by physical
+MIDI controllers, IAC buses and the previously stable Beat Link Trigger chain.
+UMP remains valid inside the Pro DJ Link input adapter where Lumi owns both
+ends; it is no longer imposed on the SoundSwitch output boundary.
+
+The engine's published/pulse counters prove only delivery into CoreMIDI. They
+must not be presented as proof that SoundSwitch executed the mapped action.
+Release evidence therefore requires both an independent MIDI observation and a
+SoundSwitch-visible AutoLoop change over a sustained run.

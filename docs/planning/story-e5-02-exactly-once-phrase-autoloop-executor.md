@@ -51,3 +51,13 @@ after that selection.
 The stored lighting offset is intentionally labelled **Saved** in dev-51. The
 exactly-once executor fires on the phrase boundary; scheduled negative or
 positive deadlines are E5-03 scope and are not represented as applied yet.
+
+## Dev-52 compatibility correction
+
+A longer live run invalidated the assumption that successful UMP delivery into
+CoreMIDI implied continued SoundSwitch consumption. Lumi kept emitting the
+correct channel-16 Bank and AutoLoop notes with a 0.1 ms realtime p95 while
+SoundSwitch stopped changing loops. Dev-52 keeps the exactly-once executor and
+changes only its provider boundary to classic CoreMIDI MIDI 1.0 packet lists.
+This correction is a prerequisite for E5-03; it does not reintroduce progress,
+seek-correction or periodic AutoLoop output.

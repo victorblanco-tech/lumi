@@ -325,7 +325,7 @@ public struct LiveWorkspaceView: View {
                 VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
                     Text("Lighting timing offset")
                         .font(LumiTypography.sectionTitle)
-                    Text("Saved preference. Dev-51 fires on the phrase boundary; scheduled pre-trigger activates in dev-52.")
+                    Text("Saved preference. Output currently fires on the phrase boundary; scheduled pre-trigger activates in a later story.")
                         .font(LumiTypography.metadata)
                         .foregroundStyle(LumiColor.textSecondary)
                     Text(timingConfirmationDetail)
@@ -385,7 +385,7 @@ public struct LiveWorkspaceView: View {
         if appliedLightingTimingOffsetMillis != lightingTimingOffsetMillis {
             return "Saved \(applied) · waiting for engine confirmation."
         }
-        return "Saved: \(applied). Scheduled pre-trigger activates in dev-52."
+        return "Saved: \(applied). Scheduled pre-trigger activates in a later story."
     }
 
     private var technicalStatusButton: some View {
@@ -1253,7 +1253,7 @@ private struct PlanSelectionControl: View {
 #Preview("Ready · Dark") {
     LiveWorkspaceView(
         state: LiveWorkspaceFixtures.ready,
-        productVersion: "0.4.0-dev-51",
+        productVersion: "0.4.0-dev-52",
         appearance: .constant(.dark),
         keyNotation: .constant(.camelot)
     )
@@ -1264,7 +1264,7 @@ private struct PlanSelectionControl: View {
 #Preview("Fallback · Light") {
     LiveWorkspaceView(
         state: LiveWorkspaceFixtures.fallback,
-        productVersion: "0.4.0-dev-51",
+        productVersion: "0.4.0-dev-52",
         appearance: .constant(.light),
         keyNotation: .constant(.classic)
     )

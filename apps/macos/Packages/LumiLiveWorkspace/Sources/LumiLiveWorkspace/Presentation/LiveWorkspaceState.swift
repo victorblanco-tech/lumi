@@ -373,7 +373,7 @@ public enum LiveWorkspacePresenter {
             let last = Double($0.lastDispatchLatenessMicros) / 1_000
             return " · realtime p95 \(p95.formatted(.number.precision(.fractionLength(1)))) ms · last \(last.formatted(.number.precision(.fractionLength(1)))) ms · \($0.lateDispatchCount) late"
         } ?? ""
-        return "\(midi.sourceName) · auto-publish \(midi.autoPublishEnabled ? "on" : "off") · \(midi.sentPulseCount) pulses\(bank) · timing \(offset) saved\(pending) · dev-51 boundary output · bank pre-roll \(midi.bankPreRollMillis) ms\(realtime)"
+        return "\(midi.sourceName) · auto-publish \(midi.autoPublishEnabled ? "on" : "off") · \(midi.sentPulseCount) pulses\(bank) · timing \(offset) saved\(pending) · phrase-boundary output · bank pre-roll \(midi.bankPreRollMillis) ms\(realtime)"
     }
 
     private static func abletonLinkDetail(_ snapshot: EngineSnapshot) -> String {
