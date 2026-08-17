@@ -39,6 +39,7 @@ Decision Records (ADR's) die de belangrijkste besluiten vastleggen.
 - [ADR-0030: Managed Ableton Link timing output](adr/0030-managed-ableton-link-timing-output.md)
 - [ADR-0031: Show-critical runtime isolation and local quality gates](adr/0031-show-critical-runtime-isolation-and-local-quality-gates.md)
 - [ADR-0032: launchd-owned engine and isolated Ableton Link clock](adr/0032-launchd-engine-and-isolated-link-clock.md)
+- [ADR-0033: Deterministic Live timing and exactly-once AutoLoop output](adr/0033-deterministic-live-timing-and-exactly-once-autoloop-output.md)
 
 Release- en deploymentmanagement staat in [`docs/release`](../release/README.md).
 

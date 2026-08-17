@@ -140,6 +140,10 @@ pub trait TimingOutputProvider {
     fn publish(&mut self) -> Result<(), Self::Error>;
     fn synchronize(&mut self, observation: LinkClockObservation) -> Result<(), Self::Error>;
     fn hold(&mut self) -> Result<(), Self::Error>;
+    fn fail_closed(&mut self, reason: String) -> Result<(), Self::Error> {
+        let _ = reason;
+        self.hold()
+    }
     fn stop(&mut self) -> Result<(), Self::Error>;
     fn status(&self) -> TimingOutputStatus;
 }

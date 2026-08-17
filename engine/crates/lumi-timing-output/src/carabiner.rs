@@ -14,7 +14,13 @@ use crate::{
 
 pub const CARABINER_DEFAULT_PORT: u16 = 17_001;
 pub const CARABINER_EXPECTED_VERSION: &str = "1.2.0";
-const COMMAND_TIMEOUT: Duration = Duration::from_millis(300);
+// Carabiner normally replies within a few milliseconds, but macOS can delay a
+// userspace socket exchange while SoundSwitch and the SwiftUI renderer are
+// both busy. A 300 ms timeout turned one scheduler stall into a helper restart
+// and a short-lived second Ableton Link peer. The worker is isolated from the
+// realtime AutoLoop lane, so waiting up to one second is safer and does not
+// block lighting deadlines.
+const COMMAND_TIMEOUT: Duration = Duration::from_secs(1);
 const WORKER_RESPONSE_TIMEOUT: Duration = Duration::from_secs(2);
 const CHILD_TERMINATION_TIMEOUT: Duration = Duration::from_millis(750);
 const WORKER_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(2);
@@ -220,6 +226,10 @@ impl TimingOutputProvider for CarabinerTimingOutput {
             .map_err(|_| CarabinerError::WorkerUnavailable)
     }
 
+    fn fail_closed(&mut self, reason: String) -> Result<(), Self::Error> {
+        CarabinerTimingOutput::fail_closed(self, reason)
+    }
+
     fn stop(&mut self) -> Result<(), Self::Error> {
         let (reply, response) = mpsc::channel();
         self.commands
@@ -284,6 +294,10 @@ fn run_worker(
 ) {
     let mut session: Option<CarabinerSession> = None;
     let mut last_anchor: Option<LinkClockObservation> = None;
+    // A failed helper exchange may not silently create a replacement Link
+    // peer while a show is active. Recovery is an explicit Disable/Enable
+    // lifecycle decision, just like reconnecting a physical timing source.
+    let mut recovery_requires_publish = false;
 
     while let Ok(command) = receiver.recv() {
         if shutting_down.load(Ordering::Acquire) && !matches!(&command, WorkerCommand::Shutdown) {
@@ -291,6 +305,7 @@ fn run_worker(
         }
         match command {
             WorkerCommand::Publish(reply) => {
+                recovery_requires_publish = false;
                 update_status(shared_status, |status| {
                     status.state = TimingOutputState::Starting;
                     status.last_event = Some("Starting managed Ableton Link output".to_owned());
@@ -299,6 +314,7 @@ fn run_worker(
                 let result = open_session(&configuration, owned_child, &mut session, shared_status);
                 if let Err(error) = &result {
                     set_degraded(shared_status, error);
+                    recovery_requires_publish = true;
                 }
                 if let Some(reply) = reply {
                     let _ = reply.send(result);
@@ -307,14 +323,15 @@ fn run_worker(
             WorkerCommand::Synchronize => {
                 let anchor = latest_anchor.lock().ok().and_then(|mut value| value.take());
                 let Some(anchor) = anchor else { continue };
-                if session.is_none()
-                    && let Err(error) =
-                        open_session(&configuration, owned_child, &mut session, shared_status)
-                {
-                    set_degraded(shared_status, &error);
+                if recovery_requires_publish {
                     continue;
                 }
                 let Some(connected) = session.as_mut() else {
+                    set_degraded(
+                        shared_status,
+                        "Ableton Link session is unavailable; disable and enable Link to recover",
+                    );
+                    recovery_requires_publish = true;
                     continue;
                 };
                 match apply_anchor(connected, last_anchor, anchor) {
@@ -362,6 +379,7 @@ fn run_worker(
                     Err(error) => {
                         set_degraded(shared_status, &error);
                         session = None;
+                        recovery_requires_publish = true;
                     }
                 }
             }
@@ -374,6 +392,8 @@ fn run_worker(
                     .map_or(Ok(()), CarabinerSession::stop_playing_now);
                 if let Err(error) = result {
                     set_degraded(shared_status, &error);
+                    session = None;
+                    recovery_requires_publish = true;
                 } else {
                     last_anchor = None;
                     update_status(shared_status, |status| {
@@ -401,6 +421,7 @@ fn run_worker(
                     Err(error) => {
                         set_degraded(shared_status, &error);
                         session = None;
+                        recovery_requires_publish = true;
                     }
                 }
             }
@@ -412,6 +433,7 @@ fn run_worker(
                     .as_mut()
                     .map_or(Ok(()), CarabinerSession::stop_playing_now);
                 session = None;
+                recovery_requires_publish = false;
                 terminate_owned_child(owned_child);
                 last_anchor = None;
                 update_status(shared_status, |status| {

@@ -5,6 +5,7 @@
 mod autoloop_defaults;
 mod commands;
 mod library;
+mod link_relay;
 mod phrase_role_defaults;
 mod service;
 mod session;

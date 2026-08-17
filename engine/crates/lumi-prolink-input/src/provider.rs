@@ -14,7 +14,7 @@ const SOURCE_ID: u64 = 31;
 const DEFAULT_TRACK_MINUTES: u32 = 10;
 const POSITION_CONTINUITY_TOLERANCE_BEATS: f64 = 2.25;
 const POSITION_AUTHORITY_DIAGNOSTIC_MAX_AGE: Duration = Duration::from_millis(500);
-const PRECISE_POSITION_SEEK_TOLERANCE_MILLIS: u64 = 750;
+const PRECISE_POSITION_FORWARD_SEEK_TOLERANCE_MILLIS: u64 = 750;
 const PRECISE_POSITION_DISCONTINUITY_CONFIRMATIONS: u8 = 3;
 const PRECISE_POSITION_HOT_CUE_CONFIRMATIONS: u8 = 2;
 const PRECISE_POSITION_STATUS_TOLERANCE_BEATS: u32 = 1;
@@ -309,16 +309,15 @@ impl ProLinkDeckSourceProvider {
         let discontinuity_candidate = if first_authoritative_position {
             previous.beat.abs_diff(absolute_beat) > 2
         } else {
-            previous.beat.abs_diff(absolute_beat) > 2
-                && position_millis_is_discontinuous(
-                    previous.last_precise_position_millis,
-                    observation.playback_position_millis,
-                    previous.last_precise_position_observed_at_nanos,
-                    observation.observed_at_nanos,
-                    previous.metadata.bpm_milli(),
-                    observation.effective_bpm_milli,
-                    previous.playing,
-                )
+            position_millis_is_discontinuous(
+                previous.last_precise_position_millis,
+                observation.playback_position_millis,
+                previous.last_precise_position_observed_at_nanos,
+                observation.observed_at_nanos,
+                previous.metadata.bpm_milli(),
+                observation.effective_bpm_milli,
+                previous.playing,
+            )
         };
         let seeked = if discontinuity_candidate && !first_authoritative_position {
             let pending = confirmed_precise_discontinuity(
@@ -744,8 +743,11 @@ impl ProLinkDeckSourceProvider {
                     deck.pending_status_discontinuity = None;
                     deck.last_status_discontinuity =
                         previous.last_status_discontinuity.filter(|candidate| {
-                            observed_at_nanos.abs_diff(candidate.observed_at_nanos)
-                                <= STATUS_DISCONTINUITY_MAX_AGE_NANOS
+                            status_discontinuity_is_still_supported(
+                                *candidate,
+                                beat,
+                                observed_at_nanos,
+                            )
                         });
                 }
                 deck.effective_bpm_milli = effective_bpm_milli;
@@ -818,7 +820,11 @@ impl ProLinkDeckSourceProvider {
             return Ok(());
         }
         let deck_id = DeckId::new(position.device_number);
-        let Some(track_load_id) = self.decks.get(&deck_id).map(|deck| deck.track_load_id) else {
+        let Some((track_load_id, effective_bpm_milli)) = self
+            .decks
+            .get(&deck_id)
+            .map(|deck| (deck.track_load_id, deck.effective_bpm_milli))
+        else {
             return Ok(());
         };
         self.precise_position_message_count = self.precise_position_message_count.saturating_add(1);
@@ -829,7 +835,13 @@ impl ProLinkDeckSourceProvider {
                 track_load_id,
                 observed_at_nanos,
                 playback_position_millis: position.playback_position_millis,
-                effective_bpm_milli: bpm_milli(position.effective_bpm)?,
+                // CdjStatus includes the player's raw pitch and is the
+                // canonical effective-tempo authority. CDJ-1500X precise
+                // position packets can temporarily report the analyzed track
+                // BPM instead, which made a pitch-slider update oscillate
+                // between two values. PrecisePosition is position authority
+                // only.
+                effective_bpm_milli,
                 beat_within_bar: position.beat_within_bar,
             });
         Ok(())
@@ -848,17 +860,16 @@ impl ProLinkDeckSourceProvider {
         let Some(previous) = self.decks.get(&deck_id).cloned() else {
             return Ok(());
         };
-        if let Some(deck) = self.decks.get_mut(&deck_id) {
-            deck.effective_bpm_milli = bpm_milli(beat.effective_bpm)?;
-        }
         // A Beat packet is exact in time but contains only its position within
         // the bar. It cannot reveal a hotcue or beat-jump absolute position,
-        // so it is timing-only and may never move Lumi's track/phrase state.
+        // nor is it the tempo authority. Keeping tempo on the latest
+        // CdjStatus prevents Beat and status packets from fighting after the
+        // DJ moves the pitch slider.
         self.timing_observations.push(ProLinkTimingObservation {
             deck_id,
             observed_at_nanos,
             absolute_beat: previous.beat,
-            effective_bpm_milli: bpm_milli(beat.effective_bpm)?,
+            effective_bpm_milli: previous.effective_bpm_milli,
             beat_within_bar: beat.beat_within_bar,
             playing: previous.playing,
             generation: self.timing_generation,
@@ -1073,9 +1084,13 @@ fn position_millis_is_discontinuous(
     // transport generations and needlessly re-anchored Link. Only an actual
     // backward move, or a forward move materially ahead of elapsed time, can
     // be an explicit hotcue/beat-jump/loop discontinuity.
-    if candidate_position_millis.saturating_add(PRECISE_POSITION_SEEK_TOLERANCE_MILLIS)
-        < previous_position_millis
-    {
+    // A playing track's accepted absolute position is monotonic until the DJ
+    // explicitly loops, seeks, beat-jumps or presses a Hot Cue. Even a small
+    // backwards PrecisePosition sample must therefore enter the confirmed
+    // discontinuity path; accepting one or two beats of packet reordering as
+    // ordinary playback visibly rewound the Live timeline without advancing
+    // its transport generation.
+    if candidate_position_millis < previous_position_millis {
         return true;
     }
     // Playback position is expressed on the track's original timeline. At a
@@ -1090,7 +1105,8 @@ fn position_millis_is_discontinuous(
     )
     .unwrap_or(u64::MAX);
     let expected = previous_position_millis.saturating_add(expected_progress);
-    candidate_position_millis > expected.saturating_add(PRECISE_POSITION_SEEK_TOLERANCE_MILLIS)
+    candidate_position_millis
+        > expected.saturating_add(PRECISE_POSITION_FORWARD_SEEK_TOLERANCE_MILLIS)
 }
 
 fn confirmed_precise_discontinuity(
@@ -1129,6 +1145,22 @@ fn status_corroborates_discontinuity(
             && observed_at_nanos.abs_diff(status.observed_at_nanos)
                 <= STATUS_DISCONTINUITY_MAX_AGE_NANOS
     })
+}
+
+fn status_discontinuity_is_still_supported(
+    candidate: StatusDiscontinuity,
+    current_beat: u32,
+    observed_at_nanos: u64,
+) -> bool {
+    // Corroboration describes the new absolute transport timeline, not a
+    // one-second permission slip. A reordered status cluster can briefly look
+    // like a seek and then return to the real timeline. Retaining that stale
+    // cluster by age alone allowed a later precise-position wobble to
+    // authorize a false seek. The current status must keep agreeing with the
+    // candidate as well.
+    candidate.absolute_beat.abs_diff(current_beat) <= PRECISE_POSITION_STATUS_TOLERANCE_BEATS
+        && observed_at_nanos.abs_diff(candidate.observed_at_nanos)
+            <= STATUS_DISCONTINUITY_MAX_AGE_NANOS
 }
 
 fn confirmed_status_discontinuity(
@@ -1181,6 +1213,7 @@ mod timing_tests {
         STATUS_DISCONTINUITY_CONFIRMATIONS, StatusDiscontinuity, confirmed_precise_discontinuity,
         confirmed_status_discontinuity, position_is_discontinuous,
         position_millis_is_discontinuous, precise_absolute_beat, status_corroborates_discontinuity,
+        status_discontinuity_is_still_supported,
     };
 
     fn candidate(
@@ -1314,6 +1347,23 @@ mod timing_tests {
     }
 
     #[test]
+    fn returned_status_timeline_revokes_old_jump_corroboration_immediately() {
+        let jump = StatusDiscontinuity {
+            absolute_beat: 64,
+            observed_at_nanos: 1_000_000_000,
+        };
+        assert!(status_discontinuity_is_still_supported(
+            jump,
+            65,
+            1_100_000_000
+        ));
+        assert!(
+            !status_discontinuity_is_still_supported(jump, 66, 1_100_000_000),
+            "normal progress away from the candidate must revoke corroboration"
+        );
+    }
+
+    #[test]
     fn status_jump_requires_its_own_coherent_timeline() {
         let first = confirmed_status_discontinuity(None, 64, 1_000_000_000, 155_000);
         let reordered = confirmed_status_discontinuity(Some(first), 120, 1_030_000_000, 155_000);
@@ -1344,8 +1394,8 @@ mod timing_tests {
     }
 
     #[test]
-    fn small_reordering_noise_is_not_a_seek() {
-        assert!(!position_millis_is_discontinuous(
+    fn any_backwards_precise_position_requires_discontinuity_confirmation() {
+        assert!(position_millis_is_discontinuous(
             Some(10_000),
             9_500,
             Some(1_000_000_000),

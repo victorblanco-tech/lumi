@@ -10,6 +10,7 @@
 - [0.3.0 development release and known limitations](0.3.0-dev-demo-and-limitations.md)
 - [0.3.0 release candidate notes](0.3.0-rc.1-release-notes.md)
 - [0.3.0 release notes](0.3.0-release-notes.md)
+- [0.4.0-dev-50 isolated Ableton Link Relay](0.4.0-dev-50-isolated-link-relay.md)
 - [Unsigned macOS installation instructions](unsigned-macos-installation.txt)
 
 Create a locally verified, unsigned Apple Silicon disk image with:

@@ -146,6 +146,59 @@ fn continuous_udp_beat_jitter_never_rewinds_the_link_timeline() {
     );
 }
 
+#[test]
+fn a_short_scheduler_stall_does_not_restart_the_link_peer() {
+    let server = FakeCarabiner::start_with_response_delay(Duration::from_millis(350));
+    let mut output = CarabinerTimingOutput::new(CarabinerConfiguration {
+        executable: None,
+        port: server.port,
+        expected_version: "1.2.0".to_owned(),
+    });
+    output
+        .publish()
+        .unwrap_or_else(|error| panic!("a delayed helper should still publish: {error}"));
+
+    let status = output.status();
+    assert_eq!(status.state, TimingOutputState::Ready);
+    assert_eq!(status.failure_count, 0);
+    assert_eq!(
+        server.connection_count(),
+        1,
+        "a transient userspace delay may not create a second Link peer"
+    );
+}
+
+#[test]
+fn a_failed_active_session_never_opens_a_replacement_peer_implicitly() {
+    let server = FakeCarabiner::start_failing_on_bpm();
+    let mut output = CarabinerTimingOutput::new(CarabinerConfiguration {
+        executable: None,
+        port: server.port,
+        expected_version: "1.2.0".to_owned(),
+    });
+    output
+        .publish()
+        .unwrap_or_else(|error| panic!("fake helper should publish: {error}"));
+    output
+        .synchronize(anchor(140_000, true))
+        .unwrap_or_else(|error| panic!("anchor should enter the worker: {error}"));
+    wait_until(Duration::from_secs(2), || {
+        output.status().state == TimingOutputState::Degraded
+    });
+
+    for bpm in [141_000, 142_000, 143_000] {
+        output
+            .synchronize(anchor(bpm, true))
+            .unwrap_or_else(|error| panic!("latest clock may still be accepted: {error}"));
+    }
+    thread::sleep(Duration::from_millis(100));
+    assert_eq!(
+        server.connection_count(),
+        1,
+        "a failed session requires an explicit Link disable/enable; clock updates may not create another peer"
+    );
+}
+
 fn anchor(bpm_milli: u32, playing: bool) -> LinkClockObservation {
     LinkClockObservation {
         source: TimingSourceKind::ProDjLink,
@@ -178,6 +231,18 @@ struct FakeCarabiner {
 
 impl FakeCarabiner {
     fn start() -> Self {
+        Self::start_with_options(Duration::ZERO, false)
+    }
+
+    fn start_with_response_delay(response_delay: Duration) -> Self {
+        Self::start_with_options(response_delay, false)
+    }
+
+    fn start_failing_on_bpm() -> Self {
+        Self::start_with_options(Duration::ZERO, true)
+    }
+
+    fn start_with_options(response_delay: Duration, fail_on_bpm: bool) -> Self {
         let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
             .unwrap_or_else(|error| panic!("fake helper should bind: {error}"));
         listener
@@ -202,7 +267,7 @@ impl FakeCarabiner {
                         if let Ok(mut count) = worker_connections.lock() {
                             *count = (*count).saturating_add(1);
                         }
-                        serve_connection(stream, &worker_commands);
+                        serve_connection(stream, &worker_commands, response_delay, fail_on_bpm);
                     }
                     Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                         thread::sleep(Duration::from_millis(2));
@@ -243,7 +308,12 @@ impl Drop for FakeCarabiner {
     }
 }
 
-fn serve_connection(stream: TcpStream, commands: &Arc<Mutex<Vec<String>>>) {
+fn serve_connection(
+    stream: TcpStream,
+    commands: &Arc<Mutex<Vec<String>>>,
+    response_delay: Duration,
+    fail_on_bpm: bool,
+) {
     stream
         .set_nonblocking(false)
         .unwrap_or_else(|error| panic!("fake helper connection should block: {error}"));
@@ -258,6 +328,7 @@ fn serve_connection(stream: TcpStream, commands: &Arc<Mutex<Vec<String>>>) {
         if let Ok(mut recorded) = commands.lock() {
             recorded.push(command.clone());
         }
+        thread::sleep(response_delay);
         if command == "version" {
             writeln!(writer, "version \"1.2.0\"")
                 .unwrap_or_else(|error| panic!("fake version should write: {error}"));
@@ -267,6 +338,9 @@ fn serve_connection(stream: TcpStream, commands: &Arc<Mutex<Vec<String>>>) {
             continue;
         }
         if let Some(value) = command.strip_prefix("bpm ") {
+            if fail_on_bpm {
+                return;
+            }
             bpm = value
                 .parse()
                 .unwrap_or_else(|_| panic!("invalid BPM command: {command}"));

@@ -187,6 +187,15 @@ AutoLoop-lane, reconnectable service plus transactioneel dataherstel, en ten
 slotte delta-UI/maintainability/release-hardening. `0.4.0-rc-1` wordt niet
 gepromoveerd voordat de P0-gates van deze epic aantoonbaar zijn gehaald.
 
+De fysieke Live-validatie heeft daarna aangetoond dat latency van de MIDI-lane
+alleen onvoldoende is: transportnormalisatie, Link-lifecycle en cue-executie
+moeten ook aantoonbaar onafhankelijk en deterministisch zijn. Daarom is
+[Epic 5 – Deterministic Live integration](epic-05-deterministic-live-integration.md)
+de actieve `0.4.0`-stabiliteitsgate. Deze epic behoudt Wi-Fi als ondersteunde
+Pro DJ Link-verbinding, isoleert realtime master-BPM naar Ableton Link en
+vervangt de complexe AutoLoop-coördinatie door exact één discrete selectie per
+bevestigde execution epoch.
+
 Exit: Lumi installeert en herstelt betrouwbaar op een schone Mac.
 
 Een eerste ondertekende en genotariseerde Apple Silicon DMG wordt naar voren

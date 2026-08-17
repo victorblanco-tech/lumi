@@ -135,6 +135,72 @@ fn preserves_low_latency_master_beat_timestamp_for_timing_output() {
 }
 
 #[test]
+fn status_is_the_only_effective_tempo_authority() {
+    let mut decoder = BridgeDecoder::new();
+    let mut provider = ProLinkDeckSourceProvider::new(MonotonicTime::new(0))
+        .unwrap_or_else(|error| panic!("provider should initialize: {error}"));
+    for (line, time) in [(HELLO, 1), (READY, 2), (STATUS, 3)] {
+        let message = decoder
+            .decode_line(line)
+            .unwrap_or_else(|error| panic!("fixture should decode: {error}"));
+        provider
+            .ingest(message, MonotonicTime::new(time))
+            .unwrap_or_else(|error| panic!("message should translate: {error}"));
+    }
+    let _ = provider.drain_timing_observations();
+
+    let tempo = decoder
+        .decode_line(
+            r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":4,"observedAtNanos":50000000,"type":"deckStatus","payload":{"deviceNumber":1,"deviceName":"CDJ-1500X","playing":true,"paused":false,"cued":false,"tempoMaster":true,"onAir":true,"sourcePlayer":1,"sourceSlot":"USB_SLOT","trackType":"REKORDBOX","rekordboxId":1256,"trackBpm":155.0,"effectiveBpm":154.767,"beatNumber":17,"beatWithinBar":1,"rawPitch":1047000}}"#,
+        )
+        .unwrap_or_else(|error| panic!("tempo status should decode: {error}"));
+    provider
+        .ingest(tempo, MonotonicTime::new(4))
+        .unwrap_or_else(|error| panic!("tempo status should translate: {error}"));
+    assert_eq!(
+        provider.drain_timing_observations()[0].effective_bpm_milli,
+        154_767
+    );
+
+    let precise = decoder
+        .decode_line(
+            r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":5,"observedAtNanos":60000000,"type":"precisePosition","payload":{"deviceNumber":1,"deviceName":"CDJ-1500X","playbackPositionMillis":10000,"effectiveBpm":155.0,"beatWithinBar":1,"tempoMaster":true}}"#,
+        )
+        .unwrap_or_else(|error| panic!("precise position should decode: {error}"));
+    provider
+        .ingest(precise, MonotonicTime::new(5))
+        .unwrap_or_else(|error| panic!("precise position should queue: {error}"));
+    let precise = provider
+        .drain_precise_position_observations()
+        .pop()
+        .unwrap_or_else(|| panic!("precise position should be retained"));
+    assert_eq!(precise.effective_bpm_milli, 154_767);
+    provider
+        .apply_authoritative_position(precise, 26, false, MonotonicTime::new(6))
+        .unwrap_or_else(|error| panic!("precise position should apply: {error}"));
+    let _ = provider.drain_timing_observations();
+
+    let beat = decoder
+        .decode_line(
+            r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":6,"observedAtNanos":70000000,"type":"beat","payload":{"deviceNumber":1,"deviceName":"CDJ-1500X","effectiveBpm":155.0,"beatWithinBar":2,"tempoMaster":true}}"#,
+        )
+        .unwrap_or_else(|error| panic!("beat should decode: {error}"));
+    provider
+        .ingest(beat, MonotonicTime::new(7))
+        .unwrap_or_else(|error| panic!("beat should translate: {error}"));
+    let timing = provider.drain_timing_observations();
+    assert_eq!(timing.len(), 1);
+    assert_eq!(timing[0].effective_bpm_milli, 154_767);
+    assert_eq!(
+        provider
+            .transport(lumi_domain::TrackLoadId::new(1))
+            .unwrap_or_else(|| panic!("transport should remain available"))
+            .effective_bpm_milli,
+        154_767
+    );
+}
+
+#[test]
 fn bar_relative_beats_never_activate_phrases_and_status_seeks_remain_explicit() {
     let mut decoder = BridgeDecoder::new();
     let mut provider = ProLinkDeckSourceProvider::new(MonotonicTime::new(0))
@@ -354,6 +420,85 @@ fn precise_position_overrides_a_stale_beat_after_hotcue_before_output_planning()
     assert_eq!(timing[0].beat_within_bar, 1);
     assert_eq!(timing[0].effective_bpm_milli, 157_250);
     assert!(timing[0].discontinuity, "Link must re-anchor exactly once");
+}
+
+#[test]
+fn reordered_precise_position_never_rewinds_the_accepted_timeline() {
+    let mut decoder = BridgeDecoder::new();
+    let mut provider = ProLinkDeckSourceProvider::new(MonotonicTime::new(0))
+        .unwrap_or_else(|error| panic!("provider should initialize: {error}"));
+    for (line, time) in [(HELLO, 1), (READY, 2), (STATUS, 3)] {
+        let message = decoder
+            .decode_line(line)
+            .unwrap_or_else(|error| panic!("fixture should decode: {error}"));
+        provider
+            .ingest(message, MonotonicTime::new(time))
+            .unwrap_or_else(|error| panic!("message should translate: {error}"));
+    }
+    let metadata = TrackMetadata::try_new(
+        TrackId::new(99),
+        "Precise reorder regression".to_owned(),
+        "Lumi".to_owned(),
+        155_000,
+        MusicalKey::new(PitchClass::C, KeyMode::Minor),
+        256,
+        vec![TrackPhrase::new(0, 0, 256, PhraseKind::Intro)],
+    )
+    .unwrap_or_else(|error| panic!("metadata should be valid: {error}"));
+    assert!(provider.hydrate_track_metadata(lumi_domain::TrackLoadId::new(1), metadata));
+    let _ = provider.drain_events();
+
+    let first = decoder
+        .decode_line(
+            r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":4,"observedAtNanos":100000000,"type":"precisePosition","payload":{"deviceNumber":1,"deviceName":"CDJ-1500X","playbackPositionMillis":48447,"effectiveBpm":155.0,"beatWithinBar":2,"tempoMaster":true}}"#,
+        )
+        .unwrap_or_else(|error| panic!("first position should decode: {error}"));
+    provider
+        .ingest(first, MonotonicTime::new(4))
+        .unwrap_or_else(|error| panic!("first position should queue: {error}"));
+    let first = provider
+        .drain_precise_position_observations()
+        .pop()
+        .unwrap_or_else(|| panic!("first position should be retained"));
+    provider
+        .apply_authoritative_position(first, 125, false, MonotonicTime::new(5))
+        .unwrap_or_else(|error| panic!("first position should apply: {error}"));
+    let _ = provider.drain_events();
+    let before = provider
+        .transport(lumi_domain::TrackLoadId::new(1))
+        .unwrap_or_else(|| panic!("transport should exist"));
+
+    let reordered = decoder
+        .decode_line(
+            r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":5,"observedAtNanos":130000000,"type":"precisePosition","payload":{"deviceNumber":1,"deviceName":"CDJ-1500X","playbackPositionMillis":47673,"effectiveBpm":155.0,"beatWithinBar":4,"tempoMaster":true}}"#,
+        )
+        .unwrap_or_else(|error| panic!("reordered position should decode: {error}"));
+    provider
+        .ingest(reordered, MonotonicTime::new(6))
+        .unwrap_or_else(|error| panic!("reordered position should queue: {error}"));
+    let reordered = provider
+        .drain_precise_position_observations()
+        .pop()
+        .unwrap_or_else(|| panic!("reordered position should be retained"));
+    let applied = provider
+        .apply_authoritative_position(reordered, 123, false, MonotonicTime::new(7))
+        .unwrap_or_else(|error| panic!("reordered position should be handled: {error}"));
+    assert!(
+        applied.is_none(),
+        "one stale packet may never become authority"
+    );
+    let after = provider
+        .transport(lumi_domain::TrackLoadId::new(1))
+        .unwrap_or_else(|| panic!("transport should remain available"));
+    assert_eq!(after.beat, before.beat);
+    assert_eq!(after.discontinuity_revision, before.discontinuity_revision);
+    assert!(
+        provider
+            .drain_events()
+            .unwrap_or_else(|error| panic!("events should drain: {error}"))
+            .is_empty(),
+        "reordered input may not emit position or phrase changes"
+    );
 }
 
 #[test]

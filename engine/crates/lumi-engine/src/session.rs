@@ -53,7 +53,7 @@ use lumi_simulator::{
 };
 use lumi_timing_output::{
     CarabinerConfiguration, CarabinerTimingOutput, LinkClockObservation, TimingDiscontinuity,
-    TimingOutputProvider as _, TimingOutputState, TimingSourceKind,
+    TimingOutputState, TimingSourceKind,
 };
 use serde::Deserialize;
 use serde_json::{Map, Value, json};
@@ -70,6 +70,12 @@ use tokio::time::{MissedTickBehavior, timeout};
 use crate::StartupReady;
 use crate::commands::{DeckSourceSelection, SessionCommand, decode_command};
 use crate::library::{LibraryPlanContext, LibraryWorker, LibraryWorkerError, ResolvedLibraryCue};
+use crate::link_relay::LinkRelay;
+#[cfg(test)]
+use crate::link_relay::{
+    MAXIMUM_PROLINK_TIMING_STALE_AFTER, MINIMUM_PROLINK_TIMING_STALE_AFTER,
+    prolink_timing_stale_after,
+};
 use crate::service::{ServiceBootstrap, ServiceBootstrapError};
 
 const EXIT_AFTER_CLIENT_DISCONNECT_ENVIRONMENT_KEY: &str = "LUMI_EXIT_AFTER_CLIENT_DISCONNECT";
@@ -82,15 +88,6 @@ const AUTO_PUBLISH_MIDI_ENVIRONMENT_KEY: &str = "LUMI_AUTO_PUBLISH_MIDI";
 const MAXIMUM_AUTHENTICATION_BYTES: usize = 512;
 const AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(5);
 const INTEGRATION_PUMP_INTERVAL: Duration = Duration::from_millis(20);
-// Physical CDJs can occasionally omit a few UDP beat packets even while deck
-// status keeps flowing. Carabiner and the realtime AutoLoop lane both keep a
-// deterministic tempo/phase projection during such a short gap, so failing
-// closed after only three beats caused false Link dropouts on a healthy LAN.
-// Eight beats tolerates transient packet loss without hiding an actual source
-// outage; the four-bar predictive AutoLoop schedule remains the authority.
-const MINIMUM_PROLINK_TIMING_STALE_AFTER: Duration = Duration::from_secs(3);
-const MAXIMUM_PROLINK_TIMING_STALE_AFTER: Duration = Duration::from_secs(8);
-const PROLINK_TIMING_STALE_BEATS: u64 = 8;
 // Prepare the identity and deadline up to four bars ahead, but release Bank
 // and AutoLoop MIDI only against a fresh exact CDJ position. This retains
 // predictable timing without letting a queued old-phrase action escape after
@@ -188,7 +185,7 @@ fn park_runtime_after_client_disconnect(runtime: &mut EngineRuntime) -> Result<(
     // Integration cleanup is bounded and best-effort here. A helper failure
     // must be visible in diagnostics, but must not tear down the engine and
     // thereby remove the stable CoreMIDI endpoints we are preserving.
-    let _ = runtime.output_worker.set_link_enabled(false);
+    let _ = runtime.link_relay.set_enabled(false);
     let _ = reconcile_local_midi_clock(runtime, true);
     Ok(())
 }
@@ -370,6 +367,7 @@ struct EngineRuntime {
     deck_source_mode: DeckSourceMode,
     planning_worker: PlanningWorker,
     output_worker: OutputWorker,
+    link_relay: LinkRelay,
     deck_input: CoreMidiDestinationProvider,
     library_worker: LibraryWorker,
     library_revision: u64,
@@ -525,6 +523,10 @@ fn initialized_runtime_for_mode(
     let prolink_start_error = None;
     let mut output_worker = OutputWorker::new();
     #[cfg(not(test))]
+    let link_relay = LinkRelay::new(CarabinerTimingOutput::new(carabiner_configuration()));
+    #[cfg(test)]
+    let link_relay = LinkRelay::new(CarabinerTimingOutput::new(CarabinerConfiguration::default()));
+    #[cfg(not(test))]
     if env::var(AUTO_PUBLISH_MIDI_ENVIRONMENT_KEY).as_deref() != Ok("0") {
         let _ = output_worker.enable_midi_auto_publish();
     }
@@ -610,6 +612,7 @@ fn initialized_runtime_for_mode(
         deck_source_mode,
         planning_worker,
         output_worker,
+        link_relay,
         deck_input,
         library_worker,
         library_revision: 1,
@@ -1102,17 +1105,11 @@ struct OutputWorker {
     provider: DryRunLightingOutputProvider,
     midi_output: RealtimeMidiController<CoreMidiSourceProvider>,
     midi_clock: MidiClockController<CoreMidiSourceProvider>,
-    link_timing: CarabinerTimingOutput,
-    link_enabled: bool,
     effect_sequence: u64,
     midi_auto_publish_enabled: bool,
     timing_offset_millis: i16,
     pending_timing_offset_millis: Option<i16>,
     last_midi_publish_attempt: Option<Instant>,
-    last_prolink_timing_at: Option<Instant>,
-    last_prolink_bpm_milli: Option<u32>,
-    last_prolink_playing: Option<bool>,
-    prolink_timing_stale: bool,
     precise_autoloop_fallback: bool,
     realtime_generation: u64,
     scheduled_prearm: Option<ScheduledPrearm>,
@@ -1197,25 +1194,15 @@ struct PendingAutoloop {
 
 impl OutputWorker {
     fn new() -> Self {
-        #[cfg(not(test))]
-        let link_configuration = carabiner_configuration();
-        #[cfg(test)]
-        let link_configuration = CarabinerConfiguration::default();
         Self {
             provider: DryRunLightingOutputProvider::default(),
             midi_output: RealtimeMidiController::new(CoreMidiSourceProvider::new),
             midi_clock: MidiClockController::new(CoreMidiSourceProvider::new),
-            link_timing: CarabinerTimingOutput::new(link_configuration),
-            link_enabled: false,
             effect_sequence: 0,
             midi_auto_publish_enabled: false,
             timing_offset_millis: 0,
             pending_timing_offset_millis: None,
             last_midi_publish_attempt: None,
-            last_prolink_timing_at: None,
-            last_prolink_bpm_milli: None,
-            last_prolink_playing: None,
-            prolink_timing_stale: false,
             precise_autoloop_fallback: false,
             realtime_generation: 0,
             scheduled_prearm: None,
@@ -1845,39 +1832,6 @@ impl OutputWorker {
         self.midi_clock.status()
     }
 
-    fn link_timing_status(&self) -> lumi_timing_output::TimingOutputStatus {
-        self.link_timing.status()
-    }
-
-    fn link_enabled(&self) -> bool {
-        self.link_enabled
-    }
-
-    fn set_link_enabled(&mut self, enabled: bool) -> Result<(), EngineError> {
-        if enabled == self.link_enabled {
-            return Ok(());
-        }
-        if enabled {
-            self.link_timing
-                .publish()
-                .map_err(|error| EngineError::Timing(error.to_string()))?;
-            self.link_enabled = true;
-        } else {
-            let stop_result = self.link_timing.stop();
-            // The managed adapter owns a bounded forced-cleanup fallback. Its
-            // logical session must be disabled even when that fallback is
-            // reported as an error, otherwise a later Enable command would
-            // incorrectly no-op against a helper that has already gone away.
-            self.link_enabled = false;
-            self.last_prolink_timing_at = None;
-            self.last_prolink_bpm_milli = None;
-            self.last_prolink_playing = None;
-            self.prolink_timing_stale = false;
-            stop_result.map_err(|error| EngineError::Timing(error.to_string()))?;
-        }
-        Ok(())
-    }
-
     fn midi_auto_publish_enabled(&self) -> bool {
         self.midi_auto_publish_enabled
     }
@@ -1918,13 +1872,6 @@ impl OutputWorker {
         self.publish_midi()
     }
 
-    fn test_link_helper(&mut self) -> Result<(), EngineError> {
-        self.link_timing
-            .self_test_helper()
-            .map(|_| ())
-            .map_err(|error| EngineError::Timing(error.to_string()))
-    }
-
     fn ensure_lighting_midi(&mut self) -> Result<(), EngineError> {
         if self.midi_auto_publish_enabled
             && self.midi_output.status().source.state != MidiSourceState::Ready
@@ -1963,114 +1910,6 @@ impl OutputWorker {
             .stop()
             .map_err(|error| EngineError::Midi(error.to_string()))
     }
-
-    #[cfg(not(test))]
-    fn synchronize_prolink_timing(
-        &mut self,
-        observation: lumi_prolink_input::ProLinkTimingObservation,
-    ) -> Result<(), EngineError> {
-        if !self.link_enabled {
-            return Ok(());
-        }
-        self.last_prolink_timing_at = Some(Instant::now());
-        self.last_prolink_bpm_milli = Some(observation.effective_bpm_milli);
-        self.last_prolink_playing = Some(observation.playing);
-        self.prolink_timing_stale = false;
-        self.link_timing
-            .synchronize(prolink_link_clock(observation))
-            .map_err(|error| EngineError::Timing(error.to_string()))
-    }
-
-    #[cfg(not(test))]
-    fn reconcile_prolink_timing_freshness(
-        &mut self,
-        source_status: DeckSourceStatus,
-    ) -> Result<(), EngineError> {
-        if !self.link_enabled || self.prolink_timing_stale {
-            return Ok(());
-        }
-        let Some(last_timing_at) = self.last_prolink_timing_at else {
-            return Ok(());
-        };
-        let source_unavailable = !matches!(source_status, DeckSourceStatus::Ready);
-        // A stopped master intentionally emits no beat packets. Its last
-        // authoritative hold remains valid while the bridge itself is healthy;
-        // otherwise every normal pause would be misreported as stale timing.
-        if !source_unavailable && self.last_prolink_playing == Some(false) {
-            return Ok(());
-        }
-        let stale_after = prolink_timing_stale_after(self.last_prolink_bpm_milli);
-        let age = last_timing_at.elapsed();
-        if !source_unavailable && age <= stale_after {
-            return Ok(());
-        }
-        let reason = if source_unavailable {
-            format!(
-                "Pro DJ Link source is {}; Link transport was held fail-closed",
-                deck_source_status_name(source_status)
-            )
-        } else {
-            format!(
-                "Pro DJ Link timing is stale ({} ms without an anchor); Link transport was held fail-closed",
-                age.as_millis()
-            )
-        };
-        self.fail_prolink_timing(reason)
-    }
-
-    #[cfg(not(test))]
-    fn fail_prolink_timing(&mut self, reason: impl Into<String>) -> Result<(), EngineError> {
-        if !self.link_enabled || self.prolink_timing_stale {
-            return Ok(());
-        }
-        self.link_timing
-            .fail_closed(reason)
-            .map_err(|error| EngineError::Timing(error.to_string()))?;
-        self.prolink_timing_stale = true;
-        Ok(())
-    }
-
-    fn synchronize_local_link_timing(
-        &mut self,
-        deck_id: lumi_domain::DeckId,
-        anchor: crate::library::LocalPlaybackClockAnchor,
-        playing: bool,
-    ) -> Result<(), EngineError> {
-        if !self.link_enabled {
-            return Ok(());
-        }
-        self.last_prolink_timing_at = None;
-        self.last_prolink_bpm_milli = None;
-        self.last_prolink_playing = None;
-        self.prolink_timing_stale = false;
-        self.link_timing
-            .synchronize(LinkClockObservation {
-                source: TimingSourceKind::LocalPlayback,
-                deck_number: Some(deck_id.value()),
-                bpm_milli: anchor.bpm_milli,
-                beat_within_bar: u8::try_from(anchor.beat_index % 4)
-                    .unwrap_or(0)
-                    .saturating_add(1),
-                playing,
-                observed_at_micros: None,
-            })
-            .map_err(|error| EngineError::Timing(error.to_string()))
-    }
-}
-
-fn prolink_timing_stale_after(bpm_milli: Option<u32>) -> Duration {
-    let beat_window = bpm_milli
-        .filter(|bpm| *bpm > 0)
-        .map(|bpm| {
-            Duration::from_micros(
-                60_000_000_000_u64.saturating_mul(PROLINK_TIMING_STALE_BEATS) / u64::from(bpm),
-            )
-        })
-        .unwrap_or(MINIMUM_PROLINK_TIMING_STALE_AFTER);
-    beat_window.clamp(
-        MINIMUM_PROLINK_TIMING_STALE_AFTER,
-        MAXIMUM_PROLINK_TIMING_STALE_AFTER,
-    )
 }
 
 fn positive_timing_delay(offset_millis: i16) -> Duration {
@@ -2219,7 +2058,6 @@ fn reconcile_local_midi_clock(
     runtime: &mut EngineRuntime,
     force_rephase: bool,
 ) -> Result<(), EngineError> {
-    let mut link_sync = None;
     let sync = if runtime.deck_source_mode == DeckSourceMode::LocalPlayback {
         runtime.state.state().leader_deck().and_then(|deck_id| {
             let deck = runtime.state.state().deck(deck_id)?;
@@ -2232,11 +2070,7 @@ fn reconcile_local_midi_clock(
                 .library_context(deck.track_load_id())?;
             let anchor = context
                 .clock_anchor_at_millis(transport.position_millis, deck.effective_bpm_milli())?;
-            // The local deck clock is Link's input authority. Lighting
-            // Off/Arm/Start/Pause only gates show/MIDI output and must never
-            // start, stop or scrub the Ableton Link timeline.
             let playing = deck.is_playing() && transport.playing;
-            link_sync = Some((deck_id, anchor, playing));
             Some(MidiClockSync {
                 bpm_milli: anchor.bpm_milli,
                 playing: runtime.state.state().operation() == OperationState::Live && playing,
@@ -2260,10 +2094,40 @@ fn reconcile_local_midi_clock(
         .midi_clock
         .synchronize(sync)
         .map_err(|error| EngineError::Midi(error.to_string()))?;
-    if let Some((deck_id, anchor, playing)) = link_sync {
+    Ok(())
+}
+
+fn synchronize_local_link_clock(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
+    if runtime.deck_source_mode != DeckSourceMode::LocalPlayback {
+        return Ok(());
+    }
+    let observation = runtime.state.state().leader_deck().and_then(|deck_id| {
+        let deck = runtime.state.state().deck(deck_id)?;
+        let transport = runtime.local_transports.get(&deck_id)?;
+        if transport.track_load_id != deck.track_load_id() {
+            return None;
+        }
+        let context = runtime
+            .planning_worker
+            .library_context(deck.track_load_id())?;
+        let anchor = context
+            .clock_anchor_at_millis(transport.position_millis, deck.effective_bpm_milli())?;
+        Some(LinkClockObservation {
+            source: TimingSourceKind::LocalPlayback,
+            deck_number: Some(deck_id.value()),
+            bpm_milli: anchor.bpm_milli,
+            beat_within_bar: u8::try_from(anchor.beat_index % 4)
+                .unwrap_or(0)
+                .saturating_add(1),
+            playing: deck.is_playing() && transport.playing,
+            observed_at_micros: None,
+        })
+    });
+    if let Some(observation) = observation {
         runtime
-            .output_worker
-            .synchronize_local_link_timing(deck_id, anchor, playing)?;
+            .link_relay
+            .synchronize(observation)
+            .map_err(EngineError::Timing)?;
     }
     Ok(())
 }
@@ -2561,12 +2425,18 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
     }
     for observation in runtime.direct_deck_source.drain_timing_observations() {
         runtime
-            .output_worker
-            .synchronize_prolink_timing(observation)?;
+            .link_relay
+            .synchronize(prolink_link_clock(observation))
+            .map_err(EngineError::Timing)?;
     }
-    runtime.output_worker.reconcile_prolink_timing_freshness(
-        runtime.direct_deck_source.diagnostics().source_status,
-    )?;
+    let source_status = runtime.direct_deck_source.diagnostics().source_status;
+    runtime
+        .link_relay
+        .reconcile_prolink_freshness(
+            matches!(source_status, DeckSourceStatus::Ready),
+            deck_source_status_name(source_status),
+        )
+        .map_err(EngineError::Timing)?;
     Ok(())
 }
 
@@ -2579,8 +2449,9 @@ fn fail_direct_prolink_bridge(
     eprintln!("Direct Pro DJ Link failure: {actionable}");
     runtime.prolink_start_error = Some(actionable.clone());
     runtime
-        .output_worker
-        .fail_prolink_timing(actionable.clone())?;
+        .link_relay
+        .fail_closed(actionable.clone())
+        .map_err(EngineError::Timing)?;
     let at = runtime.clock.now();
     runtime.direct_deck_source.mark_degraded(actionable, at)?;
     runtime.direct_deck_source.clear(at)?;
@@ -2831,25 +2702,24 @@ fn apply_command(
         }
         SessionCommand::SetAbletonLinkEnabled { enabled } => {
             runtime
-                .output_worker
-                .set_link_enabled(enabled)
-                .map_err(CommandApplicationError::Engine)?;
+                .link_relay
+                .set_enabled(enabled)
+                .map_err(|error| CommandApplicationError::Engine(EngineError::Timing(error)))?;
             if enabled && runtime.deck_source_mode == DeckSourceMode::LocalPlayback {
-                reconcile_local_midi_clock(runtime, true)
-                    .map_err(CommandApplicationError::Engine)?;
+                synchronize_local_link_clock(runtime).map_err(CommandApplicationError::Engine)?;
             }
             return Ok(());
         }
         SessionCommand::TestAbletonLinkHelper => {
             if runtime.state.state().operation() != OperationState::Off
-                || runtime.output_worker.link_enabled()
+                || runtime.link_relay.enabled()
             {
                 return Err(CommandApplicationError::TimingTestRequiresOff);
             }
             runtime
-                .output_worker
-                .test_link_helper()
-                .map_err(CommandApplicationError::Engine)?;
+                .link_relay
+                .test_helper()
+                .map_err(|error| CommandApplicationError::Engine(EngineError::Timing(error)))?;
             return Ok(());
         }
         SessionCommand::SetOutputTimingOffset { millis } => {
@@ -2930,6 +2800,7 @@ fn apply_command(
             );
             process_pending_source_events(runtime).map_err(CommandApplicationError::Engine)?;
             reconcile_local_midi_clock(runtime, false).map_err(CommandApplicationError::Engine)?;
+            synchronize_local_link_clock(runtime).map_err(CommandApplicationError::Engine)?;
             return Ok(());
         }
         SessionCommand::UpdateLocalPlaybackTransport {
@@ -2988,6 +2859,7 @@ fn apply_command(
             let leader_rephase = rephase && runtime.state.state().leader_deck() == Some(deck_id);
             reconcile_local_midi_clock(runtime, leader_rephase)
                 .map_err(CommandApplicationError::Engine)?;
+            synchronize_local_link_clock(runtime).map_err(CommandApplicationError::Engine)?;
             return Ok(());
         }
         SessionCommand::SetLocalPlaybackLeader {
@@ -3005,6 +2877,7 @@ fn apply_command(
             runtime.local_deck_source.set_leader(deck_id, at)?;
             process_pending_source_events(runtime).map_err(CommandApplicationError::Engine)?;
             reconcile_local_midi_clock(runtime, true).map_err(CommandApplicationError::Engine)?;
+            synchronize_local_link_clock(runtime).map_err(CommandApplicationError::Engine)?;
             return Ok(());
         }
         SessionCommand::SelectDeckSourceMode {
@@ -3075,6 +2948,7 @@ fn apply_command(
                 process_pending_source_events(runtime).map_err(CommandApplicationError::Engine)?;
                 reconcile_local_midi_clock(runtime, true)
                     .map_err(CommandApplicationError::Engine)?;
+                synchronize_local_link_clock(runtime).map_err(CommandApplicationError::Engine)?;
             }
             return Ok(());
         }
@@ -3089,13 +2963,9 @@ fn apply_command(
             command,
         } => {
             apply_operation_command(runtime, expected_revision, command)?;
-            if matches!(command, OperationCommand::Off | OperationCommand::Pause)
-                && runtime.output_worker.link_enabled()
-            {
-                runtime.output_worker.link_timing.hold().map_err(|error| {
-                    CommandApplicationError::Engine(EngineError::Timing(error.to_string()))
-                })?;
-            }
+            // Lighting Off/Arm/Start/Pause gates only sparse MIDI execution.
+            // The independently enabled Link relay continues to follow the
+            // selected deck's BPM, beat phase and play state.
             reconcile_local_midi_clock(runtime, true).map_err(CommandApplicationError::Engine)?;
             return Ok(());
         }
@@ -3930,11 +3800,11 @@ fn snapshot_envelope_internal(
             "lastError": midi_clock.last_error,
         }),
     );
-    let link_timing = runtime.output_worker.link_timing_status();
+    let link_timing = runtime.link_relay.status();
     payload.insert(
         "abletonLinkIntegration".to_owned(),
         json!({
-            "enabled": runtime.output_worker.link_enabled(),
+            "enabled": runtime.link_relay.enabled(),
             "state": match link_timing.state {
                 TimingOutputState::Stopped => "stopped",
                 TimingOutputState::Starting => "starting",

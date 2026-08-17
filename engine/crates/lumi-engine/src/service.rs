@@ -266,9 +266,9 @@ mod tests {
             },
             session_token: "a".repeat(64),
             process_id: 42,
-            product_version: "0.4.0-dev-48".to_owned(),
+            product_version: "0.4.0-dev-50".to_owned(),
             service_identity: ServiceIdentity {
-                product_version: "0.4.0-dev-48".to_owned(),
+                product_version: "0.4.0-dev-50".to_owned(),
                 build_number: "158".to_owned(),
                 engine_executable_path: "/Applications/Lumi/lumi-engine".to_owned(),
                 engine_executable_sha256: "f".repeat(64),

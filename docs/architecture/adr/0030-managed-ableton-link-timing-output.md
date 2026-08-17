@@ -3,6 +3,9 @@
 - Status: **Accepted**
 - Date: **2026-08-11**
 - Refines: ADR-0015, ADR-0022 and ADR-0026
+- Execution refinement: ADR-0033 replaces the predictive AutoLoop coordination
+  rules below with an exactly-once cue executor. The managed Link provider and
+  parallel SoundSwitch path decisions remain accepted.
 
 ## Context
 
