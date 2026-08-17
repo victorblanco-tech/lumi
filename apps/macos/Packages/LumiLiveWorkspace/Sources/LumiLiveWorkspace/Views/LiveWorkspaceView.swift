@@ -325,7 +325,7 @@ public struct LiveWorkspaceView: View {
                 VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
                     Text("Lighting timing offset")
                         .font(LumiTypography.sectionTitle)
-                    Text("Saved preference. Output currently fires on the phrase boundary; scheduled pre-trigger activates in a later story.")
+                    Text("Negative values pre-trigger the AutoLoop; positive values delay it. A running change becomes active at the next phrase.")
                         .font(LumiTypography.metadata)
                         .foregroundStyle(LumiColor.textSecondary)
                     Text(timingConfirmationDetail)
@@ -380,12 +380,12 @@ public struct LiveWorkspaceView: View {
         let applied = String(format: "%+d ms", appliedLightingTimingOffsetMillis)
         if let pendingLightingTimingOffsetMillis {
             let pending = String(format: "%+d ms", pendingLightingTimingOffsetMillis)
-            return "Saved \(applied) · \(pending) pending. Dev-51 still fires on the phrase boundary."
+            return "Applied \(applied) · \(pending) activates at the next phrase."
         }
         if appliedLightingTimingOffsetMillis != lightingTimingOffsetMillis {
             return "Saved \(applied) · waiting for engine confirmation."
         }
-        return "Saved: \(applied). Scheduled pre-trigger activates in a later story."
+        return "Applied: \(applied). Negative is early; positive is late."
     }
 
     private var technicalStatusButton: some View {
@@ -1253,7 +1253,7 @@ private struct PlanSelectionControl: View {
 #Preview("Ready · Dark") {
     LiveWorkspaceView(
         state: LiveWorkspaceFixtures.ready,
-        productVersion: "0.4.0-dev-54",
+        productVersion: "0.4.0-dev-55",
         appearance: .constant(.dark),
         keyNotation: .constant(.camelot)
     )
@@ -1264,7 +1264,7 @@ private struct PlanSelectionControl: View {
 #Preview("Fallback · Light") {
     LiveWorkspaceView(
         state: LiveWorkspaceFixtures.fallback,
-        productVersion: "0.4.0-dev-54",
+        productVersion: "0.4.0-dev-55",
         appearance: .constant(.light),
         keyNotation: .constant(.classic)
     )

@@ -420,6 +420,41 @@ fn stopped_live_deck_start_and_operation_resume_restore_the_current_autoloop() {
         "the backward seek must publish a new transport revision for visual consumers"
     );
 
+    let landing_phrase = deck_phrase_index(&snapshot);
+    let before_same_phrase_seek = output_record_count(&snapshot);
+    simulator_control("seek", Some("5000"));
+    let same_phrase_landing = wait_for_playback_position(
+        &mut connection,
+        &mut sequence,
+        |position| (4_000..=10_000).contains(&position),
+        "seek within the current phrase",
+    );
+    assert_eq!(
+        deck_phrase_index(&same_phrase_landing),
+        landing_phrase,
+        "the acceptance fixture must keep this landing inside one phrase"
+    );
+    let same_phrase_output = wait_for_output_count(
+        &mut connection,
+        &mut sequence,
+        before_same_phrase_seek.saturating_add(1),
+        "same-phrase seek landing",
+    );
+    thread::sleep(Duration::from_millis(300));
+    snapshot = exchange(
+        &mut connection,
+        &command(
+            "verify-no-same-phrase-seek-duplicate",
+            sequence,
+            json!({ "kind": "getSnapshot" }),
+        ),
+    );
+    assert_eq!(
+        output_record_count(&snapshot),
+        output_record_count(&same_phrase_output),
+        "one confirmed seek inside a phrase must reassert that cue exactly once"
+    );
+
     simulator_control("pause", None);
     drop(connection);
     let status = child
@@ -588,6 +623,17 @@ fn deck_transport_revision(snapshot: &MessageEnvelope) -> u64 {
         .and_then(|deck| deck.get("transportRevision"))
         .and_then(Value::as_u64)
         .unwrap_or_else(|| panic!("deck snapshot should expose transportRevision"))
+}
+
+fn deck_phrase_index(snapshot: &MessageEnvelope) -> u64 {
+    snapshot
+        .payload
+        .get("decks")
+        .and_then(Value::as_array)
+        .and_then(|decks| decks.first())
+        .and_then(|deck| deck.get("phraseIndex"))
+        .and_then(Value::as_u64)
+        .unwrap_or_else(|| panic!("deck snapshot should expose phraseIndex"))
 }
 
 fn seed_network_database(destination: &Path) {

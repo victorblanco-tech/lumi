@@ -508,7 +508,7 @@ public struct IntegrationsWorkspaceView: View {
         guard let link = library.abletonLinkIntegration else { return "Status unavailable" }
         let version = link.helperVersion.map { " · helper \($0)" } ?? ""
         let phase = link.phaseErrorMicros.map { " · phase \($0) µs" } ?? ""
-        let age = link.lastBeatAgeMillis.map { " · beat \($0) ms ago" } ?? ""
+        let age = link.lastBeatAgeMillis.map { " · tempo update \($0) ms ago" } ?? ""
         let reanchor = link.lastReanchor.map { " · re-anchor \($0)" } ?? ""
         return "\(link.state.uppercased()) · \(link.provider)\(version) · \(link.peers) peers\(age)\(phase)\(reanchor)"
     }

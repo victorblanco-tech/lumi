@@ -145,3 +145,23 @@ boundary and requires independent consumers plus source-to-output freshness.
 E5-01 and E5-02 remain open until those stronger gates pass. This audit changes
 implementation status, not the ownership and exactly-once decisions in this
 ADR.
+
+## Implementation record — `0.4.0-dev-55`
+
+The remaining epoch and output-offset decisions are implemented without
+changing Link ownership:
+
+- confirmed Start, stopped-to-playing, track load, master handoff and position
+  landing create explicit playback epochs;
+- Pause/stop and epoch replacement cancel only unsent work; a completed cue is
+  immutable;
+- a same-phrase Hot Cue or seek reasserts the current AutoLoop once, while its
+  subsequent phrase observation is a duplicate and emits nothing;
+- negative offset pre-arms a future deadline, positive offset delays it and an
+  effective-BPM change may replace only that unsent deadline;
+- Link observations cannot create or replace an AutoLoop execution epoch and
+  UI presentation remains outside both realtime lanes.
+
+Deterministic 100-action matrices, the representative network simulator and
+headed Lumi/SoundSwitch acceptance prove these rules for development. Physical
+duration evidence remains a separate E5-04 release gate.

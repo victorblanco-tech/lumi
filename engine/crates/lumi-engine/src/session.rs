@@ -68,7 +68,9 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::time::{MissedTickBehavior, timeout};
 
 use crate::StartupReady;
-use crate::autoloop_executor::{AutoloopCueExecutor, AutoloopExecutorState, AutoloopTarget};
+use crate::autoloop_executor::{
+    AutoloopCueExecutor, AutoloopExecutionIdentity, AutoloopExecutorState, AutoloopTarget,
+};
 use crate::commands::{DeckSourceSelection, SessionCommand, decode_command};
 use crate::library::{LibraryPlanContext, LibraryWorker, LibraryWorkerError, ResolvedLibraryCue};
 use crate::link_relay::LinkRelay;
@@ -95,6 +97,8 @@ const INTEGRATION_PUMP_INTERVAL: Duration = Duration::from_millis(5);
 const EVENT_QUEUE_CAPACITY: usize = 256;
 const COMMAND_ID_CACHE_CAPACITY: usize = 256;
 const LIBRARY_CONTEXT_CAPACITY: usize = 256;
+const AUTOLOOP_FORECAST_HORIZON_BEATS: u32 = 4;
+const AUTOLOOP_DEADLINE_REPLACEMENT_TOLERANCE: Duration = Duration::from_millis(10);
 #[cfg(not(test))]
 const PROLINK_JAVA_ENVIRONMENT_KEY: &str = "LUMI_PROLINK_JAVA";
 #[cfg(not(test))]
@@ -957,6 +961,31 @@ impl PlanningWorker {
         event: DomainEvent,
         leader_deck_id: Option<lumi_domain::DeckId>,
     ) -> Result<(), EngineError> {
+        let transport_epoch = transport_epoch_cause(runtime.state(), &event);
+        let stops_live_transport = matches!(
+            &event,
+            DomainEvent::Observation(lumi_domain::ObservationEnvelope {
+                observation: DeckObservation::PlaybackStateChanged {
+                    deck_id,
+                    playing: false,
+                    ..
+                },
+                ..
+            }) if runtime.state().leader_deck() == Some(*deck_id)
+        );
+        let exact_live_beat = match &event {
+            DomainEvent::Observation(lumi_domain::ObservationEnvelope {
+                observation: DeckObservation::PlaybackPosition { deck_id, beat, .. },
+                ..
+            }) => Some((*deck_id, *beat)),
+            _ => None,
+        };
+        if let Some(cause) = transport_epoch {
+            output_worker.begin_autoloop_execution_epoch(cause)?;
+        } else if stops_live_transport {
+            output_worker.invalidate_autoloop_deadline();
+            output_worker.reassert_current_on_next_cue = false;
+        }
         let activates_pending_timing = matches!(
             &event,
             DomainEvent::Observation(lumi_domain::ObservationEnvelope {
@@ -993,6 +1022,9 @@ impl PlanningWorker {
             output_worker.activate_pending_timing_offset();
         }
         process_domain_event(runtime, output_worker, event)?;
+        if let Some((deck_id, beat)) = exact_live_beat {
+            output_worker.observe_exact_live_beat(runtime.state(), deck_id, beat);
+        }
         if let Some(input) = planning_input {
             self.effect_sequence = self
                 .effect_sequence
@@ -1056,6 +1088,46 @@ impl PlanningWorker {
     }
 }
 
+fn transport_epoch_cause(
+    state: &lumi_domain::RuntimeState,
+    event: &DomainEvent,
+) -> Option<TransportEpochCause> {
+    let DomainEvent::Observation(envelope) = event else {
+        return None;
+    };
+    match &envelope.observation {
+        DeckObservation::PlaybackPositionSeeked { deck_id, .. }
+            if state.leader_deck() == Some(*deck_id) =>
+        {
+            Some(TransportEpochCause::PositionLanding)
+        }
+        DeckObservation::PlaybackStateChanged {
+            deck_id,
+            playing: true,
+            ..
+        } if state.leader_deck() == Some(*deck_id)
+            && state.deck(*deck_id).is_some_and(|deck| !deck.is_playing()) =>
+        {
+            Some(TransportEpochCause::PlaybackStarted)
+        }
+        DeckObservation::LeaderChanged { deck_id, .. } if state.leader_deck() != Some(*deck_id) => {
+            Some(TransportEpochCause::MasterHandoff)
+        }
+        DeckObservation::TrackLoaded {
+            deck_id,
+            track_load_id,
+            ..
+        } if state.leader_deck() == Some(*deck_id)
+            && state
+                .deck(*deck_id)
+                .is_some_and(|deck| deck.track_load_id() != *track_load_id) =>
+        {
+            Some(TransportEpochCause::TrackLoad)
+        }
+        _ => None,
+    }
+}
+
 fn planner_for_catalog(catalog: &AutoloopCatalog) -> DeterministicPlanner<StableChoiceSource> {
     let themes = catalog
         .themes()
@@ -1109,6 +1181,38 @@ struct OutputWorker {
     last_midi_publish_attempt: Option<Instant>,
     realtime_generation: u64,
     autoloop_executor: AutoloopCueExecutor,
+    transport_epoch_cause: Option<TransportEpochCause>,
+    reassert_current_on_next_cue: bool,
+    scheduled_future_autoloop: Option<ScheduledFutureAutoloop>,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum TransportEpochCause {
+    OperationStart,
+    PlaybackStarted,
+    PositionLanding,
+    MasterHandoff,
+    TrackLoad,
+}
+
+impl TransportEpochCause {
+    const fn name(self) -> &'static str {
+        match self {
+            Self::OperationStart => "operationStart",
+            Self::PlaybackStarted => "playbackStarted",
+            Self::PositionLanding => "positionLanding",
+            Self::MasterHandoff => "masterHandoff",
+            Self::TrackLoad => "trackLoad",
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ScheduledFutureAutoloop {
+    identity: AutoloopExecutionIdentity,
+    target: AutoloopTarget,
+    deadline: Instant,
+    effective_bpm_milli: u32,
 }
 
 impl OutputWorker {
@@ -1124,6 +1228,9 @@ impl OutputWorker {
             last_midi_publish_attempt: None,
             realtime_generation: 0,
             autoloop_executor: AutoloopCueExecutor::default(),
+            transport_epoch_cause: None,
+            reassert_current_on_next_cue: false,
+            scheduled_future_autoloop: None,
         }
     }
 
@@ -1140,6 +1247,7 @@ impl OutputWorker {
         let _ = self.begin_realtime_generation();
         let _ = self.midi_output.cancel_all();
         self.autoloop_executor.cancel_pending();
+        self.scheduled_future_autoloop = None;
     }
 
     #[cfg(any())]
@@ -1620,13 +1728,19 @@ impl OutputWorker {
         self.autoloop_prearmed_count = self.autoloop_prearmed_count.saturating_add(1);
     }
 
-    fn begin_autoloop_execution_epoch(&mut self) -> Result<(), EngineError> {
+    fn begin_autoloop_execution_epoch(
+        &mut self,
+        cause: TransportEpochCause,
+    ) -> Result<(), EngineError> {
         self.autoloop_executor
             .begin_execution_epoch()
             .ok_or_else(|| EngineError::Midi("AutoLoop execution epoch overflowed".to_owned()))?;
         self.midi_output
             .cancel_all()
             .map_err(|error| EngineError::Midi(error.to_string()))?;
+        self.transport_epoch_cause = Some(cause);
+        self.reassert_current_on_next_cue = true;
+        self.scheduled_future_autoloop = None;
         Ok(())
     }
 
@@ -1636,6 +1750,8 @@ impl OutputWorker {
         bank_number: u8,
         autoloop_number: u8,
     ) {
+        self.autoloop_executor
+            .complete_if_emitted(self.midi_output.status().emitted_count);
         let lane_before = self.midi_output.status();
         let target = AutoloopTarget {
             bank_number,
@@ -1652,6 +1768,14 @@ impl OutputWorker {
             return;
         };
         let now = Instant::now();
+        let immediate_landing = self.reassert_current_on_next_cue;
+        self.reassert_current_on_next_cue = false;
+        self.scheduled_future_autoloop = None;
+        let configured_delay = if immediate_landing {
+            Duration::ZERO
+        } else {
+            positive_timing_delay(self.timing_offset_millis)
+        };
         let mut scheduled_actions = 0_u64;
         if schedule.select_bank {
             if self
@@ -1665,11 +1789,12 @@ impl OutputWorker {
             scheduled_actions = scheduled_actions.saturating_add(1);
         }
         self.autoloop_executor.mark_bank_prepared(schedule);
-        let autoloop_deadline = if schedule.select_bank {
-            now + BANK_SETTLE_DELAY
-        } else {
-            now
-        };
+        let autoloop_deadline = now
+            + if schedule.select_bank {
+                BANK_SETTLE_DELAY.max(configured_delay)
+            } else {
+                configured_delay
+            };
         if self
             .midi_output
             .schedule_autoloop(generation, autoloop_number, autoloop_deadline)
@@ -1684,6 +1809,152 @@ impl OutputWorker {
             schedule,
             lane_before.emitted_count.saturating_add(scheduled_actions),
         );
+    }
+
+    /// Prepares exactly one future AutoLoop only when the configured offset is
+    /// negative. It is derived from the latest exact Beat boundary, never from
+    /// SwiftUI or continuous PrecisePosition samples. BPM changes may replace
+    /// an unsent deadline; a completed selection is immutable.
+    fn observe_exact_live_beat(
+        &mut self,
+        state: &lumi_domain::RuntimeState,
+        deck_id: lumi_domain::DeckId,
+        absolute_beat: u32,
+    ) {
+        self.autoloop_executor
+            .complete_if_emitted(self.midi_output.status().emitted_count);
+        let offset_millis = self.scheduling_timing_offset_millis();
+        if offset_millis >= 0
+            || state.operation() != OperationState::Live
+            || state.leader_deck() != Some(deck_id)
+        {
+            self.cancel_future_autoloop_deadline();
+            return;
+        }
+        let Some(deck) = state.deck(deck_id).filter(|deck| deck.is_playing()) else {
+            self.cancel_future_autoloop_deadline();
+            return;
+        };
+        let Some(plan) = state.active_plan().filter(|plan| {
+            plan.deck_id() == deck_id && plan.track_load_id() == deck.track_load_id()
+        }) else {
+            self.cancel_future_autoloop_deadline();
+            return;
+        };
+        let Some(cue) = plan.cues().iter().find(|cue| {
+            cue.start_beat() > absolute_beat
+                && cue.start_beat().saturating_sub(absolute_beat) <= AUTOLOOP_FORECAST_HORIZON_BEATS
+        }) else {
+            self.cancel_future_autoloop_deadline();
+            return;
+        };
+        let Ok(Some((bank_number, autoloop_number))) = automatic_midi_target(cue.action()) else {
+            self.cancel_future_autoloop_deadline();
+            return;
+        };
+        let beats_until = cue.start_beat().saturating_sub(absolute_beat);
+        let Some(trigger_delay) =
+            negative_offset_trigger_delay(beats_until, deck.effective_bpm_milli(), offset_millis)
+        else {
+            return;
+        };
+        let target = AutoloopTarget {
+            bank_number,
+            autoloop_number,
+        };
+        let identity = AutoloopExecutionIdentity {
+            execution_epoch: self.autoloop_executor.execution_epoch(),
+            deck_id,
+            track_load_id: plan.track_load_id(),
+            plan_revision: plan.revision(),
+            phrase_index: cue.phrase_index(),
+        };
+        let deadline = Instant::now() + trigger_delay;
+        if let Some(existing) = self.scheduled_future_autoloop
+            && existing.identity == identity
+        {
+            if matches!(
+                self.autoloop_executor.state(),
+                AutoloopExecutorState::Completed { identity: completed, .. } if completed == identity
+            ) {
+                return;
+            }
+            let bpm_changed = existing.effective_bpm_milli != deck.effective_bpm_milli();
+            let moved = deadline_drift_exceeds_tolerance(
+                existing.deadline,
+                deadline,
+                AUTOLOOP_DEADLINE_REPLACEMENT_TOLERANCE,
+            );
+            if !bpm_changed || !moved {
+                return;
+            }
+            if !self.autoloop_executor.replace_pending_deadline(identity) {
+                return;
+            }
+        }
+        let lane_before = self.midi_output.status();
+        let Some(schedule) = self.autoloop_executor.schedule_identity(
+            identity,
+            target,
+            lane_before.source.active_bank,
+        ) else {
+            return;
+        };
+        let Some(generation) = self.begin_realtime_generation() else {
+            self.autoloop_executor.fail(identity);
+            return;
+        };
+        let mut scheduled_actions = 0_u64;
+        if schedule.select_bank {
+            let bank_deadline = deadline
+                .checked_sub(BANK_SETTLE_DELAY)
+                .unwrap_or_else(Instant::now);
+            if self
+                .midi_output
+                .schedule_bank(generation, bank_number, bank_deadline)
+                .is_err()
+            {
+                self.autoloop_executor.fail(identity);
+                return;
+            }
+            scheduled_actions = scheduled_actions.saturating_add(1);
+        }
+        self.autoloop_executor.mark_bank_prepared(schedule);
+        if self
+            .midi_output
+            .schedule_autoloop(generation, autoloop_number, deadline)
+            .is_err()
+        {
+            let _ = self.midi_output.cancel_all();
+            self.autoloop_executor.fail(identity);
+            return;
+        }
+        scheduled_actions = scheduled_actions.saturating_add(1);
+        self.autoloop_executor.mark_triggered(
+            schedule,
+            lane_before.emitted_count.saturating_add(scheduled_actions),
+        );
+        self.scheduled_future_autoloop = Some(ScheduledFutureAutoloop {
+            identity,
+            target,
+            deadline,
+            effective_bpm_milli: deck.effective_bpm_milli(),
+        });
+    }
+
+    fn cancel_future_autoloop_deadline(&mut self) {
+        let Some(scheduled) = self.scheduled_future_autoloop.take() else {
+            return;
+        };
+        if matches!(
+            self.autoloop_executor.state(),
+            AutoloopExecutorState::Completed { identity, .. } if identity == scheduled.identity
+        ) {
+            return;
+        }
+        let _ = self.begin_realtime_generation();
+        let _ = self.midi_output.cancel_all();
+        self.autoloop_executor.cancel_pending();
     }
 
     fn process_effects(
@@ -1835,16 +2106,29 @@ impl OutputWorker {
     }
 }
 
-#[cfg(any())]
 fn positive_timing_delay(offset_millis: i16) -> Duration {
     u64::try_from(offset_millis.max(0))
         .map(Duration::from_millis)
         .unwrap_or(Duration::ZERO)
 }
 
-#[cfg(any())]
 fn negative_timing_advance(offset_millis: i16) -> Duration {
     Duration::from_millis(u64::from(offset_millis.min(0).unsigned_abs()))
+}
+
+fn negative_offset_trigger_delay(
+    beats_until: u32,
+    bpm_milli: u32,
+    offset_millis: i16,
+) -> Option<Duration> {
+    if beats_until == 0 || offset_millis >= 0 || !(20_000..=300_000).contains(&bpm_milli) {
+        return None;
+    }
+    let beat_duration = Duration::from_micros(60_000_000_000_u64 / u64::from(bpm_milli));
+    let target_delay = beat_duration.saturating_mul(beats_until);
+    let trigger_delay = target_delay.saturating_sub(negative_timing_advance(offset_millis));
+    (trigger_delay >= BANK_SETTLE_DELAY.saturating_add(INTEGRATION_PUMP_INTERVAL))
+        .then_some(trigger_delay)
 }
 
 #[cfg(any())]
@@ -1869,7 +2153,6 @@ fn prolink_predictive_delays(
     Some((trigger_delay.saturating_sub(preparation), trigger_delay))
 }
 
-#[cfg(any())]
 fn deadline_drift_exceeds_tolerance(
     current: Instant,
     candidate: Instant,
@@ -3167,7 +3450,7 @@ fn apply_operation_command(
     if command == OperationCommand::Start {
         runtime
             .output_worker
-            .begin_autoloop_execution_epoch()
+            .begin_autoloop_execution_epoch(TransportEpochCause::OperationStart)
             .map_err(CommandApplicationError::Engine)?;
     }
     process_domain_event(
@@ -3682,8 +3965,19 @@ fn snapshot_envelope_internal(
         "mode": "exactlyOncePhrase",
         "state": autoloop_state.name(),
         "executionEpoch": runtime.output_worker.autoloop_executor.execution_epoch(),
+        "transportEpochCause": runtime.output_worker.transport_epoch_cause.map(TransportEpochCause::name),
         "execution": autoloop_execution,
-        "prearmScheduled": Value::Null,
+        "prearmScheduled": runtime.output_worker.scheduled_future_autoloop.map(|scheduled| json!({
+            "executionEpoch": scheduled.identity.execution_epoch,
+            "deckNumber": scheduled.identity.deck_id.value(),
+            "trackLoadId": scheduled.identity.track_load_id.value(),
+            "planRevision": scheduled.identity.plan_revision.value(),
+            "phraseIndex": scheduled.identity.phrase_index,
+            "bankNumber": scheduled.target.bank_number,
+            "autoloopNumber": scheduled.target.autoloop_number,
+            "effectiveBpmMilli": scheduled.effective_bpm_milli,
+            "remainingMicros": u64::try_from(scheduled.deadline.saturating_duration_since(Instant::now()).as_micros()).unwrap_or(u64::MAX),
+        })),
         "pending": Value::Null,
         "requestedCount": runtime.output_worker.autoloop_executor.requested_count(),
         "prearmedCount": runtime.output_worker.autoloop_executor.bank_prepared_count(),
@@ -3691,6 +3985,7 @@ fn snapshot_envelope_internal(
         "completedCount": runtime.output_worker.autoloop_executor.completed_count(),
         "duplicateCount": runtime.output_worker.autoloop_executor.duplicate_count(),
         "cancelledCount": runtime.output_worker.autoloop_executor.cancelled_count(),
+        "rescheduledCount": runtime.output_worker.autoloop_executor.rescheduled_count(),
         "failedCount": runtime.output_worker.autoloop_executor.failed_count(),
         "lateCount": 0,
         "beatFallbackCount": 0,
@@ -3704,7 +3999,7 @@ fn snapshot_envelope_internal(
                 MidiSourceState::Ready => "ready",
             },
             "sourceName": midi_output.source_name,
-            "protocol": "MIDI 1.0 UMP",
+            "protocol": "MIDI 1.0",
             "sentPulseCount": midi_output.sent_pulse_count,
             "lastEvent": midi_output.last_event,
             "lastError": midi_output.last_error,
@@ -4553,6 +4848,21 @@ mod tests {
         assert_eq!(position_with_timing_offset(1_000, 35), 965);
         assert_eq!(position_with_timing_offset(10, 35), 0);
         assert_eq!(position_with_timing_offset(u64::MAX - 5, -35), u64::MAX);
+
+        let beat_at_140 = Duration::from_micros(60_000_000_000_u64 / 140_000);
+        assert_eq!(
+            negative_offset_trigger_delay(1, 140_000, -20),
+            Some(beat_at_140 - Duration::from_millis(20))
+        );
+        assert_eq!(negative_offset_trigger_delay(1, 140_000, 20), None);
+        assert_eq!(negative_offset_trigger_delay(0, 140_000, -20), None);
+
+        let beat_at_300 = Duration::from_micros(60_000_000_000_u64 / 300_000);
+        assert_eq!(negative_offset_trigger_delay(1, 300_000, -250), None);
+        assert_eq!(
+            negative_offset_trigger_delay(2, 300_000, -250),
+            Some(beat_at_300.saturating_mul(2) - Duration::from_millis(250))
+        );
     }
 
     #[test]

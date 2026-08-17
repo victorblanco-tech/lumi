@@ -88,6 +88,7 @@ pub(crate) struct AutoloopCueExecutor {
     completed_count: u64,
     duplicate_count: u64,
     cancelled_count: u64,
+    rescheduled_count: u64,
     failed_count: u64,
 }
 
@@ -102,6 +103,7 @@ impl Default for AutoloopCueExecutor {
             completed_count: 0,
             duplicate_count: 0,
             cancelled_count: 0,
+            rescheduled_count: 0,
             failed_count: 0,
         }
     }
@@ -120,8 +122,17 @@ impl AutoloopCueExecutor {
         target: AutoloopTarget,
         active_bank: Option<u8>,
     ) -> Option<AutoloopSchedule> {
-        self.requested_count = self.requested_count.saturating_add(1);
         let identity = AutoloopExecutionIdentity::from_request(request, self.execution_epoch);
+        self.schedule_identity(identity, target, active_bank)
+    }
+
+    pub(crate) fn schedule_identity(
+        &mut self,
+        identity: AutoloopExecutionIdentity,
+        target: AutoloopTarget,
+        active_bank: Option<u8>,
+    ) -> Option<AutoloopSchedule> {
+        self.requested_count = self.requested_count.saturating_add(1);
         if self.state.identity() == Some(identity) {
             self.duplicate_count = self.duplicate_count.saturating_add(1);
             return None;
@@ -132,6 +143,20 @@ impl AutoloopCueExecutor {
             target,
             select_bank: active_bank != Some(target.bank_number),
         })
+    }
+
+    /// Replaces an unsent deadline for the same musical cue without creating
+    /// a new execution epoch. This is used only when a CDJ pitch change moves
+    /// a future negative-offset deadline. A completed cue is immutable.
+    pub(crate) fn replace_pending_deadline(&mut self, identity: AutoloopExecutionIdentity) -> bool {
+        if self.state.identity() != Some(identity)
+            || matches!(self.state, AutoloopExecutorState::Completed { .. })
+        {
+            return false;
+        }
+        self.state = AutoloopExecutorState::Idle;
+        self.rescheduled_count = self.rescheduled_count.saturating_add(1);
+        true
     }
 
     pub(crate) fn mark_bank_prepared(&mut self, schedule: AutoloopSchedule) {
@@ -228,6 +253,10 @@ impl AutoloopCueExecutor {
 
     pub(crate) const fn cancelled_count(&self) -> u64 {
         self.cancelled_count
+    }
+
+    pub(crate) const fn rescheduled_count(&self) -> u64 {
+        self.rescheduled_count
     }
 
     pub(crate) const fn failed_count(&self) -> u64 {
@@ -351,5 +380,69 @@ mod tests {
         assert!(executor.schedule(&request(1, 1), target, Some(1)).is_some());
         assert!(executor.schedule(&request(1, 2), target, Some(1)).is_some());
         assert_eq!(executor.duplicate_count(), 0);
+    }
+
+    #[test]
+    fn a_pitch_change_replaces_only_an_unsent_deadline() {
+        let mut executor = AutoloopCueExecutor::default();
+        assert_eq!(executor.begin_execution_epoch(), Some(1));
+        let request = request(2, 1);
+        let target = AutoloopTarget {
+            bank_number: 1,
+            autoloop_number: 3,
+        };
+        let schedule = executor
+            .schedule(&request, target, Some(1))
+            .unwrap_or_else(|| panic!("future cue must schedule"));
+        executor.mark_bank_prepared(schedule);
+        executor.mark_triggered(schedule, 1);
+        assert!(executor.replace_pending_deadline(schedule.identity));
+        assert_eq!(executor.rescheduled_count(), 1);
+        assert!(executor.schedule(&request, target, Some(1)).is_some());
+
+        let replacement = match executor.state() {
+            AutoloopExecutorState::Scheduled { identity, target } => super::AutoloopSchedule {
+                identity,
+                target,
+                select_bank: false,
+            },
+            state => panic!("replacement must be scheduled, found {state:?}"),
+        };
+        executor.mark_bank_prepared(replacement);
+        executor.mark_triggered(replacement, 2);
+        executor.complete_if_emitted(2);
+        assert!(!executor.replace_pending_deadline(replacement.identity));
+        assert_eq!(executor.rescheduled_count(), 1);
+    }
+
+    #[test]
+    fn one_hundred_transport_actions_never_duplicate_an_epoch_cue() {
+        let mut executor = AutoloopCueExecutor::default();
+        let target = AutoloopTarget {
+            bank_number: 1,
+            autoloop_number: 6,
+        };
+        for action in 0_u16..100 {
+            assert_eq!(
+                executor.begin_execution_epoch(),
+                Some(u64::from(action) + 1)
+            );
+            let request = request(action % 8, 1);
+            let schedule = executor
+                .schedule(&request, target, Some(1))
+                .unwrap_or_else(|| panic!("action {action} must schedule once"));
+            assert!(
+                executor.schedule(&request, target, Some(1)).is_none(),
+                "action {action} duplicated inside one execution epoch"
+            );
+            executor.mark_bank_prepared(schedule);
+            executor.mark_triggered(schedule, u64::from(action) + 1);
+            executor.complete_if_emitted(u64::from(action) + 1);
+        }
+        assert_eq!(executor.execution_epoch(), 100);
+        assert_eq!(executor.triggered_count(), 100);
+        assert_eq!(executor.completed_count(), 100);
+        assert_eq!(executor.duplicate_count(), 100);
+        assert_eq!(executor.failed_count(), 0);
     }
 }

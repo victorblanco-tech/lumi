@@ -66,6 +66,28 @@ The representative simulator, native Lumi UI and real SoundSwitch UI prove:
 The epic remains In progress because explicit transport/offset completion and
 the one-hour physical Wi-Fi/Ethernet evidence are still E5-03/E5-04 scope.
 
+## Dev-55 deterministic transport milestone
+
+Dev-55 completes E5-03 on the representative simulator and native desktop
+acceptance path:
+
+- confirmed Start, resume, track load, master handoff and position landing each
+  create one explicit execution epoch;
+- completed output is immutable and only unsent work is cancelled or
+  rescheduled;
+- negative pre-trigger and positive delay are active output behavior, including
+  deferred activation of a running setting change;
+- 100-action domain and executor matrices produce the expected 100 cues with
+  zero failures or duplicates;
+- stopped-to-playing, Pause/Start, forward/backward and same-phrase landing pass
+  through the real network bridge and engine;
+- actual Lumi and SoundSwitch UI acceptance confirms Live Deck controls, one
+  Link peer, BPM propagation, AutoLoop response, app switching and bounded Link
+  cleanup.
+
+Only E5-04 remains open: long-running Wi-Fi/Ethernet and physical
+CDJ-1500X/SoundSwitch/DMX release evidence.
+
 ## Exit criteria
 
 - exactly one expected MIDI AutoLoop selection per execution epoch;
@@ -74,8 +96,9 @@ the one-hour physical Wi-Fi/Ethernet evidence are still E5-03/E5-04 scope.
 - real-time master pitch/BPM changes reach SoundSwitch through one Link peer;
 - no Link or MIDI restart caused by operation-state or UI changes;
 - hotcue, seek, pause/resume and master handoff matrices pass deterministically;
-- closing/reopening the client does not interrupt an explicitly active engine
-  session, while explicit Quit performs a bounded clean shutdown;
+- closing/reopening the client does not interrupt the channel engine; UI Quit
+  fails lighting safe and leaves Link, while explicit service retirement
+  performs a bounded process shutdown;
 - one-hour Wi-Fi combined soak passes with bounded queue, latency and fault
   telemetry.
 - source-to-consumer age remains bounded at the Java, Rust, AutoLoop, Link and

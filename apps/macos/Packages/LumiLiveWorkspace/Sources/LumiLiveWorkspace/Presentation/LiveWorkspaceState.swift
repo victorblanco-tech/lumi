@@ -387,7 +387,7 @@ public enum LiveWorkspacePresenter {
         }
         let bpm = link.bpmMilli.map { String(format: " · %.3f BPM", Double($0) / 1_000) } ?? ""
         let deck = link.deckNumber.map { " · deck \($0)" } ?? ""
-        let age = link.lastBeatAgeMillis.map { " · beat \($0) ms ago" } ?? ""
+        let age = link.lastBeatAgeMillis.map { " · tempo update \($0) ms ago" } ?? ""
         return "\(link.provider) · \(link.state) · \(source)\(deck)\(bpm) · \(link.peers) peers\(age)"
     }
 
