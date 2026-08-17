@@ -15,11 +15,13 @@ const DEFAULT_TRACK_MINUTES: u32 = 10;
 const POSITION_CONTINUITY_TOLERANCE_BEATS: f64 = 2.25;
 const POSITION_AUTHORITY_DIAGNOSTIC_MAX_AGE: Duration = Duration::from_millis(500);
 const PRECISE_POSITION_FORWARD_SEEK_TOLERANCE_MILLIS: u64 = 750;
-const PRECISE_POSITION_DISCONTINUITY_CONFIRMATIONS: u8 = 3;
 const PRECISE_POSITION_HOT_CUE_CONFIRMATIONS: u8 = 2;
+#[cfg(test)]
+const PRECISE_POSITION_DISCONTINUITY_CONFIRMATIONS: u8 = 3;
 const PRECISE_POSITION_STATUS_TOLERANCE_BEATS: u32 = 1;
 const STATUS_DISCONTINUITY_CONFIRMATIONS: u8 = 3;
 const STATUS_DISCONTINUITY_MAX_AGE_NANOS: u64 = 1_000_000_000;
+const STATUS_BACKWARD_JITTER_MAX_BEATS: u32 = 8;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ProLinkTrackIdentity {
@@ -305,6 +307,22 @@ impl ProLinkDeckSourceProvider {
             return Ok(None);
         }
         let first_authoritative_position = !previous.precise_position_seen;
+        if previous.playing && first_authoritative_position {
+            // A playing deck is already anchored by its absolute CdjStatus
+            // load position and exact Beat packets. The first precise packet
+            // can arrive several beats behind them, especially immediately
+            // after enabling Live Decks. Record it as a future discontinuity
+            // baseline, but never let it reset the canonical timeline.
+            self.authoritative_position_count = self.authoritative_position_count.saturating_add(1);
+            if let Some(deck) = self.decks.get_mut(&observation.deck_id) {
+                deck.precise_position_seen = true;
+                deck.last_precise_position_millis = Some(observation.playback_position_millis);
+                deck.last_precise_position_observed_at_nanos = Some(observation.observed_at_nanos);
+                deck.last_position_observed_at_nanos = observation.observed_at_nanos;
+                deck.effective_bpm_milli = observation.effective_bpm_milli;
+            }
+            return Ok(None);
+        }
         let tempo_changed = previous.effective_bpm_milli != observation.effective_bpm_milli;
         let discontinuity_candidate = if first_authoritative_position {
             previous.beat.abs_diff(absolute_beat) > 2
@@ -319,6 +337,26 @@ impl ProLinkDeckSourceProvider {
                 previous.playing,
             )
         };
+        if previous.playing && discontinuity_candidate && previous.beat.abs_diff(absolute_beat) <= 1
+        {
+            // The exact Beat lane may already have committed a status-confirmed
+            // loop/hotcue before the first precise-position packet from the new
+            // timeline is drained. That packet still looks discontinuous when
+            // compared with the old precise baseline, but it describes the
+            // canonical beat we already accepted. Absorb it as the new precise
+            // baseline instead of creating a second transport generation for
+            // one physical jump.
+            self.authoritative_position_count = self.authoritative_position_count.saturating_add(1);
+            if let Some(deck) = self.decks.get_mut(&observation.deck_id) {
+                deck.precise_position_seen = true;
+                deck.last_precise_position_millis = Some(observation.playback_position_millis);
+                deck.last_precise_position_observed_at_nanos = Some(observation.observed_at_nanos);
+                deck.pending_precise_discontinuity = None;
+                deck.last_position_observed_at_nanos = observation.observed_at_nanos;
+                deck.effective_bpm_milli = observation.effective_bpm_milli;
+            }
+            return Ok(None);
+        }
         let seeked = if discontinuity_candidate && !first_authoritative_position {
             let pending = confirmed_precise_discontinuity(
                 previous.pending_precise_discontinuity,
@@ -335,13 +373,28 @@ impl ProLinkDeckSourceProvider {
                 previous.last_status_discontinuity,
                 pending.absolute_beat,
                 observation.observed_at_nanos,
-            );
-            let required_confirmations = if known_hot_cue_target {
-                PRECISE_POSITION_HOT_CUE_CONFIRMATIONS
-            } else {
-                PRECISE_POSITION_DISCONTINUITY_CONFIRMATIONS
-            };
-            if pending.confirmation_count < required_confirmations || !corroborated_by_status {
+            ) || (known_hot_cue_target
+                && status_timeline_matches(
+                    previous.last_status_beat,
+                    previous.last_status_observed_at_nanos,
+                    pending.absolute_beat,
+                    observation.observed_at_nanos,
+                ));
+            // Beat Link deliberately exposes a switch to stop using precise
+            // position packets because modern-player packets can contain too
+            // much jitter for a continuously steered timeline. Lumi follows
+            // the same split of responsibilities: Beat packets advance the
+            // playing timeline, while precise positions may only authorize a
+            // fast discontinuity when they land on an imported Hot Cue. A
+            // generic seek/Beat Jump is confirmed by the independent absolute
+            // CdjStatus timeline and committed on the next exact Beat packet.
+            // This prevents a coherent burst of five-or-six-beat precise
+            // position jitter from rewinding the Live Deck and re-triggering
+            // an earlier SoundSwitch AutoLoop.
+            if !known_hot_cue_target
+                || pending.confirmation_count < PRECISE_POSITION_HOT_CUE_CONFIRMATIONS
+                || !corroborated_by_status
+            {
                 if let Some(deck) = self.decks.get_mut(&observation.deck_id) {
                     deck.pending_precise_discontinuity = Some(pending);
                 }
@@ -349,9 +402,9 @@ impl ProLinkDeckSourceProvider {
                 // high frequency, but Beat Link documents that they can be
                 // too jittery to steer an Ableton Link clock directly. Never
                 // turn one noisy sample into a transport generation. A real
-                // hotcue/seek persists on the new timeline. Imported hot-cue
-                // targets need two exact packets; every jump also needs an
-                // independently observed discontinuity in CdjStatus itself.
+                // hotcue/seek persists on the new timeline. Imported Hot Cue
+                // targets need two exact packets and an independently
+                // observed discontinuity in CdjStatus itself.
                 // Merely matching the latest normal status beat is not
                 // corroboration: that mistake allowed a coherent cluster of
                 // precise-position jitter to scrub the Link timeline during
@@ -367,6 +420,19 @@ impl ProLinkDeckSourceProvider {
             self.position_discontinuity_count = self.position_discontinuity_count.saturating_add(1);
         }
         self.authoritative_position_count = self.authoritative_position_count.saturating_add(1);
+        if previous.playing && !first_authoritative_position && !seeked {
+            if let Some(deck) = self.decks.get_mut(&observation.deck_id) {
+                deck.precise_position_seen = true;
+                deck.last_precise_position_millis = Some(observation.playback_position_millis);
+                deck.last_precise_position_observed_at_nanos = Some(observation.observed_at_nanos);
+                deck.last_position_observed_at_nanos = observation.observed_at_nanos;
+                deck.effective_bpm_milli = observation.effective_bpm_milli;
+                if !discontinuity_candidate {
+                    deck.pending_precise_discontinuity = None;
+                }
+            }
+            return Ok(None);
+        }
         if previous.beat != absolute_beat {
             self.emit(
                 at,
@@ -644,7 +710,7 @@ impl ProLinkDeckSourceProvider {
                     },
                 )?;
             }
-            let seeked = !previous.precise_position_seen
+            let seeked = !previous.playing
                 && previous.beat != beat
                 && position_is_discontinuous(
                     previous.beat,
@@ -654,8 +720,15 @@ impl ProLinkDeckSourceProvider {
                     previous.effective_bpm_milli,
                     previous.playing,
                 );
+            // CDJ-1500X/Beat Link can publish coherent status clusters five
+            // or six beats behind the audible transport while a deck keeps
+            // playing. Treat that documented modern-player jitter window as
+            // status baseline noise. Imported Hot Cues still take the fast
+            // precise-position path above; larger loop wraps and seeks are
+            // committed by status consensus on an exact Beat packet.
             let status_discontinuity_candidate = previous.playing
                 && status.playing
+                && status_jump_can_be_discontinuity(previous.last_status_beat, beat)
                 && position_is_discontinuous(
                     previous.last_status_beat,
                     beat,
@@ -704,14 +777,10 @@ impl ProLinkDeckSourceProvider {
                 )?;
             }
             if let Some(deck) = self.decks.get_mut(&deck_id) {
-                // Playing status frames are not beat-boundary facts and may
-                // arrive after a newer precise Beat packet. Never let such a
-                // frame rewind the canonical timeline. It may advance the
-                // internal baseline after missed Beat packets, while the Live
-                // UI and lighting output remain driven by precise beats.
-                if !previous.precise_position_seen
-                    && (seeked || !previous.playing || beat >= previous.beat)
-                {
+                // Playing status frames are not beat-boundary facts. They may
+                // confirm a discontinuity for the next Beat packet, but may
+                // never move the canonical Live timeline themselves.
+                if seeked || !previous.playing {
                     deck.beat = beat;
                 }
                 deck.last_position_observed_at_nanos = observed_at_nanos;
@@ -851,7 +920,7 @@ impl ProLinkDeckSourceProvider {
         &mut self,
         beat: crate::Beat,
         observed_at_nanos: u64,
-        _at: MonotonicTime,
+        at: MonotonicTime,
     ) -> Result<(), ProLinkProviderError> {
         if !beat.tempo_master {
             return Ok(());
@@ -860,20 +929,97 @@ impl ProLinkDeckSourceProvider {
         let Some(previous) = self.decks.get(&deck_id).cloned() else {
             return Ok(());
         };
-        // A Beat packet is exact in time but contains only its position within
-        // the bar. It cannot reveal a hotcue or beat-jump absolute position,
-        // nor is it the tempo authority. Keeping tempo on the latest
-        // CdjStatus prevents Beat and status packets from fighting after the
-        // DJ moves the pitch slider.
+        // A Beat packet is the stable, exact boundary authority while a deck
+        // is playing. CdjStatus supplies the absolute-beat neighbourhood and
+        // confirms discontinuities; the local Rekordbox beat grid supplies
+        // phrase boundaries. PrecisePosition is intentionally not allowed to
+        // steer continuous playback because those packets can jitter by
+        // several beats on modern players.
+        let status_seek = previous.last_status_discontinuity.filter(|candidate| {
+            status_discontinuity_is_still_supported(
+                *candidate,
+                previous.last_status_beat,
+                observed_at_nanos,
+            )
+        });
+        let absolute_beat = if let Some(candidate) = status_seek {
+            align_beat_within_bar(candidate.absolute_beat, beat.beat_within_bar)
+        } else {
+            precise_absolute_beat(
+                previous.last_status_beat,
+                Some(previous.beat),
+                beat.beat_within_bar,
+            )
+        };
+        // A sparse CdjStatus stream can legitimately advance by dozens of
+        // beats while the exact Beat lane has already advanced the canonical
+        // transport to the same neighbourhood. In that case the status
+        // consensus describes the next normal beat, not a seek. Only create
+        // a new transport generation when the aligned landing is still more
+        // than one beat away from the canonical timeline.
+        let status_seek_matches_continuous_transport =
+            status_seek.is_some() && absolute_beat.abs_diff(previous.beat) <= 1;
+        let seeked = status_seek.is_some() && absolute_beat.abs_diff(previous.beat) > 1;
+        if seeked {
+            self.advance_timing_generation()?;
+            self.position_discontinuity_count = self.position_discontinuity_count.saturating_add(1);
+        }
+        if absolute_beat != previous.beat {
+            self.emit(
+                at,
+                if seeked {
+                    DeckObservation::PlaybackPositionSeeked {
+                        deck_id,
+                        track_load_id: previous.track_load_id,
+                        beat: absolute_beat,
+                    }
+                } else {
+                    DeckObservation::PlaybackPosition {
+                        deck_id,
+                        track_load_id: previous.track_load_id,
+                        beat: absolute_beat,
+                    }
+                },
+            )?;
+        }
+        let phrase_index = phrase_index_at(&previous.metadata, absolute_beat)
+            .filter(|phrase_index| Some(*phrase_index) != previous.phrase_index);
+        if let Some(deck) = self.decks.get_mut(&deck_id) {
+            deck.beat = absolute_beat;
+            deck.phrase_index = phrase_index.or(previous.phrase_index);
+            deck.last_position_observed_at_nanos = observed_at_nanos;
+            if seeked {
+                deck.pending_precise_discontinuity = None;
+            }
+            if seeked || status_seek_matches_continuous_transport {
+                deck.pending_status_discontinuity = None;
+                deck.last_status_discontinuity = None;
+            }
+            if seeked {
+                deck.discontinuity_revision = self.timing_generation;
+            }
+        }
+        if let Some(phrase_index) = phrase_index {
+            self.emit(
+                at,
+                DeckObservation::PhraseChanged {
+                    deck_id,
+                    track_load_id: previous.track_load_id,
+                    phrase_index,
+                },
+            )?;
+        }
+        // CdjStatus remains the tempo authority. This prevents Beat and
+        // status packets from fighting after the DJ moves the pitch slider.
         self.timing_observations.push(ProLinkTimingObservation {
             deck_id,
             observed_at_nanos,
-            absolute_beat: previous.beat,
+            absolute_beat,
             effective_bpm_milli: previous.effective_bpm_milli,
             beat_within_bar: beat.beat_within_bar,
             playing: previous.playing,
             generation: self.timing_generation,
-            discontinuity: false,
+            discontinuity: seeked,
         });
         Ok(())
     }
@@ -1022,7 +1168,6 @@ fn phrase_index_at(metadata: &TrackMetadata, beat: u32) -> Option<u16> {
         .map(|phrase| phrase.index())
 }
 
-#[cfg(test)]
 fn precise_absolute_beat(
     status_beat: u32,
     previous_precise_beat: Option<u32>,
@@ -1038,6 +1183,17 @@ fn precise_absolute_beat(
         .into_iter()
         .min_by_key(|candidate| candidate.abs_diff(reference))
         .unwrap_or(status_beat)
+}
+
+fn align_beat_within_bar(reference: u32, beat_within_bar: u8) -> u32 {
+    let remainder = u32::from(beat_within_bar.saturating_sub(1).min(3));
+    let base = reference
+        .saturating_sub(reference % 4)
+        .saturating_add(remainder);
+    [base.saturating_sub(4), base, base.saturating_add(4)]
+        .into_iter()
+        .min_by_key(|candidate| candidate.abs_diff(reference))
+        .unwrap_or(reference)
 }
 
 fn position_is_discontinuous(
@@ -1147,6 +1303,22 @@ fn status_corroborates_discontinuity(
     })
 }
 
+fn status_timeline_matches(
+    status_beat: u32,
+    status_observed_at_nanos: u64,
+    absolute_beat: u32,
+    observed_at_nanos: u64,
+) -> bool {
+    status_beat.abs_diff(absolute_beat) <= PRECISE_POSITION_STATUS_TOLERANCE_BEATS
+        && observed_at_nanos.abs_diff(status_observed_at_nanos)
+            <= STATUS_DISCONTINUITY_MAX_AGE_NANOS
+}
+
+fn status_jump_can_be_discontinuity(previous_beat: u32, candidate_beat: u32) -> bool {
+    candidate_beat >= previous_beat
+        || previous_beat.abs_diff(candidate_beat) > STATUS_BACKWARD_JITTER_MAX_BEATS
+}
+
 fn status_discontinuity_is_still_supported(
     candidate: StatusDiscontinuity,
     current_beat: u32,
@@ -1213,7 +1385,7 @@ mod timing_tests {
         STATUS_DISCONTINUITY_CONFIRMATIONS, StatusDiscontinuity, confirmed_precise_discontinuity,
         confirmed_status_discontinuity, position_is_discontinuous,
         position_millis_is_discontinuous, precise_absolute_beat, status_corroborates_discontinuity,
-        status_discontinuity_is_still_supported,
+        status_discontinuity_is_still_supported, status_jump_can_be_discontinuity,
     };
 
     fn candidate(
@@ -1373,6 +1545,14 @@ mod timing_tests {
         let ready = confirmed_status_discontinuity(Some(second), 64, 1_060_000_000, 155_000);
         assert_eq!(second.confirmation_count, 2);
         assert_eq!(ready.confirmation_count, STATUS_DISCONTINUITY_CONFIRMATIONS);
+    }
+
+    #[test]
+    fn modern_player_small_backward_status_jitter_is_not_a_seek() {
+        assert!(!status_jump_can_be_discontinuity(173, 168));
+        assert!(!status_jump_can_be_discontinuity(76, 70));
+        assert!(status_jump_can_be_discontinuity(191, 65));
+        assert!(status_jump_can_be_discontinuity(64, 128));
     }
 
     #[test]

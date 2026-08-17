@@ -3,6 +3,7 @@
 #![forbid(unsafe_code)]
 
 mod autoloop_defaults;
+mod autoloop_executor;
 mod commands;
 mod library;
 mod link_relay;

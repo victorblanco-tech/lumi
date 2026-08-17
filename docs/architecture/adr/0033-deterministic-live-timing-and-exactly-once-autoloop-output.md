@@ -22,6 +22,11 @@ choices, not product requirements.
 Wi-Fi remains a supported Pro DJ Link transport. Normal network jitter or
 packet reordering must be absorbed before it can become a transport event.
 
+Modern players can also publish CdjStatus less frequently than exact Beat
+packets. A large difference from the previous status baseline is therefore not
+itself a seek when the exact Beat lane has already reached the same
+neighbourhood.
+
 ## Decision
 
 Lumi divides Live execution into four one-way responsibilities:
@@ -80,6 +85,21 @@ epoch.
 The output offset changes the one future cue deadline only. Before emission a
 deadline may be replaced after an effective-BPM change. After emission it is
 immutable and no compensating pulse is allowed.
+
+## Transport reconciliation rule
+
+Exact Beat packets own continuous playing progress. CdjStatus supplies the
+absolute neighbourhood and may propose a discontinuity, while PrecisePosition
+may corroborate an imported Hot Cue. A proposed status landing that aligns
+within one beat of the already accepted exact timeline is continuous progress:
+it is consumed without incrementing the transport generation. A loop, seek,
+hotcue or beatjump landing farther away creates one generation only. A later
+PrecisePosition packet that describes that already-accepted landing updates its
+baseline without creating a second generation.
+
+This rule prevents a sparse `64 -> 128` status update from masquerading as a
+seek when exact Beat packets already place the deck at beat 126/127, while
+preserving a real `192 -> 65` loop landing.
 
 ## Runtime boundary
 

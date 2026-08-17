@@ -213,18 +213,16 @@ struct LiveDeckSurface<Details: View>: View {
             Image(systemName: "metronome")
             Text(verbatim: "\(applied)\(pending)")
                 .monospacedDigit()
-            if pendingLightingTimingOffsetMillis != nil {
-                Text(verbatim: "NEXT")
-                    .foregroundStyle(LumiColor.warning)
-            }
+            Text(verbatim: "SAVED")
+                .foregroundStyle(LumiColor.warning)
         }
         .font(LumiTypography.technical.weight(.semibold))
         .foregroundStyle(Color.white.opacity(0.62))
         .frame(minWidth: 90, minHeight: LumiControlMetric.compactHeight)
         .accessibilityLabel(
             pendingLightingTimingOffsetMillis.map {
-                "Lighting timing \(applied) applied, \(String(format: "%+d ms", $0)) pending for next phrase"
-            } ?? "Lighting timing \(applied) applied"
+                "Lighting timing \(applied) saved, \(String(format: "%+d ms", $0)) pending; dev-51 output remains on the phrase boundary"
+            } ?? "Lighting timing \(applied) saved; dev-51 output remains on the phrase boundary"
         )
         .accessibilityIdentifier("lumi.deck.lightingTiming")
     }
@@ -297,16 +295,27 @@ struct LiveDeckSurface<Details: View>: View {
     }
 
     private var metadata: some View {
-        HStack(spacing: 0) {
-            metadataValue("BPM", value: String(
-                format: "%.1f",
-                locale: Locale(identifier: "en_US_POSIX"),
-                Double(deck.bpmMilli) / 1_000
-            ))
-            metadataValue("KEY", value: musicalKey)
-            metadataValue("BEAT", value: "\(deck.beat)")
-            metadataValue("TRANSPORT", value: playbackIsActive ? "PLAYING" : "PAUSED")
-            metadataValue("PHRASE", value: activePhraseName(at: Double(deck.beat)))
+        // The heavyweight workspace snapshot deliberately does not invalidate
+        // the complete SwiftUI deck tree on every Pro DJ Link beat. Render the
+        // small transport strip from the same monotonic visual clock as the
+        // waveform instead, so Off/Arm/Start transitions can never leave its
+        // beat and phrase labels visibly behind the deck.
+        TimelineView(.periodic(from: .now, by: 0.25)) { context in
+            let playheadBeat = displayedPlayheadBeat(at: context.date)
+            HStack(spacing: 0) {
+                metadataValue("BPM", value: String(
+                    format: "%.1f",
+                    locale: Locale(identifier: "en_US_POSIX"),
+                    Double(deck.bpmMilli) / 1_000
+                ))
+                metadataValue("KEY", value: musicalKey)
+                metadataValue(
+                    "BEAT",
+                    value: "\(UInt64(max(0, playheadBeat).rounded(.down)))"
+                )
+                metadataValue("TRANSPORT", value: playbackIsActive ? "PLAYING" : "PAUSED")
+                metadataValue("PHRASE", value: activePhraseName(at: playheadBeat))
+            }
         }
         .background(Color.white.opacity(0.035))
         .overlay(alignment: .top) { Divider().overlay(Color.white.opacity(0.12)) }

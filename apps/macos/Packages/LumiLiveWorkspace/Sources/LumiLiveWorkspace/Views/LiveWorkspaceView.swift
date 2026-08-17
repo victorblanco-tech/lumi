@@ -325,7 +325,7 @@ public struct LiveWorkspaceView: View {
                 VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
                     Text("Lighting timing offset")
                         .font(LumiTypography.sectionTitle)
-                    Text("Negative sends AutoLoops early; positive sends them late.")
+                    Text("Saved preference. Dev-51 fires on the phrase boundary; scheduled pre-trigger activates in dev-52.")
                         .font(LumiTypography.metadata)
                         .foregroundStyle(LumiColor.textSecondary)
                     Text(timingConfirmationDetail)
@@ -368,25 +368,24 @@ public struct LiveWorkspaceView: View {
     }
 
     private var timingConfirmationLabel: String {
-        if pendingLightingTimingOffsetMillis != nil { return "NEXT" }
         if appliedLightingTimingOffsetMillis != lightingTimingOffsetMillis { return "SYNC" }
-        return "APPLIED"
+        return "SAVED"
     }
 
     private var timingConfirmationColor: Color {
-        timingConfirmationLabel == "APPLIED" ? LumiColor.success : LumiColor.warning
+        LumiColor.warning
     }
 
     private var timingConfirmationDetail: String {
         let applied = String(format: "%+d ms", appliedLightingTimingOffsetMillis)
         if let pendingLightingTimingOffsetMillis {
             let pending = String(format: "%+d ms", pendingLightingTimingOffsetMillis)
-            return "Applied \(applied) · \(pending) will activate at the next Live phrase."
+            return "Saved \(applied) · \(pending) pending. Dev-51 still fires on the phrase boundary."
         }
         if appliedLightingTimingOffsetMillis != lightingTimingOffsetMillis {
-            return "Applied \(applied) · waiting for engine confirmation."
+            return "Saved \(applied) · waiting for engine confirmation."
         }
-        return "Applied by the lighting engine: \(applied)."
+        return "Saved: \(applied). Scheduled pre-trigger activates in dev-52."
     }
 
     private var technicalStatusButton: some View {
@@ -1254,7 +1253,7 @@ private struct PlanSelectionControl: View {
 #Preview("Ready · Dark") {
     LiveWorkspaceView(
         state: LiveWorkspaceFixtures.ready,
-        productVersion: "0.4.0-dev-50",
+        productVersion: "0.4.0-dev-51",
         appearance: .constant(.dark),
         keyNotation: .constant(.camelot)
     )
@@ -1265,7 +1264,7 @@ private struct PlanSelectionControl: View {
 #Preview("Fallback · Light") {
     LiveWorkspaceView(
         state: LiveWorkspaceFixtures.fallback,
-        productVersion: "0.4.0-dev-50",
+        productVersion: "0.4.0-dev-51",
         appearance: .constant(.light),
         keyNotation: .constant(.classic)
     )

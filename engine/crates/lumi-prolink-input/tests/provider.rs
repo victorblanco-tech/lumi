@@ -128,7 +128,7 @@ fn preserves_low_latency_master_beat_timestamp_for_timing_output() {
         .unwrap_or_else(|| panic!("master beat should become a timing observation"));
     assert_eq!(beat.deck_id.value(), 1);
     assert_eq!(beat.observed_at_nanos, 40_000_000);
-    assert_eq!(beat.absolute_beat, 16);
+    assert_eq!(beat.absolute_beat, 17);
     assert_eq!(beat.effective_bpm_milli, 157_250);
     assert_eq!(beat.beat_within_bar, 2);
     assert!(beat.playing);
@@ -201,7 +201,7 @@ fn status_is_the_only_effective_tempo_authority() {
 }
 
 #[test]
-fn bar_relative_beats_never_activate_phrases_and_status_seeks_remain_explicit() {
+fn exact_beats_advance_phrases_and_confirmed_status_jump_commits_a_seek() {
     let mut decoder = BridgeDecoder::new();
     let mut provider = ProLinkDeckSourceProvider::new(MonotonicTime::new(0))
         .unwrap_or_else(|error| panic!("provider should initialize: {error}"));
@@ -221,8 +221,8 @@ fn bar_relative_beats_never_activate_phrases_and_status_seeks_remain_explicit() 
         MusicalKey::new(PitchClass::C, KeyMode::Minor),
         64,
         vec![
-            TrackPhrase::new(0, 0, 32, PhraseKind::Breakdown),
-            TrackPhrase::new(1, 32, 64, PhraseKind::Drop),
+            TrackPhrase::new(0, 0, 17, PhraseKind::Breakdown),
+            TrackPhrase::new(1, 17, 64, PhraseKind::Drop),
         ],
     )
     .unwrap_or_else(|error| panic!("metadata should be valid: {error}"));
@@ -235,7 +235,7 @@ fn bar_relative_beats_never_activate_phrases_and_status_seeks_remain_explicit() 
 
     let boundary = decoder
         .decode_line(
-            r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":4,"observedAtNanos":41000000,"type":"beat","payload":{"deviceNumber":1,"deviceName":"LUMI-SIM","effectiveBpm":157.25,"beatWithinBar":1,"tempoMaster":true}}"#,
+            r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":4,"observedAtNanos":41000000,"type":"beat","payload":{"deviceNumber":1,"deviceName":"LUMI-SIM","effectiveBpm":157.25,"beatWithinBar":2,"tempoMaster":true}}"#,
         )
         .unwrap_or_else(|error| panic!("beat should decode: {error}"));
     provider
@@ -244,52 +244,50 @@ fn bar_relative_beats_never_activate_phrases_and_status_seeks_remain_explicit() 
     let observations = provider
         .drain_events()
         .unwrap_or_else(|error| panic!("events should drain: {error}"));
-    assert!(observations.iter().all(|event| !matches!(
+    assert!(observations.iter().any(|event| matches!(
         event,
         DomainEvent::Observation(envelope)
-            if matches!(envelope.observation, DeckObservation::PhraseChanged { .. })
+            if matches!(envelope.observation, DeckObservation::PhraseChanged { phrase_index: 1, .. })
     )));
 
-    let seek = decoder
+    for (sequence, nanos) in [(5, 42_000_000), (6, 72_000_000), (7, 102_000_000)] {
+        let seek = decoder
+            .decode_line(&format!(
+                r#"{{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":{sequence},"observedAtNanos":{nanos},"type":"deckStatus","payload":{{"deviceNumber":1,"deviceName":"LUMI-SIM","playing":true,"paused":false,"cued":false,"tempoMaster":true,"onAir":true,"sourcePlayer":1,"sourceSlot":"USB_SLOT","trackType":"REKORDBOX","rekordboxId":1256,"trackBpm":155.0,"effectiveBpm":157.25,"beatNumber":49,"beatWithinBar":1,"rawPitch":1082458112}}}}"#,
+            ))
+            .unwrap_or_else(|error| panic!("seek status should decode: {error}"));
+        provider
+            .ingest(seek, MonotonicTime::new(sequence))
+            .unwrap_or_else(|error| panic!("seek status should translate: {error}"));
+    }
+    assert!(
+        provider
+            .drain_events()
+            .unwrap_or_else(|error| panic!("events should drain: {error}"))
+            .is_empty(),
+        "asynchronous status frames may not move the live timeline"
+    );
+    let commit = decoder
         .decode_line(
-            r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":5,"observedAtNanos":42000000,"type":"deckStatus","payload":{"deviceNumber":1,"deviceName":"LUMI-SIM","playing":true,"paused":false,"cued":false,"tempoMaster":true,"onAir":true,"sourcePlayer":1,"sourceSlot":"USB_SLOT","trackType":"REKORDBOX","rekordboxId":1256,"trackBpm":155.0,"effectiveBpm":157.25,"beatNumber":33,"beatWithinBar":1,"rawPitch":1082458112}}"#,
+            r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":8,"observedAtNanos":120000000,"type":"beat","payload":{"deviceNumber":1,"deviceName":"LUMI-SIM","effectiveBpm":157.25,"beatWithinBar":1,"tempoMaster":true}}"#,
         )
-        .unwrap_or_else(|error| panic!("seek should decode: {error}"));
+        .unwrap_or_else(|error| panic!("commit beat should decode: {error}"));
     provider
-        .ingest(seek, MonotonicTime::new(6))
-        .unwrap_or_else(|error| panic!("seek should translate: {error}"));
+        .ingest(commit, MonotonicTime::new(9))
+        .unwrap_or_else(|error| panic!("commit beat should translate: {error}"));
     let observations = provider
         .drain_events()
         .unwrap_or_else(|error| panic!("events should drain: {error}"));
     assert!(observations.iter().any(|event| matches!(
         event,
         DomainEvent::Observation(envelope)
-            if matches!(envelope.observation, DeckObservation::PlaybackPositionSeeked { beat: 32, .. })
-    )));
-    assert!(observations.iter().all(|event| !matches!(
-        event,
-        DomainEvent::Observation(envelope)
-            if matches!(envelope.observation, DeckObservation::PhraseChanged { .. })
-    )));
+            if matches!(envelope.observation, DeckObservation::PlaybackPositionSeeked { beat: 48, .. })
+    )), "confirmed status jump should seek on the next exact beat: {observations:?}");
     let forward_seek_revision = provider
         .transport(lumi_domain::TrackLoadId::new(1))
         .unwrap_or_else(|| panic!("seeked deck should expose transport"))
         .discontinuity_revision;
     assert!(forward_seek_revision > initial_revision);
-
-    let backward_seek = decoder
-        .decode_line(
-            r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":6,"observedAtNanos":43000000,"type":"deckStatus","payload":{"deviceNumber":1,"deviceName":"LUMI-SIM","playing":true,"paused":false,"cued":false,"tempoMaster":true,"onAir":true,"sourcePlayer":1,"sourceSlot":"USB_SLOT","trackType":"REKORDBOX","rekordboxId":1256,"trackBpm":155.0,"effectiveBpm":157.25,"beatNumber":1,"beatWithinBar":1,"rawPitch":1082458112}}"#,
-        )
-        .unwrap_or_else(|error| panic!("backward seek should decode: {error}"));
-    provider
-        .ingest(backward_seek, MonotonicTime::new(7))
-        .unwrap_or_else(|error| panic!("backward seek should translate: {error}"));
-    let backward_seek_revision = provider
-        .transport(lumi_domain::TrackLoadId::new(1))
-        .unwrap_or_else(|| panic!("backward-seeked deck should expose transport"))
-        .discontinuity_revision;
-    assert!(backward_seek_revision > forward_seek_revision);
 }
 
 #[test]
@@ -313,8 +311,8 @@ fn precise_position_overrides_a_stale_beat_after_hotcue_before_output_planning()
         MusicalKey::new(PitchClass::C, KeyMode::Minor),
         64,
         vec![
-            TrackPhrase::new(0, 0, 32, PhraseKind::Intro),
-            TrackPhrase::new(1, 32, 64, PhraseKind::Breakdown),
+            TrackPhrase::new(0, 0, 17, PhraseKind::Intro),
+            TrackPhrase::new(1, 17, 64, PhraseKind::Breakdown),
         ],
     )
     .unwrap_or_else(|error| panic!("metadata should be valid: {error}"));
@@ -338,23 +336,29 @@ fn precise_position_overrides_a_stale_beat_after_hotcue_before_output_planning()
         .unwrap_or_else(|error| panic!("position should apply: {error}"));
     let _ = provider.drain_events();
 
-    // A bar-relative beat can race ahead of the position packet after the DJ
-    // presses Hotcue A. It must not advance or select a phrase by itself.
+    // Exact Beat packets own normal playing progress and can activate the
+    // next phrase without consulting the jittering precise-position stream.
     let raced_beat = decoder
         .decode_line(
-            r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":5,"observedAtNanos":110000000,"type":"beat","payload":{"deviceNumber":1,"deviceName":"CDJ-1500X","effectiveBpm":157.25,"beatWithinBar":1,"tempoMaster":true}}"#,
+            r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":5,"observedAtNanos":110000000,"type":"beat","payload":{"deviceNumber":1,"deviceName":"CDJ-1500X","effectiveBpm":157.25,"beatWithinBar":2,"tempoMaster":true}}"#,
         )
         .unwrap_or_else(|error| panic!("raced beat should decode: {error}"));
     provider
         .ingest(raced_beat, MonotonicTime::new(6))
         .unwrap_or_else(|error| panic!("raced beat should translate: {error}"));
-    assert!(
-        provider
-            .drain_events()
-            .unwrap_or_else(|error| panic!("events should drain: {error}"))
-            .is_empty(),
-        "a beat without absolute position may not authorize Bridge"
-    );
+    let beat_events = provider
+        .drain_events()
+        .unwrap_or_else(|error| panic!("events should drain: {error}"));
+    assert!(beat_events.iter().any(|event| matches!(
+        event,
+        DomainEvent::Observation(envelope)
+            if matches!(envelope.observation, DeckObservation::PlaybackPosition { beat: 17, .. })
+    )));
+    assert!(beat_events.iter().any(|event| matches!(
+        event,
+        DomainEvent::Observation(envelope)
+            if matches!(envelope.observation, DeckObservation::PhraseChanged { phrase_index: 1, .. })
+    )));
 
     let mut applied = None;
     for (sequence, observed_at_nanos, position_millis, at) in
@@ -420,6 +424,191 @@ fn precise_position_overrides_a_stale_beat_after_hotcue_before_output_planning()
     assert_eq!(timing[0].beat_within_bar, 1);
     assert_eq!(timing[0].effective_bpm_milli, 157_250);
     assert!(timing[0].discontinuity, "Link must re-anchor exactly once");
+}
+
+#[test]
+fn precise_position_after_exact_loop_commit_does_not_create_a_second_discontinuity() {
+    let mut decoder = BridgeDecoder::new();
+    let mut provider = ProLinkDeckSourceProvider::new(MonotonicTime::new(0))
+        .unwrap_or_else(|error| panic!("provider should initialize: {error}"));
+    for (line, time) in [(HELLO, 1), (READY, 2)] {
+        let message = decoder
+            .decode_line(line)
+            .unwrap_or_else(|error| panic!("fixture should decode: {error}"));
+        provider
+            .ingest(message, MonotonicTime::new(time))
+            .unwrap_or_else(|error| panic!("message should translate: {error}"));
+    }
+    let playing_status = decoder
+        .decode_line(
+            r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":3,"observedAtNanos":30000000,"type":"deckStatus","payload":{"deviceNumber":1,"deviceName":"CDJ-1500X","playing":true,"paused":false,"cued":false,"tempoMaster":true,"onAir":true,"sourcePlayer":1,"sourceSlot":"USB_SLOT","trackType":"REKORDBOX","rekordboxId":1256,"trackBpm":155.0,"effectiveBpm":155.0,"beatNumber":129,"beatWithinBar":1,"rawPitch":1048576}}"#,
+        )
+        .unwrap_or_else(|error| panic!("playing status should decode: {error}"));
+    provider
+        .ingest(playing_status, MonotonicTime::new(3))
+        .unwrap_or_else(|error| panic!("playing status should translate: {error}"));
+
+    let initial_precise = decoder
+        .decode_line(
+            r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":4,"observedAtNanos":40000000,"type":"precisePosition","payload":{"deviceNumber":1,"deviceName":"CDJ-1500X","playbackPositionMillis":49609,"effectiveBpm":155.0,"beatWithinBar":1,"tempoMaster":true}}"#,
+        )
+        .unwrap_or_else(|error| panic!("initial precise position should decode: {error}"));
+    provider
+        .ingest(initial_precise, MonotonicTime::new(4))
+        .unwrap_or_else(|error| panic!("initial precise position should queue: {error}"));
+    let initial_precise = provider
+        .drain_precise_position_observations()
+        .pop()
+        .unwrap_or_else(|| panic!("initial precise position should be retained"));
+    assert!(
+        provider
+            .apply_authoritative_position(initial_precise, 128, false, MonotonicTime::new(5))
+            .unwrap_or_else(|error| panic!("initial precise position should apply: {error}"))
+            .is_none()
+    );
+
+    for (sequence, observed_at_nanos) in [
+        (5, 100_000_000_u64),
+        (6, 130_000_000_u64),
+        (7, 160_000_000_u64),
+    ] {
+        let landing_status = decoder
+            .decode_line(&format!(
+                r#"{{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":{sequence},"observedAtNanos":{observed_at_nanos},"type":"deckStatus","payload":{{"deviceNumber":1,"deviceName":"CDJ-1500X","playing":true,"paused":false,"cued":false,"tempoMaster":true,"onAir":true,"sourcePlayer":1,"sourceSlot":"USB_SLOT","trackType":"REKORDBOX","rekordboxId":1256,"trackBpm":155.0,"effectiveBpm":155.0,"beatNumber":65,"beatWithinBar":1,"rawPitch":1048576}}}}"#,
+            ))
+            .unwrap_or_else(|error| panic!("landing status should decode: {error}"));
+        provider
+            .ingest(landing_status, MonotonicTime::new(sequence))
+            .unwrap_or_else(|error| panic!("landing status should translate: {error}"));
+    }
+    let loop_beat = decoder
+        .decode_line(
+            r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":8,"observedAtNanos":170000000,"type":"beat","payload":{"deviceNumber":1,"deviceName":"CDJ-1500X","effectiveBpm":155.0,"beatWithinBar":1,"tempoMaster":true}}"#,
+        )
+        .unwrap_or_else(|error| panic!("loop beat should decode: {error}"));
+    provider
+        .ingest(loop_beat, MonotonicTime::new(8))
+        .unwrap_or_else(|error| panic!("loop beat should translate: {error}"));
+    let committed = provider
+        .transport(lumi_domain::TrackLoadId::new(1))
+        .unwrap_or_else(|| panic!("loop transport should remain loaded"));
+    assert_eq!(committed.beat, 64);
+    assert_eq!(provider.diagnostics().position_discontinuity_count, 1);
+
+    let landing_precise = decoder
+        .decode_line(
+            r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":9,"observedAtNanos":180000000,"type":"precisePosition","payload":{"deviceNumber":1,"deviceName":"CDJ-1500X","playbackPositionMillis":24834,"effectiveBpm":155.0,"beatWithinBar":1,"tempoMaster":true}}"#,
+        )
+        .unwrap_or_else(|error| panic!("landing precise position should decode: {error}"));
+    provider
+        .ingest(landing_precise, MonotonicTime::new(9))
+        .unwrap_or_else(|error| panic!("landing precise position should queue: {error}"));
+    let landing_precise = provider
+        .drain_precise_position_observations()
+        .pop()
+        .unwrap_or_else(|| panic!("landing precise position should be retained"));
+    assert!(
+        provider
+            .apply_authoritative_position(landing_precise, 64, true, MonotonicTime::new(10))
+            .unwrap_or_else(|error| panic!("landing precise position should apply: {error}"))
+            .is_none()
+    );
+    let after_precise = provider
+        .transport(lumi_domain::TrackLoadId::new(1))
+        .unwrap_or_else(|| panic!("transport should remain loaded"));
+    assert_eq!(after_precise.beat, 64);
+    assert_eq!(
+        after_precise.discontinuity_revision,
+        committed.discontinuity_revision
+    );
+    assert_eq!(provider.diagnostics().position_discontinuity_count, 1);
+}
+
+#[test]
+fn sparse_status_progress_does_not_turn_the_next_exact_beat_into_a_seek() {
+    let mut decoder = BridgeDecoder::new();
+    let mut provider = ProLinkDeckSourceProvider::new(MonotonicTime::new(0))
+        .unwrap_or_else(|error| panic!("provider should initialize: {error}"));
+    for (line, time) in [(HELLO, 1), (READY, 2)] {
+        let message = decoder
+            .decode_line(line)
+            .unwrap_or_else(|error| panic!("fixture should decode: {error}"));
+        provider
+            .ingest(message, MonotonicTime::new(time))
+            .unwrap_or_else(|error| panic!("message should translate: {error}"));
+    }
+    let initial_status = decoder
+        .decode_line(
+            r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":3,"observedAtNanos":30000000,"type":"deckStatus","payload":{"deviceNumber":1,"deviceName":"CDJ-1500X","playing":true,"paused":false,"cued":false,"tempoMaster":true,"onAir":true,"sourcePlayer":1,"sourceSlot":"USB_SLOT","trackType":"REKORDBOX","rekordboxId":1256,"trackBpm":155.0,"effectiveBpm":155.0,"beatNumber":65,"beatWithinBar":1,"rawPitch":1048576}}"#,
+        )
+        .unwrap_or_else(|error| panic!("initial status should decode: {error}"));
+    provider
+        .ingest(initial_status, MonotonicTime::new(3))
+        .unwrap_or_else(|error| panic!("initial status should translate: {error}"));
+    let baseline_revision = provider
+        .transport(lumi_domain::TrackLoadId::new(1))
+        .unwrap_or_else(|| panic!("transport should be loaded"))
+        .discontinuity_revision;
+
+    // Exact Beat packets keep progressing while CdjStatus is sparse.
+    let mut sequence = 4_u64;
+    for absolute_beat in 65_u32..=126 {
+        let beat_within_bar = (absolute_beat % 4) + 1;
+        let beat = decoder
+            .decode_line(&format!(
+                r#"{{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":{sequence},"observedAtNanos":{},"type":"beat","payload":{{"deviceNumber":1,"deviceName":"CDJ-1500X","effectiveBpm":155.0,"beatWithinBar":{beat_within_bar},"tempoMaster":true}}}}"#,
+                sequence * 10_000_000
+            ))
+            .unwrap_or_else(|error| panic!("beat should decode: {error}"));
+        provider
+            .ingest(beat, MonotonicTime::new(sequence))
+            .unwrap_or_else(|error| panic!("beat should translate: {error}"));
+        sequence += 1;
+    }
+    assert_eq!(
+        provider
+            .transport(lumi_domain::TrackLoadId::new(1))
+            .unwrap_or_else(|| panic!("transport should remain loaded"))
+            .beat,
+        126
+    );
+
+    // The next status cluster appears 64 beats ahead of the old status
+    // baseline, but only two beats ahead of the already-current Beat lane.
+    for _ in 0..3 {
+        let status = decoder
+            .decode_line(&format!(
+                r#"{{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":{sequence},"observedAtNanos":{},"type":"deckStatus","payload":{{"deviceNumber":1,"deviceName":"CDJ-1500X","playing":true,"paused":false,"cued":false,"tempoMaster":true,"onAir":true,"sourcePlayer":1,"sourceSlot":"USB_SLOT","trackType":"REKORDBOX","rekordboxId":1256,"trackBpm":155.0,"effectiveBpm":155.0,"beatNumber":129,"beatWithinBar":1,"rawPitch":1048576}}}}"#,
+                sequence * 10_000_000
+            ))
+            .unwrap_or_else(|error| panic!("sparse status should decode: {error}"));
+        provider
+            .ingest(status, MonotonicTime::new(sequence))
+            .unwrap_or_else(|error| panic!("sparse status should translate: {error}"));
+        sequence += 1;
+    }
+    let next_beat = decoder
+        .decode_line(&format!(
+            r#"{{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":{sequence},"observedAtNanos":{},"type":"beat","payload":{{"deviceNumber":1,"deviceName":"CDJ-1500X","effectiveBpm":155.0,"beatWithinBar":4,"tempoMaster":true}}}}"#,
+            sequence * 10_000_000
+        ))
+        .unwrap_or_else(|error| panic!("next beat should decode: {error}"));
+    provider
+        .ingest(next_beat, MonotonicTime::new(sequence))
+        .unwrap_or_else(|error| panic!("next beat should translate: {error}"));
+
+    let transport = provider
+        .transport(lumi_domain::TrackLoadId::new(1))
+        .unwrap_or_else(|| panic!("transport should remain loaded"));
+    assert_eq!(transport.beat, 127);
+    assert_eq!(transport.discontinuity_revision, baseline_revision);
+    assert_eq!(provider.diagnostics().position_discontinuity_count, 0);
+    let timing = provider.drain_timing_observations();
+    assert!(
+        !timing
+            .last()
+            .is_some_and(|observation| observation.discontinuity)
+    );
 }
 
 #[test]
@@ -618,7 +807,7 @@ fn delayed_playing_status_progress_does_not_create_a_transport_discontinuity() {
         .transport(lumi_domain::TrackLoadId::new(1))
         .unwrap_or_else(|| panic!("loaded deck should retain transport"));
     assert_eq!(after.discontinuity_revision, before.discontinuity_revision);
-    assert_eq!(after.beat, 23);
+    assert_eq!(after.beat, 17);
 }
 
 #[test]
@@ -638,7 +827,7 @@ fn a_late_playing_status_frame_cannot_rewind_the_canonical_deck_beat() {
     let before = provider
         .transport(lumi_domain::TrackLoadId::new(1))
         .unwrap_or_else(|| panic!("loaded deck should expose transport"));
-    assert_eq!(before.beat, 16);
+    assert_eq!(before.beat, 17);
 
     let late_status = decoder
         .decode_line(
@@ -652,7 +841,7 @@ fn a_late_playing_status_frame_cannot_rewind_the_canonical_deck_beat() {
     let after = provider
         .transport(lumi_domain::TrackLoadId::new(1))
         .unwrap_or_else(|| panic!("loaded deck should retain transport"));
-    assert_eq!(after.beat, 16);
+    assert_eq!(after.beat, 17);
     assert_eq!(after.discontinuity_revision, before.discontinuity_revision);
     assert!(
         provider

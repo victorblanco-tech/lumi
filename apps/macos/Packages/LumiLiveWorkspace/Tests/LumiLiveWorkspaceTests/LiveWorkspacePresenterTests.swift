@@ -279,7 +279,7 @@ struct LiveWorkspacePresenterTests {
         #expect(state.playbackClock.condition == .ready)
     }
 
-    @Test("Live timing distinguishes the applied value from the next-phrase value")
+    @Test("Live timing distinguishes the saved value from a pending value")
     func pendingTimingIsPresentedWithoutReplacingAppliedTiming() throws {
         let recorded = try recordedEnvelope()
         var payload = recorded.payload
@@ -311,8 +311,9 @@ struct LiveWorkspacePresenterTests {
         #expect(snapshot.midiIntegration?.pendingTimingOffsetMillis == 20)
         #expect(state.content?.lightingTimingOffsetMillis == 0)
         #expect(state.content?.pendingLightingTimingOffsetMillis == 20)
-        #expect(state.lightingMidi.detail.contains("+0 ms applied"))
+        #expect(state.lightingMidi.detail.contains("+0 ms saved"))
         #expect(state.lightingMidi.detail.contains("+20 ms pending for next phrase"))
+        #expect(state.lightingMidi.detail.contains("dev-51 boundary output"))
     }
 
     @Test("Tech degrades when the lighting MIDI source is unavailable")
@@ -517,7 +518,7 @@ struct LiveWorkspacePresenterTests {
             discontinuityRevision: 3,
             at: 101
         ))
-        #expect(playing.remainsValid(
+        #expect(!playing.remainsValid(
             trackLoadID: 7,
             positionMillis: 3_000,
             durationMillis: 10_000,
@@ -525,7 +526,7 @@ struct LiveWorkspacePresenterTests {
             playbackRate: 1.1,
             discontinuityRevision: 3,
             at: 101
-        ))
+        ), "a forward authoritative drift beyond 250 ms must refresh the clock")
         #expect(playing.remainsValid(
             trackLoadID: 7,
             positionMillis: 250,

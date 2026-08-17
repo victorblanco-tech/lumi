@@ -68,6 +68,7 @@ use tokio::net::{TcpListener, TcpStream};
 use tokio::time::{MissedTickBehavior, timeout};
 
 use crate::StartupReady;
+use crate::autoloop_executor::{AutoloopCueExecutor, AutoloopExecutorState, AutoloopTarget};
 use crate::commands::{DeckSourceSelection, SessionCommand, decode_command};
 use crate::library::{LibraryPlanContext, LibraryWorker, LibraryWorkerError, ResolvedLibraryCue};
 use crate::link_relay::LinkRelay;
@@ -88,13 +89,6 @@ const AUTO_PUBLISH_MIDI_ENVIRONMENT_KEY: &str = "LUMI_AUTO_PUBLISH_MIDI";
 const MAXIMUM_AUTHENTICATION_BYTES: usize = 512;
 const AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(5);
 const INTEGRATION_PUMP_INTERVAL: Duration = Duration::from_millis(20);
-// Prepare the identity and deadline up to four bars ahead, but release Bank
-// and AutoLoop MIDI only against a fresh exact CDJ position. This retains
-// predictable timing without letting a queued old-phrase action escape after
-// a hotcue or seek. Transport discontinuities invalidate the generation below.
-const PROLINK_AUTOLOOP_PREDICTION_HORIZON_BEATS: u32 = 16;
-const PROLINK_PREDICTION_RESCHEDULE_TOLERANCE: Duration = Duration::from_millis(10);
-const PROLINK_POSITION_AUTHORITY_MAX_AGE: Duration = Duration::from_millis(250);
 const EVENT_QUEUE_CAPACITY: usize = 256;
 const COMMAND_ID_CACHE_CAPACITY: usize = 256;
 const LIBRARY_CONTEXT_CAPACITY: usize = 256;
@@ -145,7 +139,7 @@ pub async fn run() -> Result<(), EngineError> {
                 process_deck_input_messages(&mut runtime)?;
                 runtime
                     .output_worker
-                    .service_pending_autoloop(runtime.state.state(), false);
+                    .service_pending_autoloop();
                 None
             }
         };
@@ -253,7 +247,7 @@ async fn serve_authenticated_client(
                 process_deck_input_messages(runtime)?;
                 runtime
                     .output_worker
-                    .service_pending_autoloop(runtime.state.state(), false);
+                    .service_pending_autoloop();
             }
             command = read_command_line(&mut command_reader, &mut command_buffer) => {
                 let Some(command_bytes) = command? else {
@@ -1110,86 +1104,8 @@ struct OutputWorker {
     timing_offset_millis: i16,
     pending_timing_offset_millis: Option<i16>,
     last_midi_publish_attempt: Option<Instant>,
-    precise_autoloop_fallback: bool,
     realtime_generation: u64,
-    scheduled_prearm: Option<ScheduledPrearm>,
-    scheduled_early_trigger: Option<ScheduledEarlyTrigger>,
-    prearmed_autoloop: Option<PrearmedAutoloop>,
-    predictively_triggered: Option<AutoloopExecutionIdentity>,
-    pending_autoloop: Option<PendingAutoloop>,
-    autoloop_requested_count: u64,
-    autoloop_prearmed_count: u64,
-    autoloop_emitted_count: u64,
-    autoloop_cancelled_count: u64,
-    autoloop_late_count: u64,
-    autoloop_beat_fallback_count: u64,
-    authoritative_position: Option<AuthoritativePositionReceipt>,
-}
-
-#[derive(Clone, Debug)]
-struct PrearmedAutoloop {
-    bank_number: u8,
-    selected_at: Instant,
-    deck_id: lumi_domain::DeckId,
-    track_load_id: TrackLoadId,
-    plan_revision: PlanRevision,
-    phrase_index: u16,
-}
-
-#[derive(Clone, Debug)]
-struct ScheduledPrearm {
-    bank_number: u8,
-    due_at: Instant,
-    deck_id: lumi_domain::DeckId,
-    track_load_id: TrackLoadId,
-    plan_revision: PlanRevision,
-    phrase_index: u16,
-    source_generation: u64,
-}
-
-#[derive(Clone, Debug)]
-struct ScheduledEarlyTrigger {
-    due_at: Instant,
-    identity: AutoloopExecutionIdentity,
-    autoloop_number: u8,
-    source_generation: u64,
-    #[cfg_attr(test, allow(dead_code))]
-    effective_bpm_milli: u32,
-}
-
-#[derive(Clone, Copy, Debug)]
-struct AuthoritativePositionReceipt {
-    deck_id: lumi_domain::DeckId,
-    source_generation: u64,
-    received_at: Instant,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct AutoloopExecutionIdentity {
-    deck_id: lumi_domain::DeckId,
-    track_load_id: TrackLoadId,
-    plan_revision: PlanRevision,
-    phrase_index: u16,
-}
-
-impl AutoloopExecutionIdentity {
-    fn from_request(request: &OutputExecutionRequest) -> Self {
-        Self {
-            deck_id: request.deck_id(),
-            track_load_id: request.track_load_id(),
-            plan_revision: request.plan_revision(),
-            phrase_index: request.phrase_index(),
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-struct PendingAutoloop {
-    request: OutputExecutionRequest,
-    bank_number: u8,
-    autoloop_number: u8,
-    due_at: Instant,
-    requires_precise_beat: bool,
+    autoloop_executor: AutoloopCueExecutor,
 }
 
 impl OutputWorker {
@@ -1203,32 +1119,8 @@ impl OutputWorker {
             timing_offset_millis: 0,
             pending_timing_offset_millis: None,
             last_midi_publish_attempt: None,
-            precise_autoloop_fallback: false,
             realtime_generation: 0,
-            scheduled_prearm: None,
-            scheduled_early_trigger: None,
-            prearmed_autoloop: None,
-            predictively_triggered: None,
-            pending_autoloop: None,
-            autoloop_requested_count: 0,
-            autoloop_prearmed_count: 0,
-            autoloop_emitted_count: 0,
-            autoloop_cancelled_count: 0,
-            autoloop_late_count: 0,
-            autoloop_beat_fallback_count: 0,
-            authoritative_position: None,
-        }
-    }
-
-    fn set_precise_autoloop_fallback(&mut self, enabled: bool) {
-        self.precise_autoloop_fallback = enabled;
-        if !enabled {
-            self.scheduled_prearm = None;
-            self.scheduled_early_trigger = None;
-            self.prearmed_autoloop = None;
-            self.predictively_triggered = None;
-            self.authoritative_position = None;
-            let _ = self.midi_output.cancel_all();
+            autoloop_executor: AutoloopCueExecutor::default(),
         }
     }
 
@@ -1241,20 +1133,13 @@ impl OutputWorker {
     }
 
     #[cfg_attr(test, allow(dead_code))]
-    fn invalidate_prolink_prediction(&mut self) {
+    fn invalidate_autoloop_deadline(&mut self) {
         let _ = self.begin_realtime_generation();
         let _ = self.midi_output.cancel_all();
-        self.scheduled_prearm = None;
-        self.scheduled_early_trigger = None;
-        self.prearmed_autoloop = None;
-        self.predictively_triggered = None;
-        self.authoritative_position = None;
-        if self.pending_autoloop.take().is_some() {
-            self.autoloop_cancelled_count = self.autoloop_cancelled_count.saturating_add(1);
-        }
+        self.autoloop_executor.cancel_pending();
     }
 
-    #[cfg_attr(test, allow(dead_code))]
+    #[cfg(any())]
     fn active_realtime_generation(&mut self) -> Option<u64> {
         if self.realtime_generation == 0 {
             self.begin_realtime_generation()
@@ -1263,6 +1148,7 @@ impl OutputWorker {
         }
     }
 
+    #[cfg(any())]
     fn schedule_autoloop(
         &mut self,
         state: &lumi_domain::RuntimeState,
@@ -1395,6 +1281,7 @@ impl OutputWorker {
         self.cancel_stale_autoloop(state);
     }
 
+    #[cfg(any())]
     fn cancel_stale_autoloop(&mut self, state: &lumi_domain::RuntimeState) {
         let stale = self.pending_autoloop.as_ref().is_some_and(|pending| {
             !execution_context_is_current(state, &pending.request)
@@ -1410,39 +1297,12 @@ impl OutputWorker {
         }
     }
 
-    fn service_pending_autoloop(&mut self, state: &lumi_domain::RuntimeState, precise_beat: bool) {
-        self.service_scheduled_prearm(state);
-        self.service_scheduled_early_trigger(state);
-        self.cancel_stale_autoloop(state);
-        let ready = self.pending_autoloop.as_ref().is_some_and(|pending| {
-            (!pending.requires_precise_beat || precise_beat) && Instant::now() >= pending.due_at
-        });
-        if !ready {
-            return;
-        }
-        let Some(pending) = self.pending_autoloop.take() else {
-            return;
-        };
-        let emitted = if pending.requires_precise_beat {
-            self.midi_output
-                .schedule_autoloop(
-                    self.realtime_generation,
-                    pending.autoloop_number,
-                    Instant::now(),
-                )
-                .is_ok()
-        } else {
-            true
-        };
-        if emitted {
-            self.autoloop_emitted_count = self.autoloop_emitted_count.saturating_add(1);
-            if pending.requires_precise_beat {
-                self.autoloop_beat_fallback_count =
-                    self.autoloop_beat_fallback_count.saturating_add(1);
-            }
-        }
+    fn service_pending_autoloop(&mut self) {
+        self.autoloop_executor
+            .complete_if_emitted(self.midi_output.status().emitted_count);
     }
 
+    #[cfg(any())]
     fn service_scheduled_prearm(&mut self, state: &lumi_domain::RuntimeState) {
         let stale = self.scheduled_prearm.as_ref().is_some_and(|scheduled| {
             state.operation() != OperationState::Live
@@ -1502,6 +1362,7 @@ impl OutputWorker {
         self.autoloop_prearmed_count = self.autoloop_prearmed_count.saturating_add(1);
     }
 
+    #[cfg(any())]
     fn service_scheduled_early_trigger(&mut self, state: &lumi_domain::RuntimeState) {
         let stale = self
             .scheduled_early_trigger
@@ -1574,7 +1435,7 @@ impl OutputWorker {
         self.prearmed_autoloop = None;
     }
 
-    #[cfg(not(test))]
+    #[cfg(any())]
     fn on_authoritative_prolink_position(
         &mut self,
         state: &lumi_domain::RuntimeState,
@@ -1703,6 +1564,7 @@ impl OutputWorker {
             });
     }
 
+    #[cfg(any())]
     fn has_fresh_position_authority(
         &self,
         deck_id: lumi_domain::DeckId,
@@ -1716,6 +1578,7 @@ impl OutputWorker {
         )
     }
 
+    #[cfg(any())]
     fn prearm_current_or_first_cue(&mut self, state: &lumi_domain::RuntimeState) {
         if state.operation() != OperationState::Live || self.pending_autoloop.is_some() {
             return;
@@ -1754,6 +1617,72 @@ impl OutputWorker {
         self.autoloop_prearmed_count = self.autoloop_prearmed_count.saturating_add(1);
     }
 
+    fn begin_autoloop_execution_epoch(&mut self) -> Result<(), EngineError> {
+        self.autoloop_executor
+            .begin_execution_epoch()
+            .ok_or_else(|| EngineError::Midi("AutoLoop execution epoch overflowed".to_owned()))?;
+        self.midi_output
+            .cancel_all()
+            .map_err(|error| EngineError::Midi(error.to_string()))?;
+        Ok(())
+    }
+
+    fn execute_autoloop(
+        &mut self,
+        request: &OutputExecutionRequest,
+        bank_number: u8,
+        autoloop_number: u8,
+    ) {
+        let lane_before = self.midi_output.status();
+        let target = AutoloopTarget {
+            bank_number,
+            autoloop_number,
+        };
+        let Some(schedule) =
+            self.autoloop_executor
+                .schedule(request, target, lane_before.source.active_bank)
+        else {
+            return;
+        };
+        let Some(generation) = self.begin_realtime_generation() else {
+            self.autoloop_executor.fail(schedule.identity);
+            return;
+        };
+        let now = Instant::now();
+        let mut scheduled_actions = 0_u64;
+        if schedule.select_bank {
+            if self
+                .midi_output
+                .schedule_bank(generation, bank_number, now)
+                .is_err()
+            {
+                self.autoloop_executor.fail(schedule.identity);
+                return;
+            }
+            scheduled_actions = scheduled_actions.saturating_add(1);
+        }
+        self.autoloop_executor.mark_bank_prepared(schedule);
+        let autoloop_deadline = if schedule.select_bank {
+            now + BANK_SETTLE_DELAY
+        } else {
+            now
+        };
+        if self
+            .midi_output
+            .schedule_autoloop(generation, autoloop_number, autoloop_deadline)
+            .is_err()
+        {
+            let _ = self.midi_output.cancel_all();
+            self.autoloop_executor.fail(schedule.identity);
+            return;
+        }
+        scheduled_actions = scheduled_actions.saturating_add(1);
+        self.autoloop_executor.mark_triggered(
+            schedule,
+            lane_before.emitted_count.saturating_add(scheduled_actions),
+        );
+    }
+
     fn process_effects(
         &mut self,
         runtime: &mut SerializedRuntime,
@@ -1763,11 +1692,7 @@ impl OutputWorker {
             let (result, completed_at) = match effect {
                 lumi_domain::Effect::EnsureOutputClosed { .. } => {
                     let _ = self.midi_output.cancel_all();
-                    self.scheduled_prearm = None;
-                    self.scheduled_early_trigger = None;
-                    self.prearmed_autoloop = None;
-                    self.predictively_triggered = None;
-                    self.pending_autoloop = None;
+                    self.autoloop_executor.cancel_pending();
                     (EffectResult::OutputGateClosed, MonotonicTime::new(0))
                 }
                 lumi_domain::Effect::ExecuteCue(request) => {
@@ -1781,12 +1706,7 @@ impl OutputWorker {
                             if self.midi_output.status().source.state == MidiSourceState::Ready {
                                 // Hardware output fails closed and reports through Tech status;
                                 // it must never stall the authoritative transport/runtime lane.
-                                self.schedule_autoloop(
-                                    runtime.state(),
-                                    &request,
-                                    bank_number,
-                                    autoloop_number,
-                                );
+                                self.execute_autoloop(&request, bank_number, autoloop_number);
                             }
                         }
                         result
@@ -1912,16 +1832,19 @@ impl OutputWorker {
     }
 }
 
+#[cfg(any())]
 fn positive_timing_delay(offset_millis: i16) -> Duration {
     u64::try_from(offset_millis.max(0))
         .map(Duration::from_millis)
         .unwrap_or(Duration::ZERO)
 }
 
+#[cfg(any())]
 fn negative_timing_advance(offset_millis: i16) -> Duration {
     Duration::from_millis(u64::from(offset_millis.min(0).unsigned_abs()))
 }
 
+#[cfg(any())]
 fn prolink_predictive_delays(
     beats_until: u32,
     bpm_milli: u32,
@@ -1943,6 +1866,7 @@ fn prolink_predictive_delays(
     Some((trigger_delay.saturating_sub(preparation), trigger_delay))
 }
 
+#[cfg(any())]
 fn deadline_drift_exceeds_tolerance(
     current: Instant,
     candidate: Instant,
@@ -1955,6 +1879,7 @@ fn deadline_drift_exceeds_tolerance(
     }
 }
 
+#[cfg(any())]
 fn prediction_requires_reschedule(
     scheduled_bpm_milli: u32,
     observed_bpm_milli: u32,
@@ -1966,6 +1891,7 @@ fn prediction_requires_reschedule(
         && deadline_drift_exceeds_tolerance(current, candidate, tolerance)
 }
 
+#[cfg(any())]
 fn position_authority_is_fresh(
     authority: Option<AuthoritativePositionReceipt>,
     deck_id: lumi_domain::DeckId,
@@ -1980,6 +1906,7 @@ fn position_authority_is_fresh(
     })
 }
 
+#[cfg(any())]
 const fn predictive_deadline_is_stale_for_phrase(
     current_phrase_index: Option<u16>,
     scheduled_phrase_index: u16,
@@ -2285,9 +2212,6 @@ fn transport_ack_envelope(
 }
 
 fn process_deck_input_messages(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
-    runtime.output_worker.set_precise_autoloop_fallback(
-        runtime.deck_source_mode == DeckSourceMode::ConnectedDecks && runtime.uses_direct_prolink(),
-    );
     let messages = runtime.deck_input.drain_messages();
     if runtime.deck_source_mode != DeckSourceMode::ConnectedDecks {
         #[cfg(not(test))]
@@ -2395,7 +2319,7 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
             .planning_worker
             .library_context(position.track_load_id)
         else {
-            runtime.output_worker.invalidate_prolink_prediction();
+            runtime.output_worker.invalidate_autoloop_deadline();
             continue;
         };
         let absolute_beat = context.beat_at_millis(position.playback_position_millis);
@@ -2410,17 +2334,11 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
             continue;
         };
         if authoritative.discontinuity {
-            // Cancel the old phrase deadline before the seek/hotcue event can
-            // generate a replacement. This is the hard output barrier that
-            // prevents a previously prepared Bridge from escaping at Intro.
-            runtime.output_worker.invalidate_prolink_prediction();
+            // A confirmed seek/hotcue is the only position event allowed to
+            // invalidate a not-yet-emitted cue. Normal CDJ position traffic
+            // never touches the sparse SoundSwitch command lane.
+            runtime.output_worker.invalidate_autoloop_deadline();
         }
-        // Record the new exact authority before its PhraseChanged event can
-        // produce an output effect. This lets the landing phrase pass the
-        // hardware gate while every older generation is already cancelled.
-        runtime
-            .output_worker
-            .on_authoritative_prolink_position(runtime.state.state(), authoritative);
         process_pending_source_events(runtime)?;
     }
     for observation in runtime.direct_deck_source.drain_timing_observations() {
@@ -3243,6 +3161,12 @@ fn apply_operation_command(
         .operation_sequence
         .checked_add(1)
         .ok_or(CommandApplicationError::OperationSequenceOverflow)?;
+    if command == OperationCommand::Start {
+        runtime
+            .output_worker
+            .begin_autoloop_execution_epoch()
+            .map_err(CommandApplicationError::Engine)?;
+    }
     process_domain_event(
         &mut runtime.state,
         &mut runtime.output_worker,
@@ -3255,11 +3179,6 @@ fn apply_operation_command(
         }),
     )
     .map_err(CommandApplicationError::Engine)?;
-    if command == OperationCommand::Start {
-        runtime
-            .output_worker
-            .prearm_current_or_first_cue(runtime.state.state());
-    }
     Ok(())
 }
 
@@ -3711,6 +3630,69 @@ fn snapshot_envelope_internal(
     }
     let midi_output = runtime.output_worker.midi_status();
     let realtime_midi = runtime.output_worker.realtime_midi_status();
+    let autoloop_state = runtime.output_worker.autoloop_executor.state();
+    let autoloop_execution = match autoloop_state {
+        AutoloopExecutorState::Idle => Value::Null,
+        AutoloopExecutorState::Scheduled { identity, target }
+        | AutoloopExecutorState::BankPrepared { identity, target }
+        | AutoloopExecutorState::Triggered {
+            identity, target, ..
+        }
+        | AutoloopExecutorState::Completed { identity, target } => json!({
+            "executionEpoch": identity.execution_epoch,
+            "deckNumber": identity.deck_id.value(),
+            "trackLoadId": identity.track_load_id.value(),
+            "planRevision": identity.plan_revision.value(),
+            "phraseIndex": identity.phrase_index,
+            "bankNumber": target.bank_number,
+            "autoloopNumber": target.autoloop_number,
+        }),
+    };
+    let realtime_lane = json!({
+        "queueCapacity": realtime_midi.queue_capacity,
+        "queueDepth": realtime_midi.queue_depth,
+        "queueHighWater": realtime_midi.queue_high_water,
+        "scheduledCount": realtime_midi.scheduled_count,
+        "emittedCount": realtime_midi.emitted_count,
+        "cancelledCount": realtime_midi.cancelled_count,
+        "saturationCount": realtime_midi.saturation_count,
+        "latencySampleCount": realtime_midi.latency_sample_count,
+        "latencyP50Micros": realtime_midi.latency_p50_micros,
+        "latencyP95Micros": realtime_midi.latency_p95_micros,
+        "latencyP99Micros": realtime_midi.latency_p99_micros,
+        "latencyMaxMicros": realtime_midi.latency_max_micros,
+        "lastScheduledAction": realtime_midi.last_scheduled_action.map(|action| match action {
+            RealtimeMidiActionKind::Bank => "bank",
+            RealtimeMidiActionKind::Autoloop => "autoloop",
+        }),
+        "lastScheduledNumber": realtime_midi.last_scheduled_number,
+        "lastScheduledLeadMicros": realtime_midi.last_scheduled_lead_micros,
+        "lastEmittedAction": realtime_midi.last_emitted_action.map(|action| match action {
+            RealtimeMidiActionKind::Bank => "bank",
+            RealtimeMidiActionKind::Autoloop => "autoloop",
+        }),
+        "lastEmittedNumber": realtime_midi.last_emitted_number,
+        "lastDispatchLatenessMicros": realtime_midi.last_dispatch_lateness_micros,
+        "lateDispatchCount": realtime_midi.late_dispatch_count,
+    });
+    let realtime_scheduler = json!({
+        "mode": "exactlyOncePhrase",
+        "state": autoloop_state.name(),
+        "executionEpoch": runtime.output_worker.autoloop_executor.execution_epoch(),
+        "execution": autoloop_execution,
+        "prearmScheduled": Value::Null,
+        "pending": Value::Null,
+        "requestedCount": runtime.output_worker.autoloop_executor.requested_count(),
+        "prearmedCount": runtime.output_worker.autoloop_executor.bank_prepared_count(),
+        "emittedCount": runtime.output_worker.autoloop_executor.triggered_count(),
+        "completedCount": runtime.output_worker.autoloop_executor.completed_count(),
+        "duplicateCount": runtime.output_worker.autoloop_executor.duplicate_count(),
+        "cancelledCount": runtime.output_worker.autoloop_executor.cancelled_count(),
+        "failedCount": runtime.output_worker.autoloop_executor.failed_count(),
+        "lateCount": 0,
+        "beatFallbackCount": 0,
+        "lane": realtime_lane,
+    });
     payload.insert(
         "midiIntegration".to_owned(),
         json!({
@@ -3728,58 +3710,7 @@ fn snapshot_envelope_internal(
             "timingOffsetMillis": runtime.output_worker.timing_offset_millis(),
             "pendingTimingOffsetMillis": runtime.output_worker.pending_timing_offset_millis(),
             "bankPreRollMillis": BANK_SETTLE_DELAY.as_millis(),
-            "realtimeScheduler": {
-                "mode": if runtime.output_worker.precise_autoloop_fallback {
-                    "preciseBeatFallback"
-                } else {
-                    "settleDeadline"
-                },
-                "prearmScheduled": runtime.output_worker.scheduled_prearm.as_ref().map(|scheduled| json!({
-                    "deckNumber": scheduled.deck_id.value(),
-                    "phraseIndex": scheduled.phrase_index,
-                    "bankNumber": scheduled.bank_number,
-                })),
-                "pending": runtime.output_worker.pending_autoloop.as_ref().map(|pending| json!({
-                    "deckNumber": pending.request.deck_id().value(),
-                    "phraseIndex": pending.request.phrase_index(),
-                    "bankNumber": pending.bank_number,
-                    "autoloopNumber": pending.autoloop_number,
-                    "requiresPreciseBeat": pending.requires_precise_beat,
-                })),
-                "requestedCount": runtime.output_worker.autoloop_requested_count,
-                "prearmedCount": runtime.output_worker.autoloop_prearmed_count,
-                "emittedCount": runtime.output_worker.autoloop_emitted_count,
-                "cancelledCount": runtime.output_worker.autoloop_cancelled_count,
-                "lateCount": runtime.output_worker.autoloop_late_count,
-                "beatFallbackCount": runtime.output_worker.autoloop_beat_fallback_count,
-                "lane": {
-                    "queueCapacity": realtime_midi.queue_capacity,
-                    "queueDepth": realtime_midi.queue_depth,
-                    "queueHighWater": realtime_midi.queue_high_water,
-                    "scheduledCount": realtime_midi.scheduled_count,
-                    "emittedCount": realtime_midi.emitted_count,
-                    "cancelledCount": realtime_midi.cancelled_count,
-                    "saturationCount": realtime_midi.saturation_count,
-                    "latencySampleCount": realtime_midi.latency_sample_count,
-                    "latencyP50Micros": realtime_midi.latency_p50_micros,
-                    "latencyP95Micros": realtime_midi.latency_p95_micros,
-                    "latencyP99Micros": realtime_midi.latency_p99_micros,
-                    "latencyMaxMicros": realtime_midi.latency_max_micros,
-                    "lastScheduledAction": realtime_midi.last_scheduled_action.map(|action| match action {
-                        RealtimeMidiActionKind::Bank => "bank",
-                        RealtimeMidiActionKind::Autoloop => "autoloop",
-                    }),
-                    "lastScheduledNumber": realtime_midi.last_scheduled_number,
-                    "lastScheduledLeadMicros": realtime_midi.last_scheduled_lead_micros,
-                    "lastEmittedAction": realtime_midi.last_emitted_action.map(|action| match action {
-                        RealtimeMidiActionKind::Bank => "bank",
-                        RealtimeMidiActionKind::Autoloop => "autoloop",
-                    }),
-                    "lastEmittedNumber": realtime_midi.last_emitted_number,
-                    "lastDispatchLatenessMicros": realtime_midi.last_dispatch_lateness_micros,
-                    "lateDispatchCount": realtime_midi.late_dispatch_count,
-                },
-            },
+            "realtimeScheduler": realtime_scheduler,
         }),
     );
     let midi_clock = runtime.output_worker.midi_clock_status();
@@ -4619,10 +4550,6 @@ mod tests {
         assert_eq!(position_with_timing_offset(1_000, 35), 965);
         assert_eq!(position_with_timing_offset(10, 35), 0);
         assert_eq!(position_with_timing_offset(u64::MAX - 5, -35), u64::MAX);
-        assert_eq!(positive_timing_delay(35), Duration::from_millis(35));
-        assert_eq!(positive_timing_delay(-35), Duration::ZERO);
-        assert_eq!(negative_timing_advance(-35), Duration::from_millis(35));
-        assert_eq!(negative_timing_advance(35), Duration::ZERO);
     }
 
     #[test]
@@ -4676,6 +4603,7 @@ mod tests {
         );
     }
 
+    #[cfg(any())]
     #[test]
     fn pro_dj_link_predictive_schedule_respects_signed_user_offset() {
         let beat_at_140 = Duration::from_micros(60_000_000_000_u64 / 140_000);
@@ -4732,6 +4660,7 @@ mod tests {
         assert_eq!(two_beat_bank, Duration::from_millis(80));
     }
 
+    #[cfg(any())]
     #[test]
     fn stable_tempo_packet_jitter_does_not_replace_a_prepared_deadline() {
         let deadline = Instant::now() + Duration::from_secs(2);
@@ -4751,6 +4680,7 @@ mod tests {
         ));
     }
 
+    #[cfg(any())]
     #[test]
     fn connected_output_requires_fresh_exact_position_from_the_same_generation() {
         let now = Instant::now();
@@ -4784,6 +4714,7 @@ mod tests {
         assert!(!position_authority_is_fresh(None, deck, None, now));
     }
 
+    #[cfg(any())]
     #[test]
     fn entering_the_scheduled_phrase_keeps_its_midi_deadline_alive() {
         assert!(!predictive_deadline_is_stale_for_phrase(Some(4), 4));

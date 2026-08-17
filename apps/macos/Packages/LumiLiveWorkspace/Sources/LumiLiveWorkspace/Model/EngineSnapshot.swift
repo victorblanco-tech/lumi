@@ -444,7 +444,7 @@ public struct DeckVisualClockSnapshot: Equatable, Sendable {
         playbackRate authoritativePlaybackRate: Double,
         discontinuityRevision authoritativeDiscontinuityRevision: UInt64,
         at referenceTime: TimeInterval,
-        maximumPlayingDriftMillis _: Double = 250
+        maximumPlayingDriftMillis: Double = 250
     ) -> Bool {
         guard trackLoadID == authoritativeTrackLoadID,
               playing == authoritativePlaying,
@@ -456,14 +456,16 @@ public struct DeckVisualClockSnapshot: Equatable, Sendable {
         if !playing {
             return positionMillis == authoritativePositionMillis
         }
-        // A connected deck poll is observation data, not a transport command.
-        // Pro DJ Link packets can arrive late or briefly out of order; replacing
-        // this monotonic clock from such a poll made the Live waveform jump
-        // backwards. A real seek/hot-cue increments discontinuityRevision and
-        // is already rejected by the guard above.
-        _ = authoritativePositionMillis
-        _ = referenceTime
-        return true
+        // An older network observation may never rewind the monotonic visual
+        // clock. A newer authoritative position, however, must be allowed to
+        // pull a clock forward after SwiftUI/app-mode work delayed its anchor.
+        // Without this one-way drift bound the deck could remain seconds behind
+        // forever because every later poll was treated as equivalent.
+        let predicted = positionMillis(
+            at: Date(timeIntervalSinceReferenceDate: referenceTime)
+        )
+        let forwardDrift = Double(authoritativePositionMillis) - predicted
+        return forwardDrift <= maximumPlayingDriftMillis
     }
 }
 

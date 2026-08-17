@@ -6,7 +6,7 @@
 
     <groupId>co.victorblan.tech.lumi</groupId>
     <artifactId>lumi-prolink-simulator</artifactId>
-  <version>0.4.0-dev-50</version>
+  <version>0.4.0-dev-51</version>
     <name>Lumi Pro DJ Link Simulator</name>
     <description>Development-only USB-backed Pro DJ Link player simulator.</description>
     <url>https://github.com/victorblanco-tech/lumi</url>
