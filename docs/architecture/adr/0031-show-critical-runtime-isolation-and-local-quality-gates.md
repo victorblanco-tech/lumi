@@ -304,3 +304,21 @@ position or a forward position ahead of elapsed time remains an explicit
 Hot Cue, loop or beat-jump discontinuity. This prevents late network delivery
 from continuously re-anchoring Link while preserving fail-closed cancellation
 for real transport changes.
+
+## Implementation correction — `0.4.0-dev-45`
+
+Physical CDJ-1500X playback exposed that an asymmetric threshold is still not
+enough: Beat Link explicitly documents that high-frequency precise-position
+packets may contain too much jitter to discipline Ableton Link directly. An
+isolated packet may therefore never create a transport epoch. Lumi now requires
+three consecutive samples that follow one coherent new position trajectory
+before accepting a Hot Cue, seek, beatjump or loop wrap. Interleaved packets
+from the prior trajectory reset confirmation. Once confirmed, the old output
+generation is cancelled before the landing phrase is reduced, preserving the
+existing fail-closed output barrier with about 60 ms confirmation latency.
+
+macOS application activation is a presentation-only event. Core Animation may
+pause an occluded window's layer clock; when Lumi becomes active, waveform and
+AutoLoop-plan layers restart from the current app-side visual clock. This path
+may not issue an engine command, alter transport generation, re-anchor Link or
+touch MIDI. UI lifecycle and show timing are therefore mechanically separated.

@@ -233,3 +233,21 @@ wrap across 2,614 exact positions. A final three-minute output run processed
 26 MIDI events with zero late dispatches, cancellations, saturation or Link
 failures. Maximum dispatch latency was 153 microseconds, after which operation
 was Off, Link had zero peers and SoundSwitch remained responsive.
+
+### Dev-45 precise-position consensus and app activation
+
+During a later physical run, ordinary playback produced hundreds of false
+position discontinuities and hard Link re-anchors even though the realtime
+MIDI lane remained below 0.2 ms and unsaturated. The defect was upstream of
+output: isolated CDJ precise-position jitter was being promoted to a Hot Cue.
+
+Dev-45 adds a bounded three-sample transport-epoch confirmation filter. A
+candidate must continue coherently on the same new timeline for roughly 60 ms;
+an old/new interleave resets consensus. Only the confirmed candidate can
+cancel the old generation, move phrase authority, re-anchor Link and emit the
+landing AutoLoop. Regression coverage includes the original Beat-before-Hot
+Cue race plus stale-frame interleaving.
+
+Returning from SoundSwitch to Lumi separately restarts the AppKit layer
+animations from the current read-only visual clock. This repairs an occluded
+Core Animation timeline without any command to the show-critical engine.

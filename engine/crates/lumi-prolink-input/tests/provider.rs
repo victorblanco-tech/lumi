@@ -290,22 +290,29 @@ fn precise_position_overrides_a_stale_beat_after_hotcue_before_output_planning()
         "a beat without absolute position may not authorize Bridge"
     );
 
-    let intro_position = decoder
-        .decode_line(
-            r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":6,"observedAtNanos":120000000,"type":"precisePosition","payload":{"deviceNumber":1,"deviceName":"CDJ-1500X","playbackPositionMillis":0,"effectiveBpm":157.25,"beatWithinBar":1,"tempoMaster":true}}"#,
-        )
-        .unwrap_or_else(|error| panic!("hotcue position should decode: {error}"));
-    provider
-        .ingest(intro_position, MonotonicTime::new(7))
-        .unwrap_or_else(|error| panic!("hotcue position should queue: {error}"));
-    let intro_position = provider
-        .drain_precise_position_observations()
-        .pop()
-        .unwrap_or_else(|| panic!("hotcue position should be retained"));
-    let applied = provider
-        .apply_authoritative_position(intro_position, 0, MonotonicTime::new(8))
-        .unwrap_or_else(|error| panic!("hotcue position should apply: {error}"))
-        .unwrap_or_else(|| panic!("loaded track should accept its position"));
+    let mut applied = None;
+    for (sequence, observed_at_nanos, position_millis, at) in [
+        (6, 120_000_000, 0, 7),
+        (7, 150_000_000, 30, 8),
+        (8, 180_000_000, 60, 9),
+    ] {
+        let intro_position = decoder
+            .decode_line(&format!(
+                r#"{{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":{sequence},"observedAtNanos":{observed_at_nanos},"type":"precisePosition","payload":{{"deviceNumber":1,"deviceName":"CDJ-1500X","playbackPositionMillis":{position_millis},"effectiveBpm":157.25,"beatWithinBar":1,"tempoMaster":true}}}}"#,
+            ))
+            .unwrap_or_else(|error| panic!("hotcue position should decode: {error}"));
+        provider
+            .ingest(intro_position, MonotonicTime::new(at))
+            .unwrap_or_else(|error| panic!("hotcue position should queue: {error}"));
+        let intro_position = provider
+            .drain_precise_position_observations()
+            .pop()
+            .unwrap_or_else(|| panic!("hotcue position should be retained"));
+        applied = provider
+            .apply_authoritative_position(intro_position, 0, MonotonicTime::new(at + 10))
+            .unwrap_or_else(|error| panic!("hotcue position should apply: {error}"));
+    }
+    let applied = applied.unwrap_or_else(|| panic!("stable hotcue timeline should be confirmed"));
     assert!(applied.discontinuity);
     let observations = provider
         .drain_events()

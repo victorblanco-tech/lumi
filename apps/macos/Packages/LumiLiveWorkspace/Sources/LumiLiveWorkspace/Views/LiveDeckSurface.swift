@@ -1064,6 +1064,16 @@ private final class LivePlanLayerHostView: NSView {
         layer?.addSublayer(contentLayer)
         layer?.addSublayer(playheadLayer)
         layer?.addSublayer(playheadCapLayer)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationDidBecomeActive),
+            name: NSApplication.didBecomeActiveNotification,
+            object: nil
+        )
+    }
+
+    @objc private func applicationDidBecomeActive(_: Notification) {
+        applyCurrentState(restartAnimation: true)
     }
 
     @available(*, unavailable)
@@ -1680,6 +1690,16 @@ private final class RGBWaveformLayerHostView: NSView {
         layer?.addSublayer(waveformLayer)
         layer?.addSublayer(playheadLayer)
         layer?.addSublayer(playheadCapLayer)
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationDidBecomeActive),
+            name: NSApplication.didBecomeActiveNotification,
+            object: nil
+        )
+    }
+
+    @objc private func applicationDidBecomeActive(_: Notification) {
+        applyCurrentState(restartAnimation: true)
     }
 
     @available(*, unavailable)

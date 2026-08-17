@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.4.0-dev-45
+
+- Separates macOS presentation recovery from show-critical timing: returning
+  to Lumi now restarts the waveform and AutoLoop-plan Core Animation directly
+  from the current read-only visual clock without touching engine, Link or
+  MIDI state.
+- Requires three consecutive modern-player position frames to confirm a new
+  transport timeline. Isolated or interleaved precise-position jitter can no
+  longer create a seek generation, re-anchor Ableton Link, select a phrase or
+  trigger an AutoLoop.
+- Keeps real Hot Cues and loop wraps responsive: a stable new timeline is
+  confirmed in roughly 60 ms at the CDJ-1500X position update rate, after
+  which the old output generation is cancelled before the landing phrase is
+  applied.
+- Adds regressions for discontinuity consensus, stale-frame interleaving and
+  the exact Hot Cue phrase/output barrier.
+
 ## 0.4.0-dev-44
 
 - Makes modern-player `PrecisePosition` the only Pro DJ Link authority for

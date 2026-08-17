@@ -174,3 +174,8 @@ authorization boundary for connected-deck lighting. Bar-relative Beat and
 asynchronous status can no longer combine across a Hot Cue to select a stale
 phrase, and guarded deadlines fail closed when exact position is stale. See
 [`0.4.0-dev-44-exact-position-autoloop-authority.md`](../release/0.4.0-dev-44-exact-position-autoloop-authority.md).
+
+Version `0.4.0-dev-45` rejects isolated precise-position jitter through a
+three-sample transport-epoch consensus and makes macOS foreground activation a
+strictly presentation-only resynchronization. See
+[`0.4.0-dev-45-position-consensus-and-ui-resume.md`](../release/0.4.0-dev-45-position-consensus-and-ui-resume.md).
