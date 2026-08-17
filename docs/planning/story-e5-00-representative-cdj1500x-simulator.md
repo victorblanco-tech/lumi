@@ -3,6 +3,7 @@
 - Status: **Implemented and packaged locally; two-host verification pending**
 - Priority: **P0 Critical**
 - Target: `0.4.0-dev-53`
+- GitHub tracking: [#121](https://github.com/victorblanco-tech/lumi/issues/121)
 
 ## Outcome
 
