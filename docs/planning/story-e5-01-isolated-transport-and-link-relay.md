@@ -1,6 +1,6 @@
 # Story E5-01: Isolated Transport and Ableton Link Relay
 
-- Status: **Reopened; provider separation delivered, ingress separation incomplete**
+- Status: **Implementation complete in dev-54; physical soak evidence pending**
 - Priority: **P0 Critical**
 - Target: `0.4.0-dev-54`
 - Components: Pro DJ Link, Engine, Ableton Link
@@ -100,3 +100,25 @@ observations still arrive after the shared Java FIFO and the engine's shared
 and backpressure isolation. Dev-52 physical evidence showed late/oscillating BPM
 while the final provider remained healthy. Completion now requires the
 source-side and task-level boundaries in ADR-0034.
+
+## Dev-54 completion evidence
+
+- callback traffic is classified before JSON serialization as critical, tempo,
+  transport or display;
+- critical events use a bounded ordered queue; continuous per-deck values use
+  latest-value mailboxes and cannot accumulate history;
+- the Rust ingress supervisor drains critical, tempo, transport and display in
+  priority order and never coalesces critical facts;
+- a dedicated `tempoStatus` event carries only the current CdjStatus-derived
+  effective BPM and transport facts needed by the Link Relay;
+- older Pro DJ Link observations are rejected and repeated unchanged Beats do
+  not re-anchor or republish the Link clock;
+- the CDJ-1500X network test converged exactly from `155.000` to `161.510` and
+  `151.900` BPM with no old-value regression;
+- the native dev-54 app and SoundSwitch UI showed those same `161.5` and `151.9`
+  values while AutoLoop output remained independently active;
+- all Java bridge, Rust engine, macOS package, technical and functional gates
+  pass.
+
+The one-hour combined physical pitch-ramp soak remains E5-04 evidence and does
+not reopen this implementation story.

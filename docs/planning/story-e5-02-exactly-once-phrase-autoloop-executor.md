@@ -1,6 +1,6 @@
 # Story E5-02: Exactly-once phrase AutoLoop executor
 
-- Status: **Reopened; executor semantics delivered, end-to-end freshness unproven**
+- Status: **Simulator acceptance restored in dev-54; physical soak evidence pending**
 - Priority: **P0 Critical**
 - Target: `0.4.0-dev-55`
 - GitHub tracking: [#118](https://github.com/victorblanco-tech/lumi/issues/118)
@@ -78,3 +78,23 @@ Completion additionally requires:
 - no cue latency trend during the one-hour CDJ-1500X simulator profile;
 - output unaffected by simultaneous Link updates, display traffic and UI
   foreground/background changes.
+
+## Dev-54 source-isolation evidence
+
+- exact Beats, load/master/play transitions and discontinuities no longer wait
+  behind continuous position/display history at the bridge boundary;
+- a 50,000-sample display burst collapses to one newest value without losing or
+  delaying critical traffic;
+- the network acceptance fixture proves one and only one output record after a
+  forward seek and one after a backward seek;
+- a 300 ms delayed duplicate/stale burst produces zero additional output;
+- real headed testing kept AutoLoop execution alive while switching between
+  Lumi and SoundSwitch, with diagnostics reporting `realtime p95 0.1 ms`, zero
+  late cues and no saturation;
+- the 15-second dispatch soak recorded p50 69 µs, p95 10.045 ms, p99 10.060 ms,
+  zero saturation; its 28 cancellations are intentional generation replacement,
+  not late or duplicate MIDI output.
+
+The simulator and headed acceptance failure from dev-52 is therefore resolved.
+The one-hour physical source-to-MIDI soak and its final p95/p99 evidence remain
+E5-04 release evidence.

@@ -43,6 +43,16 @@ final class BridgePayloads {
     ) {
     }
 
+    record TempoStatus(
+            int deviceNumber,
+            String deviceName,
+            double effectiveBpm,
+            int beatWithinBar,
+            boolean tempoMaster,
+            boolean playing
+    ) {
+    }
+
     record PrecisePosition(
             int deviceNumber,
             String deviceName,

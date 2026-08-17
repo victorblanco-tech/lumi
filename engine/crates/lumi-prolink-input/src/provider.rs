@@ -200,7 +200,10 @@ impl ProLinkDeckSourceProvider {
         at: MonotonicTime,
     ) -> Result<(), ProLinkProviderError> {
         self.received_message_count = self.received_message_count.saturating_add(1);
-        self.last_bridge_sequence = Some(message.sequence);
+        self.last_bridge_sequence = Some(
+            self.last_bridge_sequence
+                .map_or(message.sequence, |previous| previous.max(message.sequence)),
+        );
         let observed_at_nanos = message.observed_at_nanos;
         match message.event {
             BridgeEvent::Hello(hello) => {
@@ -239,6 +242,9 @@ impl ProLinkDeckSourceProvider {
                 self.update_source_status(DeckSourceStatus::Degraded, at)?;
             }
             BridgeEvent::Beat(beat) => self.apply_beat(beat, observed_at_nanos, at)?,
+            BridgeEvent::TempoStatus(tempo) => {
+                self.apply_tempo_status(tempo, observed_at_nanos)?;
+            }
             BridgeEvent::PrecisePosition(position) => {
                 self.queue_precise_position(position, observed_at_nanos)?;
             }
@@ -1009,8 +1015,9 @@ impl ProLinkDeckSourceProvider {
                 },
             )?;
         }
-        // CdjStatus remains the tempo authority. This prevents Beat and
-        // status packets from fighting after the DJ moves the pitch slider.
+        // Preserve the exact beat observation for diagnostics and initial
+        // Link acquisition. The Link relay itself de-duplicates continuous
+        // observations, so this never becomes recurring timeline correction.
         self.timing_observations.push(ProLinkTimingObservation {
             deck_id,
             observed_at_nanos,
@@ -1020,6 +1027,31 @@ impl ProLinkDeckSourceProvider {
             playing: previous.playing,
             generation: self.timing_generation,
             discontinuity: seeked,
+        });
+        Ok(())
+    }
+
+    fn apply_tempo_status(
+        &mut self,
+        tempo: crate::TempoStatus,
+        observed_at_nanos: u64,
+    ) -> Result<(), ProLinkProviderError> {
+        if !tempo.tempo_master {
+            return Ok(());
+        }
+        let deck_id = DeckId::new(tempo.device_number);
+        let Some(deck) = self.decks.get(&deck_id) else {
+            return Ok(());
+        };
+        self.timing_observations.push(ProLinkTimingObservation {
+            deck_id,
+            observed_at_nanos,
+            absolute_beat: deck.beat,
+            effective_bpm_milli: bpm_milli(tempo.effective_bpm)?,
+            beat_within_bar: tempo.beat_within_bar.max(1),
+            playing: tempo.playing,
+            generation: self.timing_generation,
+            discontinuity: false,
         });
         Ok(())
     }

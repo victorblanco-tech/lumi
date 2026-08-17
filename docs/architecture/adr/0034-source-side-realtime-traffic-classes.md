@@ -47,6 +47,22 @@ classic profile is not valid release-performance evidence.
 - the production engine remains one launchd service, but its three integration
   consumers no longer share scheduling or backpressure.
 
+## Implementation record — `0.4.0-dev-54`
+
+The bridge implements a 256-event critical FIFO and latest-value mailboxes per
+deck for tempo, transport and display. The envelope exposes `trafficClass` and
+`bridgeQueueAgeMicros`. Rust preserves the lane priority and never coalesces
+critical messages. Link receives a dedicated `tempoStatus`, rejects an older
+source timestamp and calls its provider only when deck, BPM or play state
+materially changes. The engine-owned integration pump runs independently of
+SwiftUI at 5 ms.
+
+Automated evidence covers 50,000 replaceable samples, exact simulator pitch
+ramps, stale bursts, forward/backward landings and full functional/technical
+regression gates. Headed evidence covers the installed native app plus the real
+SoundSwitch interface. Physical one-hour evidence remains a release gate rather
+than an architectural assumption.
+
 ## Rejected alternatives
 
 - increasing the Java FIFO: delays failure and permits a larger stale backlog;

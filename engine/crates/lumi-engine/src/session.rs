@@ -88,7 +88,10 @@ const DECK_INPUT_DISABLED_ENVIRONMENT_KEY: &str = "LUMI_DECK_INPUT_DISABLED";
 const AUTO_PUBLISH_MIDI_ENVIRONMENT_KEY: &str = "LUMI_AUTO_PUBLISH_MIDI";
 const MAXIMUM_AUTHENTICATION_BYTES: usize = 512;
 const AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(5);
-const INTEGRATION_PUMP_INTERVAL: Duration = Duration::from_millis(20);
+// The engine-owned realtime lane is independent from SwiftUI refresh. A 5 ms
+// bounded drain keeps precomputed AutoLoop cues within one MIDI scheduling
+// quantum even while the app is hidden or rendering a dense waveform.
+const INTEGRATION_PUMP_INTERVAL: Duration = Duration::from_millis(5);
 const EVENT_QUEUE_CAPACITY: usize = 256;
 const COMMAND_ID_CACHE_CAPACITY: usize = 256;
 const LIBRARY_CONTEXT_CAPACITY: usize = 256;

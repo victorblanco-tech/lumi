@@ -31,7 +31,19 @@ pub const PROTOCOL_VERSION: u16 = 1;
 pub struct BridgeMessage {
     pub sequence: u64,
     pub observed_at_nanos: u64,
+    pub traffic_class: BridgeTrafficClass,
+    pub bridge_queue_age_micros: u64,
     pub event: BridgeEvent,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum BridgeTrafficClass {
+    #[default]
+    Critical,
+    Tempo,
+    Transport,
+    Display,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -42,6 +54,7 @@ pub enum BridgeEvent {
     DeviceLost(Device),
     DeckStatus(DeckStatus),
     Beat(Beat),
+    TempoStatus(TempoStatus),
     PrecisePosition(PrecisePosition),
     TrackMetadata(TrackMetadata),
     TrackSignature(TrackSignature),
@@ -113,6 +126,17 @@ pub struct Beat {
     pub effective_bpm: f64,
     pub beat_within_bar: u8,
     pub tempo_master: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct TempoStatus {
+    pub device_number: u8,
+    pub device_name: String,
+    pub effective_bpm: f64,
+    pub beat_within_bar: u8,
+    pub tempo_master: bool,
+    pub playing: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -207,6 +231,8 @@ impl BridgeDecoder {
         Ok(BridgeMessage {
             sequence: envelope.sequence,
             observed_at_nanos: envelope.observed_at_nanos,
+            traffic_class: envelope.traffic_class,
+            bridge_queue_age_micros: envelope.bridge_queue_age_micros,
             event,
         })
     }
@@ -224,6 +250,10 @@ struct WireEnvelope {
     protocol_version: u16,
     sequence: u64,
     observed_at_nanos: u64,
+    #[serde(default)]
+    traffic_class: BridgeTrafficClass,
+    #[serde(default)]
+    bridge_queue_age_micros: u64,
     #[serde(rename = "type")]
     message_type: String,
     payload: Value,
@@ -236,7 +266,9 @@ fn decode_event(message_type: &str, payload: Value) -> Result<BridgeEvent, Bridg
         "deviceFound" => decode_payload(payload).map(BridgeEvent::DeviceFound),
         "deviceLost" => decode_payload(payload).map(BridgeEvent::DeviceLost),
         "deckStatus" => decode_payload(payload).map(BridgeEvent::DeckStatus),
+        "transportStatus" => decode_payload(payload).map(BridgeEvent::DeckStatus),
         "beat" => decode_payload(payload).map(BridgeEvent::Beat),
+        "tempoStatus" => decode_payload(payload).map(BridgeEvent::TempoStatus),
         "precisePosition" => decode_payload(payload).map(BridgeEvent::PrecisePosition),
         "trackMetadata" => decode_payload(payload).map(BridgeEvent::TrackMetadata),
         "trackSignature" => decode_payload(payload).map(BridgeEvent::TrackSignature),
@@ -285,6 +317,15 @@ fn validate_event(event: &BridgeEvent) -> Result<(), BridgeDecodeError> {
                 || !(1..=4).contains(&beat.beat_within_bar)
             {
                 return Err(BridgeDecodeError::InvalidPayload("beat"));
+            }
+        }
+        BridgeEvent::TempoStatus(tempo) => {
+            if tempo.device_number == 0
+                || tempo.device_name.trim().is_empty()
+                || !valid_bpm(tempo.effective_bpm)
+                || tempo.beat_within_bar > 4
+            {
+                return Err(BridgeDecodeError::InvalidPayload("tempoStatus"));
             }
         }
         BridgeEvent::PrecisePosition(position) => {

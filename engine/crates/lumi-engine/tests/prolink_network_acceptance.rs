@@ -68,7 +68,9 @@ fn direct_timing_continues_while_the_client_is_idle() {
         );
         sequence = sequence.saturating_add(1);
         let link = required_object(&snapshot.payload, "abletonLinkIntegration");
-        if required_u64(link, "receivedAnchorCount") > 0 {
+        if required_u64(link, "receivedAnchorCount") > 0
+            && required_u64(link, "appliedAnchorCount") == required_u64(link, "receivedAnchorCount")
+        {
             break snapshot;
         }
         assert!(
@@ -109,8 +111,16 @@ fn direct_timing_continues_while_the_client_is_idle() {
     );
     let link = required_object(&observed.payload, "abletonLinkIntegration");
     assert!(required_u64(link, "enginePumpCount").saturating_sub(baseline_pumps) >= 100);
-    assert!(required_u64(link, "receivedAnchorCount") > baseline_received);
-    assert!(required_u64(link, "appliedAnchorCount") > baseline_applied);
+    assert_eq!(
+        required_u64(link, "receivedAnchorCount"),
+        baseline_received,
+        "unchanged master beats must not repeatedly correct Ableton Link"
+    );
+    assert_eq!(
+        required_u64(link, "appliedAnchorCount"),
+        baseline_applied,
+        "unchanged master beats must not repeatedly re-anchor SoundSwitch"
+    );
     assert!(
         link.get("bpmMilli")
             .and_then(Value::as_u64)
@@ -118,6 +128,100 @@ fn direct_timing_continues_while_the_client_is_idle() {
     );
     assert_eq!(required_u64(link, "failureCount"), 0);
 
+    drop(connection);
+    let status = child
+        .wait()
+        .unwrap_or_else(|error| panic!("engine should exit after disconnect: {error}"));
+    assert!(status.success());
+    remove_database(&database);
+}
+
+/// A CDJ pitch-slider movement is a latest-value BPM change, not a recurring
+/// beat-phase correction. Each stable value must reach Link once and remain
+/// stable while exact beat traffic continues.
+#[test]
+#[ignore = "requires the Lumi Pro DJ Link network simulator"]
+fn master_pitch_changes_reach_link_once_without_old_value_regression() {
+    if std::env::var("LUMI_RUN_PROLINK_NETWORK_TEST").as_deref() != Ok("1") {
+        return;
+    }
+    simulator_control("master", Some("on"));
+    simulator_control("play", None);
+    simulator_control("pitch", Some("0"));
+
+    let database = temporary_database_path();
+    let mut child = start_engine(&database);
+    let mut connection = connect_and_authenticate(&mut child);
+    let initial = read_response(&mut connection);
+    let mut sequence = 1_u64;
+    let _connected = exchange(
+        &mut connection,
+        &command(
+            "select-connected-decks-pitch",
+            sequence,
+            json!({
+                "kind": "selectDeckSourceMode",
+                "mode": "connectedDecks",
+                "expectedStateRevision": required_u64(&initial.payload, "stateRevision"),
+            }),
+        ),
+    );
+    sequence = sequence.saturating_add(1);
+    let _enabled = exchange(
+        &mut connection,
+        &command(
+            "enable-link-pitch",
+            sequence,
+            json!({ "kind": "setAbletonLinkEnabled", "enabled": true }),
+        ),
+    );
+    sequence = sequence.saturating_add(1);
+
+    let mut applied = 0_u64;
+    for (pitch, expected_bpm) in [("0", 155_000_u64), ("4.2", 161_510), ("-2", 151_900)] {
+        simulator_control("pitch", Some(pitch));
+        let deadline = Instant::now() + Duration::from_secs(15);
+        loop {
+            let snapshot = exchange(
+                &mut connection,
+                &command(
+                    "wait-for-link-pitch",
+                    sequence,
+                    json!({ "kind": "getSnapshot" }),
+                ),
+            );
+            sequence = sequence.saturating_add(1);
+            let link = required_object(&snapshot.payload, "abletonLinkIntegration");
+            let current_applied = required_u64(link, "appliedAnchorCount");
+            if link.get("bpmMilli").and_then(Value::as_u64) == Some(expected_bpm)
+                && current_applied > applied
+            {
+                applied = current_applied;
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "pitch {pitch} did not reach Link as {expected_bpm}"
+            );
+            thread::sleep(Duration::from_millis(25));
+        }
+    }
+
+    thread::sleep(Duration::from_secs(1));
+    let stable = exchange(
+        &mut connection,
+        &command(
+            "stable-link-pitch",
+            sequence,
+            json!({ "kind": "getSnapshot" }),
+        ),
+    );
+    let link = required_object(&stable.payload, "abletonLinkIntegration");
+    assert_eq!(link.get("bpmMilli").and_then(Value::as_u64), Some(151_900));
+    assert_eq!(required_u64(link, "appliedAnchorCount"), applied);
+
+    simulator_control("pause", None);
+    simulator_control("pitch", Some("0"));
     drop(connection);
     let status = child
         .wait()
@@ -253,20 +357,52 @@ fn stopped_live_deck_start_and_operation_resume_restore_the_current_autoloop() {
     }
     assert_eq!(output_record_count(&snapshot), baseline.saturating_add(2));
 
+    let before_seek_output = output_record_count(&snapshot);
     simulator_control("seek", Some("280000"));
-    let near_end_snapshot = wait_for_playback_position(
+    let _ = wait_for_playback_position(
         &mut connection,
         &mut sequence,
         |position| position >= 270_000,
         "seek near track end after Pause/Start",
     );
+    let near_end_snapshot = wait_for_output_count(
+        &mut connection,
+        &mut sequence,
+        before_seek_output.saturating_add(1),
+        "forward seek landing",
+    );
+    assert_eq!(
+        output_record_count(&near_end_snapshot),
+        before_seek_output.saturating_add(1),
+        "one seek landing may select exactly one AutoLoop"
+    );
     let near_end_revision = deck_transport_revision(&near_end_snapshot);
     simulator_control("seek", Some("1000"));
-    snapshot = wait_for_playback_position(
+    let _ = wait_for_playback_position(
         &mut connection,
         &mut sequence,
         |position| position <= 10_000,
         "backward seek to track start after Pause/Start",
+    );
+    let _ = wait_for_output_count(
+        &mut connection,
+        &mut sequence,
+        before_seek_output.saturating_add(2),
+        "backward seek landing",
+    );
+    thread::sleep(Duration::from_millis(300));
+    snapshot = exchange(
+        &mut connection,
+        &command(
+            "verify-no-seek-duplicate",
+            sequence,
+            json!({ "kind": "getSnapshot" }),
+        ),
+    );
+    assert_eq!(
+        output_record_count(&snapshot),
+        before_seek_output.saturating_add(2),
+        "stale position bursts may not duplicate a landing AutoLoop"
     );
     assert!(
         snapshot
@@ -300,6 +436,7 @@ fn start_engine(database: &Path) -> Child {
         .env("LUMI_LIBRARY_DATABASE_PATH", database)
         .env("LUMI_DECK_INPUT_DISABLED", "1")
         .env("LUMI_AUTO_PUBLISH_MIDI", "0")
+        .env("LUMI_EXIT_AFTER_CLIENT_DISCONNECT", "1")
         .stdout(Stdio::piped())
         .stderr(Stdio::inherit());
     command

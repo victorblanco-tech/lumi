@@ -5,6 +5,8 @@ record BridgeEnvelope(
         int protocolVersion,
         long sequence,
         long observedAtNanos,
+        String trafficClass,
+        long bridgeQueueAgeMicros,
         String type,
         Object payload
 ) {

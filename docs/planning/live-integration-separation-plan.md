@@ -1,6 +1,6 @@
 # Live integration separation — implementation plan (one-page)
 
-- Status: **Approved direction; implementation starts after simulator gate**
+- Status: **Phases 0–2 implemented in `0.4.0-dev-54`; phases 3–4 remain**
 - Priority: **P0 Critical**
 - Release gate: `0.4.0` cannot become RC until every phase below passes
 - Governing ADRs: ADR-0031 through ADR-0034
@@ -105,3 +105,28 @@ physical CDJ-1500X players over Wi-Fi and Ethernet.
 Dev builds may demonstrate individual phases. No story is marked Done and no
 RC is produced from component-only evidence. Simulator evidence is mandatory
 for performance; a final physical run is mandatory for protocol compatibility.
+
+## Dev-54 implementation evidence
+
+- the Java callback boundary now owns a bounded critical FIFO and replaceable
+  per-deck tempo, transport and display mailboxes;
+- the wire contract carries its traffic class and source-side queue age, while
+  the Rust supervisor preserves the same priority order instead of rebuilding
+  a single FIFO backlog;
+- the Link Relay accepts only monotonically newer master-tempo observations and
+  forwards only a changed deck, BPM or play state; ordinary Beat traffic
+  refreshes health without repeatedly correcting Link;
+- the integration pump is engine-owned at 5 ms and does not depend on a SwiftUI
+  frame or foreground application state;
+- a 50,000-sample source benchmark retained exactly the newest display sample,
+  recorded 49,999 intentional replacements and had zero critical saturation;
+- the CDJ-1500X simulator proved exact `155.000 -> 161.510 -> 151.900` BPM
+  convergence without regression to an old value;
+- forward and backward transport landings each emitted exactly one AutoLoop
+  output record, and a delayed duplicate burst emitted none;
+- the installed native app and SoundSwitch were exercised through their real
+  macOS interfaces: SoundSwitch followed `161.5` and `151.9` BPM, foreground
+  switching did not stop AutoLoop output, and diagnostics reported zero late
+  realtime cues;
+- the technical and functional repository gates pass. The physical one-hour
+  Wi-Fi/Ethernet soak remains the mandatory phase-4 release evidence.

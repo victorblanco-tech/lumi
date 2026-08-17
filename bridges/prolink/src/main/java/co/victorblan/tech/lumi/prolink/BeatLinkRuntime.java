@@ -8,6 +8,8 @@ import org.deepsymmetry.beatlink.DeviceFinder;
 import org.deepsymmetry.beatlink.DeviceUpdate;
 import org.deepsymmetry.beatlink.VirtualCdj;
 import java.util.Objects;
+import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -16,6 +18,7 @@ final class BeatLinkRuntime implements AutoCloseable {
     private final BridgePublisher publisher;
     private final AtomicBoolean started = new AtomicBoolean();
     private final AtomicBoolean sessionStarting = new AtomicBoolean();
+    private final Map<Integer, TransportFingerprint> transportFingerprints = new ConcurrentHashMap<>();
     private final ExecutorService lifecycleExecutor = Executors.newSingleThreadExecutor(
             Thread.ofPlatform().name("lumi-prolink-lifecycle-", 0).factory()
     );
@@ -29,6 +32,7 @@ final class BeatLinkRuntime implements AutoCloseable {
 
         @Override
         public void deviceLost(DeviceAnnouncement announcement) {
+            transportFingerprints.remove(announcement.getDeviceNumber());
             publishDevice("deviceLost", announcement);
         }
     };
@@ -47,7 +51,7 @@ final class BeatLinkRuntime implements AutoCloseable {
 
         DeviceFinder.getInstance().addDeviceAnnouncementListener(deviceListener);
         VirtualCdj.getInstance().addUpdateListener(this::receivedDeviceUpdate);
-        BeatFinder.getInstance().addBeatListener(beat -> publisher.publish(
+        BeatFinder.getInstance().addBeatListener(beat -> publisher.publishCritical(
                 "beat",
                 new BridgePayloads.Beat(
                         beat.getDeviceNumber(),
@@ -62,7 +66,9 @@ final class BeatLinkRuntime implements AutoCloseable {
         // the sole authority for phrase changes and AutoLoop decisions. A beat
         // packet contains only the beat within the bar and cannot distinguish
         // normal playback from a hotcue jump before the next CdjStatus frame.
-        BeatFinder.getInstance().addPrecisePositionListener(position -> publisher.publish(
+        BeatFinder.getInstance().addPrecisePositionListener(position -> publisher.publishLatest(
+                BridgeTrafficClass.TRANSPORT,
+                position.getDeviceNumber(),
                 "precisePosition",
                 new BridgePayloads.PrecisePosition(
                         position.getDeviceNumber(),
@@ -135,7 +141,7 @@ final class BeatLinkRuntime implements AutoCloseable {
         if (!(update instanceof CdjStatus status)) {
             return;
         }
-        publisher.publish("deckStatus", new BridgePayloads.DeckStatus(
+        BridgePayloads.DeckStatus payload = new BridgePayloads.DeckStatus(
                 status.getDeviceNumber(),
                 status.getDeviceName(),
                 status.isPlaying(),
@@ -152,7 +158,32 @@ final class BeatLinkRuntime implements AutoCloseable {
                 status.getBeatNumber(),
                 status.getBeatWithinBar(),
                 status.getPitch()
-        ));
+        );
+        TransportFingerprint fingerprint = TransportFingerprint.from(payload);
+        TransportFingerprint previous = transportFingerprints.put(status.getDeviceNumber(), fingerprint);
+        if (!fingerprint.equals(previous)) {
+            publisher.publishCritical("transportStatus", payload);
+        } else {
+            publisher.publishLatest(
+                    BridgeTrafficClass.TRANSPORT,
+                    status.getDeviceNumber(),
+                    "deckStatus",
+                    payload
+            );
+        }
+        publisher.publishLatest(
+                BridgeTrafficClass.TEMPO,
+                status.getDeviceNumber(),
+                "tempoStatus",
+                new BridgePayloads.TempoStatus(
+                        status.getDeviceNumber(),
+                        status.getDeviceName(),
+                        status.getEffectiveTempo(),
+                        status.getBeatWithinBar(),
+                        status.isTempoMaster(),
+                        status.isPlaying()
+                )
+        );
     }
 
     private void publishFailure(String operation, Exception failure) {
@@ -175,5 +206,31 @@ final class BeatLinkRuntime implements AutoCloseable {
         publisher.publish("sourceStatus", new BridgePayloads.SourceStatus(
                 "stopped", "Direct Pro DJ Link bridge stopped"
         ));
+    }
+
+    private record TransportFingerprint(
+            boolean playing,
+            boolean paused,
+            boolean cued,
+            boolean tempoMaster,
+            boolean onAir,
+            int sourcePlayer,
+            String sourceSlot,
+            String trackType,
+            int rekordboxId
+    ) {
+        static TransportFingerprint from(BridgePayloads.DeckStatus status) {
+            return new TransportFingerprint(
+                    status.playing(),
+                    status.paused(),
+                    status.cued(),
+                    status.tempoMaster(),
+                    status.onAir(),
+                    status.sourcePlayer(),
+                    status.sourceSlot(),
+                    status.trackType(),
+                    status.rekordboxId()
+            );
+        }
     }
 }

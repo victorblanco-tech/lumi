@@ -24,6 +24,8 @@ where
     last_prolink_timing_at: Option<Instant>,
     last_prolink_bpm_milli: Option<u32>,
     last_prolink_playing: Option<bool>,
+    last_prolink_deck_number: Option<u8>,
+    last_prolink_observed_at_micros: Option<u64>,
     prolink_timing_stale: bool,
 }
 
@@ -38,6 +40,8 @@ where
             last_prolink_timing_at: None,
             last_prolink_bpm_milli: None,
             last_prolink_playing: None,
+            last_prolink_deck_number: None,
+            last_prolink_observed_at_micros: None,
             prolink_timing_stale: false,
         }
     }
@@ -80,10 +84,25 @@ where
             return Ok(());
         }
         if observation.source == TimingSourceKind::ProDjLink {
+            if let (Some(previous), Some(current)) = (
+                self.last_prolink_observed_at_micros,
+                observation.observed_at_micros,
+            ) && current < previous
+            {
+                return Ok(());
+            }
+            let materially_changed = self.last_prolink_bpm_milli != Some(observation.bpm_milli)
+                || self.last_prolink_playing != Some(observation.playing)
+                || self.last_prolink_deck_number != observation.deck_number;
             self.last_prolink_timing_at = Some(Instant::now());
             self.last_prolink_bpm_milli = Some(observation.bpm_milli);
             self.last_prolink_playing = Some(observation.playing);
+            self.last_prolink_deck_number = observation.deck_number;
+            self.last_prolink_observed_at_micros = observation.observed_at_micros;
             self.prolink_timing_stale = false;
+            if !materially_changed {
+                return Ok(());
+            }
         } else {
             self.reset_prolink_freshness();
         }
@@ -140,6 +159,8 @@ where
         self.last_prolink_timing_at = None;
         self.last_prolink_bpm_milli = None;
         self.last_prolink_playing = None;
+        self.last_prolink_deck_number = None;
+        self.last_prolink_observed_at_micros = None;
         self.prolink_timing_stale = false;
     }
 }
@@ -251,6 +272,23 @@ mod tests {
                 Call::Synchronize(prolink_clock(136_500)),
             ]
         );
+    }
+
+    #[test]
+    fn repeated_master_beats_refresh_health_without_recorrecting_link() {
+        let mut relay = LinkRelay::new(RecordingProvider::default());
+        assert!(relay.set_enabled(true).is_ok());
+        assert!(relay.synchronize(prolink_clock(140_000)).is_ok());
+        let mut next_beat = prolink_clock(140_000);
+        next_beat.beat_within_bar = 2;
+        next_beat.observed_at_micros = Some(1_500_000);
+        assert!(relay.synchronize(next_beat).is_ok());
+
+        assert_eq!(
+            relay.provider.calls,
+            vec![Call::Publish, Call::Synchronize(prolink_clock(140_000))]
+        );
+        assert!(!relay.prolink_timing_stale);
     }
 
     #[test]

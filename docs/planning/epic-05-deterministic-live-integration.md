@@ -45,6 +45,27 @@ PrecisePosition load. E5-01 and E5-02 are therefore reopened for end-to-end
 freshness and isolation evidence; their delivered component behavior remains
 characterization coverage, not completion evidence.
 
+## Dev-54 recovery milestone
+
+Dev-54 removes the shared source FIFO that invalidated dev-52. Pro DJ Link now
+classifies critical, tempo, transport and display traffic at the callback
+boundary. Replaceable values cannot accumulate history, the Link Relay ignores
+unchanged/older observations, and critical AutoLoop facts retain ordering.
+
+The representative simulator, native Lumi UI and real SoundSwitch UI prove:
+
+- exact realtime pitch propagation `155.000 -> 161.510 -> 151.900` through one
+  Link peer;
+- exactly one AutoLoop output on each forward/backward landing and none from a
+  stale duplicate burst;
+- AutoLoop output remains active across UI foreground/background switching;
+- zero critical saturation and bounded queues under a 50,000-sample display
+  burst;
+- green technical and functional repository gates.
+
+The epic remains In progress because explicit transport/offset completion and
+the one-hour physical Wi-Fi/Ethernet evidence are still E5-03/E5-04 scope.
+
 ## Exit criteria
 
 - exactly one expected MIDI AutoLoop selection per execution epoch;

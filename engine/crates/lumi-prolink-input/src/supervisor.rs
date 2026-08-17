@@ -8,7 +8,7 @@ use std::thread;
 
 use thiserror::Error;
 
-use crate::{BridgeDecodeError, BridgeDecoder, BridgeEvent, BridgeMessage};
+use crate::{BridgeDecodeError, BridgeDecoder, BridgeEvent, BridgeMessage, BridgeTrafficClass};
 
 const STDERR_TAIL_CAPACITY: usize = 40;
 const PROCESS_OUTPUT_CAPACITY: usize = 512;
@@ -161,14 +161,19 @@ pub struct BridgeProcessDiagnostics {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CoalescingKey {
     DeckStatus(u8),
+    TempoStatus(u8),
     PrecisePosition(u8),
     TrackMetadata(u8),
     TrackSignature(u8),
 }
 
 fn coalescing_key(message: &BridgeMessage) -> Option<CoalescingKey> {
+    if message.traffic_class == BridgeTrafficClass::Critical {
+        return None;
+    }
     match &message.event {
         BridgeEvent::DeckStatus(status) => Some(CoalescingKey::DeckStatus(status.device_number)),
+        BridgeEvent::TempoStatus(status) => Some(CoalescingKey::TempoStatus(status.device_number)),
         BridgeEvent::PrecisePosition(position) => {
             Some(CoalescingKey::PrecisePosition(position.device_number))
         }
@@ -353,7 +358,17 @@ impl BridgeProcessSupervisor {
         if let Some(message) = output.terminal_error.take() {
             return Err(BridgeSupervisorError::Read(message));
         }
-        Ok(output.messages.drain(..).collect())
+        let mut messages: Vec<_> = output.messages.drain(..).collect();
+        messages.sort_by_key(|message| {
+            let priority = match message.traffic_class {
+                BridgeTrafficClass::Critical => 0_u8,
+                BridgeTrafficClass::Tempo => 1,
+                BridgeTrafficClass::Transport => 2,
+                BridgeTrafficClass::Display => 3,
+            };
+            (priority, message.sequence)
+        });
+        Ok(messages)
     }
 
     pub fn diagnostics(&mut self) -> Result<BridgeProcessDiagnostics, BridgeSupervisorError> {
@@ -473,6 +488,8 @@ mod tests {
         BridgeMessage {
             sequence,
             observed_at_nanos: sequence,
+            traffic_class: crate::BridgeTrafficClass::Transport,
+            bridge_queue_age_micros: 0,
             event: BridgeEvent::DeckStatus(crate::DeckStatus {
                 device_number,
                 device_name: format!("Player {device_number}"),
@@ -498,6 +515,8 @@ mod tests {
         BridgeMessage {
             sequence,
             observed_at_nanos: sequence,
+            traffic_class: crate::BridgeTrafficClass::Critical,
+            bridge_queue_age_micros: 0,
             event: BridgeEvent::Beat(crate::Beat {
                 device_number: 1,
                 device_name: "Player 1".to_owned(),
