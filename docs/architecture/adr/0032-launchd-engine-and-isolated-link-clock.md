@@ -39,6 +39,12 @@ Upgrades unregister the old job before registering the new bundled job. A UI
 disconnect still makes the engine fail safe to Off and leave Link, but the
 inactive engine and stable CoreMIDI endpoints remain available.
 
+Local ad-hoc signatures have no stable Team ID. If macOS temporarily rejects
+the first upgraded helper against a cached launch constraint, the supervisor
+waits for Background Task Management to invalidate that record and performs
+one bounded re-registration in the same app start. Developer ID builds retain
+the normal single-registration path.
+
 The discovery token and record are owner-only files. The engine publishes its
 record atomically only after binding its listener, and removes it on exit only
 when it still owns the recorded PID. A restarted service can therefore never
@@ -113,4 +119,3 @@ no Carabiner handle and Link owns no MIDI sender.
 5. Continuous tempo observations update Link BPM without a phase command.
 6. Initial acquisition, source handover and stopped-to-playing each emit at
    most one phase alignment.
-

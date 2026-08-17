@@ -345,11 +345,42 @@ public actor EngineProcessSupervisor {
         if service.status == .requiresApproval {
             throw EngineClientError.serviceRequiresApproval
         }
-        return try await waitForLaunchAgentRecord(
-            at: recordURL,
-            sessionToken: token,
-            serviceIdentity: serviceIdentity
-        )
+        do {
+            return try await waitForLaunchAgentRecord(
+                at: recordURL,
+                sessionToken: token,
+                serviceIdentity: serviceIdentity,
+                timeout: .seconds(5)
+            )
+        } catch EngineClientError.startupTimedOut {
+            // An ad-hoc signed local update has no stable Team ID. macOS 26
+            // can accept the re-registration, reject the first spawn against
+            // the cached launch constraint, and invalidate that BTM item a
+            // moment later. Retry once after that bounded invalidation window
+            // so unsigned Dev installs do not require a second app launch.
+            Self.logger.notice(
+                "LaunchAgent produced no discovery record; retrying registration once"
+            )
+            if service.status == .enabled {
+                try await service.unregister()
+            }
+            try await Task.sleep(for: .milliseconds(250))
+            let retryService = SMAppService.agent(plistName: plistName)
+            launchAgentService = retryService
+            if retryService.status == .requiresApproval {
+                throw EngineClientError.serviceRequiresApproval
+            }
+            if retryService.status == .enabled {
+                try await retryService.unregister()
+                try await Task.sleep(for: .milliseconds(250))
+            }
+            try retryService.register()
+            return try await waitForLaunchAgentRecord(
+                at: recordURL,
+                sessionToken: token,
+                serviceIdentity: serviceIdentity
+            )
+        }
     }
 
     private func waitForLaunchAgentRecord(
