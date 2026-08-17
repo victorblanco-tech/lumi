@@ -1,6 +1,6 @@
 # Story E5-01: Isolated Transport and Ableton Link Relay
 
-- Status: **Implementation complete; physical Wi-Fi/SoundSwitch evidence pending**
+- Status: **Done; physical CDJ/Wi-Fi soak remains in E5-04**
 - Priority: **P0 Critical**
 - Target: `0.4.0-dev-50`
 - Components: Pro DJ Link, Engine, Ableton Link
@@ -62,8 +62,19 @@ Those are delivered in E5-02 through E5-04.
 - the functional and technical local gates pass;
 - the real bundled Carabiner lifecycle tests pass, including `130 -> 140 BPM`
   and zero helper left after drop;
-- the signed-local package verification produced the Apple Silicon dev-50 DMG.
+- the signed-local package verification produced the Apple Silicon dev-50 DMG;
+- the packaged app was installed in `/Applications/Lumi/Dev` and exercised
+  through the real macOS UI against a running SoundSwitch session;
+- UI enable/disable left and rejoined the Link session without restarting
+  SoundSwitch;
+- Local Playback of `90s Bitch` changed SoundSwitch from `140.0` to `155.0`
+  BPM through the production Link path;
+- Off, Arm, Start, Pause and Off were exercised through the visible controls;
+  all transitions retained exactly one Carabiner helper and did not interrupt
+  the independently enabled Link relay;
+- Cmd-Q removed the owned Carabiner helper while the intended launchd-owned
+  engine remained available.
 
-Open evidence is deliberately physical: realtime master pitch movement into a
-running SoundSwitch Link session, one-peer observation and the later combined
-Wi-Fi soak. Those are not replaced by local tests.
+Physical CDJ pitch movement, Pro DJ Link over Wi-Fi and the combined one-hour
+soak remain explicit E5-04 release evidence. They are not silently claimed by
+this Local Playback UI test.
