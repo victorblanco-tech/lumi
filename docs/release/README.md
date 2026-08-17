@@ -16,6 +16,7 @@
 - [0.4.0-dev-53 representative Pro DJ Link simulator](0.4.0-dev-53-representative-prolink-simulator.md)
 - [0.4.0-dev-54 isolated realtime integration lanes](0.4.0-dev-54-isolated-realtime-integration-lanes.md)
 - [0.4.0-dev-55 deterministic transport epochs and output timing](0.4.0-dev-55-deterministic-transport-and-output-timing.md)
+- [0.4.0-dev-56 bounded Live integration evidence](0.4.0-dev-56-bounded-live-integration-evidence.md)
 - [Unsigned macOS installation instructions](unsigned-macos-installation.txt)
 
 Create a locally verified, unsigned Apple Silicon disk image with:

@@ -1,6 +1,6 @@
 # Live integration separation — implementation plan (one-page)
 
-- Status: **Phases 0–2 implemented in `0.4.0-dev-54`; phases 3–4 remain**
+- Status: **Phases 0–3 implemented; phase-4 automation delivered in `0.4.0-dev-56`, physical gate pending**
 - Priority: **P0 Critical**
 - Release gate: `0.4.0` cannot become RC until every phase below passes
 - Governing ADRs: ADR-0031 through ADR-0034
@@ -105,6 +105,25 @@ physical CDJ-1500X players over Wi-Fi and Ethernet.
 Dev builds may demonstrate individual phases. No story is marked Done and no
 RC is produced from component-only evidence. Simulator evidence is mandatory
 for performance; a final physical run is mandatory for protocol compatibility.
+
+## Dev-56 release-evidence automation
+
+- Pro DJ Link callback-to-engine age is measured as a constant-space p50, p95,
+  p99 and maximum, including both Java and Rust queue residence;
+- clock observations leave the shared coordinator before library hydration or
+  plan reduction, while Link and realtime MIDI retain separate worker actors;
+- `./scripts/verify-local.sh soak` runs Pro DJ Link-only, Link-only, MIDI-only
+  and combined configurable-duration gates;
+- the combined gate concurrently changes pitch, seeks, cycles lighting state
+  and polls snapshots at UI-stress cadence, while asserting zero failures,
+  zero critical saturation and bounded latency;
+- one scrubbed JSON artifact captures queue bounds, ages, Link anchors, engine
+  lateness, AutoLoop epochs/cue counts and realtime MIDI percentiles.
+
+The software implementation is complete. RC promotion still requires the same
+one-hour runner over Wi-Fi and Ethernet plus the short physical
+CDJ-1500X/SoundSwitch/Control One/DMX confirmation; automation cannot honestly
+replace that hardware evidence.
 
 ## Dev-54 implementation evidence
 

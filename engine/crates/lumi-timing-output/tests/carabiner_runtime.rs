@@ -132,6 +132,94 @@ fn dropping_the_managed_output_terminates_its_owned_link_peer() {
     );
 }
 
+#[test]
+#[ignore = "set LUMI_LINK_SOAK_SECONDS and LUMI_CARABINER_TEST_EXECUTABLE"]
+fn link_only_configurable_soak_keeps_one_bounded_latest_clock() {
+    let executable = std::env::var("LUMI_CARABINER_TEST_EXECUTABLE")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| panic!("LUMI_CARABINER_TEST_EXECUTABLE is required"));
+    let duration_seconds: u64 = std::env::var("LUMI_LINK_SOAK_SECONDS")
+        .unwrap_or_else(|_| panic!("LUMI_LINK_SOAK_SECONDS is required"))
+        .parse()
+        .unwrap_or_else(|error| panic!("LUMI_LINK_SOAK_SECONDS must be an integer: {error}"));
+    assert!(duration_seconds > 0, "Link soak duration must be positive");
+    let port = std::env::var("LUMI_LINK_SOAK_PORT")
+        .ok()
+        .and_then(|value| value.parse().ok())
+        .unwrap_or(17_093);
+    let mut output = CarabinerTimingOutput::new(CarabinerConfiguration {
+        executable: Some(executable),
+        port,
+        expected_version: "1.2.0".to_owned(),
+    });
+    output
+        .publish()
+        .unwrap_or_else(|error| panic!("Link helper should publish: {error}"));
+
+    let started = Instant::now();
+    let finish = started + Duration::from_secs(duration_seconds);
+    let mut observations = 0_u64;
+    let mut last_bpm_milli = 155_000_u32;
+    while Instant::now() < finish {
+        let step = observations % 12;
+        let bpm_milli = match step {
+            0..=3 => 155_000,
+            4..=7 => 161_510,
+            _ => 151_900,
+        };
+        last_bpm_milli = bpm_milli;
+        output
+            .synchronize(LinkClockObservation {
+                source: TimingSourceKind::ProDjLink,
+                deck_number: Some(1),
+                bpm_milli,
+                beat_within_bar: u8::try_from(observations % 4 + 1)
+                    .unwrap_or_else(|_| unreachable!()),
+                playing: true,
+                observed_at_micros: None,
+            })
+            .unwrap_or_else(|error| panic!("Link clock should remain writable: {error}"));
+        observations = observations.saturating_add(1);
+        let status = output.status();
+        assert_eq!(status.failure_count, 0, "Link helper degraded: {status:?}");
+        assert_ne!(status.state, TimingOutputState::Degraded);
+        thread::sleep(Duration::from_millis(25));
+    }
+
+    let drain_deadline = Instant::now() + Duration::from_secs(2);
+    while output.status().bpm_milli != Some(last_bpm_milli) && Instant::now() < drain_deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    let status = output.status();
+    println!(
+        "Link soak: duration={}s received={} applied={} coalesced={} hard={} failures={} peers={}",
+        duration_seconds,
+        status.received_anchor_count,
+        status.applied_anchor_count,
+        status.coalesced_anchor_count,
+        status.hard_reanchor_count,
+        status.failure_count,
+        status.peers,
+    );
+    assert_eq!(status.received_anchor_count, observations);
+    assert_eq!(status.bpm_milli, Some(last_bpm_milli));
+    assert!(
+        status
+            .applied_anchor_count
+            .saturating_add(status.coalesced_anchor_count)
+            >= observations,
+        "each source observation must be either applied or explicitly coalesced"
+    );
+    assert_eq!(status.failure_count, 0);
+    if std::env::var("LUMI_EXPECT_LINK_PEER").as_deref() == Ok("1") {
+        assert_eq!(status.peers, 1, "exactly one SoundSwitch peer is expected");
+    }
+    output
+        .stop()
+        .unwrap_or_else(|error| panic!("Link helper should stop cleanly: {error}"));
+    assert_eq!(output.status().peers, 0);
+}
+
 fn control_port_is_open(port: u16) -> bool {
     TcpStream::connect_timeout(
         &SocketAddr::new(Ipv4Addr::LOCALHOST.into(), port),

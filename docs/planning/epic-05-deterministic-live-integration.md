@@ -1,6 +1,6 @@
 # Epic 5: Deterministic Live integration
 
-- Status: **In progress**
+- Status: **Implementation complete; physical release evidence pending**
 - Priority: **P0 Critical**
 - Target: `0.4.0` stability gate
 - Components: Pro DJ Link, Engine, Ableton Link, MIDI & SoundSwitch, macOS
@@ -87,6 +87,16 @@ acceptance path:
 
 Only E5-04 remains open: long-running Wi-Fi/Ethernet and physical
 CDJ-1500X/SoundSwitch/DMX release evidence.
+
+## Dev-56 evidence milestone
+
+The final software scope is implemented. Source age now covers the Java and
+Rust ingress queues, clock forwarding is ordered ahead of potentially blocking
+library/planning work, native diagnostics expose the resulting percentiles and
+the four-lane configurable soak produces one bounded evidence artifact. The
+epic is no longer waiting on code; it remains unclosed solely because the
+one-hour Wi-Fi/Ethernet and physical DMX observations are explicit release
+facts rather than software assertions.
 
 ## Exit criteria
 

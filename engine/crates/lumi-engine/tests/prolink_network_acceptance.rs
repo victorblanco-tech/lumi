@@ -391,7 +391,7 @@ fn stopped_live_deck_start_and_operation_resume_restore_the_current_autoloop() {
         "backward seek landing",
     );
     thread::sleep(Duration::from_millis(300));
-    snapshot = exchange(
+    let _connected = exchange(
         &mut connection,
         &command(
             "verify-no-seek-duplicate",
@@ -441,7 +441,7 @@ fn stopped_live_deck_start_and_operation_resume_restore_the_current_autoloop() {
         "same-phrase seek landing",
     );
     thread::sleep(Duration::from_millis(300));
-    snapshot = exchange(
+    let snapshot = exchange(
         &mut connection,
         &command(
             "verify-no-same-phrase-seek-duplicate",
@@ -456,6 +456,414 @@ fn stopped_live_deck_start_and_operation_resume_restore_the_current_autoloop() {
     );
 
     simulator_control("pause", None);
+    drop(connection);
+    let status = child
+        .wait()
+        .unwrap_or_else(|error| panic!("engine should exit after disconnect: {error}"));
+    assert!(status.success());
+    remove_database(&database);
+}
+
+#[test]
+#[ignore = "set LUMI_RUN_PROLINK_ONLY_SOAK=1 and LUMI_PROLINK_SOAK_SECONDS"]
+fn prolink_only_configurable_soak_has_bounded_ingress_without_output_side_effects() {
+    if std::env::var("LUMI_RUN_PROLINK_ONLY_SOAK").as_deref() != Ok("1") {
+        return;
+    }
+    let duration_seconds: u64 = std::env::var("LUMI_PROLINK_SOAK_SECONDS")
+        .unwrap_or_else(|_| panic!("LUMI_PROLINK_SOAK_SECONDS is required"))
+        .parse()
+        .unwrap_or_else(|error| panic!("LUMI_PROLINK_SOAK_SECONDS must be an integer: {error}"));
+    assert!(
+        duration_seconds > 0,
+        "Pro DJ Link soak duration must be positive"
+    );
+    assert_eq!(
+        simulator_status()
+            .get("trafficProfile")
+            .and_then(Value::as_str),
+        Some("cdj-1500x")
+    );
+    simulator_control("master", Some("on"));
+    simulator_control("on-air", Some("on"));
+    simulator_control("pitch", Some("0"));
+    simulator_control("play", None);
+
+    let database = temporary_database_path();
+    let mut child = start_engine(&database);
+    let mut connection = connect_and_authenticate(&mut child);
+    let initial = read_response(&mut connection);
+    let mut sequence = 1_u64;
+    let mut snapshot = exchange(
+        &mut connection,
+        &command(
+            "prolink-only-select-connected",
+            sequence,
+            json!({
+                "kind": "selectDeckSourceMode",
+                "mode": "connectedDecks",
+                "expectedStateRevision": required_u64(&initial.payload, "stateRevision"),
+            }),
+        ),
+    );
+    sequence = sequence.saturating_add(1);
+    assert_eq!(
+        snapshot.message_type,
+        MessageType::Snapshot,
+        "connected-deck selection failed: {:?}",
+        snapshot.payload
+    );
+    let baseline_outputs = output_record_count(&snapshot);
+    let finish = Instant::now() + Duration::from_secs(duration_seconds);
+    let mut maximum_p95 = 0_u64;
+    let mut polls = 0_u64;
+    while Instant::now() < finish {
+        thread::sleep(Duration::from_millis(100));
+        snapshot = exchange(
+            &mut connection,
+            &command(
+                "prolink-only-poll",
+                sequence,
+                json!({ "kind": "getSnapshot" }),
+            ),
+        );
+        sequence = sequence.saturating_add(1);
+        polls = polls.saturating_add(1);
+        let input = required_object(&snapshot.payload, "deckInputIntegration");
+        assert_eq!(required_u64(input, "ingressCriticalSaturationCount"), 0);
+        assert!(
+            required_u64(input, "ingressQueueDepth") <= required_u64(input, "ingressQueueCapacity")
+        );
+        maximum_p95 = maximum_p95.max(required_u64(input, "ingressSourceAgeP95Micros"));
+        let link = required_object(&snapshot.payload, "abletonLinkIntegration");
+        assert_eq!(link.get("enabled").and_then(Value::as_bool), Some(false));
+        assert_eq!(output_record_count(&snapshot), baseline_outputs);
+    }
+    let input = required_object(&snapshot.payload, "deckInputIntegration");
+    assert!(required_u64(input, "receivedMessageCount") > 0);
+    assert!(required_u64(input, "ingressSourceAgeSampleCount") > 0);
+    assert!(maximum_p95 <= 250_000, "Pro DJ Link p95 exceeded budget");
+    println!(
+        "Pro DJ Link-only soak: duration={}s polls={} messages={} p95={}us max={}us highWater={}",
+        duration_seconds,
+        polls,
+        required_u64(input, "receivedMessageCount"),
+        required_u64(input, "ingressSourceAgeP95Micros"),
+        required_u64(input, "ingressSourceAgeMaxMicros"),
+        required_u64(input, "ingressQueueHighWater"),
+    );
+
+    simulator_control("pause", None);
+    drop(connection);
+    let status = child
+        .wait()
+        .unwrap_or_else(|error| panic!("engine should exit after disconnect: {error}"));
+    assert!(status.success());
+    remove_database(&database);
+}
+
+/// Combined source, Link, lighting and aggressive snapshot-polling soak.
+///
+/// The artifact contains only bounded counters and percentiles. It deliberately
+/// excludes track metadata and the simulator token so it can be retained as a
+/// release-evidence asset.
+#[test]
+#[ignore = "set LUMI_RUN_LIVE_INTEGRATION_SOAK=1 and LUMI_LIVE_SOAK_SECONDS"]
+fn combined_lanes_remain_bounded_and_emit_release_evidence() {
+    if std::env::var("LUMI_RUN_LIVE_INTEGRATION_SOAK").as_deref() != Ok("1") {
+        return;
+    }
+    let duration_seconds: u64 = std::env::var("LUMI_LIVE_SOAK_SECONDS")
+        .unwrap_or_else(|_| panic!("LUMI_LIVE_SOAK_SECONDS is required"))
+        .parse()
+        .unwrap_or_else(|error| panic!("LUMI_LIVE_SOAK_SECONDS must be an integer: {error}"));
+    assert!(duration_seconds > 0, "soak duration must be positive");
+    let simulator = simulator_status();
+    assert_eq!(
+        simulator.get("trafficProfile").and_then(Value::as_str),
+        Some("cdj-1500x"),
+        "release evidence requires the representative cdj-1500x profile"
+    );
+
+    simulator_control("pause", None);
+    simulator_control("seek", Some("60000"));
+    simulator_control("master", Some("on"));
+    simulator_control("on-air", Some("on"));
+    simulator_control("pitch", Some("0"));
+
+    let database = temporary_database_path();
+    seed_network_database(&database);
+    let mut child = start_engine(&database);
+    let mut connection = connect_and_authenticate(&mut child);
+    let initial = read_response(&mut connection);
+    let mut sequence = 1_u64;
+    let _connected = exchange(
+        &mut connection,
+        &command(
+            "soak-select-connected",
+            sequence,
+            json!({
+                "kind": "selectDeckSourceMode",
+                "mode": "connectedDecks",
+                "expectedStateRevision": required_u64(&initial.payload, "stateRevision"),
+            }),
+        ),
+    );
+    sequence = sequence.saturating_add(1);
+    let mut snapshot = exchange(
+        &mut connection,
+        &command(
+            "soak-enable-link",
+            sequence,
+            json!({ "kind": "setAbletonLinkEnabled", "enabled": true }),
+        ),
+    );
+    sequence = sequence.saturating_add(1);
+
+    let ready_deadline = Instant::now() + Duration::from_secs(15);
+    while !snapshot
+        .payload
+        .get("livePlan")
+        .is_some_and(Value::is_object)
+        || required_object(&snapshot.payload, "deckInputIntegration")
+            .get("sourceState")
+            .and_then(Value::as_str)
+            != Some("ready")
+    {
+        assert!(
+            Instant::now() < ready_deadline,
+            "the representative simulator did not produce an exact Live plan"
+        );
+        thread::sleep(Duration::from_millis(50));
+        snapshot = exchange(
+            &mut connection,
+            &command(
+                "soak-wait-ready",
+                sequence,
+                json!({ "kind": "getSnapshot" }),
+            ),
+        );
+        sequence = sequence.saturating_add(1);
+    }
+
+    for (message_id, state) in [("soak-arm", "armed"), ("soak-start", "live")] {
+        snapshot = exchange(
+            &mut connection,
+            &command(
+                message_id,
+                sequence,
+                json!({
+                    "kind": "setOperationState",
+                    "operationState": state,
+                    "expectedStateRevision": required_u64(&snapshot.payload, "stateRevision"),
+                }),
+            ),
+        );
+        sequence = sequence.saturating_add(1);
+    }
+    let baseline_outputs = output_record_count(&snapshot);
+    simulator_control("play", None);
+
+    let started = Instant::now();
+    let finish = started + Duration::from_secs(duration_seconds);
+    let mut next_pitch = started + Duration::from_secs(2);
+    let mut next_seek = started + Duration::from_secs(7);
+    let mut next_operation_cycle = started + Duration::from_secs(11);
+    let pitches = [("4.2", 161_510_u64), ("-2", 151_900), ("0", 155_000)];
+    let seeks = [280_000_u64, 1_000, 60_000];
+    let mut pitch_index = 0_usize;
+    let mut seek_index = 0_usize;
+    let mut pitch_changes = 0_u64;
+    let mut seek_landings = 0_u64;
+    let mut operation_cycles = 0_u64;
+    let mut snapshot_polls = 0_u64;
+    let mut maximum_queue_depth = 0_u64;
+    let mut maximum_queue_high_water = 0_u64;
+    let mut maximum_source_age_micros = 0_u64;
+    let mut maximum_source_age_p95_micros = 0_u64;
+    let mut maximum_engine_lateness_micros = 0_u64;
+    let mut maximum_realtime_midi_p95_micros = 0_u64;
+
+    while Instant::now() < finish {
+        let now = Instant::now();
+        if now >= next_pitch {
+            let (pitch, _) = pitches[pitch_index % pitches.len()];
+            simulator_control("pitch", Some(pitch));
+            pitch_index = pitch_index.saturating_add(1);
+            pitch_changes = pitch_changes.saturating_add(1);
+            next_pitch += Duration::from_secs(2);
+        }
+        if now >= next_seek {
+            let target = seeks[seek_index % seeks.len()];
+            simulator_control("seek", Some(&target.to_string()));
+            seek_index = seek_index.saturating_add(1);
+            seek_landings = seek_landings.saturating_add(1);
+            next_seek += Duration::from_secs(7);
+        }
+        if now >= next_operation_cycle {
+            for (suffix, state) in [("pause", "paused"), ("resume", "live")] {
+                snapshot = exchange(
+                    &mut connection,
+                    &command(
+                        &format!("soak-{suffix}-{operation_cycles}"),
+                        sequence,
+                        json!({
+                            "kind": "setOperationState",
+                            "operationState": state,
+                            "expectedStateRevision": required_u64(
+                                &snapshot.payload,
+                                "stateRevision",
+                            ),
+                        }),
+                    ),
+                );
+                sequence = sequence.saturating_add(1);
+            }
+            operation_cycles = operation_cycles.saturating_add(1);
+            next_operation_cycle += Duration::from_secs(11);
+        }
+
+        snapshot = exchange(
+            &mut connection,
+            &command(
+                "soak-aggressive-ui-poll",
+                sequence,
+                json!({ "kind": "getSnapshot" }),
+            ),
+        );
+        sequence = sequence.saturating_add(1);
+        snapshot_polls = snapshot_polls.saturating_add(1);
+
+        let input = required_object(&snapshot.payload, "deckInputIntegration");
+        assert_eq!(
+            input.get("sourceState").and_then(Value::as_str),
+            Some("ready")
+        );
+        assert_eq!(required_u64(input, "ingressCriticalSaturationCount"), 0);
+        let capacity = required_u64(input, "ingressQueueCapacity");
+        let depth = required_u64(input, "ingressQueueDepth");
+        let high_water = required_u64(input, "ingressQueueHighWater");
+        assert!(depth <= capacity, "Pro DJ Link queue exceeded capacity");
+        assert!(
+            high_water <= capacity,
+            "Pro DJ Link high-water exceeded capacity"
+        );
+        maximum_queue_depth = maximum_queue_depth.max(depth);
+        maximum_queue_high_water = maximum_queue_high_water.max(high_water);
+        maximum_source_age_micros =
+            maximum_source_age_micros.max(required_u64(input, "ingressSourceAgeMaxMicros"));
+        maximum_source_age_p95_micros =
+            maximum_source_age_p95_micros.max(required_u64(input, "ingressSourceAgeP95Micros"));
+
+        let link = required_object(&snapshot.payload, "abletonLinkIntegration");
+        assert_eq!(required_u64(link, "failureCount"), 0);
+        assert_eq!(required_u64(link, "failClosedCount"), 0);
+        maximum_engine_lateness_micros =
+            maximum_engine_lateness_micros.max(required_u64(link, "enginePumpMaxLatenessMicros"));
+
+        let midi = required_object(&snapshot.payload, "midiIntegration");
+        let scheduler = required_nested_object(midi, "realtimeScheduler");
+        assert_eq!(required_u64(scheduler, "failedCount"), 0);
+        let lane = required_nested_object(scheduler, "lane");
+        assert_eq!(required_u64(lane, "saturationCount"), 0);
+        assert!(
+            required_u64(lane, "queueDepth") <= required_u64(lane, "queueCapacity"),
+            "realtime MIDI queue exceeded capacity"
+        );
+        maximum_realtime_midi_p95_micros =
+            maximum_realtime_midi_p95_micros.max(required_u64(lane, "latencyP95Micros"));
+        thread::sleep(Duration::from_millis(25));
+    }
+
+    // The cumulative histogram uses finite buckets and must stay inside the
+    // release budget even while UI polling and control mutations share the
+    // process. The maximum remains evidence rather than a brittle scheduler
+    // assertion; p95 is the operating budget.
+    assert!(
+        maximum_source_age_p95_micros <= 250_000,
+        "source-to-engine p95 exceeded 250 ms: {maximum_source_age_p95_micros} µs"
+    );
+    assert!(
+        maximum_realtime_midi_p95_micros <= 20_000,
+        "realtime MIDI p95 exceeded 20 ms: {maximum_realtime_midi_p95_micros} µs"
+    );
+    assert!(
+        output_record_count(&snapshot) > baseline_outputs,
+        "combined soak did not execute an AutoLoop"
+    );
+
+    let final_input = required_object(&snapshot.payload, "deckInputIntegration");
+    let final_link = required_object(&snapshot.payload, "abletonLinkIntegration");
+    let final_midi = required_object(&snapshot.payload, "midiIntegration");
+    let final_scheduler = required_nested_object(final_midi, "realtimeScheduler");
+    let final_lane = required_nested_object(final_scheduler, "lane");
+    let evidence = json!({
+        "schemaVersion": 1,
+        "appVersion": env!("CARGO_PKG_VERSION"),
+        "simulatorProfile": "cdj-1500x",
+        "durationSeconds": duration_seconds,
+        "uiSnapshotPolls": snapshot_polls,
+        "actions": {
+            "pitchChanges": pitch_changes,
+            "seekLandings": seek_landings,
+            "lightingOperationCycles": operation_cycles,
+        },
+        "proDjLink": {
+            "receivedMessages": required_u64(final_input, "receivedMessageCount"),
+            "queueCapacity": required_u64(final_input, "ingressQueueCapacity"),
+            "maximumObservedDepth": maximum_queue_depth,
+            "queueHighWater": maximum_queue_high_water,
+            "coalescedMessages": required_u64(final_input, "ingressCoalescedMessageCount"),
+            "criticalSaturation": required_u64(final_input, "ingressCriticalSaturationCount"),
+            "sourceAgeSamples": required_u64(final_input, "ingressSourceAgeSampleCount"),
+            "sourceAgeP50Micros": required_u64(final_input, "ingressSourceAgeP50Micros"),
+            "sourceAgeP95Micros": required_u64(final_input, "ingressSourceAgeP95Micros"),
+            "sourceAgeP99Micros": required_u64(final_input, "ingressSourceAgeP99Micros"),
+            "sourceAgeMaxMicros": maximum_source_age_micros,
+            "positionDiscontinuities": required_u64(final_input, "positionDiscontinuityCount"),
+        },
+        "abletonLink": {
+            "peers": required_u64(final_link, "peers"),
+            "receivedAnchors": required_u64(final_link, "receivedAnchorCount"),
+            "appliedAnchors": required_u64(final_link, "appliedAnchorCount"),
+            "hardReanchors": required_u64(final_link, "hardReanchorCount"),
+            "failClosed": required_u64(final_link, "failClosedCount"),
+            "failures": required_u64(final_link, "failureCount"),
+            "enginePumpStarvation": required_u64(final_link, "enginePumpStarvationCount"),
+            "enginePumpMaxLatenessMicros": maximum_engine_lateness_micros,
+        },
+        "autoLoop": {
+            "outputs": output_record_count(&snapshot),
+            "executionEpoch": required_u64(final_scheduler, "executionEpoch"),
+            "requested": required_u64(final_scheduler, "requestedCount"),
+            "completed": required_u64(final_scheduler, "completedCount"),
+            "duplicatesSuppressed": required_u64(final_scheduler, "duplicateCount"),
+            "cancelled": required_u64(final_scheduler, "cancelledCount"),
+            "failed": required_u64(final_scheduler, "failedCount"),
+            "laneQueueHighWater": required_u64(final_lane, "queueHighWater"),
+            "laneSaturation": required_u64(final_lane, "saturationCount"),
+            "laneLatencyP50Micros": required_u64(final_lane, "latencyP50Micros"),
+            "laneLatencyP95Micros": required_u64(final_lane, "latencyP95Micros"),
+            "laneLatencyP99Micros": required_u64(final_lane, "latencyP99Micros"),
+            "laneLatencyMaxMicros": required_u64(final_lane, "latencyMaxMicros"),
+        },
+    });
+    if let Ok(path) = std::env::var("LUMI_LIVE_EVIDENCE_PATH") {
+        fs::write(
+            &path,
+            serde_json::to_vec_pretty(&evidence)
+                .unwrap_or_else(|error| panic!("evidence should encode: {error}")),
+        )
+        .unwrap_or_else(|error| panic!("evidence should write to {path}: {error}"));
+    }
+    println!(
+        "Combined Live soak evidence: {}",
+        serde_json::to_string(&evidence)
+            .unwrap_or_else(|error| panic!("evidence should encode: {error}"))
+    );
+
+    simulator_control("pause", None);
+    simulator_control("pitch", Some("0"));
     drop(connection);
     let status = child
         .wait()
@@ -542,6 +950,13 @@ fn required_u64(value: &serde_json::Map<String, Value>, field: &str) -> u64 {
         .get(field)
         .and_then(Value::as_u64)
         .unwrap_or_else(|| panic!("{field} should be an unsigned integer"))
+}
+
+fn required_nested_object<'a>(
+    value: &'a serde_json::Map<String, Value>,
+    field: &str,
+) -> &'a serde_json::Map<String, Value> {
+    required_object(value, field)
 }
 
 fn output_record_count(snapshot: &MessageEnvelope) -> u64 {
@@ -656,6 +1071,18 @@ fn simulator_control(command: &str, argument: Option<&str>) {
         .status()
         .unwrap_or_else(|error| panic!("simulator {command} should launch: {error}"));
     assert!(status.success(), "simulator {command} should succeed");
+}
+
+fn simulator_status() -> Value {
+    let script =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../scripts/prolink-simulatorctl.sh");
+    let output = Command::new(script)
+        .arg("status")
+        .output()
+        .unwrap_or_else(|error| panic!("simulator status should launch: {error}"));
+    assert!(output.status.success(), "simulator status should succeed");
+    serde_json::from_slice(&output.stdout)
+        .unwrap_or_else(|error| panic!("simulator status should be JSON: {error}"))
 }
 
 fn temporary_database_path() -> PathBuf {

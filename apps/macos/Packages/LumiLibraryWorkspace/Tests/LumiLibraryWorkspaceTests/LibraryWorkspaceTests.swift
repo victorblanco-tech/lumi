@@ -221,6 +221,11 @@ struct LibraryWorkspaceTests {
                     "ingressQueueHighWater": .number(24),
                     "ingressCoalescedMessageCount": .number(800),
                     "ingressCriticalSaturationCount": .number(0),
+                    "ingressSourceAgeSampleCount": .number(12_000),
+                    "ingressSourceAgeP50Micros": .number(500),
+                    "ingressSourceAgeP95Micros": .number(5_000),
+                    "ingressSourceAgeP99Micros": .number(20_000),
+                    "ingressSourceAgeMaxMicros": .number(38_200),
                     "precisePositionMessageCount": .number(4_000),
                     "authoritativePositionCount": .number(3_950),
                     "positionDiscontinuityCount": .number(6),
@@ -247,6 +252,11 @@ struct LibraryWorkspaceTests {
         #expect(input.ingressQueueHighWater == 24)
         #expect(input.ingressCoalescedMessageCount == 800)
         #expect(input.ingressCriticalSaturationCount == 0)
+        #expect(input.ingressSourceAgeSampleCount == 12_000)
+        #expect(input.ingressSourceAgeP50Micros == 500)
+        #expect(input.ingressSourceAgeP95Micros == 5_000)
+        #expect(input.ingressSourceAgeP99Micros == 20_000)
+        #expect(input.ingressSourceAgeMaxMicros == 38_200)
         #expect(input.precisePositionMessageCount == 4_000)
         #expect(input.authoritativePositionCount == 3_950)
         #expect(input.positionDiscontinuityCount == 6)

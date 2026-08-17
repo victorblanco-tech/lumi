@@ -9,7 +9,7 @@
     "kind": "stateSnapshot",
     "stateRevision": 8,
     "operationState": "armed",
-    "engineVersion": "0.4.0-dev-55",
+    "engineVersion": "0.4.0-dev-56",
     "runtimeCore": {
       "model": "singleWriterReducer",
       "health": "ready",

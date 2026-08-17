@@ -1,6 +1,6 @@
 # Story E5-04: Wi-Fi, lifecycle and physical release evidence
 
-- Status: **Simulator/UI baseline ready; physical duration evidence pending**
+- Status: **Implementation and automated evidence complete; physical duration evidence pending**
 - Priority: **P0 Critical**
 - Target: `0.4.0-dev-56`
 - GitHub tracking: [#120](https://github.com/victorblanco-tech/lumi/issues/120)
@@ -45,3 +45,22 @@ Still required before this story can close:
   and DMX output;
 - one retained evidence artifact with end-to-end age percentiles, exact cue
   counts, execution epochs, queue bounds and fault transitions.
+
+## Dev-56 implementation completion
+
+All software work for this story is complete:
+
+- source-to-engine age includes Java bridge and Rust supervisor residence and
+  is retained as a bounded p50/p95/p99/max histogram;
+- fresh Link clock state is forwarded before library hydration and planning;
+- native Integration diagnostics expose queue and source-age health;
+- one configurable runner covers Pro DJ Link-only, Link-only, realtime
+  MIDI-only and combined modes;
+- combined stress includes 40 Hz UI polling, live pitch changes, repeated
+  seeks and independent lighting Pause/Start cycles;
+- the combined runner emits one credential-free evidence JSON document.
+
+This leaves no unfinished implementation story. Closure and RC promotion are
+still intentionally blocked on the one-hour Wi-Fi/Ethernet runs and physical
+CDJ-1500X/SoundSwitch/Control One/DMX observation, which cannot be manufactured
+by an automated simulator run.

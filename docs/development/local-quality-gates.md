@@ -17,6 +17,7 @@ the LAN simulator or physical show hardware.
 | `full` | Existing complete repository, Xcode bundle and visual-evidence gate | No hardware; every installed Lumi app must be closed |
 | `security` | RustSec and OSV audit of production Rust and Maven dependencies | Internet required; `cargo-audit`, `curl` and `jq` required |
 | `lab` | Real network simulator plus optional real Carabiner/SoundSwitch peer | LAN simulator, synced disposable Dev DB and explicit environment |
+| `soak` | Four isolated/combined configurable Live lanes plus retained evidence | LAN simulator, managed Carabiner helper, synced disposable Dev DB |
 
 No gate silently turns a missing prerequisite into a pass. Ignored tests stay
 ignored in ordinary gates and are selected explicitly by `lab`.
@@ -85,6 +86,27 @@ export LUMI_EXPECT_LINK_PEER=1 # only while SoundSwitch is open with Link enable
 ./scripts/verify-local.sh lab
 ```
 
+## Configurable Live integration soak
+
+The soak gate uses the same simulator and database variables plus the managed
+Carabiner executable. Development evidence requires at least 30 seconds per
+lane; RC evidence requires at least one hour per lane.
+
+```bash
+export LUMI_LIVE_SOAK_SECONDS=60
+export LUMI_CARABINER_TEST_EXECUTABLE="$PWD/build/carabiner-runtime/Carabiner"
+./scripts/verify-local.sh soak
+
+# RC gate
+export LUMI_LIVE_SOAK_SECONDS=3600
+export LUMI_REQUIRE_RC_DURATION=1
+./scripts/verify-local.sh soak
+```
+
+The four sequential modes are Pro DJ Link-only, Link-only, realtime MIDI-only
+and combined. The combined mode adds pitch, transport and UI-polling stress and
+writes a credential-free JSON artifact below `build/Evidence` by default.
+
 ## Performance evidence
 
 Every accepted show-path measurement records at least:
@@ -103,7 +125,8 @@ CoreMIDI boundary. A smooth waveform is useful but is not timing evidence.
 
 ## One-hour and physical gates
 
-The bounded `lab` command is a development acceptance gate. Story E4-03B adds a
-configurable soak runner; one hour is mandatory for RC evidence. Final physical
+The bounded `lab` command is a development acceptance gate. The `soak` command
+is the configurable duration runner; one hour per lane is mandatory for RC
+evidence. Final physical
 evidence uses CDJ-1500X, DJM-V5, SoundSwitch, Control One and visible DMX output
 and is retained without copyrighted audio or user library data.

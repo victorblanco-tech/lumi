@@ -637,6 +637,11 @@ public struct DeckInputIntegrationState: Equatable, Sendable {
     public let ingressQueueHighWater: UInt64
     public let ingressCoalescedMessageCount: UInt64
     public let ingressCriticalSaturationCount: UInt64
+    public let ingressSourceAgeSampleCount: UInt64
+    public let ingressSourceAgeP50Micros: UInt64
+    public let ingressSourceAgeP95Micros: UInt64
+    public let ingressSourceAgeP99Micros: UInt64
+    public let ingressSourceAgeMaxMicros: UInt64
     public let precisePositionMessageCount: UInt64
     public let authoritativePositionCount: UInt64
     public let positionDiscontinuityCount: UInt64

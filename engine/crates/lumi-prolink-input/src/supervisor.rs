@@ -1,10 +1,11 @@
-use std::collections::VecDeque;
+use std::collections::{BTreeMap, VecDeque};
 use std::io::{BufRead, BufReader};
 use std::net::{Ipv4Addr, SocketAddrV4, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::process::{Child, ChildStdin, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use std::thread;
+use std::time::Instant;
 
 use thiserror::Error;
 
@@ -12,6 +13,10 @@ use crate::{BridgeDecodeError, BridgeDecoder, BridgeEvent, BridgeMessage, Bridge
 
 const STDERR_TAIL_CAPACITY: usize = 40;
 const PROCESS_OUTPUT_CAPACITY: usize = 512;
+const INGRESS_LATENCY_BOUNDS_MICROS: [u64; 13] = [
+    100, 250, 500, 1_000, 2_000, 5_000, 10_000, 20_000, 40_000, 100_000, 250_000, 500_000,
+    1_000_000,
+];
 pub const PRO_DJ_LINK_UDP_PORTS: [u16; 3] = [50_000, 50_001, 50_002];
 
 /// Refuse to start a second Pro DJ Link application on the same network host.
@@ -155,7 +160,53 @@ pub struct BridgeProcessDiagnostics {
     pub queue_high_water: usize,
     pub coalesced_message_count: u64,
     pub critical_saturation_count: u64,
+    pub source_age_sample_count: u64,
+    pub source_age_p50_micros: u64,
+    pub source_age_p95_micros: u64,
+    pub source_age_p99_micros: u64,
+    pub source_age_max_micros: u64,
     pub stderr_tail: Vec<String>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct IngressLatencyHistogram {
+    buckets: [u64; INGRESS_LATENCY_BOUNDS_MICROS.len() + 1],
+    sample_count: u64,
+    maximum_micros: u64,
+}
+
+impl IngressLatencyHistogram {
+    fn record(&mut self, micros: u64) {
+        let bucket = INGRESS_LATENCY_BOUNDS_MICROS
+            .iter()
+            .position(|bound| micros <= *bound)
+            .unwrap_or(INGRESS_LATENCY_BOUNDS_MICROS.len());
+        self.buckets[bucket] = self.buckets[bucket].saturating_add(1);
+        self.sample_count = self.sample_count.saturating_add(1);
+        self.maximum_micros = self.maximum_micros.max(micros);
+    }
+
+    fn percentile(&self, percentile: u64) -> u64 {
+        if self.sample_count == 0 {
+            return 0;
+        }
+        let target = self
+            .sample_count
+            .saturating_mul(percentile)
+            .saturating_add(99)
+            / 100;
+        let mut cumulative = 0_u64;
+        for (index, count) in self.buckets.iter().enumerate() {
+            cumulative = cumulative.saturating_add(*count);
+            if cumulative >= target {
+                return INGRESS_LATENCY_BOUNDS_MICROS
+                    .get(index)
+                    .copied()
+                    .unwrap_or(self.maximum_micros);
+            }
+        }
+        self.maximum_micros
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -194,11 +245,13 @@ fn coalescing_key(message: &BridgeMessage) -> Option<CoalescingKey> {
 
 struct ProcessOutputQueue {
     messages: VecDeque<BridgeMessage>,
+    received_at: BTreeMap<u64, Instant>,
     capacity: usize,
     high_water: usize,
     coalesced_message_count: u64,
     critical_saturation_count: u64,
     last_sequence: Option<u64>,
+    source_age: IngressLatencyHistogram,
     terminal_error: Option<String>,
     stdout_closed: bool,
 }
@@ -207,11 +260,13 @@ impl ProcessOutputQueue {
     fn new(capacity: usize) -> Self {
         Self {
             messages: VecDeque::with_capacity(capacity),
+            received_at: BTreeMap::new(),
             capacity,
             high_water: 0,
             coalesced_message_count: 0,
             critical_saturation_count: 0,
             last_sequence: None,
+            source_age: IngressLatencyHistogram::default(),
             terminal_error: None,
             stdout_closed: false,
         }
@@ -225,7 +280,9 @@ impl ProcessOutputQueue {
                 .iter()
                 .position(|queued| coalescing_key(queued) == Some(key))
         {
-            self.messages.remove(index);
+            if let Some(replaced) = self.messages.remove(index) {
+                self.received_at.remove(&replaced.sequence);
+            }
             self.coalesced_message_count = self.coalesced_message_count.saturating_add(1);
         }
 
@@ -235,7 +292,9 @@ impl ProcessOutputQueue {
                 .iter()
                 .position(|queued| coalescing_key(queued).is_some())
             {
-                self.messages.remove(index);
+                if let Some(replaced) = self.messages.remove(index) {
+                    self.received_at.remove(&replaced.sequence);
+                }
                 self.coalesced_message_count = self.coalesced_message_count.saturating_add(1);
             } else {
                 self.critical_saturation_count = self.critical_saturation_count.saturating_add(1);
@@ -247,6 +306,7 @@ impl ProcessOutputQueue {
             }
         }
 
+        self.received_at.insert(message.sequence, Instant::now());
         self.messages.push_back(message);
         self.high_water = self.high_water.max(self.messages.len());
         true
@@ -359,6 +419,19 @@ impl BridgeProcessSupervisor {
             return Err(BridgeSupervisorError::Read(message));
         }
         let mut messages: Vec<_> = output.messages.drain(..).collect();
+        for message in &messages {
+            let supervisor_age = output
+                .received_at
+                .remove(&message.sequence)
+                .map_or(0, |received| {
+                    u64::try_from(received.elapsed().as_micros()).unwrap_or(u64::MAX)
+                });
+            output.source_age.record(
+                message
+                    .bridge_queue_age_micros
+                    .saturating_add(supervisor_age),
+            );
+        }
         messages.sort_by_key(|message| {
             let priority = match message.traffic_class {
                 BridgeTrafficClass::Critical => 0_u8,
@@ -396,6 +469,11 @@ impl BridgeProcessSupervisor {
             queue_high_water: output.high_water,
             coalesced_message_count: output.coalesced_message_count,
             critical_saturation_count: output.critical_saturation_count,
+            source_age_sample_count: output.source_age.sample_count,
+            source_age_p50_micros: output.source_age.percentile(50),
+            source_age_p95_micros: output.source_age.percentile(95),
+            source_age_p99_micros: output.source_age.percentile(99),
+            source_age_max_micros: output.source_age.maximum_micros,
             stderr_tail,
         })
     }
@@ -586,5 +664,20 @@ mod tests {
             elapsed < Duration::from_secs(1),
             "status coalescing exceeded its one-second debug-build budget"
         );
+    }
+
+    #[test]
+    fn ingress_latency_histogram_is_bounded_and_reports_release_percentiles() {
+        let mut histogram = IngressLatencyHistogram::default();
+        for micros in [50, 200, 750, 1_500, 4_000, 9_000, 19_000, 39_000, 80_000] {
+            histogram.record(micros);
+        }
+
+        assert_eq!(histogram.sample_count, 9);
+        assert_eq!(histogram.percentile(50), 5_000);
+        assert_eq!(histogram.percentile(95), 100_000);
+        assert_eq!(histogram.percentile(99), 100_000);
+        assert_eq!(histogram.maximum_micros, 80_000);
+        assert_eq!(histogram.buckets.len(), 14);
     }
 }

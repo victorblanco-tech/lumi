@@ -547,7 +547,9 @@ public struct IntegrationsWorkspaceView: View {
         guard input.isProDJLink, input.ingressQueueCapacity > 0 else {
             return "Waiting for direct Pro DJ Link bridge"
         }
-        return "\(input.ingressQueueDepth)/\(input.ingressQueueCapacity) queued · peak \(input.ingressQueueHighWater) · \(input.ingressCoalescedMessageCount) coalesced · \(input.ingressCriticalSaturationCount) critical saturation"
+        let p95Millis = Double(input.ingressSourceAgeP95Micros) / 1_000
+        let maxMillis = Double(input.ingressSourceAgeMaxMicros) / 1_000
+        return "\(input.ingressQueueDepth)/\(input.ingressQueueCapacity) queued · peak \(input.ingressQueueHighWater) · source p95 \(p95Millis.formatted(.number.precision(.fractionLength(1)))) ms · max \(maxMillis.formatted(.number.precision(.fractionLength(1)))) ms · \(input.ingressCoalescedMessageCount) coalesced · \(input.ingressCriticalSaturationCount) critical saturation"
     }
 
     private var exactPositionDiagnostic: String {

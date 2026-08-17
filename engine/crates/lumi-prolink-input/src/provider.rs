@@ -8,7 +8,7 @@ use lumi_domain::{
 };
 use thiserror::Error;
 
-use crate::{BridgeEvent, BridgeMessage, SourceCondition};
+use crate::{BridgeEvent, BridgeMessage, BridgeProcessDiagnostics, SourceCondition};
 
 const SOURCE_ID: u64 = 31;
 const DEFAULT_TRACK_MINUTES: u32 = 10;
@@ -145,6 +145,11 @@ pub struct ProLinkDeckSourceProvider {
     ingress_queue_high_water: usize,
     ingress_coalesced_message_count: u64,
     ingress_critical_saturation_count: u64,
+    ingress_source_age_sample_count: u64,
+    ingress_source_age_p50_micros: u64,
+    ingress_source_age_p95_micros: u64,
+    ingress_source_age_p99_micros: u64,
+    ingress_source_age_max_micros: u64,
     precise_position_message_count: u64,
     authoritative_position_count: u64,
     position_discontinuity_count: u64,
@@ -177,6 +182,11 @@ impl ProLinkDeckSourceProvider {
             ingress_queue_high_water: 0,
             ingress_coalesced_message_count: 0,
             ingress_critical_saturation_count: 0,
+            ingress_source_age_sample_count: 0,
+            ingress_source_age_p50_micros: 0,
+            ingress_source_age_p95_micros: 0,
+            ingress_source_age_p99_micros: 0,
+            ingress_source_age_max_micros: 0,
             precise_position_message_count: 0,
             authoritative_position_count: 0,
             position_discontinuity_count: 0,
@@ -545,6 +555,11 @@ impl ProLinkDeckSourceProvider {
             ingress_queue_high_water: self.ingress_queue_high_water,
             ingress_coalesced_message_count: self.ingress_coalesced_message_count,
             ingress_critical_saturation_count: self.ingress_critical_saturation_count,
+            ingress_source_age_sample_count: self.ingress_source_age_sample_count,
+            ingress_source_age_p50_micros: self.ingress_source_age_p50_micros,
+            ingress_source_age_p95_micros: self.ingress_source_age_p95_micros,
+            ingress_source_age_p99_micros: self.ingress_source_age_p99_micros,
+            ingress_source_age_max_micros: self.ingress_source_age_max_micros,
             precise_position_message_count: self.precise_position_message_count,
             authoritative_position_count: self.authoritative_position_count,
             position_discontinuity_count: self.position_discontinuity_count,
@@ -560,19 +575,17 @@ impl ProLinkDeckSourceProvider {
         }
     }
 
-    pub fn record_ingress_metrics(
-        &mut self,
-        capacity: usize,
-        depth: usize,
-        high_water: usize,
-        coalesced_message_count: u64,
-        critical_saturation_count: u64,
-    ) {
-        self.ingress_queue_capacity = capacity;
-        self.ingress_queue_depth = depth;
-        self.ingress_queue_high_water = high_water;
-        self.ingress_coalesced_message_count = coalesced_message_count;
-        self.ingress_critical_saturation_count = critical_saturation_count;
+    pub fn record_ingress_metrics(&mut self, diagnostics: &BridgeProcessDiagnostics) {
+        self.ingress_queue_capacity = diagnostics.queue_capacity;
+        self.ingress_queue_depth = diagnostics.queue_depth;
+        self.ingress_queue_high_water = diagnostics.queue_high_water;
+        self.ingress_coalesced_message_count = diagnostics.coalesced_message_count;
+        self.ingress_critical_saturation_count = diagnostics.critical_saturation_count;
+        self.ingress_source_age_sample_count = diagnostics.source_age_sample_count;
+        self.ingress_source_age_p50_micros = diagnostics.source_age_p50_micros;
+        self.ingress_source_age_p95_micros = diagnostics.source_age_p95_micros;
+        self.ingress_source_age_p99_micros = diagnostics.source_age_p99_micros;
+        self.ingress_source_age_max_micros = diagnostics.source_age_max_micros;
     }
 
     pub fn clear(&mut self, at: MonotonicTime) -> Result<(), ProLinkProviderError> {
@@ -1146,6 +1159,11 @@ pub struct ProLinkDeckSourceDiagnostics {
     pub ingress_queue_high_water: usize,
     pub ingress_coalesced_message_count: u64,
     pub ingress_critical_saturation_count: u64,
+    pub ingress_source_age_sample_count: u64,
+    pub ingress_source_age_p50_micros: u64,
+    pub ingress_source_age_p95_micros: u64,
+    pub ingress_source_age_p99_micros: u64,
+    pub ingress_source_age_max_micros: u64,
     pub precise_position_message_count: u64,
     pub authoritative_position_count: u64,
     pub position_discontinuity_count: u64,

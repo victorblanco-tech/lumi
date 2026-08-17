@@ -28,8 +28,11 @@ events use a small bounded ordered queue and fail closed on saturation. Each
 fact carries source observation time through its consumer, and diagnostics
 report current/maximum age in addition to depth, coalescing and saturation.
 
-Transport/AutoLoop, Link and display are independent consumers. AutoLoop may
-not wait behind tempo, position or UI work. Link may not consume phrases,
+Transport/AutoLoop, Link and display are independent consumers. They remain in
+one launchd-owned engine, but have separate bounded queues/actors and failure
+state. The 5 ms engine coordinator always forwards fresh Link clock state
+before synchronous library hydration or lighting-plan reduction. AutoLoop may
+not wait behind Link provider I/O or UI work. Link may not consume phrases,
 lighting operation or old BPM values. Display can drop intermediate values and
 interpolates only from the newest immutable anchor.
 
@@ -45,7 +48,8 @@ classic profile is not valid release-performance evidence.
 - provider-only dispatch latency no longer qualifies as end-to-end evidence;
 - simulator soaks precede short physical protocol confirmation;
 - the production engine remains one launchd service, but its three integration
-  consumers no longer share scheduling or backpressure.
+  consumers no longer share output scheduling or backpressure; one small
+  priority coordinator remains the process-level handoff point by design.
 
 ## Implementation record — `0.4.0-dev-54`
 
@@ -62,6 +66,25 @@ ramps, stale bursts, forward/backward landings and full functional/technical
 regression gates. Headed evidence covers the installed native app plus the real
 SoundSwitch interface. Physical one-hour evidence remains a release gate rather
 than an architectural assumption.
+
+## Implementation record — `0.4.0-dev-56`
+
+The Rust supervisor now combines source-side bridge queue age with its own
+bounded queue residence and retains a constant-space histogram with p50, p95,
+p99 and maximum age. These values are exposed through the engine snapshot and
+native Integration diagnostics.
+
+Within each 5 ms coordinator turn, freshly decoded clock observations are
+forwarded to the isolated Link actor before any SQLite-backed track hydration
+or planning work. Authoritative position processing may then feed the
+Transport/AutoLoop path, and a second empty-or-discontinuity-only drain catches
+new clock acquisition without duplicating the first. UI polling is downstream
+of the immutable snapshot and cannot become a source clock.
+
+The configurable release soak exercises four explicit modes: Pro DJ Link-only,
+Link-only, realtime MIDI-only and all lanes combined with 40 Hz snapshot
+polling, pitch changes, seeks and lighting Pause/Start cycles. It emits one
+bounded JSON evidence artifact without track metadata or credentials.
 
 ## Rejected alternatives
 

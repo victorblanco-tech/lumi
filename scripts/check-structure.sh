@@ -80,6 +80,7 @@ required_paths=(
   "scripts/verify-technical.sh"
   "scripts/verify-security.sh"
   "scripts/verify-show-lab.sh"
+  "scripts/verify-live-integration-soak.sh"
   "scripts/check-apple-test-exclusivity.sh"
   "scripts/package-macos-local.sh"
   "scripts/prepare-carabiner-runtime.sh"

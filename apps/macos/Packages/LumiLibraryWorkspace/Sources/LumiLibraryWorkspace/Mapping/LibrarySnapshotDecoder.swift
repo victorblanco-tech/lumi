@@ -452,6 +452,26 @@ public struct LibrarySnapshotDecoder: Sendable {
                 input,
                 "ingressCriticalSaturationCount"
             ) ?? 0,
+            ingressSourceAgeSampleCount: optionalUnsigned(
+                input,
+                "ingressSourceAgeSampleCount"
+            ) ?? 0,
+            ingressSourceAgeP50Micros: optionalUnsigned(
+                input,
+                "ingressSourceAgeP50Micros"
+            ) ?? 0,
+            ingressSourceAgeP95Micros: optionalUnsigned(
+                input,
+                "ingressSourceAgeP95Micros"
+            ) ?? 0,
+            ingressSourceAgeP99Micros: optionalUnsigned(
+                input,
+                "ingressSourceAgeP99Micros"
+            ) ?? 0,
+            ingressSourceAgeMaxMicros: optionalUnsigned(
+                input,
+                "ingressSourceAgeMaxMicros"
+            ) ?? 0,
             precisePositionMessageCount: optionalUnsigned(
                 input,
                 "precisePositionMessageCount"

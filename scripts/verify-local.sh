@@ -22,8 +22,11 @@ case "$gate" in
   lab)
     "$script_dir/verify-show-lab.sh"
     ;;
+  soak)
+    "$script_dir/verify-live-integration-soak.sh"
+    ;;
   *)
-    echo "Usage: ./scripts/verify-local.sh {functional|technical|full|security|lab}" >&2
+    echo "Usage: ./scripts/verify-local.sh {functional|technical|full|security|lab|soak}" >&2
     echo "See docs/development/local-quality-gates.md for prerequisites and evidence." >&2
     exit 2
     ;;

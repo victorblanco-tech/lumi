@@ -2574,13 +2574,9 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
         return Ok(());
     }
 
-    runtime.direct_deck_source.record_ingress_metrics(
-        bridge_diagnostics.queue_capacity,
-        bridge_diagnostics.queue_depth,
-        bridge_diagnostics.queue_high_water,
-        bridge_diagnostics.coalesced_message_count,
-        bridge_diagnostics.critical_saturation_count,
-    );
+    runtime
+        .direct_deck_source
+        .record_ingress_metrics(&bridge_diagnostics);
 
     let at = runtime.clock.now();
     for message in messages {
@@ -2592,6 +2588,11 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
     if runtime.direct_deck_source.diagnostics().source_status == DeckSourceStatus::Ready {
         runtime.prolink_start_error = None;
     }
+    // Clock transport is the first consumer of freshly decoded Pro DJ Link
+    // traffic. Library hydration and lighting-plan reduction can touch SQLite
+    // and may be comparatively expensive; neither is allowed to add latency
+    // to the independent Ableton Link lane.
+    forward_direct_prolink_clock(runtime)?;
     // Load/status events must hydrate the exact local beat grid before a
     // PrecisePosition packet is mapped. A CDJ beat packet carries only its
     // position within the bar; it is deliberately not allowed to authorize a
@@ -2627,12 +2628,10 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
         }
         process_pending_source_events(runtime)?;
     }
-    for observation in runtime.direct_deck_source.drain_timing_observations() {
-        runtime
-            .link_relay
-            .synchronize(prolink_link_clock(observation))
-            .map_err(EngineError::Timing)?;
-    }
+    // Authoritative position processing can create a first-acquisition or
+    // confirmed-discontinuity clock observation. Drain again without
+    // duplicating the already-forwarded status/tempo observations.
+    forward_direct_prolink_clock(runtime)?;
     let source_status = runtime.direct_deck_source.diagnostics().source_status;
     runtime
         .link_relay
@@ -2641,6 +2640,17 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
             deck_source_status_name(source_status),
         )
         .map_err(EngineError::Timing)?;
+    Ok(())
+}
+
+#[cfg(not(test))]
+fn forward_direct_prolink_clock(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
+    for observation in runtime.direct_deck_source.drain_timing_observations() {
+        runtime
+            .link_relay
+            .synchronize(prolink_link_clock(observation))
+            .map_err(EngineError::Timing)?;
+    }
     Ok(())
 }
 
@@ -4110,6 +4120,11 @@ fn snapshot_envelope_internal(
                 "ingressQueueHighWater": diagnostics.ingress_queue_high_water,
                 "ingressCoalescedMessageCount": diagnostics.ingress_coalesced_message_count,
                 "ingressCriticalSaturationCount": diagnostics.ingress_critical_saturation_count,
+                "ingressSourceAgeSampleCount": diagnostics.ingress_source_age_sample_count,
+                "ingressSourceAgeP50Micros": diagnostics.ingress_source_age_p50_micros,
+                "ingressSourceAgeP95Micros": diagnostics.ingress_source_age_p95_micros,
+                "ingressSourceAgeP99Micros": diagnostics.ingress_source_age_p99_micros,
+                "ingressSourceAgeMaxMicros": diagnostics.ingress_source_age_max_micros,
                 "precisePositionMessageCount": diagnostics.precise_position_message_count,
                 "authoritativePositionCount": diagnostics.authoritative_position_count,
                 "positionDiscontinuityCount": diagnostics.position_discontinuity_count,
