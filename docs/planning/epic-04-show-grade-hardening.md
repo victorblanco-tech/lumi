@@ -179,3 +179,8 @@ Version `0.4.0-dev-45` rejects isolated precise-position jitter through a
 three-sample transport-epoch consensus and makes macOS foreground activation a
 strictly presentation-only resynchronization. See
 [`0.4.0-dev-45-position-consensus-and-ui-resume.md`](../release/0.4.0-dev-45-position-consensus-and-ui-resume.md).
+
+Version `0.4.0-dev-46` corrects pitched-playback projection and requires an
+independent deck-status beat for arbitrary transport jumps, while known Hot
+Cues retain a bounded two-packet path. See
+[`0.4.0-dev-46-independent-position-authority.md`](../release/0.4.0-dev-46-independent-position-authority.md).

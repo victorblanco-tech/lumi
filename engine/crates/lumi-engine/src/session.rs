@@ -2574,9 +2574,11 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
             continue;
         };
         let absolute_beat = context.beat_at_millis(position.playback_position_millis);
+        let known_hot_cue_target = context.is_hot_cue_beat(absolute_beat);
         let Some(authoritative) = runtime.direct_deck_source.apply_authoritative_position(
             position,
             absolute_beat,
+            known_hot_cue_target,
             runtime.clock.now(),
         )?
         else {

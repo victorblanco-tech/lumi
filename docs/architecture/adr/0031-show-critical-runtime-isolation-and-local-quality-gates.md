@@ -322,3 +322,23 @@ pause an occluded window's layer clock; when Lumi becomes active, waveform and
 AutoLoop-plan layers restart from the current app-side visual clock. This path
 may not issue an engine command, alter transport generation, re-anchor Link or
 touch MIDI. UI lifecycle and show timing are therefore mechanically separated.
+
+## Implementation correction — `0.4.0-dev-46`
+
+Physical acceptance disproved three-sample consensus as a sufficient authority
+boundary. A coherent cluster of precise-position packets can still disagree
+with the actual CDJ transport, and track position advances in original-track
+time rather than wall time when the player pitch is non-zero.
+
+Continuity projection therefore applies the effective/original BPM ratio.
+Substantial arbitrary jumps are accepted only when the independently delivered
+`CdjStatus` absolute beat corroborates the same landing beat. Imported Hot Cue
+targets are the bounded low-latency exception: two consecutive precise packets
+at a known cue can establish the new generation without waiting for the slower
+status frame. All other candidates remain fail-closed; they cannot move phrase
+authority, invalidate or release output, or re-anchor Link.
+
+The source adapter now also requires a movement of more than two mapped beats
+before a millisecond discontinuity can become a transport epoch. Small precise
+position corrections remain presentation observations and never have show-wide
+timing consequences.

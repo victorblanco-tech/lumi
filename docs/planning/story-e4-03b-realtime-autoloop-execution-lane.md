@@ -251,3 +251,16 @@ Cue race plus stale-frame interleaving.
 Returning from SoundSwitch to Lumi separately restarts the AppKit layer
 animations from the current read-only visual clock. This repairs an occluded
 Core Animation timeline without any command to the show-critical engine.
+
+### Dev-46 independent transport corroboration
+
+The physical dev-45 run retained a healthy realtime MIDI lane (p95 0.1 ms,
+zero late dispatches and zero saturation) but still produced multiple false
+transport generations during one normal long CDJ loop. Three adjacent precise
+packets were therefore not an independent proof of a user transport action.
+
+Dev-46 projects continuous track time with the CDJ pitch multiplier and checks
+arbitrary jump targets against the latest absolute `CdjStatus` beat. Known
+imported Hot Cues retain a two-packet fast path. A rejected position cluster
+never reaches the realtime worker; a confirmed generation still invalidates
+all older deadlines before the landing phrase can emit.

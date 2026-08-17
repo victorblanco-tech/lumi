@@ -267,6 +267,14 @@ impl LibraryPlanContext {
     }
 
     #[must_use]
+    #[cfg_attr(test, allow(dead_code))]
+    pub fn is_hot_cue_beat(&self, beat: u32) -> bool {
+        self.hot_cues
+            .iter()
+            .any(|cue| self.beat_at_millis(cue.time_millis()).abs_diff(beat) <= 1)
+    }
+
+    #[must_use]
     pub fn millis_at_beat(&self, beat: u32) -> Option<u64> {
         self.beat_grid
             .markers()

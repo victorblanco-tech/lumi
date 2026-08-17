@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.0-dev-46
+
+- Corrects precise-position continuity for pitched playback: track-time
+  progress is now compared with elapsed time multiplied by the effective/original
+  BPM ratio, so packet coalescing cannot turn normal pitched playback into a
+  forward seek.
+- Requires arbitrary seeks and loop wraps to agree with the independent
+  `CdjStatus` absolute beat before advancing Lumi's transport generation.
+  Coherent precise-position noise can therefore no longer scrub the waveform,
+  Ableton Link or SoundSwitch AutoLoops.
+- Keeps imported Hot Cues low latency with a dedicated two-packet confirmation
+  path while preserving the generation barrier that cancels old output before
+  the landing phrase is applied.
+- Ignores position-time jumps that do not move more than two beats, preventing
+  sub-phrase jitter from causing show-wide hard re-anchors.
+
 ## 0.4.0-dev-45
 
 - Separates macOS presentation recovery from show-critical timing: returning

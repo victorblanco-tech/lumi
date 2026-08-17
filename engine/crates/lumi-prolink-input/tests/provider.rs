@@ -268,7 +268,7 @@ fn precise_position_overrides_a_stale_beat_after_hotcue_before_output_planning()
         .pop()
         .unwrap_or_else(|| panic!("precise position should be retained"));
     provider
-        .apply_authoritative_position(bridge_position, 32, MonotonicTime::new(5))
+        .apply_authoritative_position(bridge_position, 32, false, MonotonicTime::new(5))
         .unwrap_or_else(|error| panic!("position should apply: {error}"));
     let _ = provider.drain_events();
 
@@ -291,11 +291,9 @@ fn precise_position_overrides_a_stale_beat_after_hotcue_before_output_planning()
     );
 
     let mut applied = None;
-    for (sequence, observed_at_nanos, position_millis, at) in [
-        (6, 120_000_000, 0, 7),
-        (7, 150_000_000, 30, 8),
-        (8, 180_000_000, 60, 9),
-    ] {
+    for (sequence, observed_at_nanos, position_millis, at) in
+        [(6, 120_000_000, 0, 7), (7, 150_000_000, 30, 8)]
+    {
         let intro_position = decoder
             .decode_line(&format!(
                 r#"{{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":{sequence},"observedAtNanos":{observed_at_nanos},"type":"precisePosition","payload":{{"deviceNumber":1,"deviceName":"CDJ-1500X","playbackPositionMillis":{position_millis},"effectiveBpm":157.25,"beatWithinBar":1,"tempoMaster":true}}}}"#,
@@ -309,7 +307,7 @@ fn precise_position_overrides_a_stale_beat_after_hotcue_before_output_planning()
             .pop()
             .unwrap_or_else(|| panic!("hotcue position should be retained"));
         applied = provider
-            .apply_authoritative_position(intro_position, 0, MonotonicTime::new(at + 10))
+            .apply_authoritative_position(intro_position, 0, true, MonotonicTime::new(at + 10))
             .unwrap_or_else(|error| panic!("hotcue position should apply: {error}"));
     }
     let applied = applied.unwrap_or_else(|| panic!("stable hotcue timeline should be confirmed"));
