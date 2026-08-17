@@ -69,12 +69,17 @@ Those are delivered in E5-02 through E5-04.
   SoundSwitch;
 - Local Playback of `90s Bitch` changed SoundSwitch from `140.0` to `155.0`
   BPM through the production Link path;
+- Live Decks discovered simulated Pro DJ Link Player 1 as the playing master
+  with `90s Bitch` at `155.000` BPM and Player 2 as paused/Plan Ready;
+- the Live header reported `Pro DJ Link · deck 1 · 155.000 BPM · 1 peer` while
+  SoundSwitch concurrently reported `1 Link · 155.0`;
 - Off, Arm, Start, Pause and Off were exercised through the visible controls;
   all transitions retained exactly one Carabiner helper and did not interrupt
   the independently enabled Link relay;
 - Cmd-Q removed the owned Carabiner helper while the intended launchd-owned
   engine remained available.
 
-Physical CDJ pitch movement, Pro DJ Link over Wi-Fi and the combined one-hour
-soak remain explicit E5-04 release evidence. They are not silently claimed by
-this Local Playback UI test.
+Physical CDJ pitch movement and the combined one-hour Wi-Fi soak remain
+explicit E5-04 release evidence. The direct Pro DJ Link simulator path and the
+Local Playback path have both been UI-tested; neither substitutes for the
+physical release soak.
