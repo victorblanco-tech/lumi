@@ -2,7 +2,7 @@
 
 - Status: **Refined; waiting for E5-03**
 - Priority: **P0 Critical**
-- Target: `0.4.0-dev-54`
+- Target: `0.4.0-dev-57`
 - GitHub tracking: [#120](https://github.com/victorblanco-tech/lumi/issues/120)
 
 ## Outcome
@@ -22,3 +22,5 @@ decision.
 - collect latency percentiles, cue counts, transport epochs, source gaps and
   fault transitions in one bounded evidence artifact;
 - repeat the core matrix on physical CDJ-1500X players and SoundSwitch.
+- use the `cdj-1500x` simulator profile for all performance evidence; `classic`
+  is never accepted as a substitute.

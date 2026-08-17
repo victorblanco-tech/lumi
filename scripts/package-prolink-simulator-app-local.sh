@@ -6,7 +6,14 @@ script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 repository_root="$(dirname "$script_dir")"
 distribution_root="$repository_root/build/prolink-simulator-app"
 app_name="Lumi Pro DJ Link Simulator"
-version="0.4.0"
+release_version="$(tr -d '[:space:]' < "$repository_root/VERSION")"
+marketing_version="${release_version%%-*}"
+build_number="${release_version##*-}"
+
+if [[ ! "$marketing_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ || ! "$build_number" =~ ^[0-9]+$ ]]; then
+  echo "ERROR: VERSION must use the Lumi development format x.y.z-dev-N." >&2
+  exit 1
+fi
 
 temurin_cache="$repository_root/build/package-toolchains/temurin-21-macos-aarch64"
 packaging_java_home="${SIMULATOR_PACKAGING_JAVA_HOME:-$temurin_cache/Contents/Home}"
@@ -67,9 +74,11 @@ xcrun actool "$repository_root/apps/macos/Lumi/Resources/Assets.xcassets" \
   --app-icon AppIcon \
   --output-partial-info-plist "$icon_output/Info.plist" >/dev/null
 
-dmg="$distribution_root/Lumi-Pro-DJ-Link-Simulator-${version}-macOS-arm64.dmg"
+dmg="$distribution_root/Lumi-Pro-DJ-Link-Simulator-${release_version}-macOS-arm64.dmg"
 rm -f "$dmg"
 app_image_root="$staging_root/app-image"
+# jpackage rejects pre-1.0 versions whose first component is zero. The
+# generated Info.plist is replaced with Lumi's real version below.
 "$JAVA_HOME/bin/jpackage" \
   --type app-image \
   --dest "$app_image_root" \
@@ -90,8 +99,8 @@ app_image_root="$staging_root/app-image"
 
 app_bundle="$app_image_root/$app_name.app"
 info_plist="$app_bundle/Contents/Info.plist"
-/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $version" "$info_plist"
-/usr/libexec/PlistBuddy -c "Set :CFBundleVersion 1" "$info_plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $marketing_version" "$info_plist"
+/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $build_number" "$info_plist"
 
 external_dependencies="$(
   find "$app_bundle" -type f -print0 | while IFS= read -r -d '' binary; do

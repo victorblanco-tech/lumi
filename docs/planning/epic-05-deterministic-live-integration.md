@@ -25,10 +25,25 @@ duplicate peers, hidden restarts or UI influence.
 
 ## Delivery stories
 
+0. [E5-00 — Representative CDJ-1500X simulator traffic](story-e5-00-representative-cdj1500x-simulator.md)
 1. [E5-01 — Isolated Transport and Ableton Link Relay](story-e5-01-isolated-transport-and-link-relay.md)
 2. [E5-02 — Exactly-once phrase AutoLoop executor](story-e5-02-exactly-once-phrase-autoloop-executor.md)
 3. [E5-03 — Explicit playback epochs, hotcues and output offset](story-e5-03-transport-epochs-hotcues-and-offset.md)
 4. [E5-04 — Wi-Fi, lifecycle and physical release evidence](story-e5-04-wifi-lifecycle-and-physical-evidence.md)
+
+Implementation sequence and measurable budgets are defined in the
+[one-page Live integration separation plan](live-integration-separation-plan.md).
+
+## Acceptance correction — `0.4.0-dev-52`
+
+Dev-52 is rejected as a Live Decks performance release. Its classic MIDI 1.0
+provider correction is retained, but a sustained physical run showed increasing
+deck, AutoLoop and Link delay. Earlier evidence measured only the final MIDI
+dispatch and the Rust-side queue. It did not measure the age accumulated in the
+upstream Java bridge FIFO, and the simulator did not generate CDJ-1500X
+PrecisePosition load. E5-01 and E5-02 are therefore reopened for end-to-end
+freshness and isolation evidence; their delivered component behavior remains
+characterization coverage, not completion evidence.
 
 ## Exit criteria
 
@@ -42,6 +57,8 @@ duplicate peers, hidden restarts or UI influence.
   session, while explicit Quit performs a bounded clean shutdown;
 - one-hour Wi-Fi combined soak passes with bounded queue, latency and fault
   telemetry.
+- source-to-consumer age remains bounded at the Java, Rust, AutoLoop, Link and
+  display boundaries and never trends upward with run duration.
 
 ## Release rule
 

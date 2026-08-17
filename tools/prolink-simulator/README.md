@@ -8,10 +8,17 @@ by Lumi:
 - loaded Rekordbox USB track identity;
 - play/pause, pitch, master and on-air state;
 - beat number and beat within bar.
+- CDJ-1500X-style precise-position traffic at 50 Hz;
+- deterministic stale-position bursts which test that consumers retain only
+  the newest continuous observation and never build a realtime backlog.
 
 The simulator discovers virtual players from their Pro DJ Link announcements
 and sends CDJ status to each active peer exactly as a physical player does.
 Beat and discovery packets remain broadcast traffic.
+
+`cdj-1500x` is the default and required performance-acceptance profile. The
+lower-traffic `classic` profile is available only to diagnose the simulator
+itself; a Lumi release may not use it as Live Decks performance evidence.
 
 It does not play audio, serve media to other players, emulate a CDJ display, or
 accept Pro DJ Link remote-control commands. It is never included in the Lumi
@@ -67,7 +74,8 @@ production DMG.
    ./lumi-prolink-simulator/bin/lumi-prolink-simulator \
      --usb '/Volumes/DJ VIC GRAY' \
      --interface en0 \
-     --player 1
+     --player 1 \
+     --traffic-profile cdj-1500x
    ```
 
 6. Open the printed control URL on the MacBook or iPhone. The token is removed
@@ -94,6 +102,7 @@ POST /api/v1/control/seek       {"positionMillis":64000}
 POST /api/v1/control/pitch      {"pitchPercent":4.2}
 POST /api/v1/control/master     {"enabled":true}
 POST /api/v1/control/on-air     {"enabled":true}
+POST /api/v1/control/precise-burst {}
 ```
 
 For repeatable agent or terminal tests:
@@ -118,6 +127,8 @@ development LAN. A generated token is printed when neither `--token` nor
 ./scripts/verify-prolink-simulator.sh
 ```
 
-The packet tests parse generated announcements, status and beat packets back
-through beat-link itself. The simulator also fails closed when the USB database,
-analysis files, player number or requested network interface is invalid.
+The packet tests parse generated announcements, status, beat and modern-player
+precise-position packets back through beat-link itself. The status endpoint
+exposes per-packet counters, profile, cadence, burst count and the last traffic
+error. The simulator also fails closed when the USB database, analysis files,
+player number or requested network interface is invalid.

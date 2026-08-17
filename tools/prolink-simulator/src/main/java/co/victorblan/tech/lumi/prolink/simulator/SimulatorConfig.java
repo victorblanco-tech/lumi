@@ -10,7 +10,8 @@ record SimulatorConfig(
         int playerNumber,
         String bindAddress,
         int controlPort,
-        String controlToken
+        String controlToken,
+        ProLinkTrafficProfile trafficProfile
 ) {
     private static final int DEFAULT_CONTROL_PORT = 17_840;
 
@@ -21,6 +22,7 @@ record SimulatorConfig(
         String bindAddress = "0.0.0.0";
         int controlPort = DEFAULT_CONTROL_PORT;
         String controlToken = System.getenv("LUMI_SIM_TOKEN");
+        ProLinkTrafficProfile trafficProfile = ProLinkTrafficProfile.CDJ_1500X;
 
         for (int index = 0; index < arguments.length; index++) {
             String argument = arguments[index];
@@ -31,6 +33,9 @@ record SimulatorConfig(
                 case "--bind" -> bindAddress = requiredValue(arguments, ++index, argument);
                 case "--port" -> controlPort = Integer.parseInt(requiredValue(arguments, ++index, argument));
                 case "--token" -> controlToken = requiredValue(arguments, ++index, argument);
+                case "--traffic-profile" -> trafficProfile = ProLinkTrafficProfile.parse(
+                        requiredValue(arguments, ++index, argument)
+                );
                 case "--help", "-h" -> throw new HelpRequested();
                 default -> throw new IllegalArgumentException("Unknown argument: " + argument);
             }
@@ -53,7 +58,7 @@ record SimulatorConfig(
         }
         return new SimulatorConfig(
                 usbRoot.toAbsolutePath().normalize(), networkInterface, playerNumber,
-                bindAddress, controlPort, controlToken
+                bindAddress, controlPort, controlToken, trafficProfile
         );
     }
 
@@ -70,6 +75,8 @@ record SimulatorConfig(
                   --bind 0.0.0.0      Remote control bind address
                   --port 17840        Remote control HTTP port
                   --token VALUE       Remote control token (or LUMI_SIM_TOKEN)
+                  --traffic-profile cdj-1500x|classic
+                                      Packet cadence (default cdj-1500x)
                 """;
     }
 

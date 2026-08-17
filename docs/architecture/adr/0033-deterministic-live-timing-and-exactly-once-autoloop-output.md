@@ -130,3 +130,18 @@ failure boundaries without adding a mesh of new macOS services.
   validation, not a Lumi production dependency;
 - a platform Wi-Fi driver failure is diagnosed separately from Lumi timing
   correctness and does not make Ethernet a product requirement.
+
+## Implementation audit — `0.4.0-dev-52`
+
+The four responsibilities above were separated at their provider APIs, but not
+yet across the complete ingress and scheduling path. The Java callback bridge
+still serialized all event classes through one FIFO, and the Rust engine still
+introduced Link, precise-position and source events through one integration
+pump. Physical CDJ-1500X load demonstrated increasing end-to-end age while
+final-provider diagnostics remained green.
+
+ADR-0034 therefore makes traffic classification mandatory at the first callback
+boundary and requires independent consumers plus source-to-output freshness.
+E5-01 and E5-02 remain open until those stronger gates pass. This audit changes
+implementation status, not the ownership and exactly-once decisions in this
+ADR.

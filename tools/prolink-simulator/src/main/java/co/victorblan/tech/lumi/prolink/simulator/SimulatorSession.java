@@ -28,7 +28,9 @@ final class SimulatorSession implements AutoCloseable {
     static SimulatorSession start(SimulatorConfig config) throws IOException {
         UsbLibrary library = UsbLibrary.open(config.usbRoot());
         PlayerState player = new PlayerState(config.playerNumber());
-        ProLinkBroadcaster broadcaster = new ProLinkBroadcaster(player, config.networkInterface());
+        ProLinkBroadcaster broadcaster = new ProLinkBroadcaster(
+                player, config.networkInterface(), config.trafficProfile()
+        );
         try {
             RemoteControlServer remote = new RemoteControlServer(
                     library, player, broadcaster, config.bindAddress(),
@@ -52,7 +54,8 @@ final class SimulatorSession implements AutoCloseable {
 
     String networkSummary() {
         return broadcaster.endpoint().interfaceName() + " · "
-                + broadcaster.endpoint().localAddressText();
+                + broadcaster.endpoint().localAddressText() + " · "
+                + config.trafficProfile().externalName();
     }
 
     UsbLibrary library() {

@@ -51,6 +51,10 @@
             <div class="metric"><span>Transport</span><strong id="transport">—</strong></div>
             <div class="metric"><span>Effective BPM</span><strong id="bpm">—</strong></div>
             <div class="metric"><span>Beat</span><strong id="beat">—</strong></div>
+            <div class="metric"><span>Traffic</span><strong id="traffic">—</strong></div>
+            <div class="metric"><span>Precise packets</span><strong id="precisePackets">—</strong></div>
+            <div class="metric"><span>Position bursts</span><strong id="bursts">—</strong></div>
+            <div class="metric"><span>Peers</span><strong id="peers">—</strong></div>
         </div>
         <div class="metric" style="margin-top: 10px"><span>Loaded track</span><strong id="loaded">No track loaded</strong></div>
         <div class="controls">
@@ -58,6 +62,7 @@
             <button id="pause">Pause</button>
             <button id="master">Master</button>
             <button id="onAir">On Air</button>
+            <button id="burst">Trigger position burst</button>
         </div>
         <div class="slider"><label for="seek">Position</label><input id="seek" type="range" min="0" max="1" value="0"><output id="seekValue">0:00</output></div>
         <div class="slider"><label for="pitch">Pitch</label><input id="pitch" type="range" min="-20" max="20" step="0.05" value="0"><output id="pitchValue">0.00%</output></div>
@@ -100,6 +105,10 @@
         el('transport').textContent = current.playing ? 'PLAYING' : 'PAUSED';
         el('bpm').textContent = current.track ? current.effectiveBpm.toFixed(2) : '—';
         el('beat').textContent = current.beatNumber ? `${current.beatNumber} · ${current.beatWithinBar}/4` : '—';
+        el('traffic').textContent = current.trafficProfile;
+        el('precisePackets').textContent = current.precisePositionPacketCount.toLocaleString();
+        el('bursts').textContent = current.preciseBurstCount.toLocaleString();
+        el('peers').textContent = current.proLinkPeerCount;
         el('loaded').textContent = current.track ? `${current.track.artist} — ${current.track.title}` : 'No track loaded';
         el('master').classList.toggle('active', current.master);
         el('onAir').classList.toggle('active', current.onAir);
@@ -123,6 +132,7 @@
     el('play').onclick = () => control('play'); el('pause').onclick = () => control('pause');
     el('master').onclick = () => control('master', { enabled: !current.master });
     el('onAir').onclick = () => control('on-air', { enabled: !current.onAir });
+    el('burst').onclick = () => control('precise-burst');
     el('seek').oninput = event => { seekDragging = true; el('seekValue').textContent = time(Number(event.target.value)); };
     el('seek').onchange = event => { seekDragging = false; control('seek', { positionMillis: Number(event.target.value) }); };
     el('pitch').oninput = event => { pitchDragging = true; el('pitchValue').textContent = `${Number(event.target.value).toFixed(2)}%`; };

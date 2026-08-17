@@ -1,8 +1,8 @@
 # Story E5-01: Isolated Transport and Ableton Link Relay
 
-- Status: **Done; physical CDJ/Wi-Fi soak remains in E5-04**
+- Status: **Reopened; provider separation delivered, ingress separation incomplete**
 - Priority: **P0 Critical**
-- Target: `0.4.0-dev-50`
+- Target: `0.4.0-dev-54`
 - Components: Pro DJ Link, Engine, Ableton Link
 - GitHub tracking: [#117](https://github.com/victorblanco-tech/lumi/issues/117)
 
@@ -25,6 +25,12 @@ effect on that clock.
 - remove Link hold behaviour from Lumi Off/Pause commands;
 - forbid implicit helper reconnect after an active-session failure;
 - retain explicit user enable/disable and fail-closed source-loss behaviour.
+- classify traffic at the Java callback boundary before serialization;
+- replace continuous status/position FIFO history with latest-value mailboxes;
+- give Link its own latest-master-tempo consumer, independent from exact beats,
+  AutoLoop scheduling, display projection and UI commands;
+- reject a BPM observation older than the last applied source timestamp;
+- expose source-to-Link age, replacement count and critical saturation.
 
 ## Acceptance criteria
 
@@ -37,6 +43,8 @@ effect on that clock.
 - helper failure cannot create a second peer until explicit disable/enable;
 - existing Carabiner lifecycle, provider and engine regression suites pass;
 - local build and version consistency gates pass.
+- a one-hour CDJ-1500X-profile pitch-ramp soak converges to every final BPM
+  within 150 ms, never returns to an older value and shows no increasing age.
 
 ## Out of scope
 
@@ -47,7 +55,7 @@ effect on that clock.
 
 Those are delivered in E5-02 through E5-04.
 
-## Dev-50 implementation evidence
+## Dev-50 component evidence
 
 - Link Relay state and freshness policy no longer live in the lighting/MIDI
   `OutputWorker`;
@@ -83,3 +91,12 @@ Physical CDJ pitch movement and the combined one-hour Wi-Fi soak remain
 explicit E5-04 release evidence. The direct Pro DJ Link simulator path and the
 Local Playback path have both been UI-tested; neither substitutes for the
 physical release soak.
+
+## Why this story is reopened
+
+The Link provider owns an independent worker and has no lighting API, but its
+observations still arrive after the shared Java FIFO and the engine's shared
+20 ms integration pump. That is logical API isolation, not complete scheduling
+and backpressure isolation. Dev-52 physical evidence showed late/oscillating BPM
+while the final provider remained healthy. Completion now requires the
+source-side and task-level boundaries in ADR-0034.

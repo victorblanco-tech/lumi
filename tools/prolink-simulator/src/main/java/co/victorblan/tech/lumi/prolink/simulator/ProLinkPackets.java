@@ -126,6 +126,31 @@ final class ProLinkPackets {
         return build(Util.PacketType.BEAT, deviceName, payload);
     }
 
+    static DatagramPacket precisePosition(
+            String deviceName,
+            PlayerState.Snapshot state,
+            long playbackPositionMillis
+    ) {
+        if (state.track() == null) {
+            throw new IllegalArgumentException("A loaded track is required");
+        }
+        // PrecisePosition is exactly 60 bytes: the common 31-byte header and
+        // this 29-byte payload. Offsets are pinned to beat-link 8.0.0 and are
+        // parsed back through beat-link in the packet contract tests.
+        byte[] payload = new byte[29];
+        payload[2] = (byte) state.playerNumber();
+        numberToBytes(state.track().durationMillis(), payload, 5, 4);
+        numberToBytes(
+                Math.max(0L, Math.min(playbackPositionMillis, state.track().durationMillis())),
+                payload,
+                9,
+                4
+        );
+        numberToBytes(Math.round(state.pitchPercent() * 100.0), payload, 13, 4);
+        numberToBytes(Math.round(state.effectiveBpm() * 10.0), payload, 25, 4);
+        return build(Util.PacketType.PRECISE_POSITION, deviceName, payload);
+    }
+
     private static int nextBeatInterval(PlayerState.Snapshot state) {
         int nextIndex = state.beatIndex() + 1;
         if (nextIndex < state.track().beatGrid().size()) {
@@ -157,8 +182,11 @@ final class ProLinkPackets {
         System.arraycopy(encoded, 0, target, offset, length);
     }
 
-    private static void numberToBytes(int value, byte[] target, int offset, int length) {
-        Util.numberToBytes(value, target, offset, length);
+    private static void numberToBytes(long value, byte[] target, int offset, int length) {
+        if (value < Integer.MIN_VALUE || value > 0xffff_ffffL) {
+            throw new IllegalArgumentException("Packet number does not fit in 32 bits: " + value);
+        }
+        Util.numberToBytes((int) value, target, offset, length);
     }
 
     private static byte[] beatLinkTemplate(String fieldName) {

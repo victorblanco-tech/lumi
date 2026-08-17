@@ -66,7 +66,7 @@ final class RemoteControlServer implements AutoCloseable {
         sendJson(exchange, 200, Map.of(
                 "status", "ready",
                 "service", "lumi-prolink-simulator",
-                "version", "0.4.0-dev-52"
+                "version", "0.4.0-dev-53"
         ));
     }
 
@@ -109,6 +109,7 @@ final class RemoteControlServer implements AutoCloseable {
                 case "pitch" -> state.setPitchPercent(requiredDouble(body, "pitchPercent"));
                 case "master" -> state.setMaster(requiredBoolean(body, "enabled"));
                 case "on-air" -> state.setOnAir(requiredBoolean(body, "enabled"));
+                case "precise-burst" -> broadcaster.triggerPreciseBurst();
                 default -> {
                     sendError(exchange, 404, "Unknown control action: " + action);
                     return;
@@ -164,6 +165,16 @@ final class RemoteControlServer implements AutoCloseable {
         payload.put("networkAddress", networkEndpoint.localAddressText());
         payload.put("broadcastAddress", networkEndpoint.broadcastAddressText());
         payload.put("proLinkPeerCount", broadcaster.peerCount());
+        ProLinkBroadcaster.TrafficDiagnostics traffic = broadcaster.trafficDiagnostics();
+        payload.put("trafficProfile", traffic.profile());
+        payload.put("statusIntervalMillis", traffic.statusIntervalMillis());
+        payload.put("precisePositionIntervalMillis", traffic.precisePositionIntervalMillis());
+        payload.put("announcementPacketCount", traffic.announcementPackets());
+        payload.put("statusPacketCount", traffic.statusPackets());
+        payload.put("beatPacketCount", traffic.beatPackets());
+        payload.put("precisePositionPacketCount", traffic.precisePositionPackets());
+        payload.put("preciseBurstCount", traffic.preciseBursts());
+        payload.put("lastTrafficError", traffic.lastError());
         if (snapshot.track() == null) {
             payload.put("track", null);
         } else {

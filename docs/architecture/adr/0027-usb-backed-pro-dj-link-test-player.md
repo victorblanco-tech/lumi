@@ -28,7 +28,9 @@ The simulator emits the real Pro DJ Link packet families required by Lumi:
 - player keep-alive announcements;
 - CDJ status with player number, local USB slot, Rekordbox track ID, transport,
   pitch, master, on-air, beat number and beat within bar;
-- beat packets timed from the USB beat grid.
+- beat packets timed from the USB beat grid;
+- modern-player PrecisePosition packets at the CDJ-1500X traffic cadence;
+- deterministic stale-position bursts followed by the current position.
 
 It deliberately does not emulate audio playback, a display, a jog wheel, NFS,
 dbserver, track loading by other players, or any player command receiver. Lumi
@@ -45,15 +47,25 @@ be internet-exposed.
 Remote control is out-of-band HTTP directed at the development simulator. It
 does not weaken ADR-0026's read-only rule for real Pro DJ Link devices.
 
+The default `cdj-1500x` profile emits status at 10 Hz and PrecisePosition at
+50 Hz. It periodically sends a short deterministic cluster from five beats
+behind, ending with the current position. This does not claim every physical
+packet is stale; it reproduces the observed load and worst-case ordering needed
+to prove that continuous observations replace rather than queue. The `classic`
+profile omits PrecisePosition and is a diagnostic control only.
+
 ## Verification contract
 
-- Generated packets are parsed in tests by the pinned beat-link library itself.
+- Generated announcement, status, beat and PrecisePosition packets are parsed
+  in tests by the pinned beat-link library itself.
 - The simulator reports whether each selected track has an exact ANLZ beat grid.
 - Invalid USB roots, escaping paths, missing analysis files and invalid
   player/network choices fail closed; a present analysis without a beat-grid
   tag is exposed as a marked synthetic-grid fallback.
 - A two-host test must prove discovery and deck observations through the same
   direct bridge used with physical players.
+- Performance evidence must use `cdj-1500x` and record packet/burst counters;
+  the lower-traffic `classic` profile cannot satisfy a release gate.
 - Physical hardware remains the final compatibility and timing authority.
 
 ## Consequences

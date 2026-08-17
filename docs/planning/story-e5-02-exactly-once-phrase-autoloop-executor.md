@@ -1,8 +1,8 @@
 # Story E5-02: Exactly-once phrase AutoLoop executor
 
-- Status: **Done; scheduled output offset and explicit hotcue epochs continue in E5-03**
+- Status: **Reopened; executor semantics delivered, end-to-end freshness unproven**
 - Priority: **P0 Critical**
-- Target: `0.4.0-dev-51`
+- Target: `0.4.0-dev-55`
 - GitHub tracking: [#118](https://github.com/victorblanco-tech/lumi/issues/118)
 
 ## Outcome
@@ -61,3 +61,20 @@ SoundSwitch stopped changing loops. Dev-52 keeps the exactly-once executor and
 changes only its provider boundary to classic CoreMIDI MIDI 1.0 packet lists.
 This correction is a prerequisite for E5-03; it does not reintroduce progress,
 seek-correction or periodic AutoLoop output.
+
+## Dev-52 acceptance failure
+
+The classic MIDI 1.0 packet correction made SoundSwitch consume Lumi again, but
+the longer physical run still produced increasingly late AutoLoop selections.
+The recorded 0.1 ms p95 began only after the cue reached the final realtime MIDI
+lane; it excluded age in the Beat Link callback FIFO and shared engine input
+pump. Exactly-once therefore remains necessary but is not sufficient.
+
+Completion additionally requires:
+
+- source observation time carried through the MIDI dispatch receipt;
+- normal phrase cue p95 <= 20 ms and p99 <= 40 ms end to end;
+- stale cues cancelled and reported instead of emitted late;
+- no cue latency trend during the one-hour CDJ-1500X simulator profile;
+- output unaffected by simultaneous Link updates, display traffic and UI
+  foreground/background changes.

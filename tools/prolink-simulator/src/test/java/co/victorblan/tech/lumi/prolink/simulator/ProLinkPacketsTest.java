@@ -3,6 +3,8 @@ package co.victorblan.tech.lumi.prolink.simulator;
 import org.deepsymmetry.beatlink.Beat;
 import org.deepsymmetry.beatlink.CdjStatus;
 import org.deepsymmetry.beatlink.DeviceAnnouncement;
+import org.deepsymmetry.beatlink.PrecisePosition;
+import org.deepsymmetry.beatlink.Util;
 import org.junit.jupiter.api.Test;
 
 import java.net.DatagramPacket;
@@ -73,6 +75,26 @@ class ProLinkPacketsTest {
         assertEquals(12_800, beat.getBpm());
         assertEquals(2, beat.getBeatWithinBar());
         assertEquals(124.8, beat.getEffectiveTempo(), 0.02);
+    }
+
+    @Test
+    void precisePositionMatchesTheModernPlayerPacketContract() throws Exception {
+        PlayerState state = loadedState();
+        state.setPitchPercent(3.25);
+
+        DatagramPacket packet = ProLinkPackets.precisePosition(
+                "LUMI-SIM", state.snapshot(), 42_125
+        );
+        packet.setAddress(InetAddress.getByName("192.168.10.20"));
+        PrecisePosition position = new PrecisePosition(packet);
+
+        assertEquals(60, packet.getLength());
+        assertEquals("LUMI-SIM", position.getDeviceName());
+        assertEquals(1, position.getDeviceNumber());
+        assertEquals(120_000, position.getTrackLength());
+        assertEquals(42_125, position.getPlaybackPosition());
+        assertEquals(3.25, Util.pitchToPercentage(position.getPitch()), 0.01);
+        assertEquals(132.16, position.getEffectiveTempo(), 0.05);
     }
 
     private static PlayerState loadedState() {
