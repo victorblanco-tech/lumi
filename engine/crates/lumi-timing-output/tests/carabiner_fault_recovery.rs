@@ -5,8 +5,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use lumi_timing_output::{
-    CarabinerConfiguration, CarabinerTimingOutput, TimingAnchor, TimingDiscontinuity,
-    TimingOutputProvider as _, TimingOutputState, TimingSourceKind,
+    CarabinerConfiguration, CarabinerTimingOutput, LinkClockObservation, TimingOutputProvider as _,
+    TimingOutputState, TimingSourceKind,
 };
 
 #[test]
@@ -21,7 +21,7 @@ fn stale_hold_recovers_on_the_next_authoritative_anchor_without_restarting() {
         .publish()
         .unwrap_or_else(|error| panic!("fake helper should publish: {error}"));
     output
-        .synchronize(anchor(1, 140_000, true, TimingDiscontinuity::Started))
+        .synchronize(anchor(140_000, true))
         .unwrap_or_else(|error| panic!("first anchor should synchronize: {error}"));
     wait_until(Duration::from_secs(1), || {
         output.status().state == TimingOutputState::Running
@@ -39,7 +39,7 @@ fn stale_hold_recovers_on_the_next_authoritative_anchor_without_restarting() {
     assert_eq!(held.last_error.as_deref(), Some("source timing stale"));
 
     output
-        .synchronize(anchor(2, 142_500, true, TimingDiscontinuity::MasterChanged))
+        .synchronize(anchor(142_500, true))
         .unwrap_or_else(|error| panic!("fresh anchor should recover: {error}"));
     wait_until(Duration::from_secs(1), || {
         let status = output.status();
@@ -76,7 +76,7 @@ fn a_fresh_anchor_queued_during_fail_closed_recovery_is_not_lost() {
         .publish()
         .unwrap_or_else(|error| panic!("fake helper should publish: {error}"));
     output
-        .synchronize(anchor(1, 140_000, true, TimingDiscontinuity::Started))
+        .synchronize(anchor(140_000, true))
         .unwrap_or_else(|error| panic!("first anchor should synchronize: {error}"));
     wait_until(Duration::from_secs(1), || {
         output.status().state == TimingOutputState::Running
@@ -86,7 +86,7 @@ fn a_fresh_anchor_queued_during_fail_closed_recovery_is_not_lost() {
         .fail_closed("source timing stale")
         .unwrap_or_else(|error| panic!("stale source should hold: {error}"));
     output
-        .synchronize(anchor(2, 141_000, true, TimingDiscontinuity::Resumed))
+        .synchronize(anchor(141_000, true))
         .unwrap_or_else(|error| panic!("racing recovery anchor should queue: {error}"));
 
     wait_until(Duration::from_secs(1), || {
@@ -110,14 +110,14 @@ fn continuous_udp_beat_jitter_never_rewinds_the_link_timeline() {
         .publish()
         .unwrap_or_else(|error| panic!("fake helper should publish: {error}"));
     output
-        .synchronize(anchor(1, 155_000, true, TimingDiscontinuity::Started))
+        .synchronize(anchor(155_000, true))
         .unwrap_or_else(|error| panic!("initial anchor should synchronize: {error}"));
     wait_until(Duration::from_secs(1), || {
         output.status().applied_anchor_count == 1
     });
 
     for beat_within_bar in [2, 4, 1, 3, 1, 4] {
-        let mut continuous = anchor(1, 155_000, true, TimingDiscontinuity::Continuous);
+        let mut continuous = anchor(155_000, true);
         continuous.beat_within_bar = beat_within_bar;
         let expected = output.status().applied_anchor_count.saturating_add(1);
         output
@@ -146,20 +146,13 @@ fn continuous_udp_beat_jitter_never_rewinds_the_link_timeline() {
     );
 }
 
-fn anchor(
-    generation: u64,
-    bpm_milli: u32,
-    playing: bool,
-    discontinuity: TimingDiscontinuity,
-) -> TimingAnchor {
-    TimingAnchor {
+fn anchor(bpm_milli: u32, playing: bool) -> LinkClockObservation {
+    LinkClockObservation {
         source: TimingSourceKind::ProDjLink,
         deck_number: Some(1),
         bpm_milli,
         beat_within_bar: 1,
         playing,
-        generation,
-        discontinuity,
         observed_at_micros: None,
     }
 }

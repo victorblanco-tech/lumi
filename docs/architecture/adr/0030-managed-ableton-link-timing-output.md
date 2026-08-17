@@ -278,6 +278,14 @@ signed `SMAppService` login/crash lifecycle remains ADR-0003 work.
 - The app bundle grows by one small native helper and release packaging gains a
   source/notices obligation.
 
+## Superseding isolation correction — `0.4.0-dev-48`
+
+ADR-0032 supersedes the parts of this ADR that placed show transport
+generation, phrase/Hot Cue discontinuity and lighting operation state in the
+Link input. The Link adapter now accepts a clock-only observation and cannot
+receive those show-control facts. AutoLoop MIDI and Ableton Link remain
+parallel SoundSwitch inputs.
+
 ## Rejected alternatives
 
 ### Keep Beat Link Trigger as a runtime dependency

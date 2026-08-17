@@ -52,6 +52,19 @@ virtuele CoreMIDI-devices tijdens een actieve SoundSwitch-sessie verdwenen of
 opnieuw verschenen. Stabiele endpoint ownership verwijdert die normale
 UI-lifecycletrigger zonder showveiligheid op te geven.
 
+## Implementatie — `0.4.0-dev-48`
+
+De reversibele adapter is gepromoveerd naar de bedoelde per-user
+`SMAppService` LaunchAgent. `launchd` bezit nu de channel-specifieke engine,
+start hem met KeepAlive en behoudt hem wanneer de SwiftUI-app stopt. De losse
+Rust-executable bevat de door macOS vereiste ingebedde Info.plist; packaging
+controleert zowel die Mach-O-sectie als de gebundelde LaunchAgent.
+
+De bestaande Dev-database en owner-only sessietoken blijven op hun bestaande
+channelpad. De app koppelt op basis van versie, build, executablepad en SHA-256
+en herstelt de verbinding wanneer launchd na een crash een nieuw endpoint
+publiceert. ADR-0032 legt de definitieve service- en Link-isolatiegrenzen vast.
+
 ## Afgewezen alternatieven
 
 ### Root-LaunchDaemon

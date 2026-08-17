@@ -2207,6 +2207,7 @@ final class EngineStatusModel: ObservableObject {
     private func startMonitoring() {
         monitoringTask = Task { [weak self] in
             var healthTick = 0
+            var consecutiveExchangeFailures = 0
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(250))
                 guard !Task.isCancelled, let self else {
@@ -2214,9 +2215,7 @@ final class EngineStatusModel: ObservableObject {
                 }
                 healthTick = (healthTick + 1) % 4
                 if healthTick == 0, await !self.supervisor.isRunning() {
-                    self.lifecycle = .disconnected
-                    self.workspaceState = LiveWorkspacePresenter.disconnected()
-                    self.libraryState = .failed("The local Lumi engine disconnected.")
+                    self.scheduleEngineReconnection()
                     return
                 }
                 guard self.lifecycle == .ready,
@@ -2303,15 +2302,35 @@ final class EngineStatusModel: ObservableObject {
                         }
                         self.lastLibraryRevision = observedLibraryRevision
                     }
+                    consecutiveExchangeFailures = 0
                 } catch {
                     self.isExchangingCommand = false
+                    consecutiveExchangeFailures += 1
                     Self.logger.error(
                         "Engine snapshot monitor failed: \(error.localizedDescription, privacy: .private(mask: .hash))"
                     )
-                    // The one-second process health check owns disconnect state. A
-                    // single missed polling frame must not disturb Live UI.
+                    // A single missed polling frame must not disturb Live UI.
+                    // launchd can, however, replace a crashed engine quickly
+                    // enough that the process health check already sees the new
+                    // PID while this transport still targets the old socket.
+                    // Reattach after a bounded run of failures.
+                    if consecutiveExchangeFailures >= 4 {
+                        self.scheduleEngineReconnection()
+                        return
+                    }
                 }
             }
+        }
+    }
+
+    private func scheduleEngineReconnection() {
+        guard lifecycle == .ready else { return }
+        lifecycle = .disconnected
+        workspaceState = LiveWorkspacePresenter.disconnected()
+        libraryState = .failed("Reconnecting to the local Lumi engine…")
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(100))
+            await self?.start()
         }
     }
 

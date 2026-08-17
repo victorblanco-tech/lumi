@@ -28,24 +28,24 @@ pub enum TimingDiscontinuity {
     MasterChanged,
 }
 
-/// One immutable mapping from Lumi's selected musical source to monotonic time.
+/// One immutable clock observation from the selected musical timing source.
 ///
 /// `observed_at_micros` is populated when the source and Link helper share a
 /// verified monotonic epoch, as they do for the Java Pro DJ Link bridge on
-/// macOS. Other sources are aligned against a fresh helper status snapshot.
+/// macOS. The contract deliberately contains no track position, phrase,
+/// AutoLoop, Hot Cue, seek or show-generation state. Those belong to Lumi's
+/// independent show executor and can never request a Link timeline change.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub struct TimingAnchor {
+pub struct LinkClockObservation {
     pub source: TimingSourceKind,
     pub deck_number: Option<u8>,
     pub bpm_milli: u32,
     pub beat_within_bar: u8,
     pub playing: bool,
-    pub generation: u64,
-    pub discontinuity: TimingDiscontinuity,
     pub observed_at_micros: Option<u64>,
 }
 
-impl TimingAnchor {
+impl LinkClockObservation {
     pub fn validate(self) -> Result<Self, TimingOutputValidationError> {
         if !(20_000..=300_000).contains(&self.bpm_milli) {
             return Err(TimingOutputValidationError::Tempo);
@@ -138,7 +138,7 @@ pub trait TimingOutputProvider {
 
     fn provider_kind(&self) -> &'static str;
     fn publish(&mut self) -> Result<(), Self::Error>;
-    fn synchronize(&mut self, anchor: TimingAnchor) -> Result<(), Self::Error>;
+    fn synchronize(&mut self, observation: LinkClockObservation) -> Result<(), Self::Error>;
     fn hold(&mut self) -> Result<(), Self::Error>;
     fn stop(&mut self) -> Result<(), Self::Error>;
     fn status(&self) -> TimingOutputStatus;
@@ -160,14 +160,12 @@ mod tests {
 
     #[test]
     fn pro_link_anchor_requires_a_deck() {
-        let anchor = TimingAnchor {
+        let anchor = LinkClockObservation {
             source: TimingSourceKind::ProDjLink,
             deck_number: None,
             bpm_milli: 130_000,
             beat_within_bar: 1,
             playing: true,
-            generation: 1,
-            discontinuity: TimingDiscontinuity::Started,
             observed_at_micros: Some(10),
         };
         assert_eq!(
@@ -178,14 +176,12 @@ mod tests {
 
     #[test]
     fn phase_is_zero_based_for_link_quantum() {
-        let anchor = TimingAnchor {
+        let anchor = LinkClockObservation {
             source: TimingSourceKind::LocalPlayback,
             deck_number: None,
             bpm_milli: 130_000,
             beat_within_bar: 4,
             playing: true,
-            generation: 1,
-            discontinuity: TimingDiscontinuity::Continuous,
             observed_at_micros: None,
         };
         assert_eq!(anchor.phase_beat(), 3);

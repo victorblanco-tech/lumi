@@ -48,6 +48,7 @@ xcodebuild \
 built_app="build/DerivedData/Build/Products/Dev/Lumi.app"
 built_info_plist="$built_app/Contents/Info.plist"
 built_engine_helper="$built_app/Contents/Helpers/lumi-engine"
+built_launch_agent="$built_app/Contents/Library/LaunchAgents/co.victorblan.tech.lumi.dev.engine.plist"
 built_link_helper="$built_app/Contents/Resources/link/Carabiner"
 built_app_icon="$built_app/Contents/Resources/AppIcon.icns"
 built_asset_catalog="$built_app/Contents/Resources/Assets.car"
@@ -73,6 +74,14 @@ fi
 
 if [[ ! -x "$built_engine_helper" ]]; then
   echo "ERROR: the built app does not contain an executable Lumi engine helper." >&2
+  exit 1
+fi
+if [[ ! -f "$built_launch_agent" ]]; then
+  echo "ERROR: the built app does not contain the SMAppService LaunchAgent." >&2
+  exit 1
+fi
+if ! otool -s __TEXT __info_plist "$built_engine_helper" >/dev/null 2>&1; then
+  echo "ERROR: the built Lumi engine helper has no embedded Info.plist." >&2
   exit 1
 fi
 

@@ -49,7 +49,6 @@ use crate::phrase_role_defaults::{
 };
 
 const DEFAULT_PAGE_LIMIT: u16 = 50;
-const DATABASE_PATH_ENVIRONMENT: &str = "LUMI_LIBRARY_DATABASE_PATH";
 const REKORDBOX_XML_SOURCE_ID: &str = "rekordbox-xml-local";
 const REKORDBOX_XML_SOURCE_KIND: &str = "rekordbox-xml";
 const REKORDBOX_CANONICAL_SOURCE_ID: &str = "rekordbox7-local";
@@ -572,8 +571,8 @@ pub enum AutoloopCatalogMutation {
 
 impl LibraryWorker {
     pub fn demo() -> Result<Self, LibraryWorkerError> {
-        let database_path =
-            std::env::var_os(DATABASE_PATH_ENVIRONMENT).map(std::path::PathBuf::from);
+        let database_path = crate::service::configured_database_path()
+            .map_err(|error| LibraryWorkerError::Configuration(error.to_string()))?;
         let repository = match database_path.as_ref() {
             Some(path) => SqliteLibraryRepository::open(path)?,
             None => SqliteLibraryRepository::in_memory()?,
@@ -3625,6 +3624,8 @@ fn key_mode_name(value: KeyMode) -> &'static str {
 
 #[derive(Debug, Error)]
 pub enum LibraryWorkerError {
+    #[error("engine service configuration failed: {0}")]
+    Configuration(String),
     #[error("demo library failed: {0}")]
     Demo(#[from] DemoLibraryError),
     #[error("local library file operation failed: {0}")]

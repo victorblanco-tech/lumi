@@ -8,7 +8,8 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use crate::{
-    TimingAnchor, TimingDiscontinuity, TimingOutputProvider, TimingOutputState, TimingOutputStatus,
+    LinkClockObservation, TimingDiscontinuity, TimingOutputProvider, TimingOutputState,
+    TimingOutputStatus,
 };
 
 pub const CARABINER_DEFAULT_PORT: u16 = 17_001;
@@ -61,7 +62,7 @@ enum WorkerCommand {
 pub struct CarabinerTimingOutput {
     configuration: CarabinerConfiguration,
     commands: mpsc::Sender<WorkerCommand>,
-    latest_anchor: Arc<Mutex<Option<TimingAnchor>>>,
+    latest_anchor: Arc<Mutex<Option<LinkClockObservation>>>,
     worker: Option<JoinHandle<()>>,
     status: Arc<Mutex<TimingOutputStatus>>,
     shutting_down: Arc<AtomicBool>,
@@ -189,15 +190,15 @@ impl TimingOutputProvider for CarabinerTimingOutput {
             .map_err(CarabinerError::Helper)
     }
 
-    fn synchronize(&mut self, anchor: TimingAnchor) -> Result<(), Self::Error> {
-        let anchor = anchor
+    fn synchronize(&mut self, observation: LinkClockObservation) -> Result<(), Self::Error> {
+        let observation = observation
             .validate()
             .map_err(|error| CarabinerError::InvalidAnchor(error.to_string()))?;
         let previous_pending = self
             .latest_anchor
             .lock()
             .map_err(|_| CarabinerError::WorkerUnavailable)?
-            .replace(anchor);
+            .replace(observation);
         update_status(&self.status, |status| {
             status.received_anchor_count = status.received_anchor_count.saturating_add(1);
             if previous_pending.is_some() {
@@ -277,12 +278,12 @@ fn run_worker(
     configuration: CarabinerConfiguration,
     receiver: mpsc::Receiver<WorkerCommand>,
     shared_status: &Arc<Mutex<TimingOutputStatus>>,
-    latest_anchor: &Arc<Mutex<Option<TimingAnchor>>>,
+    latest_anchor: &Arc<Mutex<Option<LinkClockObservation>>>,
     shutting_down: &Arc<AtomicBool>,
     owned_child: &Arc<Mutex<Option<Child>>>,
 ) {
     let mut session: Option<CarabinerSession> = None;
-    let mut last_anchor: Option<TimingAnchor> = None;
+    let mut last_anchor: Option<LinkClockObservation> = None;
 
     while let Ok(command) = receiver.recv() {
         if shutting_down.load(Ordering::Acquire) && !matches!(&command, WorkerCommand::Shutdown) {
@@ -331,7 +332,6 @@ fn run_worker(
                             status.bpm_milli = Some(anchor.bpm_milli);
                             status.beat_within_bar = Some(anchor.beat_within_bar);
                             status.playing = anchor.playing;
-                            status.generation = Some(anchor.generation);
                             status.last_anchor_at = Some(Instant::now());
                             status.last_anchor_age_millis = Some(0);
                             status.phase_error_micros = outcome.phase_error_micros;
@@ -340,6 +340,7 @@ fn run_worker(
                             if outcome.reanchored {
                                 status.hard_reanchor_count =
                                     status.hard_reanchor_count.saturating_add(1);
+                                status.generation = Some(status.hard_reanchor_count);
                             } else if outcome.corrected {
                                 status.soft_correction_count =
                                     status.soft_correction_count.saturating_add(1);
@@ -352,7 +353,7 @@ fn run_worker(
                                         .unsigned_abs(),
                                 );
                             if outcome.reanchored {
-                                status.last_reanchor = Some(anchor.discontinuity);
+                                status.last_reanchor = outcome.alignment_reason;
                             }
                             status.last_event = Some(outcome.event);
                             status.last_error = None;
@@ -539,13 +540,14 @@ struct AnchorOutcome {
     phase_error_micros: Option<i64>,
     reanchored: bool,
     corrected: bool,
+    alignment_reason: Option<TimingDiscontinuity>,
     event: String,
 }
 
 fn apply_anchor(
     session: &mut CarabinerSession,
-    previous: Option<TimingAnchor>,
-    anchor: TimingAnchor,
+    previous: Option<LinkClockObservation>,
+    anchor: LinkClockObservation,
 ) -> Result<AnchorOutcome, String> {
     let tempo_changed = previous.is_none_or(|value| value.bpm_milli != anchor.bpm_milli);
     if tempo_changed {
@@ -553,8 +555,9 @@ fn apply_anchor(
     }
 
     let transport_changed = previous.is_none_or(|value| value.playing != anchor.playing);
-    let generation_changed = previous.is_none_or(|value| value.generation != anchor.generation);
-    let explicit_discontinuity = anchor.discontinuity != TimingDiscontinuity::Continuous;
+    let source_changed = previous.is_some_and(|value| {
+        value.source != anchor.source || value.deck_number != anchor.deck_number
+    });
     let snapshot = session.status()?;
     let target_phase = f64::from(anchor.phase_beat());
     let snapshot_time = snapshot.timeline_micros();
@@ -574,17 +577,27 @@ fn apply_anchor(
     // backwards and forwards. SoundSwitch exposes that as an AutoLoop whose
     // progress repeatedly scrubs across beats.
     //
-    // Once established, a continuous Link timeline is monotonic and owns its
-    // own projection. Re-anchor only when the musical timeline genuinely
-    // changes. Tempo updates are still applied above without moving phase.
-    let should_reanchor =
-        generation_changed || explicit_discontinuity || (transport_changed && anchor.playing);
+    // Once established, Link owns its own monotonic projection. Only Link's
+    // own lifecycle can establish a new alignment: initial acquisition,
+    // explicit timing-source handover, or stopped -> playing. Track seeks,
+    // Hot Cues, phrases and AutoLoop generations are absent from this API and
+    // therefore cannot scrub SoundSwitch's Link timeline.
+    let alignment_reason = if previous.is_none() {
+        Some(TimingDiscontinuity::Started)
+    } else if source_changed {
+        Some(TimingDiscontinuity::MasterChanged)
+    } else if transport_changed && anchor.playing {
+        Some(TimingDiscontinuity::Resumed)
+    } else {
+        None
+    };
+    let should_reanchor = alignment_reason.is_some();
 
     if should_reanchor {
         session.force_beat_at_time(target_phase, anchor_time)?;
     }
 
-    if transport_changed || generation_changed {
+    if transport_changed || source_changed {
         if anchor.playing {
             session.start_playing_now()?;
         } else {
@@ -597,6 +610,7 @@ fn apply_anchor(
         phase_error_micros: Some(phase_error_micros),
         reanchored: should_reanchor,
         corrected: false,
+        alignment_reason,
         event: if anchor.observed_at_micros.is_some() && shared_epoch_time.is_none() {
             "Ableton Link synchronized with receive-time fallback".to_owned()
         } else if should_reanchor {

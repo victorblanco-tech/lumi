@@ -4,8 +4,8 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use lumi_timing_output::{
-    CarabinerConfiguration, CarabinerTimingOutput, TimingAnchor, TimingDiscontinuity,
-    TimingOutputProvider as _, TimingOutputState, TimingSourceKind,
+    CarabinerConfiguration, CarabinerTimingOutput, LinkClockObservation, TimingOutputProvider as _,
+    TimingOutputState, TimingSourceKind,
 };
 
 #[test]
@@ -30,14 +30,12 @@ fn launches_real_helper_and_publishes_a_link_timeline() {
         .publish()
         .unwrap_or_else(|error| panic!("helper should publish: {error}"));
     output
-        .synchronize(TimingAnchor {
+        .synchronize(LinkClockObservation {
             source: TimingSourceKind::LocalPlayback,
             deck_number: Some(1),
             bpm_milli: 130_000,
             beat_within_bar: 1,
             playing: false,
-            generation: 1,
-            discontinuity: TimingDiscontinuity::Started,
             observed_at_micros: None,
         })
         .unwrap_or_else(|error| panic!("timeline should synchronize: {error}"));
@@ -50,14 +48,12 @@ fn launches_real_helper_and_publishes_a_link_timeline() {
     assert!(!status.playing);
 
     output
-        .synchronize(TimingAnchor {
+        .synchronize(LinkClockObservation {
             source: TimingSourceKind::LocalPlayback,
             deck_number: Some(1),
             bpm_milli: 130_000,
             beat_within_bar: 1,
             playing: true,
-            generation: 1,
-            discontinuity: TimingDiscontinuity::Started,
             observed_at_micros: None,
         })
         .unwrap_or_else(|error| panic!("transport should start: {error}"));
@@ -67,14 +63,12 @@ fn launches_real_helper_and_publishes_a_link_timeline() {
     assert!(status.playing);
 
     output
-        .synchronize(TimingAnchor {
+        .synchronize(LinkClockObservation {
             source: TimingSourceKind::LocalPlayback,
             deck_number: Some(1),
             bpm_milli: 140_000,
             beat_within_bar: 2,
             playing: true,
-            generation: 1,
-            discontinuity: TimingDiscontinuity::Continuous,
             observed_at_micros: None,
         })
         .unwrap_or_else(|error| panic!("tempo change should synchronize: {error}"));

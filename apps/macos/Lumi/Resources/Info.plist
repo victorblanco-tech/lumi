@@ -34,5 +34,7 @@
 	<string>$(LUMI_RELEASE_CHANNEL)</string>
 	<key>LumiDataDirectoryName</key>
 	<string>$(LUMI_DATA_DIRECTORY_NAME)</string>
+	<key>LumiEngineLaunchAgentPlistName</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER).engine.plist</string>
 </dict>
 </plist>

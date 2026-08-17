@@ -52,7 +52,7 @@ use lumi_simulator::{
     SimulatorError,
 };
 use lumi_timing_output::{
-    CarabinerConfiguration, CarabinerTimingOutput, TimingAnchor, TimingDiscontinuity,
+    CarabinerConfiguration, CarabinerTimingOutput, LinkClockObservation, TimingDiscontinuity,
     TimingOutputProvider as _, TimingOutputState, TimingSourceKind,
 };
 use serde::Deserialize;
@@ -70,8 +70,8 @@ use tokio::time::{MissedTickBehavior, timeout};
 use crate::StartupReady;
 use crate::commands::{DeckSourceSelection, SessionCommand, decode_command};
 use crate::library::{LibraryPlanContext, LibraryWorker, LibraryWorkerError, ResolvedLibraryCue};
+use crate::service::{ServiceBootstrap, ServiceBootstrapError};
 
-const SESSION_TOKEN_ENVIRONMENT_KEY: &str = "LUMI_SESSION_TOKEN";
 const EXIT_AFTER_CLIENT_DISCONNECT_ENVIRONMENT_KEY: &str = "LUMI_EXIT_AFTER_CLIENT_DISCONNECT";
 #[cfg(not(test))]
 const DECK_INPUT_NAME_ENVIRONMENT_KEY: &str = "LUMI_DECK_INPUT_DESTINATION_NAME";
@@ -79,8 +79,6 @@ const DECK_INPUT_NAME_ENVIRONMENT_KEY: &str = "LUMI_DECK_INPUT_DESTINATION_NAME"
 const DECK_INPUT_DISABLED_ENVIRONMENT_KEY: &str = "LUMI_DECK_INPUT_DISABLED";
 #[cfg(not(test))]
 const AUTO_PUBLISH_MIDI_ENVIRONMENT_KEY: &str = "LUMI_AUTO_PUBLISH_MIDI";
-const MINIMUM_SESSION_TOKEN_BYTES: usize = 32;
-const MAXIMUM_SESSION_TOKEN_BYTES: usize = 256;
 const MAXIMUM_AUTHENTICATION_BYTES: usize = 512;
 const AUTHENTICATION_TIMEOUT: Duration = Duration::from_secs(5);
 const INTEGRATION_PUMP_INTERVAL: Duration = Duration::from_millis(20);
@@ -125,15 +123,15 @@ enum AuthenticatedClientExit {
 /// Runs one channel-scoped engine service. UI clients may disconnect and
 /// reconnect sequentially without resetting show state or duplicating MIDI.
 pub async fn run() -> Result<(), EngineError> {
-    let session_token =
-        env::var(SESSION_TOKEN_ENVIRONMENT_KEY).map_err(|_| EngineError::MissingSessionToken)?;
-    validate_session_token(&session_token)?;
+    let service = ServiceBootstrap::resolve()?;
+    let session_token = service.session_token.clone();
     let exit_after_client_disconnect =
         env::var(EXIT_AFTER_CLIENT_DISCONNECT_ENVIRONMENT_KEY).as_deref() == Ok("1");
     let mut runtime = initialized_product_runtime()?;
 
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
     let endpoint = listener.local_addr()?;
+    let _service_record = service.publish_record(endpoint.port())?;
     write_startup_record(endpoint.port())?;
     let mut termination =
         tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
@@ -192,14 +190,6 @@ fn park_runtime_after_client_disconnect(runtime: &mut EngineRuntime) -> Result<(
     // thereby remove the stable CoreMIDI endpoints we are preserving.
     let _ = runtime.output_worker.set_link_enabled(false);
     let _ = reconcile_local_midi_clock(runtime, true);
-    Ok(())
-}
-
-fn validate_session_token(session_token: &str) -> Result<(), EngineError> {
-    if !(MINIMUM_SESSION_TOKEN_BYTES..=MAXIMUM_SESSION_TOKEN_BYTES).contains(&session_token.len()) {
-        return Err(EngineError::InvalidSessionToken);
-    }
-
     Ok(())
 }
 
@@ -1119,7 +1109,6 @@ struct OutputWorker {
     timing_offset_millis: i16,
     pending_timing_offset_millis: Option<i16>,
     last_midi_publish_attempt: Option<Instant>,
-    local_timing_generation: u64,
     last_prolink_timing_at: Option<Instant>,
     last_prolink_bpm_milli: Option<u32>,
     last_prolink_playing: Option<bool>,
@@ -1223,7 +1212,6 @@ impl OutputWorker {
             timing_offset_millis: 0,
             pending_timing_offset_millis: None,
             last_midi_publish_attempt: None,
-            local_timing_generation: 0,
             last_prolink_timing_at: None,
             last_prolink_bpm_milli: None,
             last_prolink_playing: None,
@@ -1980,7 +1968,6 @@ impl OutputWorker {
     fn synchronize_prolink_timing(
         &mut self,
         observation: lumi_prolink_input::ProLinkTimingObservation,
-        operation: OperationState,
     ) -> Result<(), EngineError> {
         if !self.link_enabled {
             return Ok(());
@@ -1990,7 +1977,7 @@ impl OutputWorker {
         self.last_prolink_playing = Some(observation.playing);
         self.prolink_timing_stale = false;
         self.link_timing
-            .synchronize(prolink_timing_anchor(observation, operation))
+            .synchronize(prolink_link_clock(observation))
             .map_err(|error| EngineError::Timing(error.to_string()))
     }
 
@@ -2048,7 +2035,6 @@ impl OutputWorker {
         deck_id: lumi_domain::DeckId,
         anchor: crate::library::LocalPlaybackClockAnchor,
         playing: bool,
-        force_rephase: bool,
     ) -> Result<(), EngineError> {
         if !self.link_enabled {
             return Ok(());
@@ -2057,14 +2043,8 @@ impl OutputWorker {
         self.last_prolink_bpm_milli = None;
         self.last_prolink_playing = None;
         self.prolink_timing_stale = false;
-        if force_rephase {
-            self.local_timing_generation =
-                self.local_timing_generation.checked_add(1).ok_or_else(|| {
-                    EngineError::Timing("local timing generation overflow".to_owned())
-                })?;
-        }
         self.link_timing
-            .synchronize(TimingAnchor {
+            .synchronize(LinkClockObservation {
                 source: TimingSourceKind::LocalPlayback,
                 deck_number: Some(deck_id.value()),
                 bpm_milli: anchor.bpm_milli,
@@ -2072,12 +2052,6 @@ impl OutputWorker {
                     .unwrap_or(0)
                     .saturating_add(1),
                 playing,
-                generation: self.local_timing_generation,
-                discontinuity: if force_rephase {
-                    TimingDiscontinuity::Seeked
-                } else {
-                    TimingDiscontinuity::Continuous
-                },
                 observed_at_micros: None,
             })
             .map_err(|error| EngineError::Timing(error.to_string()))
@@ -2258,11 +2232,10 @@ fn reconcile_local_midi_clock(
                 .library_context(deck.track_load_id())?;
             let anchor = context
                 .clock_anchor_at_millis(transport.position_millis, deck.effective_bpm_milli())?;
-            let playing = !matches!(
-                runtime.state.state().operation(),
-                OperationState::Off | OperationState::Paused
-            ) && deck.is_playing()
-                && transport.playing;
+            // The local deck clock is Link's input authority. Lighting
+            // Off/Arm/Start/Pause only gates show/MIDI output and must never
+            // start, stop or scrub the Ableton Link timeline.
+            let playing = deck.is_playing() && transport.playing;
             link_sync = Some((deck_id, anchor, playing));
             Some(MidiClockSync {
                 bpm_milli: anchor.bpm_milli,
@@ -2288,37 +2261,25 @@ fn reconcile_local_midi_clock(
         .synchronize(sync)
         .map_err(|error| EngineError::Midi(error.to_string()))?;
     if let Some((deck_id, anchor, playing)) = link_sync {
-        runtime.output_worker.synchronize_local_link_timing(
-            deck_id,
-            anchor,
-            playing,
-            force_rephase,
-        )?;
+        runtime
+            .output_worker
+            .synchronize_local_link_timing(deck_id, anchor, playing)?;
     }
     Ok(())
 }
 
-fn prolink_timing_anchor(
+fn prolink_link_clock(
     observation: lumi_prolink_input::ProLinkTimingObservation,
-    operation: OperationState,
-) -> TimingAnchor {
-    TimingAnchor {
+) -> LinkClockObservation {
+    LinkClockObservation {
         source: TimingSourceKind::ProDjLink,
         deck_number: Some(observation.deck_id.value()),
         bpm_milli: observation.effective_bpm_milli,
         beat_within_bar: observation.beat_within_bar,
-        // Lumi's lighting gate owns transport, not tempo. Off and Pause keep
-        // Link stopped while still publishing the selected master's current
-        // BPM and phase so a peer such as SoundSwitch never falls back to an
-        // unrelated/default tempo.
-        playing: observation.playing
-            && !matches!(operation, OperationState::Off | OperationState::Paused),
-        generation: observation.generation,
-        discontinuity: if observation.discontinuity {
-            TimingDiscontinuity::MasterChanged
-        } else {
-            TimingDiscontinuity::Continuous
-        },
+        // Link follows the selected deck clock, never Lumi's lighting gate.
+        // Arm/Start/Pause/Off, phrases, seeks and AutoLoop generations live on
+        // a separate command path and cannot stop or scrub this clock.
+        playing: observation.playing,
         observed_at_micros: Some(observation.observed_at_nanos / 1_000),
     }
 }
@@ -2598,11 +2559,10 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
             .on_authoritative_prolink_position(runtime.state.state(), authoritative);
         process_pending_source_events(runtime)?;
     }
-    let operation = runtime.state.state().operation();
     for observation in runtime.direct_deck_source.drain_timing_observations() {
         runtime
             .output_worker
-            .synchronize_prolink_timing(observation, operation)?;
+            .synchronize_prolink_timing(observation)?;
     }
     runtime.output_worker.reconcile_prolink_timing_freshness(
         runtime.direct_deck_source.diagnostics().source_status,
@@ -4696,10 +4656,8 @@ const fn decision_reason_name(reason: DecisionReason) -> &'static str {
 
 #[derive(Debug, Error)]
 pub enum EngineError {
-    #[error("the app-scoped session token is missing")]
-    MissingSessionToken,
-    #[error("the app-scoped session token has an invalid length")]
-    InvalidSessionToken,
+    #[error("service bootstrap failed: {0}")]
+    ServiceBootstrap(#[from] ServiceBootstrapError),
     #[error("timed out waiting for session authentication")]
     AuthenticationTimeout,
     #[error("session authentication exceeds the maximum size")]
@@ -4798,7 +4756,7 @@ mod tests {
     }
 
     #[test]
-    fn pro_dj_link_tempo_remains_authoritative_while_output_transport_is_held() {
+    fn pro_dj_link_clock_is_independent_from_lighting_operation_state() {
         let observation = lumi_prolink_input::ProLinkTimingObservation {
             deck_id: lumi_domain::DeckId::new(2),
             observed_at_nanos: 12_345_000,
@@ -4810,16 +4768,22 @@ mod tests {
             discontinuity: false,
         };
 
-        for operation in [OperationState::Off, OperationState::Paused] {
-            let anchor = prolink_timing_anchor(observation, operation);
-            assert_eq!(anchor.bpm_milli, 155_250);
-            assert_eq!(anchor.beat_within_bar, 3);
-            assert_eq!(anchor.deck_number, Some(2));
-            assert!(!anchor.playing);
-        }
+        let clock = prolink_link_clock(observation);
+        assert_eq!(clock.bpm_milli, 155_250);
+        assert_eq!(clock.beat_within_bar, 3);
+        assert_eq!(clock.deck_number, Some(2));
+        assert!(clock.playing);
 
-        assert!(prolink_timing_anchor(observation, OperationState::Armed).playing);
-        assert!(prolink_timing_anchor(observation, OperationState::Live).playing);
+        let transport_jump = lumi_prolink_input::ProLinkTimingObservation {
+            generation: 99,
+            discontinuity: true,
+            ..observation
+        };
+        assert_eq!(
+            prolink_link_clock(transport_jump),
+            clock,
+            "show transport generations and Hot Cue/seek discontinuities must be invisible to Link"
+        );
     }
 
     #[test]

@@ -1,6 +1,6 @@
 # Story E4-03C: Engine service and data recovery
 
-- Status: **Reconnectable adapter physically verified — SMAppService promotion pending**
+- Status: **SMAppService migration implemented and locally verified — login/physical soak pending**
 - Priority: **P0 Critical**
 - Effort: **8**
 - Components: Engine, macOS, Persistence, Delivery
@@ -118,6 +118,22 @@ and Pro DJ Link bridge remained, and SoundSwitch plus Control One stayed
 responsive. Relaunch created only a fresh Link helper, restored the 155 BPM
 peer and allowed Off -> Arm -> Start without replacing MIDI endpoints.
 
-Still open for RC: register the engine through `SMAppService`, expose its Login
-Item state, prove login launch/crash restart and complete the one-hour plus
-physical-DMX evidence gates.
+At the Dev-43 boundary, registration through `SMAppService`, Login Item state,
+login/crash restart and the one-hour physical-DMX evidence were still open.
+
+## Dev-48 service promotion
+
+- the Dev engine is registered as the non-privileged
+  `co.victorblan.tech.lumi.dev.engine` LaunchAgent;
+- its standalone executable carries the required embedded Info.plist and the
+  package gate rejects a missing service definition or Mach-O section;
+- launchd owns engine startup and KeepAlive while the UI only authenticates and
+  attaches to its atomic owner-only discovery record;
+- normal UI Quit/relaunch retained the exact engine PID and launchd run count;
+- a stale engine socket now causes bounded automatic UI reattachment after
+  launchd publishes its replacement endpoint;
+- the existing Dev library was preserved during the ownership handover.
+
+Still open for RC evidence: login-start approval behavior, the physical
+engine-kill/reconnect check on the final signed candidate, and the one-hour
+CDJ/SoundSwitch/DMX soak.

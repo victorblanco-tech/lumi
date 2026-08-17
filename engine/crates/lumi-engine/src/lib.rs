@@ -6,6 +6,7 @@ mod autoloop_defaults;
 mod commands;
 mod library;
 mod phrase_role_defaults;
+mod service;
 mod session;
 mod startup;
 

@@ -189,3 +189,9 @@ Version `0.4.0-dev-47` corrects the meaning of independent corroboration. The
 status timeline must itself show a recent jump to the candidate landing beat;
 ordinary status agreement cannot validate precise-position jitter. See
 [`0.4.0-dev-47-independent-status-discontinuity.md`](../release/0.4.0-dev-47-independent-status-discontinuity.md).
+
+Version `0.4.0-dev-48` promotes the engine to a per-user `SMAppService`
+LaunchAgent and replaces the shared show/Link anchor with a clock-only Link
+contract. UI, realtime AutoLoop MIDI and Ableton Link are now separate runtime
+planes. See
+[`0.4.0-dev-48-launchd-engine-and-link-isolation.md`](../release/0.4.0-dev-48-launchd-engine-and-link-isolation.md).

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.4.0-dev-48
+
+- Promotes each release channel's engine to a non-privileged per-user
+  `SMAppService` LaunchAgent owned and restarted by launchd.
+- Preserves the existing channel database, stable CoreMIDI endpoints and
+  authenticated loopback discovery while UI Quit/relaunch reuses the exact
+  engine process.
+- Automatically reconnects the open UI when launchd replaces a crashed engine
+  and publishes a new endpoint.
+- Replaces the shared show/timing anchor with a clock-only Ableton Link input;
+  phrases, AutoLoops, Hot Cues, seeks, lighting operation and show generations
+  can no longer request a Link phase correction.
+- Keeps Ableton Link and realtime AutoLoop MIDI as parallel, separately owned
+  SoundSwitch inputs.
+
 ## 0.4.0-dev-47
 
 - Requires a coherent multi-frame `CdjStatus` timeline to show an independently

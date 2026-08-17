@@ -3,6 +3,7 @@ import LumiProtocol
 import OSLog
 import Darwin
 import CryptoKit
+import ServiceManagement
 
 public actor EngineProcessSupervisor {
     private static let logger = Logger(
@@ -11,10 +12,13 @@ public actor EngineProcessSupervisor {
     )
 
     private let transport: any EngineTransport
+    private let launchAgentPlistName: String?
     private var process: Process?
     private var attachedProcessID: Int32?
     private var sessionToken: String?
     private var serviceRecordURL: URL?
+    private var launchAgentService: SMAppService?
+    private var expectedServiceIdentity: ServiceIdentity?
     private var commandSequence: UInt64 = 0
     private var exchangeInProgress = false
     private var exchangeWaiters: [CheckedContinuation<Void, Never>] = []
@@ -34,8 +38,14 @@ public actor EngineProcessSupervisor {
         let engineExecutableSHA256: String
     }
 
-    public init(transport: any EngineTransport = LoopbackEngineTransport()) {
+    public init(
+        transport: any EngineTransport = LoopbackEngineTransport(),
+        launchAgentPlistName: String? = Bundle.main.object(
+            forInfoDictionaryKey: "LumiEngineLaunchAgentPlistName"
+        ) as? String
+    ) {
         self.transport = transport
+        self.launchAgentPlistName = launchAgentPlistName
     }
 
     public func launch(
@@ -56,6 +66,14 @@ public actor EngineProcessSupervisor {
                 .deletingLastPathComponent()
                 .appendingPathComponent(serviceRecordName)
             serviceRecordURL = recordURL
+            if let launchAgentPlistName,
+               packagedLaunchAgentExists(named: launchAgentPlistName) {
+                return try await launchUsingLaunchAgent(
+                    plistName: launchAgentPlistName,
+                    recordURL: recordURL,
+                    serviceIdentity: serviceIdentity
+                )
+            }
             if let record = readServiceRecord(at: recordURL),
                record.endpoint.protocolVersion == WireProtocol.version,
                processIsRunning(record.processID),
@@ -186,7 +204,17 @@ public actor EngineProcessSupervisor {
     }
 
     public func isRunning() -> Bool {
-        process?.isRunning == true || attachedProcessID.map(processIsRunning) == true
+        if launchAgentService != nil,
+           let serviceRecordURL,
+           let expectedServiceIdentity,
+           let record = readServiceRecord(at: serviceRecordURL),
+           record.serviceIdentity == expectedServiceIdentity,
+           processIsRunning(record.processID) {
+            attachedProcessID = record.processID
+            sessionToken = record.sessionToken
+            return true
+        }
+        return process?.isRunning == true || attachedProcessID.map(processIsRunning) == true
     }
 
     /// Disconnects this UI session without terminating the channel engine.
@@ -201,6 +229,14 @@ public actor EngineProcessSupervisor {
 
     public func stop() async {
         await transport.close()
+
+        if launchAgentService != nil {
+            process = nil
+            attachedProcessID = nil
+            sessionToken = nil
+            commandSequence = 0
+            return
+        }
 
         if let process, process.isRunning {
             await terminateProcess(process.processIdentifier)
@@ -217,6 +253,168 @@ public actor EngineProcessSupervisor {
         attachedProcessID = nil
         sessionToken = nil
         commandSequence = 0
+    }
+
+    private func launchUsingLaunchAgent(
+        plistName: String,
+        recordURL: URL,
+        serviceIdentity: ServiceIdentity
+    ) async throws -> EngineEndpoint {
+        await transport.close()
+        process = nil
+        attachedProcessID = nil
+        commandSequence = 0
+        expectedServiceIdentity = serviceIdentity
+
+        let token = try persistentSessionToken(
+            at: recordURL.deletingLastPathComponent()
+                .appendingPathComponent(".engine-session-token")
+        )
+        sessionToken = token
+        let service = SMAppService.agent(plistName: plistName)
+        launchAgentService = service
+
+        if service.status == .enabled,
+           let record = readServiceRecord(at: recordURL),
+           record.endpoint.protocolVersion == WireProtocol.version,
+           record.sessionToken == token,
+           record.serviceIdentity == serviceIdentity,
+           processIsRunning(record.processID) {
+            attachedProcessID = record.processID
+            Self.logger.info(
+                "Attached to launchd-owned Lumi engine pid \(record.processID) version \(record.productVersion, privacy: .public)"
+            )
+            return record.endpoint
+        }
+
+        if service.status == .enabled,
+           readServiceRecord(at: recordURL) == nil,
+           let endpoint = try? await waitForLaunchAgentRecord(
+               at: recordURL,
+               sessionToken: token,
+               serviceIdentity: serviceIdentity,
+               timeout: .seconds(3)
+           ) {
+            return endpoint
+        }
+
+        switch service.status {
+        case .enabled:
+            let previousProcessID = readServiceRecord(at: recordURL)?.processID
+            try await service.unregister()
+            if let previousProcessID {
+                try await waitUntilStopped(previousProcessID)
+            }
+            try? FileManager.default.removeItem(at: recordURL)
+            try service.register()
+        case .notRegistered:
+            if let previousProcessID = readServiceRecord(at: recordURL)?.processID,
+               processIsRunning(previousProcessID) {
+                // One-time migration from the dev-43 channel-persistent child
+                // process to launchd ownership. After this handover only
+                // SMAppService controls the service lifecycle.
+                try await retireServiceProcess(previousProcessID)
+            }
+            try? FileManager.default.removeItem(at: recordURL)
+            try service.register()
+        case .requiresApproval:
+            throw EngineClientError.serviceRequiresApproval
+        case .notFound:
+            // On a first install macOS can report `.notFound` because the
+            // Background Task Management store has no record yet, even though
+            // the bundled plist and executable are present. Registration is
+            // the operation that creates that record; any malformed bundle is
+            // then returned as a concrete SMAppService error.
+            if let previousProcessID = readServiceRecord(at: recordURL)?.processID,
+               processIsRunning(previousProcessID) {
+                try await retireServiceProcess(previousProcessID)
+            }
+            try? FileManager.default.removeItem(at: recordURL)
+            do {
+                try service.register()
+            } catch {
+                Self.logger.error(
+                    "Unable to register bundled Lumi engine service: \(error.localizedDescription, privacy: .public)"
+                )
+                throw EngineClientError.serviceRegistrationFailed
+            }
+        @unknown default:
+            throw EngineClientError.serviceRegistrationFailed
+        }
+
+        if service.status == .requiresApproval {
+            throw EngineClientError.serviceRequiresApproval
+        }
+        return try await waitForLaunchAgentRecord(
+            at: recordURL,
+            sessionToken: token,
+            serviceIdentity: serviceIdentity
+        )
+    }
+
+    private func waitForLaunchAgentRecord(
+        at url: URL,
+        sessionToken: String,
+        serviceIdentity: ServiceIdentity,
+        timeout: Duration = .seconds(15)
+    ) async throws -> EngineEndpoint {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: timeout)
+        while clock.now < deadline {
+            if let record = readServiceRecord(at: url),
+               record.endpoint.protocolVersion == WireProtocol.version,
+               record.sessionToken == sessionToken,
+               record.serviceIdentity == serviceIdentity,
+               processIsRunning(record.processID) {
+                try validate(endpoint: record.endpoint)
+                attachedProcessID = record.processID
+                Self.logger.info(
+                    "launchd started Lumi engine pid \(record.processID) version \(record.productVersion, privacy: .public)"
+                )
+                return record.endpoint
+            }
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        throw EngineClientError.startupTimedOut
+    }
+
+    private func waitUntilStopped(_ processID: Int32) async throws {
+        let clock = ContinuousClock()
+        let deadline = clock.now.advanced(by: .seconds(10))
+        while processIsRunning(processID), clock.now < deadline {
+            try await Task.sleep(for: .milliseconds(50))
+        }
+        guard !processIsRunning(processID) else {
+            throw EngineClientError.serviceHandoverTimedOut
+        }
+    }
+
+    private func persistentSessionToken(at url: URL) throws -> String {
+        if let token = try? String(contentsOf: url, encoding: .utf8)
+            .trimmingCharacters(in: .whitespacesAndNewlines),
+           (32...256).contains(token.count) {
+            return token
+        }
+        let token = try SessionTokenGenerator.generate()
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        try Data(token.utf8).write(to: url, options: [.atomic])
+        try FileManager.default.setAttributes(
+            [.posixPermissions: 0o600],
+            ofItemAtPath: url.path
+        )
+        return token
+    }
+
+    private func packagedLaunchAgentExists(named plistName: String) -> Bool {
+        let url = Bundle.main.bundleURL
+            .appendingPathComponent("Contents")
+            .appendingPathComponent("Library")
+            .appendingPathComponent("LaunchAgents")
+            .appendingPathComponent(plistName)
+        return FileManager.default.fileExists(atPath: url.path)
     }
 
     private func terminateProcess(_ processID: Int32) async {

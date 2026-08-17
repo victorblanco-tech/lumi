@@ -37,6 +37,8 @@ Decision Records (ADR's) die de belangrijkste besluiten vastleggen.
 - [ADR-0028: Trusted USB sources and monotone analysis promotion](adr/0028-trusted-usb-sources-and-monotone-analysis-promotion.md)
 - [ADR-0029: Atomic backups, Library rebuilds and Creative Archive](adr/0029-atomic-backups-library-rebuild-and-creative-archive.md)
 - [ADR-0030: Managed Ableton Link timing output](adr/0030-managed-ableton-link-timing-output.md)
+- [ADR-0031: Show-critical runtime isolation and local quality gates](adr/0031-show-critical-runtime-isolation-and-local-quality-gates.md)
+- [ADR-0032: launchd-owned engine and isolated Ableton Link clock](adr/0032-launchd-engine-and-isolated-link-clock.md)
 
 Release- en deploymentmanagement staat in [`docs/release`](../release/README.md).
 

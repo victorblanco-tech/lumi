@@ -11,18 +11,72 @@ script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 repository_root="$(dirname "$script_dir")"
 helpers_directory="$1"
 resources_directory="$(dirname "$helpers_directory")/Resources"
+contents_directory="$(dirname "$helpers_directory")"
+launch_agents_directory="$contents_directory/Library/LaunchAgents"
 cargo_bin_directory="${CARGO_HOME:-${HOME}/.cargo}/bin"
 
 if [[ -d "$cargo_bin_directory" ]]; then
   export PATH="$cargo_bin_directory:$PATH"
 fi
 
-profile_directory="release"
+# Package the engine as a per-user LaunchAgent. SMAppService registers this
+# plist directly from the containing app bundle; no installer, root helper or
+# writes to ~/Library/LaunchAgents are required. Keep every release channel
+# isolated through its bundle identifier and Application Support directory.
+for required_variable in PRODUCT_BUNDLE_IDENTIFIER LUMI_DATA_DIRECTORY_NAME LUMI_PRODUCT_VERSION CURRENT_PROJECT_VERSION; do
+  if [[ -z "${!required_variable:-}" ]]; then
+    echo "ERROR: $required_variable is required to package the Lumi engine LaunchAgent." >&2
+    exit 1
+  fi
+done
 
+profile_directory="release"
+engine_info_plist_directory="$repository_root/build/generated"
+engine_info_plist="$engine_info_plist_directory/lumi-engine-info.plist"
+install -d "$engine_info_plist_directory"
+plutil -create xml1 "$engine_info_plist"
+/usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string $PRODUCT_BUNDLE_IDENTIFIER.engine" "$engine_info_plist"
+/usr/libexec/PlistBuddy -c "Add :CFBundleName string Lumi Engine" "$engine_info_plist"
+/usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Lumi Engine" "$engine_info_plist"
+/usr/libexec/PlistBuddy -c "Add :CFBundleExecutable string lumi-engine" "$engine_info_plist"
+/usr/libexec/PlistBuddy -c "Add :CFBundlePackageType string BNDL" "$engine_info_plist"
+/usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $LUMI_PRODUCT_VERSION" "$engine_info_plist"
+/usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $CURRENT_PROJECT_VERSION" "$engine_info_plist"
+plutil -lint "$engine_info_plist" >/dev/null
+
+# A standalone LaunchAgent executable must carry an embedded Info.plist. The
+# Service Management framework rejects an otherwise valid bundled job as
+# `notFound` when this Mach-O section is absent.
+engine_info_link_argument="-Wl,-sectcreate,__TEXT,__info_plist,$engine_info_plist"
 cd "$repository_root"
-cargo build --locked --release -p lumi-engine
+RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C link-arg=$engine_info_link_argument" \
+  cargo build --locked --release -p lumi-engine
 install -d "$helpers_directory"
 install -m 755 "target/$profile_directory/lumi-engine" "$helpers_directory/lumi-engine"
+if ! otool -s __TEXT __info_plist "$helpers_directory/lumi-engine" >/dev/null 2>&1; then
+  echo "ERROR: lumi-engine is missing its embedded LaunchAgent Info.plist." >&2
+  exit 1
+fi
+
+launch_agent_label="${PRODUCT_BUNDLE_IDENTIFIER}.engine"
+launch_agent_plist="$launch_agents_directory/$launch_agent_label.plist"
+rm -rf "$launch_agents_directory"
+install -d "$launch_agents_directory"
+plutil -create xml1 "$launch_agent_plist"
+/usr/libexec/PlistBuddy -c "Add :Label string $launch_agent_label" "$launch_agent_plist"
+/usr/libexec/PlistBuddy -c "Add :BundleProgram string Contents/Helpers/lumi-engine" "$launch_agent_plist"
+/usr/libexec/PlistBuddy -c "Add :RunAtLoad bool true" "$launch_agent_plist"
+/usr/libexec/PlistBuddy -c "Add :KeepAlive bool true" "$launch_agent_plist"
+/usr/libexec/PlistBuddy -c "Add :ProcessType string Interactive" "$launch_agent_plist"
+/usr/libexec/PlistBuddy -c "Add :ThrottleInterval integer 2" "$launch_agent_plist"
+/usr/libexec/PlistBuddy -c "Add :EnvironmentVariables dict" "$launch_agent_plist"
+/usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:LUMI_SERVICE_MODE string launchd" "$launch_agent_plist"
+/usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:LUMI_DATA_DIRECTORY_NAME string $LUMI_DATA_DIRECTORY_NAME" "$launch_agent_plist"
+/usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:LUMI_PRODUCT_VERSION string $LUMI_PRODUCT_VERSION" "$launch_agent_plist"
+/usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:LUMI_BUILD_NUMBER string $CURRENT_PROJECT_VERSION" "$launch_agent_plist"
+/usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:LUMI_AUTO_PUBLISH_MIDI string 1" "$launch_agent_plist"
+/usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:LUMI_EXIT_AFTER_CLIENT_DISCONNECT string 0" "$launch_agent_plist"
+plutil -lint "$launch_agent_plist" >/dev/null
 
 # Bundle the Direct Pro DJ Link bridge and a matching Apple Silicon runtime so
 # Lumi never depends on a separately installed JDK or Beat Link Trigger.
