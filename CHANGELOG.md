@@ -1,5 +1,42 @@
 # Changelog
 
+## 0.4.0 - 2026-08-18
+
+### Added
+
+- Trusted Rekordbox One Library USB sources met stabiele device-identiteit,
+  playlistgerichte synchronisatie, change-impact, trackprovenance en veilige
+  library rebuild/back-up.
+- Directe, read-only Pro DJ Link-integratie voor CDJ-decks en mixers, inclusief
+  device discovery, live transport, masterwissels, BPM, exacte positie,
+  Hot Cues en lokale USB-trackmatching.
+- Geïsoleerde Ableton Link BPM-relay naar SoundSwitch en een afzonderlijke,
+  bounded realtime MIDI-lane voor Bank- en AutoLoop-selectie.
+- Persistent launchd-owned engine service, afzonderlijke Dev/RC/Production
+  identities en databases, Lumi-branding en een installable Apple Silicon DMG.
+
+### Changed
+
+- Live Decks gebruikt één deterministische transporttijdlijn voor waveform,
+  phraseplan en AutoLoop-output, terwijl de UI uitsluitend een read-only
+  afgeleide presentatie blijft.
+- SoundSwitch ontvangt één AutoLoop-trigger per bevestigde phrase-landing;
+  continu afspelen, Link BPM en UI-rendering zijn volledig gescheiden lanes.
+- RGB waveforms, Rekordbox beatgrids en cue-markers worden gedeeld door de
+  Track Lighting Editor, Local Playback en Live Decks.
+
+### Fixed
+
+- Hot Cues, Beat Jumps, loops, pitchwijzigingen en masterwissels kunnen geen
+  oude AutoLoop-deadline, verkeerde phrase of teruglopende Link-tijdlijn meer
+  uitvoeren.
+- Pro DJ Link status- en positie-jitter kan de waveform, Ableton Link of
+  SoundSwitch AutoLoop niet meer terugsturen.
+- Een CDJ die tijdens een show opstart kan de Pro DJ Link bridge niet meer
+  omver trekken; een echte bridge-restart herstelt geladen decks automatisch.
+- UI-appswitching, Library-navigatie en client reconnects beïnvloeden de
+  show-kritische engine-, Link- en MIDI-lanes niet meer.
+
 ## 0.4.0-dev-48
 
 - Promotes each release channel's engine to a non-privileged per-user

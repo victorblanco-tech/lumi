@@ -23,10 +23,10 @@ Het bouwplan voor de eerste verticale productmilestone staat in
 Het gerefineerde ontwerp en storyplan voor de volgende verticale milestone staat
 in [`docs/planning/epic-02a-library-track-lighting-editor.md`](docs/planning/epic-02a-library-track-lighting-editor.md).
 
-> Status: `0.4.0-dev-57` is de actieve ontwikkellijn. De geaccepteerde `0.3.0`
-> release bevat de Rekordbox-backed Library, Track Lighting Editor, Local
-> Playback dual-deck, rolling AutoLoop Plan en de eerste fysiek bewezen
-> SoundSwitch/MIDI/DMX-keten.
+> Status: `0.4.0` is de actuele productieversie. Deze release bevat trusted
+> Rekordbox USB sources, directe read-only Pro DJ Link-integratie, geïsoleerde
+> Ableton Link BPM-sync, show-grade AutoLoop-output naar SoundSwitch en de
+> native Track Lighting Editor en Live Decks.
 
 ## Development
 
