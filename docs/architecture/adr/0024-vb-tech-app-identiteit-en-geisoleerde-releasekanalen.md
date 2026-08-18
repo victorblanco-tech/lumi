@@ -25,27 +25,28 @@ Er zijn drie naast elkaar installeerbare macOS-kanalen:
 
 | Kanaal | Appnaam | Bundle identifier | Application Support |
 |---|---|---|---|
-| Stable | Lumi | `co.victorblan.tech.lumi` | `Lumi` |
-| Preview | Lumi Preview | `co.victorblan.tech.lumi.preview` | `Lumi Preview` |
-| Dev | Lumi Dev | `co.victorblan.tech.lumi.dev` | `Lumi Dev` |
+| Release | Lumi | `co.victorblan.tech.lumi` | `Lumi` |
+| RC | Lumi | `co.victorblan.tech.lumi.rc` | `Lumi RC` (intern) |
+| Dev | Lumi | `co.victorblan.tech.lumi.dev` | `Lumi Dev` (bestaand intern pad) |
 
-De Xcode-configuraties zijn respectievelijk `Release`, `Preview` en `Debug`.
+De Xcode-configuraties zijn uitsluitend `Release`, `RC` en `Dev`.
 Iedere appbundle declareert zijn kanaal en datadirectory in `Info.plist`; de app
 leidt het databasepad uitsluitend daaruit af. Preferences worden door de
 verschillende bundle identifiers in afzonderlijke macOS-domeinen bewaard.
 
-De bestaande `Application Support/Lumi/library.sqlite` blijft de Stable-data.
+De bestaande `Application Support/Lumi/library.sqlite` blijft de releasedata.
 Een expliciet lokaal hulpmiddel mag met SQLite's online backup-API een eenmalige
-kopie naar Preview of Dev maken. Het overschrijft nooit een bestaand doel. Een
+kopie naar RC of Dev maken. Het overschrijft nooit een bestaand doel. Een
 apart back-uphulpmiddel valideert de kopie met `PRAGMA integrity_check`.
 
-Preview is het standaardkanaal voor lokaal verpakte acceptatie-DMG's. Stable
-wordt uitsluitend vanaf een bewust gepromoveerde versie gebouwd. Dev blijft de
-app die vanuit de normale Debug-workflow wordt gestart.
+RC is het kanaal voor lokaal verpakte acceptatie-DMG's. Release wordt uitsluitend
+vanaf een bewust gepromoveerde versie gebouwd. Dev is de normale lokale
+ontwikkelconfiguratie. De appnaam is in elk kanaal `Lumi`; uitsluitend de
+zichtbare productversie (`dev-N`, `rc-N` of zonder suffix) onderscheidt builds.
 
 ## Gevolgen
 
-- Dev-, Preview- en Stable-databases kunnen onafhankelijk migreren en getest
+- Dev-, RC- en releasedatabases kunnen onafhankelijk migreren en getest
   worden zonder impliciete kruisbestuiving.
 - Een handmatige wijziging in één kanaal verschijnt niet automatisch in een
   ander kanaal; opnieuw klonen is een expliciete actie.

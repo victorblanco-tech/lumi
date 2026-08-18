@@ -130,6 +130,7 @@ impl WaveformCoverage {
 pub struct TrackAnalysisCoverage {
     pub beat_grid_entries: usize,
     pub phrase_entries: usize,
+    pub hot_cue_entries: usize,
     pub waveform: WaveformCoverage,
 }
 
@@ -156,6 +157,7 @@ pub struct AnalysisCoverageReport {
     pub snapshot_files: usize,
     pub total_beat_grid_entries: usize,
     pub total_phrase_entries: usize,
+    pub total_hot_cue_entries: usize,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -185,12 +187,25 @@ pub struct AnalysisPhrase {
     pub source_label: String,
 }
 
+/// Read-only Rekordbox performance marker. `index` is one-based (A = 1),
+/// while timing stays in source milliseconds so it remains aligned to the
+/// authoritative Rekordbox beat grid after import.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AnalysisHotCue {
+    pub index: u8,
+    pub time_millis: u32,
+    pub loop_end_millis: Option<u32>,
+    pub comment: String,
+    pub color_rgb: [u8; 3],
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ResolvedTrackAnalysis {
     pub coverage: TrackAnalysisCoverage,
     pub beat_grid: Vec<AnalysisBeat>,
     pub waveform: Vec<AnalysisWaveformPoint>,
     pub phrases: Vec<AnalysisPhrase>,
+    pub hot_cues: Vec<AnalysisHotCue>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -523,6 +538,7 @@ pub fn snapshot_resolved_analysis_data(
                 beat_grid: merged.beat_grid,
                 waveform: merged.waveform,
                 phrases: merged.phrases,
+                hot_cues: merged.hot_cues,
             },
         );
     }
@@ -580,6 +596,7 @@ fn accumulate_coverage(report: &mut AnalysisCoverageReport, coverage: TrackAnaly
     }
     report.total_beat_grid_entries += coverage.beat_grid_entries;
     report.total_phrase_entries += coverage.phrase_entries;
+    report.total_hot_cue_entries += coverage.hot_cue_entries;
 }
 
 #[derive(Debug)]
@@ -677,6 +694,8 @@ struct ParsedAnalysisFile {
     audio_location: Option<String>,
     beat_grid: Vec<AnalysisBeat>,
     phrases: Vec<AnalysisPhrase>,
+    hot_cues: Vec<AnalysisHotCue>,
+    hot_cue_priority: u8,
     waveform: Vec<AnalysisWaveformPoint>,
     waveform_priority: u8,
     waveform_coverage: WaveformCoverage,
@@ -687,6 +706,7 @@ impl ParsedAnalysisFile {
         TrackAnalysisCoverage {
             beat_grid_entries: self.beat_grid.len(),
             phrase_entries: self.phrases.len(),
+            hot_cue_entries: self.hot_cues.len(),
             waveform: self.waveform_coverage,
         }
     }
@@ -697,6 +717,13 @@ impl ParsedAnalysisFile {
         }
         if other.phrases.len() > self.phrases.len() {
             self.phrases = other.phrases;
+        }
+        if other.hot_cue_priority > self.hot_cue_priority
+            || (other.hot_cue_priority == self.hot_cue_priority
+                && other.hot_cues.len() > self.hot_cues.len())
+        {
+            self.hot_cues = other.hot_cues;
+            self.hot_cue_priority = other.hot_cue_priority;
         }
         if other.waveform_priority > self.waveform_priority
             || (other.waveform_priority == self.waveform_priority
@@ -783,6 +810,20 @@ fn parse_analysis_file(bytes: &[u8]) -> Result<ParsedAnalysisFile, AnalysisError
                 }
             }
             b"PSSI" => parsed.phrases = parse_phrases(body)?,
+            b"PCOB" => {
+                let hot_cues = parse_legacy_hot_cues(body)?;
+                if parsed.hot_cue_priority < 1 && !hot_cues.is_empty() {
+                    parsed.hot_cues = hot_cues;
+                    parsed.hot_cue_priority = 1;
+                }
+            }
+            b"PCO2" => {
+                let hot_cues = parse_extended_hot_cues(body)?;
+                if !hot_cues.is_empty() {
+                    parsed.hot_cues = hot_cues;
+                    parsed.hot_cue_priority = 2;
+                }
+            }
             _ => {}
         }
         offset = offset
@@ -790,6 +831,144 @@ fn parse_analysis_file(bytes: &[u8]) -> Result<ParsedAnalysisFile, AnalysisError
             .ok_or(AnalysisError::MalformedAnalysisFile)?;
     }
     Ok(parsed)
+}
+
+fn parse_legacy_hot_cues(body: &[u8]) -> Result<Vec<AnalysisHotCue>, AnalysisError> {
+    if body.len() < 12 {
+        return Err(AnalysisError::MalformedAnalysisFile);
+    }
+    let list_type = be_u32(body, 0)?;
+    let count = usize::from(be_u16(body, 6)?);
+    if list_type != 1 {
+        return Ok(Vec::new());
+    }
+    validate_entry_range(body, count, 56, 12)?;
+    let mut cues = Vec::with_capacity(count);
+    for entry_index in 0..count {
+        let offset = 12 + entry_index * 56;
+        let entry = body
+            .get(offset..offset + 56)
+            .ok_or(AnalysisError::MalformedAnalysisFile)?;
+        if &entry[..4] != b"PCPT" || usize_from_u32(be_u32(entry, 8)?)? != 56 {
+            return Err(AnalysisError::MalformedAnalysisFile);
+        }
+        let hot_cue = be_u32(entry, 12)?;
+        if hot_cue == 0 {
+            continue;
+        }
+        let index = u8::try_from(hot_cue).map_err(|_| AnalysisError::MalformedAnalysisFile)?;
+        let cue_type = entry[28];
+        // Current OneLibrary exports encode hot-cue points as `1`, while
+        // older device exports and memory points can use `0`. Loops remain
+        // `2` in both formats.
+        if !matches!(cue_type, 0..=2) {
+            return Err(AnalysisError::MalformedAnalysisFile);
+        }
+        let time_millis = be_u32(entry, 32)?;
+        let loop_time = be_u32(entry, 36)?;
+        cues.push(AnalysisHotCue {
+            index,
+            time_millis,
+            loop_end_millis: (cue_type == 2 && loop_time > time_millis).then_some(loop_time),
+            comment: String::new(),
+            color_rgb: default_hot_cue_color(),
+        });
+    }
+    normalize_hot_cues(cues)
+}
+
+fn parse_extended_hot_cues(body: &[u8]) -> Result<Vec<AnalysisHotCue>, AnalysisError> {
+    if body.len() < 8 {
+        return Err(AnalysisError::MalformedAnalysisFile);
+    }
+    let list_type = be_u32(body, 0)?;
+    let count = usize::from(be_u16(body, 4)?);
+    if list_type != 1 {
+        return Ok(Vec::new());
+    }
+    let mut offset = 8_usize;
+    let mut cues = Vec::with_capacity(count);
+    for _ in 0..count {
+        let header = body
+            .get(offset..offset + 12)
+            .ok_or(AnalysisError::MalformedAnalysisFile)?;
+        if &header[..4] != b"PCP2" {
+            return Err(AnalysisError::MalformedAnalysisFile);
+        }
+        let entry_bytes = usize_from_u32(be_u32(header, 8)?)?;
+        if entry_bytes < 28 {
+            return Err(AnalysisError::MalformedAnalysisFile);
+        }
+        let entry = body
+            .get(offset..offset + entry_bytes)
+            .ok_or(AnalysisError::MalformedAnalysisFile)?;
+        let hot_cue = be_u32(entry, 12)?;
+        if hot_cue != 0 {
+            let index = u8::try_from(hot_cue).map_err(|_| AnalysisError::MalformedAnalysisFile)?;
+            let cue_type = entry[16];
+            if !matches!(cue_type, 0..=2) {
+                return Err(AnalysisError::MalformedAnalysisFile);
+            }
+            let time_millis = be_u32(entry, 20)?;
+            let loop_time = be_u32(entry, 24)?;
+            let (comment, color_rgb) = if entry_bytes >= 44 {
+                let comment_bytes = usize_from_u32(be_u32(entry, 40)?)?;
+                let comment_end = 44_usize
+                    .checked_add(comment_bytes)
+                    .ok_or(AnalysisError::MalformedAnalysisFile)?;
+                if comment_end > entry_bytes || !comment_bytes.is_multiple_of(2) {
+                    return Err(AnalysisError::MalformedAnalysisFile);
+                }
+                let comment = parse_utf16be(&entry[44..comment_end])?;
+                let color = entry.get(comment_end..comment_end + 4).map_or_else(
+                    default_hot_cue_color,
+                    |bytes| {
+                        let rgb = [bytes[1], bytes[2], bytes[3]];
+                        if rgb == [0, 0, 0] {
+                            default_hot_cue_color()
+                        } else {
+                            rgb
+                        }
+                    },
+                );
+                (comment, color)
+            } else {
+                (String::new(), default_hot_cue_color())
+            };
+            cues.push(AnalysisHotCue {
+                index,
+                time_millis,
+                loop_end_millis: (cue_type == 2 && loop_time > time_millis).then_some(loop_time),
+                comment,
+                color_rgb,
+            });
+        }
+        offset = offset
+            .checked_add(entry_bytes)
+            .ok_or(AnalysisError::MalformedAnalysisFile)?;
+    }
+    normalize_hot_cues(cues)
+}
+
+fn parse_utf16be(bytes: &[u8]) -> Result<String, AnalysisError> {
+    let words = bytes
+        .chunks_exact(2)
+        .map(|pair| u16::from_be_bytes([pair[0], pair[1]]))
+        .take_while(|word| *word != 0)
+        .collect::<Vec<_>>();
+    String::from_utf16(&words).map_err(|_| AnalysisError::MalformedAnalysisFile)
+}
+
+fn normalize_hot_cues(mut cues: Vec<AnalysisHotCue>) -> Result<Vec<AnalysisHotCue>, AnalysisError> {
+    cues.sort_by_key(|cue| cue.index);
+    if cues.windows(2).any(|pair| pair[0].index == pair[1].index) {
+        return Err(AnalysisError::MalformedAnalysisFile);
+    }
+    Ok(cues)
+}
+
+const fn default_hot_cue_color() -> [u8; 3] {
+    [0x00, 0xd8, 0x7f]
 }
 
 fn parse_path_tag(body: &[u8]) -> Result<Option<String>, AnalysisError> {
@@ -1158,6 +1337,29 @@ mod tests {
     use super::*;
 
     #[test]
+    fn mounted_analysis_set_reports_hot_cues_when_provided()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let Ok(dat_path) = std::env::var("LUMI_TEST_ANALYSIS_DAT") else {
+            return Ok(());
+        };
+        let dat_path = PathBuf::from(dat_path);
+        let mut merged = ParsedAnalysisFile::default();
+        for path in [
+            dat_path.clone(),
+            dat_path.with_extension("EXT"),
+            dat_path.with_extension("2EX"),
+        ] {
+            if !path.is_file() {
+                continue;
+            }
+            let parsed = parse_analysis_file(&read_bounded(&path, 16 * 1024 * 1024)?)?;
+            merged.merge(parsed);
+        }
+        assert!(!merged.hot_cues.is_empty());
+        Ok(())
+    }
+
+    #[test]
     fn authoritative_resolved_set_is_snapshotted_without_path_matching()
     -> Result<(), Box<dyn std::error::Error>> {
         let test_root = unique_test_root("resolved")?;
@@ -1250,6 +1452,28 @@ mod tests {
         assert_eq!(parsed.waveform[0].high, 255);
         assert_eq!(parsed.waveform[0].mid, 0);
         assert_eq!(parsed.waveform[0].low, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn extended_hot_cues_preserve_letter_timing_name_and_rgb_over_legacy_data()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let parsed = parse_analysis_file(&analysis_file(&[
+            tag(*b"PCOB", legacy_hot_cue_body(1, 1_000)),
+            tag(
+                *b"PCO2",
+                extended_hot_cue_body(3, 32_000, Some(34_000), "DROP", [0xe6, 0x28, 0x28]),
+            ),
+        ]))?;
+
+        assert_eq!(parsed.hot_cue_priority, 2);
+        assert_eq!(parsed.hot_cues.len(), 1);
+        assert_eq!(parsed.hot_cues[0].index, 3);
+        assert_eq!(parsed.hot_cues[0].time_millis, 32_000);
+        assert_eq!(parsed.hot_cues[0].loop_end_millis, Some(34_000));
+        assert_eq!(parsed.hot_cues[0].comment, "DROP");
+        assert_eq!(parsed.hot_cues[0].color_rgb, [0xe6, 0x28, 0x28]);
+        assert_eq!(parsed.coverage().hot_cue_entries, 1);
         Ok(())
     }
 
@@ -1522,6 +1746,52 @@ mod tests {
                 *byte ^= base[index % base.len()].wrapping_add(increment);
             }
         }
+        body
+    }
+
+    fn legacy_hot_cue_body(index: u32, time_millis: u32) -> Vec<u8> {
+        let mut body = vec![0_u8; 12 + 56];
+        body[..4].copy_from_slice(&1_u32.to_be_bytes());
+        body[6..8].copy_from_slice(&1_u16.to_be_bytes());
+        let entry = &mut body[12..];
+        entry[..4].copy_from_slice(b"PCPT");
+        entry[4..8].copy_from_slice(&28_u32.to_be_bytes());
+        entry[8..12].copy_from_slice(&56_u32.to_be_bytes());
+        entry[12..16].copy_from_slice(&index.to_be_bytes());
+        entry[28] = 1;
+        entry[32..36].copy_from_slice(&time_millis.to_be_bytes());
+        body
+    }
+
+    fn extended_hot_cue_body(
+        index: u32,
+        time_millis: u32,
+        loop_end_millis: Option<u32>,
+        comment: &str,
+        color_rgb: [u8; 3],
+    ) -> Vec<u8> {
+        let mut comment_bytes = comment
+            .encode_utf16()
+            .flat_map(u16::to_be_bytes)
+            .collect::<Vec<_>>();
+        comment_bytes.extend_from_slice(&[0, 0]);
+        let entry_bytes = 44 + comment_bytes.len() + 4;
+        let mut body = vec![0_u8; 8 + entry_bytes];
+        body[..4].copy_from_slice(&1_u32.to_be_bytes());
+        body[4..6].copy_from_slice(&1_u16.to_be_bytes());
+        let entry = &mut body[8..];
+        entry[..4].copy_from_slice(b"PCP2");
+        entry[4..8].copy_from_slice(&16_u32.to_be_bytes());
+        entry[8..12].copy_from_slice(&(entry_bytes as u32).to_be_bytes());
+        entry[12..16].copy_from_slice(&index.to_be_bytes());
+        entry[16] = if loop_end_millis.is_some() { 2 } else { 1 };
+        entry[20..24].copy_from_slice(&time_millis.to_be_bytes());
+        entry[24..28].copy_from_slice(&loop_end_millis.unwrap_or_default().to_be_bytes());
+        entry[40..44].copy_from_slice(&(comment_bytes.len() as u32).to_be_bytes());
+        entry[44..44 + comment_bytes.len()].copy_from_slice(&comment_bytes);
+        let color_offset = 44 + comment_bytes.len();
+        entry[color_offset] = 0x2a;
+        entry[color_offset + 1..color_offset + 4].copy_from_slice(&color_rgb);
         body
     }
 }

@@ -1,6 +1,6 @@
 use coremidi::{
-    EventListBuffer, MidiClient, MidiError, MidiObject, MidiProperty, MidiProtocol,
-    MidiVirtualDestinationStream, VirtualSource,
+    MidiClient, MidiError, MidiObject, MidiProperty, MidiProtocol, MidiVirtualDestinationStream,
+    PacketListBuffer, VirtualSource,
 };
 use lumi_midi_output::{MIDI_CLOCK_SOURCE_NAME, MidiMessage, MidiSourceProvider};
 
@@ -125,7 +125,13 @@ impl MidiSourceProvider for CoreMidiSourceProvider {
             return Ok(());
         }
         let client = MidiClient::new("Lumi MIDI Engine")?;
-        let source = client.virtual_source_with_protocol(source_name, MidiProtocol::Midi1)?;
+        // SoundSwitch still consumes CoreMIDI through the legacy MIDI 1.0
+        // packet API. A UMP-backed source is discoverable and can initially
+        // deliver events, but SoundSwitch may silently stop consuming it while
+        // the endpoint itself remains healthy. Publish a classic MIDI 1.0
+        // source so the endpoint and delivery path match physical controllers,
+        // IAC buses and Beat Link Trigger.
+        let source = client.virtual_source(source_name)?;
         let unique_id = if source_name == MIDI_CLOCK_SOURCE_NAME {
             LUMI_CLOCK_COREMIDI_UNIQUE_ID
         } else {
@@ -147,21 +153,22 @@ impl MidiSourceProvider for CoreMidiSourceProvider {
             .source
             .as_ref()
             .ok_or(CoreMidiError::SourceNotPublished)?;
-        let mut events = EventListBuffer::with_capacity(MidiProtocol::Midi1, 128);
-        for message in messages {
-            events.add_packet_words(0, &[midi_one_ump_word(message.bytes())])?;
-        }
-        source.received_event_list(&events)?;
+        let packets = midi_one_packet_list(messages)?;
+        source.received(&packets)?;
         Ok(())
     }
 }
 
-fn midi_one_ump_word(bytes: [u8; 3]) -> u32 {
-    let message_type = if bytes[0] >= 0xf0 { 0x1_u32 } else { 0x2_u32 };
-    (message_type << 28)
-        | (u32::from(bytes[0]) << 16)
-        | (u32::from(bytes[1]) << 8)
-        | u32::from(bytes[2])
+fn midi_one_packet_list(messages: &[MidiMessage]) -> Result<PacketListBuffer, MidiError> {
+    let mut packets = PacketListBuffer::with_capacity(128);
+    for (index, message) in messages.iter().enumerate() {
+        // Distinct timestamps prevent CoreMIDI from coalescing Note On and
+        // Note Off into one packet. These tiny absolute values are in the past
+        // and therefore both packets remain immediate.
+        let timestamp = u64::try_from(index).unwrap_or(u64::MAX);
+        packets.add_packet(timestamp, &message.bytes())?;
+    }
+    Ok(packets)
 }
 
 fn decode_midi_one_ump_word(word: u32) -> Option<MidiChannelVoiceMessage> {
@@ -186,15 +193,19 @@ mod tests {
     use super::*;
 
     #[test]
-    fn midi_one_channel_voice_bytes_encode_as_ump() {
-        assert_eq!(midi_one_ump_word([0x9f, 60, 100]), 0x209f_3c64);
-        assert_eq!(midi_one_ump_word([0x8f, 60, 0]), 0x208f_3c00);
-    }
-
-    #[test]
-    fn midi_one_system_realtime_bytes_encode_as_system_ump() {
-        assert_eq!(midi_one_ump_word(MidiMessage::clock().bytes()), 0x10f8_0000);
-        assert_eq!(midi_one_ump_word(MidiMessage::start().bytes()), 0x10fa_0000);
+    fn source_messages_are_separate_legacy_midi_one_packets() {
+        let messages = [
+            MidiMessage::note_on(15, 60, 100).unwrap_or_else(|| panic!("valid note on")),
+            MidiMessage::note_off(15, 60).unwrap_or_else(|| panic!("valid note off")),
+        ];
+        let packets = midi_one_packet_list(&messages)
+            .unwrap_or_else(|error| panic!("packet list must encode: {error}"));
+        let bytes = packets
+            .as_packet_list()
+            .iter()
+            .map(|packet| packet.bytes().to_vec())
+            .collect::<Vec<_>>();
+        assert_eq!(bytes, vec![vec![0x9f, 60, 100], vec![0x8f, 60, 0]]);
     }
 
     #[test]

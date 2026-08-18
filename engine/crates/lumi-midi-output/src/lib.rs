@@ -2,6 +2,7 @@
 
 #![forbid(unsafe_code)]
 
+use std::collections::VecDeque;
 use std::marker::PhantomData;
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread::{self, JoinHandle};
@@ -14,6 +15,7 @@ const MIDI_CHANNEL_ZERO_BASED: u8 = MIDI_CHANNEL - 1;
 const BANK_NOTE_BASE: u8 = 60;
 const AUTOLOOP_NOTE_BASE: u8 = 64;
 pub const BANK_SETTLE_DELAY: Duration = Duration::from_millis(50);
+const REALTIME_LATE_DISPATCH_THRESHOLD: Duration = Duration::from_millis(20);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum MidiAddressKind {
@@ -501,6 +503,297 @@ pub enum MidiSourceState {
     Ready,
 }
 
+const REALTIME_COMMAND_CAPACITY: usize = 64;
+const REALTIME_SCHEDULE_CAPACITY: usize = 128;
+const REALTIME_LATENCY_SAMPLE_CAPACITY: usize = 2_048;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RealtimeMidiStatus {
+    pub source: MidiSourceStatus,
+    pub queue_capacity: usize,
+    pub queue_depth: usize,
+    pub queue_high_water: usize,
+    pub scheduled_count: u64,
+    pub emitted_count: u64,
+    pub cancelled_count: u64,
+    pub saturation_count: u64,
+    pub latency_sample_count: usize,
+    pub latency_p50_micros: u64,
+    pub latency_p95_micros: u64,
+    pub latency_p99_micros: u64,
+    pub latency_max_micros: u64,
+    pub last_scheduled_action: Option<RealtimeMidiActionKind>,
+    pub last_scheduled_number: Option<u8>,
+    pub last_scheduled_lead_micros: Option<u64>,
+    pub last_emitted_action: Option<RealtimeMidiActionKind>,
+    pub last_emitted_number: Option<u8>,
+    pub last_dispatch_lateness_micros: Option<u64>,
+    pub late_dispatch_count: u64,
+}
+
+impl Default for RealtimeMidiStatus {
+    fn default() -> Self {
+        Self {
+            source: MidiSourceStatus {
+                state: MidiSourceState::Stopped,
+                source_name: MIDI_SOURCE_NAME,
+                sent_pulse_count: 0,
+                last_event: None,
+                last_error: None,
+                active_bank: None,
+            },
+            queue_capacity: REALTIME_COMMAND_CAPACITY,
+            queue_depth: 0,
+            queue_high_water: 0,
+            scheduled_count: 0,
+            emitted_count: 0,
+            cancelled_count: 0,
+            saturation_count: 0,
+            latency_sample_count: 0,
+            latency_p50_micros: 0,
+            latency_p95_micros: 0,
+            latency_p99_micros: 0,
+            latency_max_micros: 0,
+            last_scheduled_action: None,
+            last_scheduled_number: None,
+            last_scheduled_lead_micros: None,
+            last_emitted_action: None,
+            last_emitted_number: None,
+            last_dispatch_lateness_micros: None,
+            late_dispatch_count: 0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RealtimeMidiActionKind {
+    Bank,
+    Autoloop,
+}
+
+#[derive(Debug, thiserror::Error, Eq, PartialEq)]
+pub enum RealtimeMidiError {
+    #[error("the realtime MIDI lane is unavailable")]
+    WorkerUnavailable,
+    #[error("the realtime MIDI lane is saturated")]
+    QueueSaturated,
+    #[error("the MIDI provider failed: {0}")]
+    Provider(String),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum RealtimeMidiAction {
+    SelectBank(u8),
+    TriggerAutoloop(u8),
+}
+
+#[derive(Clone, Copy, Debug)]
+struct ScheduledRealtimeMidiAction {
+    generation: u64,
+    deadline: Instant,
+    action: RealtimeMidiAction,
+}
+
+enum RealtimeMidiCommand {
+    Publish(mpsc::Sender<Result<(), String>>),
+    Stop(mpsc::Sender<()>),
+    SendLearnPulse(MidiAddress, mpsc::Sender<Result<(), String>>),
+    SelectBank(u8, mpsc::Sender<Result<(), String>>),
+    TriggerAutoloop(u8, mpsc::Sender<Result<(), String>>),
+    TriggerSequence(u8, u8, mpsc::Sender<Result<(), String>>),
+    SetGeneration(u64),
+    Schedule(ScheduledRealtimeMidiAction),
+    CancelAll,
+    Shutdown,
+}
+
+/// Dedicated bounded execution lane for sparse, show-critical Bank and
+/// AutoLoop messages. The provider is constructed and owned on this lane's
+/// thread, so CoreMIDI calls and deadline waits never run on the engine command,
+/// SQLite or UI snapshot path.
+pub struct RealtimeMidiController<P>
+where
+    P: MidiSourceProvider + 'static,
+{
+    commands: mpsc::SyncSender<RealtimeMidiCommand>,
+    worker: Option<JoinHandle<()>>,
+    status: Arc<Mutex<RealtimeMidiStatus>>,
+    provider: PhantomData<fn() -> P>,
+}
+
+impl<P> RealtimeMidiController<P>
+where
+    P: MidiSourceProvider + 'static,
+{
+    pub fn new(factory: impl FnOnce() -> P + Send + 'static) -> Self {
+        let (commands, receiver) = mpsc::sync_channel(REALTIME_COMMAND_CAPACITY);
+        let status = Arc::new(Mutex::new(RealtimeMidiStatus::default()));
+        let worker_status = Arc::clone(&status);
+        let worker = thread::Builder::new()
+            .name("lumi-realtime-midi".to_owned())
+            .spawn(move || run_realtime_midi_worker(factory(), receiver, &worker_status))
+            .ok();
+        Self {
+            commands,
+            worker,
+            status,
+            provider: PhantomData,
+        }
+    }
+
+    pub fn publish(&self) -> Result<(), RealtimeMidiError> {
+        let (reply, response) = mpsc::channel();
+        self.commands
+            .send(RealtimeMidiCommand::Publish(reply))
+            .map_err(|_| RealtimeMidiError::WorkerUnavailable)?;
+        response
+            .recv()
+            .map_err(|_| RealtimeMidiError::WorkerUnavailable)?
+            .map_err(RealtimeMidiError::Provider)
+    }
+
+    pub fn stop(&self) {
+        let (reply, response) = mpsc::channel();
+        if self.commands.send(RealtimeMidiCommand::Stop(reply)).is_ok() {
+            let _ = response.recv();
+        }
+    }
+
+    pub fn send_learn_pulse(&self) -> Result<(), RealtimeMidiError> {
+        self.send_address_learn_pulse(MidiAddress::BANK_ONE)
+    }
+
+    pub fn send_address_learn_pulse(&self, address: MidiAddress) -> Result<(), RealtimeMidiError> {
+        self.synchronous(|reply| RealtimeMidiCommand::SendLearnPulse(address, reply))
+    }
+
+    pub fn select_bank(&self, bank_number: u8) -> Result<(), RealtimeMidiError> {
+        self.synchronous(|reply| RealtimeMidiCommand::SelectBank(bank_number, reply))
+    }
+
+    pub fn trigger_autoloop_button(&self, autoloop_number: u8) -> Result<(), RealtimeMidiError> {
+        self.synchronous(|reply| RealtimeMidiCommand::TriggerAutoloop(autoloop_number, reply))
+    }
+
+    pub fn trigger_autoloop(
+        &self,
+        bank_number: u8,
+        autoloop_number: u8,
+    ) -> Result<(), RealtimeMidiError> {
+        self.synchronous(|reply| {
+            RealtimeMidiCommand::TriggerSequence(bank_number, autoloop_number, reply)
+        })
+    }
+
+    pub fn set_generation(&self, generation: u64) -> Result<(), RealtimeMidiError> {
+        self.try_send(RealtimeMidiCommand::SetGeneration(generation))
+    }
+
+    pub fn schedule_bank(
+        &self,
+        generation: u64,
+        bank_number: u8,
+        deadline: Instant,
+    ) -> Result<(), RealtimeMidiError> {
+        self.schedule(
+            generation,
+            deadline,
+            RealtimeMidiAction::SelectBank(bank_number),
+        )
+    }
+
+    pub fn schedule_autoloop(
+        &self,
+        generation: u64,
+        autoloop_number: u8,
+        deadline: Instant,
+    ) -> Result<(), RealtimeMidiError> {
+        self.schedule(
+            generation,
+            deadline,
+            RealtimeMidiAction::TriggerAutoloop(autoloop_number),
+        )
+    }
+
+    pub fn cancel_all(&self) -> Result<(), RealtimeMidiError> {
+        self.try_send(RealtimeMidiCommand::CancelAll)
+    }
+
+    pub fn status(&self) -> RealtimeMidiStatus {
+        self.status
+            .lock()
+            .map_or_else(|_| RealtimeMidiStatus::default(), |status| status.clone())
+    }
+
+    fn synchronous(
+        &self,
+        command: impl FnOnce(mpsc::Sender<Result<(), String>>) -> RealtimeMidiCommand,
+    ) -> Result<(), RealtimeMidiError> {
+        let (reply, response) = mpsc::channel();
+        self.commands
+            .send(command(reply))
+            .map_err(|_| RealtimeMidiError::WorkerUnavailable)?;
+        response
+            .recv()
+            .map_err(|_| RealtimeMidiError::WorkerUnavailable)?
+            .map_err(RealtimeMidiError::Provider)
+    }
+
+    fn schedule(
+        &self,
+        generation: u64,
+        deadline: Instant,
+        action: RealtimeMidiAction,
+    ) -> Result<(), RealtimeMidiError> {
+        self.try_send(RealtimeMidiCommand::Schedule(ScheduledRealtimeMidiAction {
+            generation,
+            deadline,
+            action,
+        }))
+    }
+
+    fn try_send(&self, command: RealtimeMidiCommand) -> Result<(), RealtimeMidiError> {
+        // Reserve the diagnostic queue slot before publishing the command.
+        // Incrementing after `try_send` races the worker's decrement and can
+        // leave a false non-zero depth forever when the worker is faster than
+        // the calling thread.
+        update_realtime_status(&self.status, |status| {
+            status.queue_depth = status.queue_depth.saturating_add(1);
+            status.queue_high_water = status.queue_high_water.max(status.queue_depth);
+        });
+        match self.commands.try_send(command) {
+            Ok(()) => Ok(()),
+            Err(mpsc::TrySendError::Full(_)) => {
+                update_realtime_status(&self.status, |status| {
+                    status.queue_depth = status.queue_depth.saturating_sub(1);
+                    status.saturation_count = status.saturation_count.saturating_add(1);
+                    status.source.last_error =
+                        Some("Realtime MIDI lane saturated; output failed closed".to_owned());
+                });
+                Err(RealtimeMidiError::QueueSaturated)
+            }
+            Err(mpsc::TrySendError::Disconnected(_)) => {
+                update_realtime_status(&self.status, |status| {
+                    status.queue_depth = status.queue_depth.saturating_sub(1);
+                });
+                Err(RealtimeMidiError::WorkerUnavailable)
+            }
+        }
+    }
+}
+
+impl<P> Drop for RealtimeMidiController<P>
+where
+    P: MidiSourceProvider + 'static,
+{
+    fn drop(&mut self) {
+        let _ = self.commands.send(RealtimeMidiCommand::Shutdown);
+        if let Some(worker) = self.worker.take() {
+            let _ = worker.join();
+        }
+    }
+}
+
 pub trait MidiSourceProvider {
     type Error: std::error::Error + Send + Sync + 'static;
 
@@ -634,6 +927,40 @@ where
         Ok(())
     }
 
+    /// Selects a SoundSwitch Bank without blocking for its settling interval.
+    /// The engine realtime scheduler owns the later AutoLoop deadline.
+    pub fn select_bank(&mut self, bank_number: u8) -> Result<(), MidiOutputError<P::Error>> {
+        let bank = MidiAddress::bank(bank_number).ok_or(MidiOutputError::InvalidAddress)?;
+        self.send_address_pulse(bank)?;
+        self.active_bank = Some(bank_number);
+        self.last_event = Some(format!(
+            "Pre-armed Bank {bank_number} · Ch {MIDI_CHANNEL} · Note {}",
+            bank.note()
+        ));
+        Ok(())
+    }
+
+    /// Emits only the AutoLoop button pulse. Callers must prove that the Bank
+    /// has already satisfied `BANK_SETTLE_DELAY`.
+    pub fn trigger_autoloop_button(
+        &mut self,
+        autoloop_number: u8,
+    ) -> Result<(), MidiOutputError<P::Error>> {
+        let autoloop =
+            MidiAddress::autoloop(autoloop_number).ok_or(MidiOutputError::InvalidAddress)?;
+        self.send_address_pulse(autoloop)?;
+        self.last_event = Some(format!(
+            "Triggered AutoLoop {autoloop_number} · Ch {MIDI_CHANNEL} · Note {} · Bank pre-armed",
+            autoloop.note()
+        ));
+        Ok(())
+    }
+
+    #[must_use]
+    pub const fn active_bank(&self) -> Option<u8> {
+        self.active_bank
+    }
+
     fn send_address_pulse(
         &mut self,
         address: MidiAddress,
@@ -672,6 +999,230 @@ where
             active_bank: self.active_bank,
         }
     }
+}
+
+fn run_realtime_midi_worker<P>(
+    provider: P,
+    receiver: mpsc::Receiver<RealtimeMidiCommand>,
+    shared_status: &Arc<Mutex<RealtimeMidiStatus>>,
+) where
+    P: MidiSourceProvider,
+{
+    let mut controller = MidiOutputController::new(provider);
+    let mut generation = 0_u64;
+    let mut scheduled: Vec<ScheduledRealtimeMidiAction> = Vec::new();
+    let mut latencies = VecDeque::with_capacity(REALTIME_LATENCY_SAMPLE_CAPACITY);
+
+    loop {
+        let timeout = scheduled
+            .iter()
+            .filter(|item| item.generation == generation)
+            .map(|item| item.deadline)
+            .min()
+            .map(|deadline| deadline.saturating_duration_since(Instant::now()));
+        let command = timeout.map_or_else(
+            || {
+                receiver
+                    .recv()
+                    .map_err(|_| mpsc::RecvTimeoutError::Disconnected)
+            },
+            |duration| receiver.recv_timeout(duration),
+        );
+        match command {
+            Ok(command) => {
+                update_realtime_status(shared_status, |status| {
+                    status.queue_depth = status.queue_depth.saturating_sub(1);
+                });
+                match command {
+                    RealtimeMidiCommand::Publish(reply) => {
+                        let result = controller.publish().map_err(|error| error.to_string());
+                        publish_controller_status(shared_status, &controller);
+                        let _ = reply.send(result);
+                    }
+                    RealtimeMidiCommand::Stop(reply) => {
+                        let cancelled = scheduled.len() as u64;
+                        scheduled.clear();
+                        controller.stop();
+                        update_realtime_status(shared_status, |status| {
+                            status.cancelled_count =
+                                status.cancelled_count.saturating_add(cancelled);
+                        });
+                        publish_controller_status(shared_status, &controller);
+                        let _ = reply.send(());
+                    }
+                    RealtimeMidiCommand::SendLearnPulse(address, reply) => {
+                        let result = controller
+                            .send_address_learn_pulse(address)
+                            .map_err(|error| error.to_string());
+                        publish_controller_status(shared_status, &controller);
+                        let _ = reply.send(result);
+                    }
+                    RealtimeMidiCommand::SelectBank(bank, reply) => {
+                        let result = controller
+                            .select_bank(bank)
+                            .map_err(|error| error.to_string());
+                        publish_controller_status(shared_status, &controller);
+                        let _ = reply.send(result);
+                    }
+                    RealtimeMidiCommand::TriggerAutoloop(autoloop, reply) => {
+                        let result = controller
+                            .trigger_autoloop_button(autoloop)
+                            .map_err(|error| error.to_string());
+                        publish_controller_status(shared_status, &controller);
+                        let _ = reply.send(result);
+                    }
+                    RealtimeMidiCommand::TriggerSequence(bank, autoloop, reply) => {
+                        let result = controller
+                            .trigger_autoloop(bank, autoloop)
+                            .map_err(|error| error.to_string());
+                        publish_controller_status(shared_status, &controller);
+                        let _ = reply.send(result);
+                    }
+                    RealtimeMidiCommand::SetGeneration(next) => {
+                        generation = next;
+                        let before = scheduled.len();
+                        scheduled.retain(|item| item.generation == generation);
+                        let cancelled = before.saturating_sub(scheduled.len()) as u64;
+                        update_realtime_status(shared_status, |status| {
+                            status.cancelled_count =
+                                status.cancelled_count.saturating_add(cancelled);
+                        });
+                    }
+                    RealtimeMidiCommand::Schedule(item) => {
+                        if item.generation != generation {
+                            update_realtime_status(shared_status, |status| {
+                                status.cancelled_count = status.cancelled_count.saturating_add(1);
+                            });
+                        } else if scheduled.len() >= REALTIME_SCHEDULE_CAPACITY {
+                            update_realtime_status(shared_status, |status| {
+                                status.saturation_count = status.saturation_count.saturating_add(1);
+                                status.source.last_error = Some(
+                                    "Realtime MIDI deadline capacity exceeded; output failed closed"
+                                        .to_owned(),
+                                );
+                            });
+                        } else {
+                            let (kind, number) = realtime_action_identity(item.action);
+                            let lead = item.deadline.saturating_duration_since(Instant::now());
+                            scheduled.push(item);
+                            update_realtime_status(shared_status, |status| {
+                                status.scheduled_count = status.scheduled_count.saturating_add(1);
+                                status.last_scheduled_action = Some(kind);
+                                status.last_scheduled_number = Some(number);
+                                status.last_scheduled_lead_micros =
+                                    Some(u64::try_from(lead.as_micros()).unwrap_or(u64::MAX));
+                            });
+                        }
+                    }
+                    RealtimeMidiCommand::CancelAll => {
+                        let cancelled = scheduled.len() as u64;
+                        scheduled.clear();
+                        update_realtime_status(shared_status, |status| {
+                            status.cancelled_count =
+                                status.cancelled_count.saturating_add(cancelled);
+                        });
+                    }
+                    RealtimeMidiCommand::Shutdown => {
+                        controller.stop();
+                        publish_controller_status(shared_status, &controller);
+                        return;
+                    }
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Timeout) => {
+                let now = Instant::now();
+                let mut due = Vec::new();
+                scheduled.retain(|item| {
+                    if item.generation == generation && item.deadline <= now {
+                        due.push(*item);
+                        false
+                    } else {
+                        true
+                    }
+                });
+                due.sort_by_key(|item| item.deadline);
+                for item in due {
+                    let (kind, number) = realtime_action_identity(item.action);
+                    let result = match item.action {
+                        RealtimeMidiAction::SelectBank(bank) => controller.select_bank(bank),
+                        RealtimeMidiAction::TriggerAutoloop(autoloop) => {
+                            controller.trigger_autoloop_button(autoloop)
+                        }
+                    };
+                    let elapsed = Instant::now().saturating_duration_since(item.deadline);
+                    let micros = u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX);
+                    if latencies.len() == REALTIME_LATENCY_SAMPLE_CAPACITY {
+                        latencies.pop_front();
+                    }
+                    latencies.push_back(micros);
+                    update_realtime_status(shared_status, |status| {
+                        if result.is_ok() {
+                            status.emitted_count = status.emitted_count.saturating_add(1);
+                            status.last_emitted_action = Some(kind);
+                            status.last_emitted_number = Some(number);
+                        }
+                        status.last_dispatch_lateness_micros = Some(micros);
+                        if elapsed > REALTIME_LATE_DISPATCH_THRESHOLD {
+                            status.late_dispatch_count =
+                                status.late_dispatch_count.saturating_add(1);
+                        }
+                        update_latency_distribution(status, &latencies);
+                    });
+                    publish_controller_status(shared_status, &controller);
+                }
+            }
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
+                controller.stop();
+                publish_controller_status(shared_status, &controller);
+                return;
+            }
+        }
+    }
+}
+
+const fn realtime_action_identity(action: RealtimeMidiAction) -> (RealtimeMidiActionKind, u8) {
+    match action {
+        RealtimeMidiAction::SelectBank(number) => (RealtimeMidiActionKind::Bank, number),
+        RealtimeMidiAction::TriggerAutoloop(number) => (RealtimeMidiActionKind::Autoloop, number),
+    }
+}
+
+fn publish_controller_status<P>(
+    shared_status: &Arc<Mutex<RealtimeMidiStatus>>,
+    controller: &MidiOutputController<P>,
+) where
+    P: MidiSourceProvider,
+{
+    update_realtime_status(shared_status, |status| {
+        status.source = controller.status();
+    });
+}
+
+fn update_realtime_status(
+    shared_status: &Arc<Mutex<RealtimeMidiStatus>>,
+    update: impl FnOnce(&mut RealtimeMidiStatus),
+) {
+    if let Ok(mut status) = shared_status.lock() {
+        update(&mut status);
+    }
+}
+
+fn update_latency_distribution(status: &mut RealtimeMidiStatus, latencies: &VecDeque<u64>) {
+    let mut sorted: Vec<_> = latencies.iter().copied().collect();
+    sorted.sort_unstable();
+    status.latency_sample_count = sorted.len();
+    status.latency_p50_micros = percentile(&sorted, 50);
+    status.latency_p95_micros = percentile(&sorted, 95);
+    status.latency_p99_micros = percentile(&sorted, 99);
+    status.latency_max_micros = sorted.last().copied().unwrap_or(0);
+}
+
+fn percentile(sorted: &[u64], percentile: usize) -> u64 {
+    if sorted.is_empty() {
+        return 0;
+    }
+    let index = (sorted.len() - 1).saturating_mul(percentile) / 100;
+    sorted[index]
 }
 
 #[cfg(test)]
@@ -806,6 +1357,131 @@ mod tests {
         assert_eq!(controller.provider.messages[6].bytes(), [0x9f, 67, 100]);
         assert_eq!(controller.status().sent_pulse_count, 4);
         assert_eq!(controller.status().active_bank, Some(2));
+    }
+
+    #[test]
+    fn realtime_scheduler_can_split_bank_prearm_from_autoloop_pulse() {
+        let mut controller = MidiOutputController::new(RecordingProvider::default());
+        assert!(controller.publish().is_ok());
+
+        assert!(controller.select_bank(4).is_ok());
+        assert_eq!(controller.provider.messages.len(), 2);
+        assert_eq!(controller.provider.messages[0].bytes(), [0x9f, 63, 100]);
+        assert_eq!(controller.active_bank(), Some(4));
+
+        assert!(controller.trigger_autoloop_button(32).is_ok());
+        assert_eq!(controller.provider.messages.len(), 4);
+        assert_eq!(controller.provider.messages[2].bytes(), [0x9f, 95, 100]);
+        assert_eq!(controller.status().sent_pulse_count, 2);
+    }
+
+    #[test]
+    fn realtime_lane_emits_deadlines_without_caller_polling_and_records_distribution() {
+        let lane = RealtimeMidiController::new(RecordingProvider::default);
+        assert!(lane.publish().is_ok());
+        assert!(lane.set_generation(7).is_ok());
+        let now = Instant::now();
+        assert!(
+            lane.schedule_bank(7, 2, now + Duration::from_millis(10))
+                .is_ok()
+        );
+        assert!(
+            lane.schedule_autoloop(7, 13, now + Duration::from_millis(65))
+                .is_ok()
+        );
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while lane.status().emitted_count < 2 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(2));
+        }
+        let status = lane.status();
+        assert_eq!(status.emitted_count, 2);
+        assert_eq!(status.source.sent_pulse_count, 2);
+        assert_eq!(status.source.active_bank, Some(2));
+        assert_eq!(status.latency_sample_count, 2);
+        assert!(status.latency_p95_micros <= 20_000, "{status:?}");
+    }
+
+    #[test]
+    fn realtime_lane_generation_change_cancels_stale_output() {
+        let lane = RealtimeMidiController::new(RecordingProvider::default);
+        assert!(lane.publish().is_ok());
+        assert!(lane.set_generation(10).is_ok());
+        assert!(
+            lane.schedule_autoloop(10, 31, Instant::now() + Duration::from_millis(80))
+                .is_ok()
+        );
+        assert!(lane.set_generation(11).is_ok());
+        thread::sleep(Duration::from_millis(120));
+
+        let status = lane.status();
+        assert_eq!(status.source.sent_pulse_count, 0);
+        assert_eq!(status.emitted_count, 0);
+        assert_eq!(status.cancelled_count, 1);
+    }
+
+    #[test]
+    fn realtime_lane_keeps_due_phrase_pulse_when_next_phrase_is_prepared() {
+        let lane = RealtimeMidiController::new(RecordingProvider::default);
+        assert!(lane.publish().is_ok());
+        assert!(lane.set_generation(12).is_ok());
+        let now = Instant::now();
+        assert!(
+            lane.schedule_autoloop(12, 7, now + Duration::from_millis(30))
+                .is_ok()
+        );
+        thread::sleep(Duration::from_millis(25));
+        assert!(
+            lane.schedule_bank(12, 2, now + Duration::from_millis(120))
+                .is_ok()
+        );
+
+        let deadline = Instant::now() + Duration::from_secs(1);
+        while lane.status().emitted_count < 2 && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(2));
+        }
+        let status = lane.status();
+        assert_eq!(status.emitted_count, 2);
+        assert_eq!(status.cancelled_count, 0);
+        assert_eq!(status.source.sent_pulse_count, 2);
+        assert_eq!(
+            status.last_emitted_action,
+            Some(RealtimeMidiActionKind::Bank)
+        );
+        assert_eq!(status.last_emitted_number, Some(2));
+    }
+
+    #[test]
+    fn realtime_lane_fails_closed_when_deadline_capacity_is_exceeded() {
+        let lane = RealtimeMidiController::new(RecordingProvider::default);
+        assert!(lane.set_generation(21).is_ok());
+        let distant_deadline = Instant::now() + Duration::from_secs(60);
+
+        for index in 0..=REALTIME_SCHEDULE_CAPACITY {
+            assert!(
+                lane.schedule_autoloop(21, (index % 32 + 1) as u8, distant_deadline)
+                    .is_ok()
+            );
+            let accepted_deadline = Instant::now() + Duration::from_secs(1);
+            while lane.status().queue_depth > 0 && Instant::now() < accepted_deadline {
+                thread::yield_now();
+            }
+        }
+
+        let observed_deadline = Instant::now() + Duration::from_secs(1);
+        while lane.status().saturation_count == 0 && Instant::now() < observed_deadline {
+            thread::yield_now();
+        }
+        let status = lane.status();
+        assert_eq!(status.scheduled_count, REALTIME_SCHEDULE_CAPACITY as u64);
+        assert_eq!(status.saturation_count, 1);
+        assert!(
+            status
+                .source
+                .last_error
+                .as_deref()
+                .is_some_and(|error| error.contains("failed closed"))
+        );
     }
 
     #[test]

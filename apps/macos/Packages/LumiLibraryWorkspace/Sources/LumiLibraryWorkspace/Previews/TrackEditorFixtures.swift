@@ -40,6 +40,27 @@ public enum TrackEditorFixtures {
             beatsPerBar: beatsPerBar,
             beats: beats,
             waveform: waveform,
+            hotCues: [
+                TrackEditorHotCue(
+                    index: 1,
+                    timeMillis: 8_000,
+                    name: "",
+                    colorRGB: 0x30_5A_FF
+                ),
+                TrackEditorHotCue(
+                    index: 2,
+                    timeMillis: 16_000,
+                    name: "",
+                    colorRGB: 0xFF_A0_00
+                ),
+                TrackEditorHotCue(
+                    index: 3,
+                    timeMillis: 24_000,
+                    loopEndMillis: 28_000,
+                    name: "",
+                    colorRGB: 0xE6_28_28
+                )
+            ],
             phrases: [
                 TrackEditorPhrase(
                     id: 0,

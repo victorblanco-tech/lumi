@@ -902,6 +902,8 @@ public struct TrackLightingEditorView: View {
             )
         }
 
+        drawHotCueMarkers(context: &context, width: width, bottom: phraseTop - 4, viewport: viewport)
+
         for phrase in analysis.phrases where Double(phrase.endBeat) > viewport.startBeat && Double(phrase.startBeat) < viewport.endBeat {
             let start = viewport.x(forBeat: Double(phrase.startBeat), width: width)
             let end = viewport.x(forBeat: Double(phrase.endBeat), width: width)
@@ -1015,6 +1017,14 @@ public struct TrackLightingEditorView: View {
             let lane = CGRect(x: start, y: waveformBottom + 2, width: max(1, end - start), height: 12)
             context.fill(Path(lane), with: .color(phraseColor(phrase.role).opacity(0.88)))
         }
+        for cue in analysis.hotCues {
+            let beat = TrackEditorCoordinateMapper.beat(atTimeMillis: cue.timeMillis, beats: analysis.beats)
+            let x = beat / Double(max(1, analysis.totalBeats)) * width
+            context.fill(
+                Path(CGRect(x: x - 1, y: 0, width: 2, height: waveformBottom)),
+                with: .color(hotCueColor(cue.colorRGB).opacity(0.86))
+            )
+        }
         let start = viewport.startBeat / Double(max(1, analysis.totalBeats)) * width
         let visible = viewport.visibleBeats / Double(max(1, analysis.totalBeats)) * width
         let frame = CGRect(x: start, y: 2, width: visible, height: Double(size.height) - 4)
@@ -1041,6 +1051,41 @@ public struct TrackLightingEditorView: View {
         path.addLine(to: CGPoint(x: x, y: height))
         context.stroke(path, with: .color(.white), lineWidth: 2)
         context.fill(Path(CGRect(x: x - 3, y: 0, width: 6, height: 7)), with: .color(.white))
+    }
+
+    private func drawHotCueMarkers(
+        context: inout GraphicsContext,
+        width: Double,
+        bottom: Double,
+        viewport: TrackEditorViewport
+    ) {
+        for cue in analysis.hotCues {
+            let beat = TrackEditorCoordinateMapper.beat(atTimeMillis: cue.timeMillis, beats: analysis.beats)
+            guard beat >= viewport.startBeat, beat <= viewport.endBeat else { continue }
+            let x = viewport.x(forBeat: beat, width: width)
+            let color = hotCueColor(cue.colorRGB)
+            var line = Path()
+            line.move(to: CGPoint(x: x, y: 27))
+            line.addLine(to: CGPoint(x: x, y: bottom))
+            context.stroke(line, with: .color(color.opacity(0.82)), lineWidth: 1.25)
+            let badge = CGRect(x: x - 8, y: 25, width: 16, height: 16)
+            context.fill(Path(roundedRect: badge, cornerRadius: 3), with: .color(color))
+            context.draw(
+                Text(cue.letter)
+                    .font(LumiTypography.hotCueLetter)
+                    .foregroundColor(.black.opacity(0.82)),
+                at: CGPoint(x: x, y: 33),
+                anchor: .center
+            )
+        }
+    }
+
+    private func hotCueColor(_ rgb: UInt32) -> Color {
+        Color(
+            red: Double((rgb >> 16) & 0xff) / 255,
+            green: Double((rgb >> 8) & 0xff) / 255,
+            blue: Double(rgb & 0xff) / 255
+        )
     }
 
     private var selectedPhrase: TrackEditorPhrase? {

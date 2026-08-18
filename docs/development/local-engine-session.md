@@ -1,35 +1,47 @@
-# Local engine session
+# Local engine service
 
-During Epic 1, the native macOS app owns one child `lumi-engine` process for
-the duration of its app session. The process boundary is already replaceable so
-a later `SMAppService` lifecycle does not change views or protocol models.
+Since `0.4.0-dev-48`, every installed Lumi release channel owns one per-user
+engine service. SwiftUI is a client of that service; it is not the engine
+process owner.
 
 ## Bootstrap sequence
 
-1. The app creates a cryptographically random, ephemeral session token.
-2. Xcode bundles the matching Rust binary in `Lumi.app/Contents/Helpers`.
-3. The app starts that helper with the token in its child environment.
-4. The engine binds atomically to `127.0.0.1:0` and prints one JSON startup
-   record containing only host, port, and protocol version.
-5. The app rejects non-loopback endpoints and protocol mismatches.
-6. A replaceable Network.framework transport connects and sends one bounded
-   authentication frame.
-7. The UI becomes ready only after decoding the engine's authoritative protocol
-   v1 state snapshot.
+1. Xcode bundles the Rust executable in `Contents/Helpers`, embeds its own
+   Info.plist and writes the channel LaunchAgent to
+   `Contents/Library/LaunchAgents`.
+2. The app creates or reuses a cryptographically random owner-only token in
+   the channel Application Support directory.
+3. `SMAppService` registers the non-privileged LaunchAgent. macOS Login Items
+   approval is reported when required.
+4. launchd starts the engine with the channel identity and KeepAlive policy.
+5. The engine opens that channel's SQLite database, binds to
+   `127.0.0.1:0`, and atomically publishes an owner-only discovery record.
+6. The record identifies protocol, endpoint, PID, product/build, executable
+   path and executable SHA-256. The app rejects a mismatching record.
+7. A replaceable Network.framework transport authenticates with the local
+   token and obtains the authoritative protocol-v1 snapshot.
 8. One authenticated connection remains open for bounded command/response
-   traffic. Each plan mutation returns either a complete snapshot or a typed
-   validation/revision error correlated to the command ID.
+   traffic. UI Quit makes the engine fail safe to Off and leave Link, while
+   launchd retains the inactive engine and stable CoreMIDI endpoints.
+9. UI relaunch attaches to the same service. If launchd replaces a crashed
+   engine, repeated stale-socket failures cause the UI to attach to the new
+   atomic record automatically.
 
-The authentication frame belongs to local transport bootstrap and is not an
-application command. After authentication, all semantic traffic uses the
-versioned envelopes in `contracts/protocol/v1`.
+Session tokens are never logged. Discovery/token files have mode `0600` and
+the channel directory has mode `0700`. The engine only accepts loopback
+clients, authenticates before semantic commands and bounds all frames and
+timeouts.
 
-Session tokens are never printed or included in structured logs. The engine
-accepts one loopback client and exits when that client disconnects. Startup,
-connection, and authentication all have bounded input and timeouts.
+## Legacy/package-test adapter
 
-## Local verification
+`EngineProcessSupervisor` retains a direct child-process path for Swift package
+integration tests and unbundled development hosts which have no packaged
+LaunchAgent. Installed Lumi applications always take the `SMAppService` path.
 
-`./scripts/verify.sh` builds the real Rust executable, launches it from both
-Rust and Swift integration tests, bundles it into the unsigned native app, and
-checks that the helper exists as an executable in the resulting app bundle.
+## Verification
+
+- Rust tests validate service-record compatibility and atomic ownership.
+- Swift integration tests validate authenticated reconnectable sessions.
+- macOS packaging rejects a missing LaunchAgent or embedded engine Info.plist.
+- installed acceptance checks launchd ownership, UI detach/reattach and
+  launchd restart/UI reconnect without touching the channel database.

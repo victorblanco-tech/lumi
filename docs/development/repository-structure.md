@@ -4,11 +4,13 @@ Lumi is a monorepo with explicit ownership boundaries:
 
 ```text
 apps/       Native user-facing clients
+bridges/    Supervised non-Rust provider helpers with versioned local protocols
 contracts/  Versioned provider-neutral wire contracts
 engine/     Autonomous Rust domain and runtime crates
 fixtures/   Deterministic license-safe test and demo data
 docs/       Architecture, planning, release, and development documentation
 scripts/    Repository-wide validation and delivery entry points
+tools/      Development-only external-system simulators and diagnostics
 ```
 
 ## Dependency direction
@@ -46,6 +48,22 @@ into domain events. `lumi-blt-midi` is the first connected-deck adapter: it
 decodes versioned, atomic Beat Link Trigger MIDI frames into the same port.
 CoreMIDI owns only endpoint transport and raw channel messages. A future direct
 Pro DJ Link adapter can replace BLT without changing the domain or Live UI.
+
+`bridges/prolink` owns the supervised Java helper that uses the pinned
+Deep Symmetry `beat-link` dependency. It emits only the versioned local bridge
+protocol; the Rust-side adapter performs all translation to Lumi deck
+observations. Java, Beat Link and Pro DJ Link types never enter the engine,
+domain, protocol or Swift packages.
+
+`lumi-prolink-input` owns strict decoding and validation of that local bridge
+protocol. It initially has no domain or engine dependency; the later deck
+adapter consumes its immutable messages and implements `DeckSourceProvider`.
+
+`tools/prolink-simulator` owns the development-only Pro DJ Link network player.
+It reads a mounted Rekordbox USB without writing, emits only the discovery,
+status and beat facts needed by Lumi, and exposes authenticated HTTP controls
+for repeatable two-Mac acceptance tests. It is not a deck-source adapter, never
+ships in the production DMG and never sends commands to physical players.
 
 `lumi-planner` owns deterministic creative selection and canonical plan
 evidence. It depends only on `lumi-domain`; it knows no simulator, transport,

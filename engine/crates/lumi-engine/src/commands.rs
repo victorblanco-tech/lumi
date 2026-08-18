@@ -31,7 +31,9 @@ pub enum DeckSourceSelection {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SessionCommand {
-    GetSnapshot,
+    GetSnapshot {
+        include_library: bool,
+    },
     QueryLibrary {
         search: String,
         playlist_id: Option<u64>,
@@ -62,6 +64,29 @@ pub enum SessionCommand {
         followed_paths: Vec<String>,
         include_future_child_playlists: bool,
         expected_content_sha256: String,
+    },
+    InspectRekordboxDevice {
+        root: String,
+        source_id: Option<String>,
+    },
+    SyncRekordboxDevice {
+        root: String,
+        source_id: Option<String>,
+        playlist_ids: Vec<u32>,
+    },
+    PreviewLibraryReset {
+        preserve_track_ids: Vec<u64>,
+    },
+    ApplyLibraryReset {
+        expected_token: String,
+        backup_database_path: String,
+    },
+    CreateLibraryBackup {
+        destination: String,
+    },
+    RestoreLibraryBackup {
+        source: String,
+        rollback: String,
     },
     ReconcileLibrarySource {
         track_id: u64,
@@ -103,6 +128,10 @@ pub enum SessionCommand {
     },
     PublishMidiSource,
     StopMidiSource,
+    SetAbletonLinkEnabled {
+        enabled: bool,
+    },
+    TestAbletonLinkHelper,
     SetOutputTimingOffset {
         millis: i16,
     },
@@ -187,7 +216,7 @@ impl SessionCommand {
     pub const fn is_mutating(&self) -> bool {
         !matches!(
             self,
-            Self::GetSnapshot
+            Self::GetSnapshot { .. }
                 | Self::QueryLibrary { .. }
                 | Self::OpenLibraryTrackEditor { .. }
                 | Self::GetLibraryTrackWaveform { .. }
@@ -197,7 +226,7 @@ impl SessionCommand {
 
     pub const fn context(&self) -> Option<PlanCommandContext> {
         match self {
-            Self::GetSnapshot
+            Self::GetSnapshot { .. }
             | Self::QueryLibrary { .. }
             | Self::OpenLibraryTrackEditor { .. }
             | Self::GetLibraryTrackWaveform { .. }
@@ -206,6 +235,12 @@ impl SessionCommand {
             | Self::PreviewRekordboxXmlSync { .. }
             | Self::ApplyRekordboxXmlSync { .. }
             | Self::ImportRekordboxAnalysis { .. }
+            | Self::InspectRekordboxDevice { .. }
+            | Self::SyncRekordboxDevice { .. }
+            | Self::PreviewLibraryReset { .. }
+            | Self::ApplyLibraryReset { .. }
+            | Self::CreateLibraryBackup { .. }
+            | Self::RestoreLibraryBackup { .. }
             | Self::ReconcileLibrarySource { .. }
             | Self::EditLibraryTimeline { .. }
             | Self::SetLibraryPhraseLoopStrategy { .. }
@@ -216,6 +251,8 @@ impl SessionCommand {
             | Self::MutateAutoloopCatalog { .. }
             | Self::PublishMidiSource
             | Self::StopMidiSource
+            | Self::SetAbletonLinkEnabled { .. }
+            | Self::TestAbletonLinkHelper
             | Self::SetOutputTimingOffset { .. }
             | Self::SendMidiLearnPulse
             | Self::SendMidiAddressLearnPulse { .. }
@@ -238,6 +275,25 @@ impl SessionCommand {
             | Self::RegeneratePlan { context } => Some(*context),
         }
     }
+
+    pub const fn changes_library_revision(&self) -> bool {
+        matches!(
+            self,
+            Self::ApplyRekordboxXmlSync { .. }
+                | Self::ImportRekordboxAnalysis { .. }
+                | Self::SyncRekordboxDevice { .. }
+                | Self::ApplyLibraryReset { .. }
+                | Self::RestoreLibraryBackup { .. }
+                | Self::ReconcileLibrarySource { .. }
+                | Self::EditLibraryTimeline { .. }
+                | Self::SetLibraryPhraseLoopStrategy { .. }
+                | Self::UndoLibraryTimeline { .. }
+                | Self::RedoLibraryTimeline { .. }
+                | Self::RestoreLibraryTimelineRevision { .. }
+                | Self::MutatePhraseRoleCatalog { .. }
+                | Self::MutateAutoloopCatalog { .. }
+        )
+    }
 }
 
 pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, CommandDecodeError> {
@@ -246,7 +302,9 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
     }
     let kind = string(&envelope.payload, "kind")?;
     match kind {
-        "getSnapshot" => Ok(SessionCommand::GetSnapshot),
+        "getSnapshot" => Ok(SessionCommand::GetSnapshot {
+            include_library: optional_boolean(&envelope.payload, "includeLibrary")?.unwrap_or(true),
+        }),
         "queryLibrary" => Ok(SessionCommand::QueryLibrary {
             search: library_search(&envelope.payload)?,
             playlist_id: optional_unsigned(&envelope.payload, "playlistId")?,
@@ -287,6 +345,29 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
                 "includeFutureChildPlaylists",
             )?,
             expected_content_sha256: string(&envelope.payload, "expectedContentSha256")?.to_owned(),
+        }),
+        "inspectRekordboxDevice" => Ok(SessionCommand::InspectRekordboxDevice {
+            root: string(&envelope.payload, "root")?.to_owned(),
+            source_id: optional_string(&envelope.payload, "sourceId").map(str::to_owned),
+        }),
+        "syncRekordboxDevice" => Ok(SessionCommand::SyncRekordboxDevice {
+            root: string(&envelope.payload, "root")?.to_owned(),
+            source_id: optional_string(&envelope.payload, "sourceId").map(str::to_owned),
+            playlist_ids: u32_array(&envelope.payload, "playlistIds")?,
+        }),
+        "previewLibraryReset" => Ok(SessionCommand::PreviewLibraryReset {
+            preserve_track_ids: u64_array(&envelope.payload, "preserveTrackIds")?,
+        }),
+        "applyLibraryReset" => Ok(SessionCommand::ApplyLibraryReset {
+            expected_token: string(&envelope.payload, "expectedResetToken")?.to_owned(),
+            backup_database_path: string(&envelope.payload, "backupDatabasePath")?.to_owned(),
+        }),
+        "createLibraryBackup" => Ok(SessionCommand::CreateLibraryBackup {
+            destination: string(&envelope.payload, "destination")?.to_owned(),
+        }),
+        "restoreLibraryBackup" => Ok(SessionCommand::RestoreLibraryBackup {
+            source: string(&envelope.payload, "source")?.to_owned(),
+            rollback: string(&envelope.payload, "rollback")?.to_owned(),
         }),
         "reconcileLibrarySource" => Ok(SessionCommand::ReconcileLibrarySource {
             track_id: positive_unsigned(&envelope.payload, "trackId")?,
@@ -337,6 +418,10 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
         }),
         "publishMidiSource" => Ok(SessionCommand::PublishMidiSource),
         "stopMidiSource" => Ok(SessionCommand::StopMidiSource),
+        "setAbletonLinkEnabled" => Ok(SessionCommand::SetAbletonLinkEnabled {
+            enabled: boolean(&envelope.payload, "enabled")?,
+        }),
+        "testAbletonLinkHelper" => Ok(SessionCommand::TestAbletonLinkHelper),
         "setOutputTimingOffset" => {
             let millis = signed(&envelope.payload, "millis")?;
             if !(-250..=250).contains(&millis) {
@@ -804,6 +889,20 @@ fn boolean(
         .ok_or(CommandDecodeError::InvalidField(field))
 }
 
+fn optional_boolean(
+    payload: &serde_json::Map<String, Value>,
+    field: &'static str,
+) -> Result<Option<bool>, CommandDecodeError> {
+    payload
+        .get(field)
+        .map(|value| {
+            value
+                .as_bool()
+                .ok_or(CommandDecodeError::InvalidField(field))
+        })
+        .transpose()
+}
+
 fn string_array(
     payload: &serde_json::Map<String, Value>,
     field: &'static str,
@@ -825,6 +924,69 @@ fn string_array(
                 .ok_or(CommandDecodeError::InvalidField(field))
         })
         .collect()
+}
+
+fn u32_array(
+    payload: &serde_json::Map<String, Value>,
+    field: &'static str,
+) -> Result<Vec<u32>, CommandDecodeError> {
+    let values = payload
+        .get(field)
+        .and_then(Value::as_array)
+        .ok_or(CommandDecodeError::InvalidField(field))?;
+    if values.is_empty() || values.len() > 20_000 {
+        return Err(CommandDecodeError::InvalidField(field));
+    }
+    let converted = values
+        .iter()
+        .map(|value| {
+            value
+                .as_u64()
+                .and_then(|number| u32::try_from(number).ok())
+                .filter(|number| *number > 0)
+                .ok_or(CommandDecodeError::InvalidField(field))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if converted
+        .iter()
+        .collect::<std::collections::BTreeSet<_>>()
+        .len()
+        != converted.len()
+    {
+        return Err(CommandDecodeError::InvalidField(field));
+    }
+    Ok(converted)
+}
+
+fn u64_array(
+    payload: &serde_json::Map<String, Value>,
+    field: &'static str,
+) -> Result<Vec<u64>, CommandDecodeError> {
+    let values = payload
+        .get(field)
+        .and_then(Value::as_array)
+        .ok_or(CommandDecodeError::InvalidField(field))?;
+    if values.len() > 20_000 {
+        return Err(CommandDecodeError::InvalidField(field));
+    }
+    let converted = values
+        .iter()
+        .map(|value| {
+            value
+                .as_u64()
+                .filter(|number| *number > 0)
+                .ok_or(CommandDecodeError::InvalidField(field))
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    if converted
+        .iter()
+        .collect::<std::collections::BTreeSet<_>>()
+        .len()
+        != converted.len()
+    {
+        return Err(CommandDecodeError::InvalidField(field));
+    }
+    Ok(converted)
 }
 
 fn optional_string<'a>(
@@ -887,6 +1049,62 @@ impl Error for CommandDecodeError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn snapshot_defaults_to_full_but_accepts_an_explicit_live_projection() {
+        let full = command_envelope(serde_json::json!({
+            "kind": "getSnapshot",
+        }));
+        assert_eq!(
+            decode_command(&full),
+            Ok(SessionCommand::GetSnapshot {
+                include_library: true,
+            })
+        );
+
+        let live = command_envelope(serde_json::json!({
+            "kind": "getSnapshot",
+            "includeLibrary": false,
+        }));
+        assert_eq!(
+            decode_command(&live),
+            Ok(SessionCommand::GetSnapshot {
+                include_library: false,
+            })
+        );
+
+        let invalid = command_envelope(serde_json::json!({
+            "kind": "getSnapshot",
+            "includeLibrary": "no",
+        }));
+        assert_eq!(
+            decode_command(&invalid),
+            Err(CommandDecodeError::InvalidField("includeLibrary"))
+        );
+    }
+
+    #[test]
+    fn ableton_link_enablement_decodes_as_an_explicit_boolean_command() {
+        let envelope = command_envelope(serde_json::json!({
+            "kind": "setAbletonLinkEnabled",
+            "enabled": true,
+        }));
+        assert_eq!(
+            decode_command(&envelope),
+            Ok(SessionCommand::SetAbletonLinkEnabled { enabled: true })
+        );
+    }
+
+    #[test]
+    fn ableton_link_helper_test_decodes_as_an_explicit_command() {
+        let envelope = command_envelope(serde_json::json!({
+            "kind": "testAbletonLinkHelper",
+        }));
+        assert_eq!(
+            decode_command(&envelope),
+            Ok(SessionCommand::TestAbletonLinkHelper)
+        );
+    }
 
     #[test]
     fn output_timing_offset_accepts_only_the_safe_signed_range() {

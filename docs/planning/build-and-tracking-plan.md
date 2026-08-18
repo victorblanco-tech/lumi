@@ -152,11 +152,18 @@ stabiliteitsgates blijven open**.
 - generieke MIDI-output;
 - OFF, ARMED, LIVE en PAUSED;
 - phrase-boundary execution;
-- timing-readiness voor Beat Link Trigger, Carabiner en Ableton Link;
+- timing-readiness voor de Lumi Timing Authority, managed Ableton Link output
+  en afzonderlijke MIDI Clock-fallback;
 - coexistentie met fysieke SoundSwitch-bediening;
 - veilige degradatie en emergency stop.
 
 Exit: Lumi voert betrouwbaar uit zonder de gebruikersbediening over te nemen.
+
+De actuele productionrichting gebruikt geen Beat Link Trigger. Direct Pro DJ
+Link en Local Playback voeden dezelfde Lumi-owned timing authority; ADR-0030
+legt de managed Ableton Link output naar SoundSwitch vast. Control One blijft
+een parallelle handmatige SoundSwitch-input en kan onafhankelijk als DMX-
+interface dienen.
 
 De eerste fysieke automatische licht-run en parallelle Control One-bediening
 zijn geslaagd. De Local Playback→phrase scheduler→MIDI→SoundSwitch→DMX-keten
@@ -171,6 +178,23 @@ aangesloten verlichting open. De concrete status staat in
 - autonome Rust-service via SMAppService;
 - persistence, migraties, recovery en diagnostics;
 - signing, notarization en installeerbare Apple Silicon DMG.
+
+De eerstvolgende actieve hardeningstap is
+[Epic E4-03 – Show-grade hardening](epic-04-show-grade-hardening.md). Deze epic
+brengt de bestaande werkende keten gecontroleerd naar releasekwaliteit in vier
+fases: lokale regressie- en securitybaseline, een geïsoleerde realtime
+AutoLoop-lane, reconnectable service plus transactioneel dataherstel, en ten
+slotte delta-UI/maintainability/release-hardening. `0.4.0-rc-1` wordt niet
+gepromoveerd voordat de P0-gates van deze epic aantoonbaar zijn gehaald.
+
+De fysieke Live-validatie heeft daarna aangetoond dat latency van de MIDI-lane
+alleen onvoldoende is: transportnormalisatie, Link-lifecycle en cue-executie
+moeten ook aantoonbaar onafhankelijk en deterministisch zijn. Daarom is
+[Epic 5 – Deterministic Live integration](epic-05-deterministic-live-integration.md)
+de actieve `0.4.0`-stabiliteitsgate. Deze epic behoudt Wi-Fi als ondersteunde
+Pro DJ Link-verbinding, isoleert realtime master-BPM naar Ableton Link en
+vervangt de complexe AutoLoop-coördinatie door exact één discrete selectie per
+bevestigde execution epoch.
 
 Exit: Lumi installeert en herstelt betrouwbaar op een schone Mac.
 

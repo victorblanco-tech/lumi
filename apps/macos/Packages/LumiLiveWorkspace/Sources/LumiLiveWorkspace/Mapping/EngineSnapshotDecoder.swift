@@ -110,13 +110,16 @@ public struct EngineSnapshotDecoder: Sendable {
         let midiClockIntegration = try decodeMidiClockIntegration(
             envelope.payload["midiClockIntegration"]
         )
+        let abletonLinkIntegration = try decodeAbletonLinkIntegration(
+            envelope.payload["abletonLinkIntegration"]
+        )
         let decks = try deckPayloads.map(decodeDeck)
         let timeline = try timelinePayloads.map(decodeTimelineEntry)
         let deckIDs = Set(decks.map(\.deckID))
         guard decks.count <= 2,
               deckIDs.count == decks.count,
               deckIDs.allSatisfy({ [1, 2].contains($0) }),
-              leaderDeckID.map(deckIDs.contains) ?? decks.isEmpty else {
+              leaderDeckID.map(deckIDs.contains) ?? true else {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
         guard timeline.count <= 256,
@@ -131,10 +134,11 @@ public struct EngineSnapshotDecoder: Sendable {
             nextPlan = nil
         } else {
             nextPlan = try decodePlan(envelope.payload["nextPlan"])
-            guard let leaderDeckID,
-                  let nextDeck = decks.first(where: { $0.deckID != leaderDeckID }),
-                  nextPlan?.deckID == nextDeck.deckID,
-                  nextPlan?.trackLoadID == nextDeck.trackLoadID else {
+            guard let nextPlan,
+                  let nextDeck = decks.first(where: { $0.deckID == nextPlan.deckID }),
+                  nextPlan.deckID == nextDeck.deckID,
+                  nextPlan.trackLoadID == nextDeck.trackLoadID,
+                  leaderDeckID.map({ nextDeck.deckID != $0 }) ?? true else {
                 throw EngineSnapshotDecodingError.invalidSnapshot
             }
         }
@@ -176,6 +180,7 @@ public struct EngineSnapshotDecoder: Sendable {
             deckInputIntegration: deckInputIntegration,
             midiIntegration: midiIntegration,
             midiClockIntegration: midiClockIntegration,
+            abletonLinkIntegration: abletonLinkIntegration,
             simulation: simulation,
             outputProvider: OutputProviderSnapshot(
                 providerKind: outputProviderKind,
@@ -211,7 +216,13 @@ public struct EngineSnapshotDecoder: Sendable {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
         let activeBank = try optionalUnsignedInteger(midi["activeBank"])
+        let pendingTimingOffsetMillis = try optionalSignedInteger(
+            midi["pendingTimingOffsetMillis"]
+        )
         guard activeBank.map({ (1...4).contains($0) }) ?? true else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        guard pendingTimingOffsetMillis.map({ (-250...250).contains($0) }) ?? true else {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
         return MidiOutputIntegrationSnapshot(
@@ -224,7 +235,39 @@ public struct EngineSnapshotDecoder: Sendable {
             activeBank: activeBank,
             autoPublishEnabled: autoPublishEnabled,
             timingOffsetMillis: timingOffsetMillis,
-            bankPreRollMillis: bankPreRollMillis
+            pendingTimingOffsetMillis: pendingTimingOffsetMillis,
+            bankPreRollMillis: bankPreRollMillis,
+            realtimeLane: try decodeRealtimeMidiLane(midi["realtimeScheduler"])
+        )
+    }
+
+    private func decodeRealtimeMidiLane(
+        _ value: JSONValue?
+    ) throws -> RealtimeMidiOutputLaneSnapshot? {
+        guard let value, value != .null else { return nil }
+        guard case let .object(scheduler) = value,
+              case let .object(lane)? = scheduler["lane"],
+              let queueCapacity = unsignedInteger(lane["queueCapacity"]),
+              let queueDepth = unsignedInteger(lane["queueDepth"]),
+              let queueHighWater = unsignedInteger(lane["queueHighWater"]),
+              let saturationCount = unsignedInteger(lane["saturationCount"]),
+              let latencySampleCount = unsignedInteger(lane["latencySampleCount"]),
+              let latencyP95Micros = unsignedInteger(lane["latencyP95Micros"]),
+              queueDepth <= queueCapacity,
+              queueHighWater <= queueCapacity else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        return RealtimeMidiOutputLaneSnapshot(
+            queueCapacity: queueCapacity,
+            queueDepth: queueDepth,
+            queueHighWater: queueHighWater,
+            saturationCount: saturationCount,
+            latencySampleCount: latencySampleCount,
+            latencyP95Micros: latencyP95Micros,
+            lastDispatchLatenessMicros: unsignedInteger(
+                lane["lastDispatchLatenessMicros"]
+            ) ?? 0,
+            lateDispatchCount: unsignedInteger(lane["lateDispatchCount"]) ?? 0
         )
     }
 
@@ -253,6 +296,40 @@ public struct EngineSnapshotDecoder: Sendable {
         )
     }
 
+    private func decodeAbletonLinkIntegration(
+        _ value: JSONValue?
+    ) throws -> AbletonLinkIntegrationSnapshot? {
+        if value == nil || value == .null { return nil }
+        guard case let .object(link) = value,
+              case let .string(state) = link["state"],
+              ["stopped", "starting", "ready", "running", "degraded"].contains(state),
+              case let .string(provider) = link["provider"],
+              !provider.isEmpty,
+              case let .boolean(enabled) = link["enabled"],
+              let peers = unsignedInteger(link["peers"]),
+              case let .boolean(playing) = link["playing"] else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        return AbletonLinkIntegrationSnapshot(
+            enabled: enabled,
+            state: state,
+            provider: provider,
+            helperVersion: try optionalString(link["helperVersion"]),
+            peers: peers,
+            source: try optionalString(link["source"]),
+            deckNumber: try optionalUnsignedInteger(link["deckNumber"]),
+            bpmMilli: try optionalUnsignedInteger(link["bpmMilli"]),
+            beatWithinBar: try optionalUnsignedInteger(link["beatWithinBar"]),
+            playing: playing,
+            generation: try optionalUnsignedInteger(link["generation"]),
+            lastBeatAgeMillis: try optionalUnsignedInteger(link["lastBeatAgeMillis"]),
+            phaseErrorMicros: try optionalSignedInteger(link["phaseErrorMicros"]),
+            lastReanchor: try optionalString(link["lastReanchor"]),
+            lastEvent: try optionalString(link["lastEvent"]),
+            lastError: try optionalString(link["lastError"])
+        )
+    }
+
     private func decodeDeckInputIntegration(
         _ value: JSONValue?
     ) throws -> DeckInputIntegrationSnapshot? {
@@ -276,9 +353,15 @@ public struct EngineSnapshotDecoder: Sendable {
         let destinationName = try optionalString(input["destinationName"])
         let lastDeckID = try optionalUnsignedInteger(input["lastDeckId"])
         let lastFrameSequence = try optionalUnsignedInteger(input["lastFrameSequence"])
+        let positionAuthorityReady = if case let .boolean(value) = input["positionAuthorityReady"] {
+            value
+        } else {
+            false
+        }
+        let isBLTMIDI = protocolName == "BLT MIDI Deck Frame"
         guard destinationName?.isEmpty != true,
-              lastDeckID.map({ [1, 2].contains($0) }) ?? true,
-              lastFrameSequence.map({ $0 <= 127 }) ?? true else {
+              lastDeckID.map({ (1...4).contains($0) }) ?? true,
+              lastFrameSequence.map({ !isBLTMIDI || $0 <= 127 }) ?? true else {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
         return DeckInputIntegrationSnapshot(
@@ -292,7 +375,11 @@ public struct EngineSnapshotDecoder: Sendable {
             ignoredMessageCount: ignoredMessageCount,
             duplicateFrameCount: duplicateFrameCount,
             lastDeckID: lastDeckID,
-            lastFrameSequence: lastFrameSequence
+            lastFrameSequence: lastFrameSequence,
+            precisePositionMessageCount: unsignedInteger(input["precisePositionMessageCount"]) ?? 0,
+            authoritativePositionCount: unsignedInteger(input["authoritativePositionCount"]) ?? 0,
+            positionDiscontinuityCount: unsignedInteger(input["positionDiscontinuityCount"]) ?? 0,
+            positionAuthorityReady: positionAuthorityReady
         )
     }
 
@@ -717,6 +804,18 @@ public struct EngineSnapshotDecoder: Sendable {
             phraseIndex = value
         }
 
+        let playbackPositionMillis: UInt64?
+        if deck["playbackPositionMillis"] == nil
+            || deck["playbackPositionMillis"] == .null {
+            playbackPositionMillis = nil
+        } else {
+            playbackPositionMillis = unsignedInteger(deck["playbackPositionMillis"])
+            guard playbackPositionMillis != nil else {
+                throw EngineSnapshotDecodingError.invalidSnapshot
+            }
+        }
+        let transportRevision = unsignedInteger(deck["transportRevision"]) ?? 0
+
         let phrases = try phrasePayloads.map(decodeDeckPhrase)
         let phraseTimelineIsValid = phrases.isEmpty
             ? planEligibility == .autoHeld && phraseIndex == nil
@@ -752,6 +851,10 @@ public struct EngineSnapshotDecoder: Sendable {
                 durationBeats: durationBeats
             )
         }
+        let hotCues = try decodeHotCues(
+            track["hotCues"],
+            durationMillis: beatGrid?.durationMillis
+        )
 
         let keyKnown: Bool
         if key["known"] == nil {
@@ -775,14 +878,65 @@ public struct EngineSnapshotDecoder: Sendable {
             keyKnown: keyKnown,
             beat: beat,
             playing: playing,
+            playbackPositionMillis: playbackPositionMillis,
+            transportRevision: transportRevision,
             phraseIndex: phraseIndex,
             durationBeats: durationBeats,
             beatGrid: beatGrid,
             phrases: phrases,
             waveformPreview: waveformPreview,
+            hotCues: hotCues,
             planEligibility: planEligibility,
             localPlayback: localPlayback
         )
+    }
+
+    private func decodeHotCues(
+        _ value: JSONValue?,
+        durationMillis: UInt64?
+    ) throws -> [DeckHotCueSnapshot] {
+        guard let value, value != .null else { return [] }
+        guard case let .array(values) = value, values.count <= 26 else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        let cues = try values.map { value -> DeckHotCueSnapshot in
+            guard case let .object(cue) = value,
+                  let indexValue = unsignedInteger(cue["index"]),
+                  let index = UInt8(exactly: indexValue),
+                  (1...26).contains(index),
+                  let timeMillis = unsignedInteger(cue["timeMillis"]),
+                  case let .string(name) = cue["name"],
+                  let colorValue = unsignedInteger(cue["colorRgb"]),
+                  let colorRGB = UInt32(exactly: colorValue),
+                  colorRGB <= 0x00ff_ffff else {
+                throw EngineSnapshotDecodingError.invalidSnapshot
+            }
+            let loopEndMillis: UInt64?
+            if cue["loopEndMillis"] == nil || cue["loopEndMillis"] == .null {
+                loopEndMillis = nil
+            } else {
+                guard let value = unsignedInteger(cue["loopEndMillis"]), value > timeMillis else {
+                    throw EngineSnapshotDecodingError.invalidSnapshot
+                }
+                loopEndMillis = value
+            }
+            guard durationMillis.map({ duration in
+                timeMillis < duration && (loopEndMillis.map { $0 <= duration } ?? true)
+            }) ?? true else {
+                throw EngineSnapshotDecodingError.invalidSnapshot
+            }
+            return DeckHotCueSnapshot(
+                index: index,
+                timeMillis: timeMillis,
+                loopEndMillis: loopEndMillis,
+                name: name,
+                colorRGB: colorRGB
+            )
+        }
+        guard Set(cues.map(\.index)).count == cues.count else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        return cues.sorted { $0.index < $1.index }
     }
 
     private func decodeDeckBeatGrid(
@@ -912,6 +1066,16 @@ public struct EngineSnapshotDecoder: Sendable {
             return nil
         }
         guard let decoded = unsignedInteger(value) else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        return decoded
+    }
+
+    private func optionalSignedInteger(_ value: JSONValue?) throws -> Int? {
+        if value == nil || value == .null {
+            return nil
+        }
+        guard let decoded = signedInteger(value) else {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
         return decoded

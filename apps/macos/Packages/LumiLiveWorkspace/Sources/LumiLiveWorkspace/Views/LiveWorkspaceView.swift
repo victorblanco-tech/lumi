@@ -11,8 +11,9 @@ public struct LiveWorkspaceView: View {
     private let onPlanMutation: @MainActor (PlanMutationRequest) -> Void
     private let onSessionCommand: @MainActor (SessionCommandRequest) -> Void
     private let onLocalPlayback: @MainActor (LocalPlaybackRequest) -> Void
+    private let onSetAbletonLinkEnabled: @MainActor (Bool) -> Void
     private let localPlaybackBrowser: AnyView?
-    private let localPlaybackVisualClocks: [UInt64: LocalPlaybackVisualClockSnapshot]
+    private let deckVisualClocks: [UInt64: DeckVisualClockSnapshot]
     private let localPlaybackWaveforms: [UInt64: DeckWaveformPreviewSnapshot]
     private let localPlaybackFeedback: String?
     private let localPlaybackFeedbackIsError: Bool
@@ -34,26 +35,28 @@ public struct LiveWorkspaceView: View {
         lightingTimingOffsetMillis: Binding<Int> = .constant(0),
         allowsScrolling: Bool = true,
         showsNavigation: Bool = true,
-        localPlaybackVisualClocks: [UInt64: LocalPlaybackVisualClockSnapshot] = [:],
+        deckVisualClocks: [UInt64: DeckVisualClockSnapshot] = [:],
         localPlaybackWaveforms: [UInt64: DeckWaveformPreviewSnapshot] = [:],
         localPlaybackFeedback: String? = nil,
         localPlaybackFeedbackIsError: Bool = false,
         onPlanMutation: @escaping @MainActor (PlanMutationRequest) -> Void = { _ in },
         onSessionCommand: @escaping @MainActor (SessionCommandRequest) -> Void = { _ in },
         onLocalPlayback: @escaping @MainActor (LocalPlaybackRequest) -> Void = { _ in },
+        onSetAbletonLinkEnabled: @escaping @MainActor (Bool) -> Void = { _ in },
         localPlaybackBrowser: AnyView? = nil
     ) {
         self.state = state
         self.productVersion = productVersion
         self.allowsScrolling = allowsScrolling
         self.showsNavigation = showsNavigation
-        self.localPlaybackVisualClocks = localPlaybackVisualClocks
+        self.deckVisualClocks = deckVisualClocks
         self.localPlaybackWaveforms = localPlaybackWaveforms
         self.localPlaybackFeedback = localPlaybackFeedback
         self.localPlaybackFeedbackIsError = localPlaybackFeedbackIsError
         self.onPlanMutation = onPlanMutation
         self.onSessionCommand = onSessionCommand
         self.onLocalPlayback = onLocalPlayback
+        self.onSetAbletonLinkEnabled = onSetAbletonLinkEnabled
         self.localPlaybackBrowser = localPlaybackBrowser
         _appearance = appearance
         _keyNotation = keyNotation
@@ -73,7 +76,6 @@ public struct LiveWorkspaceView: View {
             }
         }
         .background(LumiColor.canvas)
-        .frame(minWidth: 760, minHeight: 560)
         .accessibilityIdentifier("lumi.live.workspace")
         .overlay {
             if let content = state.content,
@@ -209,40 +211,110 @@ public struct LiveWorkspaceView: View {
     }
 
     private var header: some View {
-        HStack(spacing: LumiSpacing.large) {
-            VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-                Text(verbatim: "\(copy.appTitle) \(copy.live)")
-                    .font(LumiTypography.screenTitle)
-                    .foregroundStyle(LumiColor.textPrimary)
-                Text(verbatim: copy.subtitle)
-                    .font(LumiTypography.metadata)
-                    .foregroundStyle(LumiColor.textSecondary)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: LumiSpacing.medium) {
+                headerTitle
+                Spacer()
+                deckSourceSelector
+                abletonLinkControl
+                lightingTimingButton
+                technicalStatusButton
+                operationControls
+                preferenceControl
             }
-            Spacer()
-            deckSourceSelector
-            lightingTimingButton
-            technicalStatusButton
-            operationControls
-            if allowsScrolling {
-                preferenceMenu
-            } else {
-                preferenceIndicator
+            HStack(alignment: .top, spacing: LumiSpacing.large) {
+                headerTitle
+                Spacer()
+                VStack(alignment: .trailing, spacing: LumiSpacing.small) {
+                    HStack(spacing: LumiSpacing.small) {
+                        deckSourceSelector
+                        abletonLinkControl
+                        lightingTimingButton
+                        technicalStatusButton
+                    }
+                    HStack(spacing: LumiSpacing.small) {
+                        operationControls
+                        preferenceControl
+                    }
+                }
             }
         }
         .fixedSize(horizontal: false, vertical: true)
         .layoutPriority(2)
     }
 
+    private var headerTitle: some View {
+        VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+            Text(verbatim: "\(copy.appTitle) \(copy.live)")
+                .font(LumiTypography.screenTitle)
+                .foregroundStyle(LumiColor.textPrimary)
+                .lineLimit(1)
+            Text(verbatim: copy.subtitle)
+                .font(LumiTypography.metadata)
+                .foregroundStyle(LumiColor.textSecondary)
+                .lineLimit(1)
+        }
+    }
+
+    @ViewBuilder
+    private var preferenceControl: some View {
+        if allowsScrolling {
+            preferenceMenu
+        } else {
+            preferenceIndicator
+        }
+    }
+
+    private var abletonLinkControl: some View {
+        Button {
+            onSetAbletonLinkEnabled(!(state.content?.abletonLinkEnabled ?? false))
+        } label: {
+            HStack(spacing: LumiSpacing.small) {
+                Circle()
+                    .fill(componentState(for: state.playbackClock.condition).color)
+                    .frame(width: 8, height: 8)
+                Image(systemName: "link")
+                Text(abletonLinkCompactLabel)
+                    .font(LumiTypography.metadata.weight(.semibold))
+                    .monospacedDigit()
+                Image(
+                    systemName: state.content?.abletonLinkEnabled == true
+                        ? "checkmark.circle.fill" : "circle"
+                )
+                .foregroundStyle(
+                    state.content?.abletonLinkEnabled == true
+                        ? LumiColor.accent : LumiColor.textSecondary
+                )
+            }
+            .padding(.horizontal, LumiSpacing.small)
+            .frame(height: LumiControlMetric.standardHeight)
+        }
+        .buttonStyle(.bordered)
+        .help(state.playbackClock.detail)
+        .accessibilityLabel("Ableton Link")
+        .accessibilityValue(state.content?.abletonLinkEnabled == true ? "On" : "Off")
+        .accessibilityIdentifier("lumi.live.abletonLink")
+    }
+
+    private var abletonLinkCompactLabel: String {
+        guard state.content?.abletonLinkEnabled == true else { return "Link" }
+        guard let bpmMilli = state.content?.abletonLinkBPMMilli else { return "Link · Waiting" }
+        return String(format: "%.1f", Double(bpmMilli) / 1_000)
+    }
+
     private var lightingTimingButton: some View {
         Button {
             showsTimingAdjustment.toggle()
         } label: {
-            Label(
-                String(format: "%+d ms", lightingTimingOffsetMillis),
-                systemImage: "metronome"
-            )
+            HStack(spacing: LumiSpacing.xSmall) {
+                Image(systemName: "metronome")
+                Text(String(format: "%+d ms", lightingTimingOffsetMillis))
+                    .monospacedDigit()
+                Text(timingConfirmationLabel)
+                    .font(LumiTypography.technical.weight(.semibold))
+                    .foregroundStyle(timingConfirmationColor)
+            }
             .font(LumiTypography.metadata.weight(.semibold))
-            .monospacedDigit()
             .padding(.horizontal, LumiSpacing.small)
             .frame(height: LumiControlMetric.standardHeight)
         }
@@ -253,9 +325,12 @@ public struct LiveWorkspaceView: View {
                 VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
                     Text("Lighting timing offset")
                         .font(LumiTypography.sectionTitle)
-                    Text("Positive sends AutoLoops early; negative sends them late.")
+                    Text("Negative values pre-trigger the AutoLoop; positive values delay it. A running change becomes active at the next phrase.")
                         .font(LumiTypography.metadata)
                         .foregroundStyle(LumiColor.textSecondary)
+                    Text(timingConfirmationDetail)
+                        .font(LumiTypography.technical)
+                        .foregroundStyle(timingConfirmationColor)
                 }
                 HStack(spacing: LumiSpacing.medium) {
                     Button {
@@ -284,15 +359,44 @@ public struct LiveWorkspaceView: View {
         .accessibilityIdentifier("lumi.live.lightingTimingOffset")
     }
 
+    private var appliedLightingTimingOffsetMillis: Int {
+        state.content?.lightingTimingOffsetMillis ?? lightingTimingOffsetMillis
+    }
+
+    private var pendingLightingTimingOffsetMillis: Int? {
+        state.content?.pendingLightingTimingOffsetMillis
+    }
+
+    private var timingConfirmationLabel: String {
+        if appliedLightingTimingOffsetMillis != lightingTimingOffsetMillis { return "SYNC" }
+        return "SAVED"
+    }
+
+    private var timingConfirmationColor: Color {
+        LumiColor.warning
+    }
+
+    private var timingConfirmationDetail: String {
+        let applied = String(format: "%+d ms", appliedLightingTimingOffsetMillis)
+        if let pendingLightingTimingOffsetMillis {
+            let pending = String(format: "%+d ms", pendingLightingTimingOffsetMillis)
+            return "Applied \(applied) · \(pending) activates at the next phrase."
+        }
+        if appliedLightingTimingOffsetMillis != lightingTimingOffsetMillis {
+            return "Saved \(applied) · waiting for engine confirmation."
+        }
+        return "Applied: \(applied). Negative is early; positive is late."
+    }
+
     private var technicalStatusButton: some View {
         Button {
             showsTechnicalStatus.toggle()
         } label: {
             HStack(spacing: LumiSpacing.small) {
                 Circle()
-                    .fill(componentState.color)
+                    .fill(technicalComponentState.color)
                     .frame(width: 8, height: 8)
-                Text(verbatim: "Tech · \(conditionLabel)")
+                Text(verbatim: "Status · \(technicalStatusLabel)")
                     .font(LumiTypography.metadata.weight(.semibold))
             }
             .padding(.horizontal, LumiSpacing.medium)
@@ -308,70 +412,48 @@ public struct LiveWorkspaceView: View {
     private var technicalStatusPopover: some View {
         VStack(alignment: .leading, spacing: LumiSpacing.large) {
             HStack {
-                Text(verbatim: "Technical status")
+                Text(verbatim: "System status")
                     .font(LumiTypography.sectionTitle)
                 Spacer()
-                StatusBadge(key(conditionLabel), state: componentState)
+                StatusBadge(key(technicalStatusLabel), state: technicalComponentState)
             }
-            providerRow(copy.engine, systemImage: "cpu", presentation: state.engine)
             providerRow(
-                copy.runtime,
-                systemImage: "point.3.connected.trianglepath.dotted",
-                presentation: state.runtime
-            )
-            providerRow(
-                copy.deckSource,
+                "Pro DJ Link",
                 systemImage: "music.quarternote.3",
                 presentation: state.source
             )
             providerRow(
-                copy.planner,
-                systemImage: "list.bullet.rectangle",
-                presentation: state.planner
-            )
-            providerRow(
-                copy.outputProvider,
-                systemImage: "lightbulb.2",
-                presentation: state.output
-            )
-            providerRow(
-                "Lighting MIDI",
+                "Light Output",
                 systemImage: "pianokeys",
                 presentation: state.lightingMidi
             )
             providerRow(
-                "Playback Clock",
-                systemImage: "metronome",
+                "Ableton Link",
+                systemImage: "link",
                 presentation: state.playbackClock
             )
-            Divider()
-            VStack(alignment: .leading, spacing: LumiSpacing.small) {
-                Text(verbatim: "Recent engine events")
-                    .font(LumiTypography.metadata.weight(.semibold))
-                if let entries = state.content?.timeline.suffix(5), !entries.isEmpty {
-                    ForEach(Array(entries)) { entry in
-                        HStack(spacing: LumiSpacing.small) {
-                            Text(verbatim: "#\(entry.sequence)")
-                                .font(LumiTypography.technical)
-                                .foregroundStyle(LumiColor.textSecondary)
-                            Text(verbatim: entry.type)
-                                .font(LumiTypography.metadata)
-                            Spacer()
-                            Text(verbatim: entry.result.uppercased())
-                                .font(LumiTypography.technical.weight(.semibold))
-                        }
-                    }
-                } else {
-                    Text(verbatim: copy.waitingTimeline)
-                        .font(LumiTypography.metadata)
-                        .foregroundStyle(LumiColor.textSecondary)
-                }
-            }
+            Text("Only operational problems are highlighted here. Detailed diagnostics remain available under Integrations.")
+                .font(LumiTypography.caption)
+                .foregroundStyle(LumiColor.textSecondary)
         }
         .padding(LumiSpacing.large)
         .frame(width: 430)
         .background(LumiColor.surface)
         .accessibilityIdentifier("lumi.technicalStatus.popover")
+    }
+
+    private var technicalHasProblem: Bool {
+        [state.source, state.lightingMidi, state.playbackClock].contains {
+            [.degraded, .error].contains($0.condition)
+        }
+    }
+
+    private var technicalStatusLabel: String {
+        technicalHasProblem ? "Attention" : "Ready"
+    }
+
+    private var technicalComponentState: LumiComponentState {
+        technicalHasProblem ? .degraded : .ready
     }
 
     private var deckSourceSelector: some View {
@@ -396,6 +478,7 @@ public struct LiveWorkspaceView: View {
         } label: {
             Label(title, systemImage: icon)
                 .font(LumiTypography.metadata.weight(.semibold))
+                .lineLimit(1)
                 .padding(.horizontal, LumiSpacing.small)
                 .frame(height: LumiControlMetric.standardHeight - 4)
                 .background(selected ? LumiColor.accent.opacity(0.18) : Color.clear)
@@ -413,6 +496,7 @@ public struct LiveWorkspaceView: View {
             operationControl(copy.pause, systemImage: "pause.fill", status: .paused)
             operationControl(copy.off, systemImage: "stop.fill", status: .off)
         }
+        .fixedSize(horizontal: true, vertical: false)
         .accessibilityIdentifier("lumi.operation.controls")
     }
 
@@ -490,8 +574,10 @@ public struct LiveWorkspaceView: View {
                                     plan: plan,
                                     musicalKey: musicalKey(for: deck),
                                     isLocalPlayback: content.sourceMode == "localPlayback",
-                                    visualClock: localPlaybackVisualClocks[deck.deckID],
+                                    visualClock: deckVisualClocks[deck.deckID],
                                     waveformOverride: localPlaybackWaveforms[deck.deckID],
+                                    lightingTimingOffsetMillis: content.lightingTimingOffsetMillis,
+                                    pendingLightingTimingOffsetMillis: content.pendingLightingTimingOffsetMillis,
                                     selectedPhraseIndex: selectedIndex,
                                     onSelectPhrase: { phraseIndex in
                                         if isMaster {
@@ -761,7 +847,7 @@ public struct LiveWorkspaceView: View {
             Text(verbatim: sourceMode == "localPlayback" ? "No Library track loaded" : "Waiting for connected deck")
                 .font(LumiTypography.cardTitle)
                 .foregroundStyle(Color.white)
-            Text(verbatim: sourceMode == "localPlayback" ? "Load a track onto this deck from Library." : "Beat Link Trigger connection will appear here without changing the Live workflow.")
+            Text(verbatim: sourceMode == "localPlayback" ? "Load a track onto this deck from Library." : "A Direct Pro DJ Link player will appear here without changing the Live workflow.")
                 .font(LumiTypography.metadata)
                 .foregroundStyle(Color.white.opacity(0.54))
                 .multilineTextAlignment(.center)
@@ -1167,7 +1253,7 @@ private struct PlanSelectionControl: View {
 #Preview("Ready · Dark") {
     LiveWorkspaceView(
         state: LiveWorkspaceFixtures.ready,
-        productVersion: "0.3.0",
+        productVersion: "0.4.0-dev-57",
         appearance: .constant(.dark),
         keyNotation: .constant(.camelot)
     )
@@ -1178,7 +1264,7 @@ private struct PlanSelectionControl: View {
 #Preview("Fallback · Light") {
     LiveWorkspaceView(
         state: LiveWorkspaceFixtures.fallback,
-        productVersion: "0.3.0",
+        productVersion: "0.4.0-dev-57",
         appearance: .constant(.light),
         keyNotation: .constant(.classic)
     )

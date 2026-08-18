@@ -1,8 +1,8 @@
-use std::io::{BufRead as _, BufReader, Write as _};
+use std::io::{BufRead as _, BufReader, Read as _, Write as _};
 use std::net::TcpStream;
 use std::process::{Command, Stdio};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use lumi_engine::StartupReady;
 use lumi_protocol::{MessageDecoder, MessageEnvelope, MessageType, PROTOCOL_VERSION};
@@ -11,13 +11,18 @@ use serde_json::{Value, json};
 const TEST_SESSION_TOKEN: &str = "0123456789abcdef0123456789abcdef0123456789abcdef";
 
 #[test]
-fn real_engine_process_starts_empty_and_serves_authenticated_product_state() {
+fn real_engine_process_serves_state_and_fails_safe_between_ui_clients() {
     let mut child = match Command::new(env!("CARGO_BIN_EXE_lumi-engine"))
         .env("LUMI_SESSION_TOKEN", TEST_SESSION_TOKEN)
         .env(
             "LUMI_DECK_INPUT_DESTINATION_NAME",
             format!("Lumi Deck Input Process Test {}", std::process::id()),
         )
+        // This test exercises the authenticated process protocol. Keeping it
+        // independent from the host CoreMIDI daemon makes the process check
+        // deterministic on build machines and developer Macs alike.
+        .env("LUMI_DECK_INPUT_DISABLED", "1")
+        .env("LUMI_AUTO_PUBLISH_MIDI", "0")
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -40,7 +45,14 @@ fn real_engine_process_starts_empty_and_serves_authenticated_product_state() {
         Ok(ready) => ready,
         Err(error) => {
             let _ = child.kill();
-            panic!("invalid startup record: {error}");
+            let mut stderr_text = String::new();
+            if let Some(mut stderr) = child.stderr.take() {
+                let _ = stderr.read_to_string(&mut stderr_text);
+            }
+            let exit_status = child.wait().ok();
+            panic!(
+                "invalid startup record: {error}; exit status: {exit_status:?}; stderr: {stderr_text}"
+            );
         }
     };
 
@@ -212,24 +224,32 @@ fn real_engine_process_starts_empty_and_serves_authenticated_product_state() {
     );
     drop(connection);
 
-    let deadline = Instant::now() + Duration::from_secs(2);
-    loop {
-        match child.try_wait() {
-            Ok(Some(status)) => {
-                assert!(status.success());
-                break;
-            }
-            Ok(None) if Instant::now() < deadline => thread::sleep(Duration::from_millis(20)),
-            Ok(None) => {
-                let _ = child.kill();
-                panic!("engine did not exit after its client disconnected");
-            }
-            Err(error) => {
-                let _ = child.kill();
-                panic!("failed to inspect engine process: {error}");
-            }
-        }
-    }
+    thread::sleep(Duration::from_millis(40));
+    assert!(
+        child.try_wait().is_ok_and(|status| status.is_none()),
+        "the engine service must outlive a UI client"
+    );
+    let mut reconnected = TcpStream::connect((ready.host.as_str(), ready.port))
+        .unwrap_or_else(|error| panic!("failed to reconnect to engine: {error}"));
+    writeln!(reconnected, "{{\"sessionToken\":\"{TEST_SESSION_TOKEN}\"}}")
+        .unwrap_or_else(|error| panic!("failed to reauthenticate: {error}"));
+    let mut reconnect_snapshot = String::new();
+    BufReader::new(&reconnected)
+        .read_line(&mut reconnect_snapshot)
+        .unwrap_or_else(|error| panic!("failed to read reconnect snapshot: {error}"));
+    let reconnect_snapshot = MessageDecoder::decode(reconnect_snapshot.as_bytes())
+        .unwrap_or_else(|error| panic!("invalid reconnect snapshot: {error}"));
+    assert_eq!(
+        reconnect_snapshot.payload.get("operationState"),
+        Some(&Value::String("off".to_owned()))
+    );
+    assert_eq!(
+        reconnect_snapshot.payload.get("stateRevision"),
+        Some(&Value::from(4))
+    );
+    drop(reconnected);
+    let _ = child.kill();
+    let _ = child.wait();
 }
 
 fn command(message_id: &str, sequence: u64, payload: Value) -> Value {

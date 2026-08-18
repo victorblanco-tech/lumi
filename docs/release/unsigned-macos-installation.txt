@@ -7,11 +7,25 @@ not signed with a paid Apple Developer ID.
 Install
 -------
 
-1. Drag the Lumi app in this disk image to the Applications shortcut.
-2. Open Applications and try to start Lumi once.
-3. If macOS blocks the app, open System Settings > Privacy & Security.
-4. Find the Lumi message in Security and choose Open Anyway.
-5. Confirm Open when macOS asks again.
+Keep installed channels in these locations so they can coexist with separate
+data and preferences:
+
+- Production: /Applications/Lumi/Lumi.app
+- Dev: /Applications/Lumi/Dev/Lumi Dev <version>.app
+- RC: /Applications/Lumi/RC/Lumi RC <version>.app
+
+1. Create the matching channel folder above if it does not exist yet.
+2. Drag the Lumi app onto the channel-specific Applications shortcut in this
+   disk image. Dev points to /Applications/Lumi/Dev, RC to
+   /Applications/Lumi/RC and Production to /Applications/Lumi.
+3. Open the channel folder and try to start Lumi once.
+4. If macOS blocks the app, open System Settings > Privacy & Security.
+5. Find the Lumi message in Security and choose Open Anyway.
+6. Confirm Open when macOS asks again.
+
+The three channels use distinct bundle identifiers and Application Support
+directories. Installing or removing one app does not replace another channel's
+database.
 
 Only use a disk image downloaded from the official Lumi GitHub repository and
 compare its SHA-256 checksum with the checksum published beside the release.

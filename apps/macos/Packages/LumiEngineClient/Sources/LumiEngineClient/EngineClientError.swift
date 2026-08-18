@@ -13,6 +13,10 @@ public enum EngineClientError: Error, Equatable, LocalizedError, Sendable {
     case connectionClosed
     case invalidInitialSnapshot
     case commandSequenceOverflow
+    case serviceHandoverTimedOut
+    case serviceRequiresApproval
+    case serviceDefinitionMissing
+    case serviceRegistrationFailed
 
     public var errorDescription: String? {
         switch self {
@@ -40,6 +44,14 @@ public enum EngineClientError: Error, Equatable, LocalizedError, Sendable {
             "The Lumi engine did not provide a valid initial snapshot."
         case .commandSequenceOverflow:
             "The local command sequence overflowed. Restart Lumi before sending more edits."
+        case .serviceHandoverTimedOut:
+            "The previous Lumi engine did not stop safely. Close other Lumi versions and try again."
+        case .serviceRequiresApproval:
+            "Lumi Engine requires approval in System Settings > General > Login Items. No administrator account is required."
+        case .serviceDefinitionMissing:
+            "The bundled Lumi Engine background-service definition is missing. Reinstall this Lumi build."
+        case .serviceRegistrationFailed:
+            "macOS could not register the Lumi Engine background service."
         }
     }
 }

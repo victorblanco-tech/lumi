@@ -10,6 +10,8 @@ required_paths=(
   "TRADEMARKS.md"
   "THIRD_PARTY_NOTICES.md"
   "Cargo.toml"
+  "bridges/prolink/pom.xml"
+  "tools/prolink-simulator/pom.xml"
   "engine/crates/lumi-domain"
   "engine/crates/lumi-deck-source"
   "engine/crates/lumi-blt-midi"
@@ -24,12 +26,16 @@ required_paths=(
   "engine/crates/lumi-output-dry-run"
   "engine/crates/lumi-planner"
   "engine/crates/lumi-protocol"
+  "engine/crates/lumi-prolink-input"
   "engine/crates/lumi-simulator"
+  "engine/crates/lumi-timing-output"
   "apps/macos/Lumi.xcodeproj"
   "apps/macos/Lumi"
+  "apps/macos/Lumi/Resources/Assets.xcassets/AppIcon.appiconset/Contents.json"
+  "apps/macos/Lumi/Resources/Assets.xcassets/LumiMark.imageset/Contents.json"
   "apps/macos/Config/Dev.xcconfig"
-  "apps/macos/Config/Preview.xcconfig"
-  "apps/macos/Config/Stable.xcconfig"
+  "apps/macos/Config/RC.xcconfig"
+  "apps/macos/Config/Release.xcconfig"
   "apps/macos/Packages/LumiProtocol"
   "apps/macos/Packages/LumiEngineClient"
   "apps/macos/Packages/LumiDesignSystem"
@@ -49,6 +55,8 @@ required_paths=(
   "docs/development/music-library-core.md"
   "docs/development/library-workspace.md"
   "docs/development/track-editor-preview.md"
+  "docs/development/local-quality-gates.md"
+  "docs/design/brand/README.md"
   "docs/release/0.1.0-demo-and-limitations.md"
   "docs/release/0.1.0-epic-1-evidence.md"
   "docs/release/0.2.0-demo-and-limitations.md"
@@ -60,12 +68,31 @@ required_paths=(
   "scripts/check-architecture.sh"
   "scripts/check-epic-2a-evidence.sh"
   "scripts/verify-rust.sh"
+  "scripts/verify-prolink-bridge.sh"
+  "scripts/verify-prolink-simulator.sh"
+  "scripts/run-prolink-simulator.sh"
+  "scripts/package-prolink-simulator-local.sh"
+  "scripts/prolink-simulatorctl.sh"
   "scripts/verify-apple.sh"
   "scripts/verify.sh"
+  "scripts/verify-local.sh"
+  "scripts/verify-functional.sh"
+  "scripts/verify-technical.sh"
+  "scripts/verify-security.sh"
+  "scripts/verify-show-lab.sh"
+  "scripts/verify-live-integration-soak.sh"
+  "scripts/check-apple-test-exclusivity.sh"
   "scripts/package-macos-local.sh"
+  "scripts/prepare-carabiner-runtime.sh"
   "scripts/backup-macos-user-data.sh"
   "scripts/clone-macos-channel-data.sh"
   "docs/planning/story-e3-03-resume-and-timing-confirmation.md"
+  "docs/planning/epic-04-show-grade-hardening.md"
+  "docs/planning/story-e4-03a-regression-baseline-and-security-floor.md"
+  "docs/planning/story-e4-03b-realtime-autoloop-execution-lane.md"
+  "docs/planning/story-e4-03c-engine-service-and-data-recovery.md"
+  "docs/planning/story-e4-03d-delta-ui-maintainability-release-hardening.md"
+  "docs/architecture/adr/0031-show-critical-runtime-isolation-and-local-quality-gates.md"
   "docs"
   "scripts"
 )
@@ -90,10 +117,10 @@ fi
 
 if ! grep -Fq 'PRODUCT_BUNDLE_IDENTIFIER = co.victorblan.tech.lumi.dev' \
   "$repository_root/apps/macos/Config/Dev.xcconfig" \
-  || ! grep -Fq 'PRODUCT_BUNDLE_IDENTIFIER = co.victorblan.tech.lumi.preview' \
-    "$repository_root/apps/macos/Config/Preview.xcconfig" \
+  || ! grep -Fq 'PRODUCT_BUNDLE_IDENTIFIER = co.victorblan.tech.lumi.rc' \
+    "$repository_root/apps/macos/Config/RC.xcconfig" \
   || ! grep -Fq 'PRODUCT_BUNDLE_IDENTIFIER = co.victorblan.tech.lumi' \
-    "$repository_root/apps/macos/Config/Stable.xcconfig"; then
+    "$repository_root/apps/macos/Config/Release.xcconfig"; then
   echo "ERROR: macOS release-channel bundle identities are incomplete." >&2
   exit 1
 fi

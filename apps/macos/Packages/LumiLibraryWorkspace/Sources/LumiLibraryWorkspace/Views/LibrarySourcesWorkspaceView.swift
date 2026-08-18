@@ -3,17 +3,56 @@ import Foundation
 import LumiDesignSystem
 import SwiftUI
 
+public struct USBPlaylistSelectionImpact: Equatable, Sendable {
+    public let playlistCount: Int
+    public let uniqueTrackCount: Int
+    public let currentCount: Int
+    public let usbNewerCount: Int
+    public let usbOutdatedCount: Int
+    public let notInLumiCount: Int
+    public let conflictCount: Int
+
+    public init(
+        inspection: RekordboxDeviceInspectionState,
+        selectedPlaylistIDs: Set<UInt32>
+    ) {
+        let selected = inspection.playlists.filter { selectedPlaylistIDs.contains($0.id) }
+        var tracksByID: [UInt32: RekordboxDeviceTrackState] = [:]
+        for playlist in selected {
+            for track in playlist.tracks {
+                tracksByID[track.id] = track
+            }
+        }
+
+        playlistCount = selected.count
+        uniqueTrackCount = tracksByID.count
+        currentCount = tracksByID.values.count { $0.status == "current" }
+        usbNewerCount = tracksByID.values.count { $0.status == "usb-newer" }
+        usbOutdatedCount = tracksByID.values.count { $0.status == "usb-outdated" }
+        notInLumiCount = tracksByID.values.count { $0.status == "not-in-lumi" }
+        conflictCount = tracksByID.values.count {
+            !["current", "usb-newer", "usb-outdated", "not-in-lumi"].contains($0.status)
+        }
+    }
+
+    public var changedCount: Int { usbNewerCount + notInLumiCount }
+    public var heldCount: Int { usbOutdatedCount + conflictCount }
+}
+
 public struct LibrarySourcesWorkspaceView: View {
     private let library: LibraryWorkspaceState
     private let settings: PhraseRoleSettingsState?
     private let feedback: String?
     private let syncFeedback: String?
     private let syncFeedbackIsError: Bool
+    private let usbOperation: USBSourceOperationState
     private let rendersInteractiveControls: Bool
     private let onMutation: @Sendable (PhraseRoleMutationRequest) -> Void
     private let onSyncPreview: @Sendable (RekordboxXMLSyncPreviewRequest) -> Void
     private let onSyncApply: @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void
     private let onAnalysisImport: @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void
+    private let onDeviceInspect: @Sendable (String) -> Void
+    private let onDeviceSync: @Sendable (String, [UInt32]) -> Void
 
     @AppStorage(LumiPreferenceKey.rekordboxXMLFolder)
     private var rekordboxFolderPath = ""
@@ -21,6 +60,10 @@ public struct LibrarySourcesWorkspaceView: View {
     private var includeFutureChildPlaylists = true
     @AppStorage(LumiPreferenceKey.rekordboxXMLFollowedPaths)
     private var followedPathsJSON = "[]"
+    @AppStorage(LumiPreferenceKey.rekordboxDeviceRoot)
+    private var rekordboxDeviceRoot = ""
+    @AppStorage(LumiPreferenceKey.rekordboxDevicePlaylistSelections)
+    private var devicePlaylistSelectionsJSON = "{}"
 
     @State private var selectedProviderKind: String?
     @State private var followedPaths: Set<String> = []
@@ -32,6 +75,14 @@ public struct LibrarySourcesWorkspaceView: View {
     @State private var isRekordboxExportExpanded = false
     @State private var isSyncPreviewDetailsExpanded = false
     @State private var isPhraseMappingExpanded = false
+    @State private var selectedUSBSourceID: String?
+    @State private var selectedUSBPlaylistIDs: Set<UInt32> = []
+    @State private var expandedUSBPlaylistIDs: Set<UInt32> = []
+    @State private var usbPlaylistSearch = ""
+    @State private var mountRevision = 0
+    @State private var mountedUSBChoices: [URL] = []
+    @State private var isUSBSourceChoicePresented = false
+    @State private var usbSelectionFeedback: String?
 
     public init(
         library: LibraryWorkspaceState,
@@ -39,22 +90,28 @@ public struct LibrarySourcesWorkspaceView: View {
         feedback: String? = nil,
         syncFeedback: String? = nil,
         syncFeedbackIsError: Bool = false,
+        usbOperation: USBSourceOperationState = .idle,
         rendersInteractiveControls: Bool = true,
         onMutation: @escaping @Sendable (PhraseRoleMutationRequest) -> Void = { _ in },
         onSyncPreview: @escaping @Sendable (RekordboxXMLSyncPreviewRequest) -> Void = { _ in },
         onSyncApply: @escaping @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void = { _, _ in },
-        onAnalysisImport: @escaping @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void = { _, _ in }
+        onAnalysisImport: @escaping @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void = { _, _ in },
+        onDeviceInspect: @escaping @Sendable (String) -> Void = { _ in },
+        onDeviceSync: @escaping @Sendable (String, [UInt32]) -> Void = { _, _ in }
     ) {
         self.library = library
         self.settings = settings
         self.feedback = feedback
         self.syncFeedback = syncFeedback
         self.syncFeedbackIsError = syncFeedbackIsError
+        self.usbOperation = usbOperation
         self.rendersInteractiveControls = rendersInteractiveControls
         self.onMutation = onMutation
         self.onSyncPreview = onSyncPreview
         self.onSyncApply = onSyncApply
         self.onAnalysisImport = onAnalysisImport
+        self.onDeviceInspect = onDeviceInspect
+        self.onDeviceSync = onDeviceSync
         _selectedProviderKind = State(initialValue: settings?.mappingProfiles.first?.providerKind)
     }
 
@@ -62,10 +119,14 @@ public struct LibrarySourcesWorkspaceView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: LumiSpacing.xLarge) {
                 header
-                rekordboxSource
-                rekordboxSyncPreview
-                appliedRekordboxMirror
-                activeSource
+                usbMediaSummary
+                if let usbSelectionFeedback {
+                    Label(usbSelectionFeedback, systemImage: "exclamationmark.triangle.fill")
+                        .font(LumiTypography.caption.weight(.semibold))
+                        .foregroundStyle(LumiColor.warning)
+                        .accessibilityIdentifier("lumi.library.sources.usb.selectionFeedback")
+                }
+                trustedUSBSources
                 sourceMappings
             }
             .padding(LumiSpacing.xLarge)
@@ -73,20 +134,732 @@ public struct LibrarySourcesWorkspaceView: View {
         }
         .background(LumiColor.canvas)
         .accessibilityIdentifier("lumi.library.sources")
+        .confirmationDialog(
+            "Choose USB Source",
+            isPresented: $isUSBSourceChoicePresented,
+            titleVisibility: .visible
+        ) {
+            ForEach(mountedUSBChoices, id: \.path) { url in
+                Button(volumeDisplayName(url)) { inspectRekordboxDevice(at: url) }
+            }
+            Button("Cancel", role: .cancel) {}
+        } message: {
+            Text("Only connected Rekordbox OneLibrary USB sources are shown.")
+        }
         .onChange(of: settings?.revision) { _, _ in synchronizeProvider() }
+        .onChange(of: library.rekordboxDevices) { _, devices in
+            if let selectedUSBSourceID,
+               !devices.contains(where: { $0.sourceID == selectedUSBSourceID }),
+               library.rekordboxDeviceInspection?.sourceID != selectedUSBSourceID {
+                self.selectedUSBSourceID = nil
+            }
+        }
+        .onChange(of: selectedUSBSourceID) { _, _ in restoreDevicePlaylistSelection() }
+        .onChange(of: library.rekordboxDeviceInspection) { _, _ in
+            restoreDevicePlaylistSelection()
+        }
         .onAppear {
             guard !didInitializeSource else { return }
             didInitializeSource = true
             restoreFollowedPaths()
             if !rekordboxFolderPath.isEmpty { scanImportFolder() }
+            restoreDevicePlaylistSelection()
+            inspectFirstMountedTrustedSource()
         }
+        .onReceive(
+            NSWorkspace.shared.notificationCenter.publisher(
+                for: NSWorkspace.didMountNotification
+            )
+        ) { notification in
+            mountRevision &+= 1
+            guard let url = notification.userInfo?[NSWorkspace.volumeURLUserInfoKey] as? URL else {
+                return
+            }
+            inspectMountedTrustedSource(url)
+        }
+        .onReceive(
+            NSWorkspace.shared.notificationCenter.publisher(
+                for: NSWorkspace.didUnmountNotification
+            )
+        ) { _ in
+            mountRevision &+= 1
+        }
+    }
+
+    private var usbMediaSummary: some View {
+        LumiPanel {
+            HStack(spacing: LumiSpacing.xLarge) {
+                sourceIcon("externaldrive.fill.badge.checkmark", state: overallUSBState)
+                VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+                    Text("USB Sources").font(LumiTypography.cardTitle)
+                    Text("\(visibleUSBDevices.count) trusted · \(mountedTrustedSources.count) connected · read only")
+                        .font(LumiTypography.technical)
+                        .foregroundStyle(LumiColor.textSecondary)
+                    Text("Trusted media identifies live Pro DJ Link tracks. Older or incomparable backup analysis is registered but never replaces newer active Lumi data.")
+                        .font(LumiTypography.caption)
+                        .foregroundStyle(LumiColor.textSecondary)
+                }
+                Spacer()
+                Button("Add USB Source…") { chooseRekordboxDevice() }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!rendersInteractiveControls)
+                    .accessibilityIdentifier("lumi.library.sources.usb.add")
+            }
+        }
+    }
+
+    private var trustedUSBSources: some View {
+        VStack(alignment: .leading, spacing: LumiSpacing.medium) {
+            HStack {
+                Text("Trusted USB Sources").font(LumiTypography.sectionTitle)
+                Spacer()
+                Text("SOURCE  ·  CONNECTION  ·  SYNC HEALTH")
+                    .font(LumiTypography.technical)
+                    .foregroundStyle(LumiColor.textSecondary)
+            }
+            if !hasExpandedUSBSourceLane {
+                usbOperationStatus
+            }
+            if visibleUSBDevices.isEmpty, provisionalUSBInspection == nil {
+                LumiPanel {
+                    VStack(alignment: .leading, spacing: LumiSpacing.small) {
+                        Text("No trusted USB sources").font(LumiTypography.cardTitle)
+                        Text("Connect a current Rekordbox OneLibrary USB and choose Add USB Source. Lumi only reads its library and analysis files.")
+                            .font(LumiTypography.caption)
+                            .foregroundStyle(LumiColor.textSecondary)
+                    }
+                }
+            } else {
+                VStack(spacing: LumiSpacing.small) {
+                    ForEach(visibleUSBDevices) { device in
+                        VStack(spacing: LumiSpacing.small) {
+                            usbSourceRow(device)
+                            if selectedUSBSourceID == device.sourceID {
+                                selectedUSBInspector(device: device)
+                            }
+                        }
+                    }
+                    if let inspection = provisionalUSBInspection {
+                        VStack(spacing: LumiSpacing.small) {
+                            provisionalUSBSourceRow(inspection)
+                            if selectedUSBSourceID == inspection.sourceID {
+                                selectedUSBInspector(device: nil)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    private func usbSourceRow(_ device: RekordboxDeviceState) -> some View {
+        let mounted = mountedURL(for: device) != nil
+        let selected = selectedUSBSourceID == device.sourceID
+        let displayName = USBSourceIdentityResolver.displayName(
+            for: device,
+            inspection: selected ? library.rekordboxDeviceInspection : nil
+        )
+        return Button {
+            if selected {
+                selectedUSBSourceID = nil
+            } else {
+                selectedUSBSourceID = device.sourceID
+                if let root = mountedURL(for: device)?.path {
+                    onDeviceInspect(root)
+                }
+            }
+        } label: {
+            HStack(spacing: LumiSpacing.large) {
+                Image(systemName: mounted ? "externaldrive.fill.badge.checkmark" : "externaldrive")
+                    .foregroundStyle(mounted ? LumiColor.success : LumiColor.textSecondary)
+                    .frame(width: 28)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(displayName).font(LumiTypography.cardTitle)
+                    Text("TRUSTED · \(shortRevision(device.databaseRevision))")
+                        .font(LumiTypography.technical)
+                        .foregroundStyle(LumiColor.textSecondary)
+                }
+                Spacer()
+                compactStatus(mounted ? "CONNECTED" : "OFFLINE", mounted ? .ready : .empty)
+                compactStatus(deviceSyncLabel(device), deviceSyncState(device))
+                Text("\(device.matchedTracks)/\(device.activeTracks) matched")
+                    .font(LumiTypography.technical)
+                    .foregroundStyle(LumiColor.textSecondary)
+                    .frame(width: 130, alignment: .trailing)
+                Image(systemName: selected ? "chevron.down" : "chevron.right")
+                    .foregroundStyle(LumiColor.textSecondary)
+            }
+            .padding(.horizontal, LumiSpacing.large)
+            .frame(minHeight: 66)
+            .background(selected ? LumiColor.accent.opacity(0.13) : LumiColor.surface)
+            .overlay {
+                RoundedRectangle(cornerRadius: LumiRadius.panel)
+                    .stroke(selected ? LumiColor.accent : LumiColor.border, lineWidth: selected ? 1.5 : 1)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: LumiRadius.panel))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("lumi.library.sources.usb.\(device.sourceID)")
+    }
+
+    private func provisionalUSBSourceRow(
+        _ inspection: RekordboxDeviceInspectionState
+    ) -> some View {
+        let selected = selectedUSBSourceID == inspection.sourceID
+        return Button {
+            selectedUSBSourceID = selected ? nil : inspection.sourceID
+        } label: {
+            HStack(spacing: LumiSpacing.large) {
+                Image(systemName: "externaldrive.fill.badge.checkmark")
+                    .foregroundStyle(LumiColor.success)
+                    .frame(width: 28)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(inspection.displayName).font(LumiTypography.cardTitle)
+                    Text("ANALYZED · NOT YET SYNCHRONIZED")
+                        .font(LumiTypography.technical)
+                        .foregroundStyle(LumiColor.textSecondary)
+                }
+                Spacer()
+                compactStatus("CONNECTED", .ready)
+                compactStatus("READY TO REVIEW", .empty)
+                Text("\(inspection.trackCount) on USB")
+                    .font(LumiTypography.technical)
+                    .foregroundStyle(LumiColor.textSecondary)
+                    .frame(width: 130, alignment: .trailing)
+                Image(systemName: selected ? "chevron.down" : "chevron.right")
+                    .foregroundStyle(LumiColor.textSecondary)
+            }
+            .padding(.horizontal, LumiSpacing.large)
+            .frame(minHeight: 66)
+            .background(selected ? LumiColor.accent.opacity(0.13) : LumiColor.surface)
+            .overlay {
+                RoundedRectangle(cornerRadius: LumiRadius.panel)
+                    .stroke(selected ? LumiColor.accent : LumiColor.border, lineWidth: selected ? 1.5 : 1)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: LumiRadius.panel))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("lumi.library.sources.usb.\(inspection.sourceID)")
+    }
+
+    @ViewBuilder
+    private func selectedUSBInspector(device: RekordboxDeviceState?) -> some View {
+        if let device {
+            let displayName = USBSourceIdentityResolver.displayName(
+                for: device,
+                inspection: activeDeviceInspection
+            )
+            LumiPanel {
+                VStack(alignment: .leading, spacing: LumiSpacing.large) {
+                    HStack(alignment: .top) {
+                        VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+                            Text(displayName).font(LumiTypography.sectionTitle)
+                            Text("Trusted USB source · last synchronized \(formattedSyncDate(device.syncedAt))")
+                                .font(LumiTypography.caption)
+                                .foregroundStyle(LumiColor.textSecondary)
+                        }
+                        Spacer()
+                        if let root = mountedURL(for: device)?.path {
+                            Button(activeDeviceInspection == nil ? "Choose Playlists…" : "Refresh Playlists") {
+                                onDeviceInspect(root)
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(usbOperation.isActive || !rendersInteractiveControls)
+                            Button(deviceSyncButtonTitle) {
+                                syncSelectedDevicePlaylists(root: root)
+                            }
+                                .buttonStyle(.borderedProminent)
+                                .disabled(selectedUSBPlaylistIDs.isEmpty || usbOperation.isActive || !rendersInteractiveControls)
+                        } else {
+                            compactStatus("CONNECT USB TO SYNC", .empty)
+                        }
+                    }
+                    usbOperationStatus
+                    if let inspection = activeDeviceInspection {
+                        Divider()
+                        devicePlaylistSelection(inspection)
+                    } else {
+                        Divider()
+                        storedDevicePlaylists(device)
+                    }
+                    Divider()
+                    HStack(spacing: LumiSpacing.xLarge) {
+                        metric("Synced", device.activeTracks)
+                        metric("Matched", device.matchedTracks)
+                        metric("Unmatched · held", device.unmatchedTracks)
+                        metric("Current", device.currentTracks)
+                        metric("Updated", device.promotedTracks)
+                    }
+                    if device.protectedTracks > 0 || device.conflictTracks > 0 {
+                        Label(
+                            "\(device.protectedTracks) older track version\(device.protectedTracks == 1 ? "" : "s") protected · \(device.conflictTracks) incomparable change\(device.conflictTracks == 1 ? "" : "s") held for review",
+                            systemImage: "shield.lefthalf.filled"
+                        )
+                        .font(LumiTypography.caption.weight(.semibold))
+                        .foregroundStyle(device.conflictTracks > 0 ? LumiColor.warning : LumiColor.success)
+                    } else {
+                        Label("No downgrade risk detected. Active Lumi analysis and all Lumi-owned phrases and AutoLoop choices are protected.", systemImage: "checkmark.shield.fill")
+                            .font(LumiTypography.caption)
+                            .foregroundStyle(LumiColor.success)
+                    }
+                    HStack(spacing: LumiSpacing.large) {
+                        sourceSettingRow(title: "Database revision", detail: shortRevision(device.databaseRevision), systemImage: "cylinder")
+                        sourceSettingRow(title: "Version policy", detail: "Newer promotes · older/unknown holds", systemImage: "arrow.up.arrow.down")
+                    }
+                }
+            }
+        } else if let inspection = activeDeviceInspection {
+            LumiPanel {
+                VStack(alignment: .leading, spacing: LumiSpacing.large) {
+                    HStack {
+                        VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+                            Text(inspection.displayName).font(LumiTypography.sectionTitle)
+                            Text("USB indexed read-only · choose playlists before the first sync")
+                                .font(LumiTypography.caption)
+                                .foregroundStyle(LumiColor.textSecondary)
+                        }
+                        Spacer()
+                        if !rekordboxDeviceRoot.isEmpty {
+                            Button(deviceSyncButtonTitle) {
+                                syncSelectedDevicePlaylists(root: rekordboxDeviceRoot)
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .disabled(selectedUSBPlaylistIDs.isEmpty || usbOperation.isActive || !rendersInteractiveControls)
+                        }
+                    }
+                    usbOperationStatus
+                    Divider()
+                    devicePlaylistSelection(inspection)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func storedDevicePlaylists(_ device: RekordboxDeviceState) -> some View {
+        VStack(alignment: .leading, spacing: LumiSpacing.medium) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Synchronized playlists")
+                        .font(LumiTypography.cardTitle)
+                    Text("Stored in Lumi and available while this USB is disconnected")
+                        .font(LumiTypography.caption)
+                        .foregroundStyle(LumiColor.textSecondary)
+                }
+                Spacer()
+                compactStatus("\(device.playlists.count) STORED", device.playlists.isEmpty ? .empty : .ready)
+            }
+            if device.playlists.isEmpty {
+                Label(
+                    "Legacy full-device sync · \(device.activeTracks) track identities are stored, but this older sync did not record playlist names. Reconnect the USB and synchronize selected playlists once to make them available offline.",
+                    systemImage: "externaldrive.badge.questionmark"
+                )
+                .font(LumiTypography.caption)
+                .foregroundStyle(LumiColor.textSecondary)
+                .padding(LumiSpacing.medium)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(LumiColor.surfaceElevated)
+                .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
+            } else {
+                VStack(spacing: LumiSpacing.xSmall) {
+                    ForEach(device.playlists) { playlist in
+                        HStack(spacing: LumiSpacing.medium) {
+                            Image(systemName: "music.note.list")
+                                .foregroundStyle(LumiColor.success)
+                            Text(playlist.name)
+                                .font(LumiTypography.body.weight(.semibold))
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                                .layoutPriority(1)
+                                .help(playlist.name)
+                            Spacer()
+                            compactStatus("SYNCED", .ready)
+                            Text("\(playlist.trackCount) tracks")
+                                .font(LumiTypography.technical)
+                                .foregroundStyle(LumiColor.textSecondary)
+                        }
+                        .padding(.horizontal, LumiSpacing.medium)
+                        .frame(minHeight: 42)
+                        .background(LumiColor.surfaceElevated)
+                        .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var usbOperationStatus: some View {
+        if usbOperation.phase != .idle {
+            HStack(alignment: .top, spacing: LumiSpacing.medium) {
+                if usbOperation.isActive {
+                    ProgressView()
+                        .controlSize(.small)
+                        .padding(.top, 2)
+                } else {
+                    Image(systemName: usbOperation.phase == .failed
+                        ? "exclamationmark.triangle.fill"
+                        : "checkmark.circle.fill")
+                        .foregroundStyle(usbOperation.phase == .failed
+                            ? LumiColor.warning
+                            : LumiColor.success)
+                        .padding(.top, 2)
+                }
+                VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+                    Text(usbOperation.title)
+                        .font(LumiTypography.body.weight(.semibold))
+                    Text(usbOperation.detail)
+                        .font(LumiTypography.caption)
+                        .foregroundStyle(LumiColor.textSecondary)
+                    if usbOperation.isActive {
+                        ProgressView()
+                            .progressViewStyle(.linear)
+                            .accessibilityLabel(usbOperation.title)
+                    } else if usbOperation.phase == .completed {
+                        Text("Completed safely · the USB disk was not modified")
+                            .font(LumiTypography.technical)
+                            .foregroundStyle(LumiColor.success)
+                    }
+                }
+                Spacer()
+            }
+            .padding(LumiSpacing.medium)
+            .background(
+                (usbOperation.phase == .failed ? LumiColor.warning : LumiColor.accent)
+                    .opacity(0.10)
+            )
+            .overlay {
+                RoundedRectangle(cornerRadius: LumiRadius.control)
+                    .stroke(
+                        usbOperation.phase == .failed ? LumiColor.warning : LumiColor.border,
+                        lineWidth: 1
+                    )
+            }
+            .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
+            .accessibilityIdentifier("lumi.library.sources.usb.operation")
+        }
+    }
+
+    private func devicePlaylistSelection(
+        _ inspection: RekordboxDeviceInspectionState
+    ) -> some View {
+        VStack(alignment: .leading, spacing: LumiSpacing.medium) {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Playlists to load into Lumi").font(LumiTypography.cardTitle)
+                    Text("\(inspection.playlistCount) available · \(inspection.trackCount) tracks on USB · \(selectedUSBPlaylistIDs.count) selected")
+                        .font(LumiTypography.technical)
+                        .foregroundStyle(LumiColor.textSecondary)
+                }
+                Spacer()
+                Button("Clear") {
+                    selectedUSBPlaylistIDs.removeAll()
+                    persistDevicePlaylistSelection()
+                }
+                .buttonStyle(.borderless)
+                .disabled(selectedUSBPlaylistIDs.isEmpty)
+                Button("Select All") {
+                    selectedUSBPlaylistIDs = Set(inspection.playlists.map(\.id))
+                    persistDevicePlaylistSelection()
+                }
+                .buttonStyle(.borderless)
+            }
+            TextField("Search playlists", text: $usbPlaylistSearch)
+                .textFieldStyle(.roundedBorder)
+                .accessibilityIdentifier("lumi.library.sources.usb.playlistSearch")
+            selectionImpact(inspection)
+            ScrollView {
+                LazyVStack(spacing: LumiSpacing.xSmall) {
+                    ForEach(filteredDevicePlaylists(inspection)) { playlist in
+                        VStack(spacing: 0) {
+                            HStack(spacing: LumiSpacing.medium) {
+                                Button {
+                                    if selectedUSBPlaylistIDs.contains(playlist.id) {
+                                        selectedUSBPlaylistIDs.remove(playlist.id)
+                                    } else {
+                                        selectedUSBPlaylistIDs.insert(playlist.id)
+                                    }
+                                    persistDevicePlaylistSelection()
+                                } label: {
+                                    Image(systemName: selectedUSBPlaylistIDs.contains(playlist.id) ? "checkmark.square.fill" : "square")
+                                        .foregroundStyle(selectedUSBPlaylistIDs.contains(playlist.id) ? LumiColor.accent : LumiColor.textSecondary)
+                                        .frame(width: 28, height: 40)
+                                        .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                                Button {
+                                    if expandedUSBPlaylistIDs.contains(playlist.id) {
+                                        expandedUSBPlaylistIDs.remove(playlist.id)
+                                    } else {
+                                        expandedUSBPlaylistIDs.insert(playlist.id)
+                                    }
+                                } label: {
+                                    HStack(spacing: LumiSpacing.medium) {
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(playlist.name)
+                                        .font(LumiTypography.body.weight(.semibold))
+                                        .foregroundStyle(LumiColor.textPrimary)
+                                        .lineLimit(1)
+                                        .truncationMode(.middle)
+                                        .help(playlist.name)
+                                    if playlist.path != playlist.name {
+                                        Text(playlist.path)
+                                            .font(LumiTypography.caption)
+                                            .foregroundStyle(LumiColor.textSecondary)
+                                            .lineLimit(1)
+                                            .truncationMode(.middle)
+                                            .help(playlist.path)
+                                    }
+                                    if inspection.selectedPlaylistIDs.contains(playlist.id) {
+                                        Text("Previously synchronized")
+                                            .font(LumiTypography.technical)
+                                            .foregroundStyle(LumiColor.accent)
+                                    }
+                                }
+                                Spacer()
+                                        playlistStatusSummary(playlist.statusCounts)
+                                        Text("\(playlist.trackCount)")
+                                            .font(LumiTypography.technical)
+                                            .foregroundStyle(LumiColor.textSecondary)
+                                        Image(systemName: expandedUSBPlaylistIDs.contains(playlist.id) ? "chevron.down" : "chevron.right")
+                                            .foregroundStyle(LumiColor.textSecondary)
+                                    }
+                                    .contentShape(Rectangle())
+                                }
+                                .buttonStyle(.plain)
+                            }
+                            .padding(.horizontal, LumiSpacing.medium)
+                            .frame(minHeight: 44)
+                            if expandedUSBPlaylistIDs.contains(playlist.id) {
+                                Divider()
+                                LazyVStack(spacing: 0) {
+                                    ForEach(playlist.tracks) { track in
+                                        deviceTrackRow(track)
+                                    }
+                                }
+                                .padding(.leading, 44)
+                            }
+                        }
+                        .background(
+                            selectedUSBPlaylistIDs.contains(playlist.id)
+                                ? LumiColor.accent.opacity(0.10)
+                                : LumiColor.surfaceElevated
+                        )
+                        .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
+                        .accessibilityIdentifier("lumi.library.sources.usb.playlist.\(playlist.id)")
+                    }
+                }
+            }
+            .frame(minHeight: 220, maxHeight: 520)
+            if filteredDevicePlaylists(inspection).isEmpty {
+                Text("No playlists match this search.")
+                    .font(LumiTypography.caption)
+                    .foregroundStyle(LumiColor.textSecondary)
+            }
+            Text("Browse playlists and track status before sync. Only selected playlists are synchronized; duplicate tracks are processed once.")
+                .font(LumiTypography.caption)
+                .foregroundStyle(LumiColor.textSecondary)
+        }
+    }
+
+    @ViewBuilder
+    private func selectionImpact(_ inspection: RekordboxDeviceInspectionState) -> some View {
+        if selectedUSBPlaylistIDs.isEmpty {
+            Label(
+                "Select one or more playlists to calculate their impact before synchronization.",
+                systemImage: "checklist"
+            )
+            .font(LumiTypography.caption)
+            .foregroundStyle(LumiColor.textSecondary)
+            .padding(LumiSpacing.medium)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(LumiColor.surfaceElevated)
+            .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
+        } else {
+            let impact = USBPlaylistSelectionImpact(
+                inspection: inspection,
+                selectedPlaylistIDs: selectedUSBPlaylistIDs
+            )
+            VStack(alignment: .leading, spacing: LumiSpacing.medium) {
+                HStack {
+                    Label("Selection impact", systemImage: "checkmark.shield.fill")
+                        .font(LumiTypography.cardTitle)
+                    Spacer()
+                    Text("ANALYSIS COMPLETE · NO CHANGES APPLIED")
+                        .font(LumiTypography.technical)
+                        .foregroundStyle(LumiColor.success)
+                }
+                HStack(spacing: LumiSpacing.small) {
+                    impactMetric("Selected", impact.uniqueTrackCount, .empty)
+                    impactMetric("New", impact.notInLumiCount, .ready)
+                    impactMetric("Update", impact.usbNewerCount, .ready)
+                    impactMetric("Current", impact.currentCount, .ready)
+                    impactMetric("Protected", impact.usbOutdatedCount, .stale)
+                    impactMetric("Review", impact.conflictCount, .degraded)
+                }
+                Text(
+                    "Sync will add or update \(impact.changedCount) unique track\(impact.changedCount == 1 ? "" : "s"). "
+                        + "\(impact.heldCount) older or incomparable version\(impact.heldCount == 1 ? "" : "s") will be held; Lumi-owned phrases and AutoLoop choices remain unchanged."
+                )
+                .font(LumiTypography.caption)
+                .foregroundStyle(LumiColor.textSecondary)
+            }
+            .padding(LumiSpacing.medium)
+            .background(LumiColor.accent.opacity(0.08))
+            .overlay {
+                RoundedRectangle(cornerRadius: LumiRadius.control)
+                    .stroke(LumiColor.accent.opacity(0.55), lineWidth: 1)
+            }
+            .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
+            .accessibilityIdentifier("lumi.library.sources.usb.selectionImpact")
+        }
+    }
+
+    private func impactMetric(
+        _ title: String,
+        _ value: Int,
+        _ state: LumiComponentState
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title.uppercased())
+                .font(LumiTypography.technical)
+                .foregroundStyle(LumiColor.textSecondary)
+            Text(value.formatted())
+                .font(LumiTypography.body.monospacedDigit().weight(.semibold))
+                .foregroundStyle(value == 0 ? LumiColor.textSecondary : state.color)
+        }
+        .padding(.horizontal, LumiSpacing.medium)
+        .padding(.vertical, LumiSpacing.small)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(LumiColor.surfaceElevated)
+        .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
+    }
+
+    private func playlistStatusSummary(
+        _ counts: RekordboxDeviceStatusCounts
+    ) -> some View {
+        HStack(spacing: LumiSpacing.small) {
+            if counts.current > 0 { compactStatus("\(counts.current) CURRENT", .ready) }
+            if counts.usbNewer > 0 { compactStatus("\(counts.usbNewer) USB NEWER", .ready) }
+            if counts.usbOutdated > 0 { compactStatus("\(counts.usbOutdated) USB OUTDATED", .stale) }
+            if counts.conflict > 0 { compactStatus("\(counts.conflict) REVIEW", .degraded) }
+            if counts.notInLumi > 0 { compactStatus("\(counts.notInLumi) NEW", .empty) }
+        }
+    }
+
+    private func deviceTrackRow(_ track: RekordboxDeviceTrackState) -> some View {
+        HStack(spacing: LumiSpacing.medium) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(track.title)
+                    .font(LumiTypography.body)
+                    .foregroundStyle(LumiColor.textPrimary)
+                Text(track.artist.isEmpty ? "Unknown artist" : track.artist)
+                    .font(LumiTypography.caption)
+                    .foregroundStyle(LumiColor.textSecondary)
+            }
+            Spacer()
+            Text(String(format: "%.2f BPM", Double(track.bpmMilli) / 1_000))
+                .font(LumiTypography.technical)
+                .foregroundStyle(LumiColor.textSecondary)
+                .frame(width: 82, alignment: .trailing)
+            deviceTrackStatus(track.status)
+        }
+        .padding(.horizontal, LumiSpacing.medium)
+        .frame(minHeight: 42)
+        .background(LumiColor.canvas.opacity(0.55))
+        .help(track.detail)
+    }
+
+    @ViewBuilder
+    private func deviceTrackStatus(_ status: String) -> some View {
+        switch status {
+        case "current": compactStatus("CURRENT", .ready)
+        case "usb-newer": compactStatus("USB NEWER", .ready)
+        case "usb-outdated": compactStatus("USB OUTDATED", .stale)
+        case "not-in-lumi": compactStatus("NEW", .empty)
+        default: compactStatus("REVIEW", .degraded)
+        }
+    }
+
+    private var rekordboxDeviceSource: some View {
+        LumiPanel {
+            VStack(alignment: .leading, spacing: LumiSpacing.large) {
+                HStack(alignment: .top, spacing: LumiSpacing.large) {
+                    sourceIcon("externaldrive.fill.badge.checkmark", state: deviceSourceState)
+                    VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+                        HStack {
+                            Text("Rekordbox Device Library")
+                                .font(LumiTypography.cardTitle)
+                            Text("USB / SD · READ ONLY")
+                                .font(LumiTypography.technical)
+                                .padding(.horizontal, 8)
+                                .padding(.vertical, 4)
+                                .background(LumiColor.surfaceElevated)
+                                .clipShape(Capsule())
+                        }
+                        Text(deviceSourceStatus)
+                            .font(LumiTypography.technical)
+                            .foregroundStyle(LumiColor.textSecondary)
+                        Text("Syncs performance identity plus Rekordbox metadata, beatgrid, RGB waveform and analysis revisions. Lumi never writes to or ejects the device.")
+                            .font(LumiTypography.caption)
+                            .foregroundStyle(LumiColor.textSecondary)
+                    }
+                    Spacer()
+                    HStack(spacing: LumiSpacing.small) {
+                        Button(rekordboxDeviceRoot.isEmpty ? "Choose Device…" : "Change Device…") {
+                            chooseRekordboxDevice()
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(!rendersInteractiveControls)
+                        .accessibilityIdentifier("lumi.library.sources.device.choose")
+                        Button("Sync Device") {
+                            onDeviceInspect(rekordboxDeviceRoot)
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(rekordboxDeviceRoot.isEmpty || !rendersInteractiveControls)
+                        .accessibilityIdentifier("lumi.library.sources.device.sync")
+                    }
+                }
+                if !rekordboxDeviceRoot.isEmpty {
+                    Divider()
+                    HStack(spacing: LumiSpacing.large) {
+                        sourceSettingRow(
+                            title: "Selected device",
+                            detail: rekordboxDeviceRoot,
+                            systemImage: "externaldrive"
+                        )
+                        sourceSettingRow(
+                            title: "Refresh policy",
+                            detail: "Metadata, beatgrid and cue revisions on every sync",
+                            systemImage: "arrow.triangle.2.circlepath"
+                        )
+                    }
+                    if let syncFeedback, isDeviceSyncFeedback {
+                        Label(
+                            syncFeedback,
+                            systemImage: syncFeedbackIsError
+                                ? "exclamationmark.triangle.fill"
+                                : "checkmark.shield.fill"
+                        )
+                        .font(LumiTypography.caption)
+                        .foregroundStyle(syncFeedbackIsError ? LumiColor.warning : LumiColor.success)
+                    }
+                    Text("Cue changes already invalidate the stored analysis revision. Cue markers will become visible in a later UI step.")
+                        .font(LumiTypography.caption)
+                        .foregroundStyle(LumiColor.textSecondary)
+                }
+            }
+        }
+        .accessibilityIdentifier("lumi.library.sources.device")
     }
 
     private var header: some View {
         VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-            Text("Sources & Import")
+            Text("Import & Sources")
                 .font(LumiTypography.screenTitle)
-            Text("Connect local music-library sources, inspect import state and configure source-specific initial phrase mapping.")
+            Text("Manage trusted USB sources, safe synchronization and source-specific initial phrase mapping.")
                 .font(LumiTypography.body)
                 .foregroundStyle(LumiColor.textSecondary)
         }
@@ -334,7 +1107,7 @@ public struct LibrarySourcesWorkspaceView: View {
                     }
                     .tint(LumiColor.accent)
                     .accessibilityIdentifier("lumi.library.sources.rekordbox.previewDetailsDisclosure")
-                    if let syncFeedback {
+                    if let syncFeedback, !isDeviceSyncFeedback {
                         Label(syncFeedback, systemImage: "checkmark.shield.fill")
                             .font(LumiTypography.caption)
                             .foregroundStyle(LumiColor.success)
@@ -342,7 +1115,7 @@ public struct LibrarySourcesWorkspaceView: View {
                 }
             }
             .accessibilityIdentifier("lumi.library.sources.rekordbox.syncPreview")
-        } else if let syncFeedback {
+        } else if let syncFeedback, !isDeviceSyncFeedback {
             Label(syncFeedback, systemImage: "exclamationmark.triangle.fill")
                 .font(LumiTypography.caption)
                 .foregroundStyle(LumiColor.warning)
@@ -597,6 +1370,214 @@ public struct LibrarySourcesWorkspaceView: View {
         }
     }
 
+    private var selectedUSBSource: RekordboxDeviceState? {
+        visibleUSBDevices.first { $0.sourceID == selectedUSBSourceID }
+    }
+
+    private var provisionalUSBInspection: RekordboxDeviceInspectionState? {
+        guard let inspection = library.rekordboxDeviceInspection else { return nil }
+        let alreadyTrusted = visibleUSBDevices.contains { $0.sourceID == inspection.sourceID }
+        return alreadyTrusted ? nil : inspection
+    }
+
+    private var hasExpandedUSBSourceLane: Bool {
+        guard let selectedUSBSourceID else { return false }
+        return visibleUSBDevices.contains { $0.sourceID == selectedUSBSourceID }
+            || provisionalUSBInspection?.sourceID == selectedUSBSourceID
+    }
+
+    private var deviceSyncButtonTitle: String {
+        if usbOperation.phase == .synchronizing { return "Synchronizing…" }
+        return "Sync \(selectedUSBPlaylistIDs.count) Playlist\(selectedUSBPlaylistIDs.count == 1 ? "" : "s")"
+    }
+
+    private var visibleUSBDevices: [RekordboxDeviceState] {
+        let stableDevices = library.rekordboxDevices.filter {
+            !$0.sourceID.hasPrefix("usb-volume:")
+        }
+        let stableKeys = Set(stableDevices.map(deviceIdentityKey))
+        var newestLegacyByKey: [String: RekordboxDeviceState] = [:]
+        for device in library.rekordboxDevices where device.sourceID.hasPrefix("usb-volume:") {
+            let key = deviceIdentityKey(device)
+            guard !stableKeys.contains(key) else { continue }
+            if let current = newestLegacyByKey[key], current.syncedAt >= device.syncedAt {
+                continue
+            }
+            newestLegacyByKey[key] = device
+        }
+        return (stableDevices + newestLegacyByKey.values).sorted {
+            if $0.displayName == $1.displayName { return $0.sourceID < $1.sourceID }
+            return $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending
+        }
+    }
+
+    private func deviceIdentityKey(_ device: RekordboxDeviceState) -> String {
+        "\(device.displayName.lowercased())|\(device.databaseRevision)"
+    }
+
+    private var activeDeviceInspection: RekordboxDeviceInspectionState? {
+        guard let inspection = library.rekordboxDeviceInspection else { return nil }
+        if inspection.sourceID == selectedUSBSourceID { return inspection }
+        guard let selectedUSBSource else { return nil }
+        guard USBSourceIdentityResolver.inspection(inspection, matches: selectedUSBSource) else {
+            return nil
+        }
+        return inspection
+    }
+
+    private func filteredDevicePlaylists(
+        _ inspection: RekordboxDeviceInspectionState
+    ) -> [RekordboxDevicePlaylistState] {
+        let query = usbPlaylistSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty else { return inspection.playlists }
+        return inspection.playlists.filter {
+            $0.path.localizedCaseInsensitiveContains(query)
+                || $0.name.localizedCaseInsensitiveContains(query)
+        }
+    }
+
+    private func restoreDevicePlaylistSelection() {
+        guard let sourceID = selectedUSBSourceID else {
+            selectedUSBPlaylistIDs = []
+            return
+        }
+        let storedSelections = decodedDevicePlaylistSelections()[sourceID]
+        let stored = storedSelections ?? activeDeviceInspection?.selectedPlaylistIDs ?? []
+        if let inspection = activeDeviceInspection {
+            let available = Set(inspection.playlists.map(\.id))
+            selectedUSBPlaylistIDs = Set(stored).intersection(available)
+        } else {
+            selectedUSBPlaylistIDs = Set(stored)
+        }
+    }
+
+    private func persistDevicePlaylistSelection() {
+        guard let sourceID = selectedUSBSourceID else { return }
+        var selections = decodedDevicePlaylistSelections()
+        selections[sourceID] = selectedUSBPlaylistIDs.sorted()
+        guard let data = try? JSONEncoder().encode(selections),
+              let encoded = String(data: data, encoding: .utf8) else { return }
+        devicePlaylistSelectionsJSON = encoded
+    }
+
+    private func decodedDevicePlaylistSelections() -> [String: [UInt32]] {
+        guard let data = devicePlaylistSelectionsJSON.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode([String: [UInt32]].self, from: data) else {
+            return [:]
+        }
+        return decoded
+    }
+
+    private func syncSelectedDevicePlaylists(root: String) {
+        guard !selectedUSBPlaylistIDs.isEmpty else { return }
+        persistDevicePlaylistSelection()
+        onDeviceSync(root, selectedUSBPlaylistIDs.sorted())
+    }
+
+    private var mountedTrustedSources: [RekordboxDeviceState] {
+        _ = mountRevision
+        return visibleUSBDevices.filter { mountedURL(for: $0) != nil }
+    }
+
+    private func inspectFirstMountedTrustedSource() {
+        guard usbOperation.phase == .idle,
+              let device = visibleUSBDevices.first(where: { mountedURL(for: $0) != nil }),
+              let url = mountedURL(for: device) else { return }
+        selectedUSBSourceID = device.sourceID
+        rekordboxDeviceRoot = url.path
+        onDeviceInspect(url.path)
+    }
+
+    private func inspectMountedTrustedSource(_ url: URL) {
+        guard FileManager.default.fileExists(
+            atPath: url.appendingPathComponent("PIONEER/rekordbox/exportLibrary.db").path
+        ) else { return }
+        let volume = mountedIdentity(url)
+        guard let sourceID = USBSourceIdentityResolver.selectedSourceID(
+            for: volume,
+            devices: visibleUSBDevices
+        ), let device = visibleUSBDevices.first(where: { $0.sourceID == sourceID }) else {
+            return
+        }
+        selectedUSBSourceID = device.sourceID
+        rekordboxDeviceRoot = url.path
+        onDeviceInspect(url.path)
+    }
+
+    private var overallUSBState: LumiComponentState {
+        if visibleUSBDevices.contains(where: { $0.conflictTracks > 0 }) { return .degraded }
+        if !mountedTrustedSources.isEmpty { return .ready }
+        return visibleUSBDevices.isEmpty ? .empty : .stale
+    }
+
+    private func mountedURL(for device: RekordboxDeviceState) -> URL? {
+        FileManager.default.mountedVolumeURLs(
+            includingResourceValuesForKeys: [.volumeNameKey],
+            options: [.skipHiddenVolumes]
+        )?.first { url in
+            return USBSourceIdentityResolver.volume(mountedIdentity(url), matches: device)
+                && FileManager.default.fileExists(
+                    atPath: url.appendingPathComponent("PIONEER/rekordbox/exportLibrary.db").path
+                )
+        }
+    }
+
+    private func volumeSourceID(_ url: URL) -> String? {
+        guard let stable = try? url.resourceValues(forKeys: [.volumeUUIDStringKey]).volumeUUIDString,
+              !stable.isEmpty else { return nil }
+        return "usb-fs:\(stable.lowercased())"
+    }
+
+    private func mountedIdentity(_ url: URL) -> MountedUSBIdentity {
+        MountedUSBIdentity(
+            sourceID: volumeSourceID(url),
+            displayName: volumeDisplayName(url)
+        )
+    }
+
+    private func deviceSyncState(_ device: RekordboxDeviceState) -> LumiComponentState {
+        if device.conflictTracks > 0 { return .degraded }
+        if device.protectedTracks > 0 { return .stale }
+        return .ready
+    }
+
+    private func deviceSyncLabel(_ device: RekordboxDeviceState) -> String {
+        if device.conflictTracks > 0 { return "REVIEW" }
+        if device.protectedTracks > 0 { return "OLDER HELD" }
+        return "CURRENT"
+    }
+
+    private func compactStatus(_ label: String, _ state: LumiComponentState) -> some View {
+        HStack(spacing: 6) {
+            Circle().fill(state.color).frame(width: 7, height: 7)
+            Text(label).font(LumiTypography.technical)
+        }
+        .foregroundStyle(state.color)
+        .padding(.horizontal, 9)
+        .padding(.vertical, 5)
+        .background(state.color.opacity(0.1))
+        .clipShape(Capsule())
+    }
+
+    private func metric(_ title: String, _ value: UInt64) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text("\(value)").font(LumiTypography.cardTitle)
+            Text(title.uppercased())
+                .font(LumiTypography.technical)
+                .foregroundStyle(LumiColor.textSecondary)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func shortRevision(_ revision: String) -> String {
+        revision.count > 14 ? "\(revision.prefix(12))…" : revision
+    }
+
+    private func formattedSyncDate(_ value: String) -> String {
+        guard value != "Unknown" else { return value }
+        return value.replacingOccurrences(of: "T", with: " ").replacingOccurrences(of: "Z", with: "")
+    }
+
     private var rekordboxSourceStatus: String {
         if isScanning { return "Scanning import folder read-only…" }
         if let sourceError { return sourceError }
@@ -604,6 +1585,35 @@ public struct LibrarySourcesWorkspaceView: View {
             return rekordboxFolderPath.isEmpty ? "Not configured" : "Configured · no valid export loaded"
         }
         return "Ready · \(discovery.export.fileName) · \(availableExportCount) XML export\(availableExportCount == 1 ? "" : "s") found"
+    }
+
+    private var selectedDeviceSummary: RekordboxDeviceState? {
+        guard !rekordboxDeviceRoot.isEmpty else { return nil }
+        let volume = mountedIdentity(URL(fileURLWithPath: rekordboxDeviceRoot, isDirectory: true))
+        guard let sourceID = USBSourceIdentityResolver.selectedSourceID(
+            for: volume,
+            devices: visibleUSBDevices
+        ) else { return nil }
+        return visibleUSBDevices.first { $0.sourceID == sourceID }
+    }
+
+    private var isDeviceSyncFeedback: Bool {
+        guard let feedback = syncFeedback?.lowercased() else { return false }
+        return feedback.contains("device") || feedback.contains("usb")
+    }
+
+    private var deviceSourceState: LumiComponentState {
+        if selectedDeviceSummary != nil { return .ready }
+        return rekordboxDeviceRoot.isEmpty ? .empty : .stale
+    }
+
+    private var deviceSourceStatus: String {
+        guard let device = selectedDeviceSummary else {
+            return rekordboxDeviceRoot.isEmpty
+                ? "Not configured"
+                : "Configured · sync required"
+        }
+        return "Ready · \(device.displayName) · \(device.matchedTracks)/\(device.activeTracks) tracks matched · \(device.unmatchedTracks) held"
     }
 
     private var currentSyncRequest: RekordboxXMLSyncPreviewRequest {
@@ -696,6 +1706,54 @@ public struct LibrarySourcesWorkspaceView: View {
         discovery = nil
         sourceError = nil
         scanImportFolder()
+    }
+
+    private func chooseRekordboxDevice() {
+        let choices = mountedRekordboxUSBs()
+        usbSelectionFeedback = nil
+        guard !choices.isEmpty else {
+            usbSelectionFeedback = "No connected Rekordbox OneLibrary USB source was found. Connect the USB and try again."
+            return
+        }
+        guard choices.count > 1 else {
+            inspectRekordboxDevice(at: choices[0])
+            return
+        }
+        mountedUSBChoices = choices
+        isUSBSourceChoicePresented = true
+    }
+
+    private func inspectRekordboxDevice(at url: URL) {
+        usbSelectionFeedback = nil
+        rekordboxDeviceRoot = url.path
+        selectedUSBSourceID = USBSourceIdentityResolver.selectedSourceID(
+            for: mountedIdentity(url),
+            devices: visibleUSBDevices
+        )
+        selectedUSBPlaylistIDs = []
+        usbPlaylistSearch = ""
+        onDeviceInspect(url.path)
+    }
+
+    private func mountedRekordboxUSBs() -> [URL] {
+        FileManager.default.mountedVolumeURLs(
+            includingResourceValuesForKeys: [.volumeNameKey],
+            options: [.skipHiddenVolumes]
+        )?
+        .filter {
+            FileManager.default.fileExists(
+                atPath: $0.appendingPathComponent("PIONEER/rekordbox/exportLibrary.db").path
+            )
+        }
+        .sorted {
+            volumeDisplayName($0).localizedCaseInsensitiveCompare(volumeDisplayName($1))
+                == .orderedAscending
+        } ?? []
+    }
+
+    private func volumeDisplayName(_ url: URL) -> String {
+        (try? url.resourceValues(forKeys: [.volumeNameKey]).volumeName)
+            ?? url.lastPathComponent
     }
 
     private func scanImportFolder(previewAfterScan: Bool = false) {

@@ -5,7 +5,7 @@ struct LiveDeckVisualTimeline: Sendable {
         trackLoadID: UInt64,
         durationBeats: UInt64,
         fallbackBeat: Double,
-        visualClock: LocalPlaybackVisualClockSnapshot?,
+        visualClock: DeckVisualClockSnapshot?,
         beatGrid: LiveBeatGridTimeline?,
         at date: Date
     ) -> Double {

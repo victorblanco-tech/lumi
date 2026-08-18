@@ -4,6 +4,24 @@ Status: **Local Playback product slice user-accepted; BLT MIDI adapter functiona
 
 Target milestone: **0.2.0 – Deck Intelligence**
 
+## 2026-08-10 — OneLibrary USB foundation
+
+- [x] Define a read-only OneLibrary adapter and persistent performance aliases.
+- [x] Browse playlists and track-level freshness before an explicit sync.
+- [x] Restore selected playlist subscriptions by their complete folder path.
+- [x] Refresh metadata, beatgrid, RGB waveform and cue-bearing analysis
+  revisions on every explicit device sync.
+- [x] Preserve Lumi-owned phrases and AutoLoop choices during that refresh.
+- [x] Extend the BLT frame for deterministic Shallow Simulator identity without
+  changing BLT itself.
+- [x] Hydrate a matched Connected Deck from the canonical Library timeline;
+  unmatched and ambiguous tracks remain `AUTO HELD`.
+- [x] Add Sources & Import device selection, sync and match diagnostics.
+- [ ] Validate a full track through BLT simulation and Local/Connected Deck
+  lighting output using the same canonical track.
+- [x] Parse and display Rekordbox hot-cue markers from the tracked analysis
+  revision with their source letter, name, loop state and RGB color.
+
 ## Product outcome
 
 Lumi presents a fixed, CDJ-recognizable Deck A/B workspace. The master role,
@@ -20,6 +38,9 @@ current Live track.
   Off is white, Armed is orange, Live is red and Paused blinks orange.
 - The master card is visually dominant; `PLAN READY` is deliberately quieter.
 - Both cards show an RGB waveform, beatgrid, playhead and phrase band.
+- Both cards show subtle source-colored hot-cue markers and a compact
+  letter/name strip; Local Playback may seek to one while Live Decks remains
+  read-only and follows the physical player.
 - Editor and Live share one continuous beat-space interaction model: slider,
   vertical wheel/pinch zoom, horizontal pan, mouse/playhead zoom anchor and
   optional reversed horizontal scrolling. Phrase bands stay aligned while

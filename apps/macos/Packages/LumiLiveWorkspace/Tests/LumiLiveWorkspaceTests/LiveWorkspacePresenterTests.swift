@@ -5,6 +5,23 @@ import Testing
 
 @Suite("Live workspace presentation")
 struct LiveWorkspacePresenterTests {
+    @Test("Mounted USB inspection snapshot preserves the live workspace")
+    func mountedUSBInspectionSnapshotDecodesWhenProvided() throws {
+        guard let envelopePath = ProcessInfo.processInfo.environment[
+            "LUMI_TEST_USB_ENVELOPE"
+        ] else {
+            return
+        }
+        let data = try Data(contentsOf: URL(fileURLWithPath: envelopePath))
+        let envelope = try JSONDecoder().decode(MessageEnvelope.self, from: data)
+        let snapshot = try EngineSnapshotDecoder().decode(
+            envelope,
+            endpointDescription: "127.0.0.1:1",
+            protocolVersion: 1
+        )
+        #expect(snapshot.snapshotSequence > 0)
+    }
+
     @Test("Operation status drives one shared Master and control presentation")
     func operationStatusPresentationIsConsistent() {
         #expect(LiveOperationStatus(engineState: "off") == .off)
@@ -64,9 +81,239 @@ struct LiveWorkspacePresenterTests {
         #expect(state.output.condition == .ready)
         #expect(state.lightingMidi.condition == .ready)
         #expect(state.playbackClock.condition == .ready)
+        #expect(state.content?.abletonLinkEnabled == true)
+        #expect(snapshot.abletonLinkIntegration?.provider == "Carabiner")
+        #expect(snapshot.abletonLinkIntegration?.source == "localPlayback")
+        #expect(snapshot.abletonLinkIntegration?.lastBeatAgeMillis == 4)
+        #expect(snapshot.abletonLinkIntegration?.lastReanchor == "started")
         #expect(snapshot.midiIntegration?.autoPublishEnabled == true)
         #expect(snapshot.midiIntegration?.timingOffsetMillis == 0)
         #expect(state.planner.condition == .ready)
+    }
+
+    @Test("Connected decks preserve Rekordbox hot-cue letters, names, loops, and colors")
+    func connectedDeckHotCuesDecode() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case var .array(decks) = payload["decks"],
+              !decks.isEmpty,
+              case var .object(deck) = decks[0],
+              case var .object(track) = deck["track"] else {
+            Issue.record("Recorded fixture must contain Deck A track data")
+            return
+        }
+        track["hotCues"] = .array([
+            .object([
+                "index": .number(1),
+                "timeMillis": .number(8_000),
+                "loopEndMillis": .null,
+                "name": .string("First drop"),
+                "colorRgb": .number(0xFF4A4A)
+            ]),
+            .object([
+                "index": .number(3),
+                "timeMillis": .number(16_000),
+                "loopEndMillis": .number(18_000),
+                "name": .string("Outro loop"),
+                "colorRgb": .number(0x45D483)
+            ])
+        ])
+        deck["track"] = .object(track)
+        decks[0] = .object(deck)
+        payload["decks"] = .array(decks)
+
+        let snapshot = try EngineSnapshotDecoder().decode(
+            MessageEnvelope(
+                protocolVersion: recorded.protocolVersion,
+                messageType: recorded.messageType,
+                messageId: recorded.messageId,
+                sequence: recorded.sequence,
+                correlationId: recorded.correlationId,
+                sentAt: recorded.sentAt,
+                payload: payload
+            ),
+            endpointDescription: "127.0.0.1:52841",
+            protocolVersion: 1
+        )
+
+        #expect(snapshot.decks[0].hotCues.map(\.letter) == ["A", "C"])
+        #expect(snapshot.decks[0].hotCues.map(\.name) == ["First drop", "Outro loop"])
+        #expect(snapshot.decks[0].hotCues.map(\.colorRGB) == [0xFF4A4A, 0x45D483])
+        #expect(snapshot.decks[0].hotCues[1].loopEndMillis == 18_000)
+    }
+
+    @Test("Disabled Ableton Link is informational and never degrades Live")
+    func disabledAbletonLinkIsNotAProblem() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case var .object(link) = payload["abletonLinkIntegration"] else {
+            Issue.record("Recorded fixture has no Ableton Link status")
+            return
+        }
+        link["enabled"] = .boolean(false)
+        link["state"] = .string("stopped")
+        link["lastError"] = .null
+        payload["abletonLinkIntegration"] = .object(link)
+        let snapshot = try EngineSnapshotDecoder().decode(
+            MessageEnvelope(
+                protocolVersion: recorded.protocolVersion,
+                messageType: recorded.messageType,
+                messageId: recorded.messageId,
+                sequence: recorded.sequence,
+                correlationId: recorded.correlationId,
+                sentAt: recorded.sentAt,
+                payload: payload
+            ),
+            endpointDescription: "127.0.0.1:52841",
+            protocolVersion: 1
+        )
+
+        let state = LiveWorkspacePresenter.ready(snapshot)
+
+        #expect(state.condition == .ready)
+        #expect(state.playbackClock.condition == .empty)
+        #expect(state.playbackClock.detail == "Off")
+        #expect(state.content?.abletonLinkEnabled == false)
+    }
+
+    @Test("An intentionally disabled Light Output is informational")
+    func disabledLightOutputIsNotAProblem() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case var .object(midi) = payload["midiIntegration"] else {
+            Issue.record("Recorded fixture has no lighting MIDI status")
+            return
+        }
+        midi["state"] = .string("stopped")
+        midi["autoPublishEnabled"] = .boolean(false)
+        midi["lastError"] = .null
+        payload["midiIntegration"] = .object(midi)
+        let snapshot = try EngineSnapshotDecoder().decode(
+            MessageEnvelope(
+                protocolVersion: recorded.protocolVersion,
+                messageType: recorded.messageType,
+                messageId: recorded.messageId,
+                sequence: recorded.sequence,
+                correlationId: recorded.correlationId,
+                sentAt: recorded.sentAt,
+                payload: payload
+            ),
+            endpointDescription: "127.0.0.1:52841",
+            protocolVersion: 1
+        )
+
+        let state = LiveWorkspacePresenter.ready(snapshot)
+
+        #expect(state.condition == .ready)
+        #expect(state.lightingMidi.condition == .empty)
+    }
+
+    @Test("Realtime lighting saturation degrades Live tech readiness")
+    func realtimeLightingSaturationDegradesReadiness() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case var .object(midi) = payload["midiIntegration"] else {
+            Issue.record("Recorded fixture has no lighting MIDI status")
+            return
+        }
+        midi["realtimeScheduler"] = .object([
+            "lane": .object([
+                "queueCapacity": .number(64),
+                "queueDepth": .number(64),
+                "queueHighWater": .number(64),
+                "saturationCount": .number(1),
+                "latencySampleCount": .number(20),
+                "latencyP95Micros": .number(2_000)
+            ])
+        ])
+        payload["midiIntegration"] = .object(midi)
+        let snapshot = try EngineSnapshotDecoder().decode(
+            MessageEnvelope(
+                protocolVersion: recorded.protocolVersion,
+                messageType: recorded.messageType,
+                messageId: recorded.messageId,
+                sequence: recorded.sequence,
+                correlationId: recorded.correlationId,
+                sentAt: recorded.sentAt,
+                payload: payload
+            ),
+            endpointDescription: "127.0.0.1:52841",
+            protocolVersion: 1
+        )
+
+        let state = LiveWorkspacePresenter.ready(snapshot)
+        #expect(snapshot.midiIntegration?.realtimeLane?.isHealthy == false)
+        #expect(state.lightingMidi.condition == .degraded)
+    }
+
+    @Test("No loaded deck is an empty workspace, not a provider failure")
+    func emptyDecksAreNotAProblem() {
+        let recorded = LiveWorkspaceFixtures.readySnapshot
+        let empty = EngineSnapshot(
+            endpoint: recorded.endpoint,
+            engineVersion: recorded.engineVersion,
+            protocolVersion: recorded.protocolVersion,
+            snapshotSequence: recorded.snapshotSequence,
+            stateRevision: recorded.stateRevision,
+            operationState: recorded.operationState,
+            runtime: recorded.runtime,
+            deckSource: recorded.deckSource,
+            midiIntegration: recorded.midiIntegration,
+            midiClockIntegration: recorded.midiClockIntegration,
+            abletonLinkIntegration: recorded.abletonLinkIntegration,
+            simulation: recorded.simulation,
+            outputProvider: recorded.outputProvider,
+            leaderDeckID: nil,
+            decks: [],
+            livePlan: nil,
+            nextPlan: nil,
+            planningOptions: recorded.planningOptions,
+            timeline: recorded.timeline
+        )
+
+        let state = LiveWorkspacePresenter.ready(empty)
+
+        #expect(state.condition == .empty)
+        #expect(state.source.condition == .empty)
+        #expect(state.lightingMidi.condition == .ready)
+        #expect(state.playbackClock.condition == .ready)
+    }
+
+    @Test("Live timing distinguishes the saved value from a pending value")
+    func pendingTimingIsPresentedWithoutReplacingAppliedTiming() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case var .object(midi) = payload["midiIntegration"] else {
+            Issue.record("Recorded fixture has no lighting MIDI status")
+            return
+        }
+        midi["timingOffsetMillis"] = .number(0)
+        midi["pendingTimingOffsetMillis"] = .number(20)
+        payload["midiIntegration"] = .object(midi)
+        let envelope = MessageEnvelope(
+            protocolVersion: recorded.protocolVersion,
+            messageType: recorded.messageType,
+            messageId: recorded.messageId,
+            sequence: recorded.sequence,
+            correlationId: recorded.correlationId,
+            sentAt: recorded.sentAt,
+            payload: payload
+        )
+
+        let snapshot = try EngineSnapshotDecoder().decode(
+            envelope,
+            endpointDescription: "127.0.0.1:52841",
+            protocolVersion: 1
+        )
+        let state = LiveWorkspacePresenter.ready(snapshot)
+
+        #expect(snapshot.midiIntegration?.timingOffsetMillis == 0)
+        #expect(snapshot.midiIntegration?.pendingTimingOffsetMillis == 20)
+        #expect(state.content?.lightingTimingOffsetMillis == 0)
+        #expect(state.content?.pendingLightingTimingOffsetMillis == 20)
+        #expect(state.lightingMidi.detail.contains("+0 ms saved"))
+        #expect(state.lightingMidi.detail.contains("+20 ms pending for next phrase"))
+        #expect(state.lightingMidi.detail.contains("phrase-boundary output"))
     }
 
     @Test("Tech degrades when the lighting MIDI source is unavailable")
@@ -102,6 +349,37 @@ struct LiveWorkspacePresenterTests {
         #expect(state.lightingMidi.detail.contains("CoreMIDI source unavailable"))
     }
 
+    @Test("A duplicate Lumi MIDI owner is presented as an actionable user problem")
+    func duplicateMidiOwnerIsActionable() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case var .object(midi) = payload["midiIntegration"] else {
+            Issue.record("Recorded fixture has no lighting MIDI status")
+            return
+        }
+        midi["state"] = .string("stopped")
+        midi["lastError"] = .string("CoreMIDI failed: CoreMIDI unique ID collision")
+        payload["midiIntegration"] = .object(midi)
+        let snapshot = try EngineSnapshotDecoder().decode(
+            MessageEnvelope(
+                protocolVersion: recorded.protocolVersion,
+                messageType: recorded.messageType,
+                messageId: recorded.messageId,
+                sequence: recorded.sequence,
+                correlationId: recorded.correlationId,
+                sentAt: recorded.sentAt,
+                payload: payload
+            ),
+            endpointDescription: "127.0.0.1:52841",
+            protocolVersion: 1
+        )
+
+        let state = LiveWorkspacePresenter.ready(snapshot)
+
+        #expect(state.lightingMidi.condition == .degraded)
+        #expect(state.lightingMidi.detail == "Another Lumi version is using Light Output · close it and restart this app")
+    }
+
     @Test("Physical Deck A and B ordering remains stable when Deck B becomes master")
     func stableDeckOrderingSurvivesMasterChange() {
         let snapshot = LiveWorkspaceFixtures.readySnapshot
@@ -116,6 +394,7 @@ struct LiveWorkspacePresenterTests {
             deckSource: snapshot.deckSource,
             midiIntegration: snapshot.midiIntegration,
             midiClockIntegration: snapshot.midiClockIntegration,
+            abletonLinkIntegration: snapshot.abletonLinkIntegration,
             simulation: snapshot.simulation,
             outputProvider: snapshot.outputProvider,
             leaderDeckID: 2,
@@ -190,24 +469,110 @@ struct LiveWorkspacePresenterTests {
 
     @Test("Local visual clock advances independently and clamps at track end")
     func localVisualClockAdvancesSmoothly() {
-        let playing = LocalPlaybackVisualClockSnapshot(
+        let playing = DeckVisualClockSnapshot(
             trackLoadID: 7,
             positionMillis: 1_000,
             durationMillis: 4_000,
             playing: true,
             anchoredAtReferenceTime: 100
         )
-        let paused = LocalPlaybackVisualClockSnapshot(
+        let paused = DeckVisualClockSnapshot(
             trackLoadID: 7,
             positionMillis: 1_000,
             durationMillis: 4_000,
             playing: false,
             anchoredAtReferenceTime: 100
         )
+        let pitched = DeckVisualClockSnapshot(
+            trackLoadID: 7,
+            positionMillis: 1_000,
+            durationMillis: 4_000,
+            playing: true,
+            anchoredAtReferenceTime: 100,
+            playbackRate: 1.1
+        )
 
         #expect(playing.positionMillis(at: Date(timeIntervalSinceReferenceDate: 101.25)) == 2_250)
         #expect(playing.positionMillis(at: Date(timeIntervalSinceReferenceDate: 110)) == 4_000)
         #expect(paused.positionMillis(at: Date(timeIntervalSinceReferenceDate: 110)) == 1_000)
+        #expect(pitched.positionMillis(at: Date(timeIntervalSinceReferenceDate: 101)) == 2_100)
+    }
+
+    @Test("Connected visual clock survives equivalent playing and paused deck polls")
+    func connectedVisualClockSuppressesEquivalentPolls() {
+        let playing = DeckVisualClockSnapshot(
+            trackLoadID: 7,
+            positionMillis: 1_000,
+            durationMillis: 10_000,
+            playing: true,
+            anchoredAtReferenceTime: 100,
+            playbackRate: 1.1,
+            discontinuityRevision: 3
+        )
+        #expect(playing.remainsValid(
+            trackLoadID: 7,
+            positionMillis: 2_110,
+            durationMillis: 10_000,
+            playing: true,
+            playbackRate: 1.1,
+            discontinuityRevision: 3,
+            at: 101
+        ))
+        #expect(!playing.remainsValid(
+            trackLoadID: 7,
+            positionMillis: 3_000,
+            durationMillis: 10_000,
+            playing: true,
+            playbackRate: 1.1,
+            discontinuityRevision: 3,
+            at: 101
+        ), "a forward authoritative drift beyond 250 ms must refresh the clock")
+        #expect(playing.remainsValid(
+            trackLoadID: 7,
+            positionMillis: 250,
+            durationMillis: 10_000,
+            playing: true,
+            playbackRate: 1.1,
+            discontinuityRevision: 3,
+            at: 103
+        ))
+        #expect(!playing.remainsValid(
+            trackLoadID: 7,
+            positionMillis: 250,
+            durationMillis: 10_000,
+            playing: true,
+            playbackRate: 1.1,
+            discontinuityRevision: 4,
+            at: 103
+        ))
+
+        let paused = DeckVisualClockSnapshot(
+            trackLoadID: 7,
+            positionMillis: 4_000,
+            durationMillis: 10_000,
+            playing: false,
+            anchoredAtReferenceTime: 100,
+            playbackRate: 1.1,
+            discontinuityRevision: 4
+        )
+        #expect(paused.remainsValid(
+            trackLoadID: 7,
+            positionMillis: 4_000,
+            durationMillis: 10_000,
+            playing: false,
+            playbackRate: 1.1,
+            discontinuityRevision: 4,
+            at: 200
+        ))
+        #expect(!paused.remainsValid(
+            trackLoadID: 7,
+            positionMillis: 4_001,
+            durationMillis: 10_000,
+            playing: false,
+            playbackRate: 1.1,
+            discontinuityRevision: 4,
+            at: 200
+        ))
     }
 
     @Test("Live waveform motion keeps a constant fixed playhead while the waveform scrolls")
@@ -253,7 +618,7 @@ struct LiveWorkspacePresenterTests {
             timesMillis: [60, 447, 901, 1_300]
         )
         let timeline = try #require(LiveBeatGridTimeline(grid: grid, totalBeats: 4))
-        let clock = LocalPlaybackVisualClockSnapshot(
+        let clock = DeckVisualClockSnapshot(
             trackLoadID: 7,
             positionMillis: 447,
             durationMillis: 1_250,
@@ -322,6 +687,37 @@ struct LiveWorkspacePresenterTests {
         #expect(snapshot.decks[0].beatGrid?.timesMillis == [60, 447, 901, 1_300])
     }
 
+    @Test("Recorded Live decks decode transport discontinuity revisions")
+    func liveDeckDecodesTransportRevision() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case var .array(decks) = payload["decks"],
+              case var .object(deck) = decks[0] else {
+            Issue.record("Recorded deck fixture is malformed")
+            return
+        }
+        deck["transportRevision"] = .number(42)
+        decks[0] = .object(deck)
+        payload["decks"] = .array(decks)
+        let envelope = MessageEnvelope(
+            protocolVersion: recorded.protocolVersion,
+            messageType: recorded.messageType,
+            messageId: recorded.messageId,
+            sequence: recorded.sequence,
+            correlationId: recorded.correlationId,
+            sentAt: recorded.sentAt,
+            payload: payload
+        )
+
+        let snapshot = try EngineSnapshotDecoder().decode(
+            envelope,
+            endpointDescription: "127.0.0.1:52841",
+            protocolVersion: 1
+        )
+
+        #expect(snapshot.decks[0].transportRevision == 42)
+    }
+
     @Test("Recorded Live decks accept a final Rekordbox marker past the audio duration")
     func liveDeckAcceptsRekordboxTrailingBeatMarker() throws {
         let recorded = try recordedEnvelope()
@@ -362,7 +758,7 @@ struct LiveWorkspacePresenterTests {
 
     @Test("Authoritative playback clock prevents poll snapshots from restarting waveform motion")
     func playbackClockKeepsWaveformAnimationIdentityStable() {
-        let clock = LocalPlaybackVisualClockSnapshot(
+        let clock = DeckVisualClockSnapshot(
             trackLoadID: 7,
             positionMillis: 1_000,
             durationMillis: 120_000,
@@ -389,6 +785,48 @@ struct LiveWorkspacePresenterTests {
         )
 
         #expect(first.animationIdentity == nextPoll.animationIdentity)
+    }
+
+    @Test("Transport discontinuities restart waveform motion at the authoritative position")
+    func transportDiscontinuityRestartsWaveformMotion() {
+        let beforeSeek = DeckVisualClockSnapshot(
+            trackLoadID: 7,
+            positionMillis: 118_000,
+            durationMillis: 120_000,
+            playing: true,
+            anchoredAtReferenceTime: 100,
+            discontinuityRevision: 11
+        )
+        let afterSeek = DeckVisualClockSnapshot(
+            trackLoadID: 7,
+            positionMillis: 1_000,
+            durationMillis: 120_000,
+            playing: true,
+            anchoredAtReferenceTime: 101,
+            discontinuityRevision: 12
+        )
+        let before = LiveWaveformMotionPlan(
+            waveformID: 7,
+            totalBeats: 512,
+            viewportStartBeat: 352,
+            visibleBeats: 160,
+            followsLiveViewport: true,
+            fallbackPlayheadBeat: 500,
+            visualClock: beforeSeek
+        )
+        let after = LiveWaveformMotionPlan(
+            waveformID: 7,
+            totalBeats: 512,
+            viewportStartBeat: 352,
+            visibleBeats: 160,
+            followsLiveViewport: true,
+            fallbackPlayheadBeat: 4,
+            visualClock: afterSeek
+        )
+
+        #expect(before.animationIdentity != after.animationIdentity)
+        #expect(after.playheadBeat(at: Date(timeIntervalSinceReferenceDate: 101)) < 10)
+        #expect(after.startBeat(for: 4) == 0)
     }
 
     @Test("One-time library waveform detail accepts the full high-resolution payload")
@@ -454,6 +892,85 @@ struct LiveWorkspacePresenterTests {
         #expect(abs(viewport.x(forBeat: 400, width: 800) - 176) < 0.001)
     }
 
+    @Test("Manual horizontal navigation suspends Live follow without losing the rendered position")
+    func manualHorizontalNavigationSuspendsLiveFollow() {
+        let renderedViewport = LiveDeckViewportPolicy.live(
+            playheadBeat: 400,
+            totalBeats: 1_024,
+            visibleBeats: 160
+        )
+        let navigation = LiveDeckViewportPolicy.manualPan(
+            renderedViewport: renderedViewport,
+            deltaPixels: 100,
+            width: 1_000,
+            reversesDirection: false
+        )
+
+        #expect(navigation.usesLiveViewport == false)
+        #expect(navigation.viewport.visibleBeats == 160)
+        #expect(abs(navigation.viewport.startBeat - (renderedViewport.startBeat + 16)) < 0.001)
+    }
+
+    @Test("A Live horizontal gesture accumulates from the prior manual viewport")
+    func manualHorizontalNavigationAccumulates() {
+        let liveViewport = LiveDeckViewportPolicy.live(
+            playheadBeat: 400,
+            totalBeats: 1_024,
+            visibleBeats: 160
+        )
+        let first = LiveDeckViewportPolicy.manualPan(
+            renderedViewport: liveViewport,
+            deltaPixels: 50,
+            width: 1_000,
+            reversesDirection: false
+        )
+        let second = LiveDeckViewportPolicy.manualPan(
+            renderedViewport: first.viewport,
+            deltaPixels: 50,
+            width: 1_000,
+            reversesDirection: false
+        )
+
+        #expect(first.usesLiveViewport == false)
+        #expect(second.usesLiveViewport == false)
+        #expect(abs(second.viewport.startBeat - (liveViewport.startBeat + 16)) < 0.001)
+    }
+
+    @Test("An authoritative Live Deck seek resumes follow after manual navigation")
+    func authoritativeSeekResumesLiveFollow() {
+        #expect(LiveDeckViewportPolicy.resumesFollow(
+            previousDiscontinuityRevision: 7,
+            currentDiscontinuityRevision: 8,
+            isMaster: true
+        ))
+        #expect(!LiveDeckViewportPolicy.resumesFollow(
+            previousDiscontinuityRevision: 8,
+            currentDiscontinuityRevision: 8,
+            isMaster: true
+        ))
+        #expect(!LiveDeckViewportPolicy.resumesFollow(
+            previousDiscontinuityRevision: 7,
+            currentDiscontinuityRevision: 8,
+            isMaster: false
+        ))
+    }
+
+    @Test("Operation controls can acknowledge a valid target before the engine round trip")
+    func operationStateCanBePresentedOptimistically() throws {
+        let snapshot = LiveWorkspaceFixtures.readySnapshot
+            .optimisticallySettingOperationState("off")
+        let armed = snapshot.optimisticallySettingOperationState("armed")
+
+        #expect(snapshot.operationState == "off")
+        #expect(armed.operationState == "armed")
+        #expect(armed.stateRevision == snapshot.stateRevision)
+
+        let live = armed.optimisticallySettingOperationState("live")
+        #expect(live.operationState == "live")
+        #expect(live.livePlan == armed.livePlan)
+        #expect(live.decks == armed.decks)
+    }
+
     @Test("Live AutoLoop plan exposes active, next, and future status with output details")
     func liveAutoloopStatusIsExplicit() throws {
         let content = try #require(LiveWorkspaceFixtures.ready.content)
@@ -516,6 +1033,7 @@ struct LiveWorkspacePresenterTests {
             deckInputIntegration: snapshot.deckInputIntegration,
             midiIntegration: snapshot.midiIntegration,
             midiClockIntegration: snapshot.midiClockIntegration,
+            abletonLinkIntegration: snapshot.abletonLinkIntegration,
             simulation: snapshot.simulation,
             outputProvider: snapshot.outputProvider,
             leaderDeckID: snapshot.leaderDeckID,
@@ -665,6 +1183,47 @@ struct LiveWorkspacePresenterTests {
         #expect(snapshot.decks[0].bpmMilli == 131_300)
     }
 
+    @Test("A loaded connected deck can be planned before a Master is elected")
+    func loadedConnectedDeckWithoutMasterDecodesAsNextPlan() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case let .array(decks) = payload["decks"],
+              decks.count == 2,
+              case let .object(nextPlan) = payload["nextPlan"],
+              let nextDeckID = nextPlan["deckId"],
+              let nextDeck = decks.first(where: { deck in
+                  guard case let .object(value) = deck else { return false }
+                  return value["deckId"] == nextDeckID
+              }) else {
+            Issue.record("Recorded fixture must contain a next deck and plan")
+            return
+        }
+        payload["leaderDeckId"] = .null
+        payload["decks"] = .array([nextDeck])
+        payload["livePlan"] = .null
+        let envelope = MessageEnvelope(
+            protocolVersion: recorded.protocolVersion,
+            messageType: recorded.messageType,
+            messageId: recorded.messageId,
+            sequence: recorded.sequence,
+            correlationId: recorded.correlationId,
+            sentAt: recorded.sentAt,
+            payload: payload
+        )
+
+        let snapshot = try EngineSnapshotDecoder().decode(
+            envelope,
+            endpointDescription: "127.0.0.1:52841",
+            protocolVersion: 1
+        )
+
+        #expect(snapshot.leaderDeckID == nil)
+        #expect(snapshot.decks.count == 1)
+        #expect(snapshot.nextPlan?.deckID == snapshot.decks[0].deckID)
+        #expect(snapshot.nextPlan?.trackLoadID == snapshot.decks[0].trackLoadID)
+        #expect(snapshot.livePlan == nil)
+    }
+
     @Test("BLT input diagnostics decode as a separate connected-deck integration")
     func deckInputDiagnosticsDecode() throws {
         let recorded = try recordedEnvelope()
@@ -701,6 +1260,51 @@ struct LiveWorkspacePresenterTests {
         #expect(snapshot.deckInputIntegration?.destinationName == "Lumi Deck Input")
         #expect(snapshot.deckInputIntegration?.committedFrameCount == 2)
         #expect(snapshot.deckInputIntegration?.lastDeckID == 2)
+    }
+
+    @Test("Direct Pro DJ Link diagnostics accept the bridge sequence and player range")
+    func directProLinkDiagnosticsDecode() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        payload["deckInputIntegration"] = .object([
+            "state": .string("ready"),
+            "destinationName": .null,
+            "protocol": .string("lumi-prolink-bridge"),
+            "protocolVersion": .number(1),
+            "receivedMessageCount": .number(340),
+            "invalidWordCount": .number(0),
+            "committedFrameCount": .number(340),
+            "ignoredMessageCount": .number(0),
+            "duplicateFrameCount": .number(0),
+            "lastDeckId": .number(4),
+            "lastFrameSequence": .number(340),
+            "precisePositionMessageCount": .number(280),
+            "authoritativePositionCount": .number(278),
+            "positionDiscontinuityCount": .number(3),
+            "positionAuthorityReady": .boolean(true)
+        ])
+        let envelope = MessageEnvelope(
+            protocolVersion: recorded.protocolVersion,
+            messageType: recorded.messageType,
+            messageId: recorded.messageId,
+            sequence: recorded.sequence,
+            correlationId: recorded.correlationId,
+            sentAt: recorded.sentAt,
+            payload: payload
+        )
+
+        let snapshot = try EngineSnapshotDecoder().decode(
+            envelope,
+            endpointDescription: "127.0.0.1:52841",
+            protocolVersion: 1
+        )
+
+        #expect(snapshot.deckInputIntegration?.protocolName == "lumi-prolink-bridge")
+        #expect(snapshot.deckInputIntegration?.lastFrameSequence == 340)
+        #expect(snapshot.deckInputIntegration?.lastDeckID == 4)
+        #expect(snapshot.deckInputIntegration?.positionAuthorityReady == true)
+        #expect(snapshot.deckInputIntegration?.authoritativePositionCount == 278)
+        #expect(snapshot.deckInputIntegration?.positionDiscontinuityCount == 3)
     }
 
     @Test("Malformed optional BLT diagnostics fail strict decoding")

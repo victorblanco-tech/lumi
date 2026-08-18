@@ -7,6 +7,31 @@ import Testing
 
 @Suite("Library workspace")
 struct LibraryWorkspaceTests {
+    @Test("Mounted USB engine snapshot decodes in the macOS workspace")
+    func mountedUSBSnapshotDecodesWhenProvided() throws {
+        guard let snapshotPath = ProcessInfo.processInfo.environment[
+            "LUMI_TEST_USB_SNAPSHOT"
+        ] else {
+            return
+        }
+        let data = try Data(contentsOf: URL(fileURLWithPath: snapshotPath))
+        let library = try JSONDecoder().decode(JSONValue.self, from: data)
+        let envelope = MessageEnvelope(
+            protocolVersion: 1,
+            messageType: .snapshot,
+            messageId: "mounted-usb-snapshot",
+            sequence: 1,
+            correlationId: "hardware-acceptance",
+            sentAt: "2026-08-10T00:00:00Z",
+            payload: ["library": library]
+        )
+
+        let state = try LibrarySnapshotDecoder().decode(envelope)
+        let inspection = try #require(state.rekordboxDeviceInspection)
+        #expect(inspection.trackCount > 0)
+        #expect(inspection.playlistCount > 0)
+    }
+
     @Test("Native Local Playback rows select the exact library track")
     @MainActor
     func nativeLocalPlaybackRowInteraction() throws {
@@ -54,11 +79,11 @@ struct LibraryWorkspaceTests {
     @Test("Task-oriented navigation keeps provider configuration out of Settings")
     func taskOrientedNavigationBoundaries() {
         #expect(PhraseRoleSettingsSection.allCases.map(\.rawValue) == [
-            "general", "phraseModel", "planningDefaults"
+            "general", "phraseModel", "planningDefaults", "dataBackups"
         ])
         #expect(LibraryHubSection.allCases.map(\.rawValue) == ["tracks", "sources"])
         #expect(IntegrationsWorkspaceSection.allCases.map(\.rawValue) == [
-            "overview", "deckInputs", "lightingOutputs", "diagnostics"
+            "overview", "deckInputs", "abletonLink", "lightingOutputs", "diagnostics"
         ])
     }
 
@@ -73,6 +98,169 @@ struct LibraryWorkspaceTests {
         #expect(state.page.tracks.first?.title == "Horizon Lines")
         #expect(state.page.tracks.first?.readiness == .ready)
         #expect(state.page.tracks.first?.missingCapabilities == [])
+        #expect(state.page.tracks.first?.usbSources.first?.displayName == "DJ USB")
+    }
+
+    @Test("Data management decodes reset impact and detached creative work")
+    func decodesDataManagementState() throws {
+        let state = try LibrarySnapshotDecoder().decode(
+            envelope(
+                trackValues: [trackValue()],
+                dataManagement: .object([
+                    "trackCount": .number(393),
+                    "playlistCount": .number(14),
+                    "userEditedTrackCount": .number(1),
+                    "creativeArchiveCount": .number(1),
+                    "pendingArchiveCount": .number(1),
+                    "resetCandidates": .array([
+                        .object([
+                            "trackId": .number(202),
+                            "title": .string("90s Bitch - Extended Mix"),
+                            "artist": .string("Victor Blanco"),
+                            "timelineRevision": .number(35)
+                        ])
+                    ]),
+                    "creativeArchives": .array([
+                        .object([
+                            "archiveId": .number(1),
+                            "title": .string("90s Bitch - Extended Mix"),
+                            "artist": .string("Victor Blanco"),
+                            "phraseCount": .number(12),
+                            "totalBeats": .number(1_024),
+                            "state": .string("pending"),
+                            "restoredTrackId": .null
+                        ])
+                    ]),
+                    "resetPreview": .object([
+                        "token": .string("reset-token"),
+                        "trackCount": .number(393),
+                        "playlistCount": .number(14),
+                        "preservedTrackCount": .number(1),
+                        "removedTrackCount": .number(392),
+                        "archivedCreativeTrackCount": .number(1),
+                        "preserveTrackIds": .array([.number(202)])
+                    ])
+                ])
+            )
+        )
+
+        #expect(state.dataManagement.trackCount == 393)
+        #expect(state.dataManagement.resetCandidates.first?.trackID == 202)
+        #expect(state.dataManagement.creativeArchives.first?.state == "pending")
+        #expect(state.dataManagement.resetPreview?.preserveTrackIDs == [202])
+    }
+
+    @Test("Rekordbox device sync diagnostics decode match and cue revision status")
+    func decodesRekordboxDeviceState() throws {
+        let devices: JSONValue = .array([
+            .object([
+                "sourceId": .string("rekordbox-device:dj-usb"),
+                "displayName": .string("DJ USB"),
+                "databaseRevision": .string("device-sha"),
+                "activeTracks": .number(1_138),
+                "matchedTracks": .number(43),
+                "unmatchedTracks": .number(1_095),
+                "syncedAt": .string("2026-08-10 12:00:00"),
+                "trustState": .string("trusted"),
+                "currentTracks": .number(40),
+                "promotedTracks": .number(2),
+                "protectedTracks": .number(1),
+                "conflictTracks": .number(0),
+                "beatGridRefresh": .boolean(true),
+                "cueRevisionTracked": .boolean(true),
+                "playlists": .array([
+                    .object([
+                        "id": .number(86),
+                        "libraryPlaylistId": .number(57),
+                        "name": .string("Genre 5 Stars/MainStage 140+"),
+                        "trackCount": .number(63)
+                    ])
+                ])
+            ])
+        ])
+        let state = try LibrarySnapshotDecoder().decode(
+            envelope(trackValues: [trackValue()], rekordboxDevices: devices)
+        )
+
+        let device = try #require(state.rekordboxDevices.first)
+        #expect(device.displayName == "DJ USB")
+        #expect(device.matchedTracks == 43)
+        #expect(device.unmatchedTracks == 1_095)
+        #expect(device.protectedTracks == 1)
+        #expect(device.conflictTracks == 0)
+        #expect(device.playlists.first?.libraryPlaylistID == 57)
+        #expect(device.playlists.first?.trackCount == 63)
+        #expect(device.beatGridRefresh)
+        #expect(device.cueRevisionTracked)
+    }
+
+    @Test("Pro DJ Link diagnostics decode discovered equipment and bridge state")
+    func decodesProDJLinkIntegration() throws {
+        let state = try LibrarySnapshotDecoder().decode(
+            envelope(
+                trackValues: [trackValue()],
+                deckInputIntegration: .object([
+                    "state": .string("ready"),
+                    "sourceState": .string("ready"),
+                    "destinationName": .null,
+                    "protocol": .string("lumi-prolink-bridge"),
+                    "protocolVersion": .number(1),
+                    "receivedMessageCount": .number(120),
+                    "invalidWordCount": .number(0),
+                    "committedFrameCount": .number(120),
+                    "ignoredMessageCount": .number(0),
+                    "duplicateFrameCount": .number(0),
+                    "lastDeckId": .number(2),
+                    "lastFrameSequence": .number(121),
+                    "bridgeVersion": .string("0.4.0-dev-20"),
+                    "beatLinkVersion": .string("8.0.0"),
+                    "recoveryPending": .boolean(false),
+                    "restartCount": .number(2),
+                    "ingressQueueCapacity": .number(512),
+                    "ingressQueueDepth": .number(3),
+                    "ingressQueueHighWater": .number(24),
+                    "ingressCoalescedMessageCount": .number(800),
+                    "ingressCriticalSaturationCount": .number(0),
+                    "ingressSourceAgeSampleCount": .number(12_000),
+                    "ingressSourceAgeP50Micros": .number(500),
+                    "ingressSourceAgeP95Micros": .number(5_000),
+                    "ingressSourceAgeP99Micros": .number(20_000),
+                    "ingressSourceAgeMaxMicros": .number(38_200),
+                    "precisePositionMessageCount": .number(4_000),
+                    "authoritativePositionCount": .number(3_950),
+                    "positionDiscontinuityCount": .number(6),
+                    "positionAuthorityReady": .boolean(true),
+                    "discoveredPlayers": .array([
+                        .object([
+                            "playerNumber": .number(1),
+                            "name": .string("CDJ-1500X"),
+                            "address": .string("192.168.1.50")
+                        ])
+                    ]),
+                    "lastError": .null
+                ])
+            )
+        )
+        let input = try #require(state.deckInputIntegration)
+        #expect(input.isProDJLink)
+        #expect(input.discoveredPlayers.first?.name == "CDJ-1500X")
+        #expect(input.discoveredPlayers.first?.address == "192.168.1.50")
+        #expect(input.recoveryPending == false)
+        #expect(input.restartCount == 2)
+        #expect(input.ingressQueueCapacity == 512)
+        #expect(input.ingressQueueDepth == 3)
+        #expect(input.ingressQueueHighWater == 24)
+        #expect(input.ingressCoalescedMessageCount == 800)
+        #expect(input.ingressCriticalSaturationCount == 0)
+        #expect(input.ingressSourceAgeSampleCount == 12_000)
+        #expect(input.ingressSourceAgeP50Micros == 500)
+        #expect(input.ingressSourceAgeP95Micros == 5_000)
+        #expect(input.ingressSourceAgeP99Micros == 20_000)
+        #expect(input.ingressSourceAgeMaxMicros == 38_200)
+        #expect(input.precisePositionMessageCount == 4_000)
+        #expect(input.authoritativePositionCount == 3_950)
+        #expect(input.positionDiscontinuityCount == 6)
+        #expect(input.positionAuthorityReady)
     }
 
     @Test("MIDI integration state decodes independently from the library catalog")
@@ -82,7 +270,23 @@ struct LibraryWorkspaceTests {
             "sourceName": .string("Lumi Virtual MIDI"),
             "protocol": .string("MIDI 1.0 UMP"),
             "sentPulseCount": .number(1),
-            "lastEvent": .string("Learn pulse sent")
+            "lastEvent": .string("Learn pulse sent"),
+            "realtimeScheduler": .object([
+                "lane": .object([
+                    "queueCapacity": .number(64),
+                    "queueDepth": .number(0),
+                    "queueHighWater": .number(3),
+                    "scheduledCount": .number(20),
+                    "emittedCount": .number(18),
+                    "cancelledCount": .number(2),
+                    "saturationCount": .number(0),
+                    "latencySampleCount": .number(18),
+                    "latencyP50Micros": .number(800),
+                    "latencyP95Micros": .number(2_100),
+                    "latencyP99Micros": .number(3_000),
+                    "latencyMaxMicros": .number(3_200)
+                ])
+            ])
         ])
         let state = try LibrarySnapshotDecoder().decode(
             envelope(trackValues: [trackValue()], midiIntegration: midi)
@@ -91,6 +295,8 @@ struct LibraryWorkspaceTests {
         #expect(state.midiIntegration?.isReady == true)
         #expect(state.midiIntegration?.sourceName == "Lumi Virtual MIDI")
         #expect(state.midiIntegration?.sentPulseCount == 1)
+        #expect(state.midiIntegration?.realtimeLane?.isHealthy == true)
+        #expect(state.midiIntegration?.realtimeLane?.latencyP95Micros == 2_100)
     }
 
     @Test("Local Playback MIDI Clock diagnostics decode independently")
@@ -113,6 +319,98 @@ struct LibraryWorkspaceTests {
         #expect(state.midiClockIntegration?.sourceName == "Lumi Clock")
         #expect(state.midiClockIntegration?.bpmDescription == "130.000 BPM")
         #expect(state.midiClockIntegration?.sentTickCount == 240)
+    }
+
+    @Test("Ableton Link timing diagnostics decode independently from command MIDI")
+    func decodesAbletonLinkIntegrationState() throws {
+        let link: JSONValue = .object([
+            "enabled": .boolean(true),
+            "state": .string("running"),
+            "provider": .string("Carabiner"),
+            "helperVersion": .string("1.2.0"),
+            "peers": .number(1),
+            "source": .string("proDjLink"),
+            "deckNumber": .number(2),
+            "bpmMilli": .number(136_500),
+            "beatWithinBar": .number(3),
+            "playing": .boolean(true),
+            "generation": .number(7),
+            "lastBeatAgeMillis": .number(5),
+            "phaseErrorMicros": .number(-350),
+            "receivedAnchorCount": .number(1_001),
+            "appliedAnchorCount": .number(1_000),
+            "coalescedAnchorCount": .number(1),
+            "hardReanchorCount": .number(2),
+            "softCorrectionCount": .number(3),
+            "failClosedCount": .number(1),
+            "failureCount": .number(0),
+            "maxAbsPhaseErrorMicros": .number(7_500),
+            "enginePumpCount": .number(10_000),
+            "enginePumpStarvationCount": .number(2),
+            "enginePumpMaxLatenessMicros": .number(21_000),
+            "lastReanchor": .string("masterChanged"),
+            "lastEvent": .string("Ableton Link timing locked"),
+            "lastError": .null
+        ])
+        let state = try LibrarySnapshotDecoder().decode(
+            envelope(trackValues: [trackValue()], abletonLinkIntegration: link)
+        )
+
+        #expect(state.abletonLinkIntegration?.isAvailable == true)
+        #expect(state.abletonLinkIntegration?.enabled == true)
+        #expect(state.abletonLinkIntegration?.sourceDescription == "Pro DJ Link")
+        #expect(state.abletonLinkIntegration?.bpmDescription == "136.500 BPM")
+        #expect(state.abletonLinkIntegration?.lastReanchor == "masterChanged")
+        #expect(state.abletonLinkIntegration?.appliedAnchorCount == 1_000)
+        #expect(state.abletonLinkIntegration?.maxAbsPhaseErrorMicros == 7_500)
+        #expect(state.abletonLinkIntegration?.failClosedCount == 1)
+        #expect(state.abletonLinkIntegration?.enginePumpCount == 10_000)
+    }
+
+    @Test("Lightweight snapshots refresh integration telemetry without replacing library state")
+    func refreshesRuntimeIntegrationsWithoutReplacingLibrary() throws {
+        let decoder = LibrarySnapshotDecoder()
+        let original = try decoder.decode(envelope(trackValues: [trackValue()]))
+        let runtime = envelope(
+            trackValues: [],
+            abletonLinkIntegration: .object([
+                "enabled": .boolean(true),
+                "state": .string("running"),
+                "provider": .string("Carabiner"),
+                "helperVersion": .string("1.2.0"),
+                "peers": .number(1),
+                "source": .string("proDjLink"),
+                "deckNumber": .number(1),
+                "bpmMilli": .number(155_000),
+                "beatWithinBar": .number(2),
+                "playing": .boolean(true),
+                "generation": .number(9),
+                "lastBeatAgeMillis": .number(4),
+                "phaseErrorMicros": .number(120),
+                "receivedAnchorCount": .number(5_700),
+                "appliedAnchorCount": .number(5_650),
+                "coalescedAnchorCount": .number(50),
+                "hardReanchorCount": .number(3),
+                "softCorrectionCount": .number(0),
+                "failClosedCount": .number(0),
+                "failureCount": .number(0),
+                "maxAbsPhaseErrorMicros": .number(8_000),
+                "enginePumpCount": .number(12_000),
+                "enginePumpStarvationCount": .number(0),
+                "enginePumpMaxLatenessMicros": .number(4_000),
+                "lastReanchor": .string("trackChanged"),
+                "lastEvent": .string("Ableton Link timing locked"),
+                "lastError": .null
+            ])
+        )
+
+        let refreshed = try decoder.refreshingRuntimeIntegrations(in: original, from: runtime)
+
+        #expect(refreshed.page == original.page)
+        #expect(refreshed.playlists == original.playlists)
+        #expect(refreshed.collectionTotal == original.collectionTotal)
+        #expect(refreshed.abletonLinkIntegration?.bpmMilli == 155_000)
+        #expect(refreshed.abletonLinkIntegration?.receivedAnchorCount == 5_700)
     }
 
     @Test("Rekordbox sync preview decodes a bounded, hash-bound apply plan")
@@ -166,6 +464,160 @@ struct LibraryWorkspaceTests {
         #expect(preview.diff.inserted == 40)
         #expect(preview.diff.archived == 2)
         #expect(preview.applyState == "ready")
+    }
+
+    @Test("USB inspection exposes a bounded playlist selection before sync")
+    func decodesUSBPlaylistInspection() throws {
+        let state = try LibrarySnapshotDecoder().decode(
+            envelope(
+                trackValues: [trackValue()],
+                rekordboxDeviceInspection: .object([
+                    "sourceId": .string("usb-volume:1234"),
+                    "displayName": .string("DJ VIC CHRM"),
+                    "databaseRevision": .string("abc123"),
+                    "libraryFormat": .string("OneLibrary"),
+                    "databaseVersion": .string("1000"),
+                    "exportedAt": .string("2026-08-10"),
+                    "trackCount": .number(956),
+                    "playlistCount": .number(2),
+                    "selectedPlaylistIds": .array([.number(77)]),
+                    "playlists": .array([
+                        .object([
+                            "id": .number(77),
+                            "path": .string("Sets/90s Dance/90s Club"),
+                            "name": .string("90s Club"),
+                            "trackCount": .number(48),
+                            "statusCounts": .object([
+                                "current": .number(45),
+                                "usbNewer": .number(3),
+                                "usbOutdated": .number(0),
+                                "notInLumi": .number(0),
+                                "conflict": .number(0)
+                            ]),
+                            "tracks": .array([
+                                .object([
+                                    "id": .number(10),
+                                    "title": .string("90s Bitch"),
+                                    "artist": .string("Maddix"),
+                                    "bpmMilli": .number(155_000),
+                                    "durationMillis": .number(180_000),
+                                    "status": .string("usb-newer"),
+                                    "detail": .string("USB changed after the previous sync")
+                                ])
+                            ])
+                        ]),
+                        .object([
+                            "id": .number(88),
+                            "path": .string("Genre 5 Stars/90s Dance"),
+                            "name": .string("90s Dance"),
+                            "trackCount": .number(1),
+                            "statusCounts": .object([
+                                "current": .number(0),
+                                "usbNewer": .number(0),
+                                "usbOutdated": .number(1),
+                                "notInLumi": .number(0),
+                                "conflict": .number(0)
+                            ]),
+                            "tracks": .array([])
+                        ])
+                    ])
+                ])
+            )
+        )
+
+        #expect(state.rekordboxDeviceInspection?.displayName == "DJ VIC CHRM")
+        #expect(state.rekordboxDeviceInspection?.playlists.map(\.id) == [77, 88])
+        #expect(state.rekordboxDeviceInspection?.selectedPlaylistIDs == [77])
+        #expect(state.rekordboxDeviceInspection?.playlists.first?.statusCounts.usbNewer == 3)
+        #expect(state.rekordboxDeviceInspection?.playlists.first?.tracks.first?.status == "usb-newer")
+
+        let compactStatus = try LibrarySnapshotDecoder().decode(
+            envelope(trackValues: [trackValue()])
+        )
+        let preserved = compactStatus.preservingDeviceInspection(
+            state.rekordboxDeviceInspection
+        )
+        #expect(preserved.rekordboxDeviceInspection == state.rekordboxDeviceInspection)
+    }
+
+    @Test("USB selection impact is read-only and deduplicates tracks across playlists")
+    func usbSelectionImpactDeduplicatesTracks() {
+        let sharedTrack = RekordboxDeviceTrackState(
+            id: 10,
+            title: "90s Bitch",
+            artist: "Maddix",
+            bpmMilli: 155_000,
+            durationMillis: 180_000,
+            status: "usb-newer",
+            detail: "USB changed after the previous sync"
+        )
+        let newTrack = RekordboxDeviceTrackState(
+            id: 20,
+            title: "New Track",
+            artist: "Artist",
+            bpmMilli: 140_000,
+            durationMillis: 200_000,
+            status: "not-in-lumi",
+            detail: "Not yet in Lumi"
+        )
+        let protectedTrack = RekordboxDeviceTrackState(
+            id: 30,
+            title: "Older USB Track",
+            artist: "Artist",
+            bpmMilli: 138_000,
+            durationMillis: 210_000,
+            status: "usb-outdated",
+            detail: "Lumi has newer analysis"
+        )
+        let emptyCounts = RekordboxDeviceStatusCounts(
+            current: 0,
+            usbNewer: 0,
+            usbOutdated: 0,
+            notInLumi: 0,
+            conflict: 0
+        )
+        let inspection = RekordboxDeviceInspectionState(
+            sourceID: "usb-fs:test",
+            displayName: "DJ USB",
+            databaseRevision: "revision",
+            libraryFormat: "OneLibrary",
+            databaseVersion: "1000",
+            exportedAt: "2026-08-10",
+            trackCount: 3,
+            playlistCount: 2,
+            selectedPlaylistIDs: [],
+            playlists: [
+                RekordboxDevicePlaylistState(
+                    id: 1,
+                    path: "Sets/A",
+                    name: "A",
+                    trackCount: 2,
+                    statusCounts: emptyCounts,
+                    tracks: [sharedTrack, newTrack]
+                ),
+                RekordboxDevicePlaylistState(
+                    id: 2,
+                    path: "Sets/B",
+                    name: "B",
+                    trackCount: 2,
+                    statusCounts: emptyCounts,
+                    tracks: [sharedTrack, protectedTrack]
+                )
+            ]
+        )
+
+        let impact = USBPlaylistSelectionImpact(
+            inspection: inspection,
+            selectedPlaylistIDs: [1, 2]
+        )
+
+        #expect(impact.playlistCount == 2)
+        #expect(impact.uniqueTrackCount == 3)
+        #expect(impact.usbNewerCount == 1)
+        #expect(impact.notInLumiCount == 1)
+        #expect(impact.usbOutdatedCount == 1)
+        #expect(impact.changedCount == 2)
+        #expect(impact.heldCount == 1)
     }
 
     @Test("Wire pages over 200 tracks are rejected before presentation")
@@ -245,7 +697,7 @@ struct LibraryWorkspaceTests {
                     "state": .string("ready"),
                     "destinationName": .string("Lumi Deck Input"),
                     "protocol": .string("BLT MIDI Deck Frame"),
-                    "protocolVersion": .number(2),
+                    "protocolVersion": .number(3),
                     "receivedMessageCount": .number(48),
                     "invalidWordCount": .number(0),
                     "committedFrameCount": .number(3),
@@ -272,7 +724,14 @@ struct LibraryWorkspaceTests {
         #expect(expression.contains("(/ (* raw-track-bpm 10.0) pitch-scale)"))
         #expect(expression.contains("(* raw-track-bpm 10.0)"))
         #expect(expression.contains("(or effective-tempo 0.0)"))
-        #expect(expression.contains("[119 2]"))
+        #expect(expression.contains("sim-signature"))
+        #expect(expression.contains("[36 (chunk sim-signature 0)]"))
+        #expect(expression.contains("raw-position (playback-time status)"))
+        #expect(expression.contains("sampled-position (* 100 (quot current-position 100))"))
+        #expect(expression.contains(":lumi-last-frame frame-key"))
+        #expect(expression.contains("(>= (- now-ms last-sent-ms) 1000)"))
+        #expect(expression.contains("[41 (chunk sampled-position 0)]"))
+        #expect(expression.contains("[119 4]"))
     }
 
     @Test("Duplicate stable role IDs are rejected before Settings renders")
@@ -428,6 +887,10 @@ struct LibraryWorkspaceTests {
         #expect(editor.beatsPerBar == 4)
         #expect(editor.totalBars == 2)
         #expect(editor.waveform.count == 3)
+        #expect(editor.hotCues.map(\.letter) == ["A", "B"])
+        #expect(editor.hotCues.map(\.name) == ["First drop", "Outro loop"])
+        #expect(editor.hotCues.map(\.colorRGB) == [0xFF4A4A, 0x45D483])
+        #expect(editor.hotCues[1].loopEndMillis == 3_500)
         #expect(editor.phrases.map(\.role) == ["Intro", "Build"])
         #expect(editor.phrases.map(\.roleID) == ["intro-outro", "buildup-1"])
         #expect(editor.timeline.revision == 1)
@@ -721,6 +1184,7 @@ private func replacingAudioURI(
         beatsPerBar: analysis.beatsPerBar,
         beats: analysis.beats,
         waveform: analysis.waveform,
+        hotCues: analysis.hotCues,
         phrases: analysis.phrases,
         roles: analysis.roles,
         sourcePhrases: analysis.sourcePhrases,
@@ -735,8 +1199,12 @@ private func envelope(
     autoloopCatalog: JSONValue = .null,
     midiIntegration: JSONValue = .null,
     midiClockIntegration: JSONValue = .null,
+    abletonLinkIntegration: JSONValue = .null,
     deckInputIntegration: JSONValue = .null,
-    rekordboxSyncPreview: JSONValue = .null
+    rekordboxSyncPreview: JSONValue = .null,
+    rekordboxDevices: JSONValue = .null,
+    rekordboxDeviceInspection: JSONValue = .null,
+    dataManagement: JSONValue = .null
 ) -> MessageEnvelope {
     MessageEnvelope(
         protocolVersion: 1,
@@ -748,6 +1216,7 @@ private func envelope(
         payload: [
             "midiIntegration": midiIntegration,
             "midiClockIntegration": midiClockIntegration,
+            "abletonLinkIntegration": abletonLinkIntegration,
             "deckInputIntegration": deckInputIntegration,
             "library": .object([
                 "condition": .string("ready"),
@@ -789,7 +1258,10 @@ private func envelope(
                 "editor": editorValue,
                 "phraseRoleSettings": phraseRoleSettings,
                 "autoloopCatalog": autoloopCatalog,
-                "rekordboxSyncPreview": rekordboxSyncPreview
+                "rekordboxSyncPreview": rekordboxSyncPreview,
+                "rekordboxDevices": rekordboxDevices,
+                "rekordboxDeviceInspection": rekordboxDeviceInspection,
+                "dataManagement": dataManagement
             ])
         ]
     )
@@ -897,6 +1369,22 @@ private func editorValue() -> JSONValue {
             .object(["low": .number(30), "mid": .number(60), "high": .number(90)]),
             .object(["low": .number(90), "mid": .number(60), "high": .number(30)]),
             .object(["low": .number(45), "mid": .number(80), "high": .number(120)])
+        ]),
+        "hotCues": .array([
+            .object([
+                "index": .number(1),
+                "timeMillis": .number(1_500),
+                "loopEndMillis": .null,
+                "name": .string("First drop"),
+                "colorRgb": .number(0xFF4A4A)
+            ]),
+            .object([
+                "index": .number(2),
+                "timeMillis": .number(3_000),
+                "loopEndMillis": .number(3_500),
+                "name": .string("Outro loop"),
+                "colorRgb": .number(0x45D483)
+            ])
         ]),
         "phrases": .array([
             .object([
@@ -1043,6 +1531,13 @@ private func trackValue() -> JSONValue {
         "colorRgb": .number(0x4870CD),
         "analysisRevision": .string("horizon-lines-v1"),
         "timelineRevision": .null,
+        "usbSources": .array([
+            .object([
+                "sourceId": .string("rekordbox-device:dj-usb"),
+                "displayName": .string("DJ USB"),
+                "syncDisposition": .string("current")
+            ])
+        ]),
         "readiness": .object([
             "status": .string("ready"),
             "missingCapabilities": .array([]),

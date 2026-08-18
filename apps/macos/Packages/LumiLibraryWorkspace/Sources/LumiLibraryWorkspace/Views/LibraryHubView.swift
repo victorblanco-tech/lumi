@@ -17,6 +17,7 @@ public struct LibraryHubView: View {
     private let localPlaybackFeedbackIsError: Bool
     private let sourceImportFeedback: String?
     private let sourceImportFeedbackIsError: Bool
+    private let usbSourceOperation: USBSourceOperationState
     private let onQuery: @MainActor (LibraryQueryRequest) -> Void
     private let onOpenEditor: @MainActor (UInt64) -> Void
     private let onTimelineEdit: @MainActor (TrackTimelineEditRequest) -> Void
@@ -27,6 +28,8 @@ public struct LibraryHubView: View {
     private let onRekordboxSyncPreview: @Sendable (RekordboxXMLSyncPreviewRequest) -> Void
     private let onRekordboxSyncApply: @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void
     private let onRekordboxAnalysisImport: @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void
+    private let onRekordboxDeviceInspect: @Sendable (String) -> Void
+    private let onRekordboxDeviceSync: @Sendable (String, [UInt32]) -> Void
 
     @Binding private var section: LibraryHubSection
 
@@ -40,6 +43,7 @@ public struct LibraryHubView: View {
         localPlaybackFeedbackIsError: Bool = false,
         sourceImportFeedback: String? = nil,
         sourceImportFeedbackIsError: Bool = false,
+        usbSourceOperation: USBSourceOperationState = .idle,
         onQuery: @escaping @MainActor (LibraryQueryRequest) -> Void = { _ in },
         onOpenEditor: @escaping @MainActor (UInt64) -> Void = { _ in },
         onTimelineEdit: @escaping @MainActor (TrackTimelineEditRequest) -> Void = { _ in },
@@ -49,7 +53,9 @@ public struct LibraryHubView: View {
         onPhraseRoleMutation: @escaping @Sendable (PhraseRoleMutationRequest) -> Void = { _ in },
         onRekordboxSyncPreview: @escaping @Sendable (RekordboxXMLSyncPreviewRequest) -> Void = { _ in },
         onRekordboxSyncApply: @escaping @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void = { _, _ in },
-        onRekordboxAnalysisImport: @escaping @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void = { _, _ in }
+        onRekordboxAnalysisImport: @escaping @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void = { _, _ in },
+        onRekordboxDeviceInspect: @escaping @Sendable (String) -> Void = { _ in },
+        onRekordboxDeviceSync: @escaping @Sendable (String, [UInt32]) -> Void = { _, _ in }
     ) {
         self.state = state
         _keyNotation = keyNotation
@@ -60,6 +66,7 @@ public struct LibraryHubView: View {
         self.localPlaybackFeedbackIsError = localPlaybackFeedbackIsError
         self.sourceImportFeedback = sourceImportFeedback
         self.sourceImportFeedbackIsError = sourceImportFeedbackIsError
+        self.usbSourceOperation = usbSourceOperation
         self.onQuery = onQuery
         self.onOpenEditor = onOpenEditor
         self.onTimelineEdit = onTimelineEdit
@@ -70,6 +77,8 @@ public struct LibraryHubView: View {
         self.onRekordboxSyncPreview = onRekordboxSyncPreview
         self.onRekordboxSyncApply = onRekordboxSyncApply
         self.onRekordboxAnalysisImport = onRekordboxAnalysisImport
+        self.onRekordboxDeviceInspect = onRekordboxDeviceInspect
+        self.onRekordboxDeviceSync = onRekordboxDeviceSync
     }
 
     public var body: some View {
@@ -99,10 +108,13 @@ public struct LibraryHubView: View {
                         feedback: phraseRoleFeedback,
                         syncFeedback: sourceImportFeedback,
                         syncFeedbackIsError: sourceImportFeedbackIsError,
+                        usbOperation: usbSourceOperation,
                         onMutation: onPhraseRoleMutation,
                         onSyncPreview: onRekordboxSyncPreview,
                         onSyncApply: onRekordboxSyncApply,
-                        onAnalysisImport: onRekordboxAnalysisImport
+                        onAnalysisImport: onRekordboxAnalysisImport,
+                        onDeviceInspect: onRekordboxDeviceInspect,
+                        onDeviceSync: onRekordboxDeviceSync
                     )
                 }
             }
@@ -120,7 +132,7 @@ public struct LibraryHubView: View {
                 .padding(.horizontal, LumiSpacing.small)
                 .padding(.bottom, LumiSpacing.small)
             sectionButton(.tracks, "Tracks", "music.note.list")
-            sectionButton(.sources, "Sources & Import", "externaldrive.badge.plus")
+            sectionButton(.sources, "Import & Sources", "externaldrive.badge.plus")
             Spacer()
         }
         .padding(LumiSpacing.large)

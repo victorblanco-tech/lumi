@@ -3,7 +3,7 @@ import Foundation
 public enum LiveWorkspaceFixtures {
     public static let readySnapshot = EngineSnapshot(
         endpoint: "127.0.0.1:52841",
-        engineVersion: "0.3.0",
+        engineVersion: "0.4.0-dev-57",
         protocolVersion: 1,
         snapshotSequence: 42,
         stateRevision: 8,
@@ -42,6 +42,24 @@ public enum LiveWorkspaceFixtures {
             lastEvent: "Clock running at 124.000 BPM",
             lastError: nil
         ),
+        abletonLinkIntegration: AbletonLinkIntegrationSnapshot(
+            enabled: true,
+            state: "running",
+            provider: "Carabiner",
+            helperVersion: "1.2.0",
+            peers: 1,
+            source: "localPlayback",
+            deckNumber: 1,
+            bpmMilli: 124_000,
+            beatWithinBar: 1,
+            playing: true,
+            generation: 1,
+            lastBeatAgeMillis: 4,
+            phaseErrorMicros: 120,
+            lastReanchor: "started",
+            lastEvent: "Ableton Link synchronized to Local Playback",
+            lastError: nil
+        ),
         outputProvider: OutputProviderSnapshot(
             providerKind: "dryRun",
             status: "ready",
@@ -64,6 +82,7 @@ public enum LiveWorkspaceFixtures {
                 durationBeats: 128,
                 phrases: deckPhrases(second: "verse"),
                 waveformPreview: waveform(seed: 101),
+                hotCues: hotCues(),
                 planEligibility: .readyExact,
                 localPlayback: LocalPlaybackTrackSnapshot(
                     audioURI: "lumi-demo://aurora-signal",
@@ -84,6 +103,7 @@ public enum LiveWorkspaceFixtures {
                 durationBeats: 128,
                 phrases: deckPhrases(second: "breakdown"),
                 waveformPreview: waveform(seed: 202),
+                hotCues: hotCues(),
                 planEligibility: .readyExact,
                 localPlayback: LocalPlaybackTrackSnapshot(
                     audioURI: "lumi-demo://neon-horizon",
@@ -261,6 +281,7 @@ public enum LiveWorkspaceFixtures {
             deckSource: readySnapshot.deckSource,
             midiIntegration: readySnapshot.midiIntegration,
             midiClockIntegration: readySnapshot.midiClockIntegration,
+            abletonLinkIntegration: readySnapshot.abletonLinkIntegration,
             simulation: readySnapshot.simulation,
             outputProvider: readySnapshot.outputProvider,
             leaderDeckID: readySnapshot.leaderDeckID,
@@ -320,6 +341,7 @@ public enum LiveWorkspaceFixtures {
             deckSource: readySnapshot.deckSource,
             midiIntegration: readySnapshot.midiIntegration,
             midiClockIntegration: readySnapshot.midiClockIntegration,
+            abletonLinkIntegration: readySnapshot.abletonLinkIntegration,
             simulation: readySnapshot.simulation,
             outputProvider: readySnapshot.outputProvider,
             leaderDeckID: readySnapshot.leaderDeckID,
@@ -363,6 +385,7 @@ public enum LiveWorkspaceFixtures {
             deckSource: readySnapshot.deckSource,
             midiIntegration: readySnapshot.midiIntegration,
             midiClockIntegration: readySnapshot.midiClockIntegration,
+            abletonLinkIntegration: readySnapshot.abletonLinkIntegration,
             simulation: readySnapshot.simulation,
             outputProvider: readySnapshot.outputProvider,
             leaderDeckID: readySnapshot.leaderDeckID,
@@ -418,6 +441,7 @@ public enum LiveWorkspaceFixtures {
             deckSource: snapshot.deckSource,
             midiIntegration: snapshot.midiIntegration,
             midiClockIntegration: snapshot.midiClockIntegration,
+            abletonLinkIntegration: snapshot.abletonLinkIntegration,
             simulation: snapshot.simulation,
             outputProvider: snapshot.outputProvider,
             leaderDeckID: snapshot.leaderDeckID,
@@ -529,6 +553,30 @@ public enum LiveWorkspaceFixtures {
             )
         }
         return DeckWaveformPreviewSnapshot(source: "library", style: "rgb", points: points)
+    }
+
+    private static func hotCues() -> [DeckHotCueSnapshot] {
+        [
+            DeckHotCueSnapshot(
+                index: 1,
+                timeMillis: 15_484,
+                name: "",
+                colorRGB: 0x30_5A_FF
+            ),
+            DeckHotCueSnapshot(
+                index: 2,
+                timeMillis: 30_968,
+                name: "",
+                colorRGB: 0xFF_A0_00
+            ),
+            DeckHotCueSnapshot(
+                index: 3,
+                timeMillis: 46_451,
+                loopEndMillis: 54_193,
+                name: "",
+                colorRGB: 0xE6_28_28
+            )
+        ]
     }
 
     private static let planningOptions = PlanningOptionsSnapshot(

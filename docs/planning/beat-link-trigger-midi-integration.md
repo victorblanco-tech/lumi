@@ -16,7 +16,7 @@ Create two triggers:
 | Watch | Player 1 | Player 2 |
 | MIDI Output | Lumi Deck Input | Lumi Deck Input |
 | Message | Custom | Custom |
-| Enabled | Never | Never |
+| Enabled | Always | Always |
 | Expression | same Tracked Update expression | same Tracked Update expression |
 
 The exact versioned expression is available in Lumi under **Settings →
@@ -31,14 +31,14 @@ the expression therefore uses raw BPM as effective BPM and divides out pitch
 for immutable track BPM. Real Pro DJ Link updates continue to use BLT's official
 `effective-tempo` value without this compatibility correction.
 
-## Frame v2
+## Frame v4
 
 All values are seven-bit Control Change values. Multi-byte numbers use
 least-significant seven-bit chunks first.
 
 | CC | Value |
 | --- | --- |
-| 16 | flags: loaded 1, playing 2, master 4, on-air 8 |
+| 16 | flags: loaded 1, playing 2, master 4, on-air 8, position known 16 |
 | 17–20 | rekordbox ID, 28 bit |
 | 21 | source player |
 | 22 | source slot: SD 1, USB 2, collection 3, CD 4 |
@@ -47,10 +47,25 @@ least-significant seven-bit chunks first.
 | 29–31 | duration in seconds, 21 bit |
 | 32 | frame sequence modulo 128 |
 | 33–35 | effective deck BPM × 1000 (including pitch), 21 bit |
-| 119 | protocol version and atomic commit; value 2 |
+| 36–40 | shallow-simulator metadata signature, 35 bit; zero on real decks |
+| 41–43 | playback position in milliseconds, sampled at 100 ms; zero when unknown |
+| 119 | protocol version and atomic commit; value 4 |
 
 MIDI channel 1 is Deck A/Player 1 and channel 2 is Deck B/Player 2. Channel 16
 is reserved for the independent Lumi → SoundSwitch output profile.
+
+The Tracked Update expression deduplicates identical status packets and sends a
+one-second heartbeat. While playing, the 100 ms playback-position sample limits
+the stream to roughly ten frames per second per deck. This prevents CoreMIDI and
+the serialized engine command lane from being flooded by hundreds of identical
+BLT evaluations per second. Transport flags, seeks, tempo and master changes are
+still sent immediately.
+
+Lumi treats the heartbeat as the source lease. When no complete frame for a
+deck arrives for 2.5 seconds, that deck is unloaded and its stale play state is
+discarded. A paused deck remains loaded because its one-second heartbeat keeps
+the lease alive; quitting or disconnecting BLT therefore fails closed instead
+of leaving a phantom playing deck behind.
 
 ## Acceptance evidence
 
@@ -59,16 +74,20 @@ is reserved for the independent Lumi → SoundSwitch output profile.
   SoundSwitch source.
 - Complete Player 1 and Player 2 frames render as fixed Deck A and Deck B.
 - Changing Master moves Live between those fixed deck positions.
-- Play/pause, beat and pitch-adjusted effective BPM updates appear without a local simulator in Lumi.
+- Play/pause, precise playback position, beat and pitch-adjusted effective BPM updates appear without a local simulator in Lumi.
 - In the Shallow Playback Simulator, displayed BPM and Lumi effective BPM are equal above, below and at zero pitch.
 - Unknown tracks show `AUTO HELD` and never trigger an automatic MIDI output.
+- Real decks resolve the Device Library ID from the synced USB/SD source.
+- The shallow simulator resolves its metadata signature because BLT publishes
+  the fixed Rekordbox ID `42` for every simulated track.
 - Partial, duplicate and foreign messages are counted and do not mutate state.
+- A missing heartbeat unloads only the affected deck after 2.5 seconds.
 - Disconnect/restart produces no unsolicited SoundSwitch output.
 
 ## Current limitation
 
-BLT MIDI v2 does not carry title, artist, musical key, RGB waveform or phrase
-analysis. The first UI therefore shows a safe transient `External track <id>`
-with unknown key (`—`) when no exact Lumi Library match exists. Rich metadata
-is the next design decision, not an implicit extension of this compact realtime
-frame.
+BLT MIDI v4 deliberately remains a compact transport and identity protocol. It
+does not stream RGB waveform, beatgrid or phrase analysis. Lumi hydrates those
+from its read-only synchronized Rekordbox Device Library alias. An unmatched or
+ambiguous identity remains a safe transient `External track <id>` with `AUTO
+HELD`; it never falls back to a fuzzy realtime guess.

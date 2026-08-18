@@ -31,4 +31,33 @@ enum LiveDeckViewportPolicy {
             beatsPerBar: beatsPerBar
         )
     }
+
+    static func manualPan(
+        renderedViewport: LumiWaveformViewport,
+        deltaPixels: Double,
+        width: Double,
+        reversesDirection: Bool
+    ) -> (viewport: LumiWaveformViewport, usesLiveViewport: Bool) {
+        let direction = reversesDirection ? -1.0 : 1.0
+        return (
+            renderedViewport.panned(
+                byPixels: deltaPixels * direction,
+                width: width
+            ),
+            false
+        )
+    }
+
+    static func resumesFollow(
+        previousDiscontinuityRevision: UInt64?,
+        currentDiscontinuityRevision: UInt64?,
+        isMaster: Bool
+    ) -> Bool {
+        guard isMaster,
+              let previousDiscontinuityRevision,
+              let currentDiscontinuityRevision else {
+            return false
+        }
+        return currentDiscontinuityRevision != previousDiscontinuityRevision
+    }
 }

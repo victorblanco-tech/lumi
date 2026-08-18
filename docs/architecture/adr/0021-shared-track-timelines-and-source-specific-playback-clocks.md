@@ -61,6 +61,10 @@ their interaction policies remain separate.
   UI renders at a higher frame rate.
 - Provider adapters must expose discontinuities explicitly after seek, load,
   reconnect or master change.
+- Connected transport snapshots carry a monotone discontinuity revision. Live
+  renderers use a revision change to discard stale Core Animation motion and
+  resume Master follow at the new authoritative position; the revision never
+  participates in lighting-output timing.
 
 ## Rejected alternatives
 

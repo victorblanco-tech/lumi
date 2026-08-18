@@ -1,7 +1,0 @@
-#include "Base.xcconfig"
-
-LUMI_DATA_DIRECTORY_NAME = Lumi Preview
-LUMI_DISPLAY_NAME = Lumi Preview
-LUMI_PRODUCT_NAME = Lumi Preview
-LUMI_RELEASE_CHANNEL = preview
-PRODUCT_BUNDLE_IDENTIFIER = co.victorblan.tech.lumi.preview

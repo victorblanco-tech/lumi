@@ -85,6 +85,12 @@ public struct LiveWorkspaceContent: Equatable, Sendable {
     public let stateRevision: UInt64
     public let planningOptions: PlanningOptionsSnapshot
     public let operationState: String
+    public let lightingTimingOffsetMillis: Int
+    public let pendingLightingTimingOffsetMillis: Int?
+    public let abletonLinkEnabled: Bool
+    public let abletonLinkState: String
+    public let abletonLinkBPMMilli: UInt64?
+    public let abletonLinkPeers: UInt64
     public let simulation: SimulationSnapshot?
     public let timeline: [TimelineEntrySnapshot]
 
@@ -100,6 +106,12 @@ public struct LiveWorkspaceContent: Equatable, Sendable {
         stateRevision: UInt64,
         planningOptions: PlanningOptionsSnapshot,
         operationState: String,
+        lightingTimingOffsetMillis: Int = 0,
+        pendingLightingTimingOffsetMillis: Int? = nil,
+        abletonLinkEnabled: Bool = false,
+        abletonLinkState: String = "stopped",
+        abletonLinkBPMMilli: UInt64? = nil,
+        abletonLinkPeers: UInt64 = 0,
         simulation: SimulationSnapshot? = nil,
         timeline: [TimelineEntrySnapshot]
     ) {
@@ -114,6 +126,12 @@ public struct LiveWorkspaceContent: Equatable, Sendable {
         self.stateRevision = stateRevision
         self.planningOptions = planningOptions
         self.operationState = operationState
+        self.lightingTimingOffsetMillis = lightingTimingOffsetMillis
+        self.pendingLightingTimingOffsetMillis = pendingLightingTimingOffsetMillis
+        self.abletonLinkEnabled = abletonLinkEnabled
+        self.abletonLinkState = abletonLinkState
+        self.abletonLinkBPMMilli = abletonLinkBPMMilli
+        self.abletonLinkPeers = abletonLinkPeers
         self.simulation = simulation
         self.timeline = timeline
     }
@@ -264,10 +282,24 @@ public enum LiveWorkspacePresenter {
     ) -> LiveWorkspaceState {
         let content = content(from: snapshot)
         let derivedCondition: LiveWorkspaceCondition
+        let usesDirectProDJLink = snapshot.deckInputIntegration?.protocolName == "lumi-prolink-bridge"
+        let exactPositionMissing = usesDirectProDJLink
+            && !snapshot.decks.isEmpty
+            && snapshot.operationState == "live"
+            && snapshot.deckInputIntegration?.positionAuthorityReady != true
+        let proDJLinkHasProblem = snapshot.deckSource.mode == "connectedDecks"
+            && (snapshot.deckInputIntegration?.state != "ready" || exactPositionMissing)
+        let lightingHasProblem = snapshot.midiIntegration?.lastError != nil
+            || (snapshot.midiIntegration?.autoPublishEnabled == true
+                && snapshot.midiIntegration?.state != "ready")
+            || snapshot.midiIntegration?.realtimeLane?.isHealthy == false
+        let linkHasProblem = snapshot.abletonLinkIntegration?.enabled == true
+            && (snapshot.abletonLinkIntegration?.state == "degraded"
+                || snapshot.abletonLinkIntegration?.lastError != nil)
         if snapshot.runtime.health != "ready"
-            || snapshot.deckSource.status != "ready"
-            || snapshot.midiIntegration?.state != "ready"
-            || !["ready", "running"].contains(snapshot.midiClockIntegration?.state ?? "stopped") {
+            || proDJLinkHasProblem
+            || lightingHasProblem
+            || linkHasProblem {
             derivedCondition = .degraded
         } else if snapshot.decks.isEmpty {
             derivedCondition = .empty
@@ -295,7 +327,7 @@ public enum LiveWorkspacePresenter {
             ),
             source: ProviderPresentation(
                 detail: deckSourceDetail(snapshot),
-                condition: snapshot.deckSource.status == "ready" ? healthyProviderCondition : .degraded
+                condition: proDJLinkCondition(snapshot, healthy: healthyProviderCondition)
             ),
             planner: ProviderPresentation(
                 detail: plannerDetail(snapshot),
@@ -307,17 +339,17 @@ public enum LiveWorkspacePresenter {
             ),
             lightingMidi: ProviderPresentation(
                 detail: lightingMidiDetail(snapshot),
-                condition: snapshot.midiIntegration?.state == "ready"
-                    ? healthyProviderCondition : .degraded
+                condition: lightingMidiCondition(snapshot, healthy: healthyProviderCondition)
             ),
             playbackClock: ProviderPresentation(
-                detail: playbackClockDetail(snapshot),
-                condition: ["ready", "running"].contains(
-                    snapshot.midiClockIntegration?.state ?? "stopped"
-                ) ? healthyProviderCondition : .degraded
+                detail: abletonLinkDetail(snapshot),
+                condition: abletonLinkCondition(snapshot, healthy: healthyProviderCondition)
             ),
             content: content,
-            diagnostic: diagnostic ?? defaultDiagnostic(for: derivedCondition),
+            diagnostic: diagnostic ?? defaultDiagnostic(
+                for: derivedCondition,
+                snapshot: snapshot
+            ),
             planInteraction: planInteraction,
             sessionInteraction: sessionInteraction
         )
@@ -325,27 +357,96 @@ public enum LiveWorkspacePresenter {
 
     private static func lightingMidiDetail(_ snapshot: EngineSnapshot) -> String {
         guard let midi = snapshot.midiIntegration else { return "Status unavailable" }
-        if let error = midi.lastError { return "\(midi.sourceName) · \(error)" }
+        if let error = midi.lastError {
+            if error.localizedCaseInsensitiveContains("unique ID collision") {
+                return "Another Lumi version is using Light Output · close it and restart this app"
+            }
+            return "\(midi.sourceName) · \(error)"
+        }
         let bank = midi.activeBank.map { " · bank \($0) active" } ?? ""
         let offset = String(format: "%+d ms", midi.timingOffsetMillis)
-        return "\(midi.sourceName) · auto-publish \(midi.autoPublishEnabled ? "on" : "off") · \(midi.sentPulseCount) pulses\(bank) · timing \(offset) · bank pre-roll \(midi.bankPreRollMillis) ms"
+        let pending = midi.pendingTimingOffsetMillis.map {
+            " · \(String(format: "%+d ms", $0)) pending for next phrase"
+        } ?? ""
+        let realtime = midi.realtimeLane.map {
+            let p95 = Double($0.latencyP95Micros) / 1_000
+            let last = Double($0.lastDispatchLatenessMicros) / 1_000
+            return " · realtime p95 \(p95.formatted(.number.precision(.fractionLength(1)))) ms · last \(last.formatted(.number.precision(.fractionLength(1)))) ms · \($0.lateDispatchCount) late"
+        } ?? ""
+        return "\(midi.sourceName) · auto-publish \(midi.autoPublishEnabled ? "on" : "off") · \(midi.sentPulseCount) pulses\(bank) · timing \(offset) saved\(pending) · phrase-boundary output · bank pre-roll \(midi.bankPreRollMillis) ms\(realtime)"
     }
 
-    private static func playbackClockDetail(_ snapshot: EngineSnapshot) -> String {
-        guard let clock = snapshot.midiClockIntegration else { return "Status unavailable" }
-        if let error = clock.lastError { return "\(clock.sourceName) · \(error)" }
-        let bpm = clock.bpmMilli.map { String(format: " · %.3f BPM", Double($0) / 1_000) } ?? ""
-        return "\(clock.sourceName) · \(clock.state)\(bpm) · \(clock.sentTickCount) ticks"
+    private static func abletonLinkDetail(_ snapshot: EngineSnapshot) -> String {
+        guard let link = snapshot.abletonLinkIntegration else { return "Status unavailable" }
+        if let error = link.lastError { return "\(link.provider) · \(error)" }
+        if !link.enabled { return "Off" }
+        let source: String = switch link.source {
+        case "localPlayback": "Local Playback"
+        case "proDjLink": "Pro DJ Link"
+        default: "waiting for timing authority"
+        }
+        let bpm = link.bpmMilli.map { String(format: " · %.3f BPM", Double($0) / 1_000) } ?? ""
+        let deck = link.deckNumber.map { " · deck \($0)" } ?? ""
+        let age = link.lastBeatAgeMillis.map { " · tempo update \($0) ms ago" } ?? ""
+        return "\(link.provider) · \(link.state) · \(source)\(deck)\(bpm) · \(link.peers) peers\(age)"
+    }
+
+    private static func abletonLinkCondition(
+        _ snapshot: EngineSnapshot,
+        healthy: ProviderCondition
+    ) -> ProviderCondition {
+        guard let link = snapshot.abletonLinkIntegration else { return .degraded }
+        if !link.enabled { return .empty }
+        if link.lastError != nil || link.state == "degraded" { return .degraded }
+        if link.state == "starting" { return .loading }
+        return ["ready", "running"].contains(link.state) ? healthy : .degraded
+    }
+
+    private static func lightingMidiCondition(
+        _ snapshot: EngineSnapshot,
+        healthy: ProviderCondition
+    ) -> ProviderCondition {
+        guard let midi = snapshot.midiIntegration else { return .degraded }
+        if midi.lastError != nil { return .degraded }
+        if !midi.autoPublishEnabled { return .empty }
+        if midi.realtimeLane?.isHealthy == false { return .degraded }
+        return midi.state == "ready" ? healthy : .degraded
+    }
+
+    private static func proDJLinkCondition(
+        _ snapshot: EngineSnapshot,
+        healthy: ProviderCondition
+    ) -> ProviderCondition {
+        guard snapshot.deckSource.mode == "connectedDecks" else { return .empty }
+        guard let input = snapshot.deckInputIntegration, input.state == "ready" else {
+            return .degraded
+        }
+        if input.protocolName == "lumi-prolink-bridge",
+           !snapshot.decks.isEmpty,
+           snapshot.operationState == "live",
+           !input.positionAuthorityReady {
+            return .degraded
+        }
+        return healthy
     }
 
     private static func deckSourceDetail(_ snapshot: EngineSnapshot) -> String {
-        guard snapshot.deckSource.mode == "connectedDecks",
-              let input = snapshot.deckInputIntegration else {
-            return snapshot.deckSource.displayName
+        guard snapshot.deckSource.mode == "connectedDecks" else {
+            return "Not in use · Local Playback selected"
         }
-        let endpoint = input.destinationName ?? "MIDI input unavailable"
+        guard let input = snapshot.deckInputIntegration else { return "Unavailable" }
+        let isDirectProLink = input.protocolName == "lumi-prolink-bridge"
+        let endpoint = if isDirectProLink {
+            "Direct Pro DJ Link"
+        } else {
+            input.destinationName ?? "MIDI input unavailable"
+        }
+        let messageKind = isDirectProLink ? "bridge events" : "MIDI messages"
         let lastDeck = input.lastDeckID.map { " · last deck \($0)" } ?? ""
-        return "\(snapshot.deckSource.displayName) · \(endpoint) · \(input.receivedMessageCount) MIDI messages · \(input.committedFrameCount) frames\(lastDeck)"
+        let exactPosition = isDirectProLink
+            ? " · exact position \(input.positionAuthorityReady ? "ready" : "waiting")"
+            : ""
+        return "\(snapshot.deckSource.displayName) · \(endpoint) · \(input.receivedMessageCount) \(messageKind) · \(input.committedFrameCount) frames\(lastDeck)\(exactPosition)"
     }
 
     private static func plannerDetail(_ snapshot: EngineSnapshot) -> String {
@@ -383,6 +484,12 @@ public enum LiveWorkspacePresenter {
             stateRevision: snapshot.stateRevision,
             planningOptions: snapshot.planningOptions,
             operationState: snapshot.operationState,
+            lightingTimingOffsetMillis: snapshot.midiIntegration?.timingOffsetMillis ?? 0,
+            pendingLightingTimingOffsetMillis: snapshot.midiIntegration?.pendingTimingOffsetMillis,
+            abletonLinkEnabled: snapshot.abletonLinkIntegration?.enabled ?? false,
+            abletonLinkState: snapshot.abletonLinkIntegration?.state ?? "stopped",
+            abletonLinkBPMMilli: snapshot.abletonLinkIntegration?.bpmMilli,
+            abletonLinkPeers: snapshot.abletonLinkIntegration?.peers ?? 0,
             simulation: snapshot.simulation,
             timeline: snapshot.timeline
         )
@@ -430,15 +537,41 @@ public enum LiveWorkspacePresenter {
     }
 
     private static func defaultDiagnostic(
-        for condition: LiveWorkspaceCondition
+        for condition: LiveWorkspaceCondition,
+        snapshot: EngineSnapshot
     ) -> String? {
         switch condition {
         case .fallback:
-            "Phrase analysis is incomplete. Lumi prepared a safe hold plan."
+            return "Phrase analysis is incomplete. Lumi prepared a safe hold plan."
         case .degraded:
-            "Live data is available, but one or more providers need attention."
+            if snapshot.runtime.health != "ready" {
+                return "The Lumi engine is not ready. Automatic light output is held safe."
+            }
+            if snapshot.deckSource.mode == "connectedDecks",
+               snapshot.deckInputIntegration?.state != "ready" {
+                return "Pro DJ Link data was interrupted. Exact live timing is recovering."
+            }
+            if snapshot.deckInputIntegration?.protocolName == "lumi-prolink-bridge",
+               !snapshot.decks.isEmpty,
+               snapshot.operationState == "live",
+               snapshot.deckInputIntegration?.positionAuthorityReady != true {
+                return "Exact CDJ position is unavailable. Automatic light output is held to prevent a wrong AutoLoop."
+            }
+            if let error = snapshot.midiIntegration?.lastError {
+                return "Light Output needs attention: \(error)"
+            }
+            if snapshot.midiIntegration?.realtimeLane?.isHealthy == false {
+                return "Light Output missed its realtime latency target. Check Diagnostics before continuing."
+            }
+            if let error = snapshot.abletonLinkIntegration?.lastError {
+                return "Ableton Link needs attention: \(error)"
+            }
+            if snapshot.abletonLinkIntegration?.state == "degraded" {
+                return "Ableton Link timing is recovering after an interrupted Pro DJ Link beat stream."
+            }
+            return "A live provider needs attention. Open Tech status for details."
         default:
-            nil
+            return nil
         }
     }
 }

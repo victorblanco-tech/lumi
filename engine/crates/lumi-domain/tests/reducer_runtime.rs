@@ -96,6 +96,88 @@ fn explicit_seek_can_move_the_active_track_backward() {
 }
 
 #[test]
+fn live_seek_inside_the_same_phrase_reasserts_once() {
+    let mut runtime = started_runtime(48);
+    submit_and_process(&mut runtime, track_loaded(1, 10, 100, 1));
+    submit_and_process(
+        &mut runtime,
+        plan_result(1, plan(PlanRevision::initial(), TrackLoadId::new(10))),
+    );
+    submit_and_process(&mut runtime, leader_changed(2, 10, 2));
+    submit_and_process(&mut runtime, phrase_changed(3, 10, 0, 3));
+    submit_and_process(&mut runtime, playback_state(4, 10, true, 4));
+    let revision = runtime.state().revision();
+    submit_and_process(
+        &mut runtime,
+        command_event(1, revision, OperationCommand::Arm),
+    );
+    let revision = runtime.state().revision();
+    submit_and_process(
+        &mut runtime,
+        command_event(2, revision, OperationCommand::Start),
+    );
+
+    let landing = submit_and_process(&mut runtime, seek_position(5, 10, 24, 5));
+    assert_eq!(landing.decision, DecisionReason::PhraseExecutionScheduled);
+    assert!(matches!(
+        landing.effects.as_slice(),
+        [Effect::ExecuteCue(_)]
+    ));
+
+    let duplicate = submit_and_process(&mut runtime, phrase_changed(6, 10, 0, 6));
+    assert_eq!(duplicate.decision, DecisionReason::PhraseExecutionSkipped);
+    assert!(duplicate.effects.is_empty());
+}
+
+#[test]
+fn one_hundred_confirmed_landings_each_reassert_once_without_phrase_duplicates() {
+    let mut runtime = started_runtime(512);
+    submit_and_process(&mut runtime, track_loaded(1, 10, 100, 1));
+    submit_and_process(
+        &mut runtime,
+        plan_result(1, plan(PlanRevision::initial(), TrackLoadId::new(10))),
+    );
+    submit_and_process(&mut runtime, leader_changed(2, 10, 2));
+    submit_and_process(&mut runtime, phrase_changed(3, 10, 0, 3));
+    submit_and_process(&mut runtime, playback_state(4, 10, true, 4));
+    let revision = runtime.state().revision();
+    submit_and_process(
+        &mut runtime,
+        command_event(1, revision, OperationCommand::Arm),
+    );
+    let revision = runtime.state().revision();
+    submit_and_process(
+        &mut runtime,
+        command_event(2, revision, OperationCommand::Start),
+    );
+
+    let mut source_sequence = 5_u64;
+    let mut scheduled = 0_u64;
+    for action in 0_u32..100 {
+        let landing = submit_and_process(
+            &mut runtime,
+            seek_position(source_sequence, 10, action % 120, source_sequence),
+        );
+        source_sequence = source_sequence.saturating_add(1);
+        assert_eq!(landing.decision, DecisionReason::PhraseExecutionScheduled);
+        assert!(matches!(
+            landing.effects.as_slice(),
+            [Effect::ExecuteCue(_)]
+        ));
+        scheduled = scheduled.saturating_add(1);
+
+        let duplicate = submit_and_process(
+            &mut runtime,
+            phrase_changed(source_sequence, 10, 0, source_sequence),
+        );
+        source_sequence = source_sequence.saturating_add(1);
+        assert_eq!(duplicate.decision, DecisionReason::PhraseExecutionSkipped);
+        assert!(duplicate.effects.is_empty());
+    }
+    assert_eq!(scheduled, 100);
+}
+
+#[test]
 fn every_non_increasing_source_sequence_is_ignored() {
     for stale_sequence in 0..=64 {
         let mut runtime = started_runtime(8);
@@ -192,13 +274,62 @@ fn live_phrase_execution_requires_playback_and_deduplicates_the_same_cue() {
     assert_eq!(stopped.decision, DecisionReason::PhraseChanged);
     assert!(stopped.effects.is_empty());
 
-    submit_and_process(&mut runtime, playback_state(4, 10, true, 4));
-    let first = submit_and_process(&mut runtime, phrase_changed(5, 10, 0, 5));
+    let first = submit_and_process(&mut runtime, playback_state(4, 10, true, 4));
     assert_eq!(first.decision, DecisionReason::PhraseExecutionScheduled);
     assert!(matches!(first.effects.as_slice(), [Effect::ExecuteCue(_)]));
 
-    let duplicate = submit_and_process(&mut runtime, phrase_changed(6, 10, 0, 6));
+    let duplicate = submit_and_process(&mut runtime, phrase_changed(5, 10, 0, 5));
     assert_eq!(duplicate.decision, DecisionReason::PhraseExecutionSkipped);
+    assert!(duplicate.effects.is_empty());
+
+    let repeated_playing = submit_and_process(&mut runtime, playback_state(6, 10, true, 6));
+    assert_eq!(
+        repeated_playing.decision,
+        DecisionReason::PlaybackStateChanged
+    );
+    assert!(repeated_playing.effects.is_empty());
+}
+
+#[test]
+fn live_deck_restart_from_a_cued_position_reasserts_the_current_autoloop_once() {
+    let mut runtime = started_runtime(48);
+    submit_and_process(&mut runtime, track_loaded(1, 10, 100, 1));
+    submit_and_process(
+        &mut runtime,
+        plan_result(1, plan(PlanRevision::initial(), TrackLoadId::new(10))),
+    );
+    submit_and_process(&mut runtime, leader_changed(2, 10, 2));
+    submit_and_process(&mut runtime, phrase_changed(3, 10, 0, 3));
+
+    let revision = runtime.state().revision();
+    submit_and_process(
+        &mut runtime,
+        command_event(1, revision, OperationCommand::Arm),
+    );
+    let revision = runtime.state().revision();
+    submit_and_process(
+        &mut runtime,
+        command_event(2, revision, OperationCommand::Start),
+    );
+
+    let first_start = submit_and_process(&mut runtime, playback_state(4, 10, true, 4));
+    assert!(matches!(
+        first_start.effects.as_slice(),
+        [Effect::ExecuteCue(_)]
+    ));
+
+    submit_and_process(&mut runtime, seek_position(5, 10, 24, 5));
+    let stopped = submit_and_process(&mut runtime, playback_state(6, 10, false, 6));
+    assert!(stopped.effects.is_empty());
+
+    let restarted = submit_and_process(&mut runtime, playback_state(7, 10, true, 7));
+    assert_eq!(restarted.decision, DecisionReason::PhraseExecutionScheduled);
+    assert!(matches!(
+        restarted.effects.as_slice(),
+        [Effect::ExecuteCue(_)]
+    ));
+
+    let duplicate = submit_and_process(&mut runtime, playback_state(8, 10, true, 8));
     assert!(duplicate.effects.is_empty());
 }
 
@@ -247,19 +378,64 @@ fn off_closes_output_without_discarding_the_prepared_leader_plan() {
         command_event(4, revision, OperationCommand::Arm),
     );
     let revision = runtime.state().revision();
-    submit_and_process(
+    let restarted = submit_and_process(
         &mut runtime,
         command_event(5, revision, OperationCommand::Start),
     );
-    let rescheduled = submit_and_process(&mut runtime, phrase_changed(5, 10, 0, 5));
-    assert_eq!(
-        rescheduled.decision,
-        DecisionReason::PhraseExecutionScheduled
-    );
     assert!(matches!(
-        rescheduled.effects.as_slice(),
+        restarted.effects.as_slice(),
         [Effect::ExecuteCue(_)]
     ));
+    let rescheduled = submit_and_process(&mut runtime, phrase_changed(5, 10, 0, 5));
+    assert_eq!(rescheduled.decision, DecisionReason::PhraseExecutionSkipped);
+    assert!(rescheduled.effects.is_empty());
+}
+
+#[test]
+fn start_while_the_master_is_already_playing_executes_its_current_phrase_once() {
+    let mut runtime = started_runtime(48);
+    submit_and_process(&mut runtime, track_loaded(1, 10, 100, 1));
+    submit_and_process(
+        &mut runtime,
+        plan_result(1, plan(PlanRevision::initial(), TrackLoadId::new(10))),
+    );
+    submit_and_process(&mut runtime, leader_changed(2, 10, 2));
+    submit_and_process(&mut runtime, playback_state(3, 10, true, 3));
+    submit_and_process(&mut runtime, phrase_changed(4, 10, 0, 4));
+
+    let revision = runtime.state().revision();
+    let armed = submit_and_process(
+        &mut runtime,
+        command_event(1, revision, OperationCommand::Arm),
+    );
+    assert!(armed.effects.is_empty());
+
+    let revision = runtime.state().revision();
+    let started = submit_and_process(
+        &mut runtime,
+        command_event(2, revision, OperationCommand::Start),
+    );
+    assert!(matches!(
+        started.effects.as_slice(),
+        [Effect::ExecuteCue(_)]
+    ));
+
+    let revision = runtime.state().revision();
+    submit_and_process(
+        &mut runtime,
+        command_event(3, revision, OperationCommand::Pause),
+    );
+    let revision = runtime.state().revision();
+    let resumed = submit_and_process(
+        &mut runtime,
+        command_event(4, revision, OperationCommand::Start),
+    );
+    assert!(matches!(
+        resumed.effects.as_slice(),
+        [Effect::ExecuteCue(_)]
+    ));
+    let duplicate = submit_and_process(&mut runtime, phrase_changed(5, 10, 0, 5));
+    assert!(duplicate.effects.is_empty());
 }
 
 #[test]

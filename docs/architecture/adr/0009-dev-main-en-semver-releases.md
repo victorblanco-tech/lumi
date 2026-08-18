@@ -19,8 +19,8 @@ macOS-publicatie vinden bovendien niet atomair plaats.
 - Hotfixes vertrekken vanaf en keren terug naar `main`.
 - `main` wordt na iedere release/hotfix terug naar `dev` gesynchroniseerd.
 - Productversies volgen Semantic Versioning en staan canoniek in `VERSION`.
-- `dev` draagt de eerstvolgende geplande versie met `-dev`; productiecommits op
-  `main` hebben geen pre-release suffix.
+- `dev` draagt de eerstvolgende geplande versie met een oplopende
+  `-dev-<n>`-suffix; productiecommits op `main` hebben geen pre-release suffix.
 - Productietags gebruiken `vMAJOR.MINOR.PATCH` en worden niet verplaatst.
 - Releasebouw en publicatie zijn afzonderlijke, gecontroleerde stappen.
 - macOS en iPhone delen een marketingversie, maar hebben eigen monotone
@@ -32,6 +32,8 @@ macOS-publicatie vinden bovendien niet atomair plaats.
 - Release- en hotfixflows zijn explicieter dan continuous deployment.
 - De branches moeten na iedere release bewust worden gesynchroniseerd.
 - CI moet versieconsistentie over Rust en Xcode bewaken.
+- Iedere deelbare developmentbuild heeft een herkenbaar, oplopend nummer; een
+  eerdere build kan daardoor niet met de actuele testbuild worden verward.
 - iPhone en Mac moeten protocolcompatibel blijven tijdens gefaseerde updates.
 - Een solo-ontwikkelaar gebruikt geen verplichte self-review, maar wel PR- en
   CI-gates voor `main`.

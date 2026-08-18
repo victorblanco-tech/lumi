@@ -1,0 +1,1 @@
+{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":3,"observedAtNanos":3000000,"type":"precisePosition","payload":{"deviceNumber":2,"deviceName":"CDJ-1500X","playbackPositionMillis":42750,"effectiveBpm":136.5,"beatWithinBar":1,"tempoMaster":true}}

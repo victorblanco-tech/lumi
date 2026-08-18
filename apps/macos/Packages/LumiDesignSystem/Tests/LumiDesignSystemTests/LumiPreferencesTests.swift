@@ -47,3 +47,21 @@ func lightingTimingIsClamped() throws {
     let restored = LumiPreferences(userDefaults: defaults)
     #expect(restored.lightingTimingOffsetMillis == 250)
 }
+
+@MainActor
+@Test("Legacy positive-early timing is migrated once to negative-early")
+func legacyTimingSignIsMigratedOnce() throws {
+    let suite = "LumiPreferencesTests.timingConvention.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suite))
+    defer { defaults.removePersistentDomain(forName: suite) }
+    defaults.set(20, forKey: LumiPreferenceKey.lightingTimingOffsetMillis)
+
+    let migrated = LumiPreferences(userDefaults: defaults)
+    #expect(migrated.lightingTimingOffsetMillis == -20)
+    #expect(
+        defaults.integer(forKey: LumiPreferenceKey.lightingTimingOffsetConventionVersion) == 2
+    )
+
+    let restored = LumiPreferences(userDefaults: defaults)
+    #expect(restored.lightingTimingOffsetMillis == -20)
+}

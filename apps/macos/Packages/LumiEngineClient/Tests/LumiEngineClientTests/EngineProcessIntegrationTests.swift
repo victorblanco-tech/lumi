@@ -35,6 +35,126 @@ func decodesCommandFailure() {
     #expect(failure?.retryable == true)
 }
 
+@Test("The Swift transport receives a complete mounted USB inspection snapshot")
+func receivesMountedUSBInspectionWhenProvided() async throws {
+    let environment = ProcessInfo.processInfo.environment
+    guard let executablePath = environment["LUMI_ENGINE_TEST_EXECUTABLE"],
+          let usbRoot = environment["LUMI_TEST_USB_ROOT"] else {
+        return
+    }
+
+    let supervisor = EngineProcessSupervisor()
+    let suppliedDatabasePath = environment["LUMI_TEST_LIBRARY_DATABASE"]
+    let databaseURL = suppliedDatabasePath.map(URL.init(fileURLWithPath:))
+        ?? FileManager.default.temporaryDirectory
+            .appendingPathComponent("lumi-swift-usb-\(UUID().uuidString).sqlite")
+    defer {
+        if suppliedDatabasePath == nil {
+            try? FileManager.default.removeItem(at: databaseURL)
+            try? FileManager.default.removeItem(atPath: databaseURL.path + "-wal")
+            try? FileManager.default.removeItem(atPath: databaseURL.path + "-shm")
+        }
+    }
+    do {
+        let endpoint = try await supervisor.launch(
+            engineExecutable: URL(fileURLWithPath: executablePath),
+            libraryDatabaseURL: databaseURL,
+            automaticallyPublishesMidi: false
+        )
+        _ = try await supervisor.connect(to: endpoint)
+        let snapshot = try await supervisor.send(
+            .inspectRekordboxDevice(
+                root: usbRoot,
+                sourceID: environment["LUMI_TEST_USB_SOURCE_ID"]
+            ),
+            messageID: "swift-inspect-mounted-usb"
+        )
+        let encoded = try JSONEncoder().encode(snapshot)
+        if let outputPath = environment["LUMI_TEST_USB_ENVELOPE_OUTPUT"] {
+            try encoded.write(to: URL(fileURLWithPath: outputPath), options: .atomic)
+        }
+        #expect(encoded.count <= WireProtocol.maximumMessageBytes)
+        guard case let .object(library)? = snapshot.payload["library"],
+              case let .object(inspection)? = library["rekordboxDeviceInspection"],
+              case let .number(trackCount)? = inspection["trackCount"],
+              case let .number(playlistCount)? = inspection["playlistCount"] else {
+            Issue.record("Mounted USB inspection is missing from the engine snapshot")
+            await supervisor.stop()
+            return
+        }
+        #expect(trackCount > 0)
+        #expect(playlistCount > 0)
+        let statusSnapshot = try await supervisor.getSnapshot(
+            messageID: "swift-status-after-mounted-usb"
+        )
+        let encodedStatus = try JSONEncoder().encode(statusSnapshot)
+        #expect(encodedStatus.count < encoded.count)
+        guard case let .object(statusLibrary)? = statusSnapshot.payload["library"] else {
+            Issue.record("Status snapshot is missing its library state")
+            await supervisor.stop()
+            return
+        }
+        #expect(statusLibrary["rekordboxDeviceInspection"] == .null)
+        await supervisor.stop()
+    } catch {
+        await supervisor.stop()
+        throw error
+    }
+}
+
+@Test("A selected trusted USB playlist enriches an existing track with Rekordbox hot cues")
+func syncsMountedUSBHotCuesWhenProvided() async throws {
+    let environment = ProcessInfo.processInfo.environment
+    guard let executablePath = environment["LUMI_ENGINE_TEST_EXECUTABLE"],
+          let usbRoot = environment["LUMI_TEST_USB_ROOT"],
+          let sourceID = environment["LUMI_TEST_USB_SOURCE_ID"],
+          let playlistText = environment["LUMI_TEST_USB_PLAYLIST_ID"],
+          let playlistID = UInt32(playlistText),
+          let databasePath = environment["LUMI_TEST_LIBRARY_DATABASE"] else {
+        return
+    }
+
+    let supervisor = EngineProcessSupervisor()
+    do {
+        let endpoint = try await supervisor.launch(
+            engineExecutable: URL(fileURLWithPath: executablePath),
+            libraryDatabaseURL: URL(fileURLWithPath: databasePath),
+            automaticallyPublishesMidi: false
+        )
+        _ = try await supervisor.connect(to: endpoint)
+        _ = try await supervisor.send(
+            .syncRekordboxDevice(
+                root: usbRoot,
+                sourceID: sourceID,
+                playlistIDs: [playlistID]
+            ),
+            messageID: "swift-sync-mounted-usb-hot-cues"
+        )
+        let search = try await supervisor.send(
+            .queryLibrary(search: "90s Bitch", playlistID: nil, offset: 0, limit: 25),
+            messageID: "swift-search-hot-cue-track"
+        )
+        #expect(libraryTrackTitles(search) == ["90s Bitch - Extended Mix"])
+        let editor = try await supervisor.send(
+            .openLibraryTrackEditor(trackID: requiredFirstLibraryTrackID(search)),
+            messageID: "swift-open-hot-cue-track"
+        )
+        #expect(libraryEditorArrayCount(editor, field: "hotCues") == 2)
+        #expect(libraryEditorArrayCount(editor, field: "phrases") == 17)
+        #expect(libraryEditorTimelineRevision(editor) == 35)
+        if let outputPath = environment["LUMI_TEST_USB_SYNC_ENVELOPE_OUTPUT"] {
+            try JSONEncoder().encode(editor).write(
+                to: URL(fileURLWithPath: outputPath),
+                options: .atomic
+            )
+        }
+        await supervisor.stop()
+    } catch {
+        await supervisor.stop()
+        throw error
+    }
+}
+
 @Test("The Swift client launches and authenticates the real Rust engine")
 func launchesRealEngine() async throws {
     let environment = ProcessInfo.processInfo.environment
@@ -494,8 +614,16 @@ func launchesRealEngine() async throws {
                 expectedStateRevision: requiredStateRevision(played)
             )
         )
-        #expect(deckSourceMode(connected) == "connectedDecks")
-        #expect(deckCount(connected) == 0)
+        if let failure = EngineCommandFailure(connected) {
+            // A standalone engine binary intentionally has no packaged Java
+            // bridge. Verify that this environment limitation fails closed;
+            // the full app-bundle gate separately verifies Direct Pro DJ Link.
+            #expect(failure.code == "proDjLinkUnavailable")
+            #expect(!failure.message.isEmpty)
+        } else {
+            #expect(deckSourceMode(connected) == "connectedDecks")
+            #expect(deckCount(connected) == 0)
+        }
         #expect(await supervisor.isRunning())
         await supervisor.stop()
         #expect(await !supervisor.isRunning())
@@ -510,6 +638,124 @@ func launchesRealEngine() async throws {
         try? FileManager.default.removeItem(at: databaseURL)
         try? FileManager.default.removeItem(atPath: databaseURL.path + "-wal")
         try? FileManager.default.removeItem(atPath: databaseURL.path + "-shm")
+        throw error
+    }
+}
+
+@Test("Concurrent monitor and interactive exchanges remain framed and correlated")
+func serializesConcurrentEngineExchanges() async throws {
+    let environment = ProcessInfo.processInfo.environment
+    guard let executablePath = environment["LUMI_ENGINE_TEST_EXECUTABLE"] else {
+        Issue.record("LUMI_ENGINE_TEST_EXECUTABLE is required")
+        return
+    }
+
+    let supervisor = EngineProcessSupervisor()
+    let databaseURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("lumi-swift-concurrent-\(UUID().uuidString).sqlite")
+    defer {
+        try? FileManager.default.removeItem(at: databaseURL)
+        try? FileManager.default.removeItem(atPath: databaseURL.path + "-wal")
+        try? FileManager.default.removeItem(atPath: databaseURL.path + "-shm")
+        try? FileManager.default.removeItem(
+            at: databaseURL.deletingLastPathComponent().appendingPathComponent(
+                ".\(databaseURL.lastPathComponent).engine-service.json"
+            )
+        )
+    }
+
+    do {
+        let endpoint = try await supervisor.launch(
+            engineExecutable: URL(fileURLWithPath: executablePath),
+            libraryDatabaseURL: databaseURL,
+            automaticallyPublishesMidi: false
+        )
+        _ = try await supervisor.connect(to: endpoint)
+        async let monitor = supervisor.getSnapshot(
+            includeLibrary: false,
+            messageID: "concurrent-monitor"
+        )
+        async let interactive = supervisor.getSnapshot(
+            includeLibrary: true,
+            messageID: "concurrent-interactive"
+        )
+        let (monitorResponse, interactiveResponse) = try await (monitor, interactive)
+        #expect(monitorResponse.correlationId == "concurrent-monitor")
+        #expect(interactiveResponse.correlationId == "concurrent-interactive")
+        #expect(monitorResponse.messageType == .snapshot)
+        #expect(interactiveResponse.messageType == .snapshot)
+        await supervisor.stop()
+    } catch {
+        await supervisor.stop()
+        throw error
+    }
+}
+
+@Test("A UI disconnect parks and reuses the channel engine without MIDI endpoint churn")
+func parksAndReattachesChannelEngine() async throws {
+    let environment = ProcessInfo.processInfo.environment
+    guard let executablePath = environment["LUMI_ENGINE_TEST_EXECUTABLE"] else {
+        Issue.record("LUMI_ENGINE_TEST_EXECUTABLE is required")
+        return
+    }
+
+    let firstSupervisor = EngineProcessSupervisor()
+    let secondSupervisor = EngineProcessSupervisor()
+    let databaseURL = FileManager.default.temporaryDirectory
+        .appendingPathComponent("lumi-swift-parked-service-\(UUID().uuidString).sqlite")
+    defer {
+        try? FileManager.default.removeItem(at: databaseURL)
+        try? FileManager.default.removeItem(atPath: databaseURL.path + "-wal")
+        try? FileManager.default.removeItem(atPath: databaseURL.path + "-shm")
+        try? FileManager.default.removeItem(
+            at: databaseURL.deletingLastPathComponent().appendingPathComponent(
+                ".\(databaseURL.lastPathComponent).engine-service.json"
+            )
+        )
+    }
+
+    do {
+        let firstEndpoint = try await firstSupervisor.launch(
+            engineExecutable: URL(fileURLWithPath: executablePath),
+            libraryDatabaseURL: databaseURL,
+            automaticallyPublishesMidi: false
+        )
+        var snapshot = try await firstSupervisor.connect(to: firstEndpoint)
+        snapshot = try await firstSupervisor.send(
+            .setOperationState(
+                "armed",
+                expectedStateRevision: requiredStateRevision(snapshot)
+            ),
+            messageID: "swift-park-arm"
+        )
+        snapshot = try await firstSupervisor.send(
+            .setOperationState(
+                "live",
+                expectedStateRevision: requiredStateRevision(snapshot)
+            ),
+            messageID: "swift-park-live"
+        )
+        #expect(operationState(snapshot) == "live")
+
+        await firstSupervisor.detachKeepingServiceAlive()
+        try await Task.sleep(for: .milliseconds(75))
+        #expect(await firstSupervisor.isRunning())
+
+        let secondEndpoint = try await secondSupervisor.launch(
+            engineExecutable: URL(fileURLWithPath: executablePath),
+            libraryDatabaseURL: databaseURL,
+            automaticallyPublishesMidi: false
+        )
+        #expect(secondEndpoint.host == firstEndpoint.host)
+        #expect(secondEndpoint.port == firstEndpoint.port)
+        snapshot = try await secondSupervisor.connect(to: secondEndpoint)
+        #expect(operationState(snapshot) == "off")
+        #expect(midiIntegrationState(snapshot) == "stopped")
+        await secondSupervisor.stop()
+        #expect(await !secondSupervisor.isRunning())
+    } catch {
+        await secondSupervisor.stop()
+        await firstSupervisor.stop()
         throw error
     }
 }

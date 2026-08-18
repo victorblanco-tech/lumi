@@ -223,17 +223,56 @@ fn reduce_observation(
             deck_id,
             track_load_id,
             beat,
-        } => match state.decks.get_mut(deck_id) {
-            Some(deck) if deck.track_load_id() != *track_load_id => {
-                DecisionReason::TrackLoadMismatch
+        } => {
+            let accepted = match state.decks.get_mut(deck_id) {
+                Some(deck) if deck.track_load_id() != *track_load_id => None,
+                Some(deck) => {
+                    let phrase_index = phrase_index_at_beat(deck.metadata(), *beat);
+                    deck.beat = *beat;
+                    deck.phrase_index = phrase_index;
+                    deck.last_observed_at = event.observed_at;
+                    Some((deck.is_playing(), phrase_index))
+                }
+                None => None,
+            };
+            match accepted {
+                None => DecisionReason::TrackLoadMismatch,
+                Some((playing, phrase_index)) => {
+                    // A confirmed landing starts a new transport execution
+                    // context. Even when it lands inside the same phrase, the
+                    // current SoundSwitch AutoLoop must be eligible exactly
+                    // once; the following PhraseChanged observation is then a
+                    // harmless duplicate.
+                    if state
+                        .last_scheduled_cue
+                        .is_some_and(|scheduled| scheduled.0 == *deck_id)
+                    {
+                        state.last_scheduled_cue = None;
+                    }
+                    if state.operation == OperationState::Live
+                        && state.leader_deck == Some(*deck_id)
+                        && playing
+                    {
+                        if let Some(phrase_index) = phrase_index
+                            && let Some(effect) = execution_effect(
+                                state,
+                                *deck_id,
+                                *track_load_id,
+                                phrase_index,
+                                event.observed_at,
+                            )?
+                        {
+                            effects.push(effect);
+                            DecisionReason::PhraseExecutionScheduled
+                        } else {
+                            DecisionReason::PositionSeeked
+                        }
+                    } else {
+                        DecisionReason::PositionSeeked
+                    }
+                }
             }
-            Some(deck) => {
-                deck.beat = *beat;
-                deck.last_observed_at = event.observed_at;
-                DecisionReason::PositionSeeked
-            }
-            None => DecisionReason::TrackLoadMismatch,
-        },
+        }
         DeckObservation::PlaybackTempoChanged {
             deck_id,
             track_load_id,
@@ -253,22 +292,48 @@ fn reduce_observation(
             deck_id,
             track_load_id,
             playing,
-        } => match state.decks.get_mut(deck_id) {
-            Some(deck) if deck.track_load_id() == *track_load_id => {
-                deck.playing = *playing;
-                deck.last_observed_at = event.observed_at;
-                if !playing
-                    && deck.beat() == 0
-                    && state
+        } => {
+            let accepted = match state.decks.get_mut(deck_id) {
+                Some(deck) if deck.track_load_id() == *track_load_id => {
+                    let started = !deck.is_playing() && *playing;
+                    deck.playing = *playing;
+                    deck.last_observed_at = event.observed_at;
+                    Some((started, deck.phrase_index))
+                }
+                _ => None,
+            };
+            match accepted {
+                None => DecisionReason::TrackLoadMismatch,
+                Some((_, _)) if !playing => {
+                    // A real deck transport stop closes the current playback
+                    // generation. SoundSwitch may also have stopped its active
+                    // AutoLoop, so the same Lumi cue must be eligible for the
+                    // next stopped -> playing edge, including from a Hot Cue.
+                    if state
                         .last_scheduled_cue
                         .is_some_and(|scheduled| scheduled.0 == *deck_id)
-                {
-                    state.last_scheduled_cue = None;
+                    {
+                        state.last_scheduled_cue = None;
+                    }
+                    DecisionReason::PlaybackStateChanged
                 }
-                DecisionReason::PlaybackStateChanged
+                Some((true, Some(phrase_index))) if state.operation == OperationState::Live => {
+                    if let Some(effect) = execution_effect(
+                        state,
+                        *deck_id,
+                        *track_load_id,
+                        phrase_index,
+                        event.observed_at,
+                    )? {
+                        effects.push(effect);
+                        DecisionReason::PhraseExecutionScheduled
+                    } else {
+                        DecisionReason::PlaybackStateChanged
+                    }
+                }
+                Some(_) => DecisionReason::PlaybackStateChanged,
             }
-            _ => DecisionReason::TrackLoadMismatch,
-        },
+        }
         DeckObservation::TrackUnloaded {
             deck_id,
             track_load_id,
@@ -337,29 +402,56 @@ fn reduce_observation(
         DeckObservation::LeaderChanged {
             deck_id,
             track_load_id,
-        } => match state.decks.get(deck_id) {
-            Some(deck) if deck.track_load_id() == *track_load_id => {
-                state.leader_deck = Some(*deck_id);
-                state.active_plan = state
-                    .plans
-                    .get(deck_id)
-                    .filter(|plan| {
-                        plan.status() == PlanStatus::Ready
-                            && plan.track_load_id() == *track_load_id
-                            && plan.track_id() == deck.track_id()
-                    })
-                    .cloned();
-                if state.active_plan.is_some() {
-                    DecisionReason::PlanActivated
-                } else {
-                    DecisionReason::PlanActivationSkipped
+        } => {
+            let accepted = state.decks.get(deck_id).and_then(|deck| {
+                (deck.track_load_id() == *track_load_id).then_some((
+                    deck.is_playing(),
+                    deck.phrase_index(),
+                    deck.track_id(),
+                ))
+            });
+            match accepted {
+                Some((playing, phrase_index, track_id)) => {
+                    state.leader_deck = Some(*deck_id);
+                    state.active_plan = state
+                        .plans
+                        .get(deck_id)
+                        .filter(|plan| {
+                            plan.status() == PlanStatus::Ready
+                                && plan.track_load_id() == *track_load_id
+                                && plan.track_id() == track_id
+                        })
+                        .cloned();
+                    if state.active_plan.is_some()
+                        && state.operation == OperationState::Live
+                        && playing
+                    {
+                        if let Some(phrase_index) = phrase_index
+                            && let Some(effect) = execution_effect(
+                                state,
+                                *deck_id,
+                                *track_load_id,
+                                phrase_index,
+                                event.observed_at,
+                            )?
+                        {
+                            effects.push(effect);
+                            DecisionReason::PhraseExecutionScheduled
+                        } else {
+                            DecisionReason::PlanActivated
+                        }
+                    } else if state.active_plan.is_some() {
+                        DecisionReason::PlanActivated
+                    } else {
+                        DecisionReason::PlanActivationSkipped
+                    }
+                }
+                None => {
+                    state.active_plan = None;
+                    DecisionReason::TrackLoadMismatch
                 }
             }
-            _ => {
-                state.active_plan = None;
-                DecisionReason::TrackLoadMismatch
-            }
-        },
+        }
     };
 
     let state_changed = matches!(
@@ -378,6 +470,14 @@ fn reduce_observation(
             | DecisionReason::PhraseExecutionSkipped
     );
     Ok((decision, effects, state_changed))
+}
+
+fn phrase_index_at_beat(metadata: &crate::TrackMetadata, beat: u32) -> Option<u16> {
+    metadata
+        .phrases()
+        .iter()
+        .find(|phrase| beat >= phrase.start_beat() && beat < phrase.end_beat())
+        .map(|phrase| phrase.index())
 }
 
 fn execution_effect(
@@ -478,16 +578,31 @@ fn reduce_command(
         .command_sequences
         .insert(event.client_id, event.sequence);
     state.operation = target;
-    if target == OperationState::Off {
-        // Off closes the physical output gate, but the prepared plan remains
-        // visible and ready. Re-arming must not require a deck/leader change to
-        // recover the plan for the currently loaded track.
+    if matches!(target, OperationState::Paused | OperationState::Off) {
+        // Pause and Off close the physical output gate, but the prepared plan
+        // remains visible and ready. Starting again must restore the current
+        // AutoLoop immediately; waiting for a later phrase boundary would leave
+        // the show dark after an explicitly requested output pause.
         state.last_scheduled_cue = None;
     }
     let effects = if matches!(target, OperationState::Paused | OperationState::Off) {
         vec![Effect::EnsureOutputClosed {
             reason: DecisionReason::OperationTransitionAccepted,
         }]
+    } else if target == OperationState::Live {
+        let current = state.leader_deck.and_then(|deck_id| {
+            let deck = state.decks.get(&deck_id)?;
+            deck.is_playing()
+                .then_some((deck_id, deck.track_load_id(), deck.phrase_index?))
+        });
+        current
+            .map(|(deck_id, track_load_id, phrase_index)| {
+                execution_effect(state, deck_id, track_load_id, phrase_index, event.issued_at)
+            })
+            .transpose()?
+            .into_iter()
+            .flatten()
+            .collect()
     } else {
         Vec::new()
     };

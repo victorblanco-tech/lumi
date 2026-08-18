@@ -31,6 +31,15 @@ Decision Records (ADR's) die de belangrijkste besluiten vastleggen.
 - [ADR-0022: Separate CoreMIDI sources for lighting commands and playback timing](adr/0022-separate-coremidi-command-and-clock-sources.md)
 - [ADR-0023: Independent MIDI lifecycle and phrase-boundary pre-roll](adr/0023-independent-midi-lifecycle-and-phrase-boundary-preroll.md)
 - [ADR-0024: VB Tech-appidentiteit en geïsoleerde releasekanalen](adr/0024-vb-tech-app-identiteit-en-geisoleerde-releasekanalen.md)
+- [ADR-0025: Read-only Rekordbox Device identity and analysis sync](adr/0025-read-only-rekordbox-device-identity-and-analysis-sync.md)
+- [ADR-0026: Direct Pro DJ Link bridge and separate timing authority](adr/0026-direct-pro-dj-link-bridge-and-timing-authority.md)
+- [ADR-0027: USB-backed Pro DJ Link test player and remote control](adr/0027-usb-backed-pro-dj-link-test-player.md)
+- [ADR-0028: Trusted USB sources and monotone analysis promotion](adr/0028-trusted-usb-sources-and-monotone-analysis-promotion.md)
+- [ADR-0029: Atomic backups, Library rebuilds and Creative Archive](adr/0029-atomic-backups-library-rebuild-and-creative-archive.md)
+- [ADR-0030: Managed Ableton Link timing output](adr/0030-managed-ableton-link-timing-output.md)
+- [ADR-0031: Show-critical runtime isolation and local quality gates](adr/0031-show-critical-runtime-isolation-and-local-quality-gates.md)
+- [ADR-0032: launchd-owned engine and isolated Ableton Link clock](adr/0032-launchd-engine-and-isolated-link-clock.md)
+- [ADR-0033: Deterministic Live timing and exactly-once AutoLoop output](adr/0033-deterministic-live-timing-and-exactly-once-autoloop-output.md)
 
 Release- en deploymentmanagement staat in [`docs/release`](../release/README.md).
 

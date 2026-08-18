@@ -22,13 +22,98 @@ use rusqlite::Connection;
 #[test]
 fn migrates_an_empty_database() -> Result<(), Box<dyn Error>> {
     let repository = SqliteLibraryRepository::in_memory()?;
-    assert_eq!(repository.schema_version()?, 6);
+    assert_eq!(repository.schema_version()?, 11);
     assert_eq!(
         repository
             .page_tracks(TrackPageRequest::try_new(0, 25)?)?
             .total(),
         0
     );
+    Ok(())
+}
+
+#[test]
+fn engine_owned_backup_is_coherent_while_wal_repository_remains_open() -> Result<(), Box<dyn Error>>
+{
+    let live_path = temporary_database_path()?;
+    let backup_path = temporary_database_path()?;
+    let baseline = DemoLibrarySourceProvider::curated().load_baseline()?;
+    let mut repository = SqliteLibraryRepository::open(&live_path)?;
+    repository.import_baseline(&baseline)?;
+
+    repository.create_consistent_backup(&backup_path)?;
+    SqliteLibraryRepository::validate_backup(&backup_path)?;
+    let restored = SqliteLibraryRepository::open(&backup_path)?;
+    assert_eq!(
+        restored
+            .page_tracks(TrackPageRequest::try_new(0, 1)?)?
+            .total(),
+        baseline.tracks().len() as u64
+    );
+
+    let _ = std::fs::remove_file(live_path);
+    let _ = std::fs::remove_file(backup_path);
+    Ok(())
+}
+
+#[test]
+fn corrupt_or_future_backup_is_rejected_before_live_data_changes() -> Result<(), Box<dyn Error>> {
+    let live_path = temporary_database_path()?;
+    let corrupt_path = temporary_database_path()?;
+    let rollback_path = temporary_database_path()?;
+    let baseline = DemoLibrarySourceProvider::curated().load_baseline()?;
+    let mut repository = SqliteLibraryRepository::open(&live_path)?;
+    repository.import_baseline(&baseline)?;
+    std::fs::write(&corrupt_path, b"not a sqlite database")?;
+
+    assert!(
+        repository
+            .restore_consistent_backup(&corrupt_path, &rollback_path)
+            .is_err()
+    );
+    assert_eq!(
+        repository
+            .page_tracks(TrackPageRequest::try_new(0, 1)?)?
+            .total(),
+        baseline.tracks().len() as u64
+    );
+    assert!(!rollback_path.exists());
+
+    let _ = std::fs::remove_file(live_path);
+    let _ = std::fs::remove_file(corrupt_path);
+    Ok(())
+}
+
+#[test]
+fn successful_live_restore_replaces_data_and_retains_a_valid_rollback() -> Result<(), Box<dyn Error>>
+{
+    let live_path = temporary_database_path()?;
+    let backup_path = temporary_database_path()?;
+    let rollback_path = temporary_database_path()?;
+    let initial =
+        DemoLibrarySourceProvider::curated_revision(DemoLibraryRevision::V1).load_baseline()?;
+    let mut repository = SqliteLibraryRepository::open(&live_path)?;
+    repository.import_baseline(&initial)?;
+    let track_id = repository.track_ids_missing_timelines(1)?[0];
+    let track = repository.track(track_id)?.ok_or("track")?;
+    repository.create_consistent_backup(&backup_path)?;
+    repository.append_timeline_revision(&source_timeline(track_id, &track)?, None)?;
+    assert!(repository.timeline_head(track_id)?.is_some());
+
+    repository.restore_consistent_backup(&backup_path, &rollback_path)?;
+    assert_eq!(
+        repository
+            .page_tracks(TrackPageRequest::try_new(0, 1)?)?
+            .total(),
+        initial.tracks().len() as u64
+    );
+    assert!(repository.timeline_head(track_id)?.is_none());
+    let rollback = SqliteLibraryRepository::open(&rollback_path)?;
+    assert!(rollback.timeline_head(track_id)?.is_some());
+
+    let _ = std::fs::remove_file(live_path);
+    let _ = std::fs::remove_file(backup_path);
+    let _ = std::fs::remove_file(rollback_path);
     Ok(())
 }
 
@@ -88,7 +173,7 @@ fn migrates_version_one_timeline_history_without_losing_rows() -> Result<(), Box
     }
 
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 6);
+    assert_eq!(repository.schema_version()?, 11);
     drop(repository);
     let connection = Connection::open(&path)?;
     let reason: String = connection.query_row(
@@ -145,7 +230,7 @@ fn migrates_version_two_phrase_roles_into_an_unseeded_catalog() -> Result<(), Bo
     }
 
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 6);
+    assert_eq!(repository.schema_version()?, 11);
     let catalog = repository.phrase_role_catalog()?;
     assert_eq!(catalog.revision(), 0);
     assert_eq!(catalog.defaults_version(), 0);
@@ -188,7 +273,7 @@ fn migrates_version_three_into_an_unseeded_autoloop_catalog() -> Result<(), Box<
     }
 
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 6);
+    assert_eq!(repository.schema_version()?, 11);
     let catalog = repository.autoloop_catalog()?;
     assert_eq!(catalog.revision(), 0);
     assert_eq!(catalog.defaults_version(), 0);
@@ -693,6 +778,25 @@ fn phrase_role_catalog_mutation_usage_and_conflict_survive_restart() -> Result<(
 }
 
 #[test]
+fn phrase_role_defaults_upgrade_is_persisted_and_not_repeated() -> Result<(), Box<dyn Error>> {
+    let mut repository = SqliteLibraryRepository::in_memory()?;
+    let role = PhraseRole::try_new(PhraseRoleId::try_new("intro-outro")?, "Intro", 1, false)?;
+    repository.initialize_phrase_role_catalog(&PhraseRoleCatalog::try_new(
+        1,
+        1,
+        vec![role.clone()],
+        vec![],
+    )?)?;
+    repository
+        .replace_phrase_role_catalog(&PhraseRoleCatalog::try_new(2, 2, vec![role], vec![])?, 1)?;
+
+    let persisted = repository.phrase_role_catalog()?;
+    assert_eq!(persisted.revision(), 2);
+    assert_eq!(persisted.defaults_version(), 2);
+    Ok(())
+}
+
+#[test]
 fn loop_strategy_survives_a_revision_round_trip() -> Result<(), Box<dyn Error>> {
     let baseline = DemoLibrarySourceProvider::curated().load_baseline()?;
     let mut repository = SqliteLibraryRepository::in_memory()?;
@@ -754,6 +858,224 @@ fn timeline_writes_use_optimistic_concurrency() -> Result<(), Box<dyn Error>> {
             actual: Some(_),
         })
     ));
+    Ok(())
+}
+
+#[test]
+fn library_rebuild_archives_and_relinks_user_phrase_work() -> Result<(), Box<dyn Error>> {
+    let baseline = DemoLibrarySourceProvider::curated().load_baseline()?;
+    let mut repository = SqliteLibraryRepository::in_memory()?;
+    repository.initialize_phrase_role_catalog(&PhraseRoleCatalog::try_new(
+        1,
+        PHRASE_ROLE_DEFAULTS_VERSION,
+        vec![PhraseRole::try_new(
+            PhraseRoleId::try_new("breakdown-1")?,
+            "Breakdown 1",
+            1,
+            false,
+        )?],
+        vec![],
+    )?)?;
+    repository.import_baseline(&baseline)?;
+    let original_track = repository
+        .page_tracks(TrackPageRequest::try_new(0, 25)?)?
+        .tracks()[0]
+        .clone();
+    let stored = repository
+        .track(original_track.id())?
+        .ok_or("original track")?;
+    let total_beats = u32::try_from(stored.beat_grid().markers().len())?;
+    let authored = LumiPhraseTimeline::try_new(
+        original_track.id(),
+        TimelineRevision::initial(),
+        stored.summary().source_revision().clone(),
+        total_beats,
+        TimelineRevisionOrigin::UserEdit,
+        vec![PhraseInstance::new(
+            0,
+            0,
+            total_beats,
+            PhraseRoleId::try_new("breakdown-1")?,
+        )],
+    )?;
+    repository
+        .append_timeline_revision(&authored, None)
+        .map_err(|error| format!("authored timeline: {error}"))?;
+
+    let preview = repository.preview_library_reset(&[])?;
+    assert_eq!(preview.track_count, 3);
+    assert_eq!(preview.preserved_track_count, 0);
+    assert_eq!(preview.archived_creative_track_count, 1);
+
+    repository
+        .reset_library_content(&[])
+        .map_err(|error| format!("reset: {error}"))?;
+    let reset = repository.data_summary()?;
+    assert_eq!(reset.track_count, 0);
+    assert_eq!(reset.playlist_count, 0);
+    assert_eq!(reset.creative_archive_count, 1);
+    assert_eq!(reset.pending_archive_count, 1);
+    assert!(repository.suppress_demo_seed()?);
+    assert_eq!(repository.creative_archives()?[0].state, "pending");
+
+    repository.import_baseline(&baseline)?;
+    let reimported = repository
+        .page_tracks(TrackPageRequest::try_new(0, 25)?)?
+        .tracks()
+        .iter()
+        .find(|track| track.source_track_id() == original_track.source_track_id())
+        .cloned()
+        .ok_or("reimported track")?;
+    let reimported_track = repository.track(reimported.id())?.ok_or("track")?;
+    repository
+        .append_timeline_revision(&source_timeline(reimported.id(), &reimported_track)?, None)?;
+
+    let result = repository.relink_creative_archives()?;
+    assert_eq!(result.restored, 1);
+    assert_eq!(result.pending_review, 0);
+    let restored = repository
+        .timeline_head(reimported.id())?
+        .ok_or("restored timeline")?;
+    assert_eq!(restored.revision().value(), 2);
+    assert_eq!(restored.origin(), TimelineRevisionOrigin::RevisionRestore);
+    assert_eq!(restored.phrases()[0].role_id().as_str(), "breakdown-1");
+    assert_eq!(repository.creative_archives()?[0].state, "restored");
+    Ok(())
+}
+
+#[test]
+fn library_rebuild_can_keep_selected_authored_tracks_immediately_available()
+-> Result<(), Box<dyn Error>> {
+    let baseline = DemoLibrarySourceProvider::curated().load_baseline()?;
+    let mut repository = SqliteLibraryRepository::in_memory()?;
+    repository.initialize_phrase_role_catalog(&PhraseRoleCatalog::try_new(
+        1,
+        PHRASE_ROLE_DEFAULTS_VERSION,
+        vec![PhraseRole::try_new(
+            PhraseRoleId::try_new("drop")?,
+            "Drop",
+            1,
+            false,
+        )?],
+        vec![],
+    )?)?;
+    repository.import_baseline(&baseline)?;
+    let keep = repository
+        .page_tracks(TrackPageRequest::try_new(0, 25)?)?
+        .tracks()[0]
+        .clone();
+    let stored = repository.track(keep.id())?.ok_or("track")?;
+    let authored = LumiPhraseTimeline::try_new(
+        keep.id(),
+        TimelineRevision::initial(),
+        stored.summary().source_revision().clone(),
+        u32::try_from(stored.beat_grid().markers().len())?,
+        TimelineRevisionOrigin::UserEdit,
+        vec![PhraseInstance::new(
+            0,
+            0,
+            u32::try_from(stored.beat_grid().markers().len())?,
+            PhraseRoleId::try_new("drop")?,
+        )],
+    )?;
+    repository
+        .append_timeline_revision(&authored, None)
+        .map_err(|error| format!("authored timeline: {error}"))?;
+
+    repository
+        .reset_library_content(&[keep.id()])
+        .map_err(|error| format!("reset: {error}"))?;
+
+    assert_eq!(repository.data_summary()?.track_count, 1);
+    assert!(repository.track(keep.id())?.is_some());
+    assert_eq!(
+        repository
+            .page_playlists(TrackPageRequest::try_new(0, 25)?)?
+            .total(),
+        0
+    );
+    let archive = repository.creative_archives()?.remove(0);
+    assert_eq!(archive.state, "preserved");
+    assert_eq!(archive.restored_track_id, Some(keep.id()));
+    Ok(())
+}
+
+#[test]
+fn creative_relink_holds_an_incompatible_beat_structure_for_review() -> Result<(), Box<dyn Error>> {
+    let baseline = DemoLibrarySourceProvider::curated().load_baseline()?;
+    let mut repository = SqliteLibraryRepository::in_memory()?;
+    repository.initialize_phrase_role_catalog(&PhraseRoleCatalog::try_new(
+        1,
+        PHRASE_ROLE_DEFAULTS_VERSION,
+        vec![PhraseRole::try_new(
+            PhraseRoleId::try_new("synth")?,
+            "Synth",
+            1,
+            false,
+        )?],
+        vec![],
+    )?)?;
+    repository.import_baseline(&baseline)?;
+    let original = repository
+        .page_tracks(TrackPageRequest::try_new(0, 25)?)?
+        .tracks()[0]
+        .clone();
+    let stored = repository.track(original.id())?.ok_or("track")?;
+    let original_beats = u32::try_from(stored.beat_grid().markers().len())?;
+    repository.append_timeline_revision(
+        &LumiPhraseTimeline::try_new(
+            original.id(),
+            TimelineRevision::initial(),
+            stored.summary().source_revision().clone(),
+            original_beats,
+            TimelineRevisionOrigin::UserEdit,
+            vec![PhraseInstance::new(
+                0,
+                0,
+                original_beats,
+                PhraseRoleId::try_new("synth")?,
+            )],
+        )?,
+        None,
+    )?;
+    repository.reset_library_content(&[])?;
+    repository.import_baseline(&baseline)?;
+    let reimported = repository
+        .page_tracks(TrackPageRequest::try_new(0, 25)?)?
+        .tracks()
+        .iter()
+        .find(|track| track.source_track_id() == original.source_track_id())
+        .cloned()
+        .ok_or("reimported track")?;
+    let changed_beats = original_beats.checked_sub(4).ok_or("short track")?;
+    repository.append_timeline_revision(
+        &LumiPhraseTimeline::try_new(
+            reimported.id(),
+            TimelineRevision::initial(),
+            reimported.source_revision().clone(),
+            changed_beats,
+            TimelineRevisionOrigin::SourceImport,
+            vec![PhraseInstance::new(
+                0,
+                0,
+                changed_beats,
+                PhraseRoleId::try_new("synth")?,
+            )],
+        )?,
+        None,
+    )?;
+
+    let result = repository.relink_creative_archives()?;
+
+    assert_eq!(result.restored, 0);
+    assert_eq!(result.pending_review, 1);
+    assert_eq!(repository.creative_archives()?[0].state, "review");
+    assert_eq!(
+        repository
+            .timeline_head(reimported.id())?
+            .map(|timeline| timeline.revision()),
+        Some(TimelineRevision::initial())
+    );
     Ok(())
 }
 

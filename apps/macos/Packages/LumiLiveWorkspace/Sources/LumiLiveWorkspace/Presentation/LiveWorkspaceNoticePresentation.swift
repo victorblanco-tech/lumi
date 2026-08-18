@@ -23,10 +23,10 @@ enum LiveWorkspaceNoticePresenter {
         if case let .rejected(message) = state.sessionInteraction {
             return .init(message: message, tone: .warning)
         }
-        if state.planInteraction == .submitting {
+        if case .submitting = state.planInteraction {
             return .init(message: "Saving lighting plan…", tone: .working)
         }
-        if state.sessionInteraction == .submitting {
+        if case .submitting = state.sessionInteraction {
             return .init(message: "Applying deck command…", tone: .working)
         }
         if case let .succeeded(message) = state.planInteraction {

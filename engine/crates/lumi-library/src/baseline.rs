@@ -148,6 +148,67 @@ pub struct WaveformPoint {
     high: u8,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HotCue {
+    index: u8,
+    time_millis: u64,
+    loop_end_millis: Option<u64>,
+    name: String,
+    color_rgb: u32,
+}
+
+impl HotCue {
+    pub fn try_new(
+        index: u8,
+        time_millis: u64,
+        loop_end_millis: Option<u64>,
+        name: impl Into<String>,
+        color_rgb: u32,
+    ) -> Result<Self, TrackValidationError> {
+        let name = name.into();
+        if !(1..=26).contains(&index) {
+            return Err(TrackValidationError::InvalidHotCueIndex(index));
+        }
+        if name.chars().count() > 512 {
+            return Err(TrackValidationError::HotCueNameTooLong);
+        }
+        if loop_end_millis.is_some_and(|end| end <= time_millis) {
+            return Err(TrackValidationError::InvalidHotCueLoop);
+        }
+        if color_rgb > 0x00ff_ffff {
+            return Err(TrackValidationError::InvalidHotCueColor);
+        }
+        Ok(Self {
+            index,
+            time_millis,
+            loop_end_millis,
+            name,
+            color_rgb,
+        })
+    }
+
+    #[must_use]
+    pub const fn index(&self) -> u8 {
+        self.index
+    }
+    #[must_use]
+    pub const fn time_millis(&self) -> u64 {
+        self.time_millis
+    }
+    #[must_use]
+    pub const fn loop_end_millis(&self) -> Option<u64> {
+        self.loop_end_millis
+    }
+    #[must_use]
+    pub fn name(&self) -> &str {
+        &self.name
+    }
+    #[must_use]
+    pub const fn color_rgb(&self) -> u32 {
+        self.color_rgb
+    }
+}
+
 impl WaveformPoint {
     #[must_use]
     pub const fn new(low: u8, mid: u8, high: u8) -> Self {
@@ -227,6 +288,7 @@ pub struct ImportedTrackAnalysis {
     beat_grid: BeatGrid,
     waveform: Vec<WaveformPoint>,
     raw_phrases: Vec<RawPhraseObservation>,
+    hot_cues: Vec<HotCue>,
 }
 
 impl ImportedTrackAnalysis {
@@ -287,7 +349,31 @@ impl ImportedTrackAnalysis {
             beat_grid,
             waveform,
             raw_phrases,
+            hot_cues: Vec::new(),
         })
+    }
+
+    pub fn with_hot_cues(
+        mut self,
+        mut hot_cues: Vec<HotCue>,
+    ) -> Result<Self, TrackValidationError> {
+        hot_cues.sort_by_key(HotCue::index);
+        if hot_cues
+            .windows(2)
+            .any(|pair| pair[0].index() == pair[1].index())
+        {
+            return Err(TrackValidationError::DuplicateHotCueIndex);
+        }
+        if hot_cues.iter().any(|cue| {
+            cue.time_millis() >= self.duration_millis
+                || cue
+                    .loop_end_millis()
+                    .is_some_and(|end| end > self.duration_millis)
+        }) {
+            return Err(TrackValidationError::HotCueOutsideTrack);
+        }
+        self.hot_cues = hot_cues;
+        Ok(self)
     }
 
     #[must_use]
@@ -338,6 +424,10 @@ impl ImportedTrackAnalysis {
     pub fn raw_phrases(&self) -> &[RawPhraseObservation] {
         &self.raw_phrases
     }
+    #[must_use]
+    pub fn hot_cues(&self) -> &[HotCue] {
+        &self.hot_cues
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -351,6 +441,12 @@ pub enum TrackValidationError {
     TooManyBeats,
     EmptyRawPhraseLabel,
     InvalidRawPhraseRange,
+    InvalidHotCueIndex(u8),
+    HotCueNameTooLong,
+    InvalidHotCueLoop,
+    InvalidHotCueColor,
+    DuplicateHotCueIndex,
+    HotCueOutsideTrack,
 }
 
 impl fmt::Display for TrackValidationError {
@@ -365,6 +461,20 @@ impl fmt::Display for TrackValidationError {
             Self::TooManyBeats => formatter.write_str("track contains too many beats"),
             Self::EmptyRawPhraseLabel => formatter.write_str("raw phrase label may not be empty"),
             Self::InvalidRawPhraseRange => formatter.write_str("raw phrase range is invalid"),
+            Self::InvalidHotCueIndex(value) => {
+                write!(formatter, "hot cue index {value} is invalid")
+            }
+            Self::HotCueNameTooLong => formatter.write_str("hot cue name is too long"),
+            Self::InvalidHotCueLoop => {
+                formatter.write_str("hot cue loop end must follow its start")
+            }
+            Self::InvalidHotCueColor => {
+                formatter.write_str("hot cue color must be a 24-bit RGB value")
+            }
+            Self::DuplicateHotCueIndex => formatter.write_str("hot cue indexes must be unique"),
+            Self::HotCueOutsideTrack => {
+                formatter.write_str("hot cue timing must be inside the track")
+            }
         }
     }
 }

@@ -15,15 +15,18 @@ members = [
     "engine/crates/lumi-output-dry-run",
     "engine/crates/lumi-planner",
     "engine/crates/lumi-protocol",
+    "engine/crates/lumi-prolink-input",
     "engine/crates/lumi-rekordbox-analysis",
+    "engine/crates/lumi-rekordbox-device",
     "engine/crates/lumi-rekordbox-resolver",
     "engine/crates/lumi-rekordbox-xml",
     "engine/crates/lumi-simulator",
+    "engine/crates/lumi-timing-output",
 ]
 resolver = "3"
 
 [workspace.package]
-version = "0.3.0"
+version = "0.4.0-dev-57"
 edition = "2024"
 rust-version = "1.97.1"
 license = "EPL-2.0"

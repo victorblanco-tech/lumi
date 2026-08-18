@@ -26,6 +26,10 @@ struct FoundationView: View {
             ?? "unknown"
     }
 
+    private var navigationIsCollapsed: Bool {
+        navigationAutoHides && !navigationHovered
+    }
+
     var body: some View {
         HStack(spacing: 0) {
             navigationShell
@@ -41,7 +45,7 @@ struct FoundationView: View {
                         lightingTimingOffsetMillis: $preferences.lightingTimingOffsetMillis,
                         allowsScrolling: false,
                         showsNavigation: false,
-                        localPlaybackVisualClocks: engineStatus.localPlaybackVisualClocks,
+                        deckVisualClocks: engineStatus.deckVisualClocks,
                         localPlaybackWaveforms: engineStatus.localPlaybackWaveforms,
                         localPlaybackFeedback: engineStatus.localPlaybackFeedback,
                         localPlaybackFeedbackIsError: engineStatus.localPlaybackFeedbackIsError,
@@ -53,6 +57,9 @@ struct FoundationView: View {
                         },
                         onLocalPlayback: { request in
                             engineStatus.runLocalPlayback(request)
+                        },
+                        onSetAbletonLinkEnabled: { enabled in
+                            Task { await engineStatus.setAbletonLinkEnabled(enabled) }
                         },
                         localPlaybackBrowser: AnyView(
                             LocalPlaybackLibraryBrowserView(
@@ -79,6 +86,7 @@ struct FoundationView: View {
                         localPlaybackFeedbackIsError: engineStatus.localPlaybackFeedbackIsError,
                         sourceImportFeedback: engineStatus.sourceImportFeedback,
                         sourceImportFeedbackIsError: engineStatus.sourceImportFeedbackIsError,
+                        usbSourceOperation: engineStatus.usbSourceOperation,
                         onQuery: { request in
                             Task { await engineStatus.queryLibrary(request) }
                         },
@@ -118,6 +126,17 @@ struct FoundationView: View {
                                     expectedContentSHA256: expectedContentSHA256
                                 )
                             }
+                        },
+                        onRekordboxDeviceInspect: { root in
+                            Task { await engineStatus.inspectRekordboxDevice(root: root) }
+                        },
+                        onRekordboxDeviceSync: { root, playlistIDs in
+                            Task {
+                                await engineStatus.syncRekordboxDevice(
+                                    root: root,
+                                    playlistIDs: playlistIDs
+                                )
+                            }
                         }
                     )
                 case .integrations:
@@ -125,6 +144,8 @@ struct FoundationView: View {
                         library: engineStatus.libraryState,
                         autoloopFeedback: engineStatus.autoloopCatalogFeedback,
                         midiIntegrationFeedback: engineStatus.midiIntegrationFeedback,
+                        abletonLinkFeedback: engineStatus.abletonLinkFeedback,
+                        abletonLinkAutoStart: $preferences.abletonLinkAutoStart,
                         onOpenLibrarySources: {
                             librarySection = .sources
                             destination = .library
@@ -137,6 +158,12 @@ struct FoundationView: View {
                         },
                         onStopMidi: {
                             Task { await engineStatus.stopMidiSource() }
+                        },
+                        onSetAbletonLinkEnabled: { enabled in
+                            Task { await engineStatus.setAbletonLinkEnabled(enabled) }
+                        },
+                        onTestAbletonLinkHelper: {
+                            Task { await engineStatus.testAbletonLinkHelper() }
                         },
                         onSendMidiAddressLearnPulse: { targetKind, targetNumber in
                             Task {
@@ -162,8 +189,28 @@ struct FoundationView: View {
                         keyNotation: $preferences.keyNotation,
                         lightingTimingOffsetMillis: $preferences.lightingTimingOffsetMillis,
                         feedback: engineStatus.phraseRoleFeedback,
+                        dataManagement: engineStatus.libraryState.dataManagement,
+                        dataOperation: engineStatus.dataManagementOperation,
+                        backups: engineStatus.backupRecords,
+                        canManageData: engineStatus.canManageData,
                         onMutation: { request in
                             Task { await engineStatus.mutatePhraseRoles(request) }
+                        },
+                        onCreateBackup: {
+                            Task { await engineStatus.createFullBackup() }
+                        },
+                        onPrepareReset: { trackIDs in
+                            Task {
+                                await engineStatus.prepareLibraryReset(
+                                    preserveTrackIDs: trackIDs
+                                )
+                            }
+                        },
+                        onApplyReset: {
+                            Task { await engineStatus.applyPreparedLibraryReset() }
+                        },
+                        onRestoreBackup: { path in
+                            Task { await engineStatus.restoreBackup(path: path) }
                         }
                     )
                 }
@@ -172,49 +219,61 @@ struct FoundationView: View {
         }
         .background(LumiColor.canvas)
         .tint(LumiColor.accent)
-        .frame(minWidth: 1_180, minHeight: 620)
         .accessibilityIdentifier("lumi.app.shell")
     }
 
     private var navigationShell: some View {
-        Group {
-            if navigationAutoHides && !navigationHovered {
-                collapsedNavigation
-            } else {
-                appNavigation
-            }
+        ZStack(alignment: .leading) {
+            appNavigation
+                .opacity(navigationIsCollapsed ? 0 : 1)
+                .offset(x: navigationIsCollapsed ? -8 : 0)
+                .allowsHitTesting(!navigationIsCollapsed)
+                .accessibilityHidden(navigationIsCollapsed)
+            collapsedNavigation
+                .opacity(navigationIsCollapsed ? 1 : 0)
+                .offset(x: navigationIsCollapsed ? 0 : 6)
+                .allowsHitTesting(navigationIsCollapsed)
+                .accessibilityHidden(!navigationIsCollapsed)
         }
+        .frame(width: navigationIsCollapsed ? 52 : 196, alignment: .leading)
+        .clipped()
         .onHover { navigationHovered = $0 }
-        .animation(.easeInOut(duration: 0.16), value: navigationHovered)
-        .animation(.easeInOut(duration: 0.16), value: navigationAutoHides)
+        .animation(.easeInOut(duration: 0.24), value: navigationIsCollapsed)
     }
 
     private var appNavigation: some View {
         VStack(alignment: .leading, spacing: LumiSpacing.xLarge) {
-            HStack(alignment: .top, spacing: LumiSpacing.small) {
-                VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-                    Text(verbatim: "Lumi")
-                        .font(LumiTypography.screenTitle)
-                        .foregroundStyle(LumiColor.textPrimary)
-                    Text(productVersion)
-                        .font(LumiTypography.technical)
-                        .foregroundStyle(LumiColor.textSecondary)
+            VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+                HStack(alignment: .center, spacing: LumiSpacing.xSmall) {
+                    Image("LumiWordmark")
+                        .resizable()
+                        .interpolation(.high)
+                        .scaledToFit()
+                        .frame(width: 126, height: 36, alignment: .leading)
+                        .accessibilityHidden(true)
+                        .accessibilityIdentifier("lumi.navigation.brandWordmark")
+                    Spacer(minLength: 0)
+                    Button {
+                        navigationAutoHides.toggle()
+                    } label: {
+                        Image(systemName: "sidebar.left")
+                            .frame(width: 28, height: 28)
+                    }
+                    .buttonStyle(.plain)
+                    .foregroundStyle(navigationAutoHides ? LumiColor.accent : LumiColor.textSecondary)
+                    .help(navigationAutoHides ? "Keep navigation visible" : "Auto-hide navigation")
+                    .accessibilityLabel(
+                        navigationAutoHides ? "Keep navigation visible" : "Auto-hide navigation"
+                    )
+                    .accessibilityIdentifier("lumi.navigation.autoHide")
                 }
-                Spacer()
-                Button {
-                    navigationAutoHides.toggle()
-                } label: {
-                    Image(systemName: "sidebar.left")
-                        .frame(width: 28, height: 28)
-                }
-                .buttonStyle(.plain)
-                .foregroundStyle(navigationAutoHides ? LumiColor.accent : LumiColor.textSecondary)
-                .help(navigationAutoHides ? "Keep navigation visible" : "Auto-hide navigation")
-                .accessibilityLabel(
-                    navigationAutoHides ? "Keep navigation visible" : "Auto-hide navigation"
-                )
-                .accessibilityIdentifier("lumi.navigation.autoHide")
+                Text(productVersion)
+                    .font(LumiTypography.technical)
+                    .foregroundStyle(LumiColor.textSecondary)
+                    .accessibilityIdentifier("lumi.navigation.version")
             }
+            .accessibilityElement(children: .contain)
+            .accessibilityLabel("Lumi \(productVersion)")
             VStack(spacing: LumiSpacing.xSmall) {
                 destinationButton(.live, title: "Live", systemImage: "waveform")
                 destinationButton(.library, title: "Library", systemImage: "music.note.list")
@@ -235,12 +294,16 @@ struct FoundationView: View {
             Button {
                 navigationAutoHides = false
             } label: {
-                Image(systemName: "sidebar.right")
-                    .frame(width: 32, height: 32)
+                Image("LumiMark")
+                    .resizable()
+                    .interpolation(.high)
+                    .frame(width: 36, height: 36)
+                    .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(LumiColor.accent)
-            .help("Show navigation")
+            .help("Lumi · Show navigation")
+            .accessibilityLabel("Lumi, show navigation")
+            .accessibilityIdentifier("lumi.navigation.brandMark")
             compactDestinationButton(.live, systemImage: "waveform", title: "Live")
             compactDestinationButton(.library, systemImage: "music.note.list", title: "Library")
             Image(systemName: "list.bullet.rectangle")

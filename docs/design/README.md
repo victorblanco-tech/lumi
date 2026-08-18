@@ -7,6 +7,7 @@ Accepted UX designs that define story behavior before native implementation:
 - [Live workspace – fixed dual decks and rolling plans](live-workspace/README.md)
 - [Desktop information architecture](information-architecture/README.md)
 - [Rekordbox XML playlist sync](library-sources/rekordbox-xml-sync.md)
+- [Lumi approved product mark and application assets](brand/README.md)
 
 Interactive proposals are design references. Production implementation remains
 native SwiftUI and uses Lumi's shared Design System and provider-neutral engine

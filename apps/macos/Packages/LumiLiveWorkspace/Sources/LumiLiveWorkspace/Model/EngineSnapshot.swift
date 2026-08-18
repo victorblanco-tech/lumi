@@ -12,6 +12,7 @@ public struct EngineSnapshot: Equatable, Sendable {
     public let deckInputIntegration: DeckInputIntegrationSnapshot?
     public let midiIntegration: MidiOutputIntegrationSnapshot?
     public let midiClockIntegration: MidiClockIntegrationSnapshot?
+    public let abletonLinkIntegration: AbletonLinkIntegrationSnapshot?
     public let simulation: SimulationSnapshot?
     public let outputProvider: OutputProviderSnapshot
     public let leaderDeckID: UInt64?
@@ -33,6 +34,7 @@ public struct EngineSnapshot: Equatable, Sendable {
         deckInputIntegration: DeckInputIntegrationSnapshot? = nil,
         midiIntegration: MidiOutputIntegrationSnapshot? = nil,
         midiClockIntegration: MidiClockIntegrationSnapshot? = nil,
+        abletonLinkIntegration: AbletonLinkIntegrationSnapshot? = nil,
         simulation: SimulationSnapshot? = nil,
         outputProvider: OutputProviderSnapshot = .init(
             providerKind: "dryRun",
@@ -57,6 +59,7 @@ public struct EngineSnapshot: Equatable, Sendable {
         self.deckInputIntegration = deckInputIntegration
         self.midiIntegration = midiIntegration
         self.midiClockIntegration = midiClockIntegration
+        self.abletonLinkIntegration = abletonLinkIntegration
         self.simulation = simulation
         self.outputProvider = outputProvider
         self.leaderDeckID = leaderDeckID
@@ -86,12 +89,42 @@ public struct EngineSnapshot: Equatable, Sendable {
             deckInputIntegration: deckInputIntegration,
             midiIntegration: midiIntegration,
             midiClockIntegration: midiClockIntegration,
+            abletonLinkIntegration: abletonLinkIntegration,
             simulation: simulation,
             outputProvider: outputProvider,
             leaderDeckID: deckID,
             decks: decks,
             livePlan: availablePlans.first(where: { $0.deckID == deckID }),
             nextPlan: availablePlans.first(where: { $0.deckID != deckID }),
+            planningOptions: planningOptions,
+            timeline: timeline
+        )
+    }
+
+    public func optimisticallySettingOperationState(_ state: String) -> Self {
+        guard ["off", "armed", "live", "paused"].contains(state),
+              operationState != state else {
+            return self
+        }
+        return Self(
+            endpoint: endpoint,
+            engineVersion: engineVersion,
+            protocolVersion: protocolVersion,
+            snapshotSequence: snapshotSequence,
+            stateRevision: stateRevision,
+            operationState: state,
+            runtime: runtime,
+            deckSource: deckSource,
+            deckInputIntegration: deckInputIntegration,
+            midiIntegration: midiIntegration,
+            midiClockIntegration: midiClockIntegration,
+            abletonLinkIntegration: abletonLinkIntegration,
+            simulation: simulation,
+            outputProvider: outputProvider,
+            leaderDeckID: leaderDeckID,
+            decks: decks,
+            livePlan: livePlan,
+            nextPlan: nextPlan,
             planningOptions: planningOptions,
             timeline: timeline
         )
@@ -108,7 +141,9 @@ public struct MidiOutputIntegrationSnapshot: Equatable, Sendable {
     public let activeBank: UInt64?
     public let autoPublishEnabled: Bool
     public let timingOffsetMillis: Int
+    public let pendingTimingOffsetMillis: Int?
     public let bankPreRollMillis: UInt64
+    public let realtimeLane: RealtimeMidiOutputLaneSnapshot?
 
     public init(
         state: String,
@@ -120,7 +155,9 @@ public struct MidiOutputIntegrationSnapshot: Equatable, Sendable {
         activeBank: UInt64?,
         autoPublishEnabled: Bool,
         timingOffsetMillis: Int,
-        bankPreRollMillis: UInt64 = 50
+        pendingTimingOffsetMillis: Int? = nil,
+        bankPreRollMillis: UInt64 = 50,
+        realtimeLane: RealtimeMidiOutputLaneSnapshot? = nil
     ) {
         self.state = state
         self.sourceName = sourceName
@@ -131,7 +168,24 @@ public struct MidiOutputIntegrationSnapshot: Equatable, Sendable {
         self.activeBank = activeBank
         self.autoPublishEnabled = autoPublishEnabled
         self.timingOffsetMillis = timingOffsetMillis
+        self.pendingTimingOffsetMillis = pendingTimingOffsetMillis
         self.bankPreRollMillis = bankPreRollMillis
+        self.realtimeLane = realtimeLane
+    }
+}
+
+public struct RealtimeMidiOutputLaneSnapshot: Equatable, Sendable {
+    public let queueCapacity: UInt64
+    public let queueDepth: UInt64
+    public let queueHighWater: UInt64
+    public let saturationCount: UInt64
+    public let latencySampleCount: UInt64
+    public let latencyP95Micros: UInt64
+    public let lastDispatchLatenessMicros: UInt64
+    public let lateDispatchCount: UInt64
+
+    public var isHealthy: Bool {
+        saturationCount == 0 && (latencySampleCount == 0 || latencyP95Micros <= 20_000)
     }
 }
 
@@ -163,6 +217,25 @@ public struct MidiClockIntegrationSnapshot: Equatable, Sendable {
     }
 }
 
+public struct AbletonLinkIntegrationSnapshot: Equatable, Sendable {
+    public let enabled: Bool
+    public let state: String
+    public let provider: String
+    public let helperVersion: String?
+    public let peers: UInt64
+    public let source: String?
+    public let deckNumber: UInt64?
+    public let bpmMilli: UInt64?
+    public let beatWithinBar: UInt64?
+    public let playing: Bool
+    public let generation: UInt64?
+    public let lastBeatAgeMillis: UInt64?
+    public let phaseErrorMicros: Int?
+    public let lastReanchor: String?
+    public let lastEvent: String?
+    public let lastError: String?
+}
+
 public struct DeckInputIntegrationSnapshot: Equatable, Sendable {
     public let state: String
     public let destinationName: String?
@@ -175,6 +248,10 @@ public struct DeckInputIntegrationSnapshot: Equatable, Sendable {
     public let duplicateFrameCount: UInt64
     public let lastDeckID: UInt64?
     public let lastFrameSequence: UInt64?
+    public let precisePositionMessageCount: UInt64
+    public let authoritativePositionCount: UInt64
+    public let positionDiscontinuityCount: UInt64
+    public let positionAuthorityReady: Bool
 
     public init(
         state: String,
@@ -187,7 +264,11 @@ public struct DeckInputIntegrationSnapshot: Equatable, Sendable {
         ignoredMessageCount: UInt64,
         duplicateFrameCount: UInt64,
         lastDeckID: UInt64?,
-        lastFrameSequence: UInt64?
+        lastFrameSequence: UInt64?,
+        precisePositionMessageCount: UInt64 = 0,
+        authoritativePositionCount: UInt64 = 0,
+        positionDiscontinuityCount: UInt64 = 0,
+        positionAuthorityReady: Bool = false
     ) {
         self.state = state
         self.destinationName = destinationName
@@ -200,6 +281,10 @@ public struct DeckInputIntegrationSnapshot: Equatable, Sendable {
         self.duplicateFrameCount = duplicateFrameCount
         self.lastDeckID = lastDeckID
         self.lastFrameSequence = lastFrameSequence
+        self.precisePositionMessageCount = precisePositionMessageCount
+        self.authoritativePositionCount = authoritativePositionCount
+        self.positionDiscontinuityCount = positionDiscontinuityCount
+        self.positionAuthorityReady = positionAuthorityReady
     }
 }
 
@@ -312,34 +397,75 @@ public struct LocalPlaybackTrackSnapshot: Equatable, Sendable {
     }
 }
 
-/// Lightweight app-side clock used only to render Local Playback smoothly.
-/// Authoritative phrase and planning state still comes from the engine.
-public struct LocalPlaybackVisualClockSnapshot: Equatable, Sendable {
+/// Lightweight app-side clock used to render local and connected decks smoothly.
+/// Authoritative transport, phrase and planning state still comes from the engine.
+public struct DeckVisualClockSnapshot: Equatable, Sendable {
     public let trackLoadID: UInt64
     public let positionMillis: UInt64
     public let durationMillis: UInt64
     public let playing: Bool
     public let anchoredAtReferenceTime: TimeInterval
+    public let playbackRate: Double
+    public let discontinuityRevision: UInt64
 
     public init(
         trackLoadID: UInt64,
         positionMillis: UInt64,
         durationMillis: UInt64,
         playing: Bool,
-        anchoredAtReferenceTime: TimeInterval
+        anchoredAtReferenceTime: TimeInterval,
+        playbackRate: Double = 1,
+        discontinuityRevision: UInt64 = 0
     ) {
         self.trackLoadID = trackLoadID
         self.positionMillis = positionMillis
         self.durationMillis = durationMillis
         self.playing = playing
         self.anchoredAtReferenceTime = anchoredAtReferenceTime
+        self.playbackRate = max(0, playbackRate)
+        self.discontinuityRevision = discontinuityRevision
     }
 
     public func positionMillis(at date: Date) -> Double {
         let elapsed = playing
-            ? max(0, date.timeIntervalSinceReferenceDate - anchoredAtReferenceTime) * 1_000
+            ? max(0, date.timeIntervalSinceReferenceDate - anchoredAtReferenceTime)
+                * 1_000 * playbackRate
             : 0
         return min(Double(durationMillis), Double(positionMillis) + elapsed)
+    }
+
+    /// Returns whether this monotonic presentation clock can keep rendering
+    /// without replacing it from the next authoritative deck poll.
+    public func remainsValid(
+        trackLoadID authoritativeTrackLoadID: UInt64,
+        positionMillis authoritativePositionMillis: UInt64,
+        durationMillis authoritativeDurationMillis: UInt64,
+        playing authoritativePlaying: Bool,
+        playbackRate authoritativePlaybackRate: Double,
+        discontinuityRevision authoritativeDiscontinuityRevision: UInt64,
+        at referenceTime: TimeInterval,
+        maximumPlayingDriftMillis: Double = 250
+    ) -> Bool {
+        guard trackLoadID == authoritativeTrackLoadID,
+              playing == authoritativePlaying,
+              discontinuityRevision == authoritativeDiscontinuityRevision,
+              durationMillis == authoritativeDurationMillis,
+              abs(playbackRate - authoritativePlaybackRate) < 0.005 else {
+            return false
+        }
+        if !playing {
+            return positionMillis == authoritativePositionMillis
+        }
+        // An older network observation may never rewind the monotonic visual
+        // clock. A newer authoritative position, however, must be allowed to
+        // pull a clock forward after SwiftUI/app-mode work delayed its anchor.
+        // Without this one-way drift bound the deck could remain seconds behind
+        // forever because every later poll was treated as equivalent.
+        let predicted = positionMillis(
+            at: Date(timeIntervalSinceReferenceDate: referenceTime)
+        )
+        let forwardDrift = Double(authoritativePositionMillis) - predicted
+        return forwardDrift <= maximumPlayingDriftMillis
     }
 }
 
@@ -355,11 +481,14 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
     public let keyKnown: Bool
     public let beat: UInt64
     public let playing: Bool
+    public let playbackPositionMillis: UInt64?
+    public let transportRevision: UInt64
     public let phraseIndex: UInt64?
     public let durationBeats: UInt64
     public let beatGrid: DeckBeatGridSnapshot?
     public let phrases: [DeckPhraseSnapshot]
     public let waveformPreview: DeckWaveformPreviewSnapshot?
+    public let hotCues: [DeckHotCueSnapshot]
     public let planEligibility: DeckPlanEligibility
     public let localPlayback: LocalPlaybackTrackSnapshot?
 
@@ -377,11 +506,14 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
         keyKnown: Bool = true,
         beat: UInt64,
         playing: Bool = false,
+        playbackPositionMillis: UInt64? = nil,
+        transportRevision: UInt64 = 0,
         phraseIndex: UInt64?,
         durationBeats: UInt64 = 0,
         beatGrid: DeckBeatGridSnapshot? = nil,
         phrases: [DeckPhraseSnapshot] = [],
         waveformPreview: DeckWaveformPreviewSnapshot? = nil,
+        hotCues: [DeckHotCueSnapshot] = [],
         planEligibility: DeckPlanEligibility = .autoHeld,
         localPlayback: LocalPlaybackTrackSnapshot? = nil
     ) {
@@ -396,13 +528,43 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
         self.keyKnown = keyKnown
         self.beat = beat
         self.playing = playing
+        self.playbackPositionMillis = playbackPositionMillis
+        self.transportRevision = transportRevision
         self.phraseIndex = phraseIndex
         self.durationBeats = durationBeats
         self.beatGrid = beatGrid
         self.phrases = phrases
         self.waveformPreview = waveformPreview
+        self.hotCues = hotCues
         self.planEligibility = planEligibility
         self.localPlayback = localPlayback
+    }
+}
+
+public struct DeckHotCueSnapshot: Equatable, Identifiable, Sendable {
+    public var id: UInt8 { index }
+    public let index: UInt8
+    public let timeMillis: UInt64
+    public let loopEndMillis: UInt64?
+    public let name: String
+    public let colorRGB: UInt32
+
+    public init(
+        index: UInt8,
+        timeMillis: UInt64,
+        loopEndMillis: UInt64? = nil,
+        name: String,
+        colorRGB: UInt32
+    ) {
+        self.index = index
+        self.timeMillis = timeMillis
+        self.loopEndMillis = loopEndMillis
+        self.name = name
+        self.colorRGB = colorRGB
+    }
+
+    public var letter: String {
+        UnicodeScalar(64 + Int(index)).map(String.init) ?? "?"
     }
 }
 

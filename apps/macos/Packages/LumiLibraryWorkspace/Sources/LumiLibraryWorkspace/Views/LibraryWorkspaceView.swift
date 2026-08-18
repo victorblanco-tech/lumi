@@ -210,7 +210,8 @@ public struct LibraryWorkspaceView: View {
                                 playlist.name,
                                 count: playlist.trackCount,
                                 systemImage: "music.note",
-                                selected: selectedPlaylistID == playlist.id
+                                selected: selectedPlaylistID == playlist.id,
+                                subtitle: playlistSourceLabel(playlist)
                             )
                         }
                         .buttonStyle(.plain)
@@ -222,22 +223,6 @@ public struct LibraryWorkspaceView: View {
             .frame(maxHeight: .infinity)
             .accessibilityIdentifier("lumi.library.playlists")
 
-            if let source = state.source {
-                VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-                    Label(source.name, systemImage: "externaldrive.fill")
-                        .font(LumiTypography.metadata)
-                    Text(source.revision)
-                        .font(LumiTypography.technical)
-                        .foregroundStyle(LumiColor.textSecondary)
-                    Label(
-                        state.providerKind.capitalized,
-                        systemImage: state.condition.componentState.systemImage
-                    )
-                    .font(LumiTypography.caption)
-                    .foregroundStyle(state.condition.componentState.color)
-                }
-                .accessibilityIdentifier("lumi.library.source")
-            }
         }
         .padding(LumiSpacing.large)
         .background(LumiColor.surface)
@@ -247,11 +232,24 @@ public struct LibraryWorkspaceView: View {
         _ title: String,
         count: UInt64,
         systemImage: String,
-        selected: Bool
+        selected: Bool,
+        subtitle: String? = nil
     ) -> some View {
         HStack(spacing: LumiSpacing.small) {
             Image(systemName: systemImage)
-            Text(title).lineLimit(1)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(title).lineLimit(1)
+                if let subtitle {
+                    Text(subtitle.uppercased())
+                        .font(LumiTypography.technical)
+                        .foregroundStyle(
+                            subtitle.hasSuffix("· USB")
+                                ? LumiColor.success
+                                : LumiColor.textSecondary
+                        )
+                        .lineLimit(1)
+                }
+            }
             Spacer()
             Text("\(count)")
                 .font(LumiTypography.technical)
@@ -259,10 +257,31 @@ public struct LibraryWorkspaceView: View {
         }
         .foregroundStyle(selected ? LumiColor.accent : LumiColor.textPrimary)
         .padding(.horizontal, LumiSpacing.small)
-        .frame(height: LumiControlMetric.standardHeight)
+        .frame(height: subtitle == nil ? LumiControlMetric.standardHeight : 44)
         .contentShape(Rectangle())
         .background(selected ? LumiColor.accent.opacity(0.14) : Color.clear)
         .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
+    }
+
+    private func playlistSourceLabel(_ playlist: LibraryPlaylist) -> String {
+        let devices = state.rekordboxDevices.filter { device in
+            device.playlists.contains {
+                $0.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    .localizedCaseInsensitiveCompare(
+                        playlist.name.trimmingCharacters(in: .whitespacesAndNewlines)
+                    ) == .orderedSame
+            }
+        }
+        if devices.count > 1 {
+            return "\(devices.count) USB sources"
+        }
+        if let device = devices.first {
+            return "\(device.displayName) · USB"
+        }
+        if playlist.sourcePlaylistID.hasPrefix("onelibrary:") {
+            return "USB"
+        }
+        return "Legacy library"
     }
 
     private var trackBrowser: some View {
@@ -385,13 +404,15 @@ public struct LibraryWorkspaceView: View {
             .width(min: 56, ideal: 68, max: 100)
             .customizationID("duration")
 
-            TableColumn(localized("library.source")) { track in
+            TableColumn(localized("library.usbSources")) { track in
                 editorLoadingCell(track) {
-                    Text(state.source?.name ?? "—").lineLimit(1)
+                    let sources = track.usbSources.map(\.displayName).joined(separator: ", ")
+                    Text(sources.isEmpty ? "—" : sources)
+                        .lineLimit(1)
                 }
             }
-            .width(min: 100, ideal: 140, max: 280)
-            .customizationID("source")
+            .width(min: 120, ideal: 180, max: 360)
+            .customizationID("usbSources")
 
             TableColumn(localized("library.timelineRevision")) { track in
                 editorLoadingCell(track) {

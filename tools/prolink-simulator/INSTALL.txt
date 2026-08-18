@@ -1,0 +1,24 @@
+Lumi Pro DJ Link Simulator — Installation
+==========================================
+
+Normal installation
+-------------------
+Drag Lumi Pro DJ Link Simulator to the Applications shortcut in this window.
+
+Installation without administrator rights
+-------------------------------------------
+1. In Finder, choose Go > Home.
+2. Create a folder named Applications if it does not exist.
+3. Drag Lumi Pro DJ Link Simulator from this disk image into that personal
+   Applications folder.
+
+The app itself never needs administrator rights. It stores settings and logs
+inside the current user's Library folder.
+
+First launch
+------------
+Because this development build is not notarized, Control-click the copied app,
+choose Open, and confirm Open on the first launch.
+
+Connect a Rekordbox-exported USB before or after starting the app. A missing
+USB never prevents the management window from opening.

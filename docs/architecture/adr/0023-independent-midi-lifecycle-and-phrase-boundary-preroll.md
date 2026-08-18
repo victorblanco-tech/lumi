@@ -48,7 +48,7 @@ bank, Lumi sends:
 
 The bank is deliberately not cached as authoritative because Control One can
 override it between Lumi cues. A signed user timing offset from -250 through
-+250 ms moves the final AutoLoop moment: positive is earlier, negative is later.
++250 ms moves the final AutoLoop moment: negative is earlier, positive is later.
 The fixed 50 ms SoundSwitch bank pre-roll is internal and does not change that
 user-facing meaning.
 
@@ -58,10 +58,15 @@ before queued Library or UI commands acquire the serial engine channel. Status
 snapshot decoding runs away from the UI/transport lane and discards stale
 snapshot sequences.
 
-The same timing-offset policy is provider-neutral. This implementation applies
-predictive pre-roll to Local Playback. A connected-deck adapter must provide
-equivalent timestamped/predictive observations before it can claim the same
-timing guarantee.
+The same timing-offset policy is provider-neutral. Local Playback predicts from
+its native audio clock. Direct Pro DJ Link predicts from exact beat packets and
+the Lumi-owned Rekordbox beat grid, so a negative offset can leave before the
+phrase boundary without sleeping or blocking the engine lane. A positive
+offset is emitted by the same bounded scheduler after the boundary.
+
+Development builds through `0.4.0-dev-30` exposed the inverse sign. The
+preference is migrated once so an existing physical compensation keeps the
+same timing while its displayed sign changes.
 
 ## Consequences
 
@@ -72,11 +77,19 @@ timing guarantee.
   timing offset are inspectable.
 - The Live header exposes a compact ±5 ms adjustment; Settings persists the
   same default for future sessions.
-- The first cue after starting audio cannot be pre-rolled before an as-yet
-  unknown start instant. Subsequent phrase boundaries receive the full
-  predictive pre-roll. A later start-handshake may tighten first-cue timing.
-- Connected Live Deck timing still requires physical acceptance with its own
-  adapter and remains distinct from this Local Playback guarantee.
+- Entering Start while a Master track is already playing schedules the current
+  phrase exactly once. If its Bank is not ready yet, Lumi settles the Bank and
+  emits on the first following exact beat; it never waits silently for the next
+  phrase boundary.
+- A real deck stopped-to-playing edge starts a new playback generation. Lumi
+  makes the current phrase eligible again and reasserts it exactly once; repeated
+  playing observations are idempotent. Operational Pause follows the same rule
+  because it explicitly closes the output gate and Start must restore the show.
+- A negative offset cannot retroactively move that initial Start pulse into the
+  past. Predictive offset timing applies to the following known boundary.
+- Direct connected-deck timing remains subject to physical SoundSwitch/DMX
+  acceptance even though its deterministic scheduling contract is shared with
+  Local Playback.
 
 ## Rejected alternatives
 
@@ -94,3 +107,24 @@ domains. Losing one cannot silently remove the other.
 
 Rejected because visible UI work is less important than phrase-boundary output
 timing during Live playback.
+
+## SoundSwitch compatibility correction — `0.4.0-dev-52`
+
+The first persistent-service implementation published `Lumi Virtual MIDI` as a
+CoreMIDI MIDI 1.0 UMP endpoint and delivered UMP event lists. macOS and a second
+CoreMIDI monitor continued to receive the exact Bank and AutoLoop messages, but
+SoundSwitch could silently stop consuming that source after an initially
+successful run. The Lumi realtime lane therefore looked healthy while the
+actual lighting consumer received nothing.
+
+`Lumi Virtual MIDI` and `Lumi Clock` now use CoreMIDI's classic MIDI 1.0 source
+and `MIDIPacketList` delivery path. Note On and Note Off are separate packets in
+one immediate packet list. This is the compatibility boundary used by physical
+MIDI controllers, IAC buses and the previously stable Beat Link Trigger chain.
+UMP remains valid inside the Pro DJ Link input adapter where Lumi owns both
+ends; it is no longer imposed on the SoundSwitch output boundary.
+
+The engine's published/pulse counters prove only delivery into CoreMIDI. They
+must not be presented as proof that SoundSwitch executed the mapped action.
+Release evidence therefore requires both an independent MIDI observation and a
+SoundSwitch-visible AutoLoop change over a sustained run.
