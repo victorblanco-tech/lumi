@@ -20,11 +20,12 @@ use lumi_library::{
     TimelineRevisionPage, TimelineRevisionReason, TimelineRevisionSummary, TrackColor, TrackPage,
     TrackPageRequest, TrackSummary, VariantId, WaveformPoint, normalize_source_label,
 };
+use lumi_light_plans::LightPlanningPolicy;
 use rusqlite::backup::Backup;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Row, Transaction, params};
 use thiserror::Error;
 
-const SCHEMA_VERSION: u32 = 11;
+const SCHEMA_VERSION: u32 = 12;
 const DEFAULTS_VERSION_KEY: &str = "phrase-role-defaults-version";
 const CATALOG_REVISION_KEY: &str = "phrase-role-catalog-revision";
 const AUTOLOOP_DEFAULTS_VERSION_KEY: &str = "autoloop-catalog-defaults-version";
@@ -225,6 +226,62 @@ pub struct CreativeRelinkResult {
 }
 
 impl SqliteLibraryRepository {
+    /// Loads the complete revisioned planning policy. A missing row is a valid
+    /// pre-feature database and receives safe defaults.
+    pub fn light_planning_policy(&self) -> Result<LightPlanningPolicy, SqliteLibraryError> {
+        let encoded = self
+            .connection
+            .query_row(
+                "SELECT policy_json FROM light_planning_policy WHERE singleton_id = 1",
+                [],
+                |row| row.get::<_, String>(0),
+            )
+            .optional()?;
+        let policy = encoded.map_or_else(
+            || Ok(LightPlanningPolicy::default()),
+            |value| serde_json::from_str(&value),
+        )?;
+        policy.validate().map_err(|error| {
+            SqliteLibraryError::CorruptData(format!("invalid Light Planning Policy: {error}"))
+        })?;
+        Ok(policy)
+    }
+
+    /// Atomically replaces the policy when the caller still owns the expected
+    /// revision. Existing plans retain their compiled revision.
+    pub fn replace_light_planning_policy(
+        &mut self,
+        expected_revision: u64,
+        mut policy: LightPlanningPolicy,
+    ) -> Result<LightPlanningPolicy, SqliteLibraryError> {
+        let current = self.light_planning_policy()?;
+        if current.revision != expected_revision {
+            return Err(SqliteLibraryError::LightPlanningRevisionConflict {
+                expected: expected_revision,
+                actual: current.revision,
+            });
+        }
+        policy.revision = expected_revision
+            .checked_add(1)
+            .ok_or(SqliteLibraryError::ArithmeticOverflow)?;
+        policy.validate().map_err(|error| {
+            SqliteLibraryError::CorruptData(format!("invalid Light Planning Policy: {error}"))
+        })?;
+        let encoded = serde_json::to_string(&policy)?;
+        let transaction = self.connection.transaction()?;
+        transaction.execute(
+            "INSERT INTO light_planning_policy(singleton_id, revision, policy_json, updated_at)
+             VALUES (1, ?1, ?2, CURRENT_TIMESTAMP)
+             ON CONFLICT(singleton_id) DO UPDATE SET
+                revision = excluded.revision,
+                policy_json = excluded.policy_json,
+                updated_at = CURRENT_TIMESTAMP",
+            params![to_i64(policy.revision)?, encoded],
+        )?;
+        transaction.commit()?;
+        Ok(policy)
+    }
+
     pub fn open(path: impl AsRef<Path>) -> Result<Self, SqliteLibraryError> {
         Self::from_connection(Connection::open(path)?)
     }
@@ -1787,7 +1844,13 @@ impl SqliteLibraryRepository {
                     loop_strategy TEXT NOT NULL,
                     PRIMARY KEY(archive_id, phrase_index)
                 );
-                PRAGMA user_version = 11;
+                CREATE TABLE light_planning_policy (
+                    singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+                    revision INTEGER NOT NULL,
+                    policy_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                PRAGMA user_version = 12;
                 COMMIT;
                 ",
             )?;
@@ -2126,6 +2189,22 @@ impl SqliteLibraryRepository {
                 COMMIT;
                 "
                 })?;
+            current = 11;
+        }
+        if current == 11 {
+            self.connection.execute_batch(
+                "
+                BEGIN IMMEDIATE;
+                CREATE TABLE light_planning_policy (
+                    singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+                    revision INTEGER NOT NULL,
+                    policy_json TEXT NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                PRAGMA user_version = 12;
+                COMMIT;
+                ",
+            )?;
         }
         Ok(())
     }
@@ -4183,6 +4262,8 @@ fn validate_backup_connection(connection: &Connection) -> Result<(), SqliteLibra
 pub enum SqliteLibraryError {
     #[error("SQLite library error: {0}")]
     Sqlite(#[from] rusqlite::Error),
+    #[error("invalid persisted JSON: {0}")]
+    Json(#[from] serde_json::Error),
     #[error("SQLite backup I/O failed: {0}")]
     Io(#[from] std::io::Error),
     #[error("backup destination already exists: {0}")]
@@ -4191,6 +4272,8 @@ pub enum SqliteLibraryError {
     IntegrityCheckFailed(String),
     #[error("library schema version {0} is newer than this Lumi build supports")]
     UnsupportedSchema(u32),
+    #[error("Light Planning Policy changed; expected revision {expected}, actual {actual}")]
+    LightPlanningRevisionConflict { expected: u64, actual: u64 },
     #[error("invalid library identifier: {0}")]
     InvalidIdentifier(#[from] TextIdentifierError),
     #[error("invalid persisted beat grid: {0}")]
@@ -4574,7 +4657,7 @@ mod fault_tests {
 
     use super::{
         DeviceAliasUpsert, DeviceAnalysisDecision, DeviceAnalysisUpsert, DeviceHotCueUpsert,
-        DevicePlaylistUpsert, DeviceTrackImport, SqliteLibraryRepository,
+        DevicePlaylistUpsert, DeviceTrackImport, SqliteLibraryError, SqliteLibraryRepository,
     };
 
     #[test]
@@ -5309,6 +5392,31 @@ mod fault_tests {
                 .source_id,
             "usb-fs:stable-gray-volume-uuid"
         );
+        Ok(())
+    }
+
+    #[test]
+    fn light_planning_policy_is_revisioned_and_persistent() -> Result<(), Box<dyn std::error::Error>>
+    {
+        let mut repository = SqliteLibraryRepository::in_memory()?;
+        let initial = repository.light_planning_policy()?;
+        assert_eq!(initial.revision, 1);
+        let mut replacement = initial.clone();
+        replacement.theme_cooldown_tracks = 2;
+        let stored = repository.replace_light_planning_policy(1, replacement)?;
+        assert_eq!(stored.revision, 2);
+        assert_eq!(repository.light_planning_policy()?, stored);
+        assert!(matches!(
+            repository.replace_light_planning_policy(1, initial),
+            Err(SqliteLibraryError::LightPlanningRevisionConflict {
+                expected: 1,
+                actual: 2
+            })
+        ));
+        let schema: u32 = repository
+            .connection
+            .query_row("PRAGMA user_version", [], |row| row.get(0))?;
+        assert_eq!(schema, 12);
         Ok(())
     }
 }

@@ -26,6 +26,43 @@ struct EngineCommandTests {
         #expect(payload["millis"] == .number(-35))
     }
 
+    @Test("Light Plan preview carries the immutable compiler inputs")
+    func lightPlanPreviewPayload() {
+        let policy: JSONValue = .object([
+            "revision": .number(7),
+            "themeCooldownTracks": .number(1),
+            "autoloopCooldownUses": .number(2),
+            "duplicatePlanWindow": .number(4),
+            "rules": .array([]),
+            "modifiers": .array([]),
+            "modifierRules": .array([])
+        ])
+        let payload = EngineCommand.previewLightPlan(
+            trackID: 90,
+            expectedTimelineRevision: 36,
+            themeID: 2,
+            variationSeed: 11,
+            policy: policy
+        ).payload()
+
+        #expect(payload["kind"] == .string("previewLightPlan"))
+        #expect(payload["trackId"] == .number(90))
+        #expect(payload["expectedTimelineRevision"] == .number(36))
+        #expect(payload["themeId"] == .number(2))
+        #expect(payload["variationSeed"] == .number(11))
+        #expect(payload["policy"] == policy)
+    }
+
+    @Test("Custom MIDI learn keeps the one-based channel and exact note")
+    func customMidiLearnPayload() {
+        let payload = EngineCommand.sendCustomMidiLearnPulse(channel: 14, note: 0).payload()
+
+        #expect(payload["kind"] == .string("sendMidiAddressLearnPulse"))
+        #expect(payload["targetKind"] == .string("custom"))
+        #expect(payload["channel"] == .number(14))
+        #expect(payload["targetNumber"] == .number(0))
+    }
+
     @Test("Rekordbox preview carries the exact selected playlist paths")
     func rekordboxPreviewPayload() {
         let payload = EngineCommand.previewRekordboxXMLSync(

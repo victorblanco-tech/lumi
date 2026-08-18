@@ -11,7 +11,6 @@ use std::time::{Duration, Instant};
 pub const MIDI_SOURCE_NAME: &str = "Lumi Virtual MIDI";
 pub const MIDI_CLOCK_SOURCE_NAME: &str = "Lumi Clock";
 pub const MIDI_CHANNEL: u8 = 16;
-const MIDI_CHANNEL_ZERO_BASED: u8 = MIDI_CHANNEL - 1;
 const BANK_NOTE_BASE: u8 = 60;
 const AUTOLOOP_NOTE_BASE: u8 = 64;
 pub const BANK_SETTLE_DELAY: Duration = Duration::from_millis(50);
@@ -21,6 +20,7 @@ const REALTIME_LATE_DISPATCH_THRESHOLD: Duration = Duration::from_millis(20);
 pub enum MidiAddressKind {
     Bank,
     Autoloop,
+    Custom,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -28,6 +28,7 @@ pub struct MidiAddress {
     kind: MidiAddressKind,
     number: u8,
     note: u8,
+    channel: u8,
 }
 
 impl MidiAddress {
@@ -35,6 +36,7 @@ impl MidiAddress {
         kind: MidiAddressKind::Bank,
         number: 1,
         note: BANK_NOTE_BASE,
+        channel: MIDI_CHANNEL,
     };
 
     pub const fn bank(number: u8) -> Option<Self> {
@@ -43,6 +45,7 @@ impl MidiAddress {
                 kind: MidiAddressKind::Bank,
                 number,
                 note: BANK_NOTE_BASE + number - 1,
+                channel: MIDI_CHANNEL,
             })
         } else {
             None
@@ -55,6 +58,20 @@ impl MidiAddress {
                 kind: MidiAddressKind::Autoloop,
                 number,
                 note: AUTOLOOP_NOTE_BASE + number - 1,
+                channel: MIDI_CHANNEL,
+            })
+        } else {
+            None
+        }
+    }
+
+    pub const fn custom(channel: u8, note: u8) -> Option<Self> {
+        if channel >= 1 && channel <= 16 && note < 128 {
+            Some(Self {
+                kind: MidiAddressKind::Custom,
+                number: note,
+                note,
+                channel,
             })
         } else {
             None
@@ -71,6 +88,10 @@ impl MidiAddress {
 
     pub const fn note(self) -> u8 {
         self.note
+    }
+
+    pub const fn channel(self) -> u8 {
+        self.channel
     }
 }
 
@@ -877,11 +898,12 @@ where
         let target = match address.kind() {
             MidiAddressKind::Bank => "Bank",
             MidiAddressKind::Autoloop => "AutoLoop",
+            MidiAddressKind::Custom => "Custom",
         };
         self.last_event = Some(format!(
             "{target} {} learn pulse sent · Ch {} · Note {} · Note Off included",
             address.number(),
-            MIDI_CHANNEL,
+            address.channel(),
             address.note()
         ));
         Ok(())
@@ -968,9 +990,10 @@ where
         if self.state != MidiSourceState::Ready {
             return Err(MidiOutputError::SourceNotPublished);
         }
-        let note_on = MidiMessage::note_on(MIDI_CHANNEL_ZERO_BASED, address.note(), 100)
+        let channel = address.channel().saturating_sub(1);
+        let note_on = MidiMessage::note_on(channel, address.note(), 100)
             .ok_or(MidiOutputError::SourceNotPublished)?;
-        let note_off = MidiMessage::note_off(MIDI_CHANNEL_ZERO_BASED, address.note())
+        let note_off = MidiMessage::note_off(channel, address.note())
             .ok_or(MidiOutputError::SourceNotPublished)?;
         let next_count = self
             .sent_pulse_count
@@ -1308,6 +1331,19 @@ mod tests {
 
         assert_eq!(controller.provider.messages[0].bytes(), [0x9f, 95, 100]);
         assert_eq!(controller.provider.messages[1].bytes(), [0x8f, 95, 0]);
+    }
+
+    #[test]
+    fn custom_modifier_address_preserves_channel_and_zero_note() {
+        let mut controller = MidiOutputController::new(RecordingProvider::default());
+        assert!(controller.publish().is_ok());
+        let Some(address) = MidiAddress::custom(14, 0) else {
+            panic!("channel 14 note 0 must be a valid modifier address");
+        };
+        assert!(controller.send_address_learn_pulse(address).is_ok());
+
+        assert_eq!(controller.provider.messages[0].bytes(), [0x9d, 0, 100]);
+        assert_eq!(controller.provider.messages[1].bytes(), [0x8d, 0, 0]);
     }
 
     #[test]

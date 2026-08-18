@@ -150,6 +150,83 @@ struct LibraryWorkspaceTests {
         #expect(state.dataManagement.resetPreview?.preserveTrackIDs == [202])
     }
 
+    @Test("Light Planning snapshot preserves compiled evidence and modifier rules")
+    func decodesLightPlanningState() throws {
+        let policy: JSONValue = .object([
+            "revision": .number(3),
+            "themeCooldownTracks": .number(1),
+            "autoloopCooldownUses": .number(2),
+            "duplicatePlanWindow": .number(4),
+            "rules": .array([]),
+            "modifiers": .array([]),
+            "modifierRules": .array([
+                .object([
+                    "modifierId": .string("static-dark"),
+                    "roleId": .string("breakdown-1"),
+                    "applicationRate": .number(25),
+                    "selectionWeight": .number(2),
+                    "cooldownUses": .number(2),
+                    "scope": .string("phrase"),
+                    "colorBehavior": .string("neutral"),
+                    "colorRgb": .array([])
+                ])
+            ])
+        ])
+        let preview: JSONValue = .object([
+            "trackId": .number(42),
+            "trackTitle": .string("90s Bitch"),
+            "themeId": .number(1),
+            "policyRevision": .number(3),
+            "variationSeed": .string("9"),
+            "signature": .string("123"),
+            "phrases": .array([
+                .object([
+                    "phraseIndex": .number(0),
+                    "startBeat": .number(0),
+                    "endBeat": .number(32),
+                    "roleId": .string("intro"),
+                    "roleName": .string("Intro"),
+                    "variantId": .string("mapping-1"),
+                    "entryId": .string("entry-1"),
+                    "autoloopName": .string("INTRO BLUE PINK"),
+                    "autoloopNumber": .number(1),
+                    "reason": .string("weighted variation"),
+                    "effectiveWeight": .number(2),
+                    "colorInfluence": .string("neutral"),
+                    "repeatProtection": .string("recent variants excluded")
+                ])
+            ]),
+            "modifiers": .array([])
+        ])
+        let message = MessageEnvelope(
+            protocolVersion: 1,
+            messageType: .snapshot,
+            messageId: "light-plan",
+            sequence: 1,
+            correlationId: "test",
+            sentAt: "2026-08-19T00:00:00Z",
+            payload: [
+                "library": .object([
+                    "lightPlanning": .object([
+                        "policy": policy,
+                        "preview": preview,
+                        "execution": .object([
+                            "compiledBeforePlayback": .boolean(true),
+                            "realtimePolicyEvaluation": .boolean(false),
+                            "staticLookOutput": .string("pocRequired"),
+                            "colorOverrideOutput": .string("pocRequired")
+                        ])
+                    ])
+                ])
+            ]
+        )
+
+        let state = try LightPlanningSnapshotDecoder().decode(message)
+        #expect(state.policy.modifierRules.first?.applicationRate == 25)
+        #expect(state.preview?.phrases.first?.autoloopName == "INTRO BLUE PINK")
+        #expect(state.preview?.phrases.first?.startBeat == 0)
+    }
+
     @Test("Rekordbox device sync diagnostics decode match and cue revision status")
     func decodesRekordboxDeviceState() throws {
         let devices: JSONValue = .array([

@@ -203,7 +203,24 @@ gehaald als delivery gate voor `0.3.0`. De autonome service-installatie,
 upgrade/recovery en volledige schone-Mac hardening blijven onderdeel van
 `0.4.0`; een installeerbare `0.3.0` claimt die service-eigenschappen nog niet.
 
-### Fase 5 – iPhone Remote Beta (`0.5.0`)
+### Fase 5 – Compiled Light Plans (`0.5.0`)
+
+Status op 2026-08-19: **geïmplementeerd in `0.5.0-dev-2`; fysieke
+modifier-output blijft bewust achter de POC-gate**.
+
+- deterministic AutoLoop variation per Phrase Role;
+- Selection Weight, track-color affinity and repeat protection;
+- explainable full-track preview and explicit regeneration;
+- provider-neutral modifier model;
+- fail-closed preparation of SoundSwitch Static Looks and Color Overrides.
+
+De uitvoering staat in
+[Epic 6 – Compiled Light Plans](epic-06-compiled-light-plans.md).
+
+Exit: Lumi compiles a varied, deterministic and inspectable full-song plan without
+adding work or coupling to the realtime integration lanes.
+
+### Fase 6 – iPhone Remote Beta (`0.6.0`)
 
 - lokale discovery en pairing;
 - current/next deck en planpreview;
@@ -212,7 +229,7 @@ upgrade/recovery en volledige schone-Mac hardening blijven onderdeel van
 
 Exit: de DJ kan zonder internet veilig vanaf een gepairde iPhone tunen.
 
-### Fase 6 – Live beta en stable (`1.0.0`)
+### Fase 7 – Live beta en stable (`1.0.0`)
 
 - hardware-in-the-loop validatie;
 - soak-, latency- en fault-injectiontests;

@@ -329,6 +329,17 @@ public enum EngineCommand: Equatable, Sendable {
         expectedAutoloopCatalogRevision: UInt64,
         mutation: EngineAutoloopCatalogMutation
     )
+    case replaceLightPlanningPolicy(
+        expectedRevision: UInt64,
+        policy: JSONValue
+    )
+    case previewLightPlan(
+        trackID: UInt64,
+        expectedTimelineRevision: UInt64,
+        themeID: UInt64,
+        variationSeed: UInt64,
+        policy: JSONValue
+    )
     case publishMidiSource
     case stopMidiSource
     case setAbletonLinkEnabled(Bool)
@@ -336,6 +347,7 @@ public enum EngineCommand: Equatable, Sendable {
     case setOutputTimingOffset(millis: Int16)
     case sendMidiLearnPulse
     case sendMidiAddressLearnPulse(targetKind: String, targetNumber: UInt16)
+    case sendCustomMidiLearnPulse(channel: UInt8, note: UInt8)
     case triggerMidiAutoloop(bankNumber: UInt16, autoloopNumber: UInt16)
     case loadLibraryTrackOnLocalDeck(
         trackID: UInt64,
@@ -529,6 +541,21 @@ public enum EngineCommand: Equatable, Sendable {
             payload["kind"] = .string("mutateAutoloopCatalog")
             payload["expectedAutoloopCatalogRevision"] = .number(Double(expectedRevision))
             return payload
+        case let .replaceLightPlanningPolicy(expectedRevision, policy):
+            return [
+                "kind": .string("replaceLightPlanningPolicy"),
+                "expectedLightPlanningRevision": .number(Double(expectedRevision)),
+                "policy": policy
+            ]
+        case let .previewLightPlan(trackID, expectedTimelineRevision, themeID, variationSeed, policy):
+            return [
+                "kind": .string("previewLightPlan"),
+                "trackId": .number(Double(trackID)),
+                "expectedTimelineRevision": .number(Double(expectedTimelineRevision)),
+                "themeId": .number(Double(themeID)),
+                "variationSeed": .number(Double(variationSeed)),
+                "policy": policy
+            ]
         case .publishMidiSource:
             return ["kind": .string("publishMidiSource")]
         case .stopMidiSource:
@@ -552,6 +579,13 @@ public enum EngineCommand: Equatable, Sendable {
                 "kind": .string("sendMidiAddressLearnPulse"),
                 "targetKind": .string(targetKind),
                 "targetNumber": .number(Double(targetNumber))
+            ]
+        case let .sendCustomMidiLearnPulse(channel, note):
+            return [
+                "kind": .string("sendMidiAddressLearnPulse"),
+                "targetKind": .string("custom"),
+                "targetNumber": .number(Double(note)),
+                "channel": .number(Double(channel))
             ]
         case let .triggerMidiAutoloop(bankNumber, autoloopNumber):
             return [

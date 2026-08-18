@@ -10,6 +10,7 @@ lumi-blt-midi = { path = "../lumi-blt-midi" }
 lumi-deck-source = { path = "../lumi-deck-source" }
 lumi-domain = { path = "../lumi-domain" }
 lumi-lighting-output = { path = "../lumi-lighting-output" }
+lumi-light-plans = { path = "../lumi-light-plans" }
 lumi-local-playback = { path = "../lumi-local-playback" }
 lumi-library = { path = "../lumi-library" }
 lumi-library-demo = { path = "../lumi-library-demo" }

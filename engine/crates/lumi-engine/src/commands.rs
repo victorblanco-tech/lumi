@@ -9,6 +9,7 @@ use lumi_library::{
     PhraseRoleMove, ReconcileSide, ReconcileStrategy, ThemeSpecificVariant, TimelineEditCommand,
     VariantId,
 };
+use lumi_light_plans::LightPlanningPolicy;
 use lumi_midi_output::MidiAddress;
 use lumi_protocol::{MessageEnvelope, MessageType};
 use lumi_simulator::SimulationSpeed;
@@ -125,6 +126,17 @@ pub enum SessionCommand {
     MutateAutoloopCatalog {
         expected_revision: u64,
         mutation: AutoloopCatalogMutation,
+    },
+    ReplaceLightPlanningPolicy {
+        expected_revision: u64,
+        policy: LightPlanningPolicy,
+    },
+    PreviewLightPlan {
+        track_id: u64,
+        expected_timeline_revision: u64,
+        theme_id: u64,
+        variation_seed: u64,
+        policy: LightPlanningPolicy,
     },
     PublishMidiSource,
     StopMidiSource,
@@ -249,6 +261,8 @@ impl SessionCommand {
             | Self::RestoreLibraryTimelineRevision { .. }
             | Self::MutatePhraseRoleCatalog { .. }
             | Self::MutateAutoloopCatalog { .. }
+            | Self::ReplaceLightPlanningPolicy { .. }
+            | Self::PreviewLightPlan { .. }
             | Self::PublishMidiSource
             | Self::StopMidiSource
             | Self::SetAbletonLinkEnabled { .. }
@@ -292,6 +306,7 @@ impl SessionCommand {
                 | Self::RestoreLibraryTimelineRevision { .. }
                 | Self::MutatePhraseRoleCatalog { .. }
                 | Self::MutateAutoloopCatalog { .. }
+                | Self::ReplaceLightPlanningPolicy { .. }
         )
     }
 }
@@ -416,6 +431,37 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
             )?,
             mutation: autoloop_catalog_mutation(&envelope.payload)?,
         }),
+        "replaceLightPlanningPolicy" => Ok(SessionCommand::ReplaceLightPlanningPolicy {
+            expected_revision: positive_unsigned(
+                &envelope.payload,
+                "expectedLightPlanningRevision",
+            )?,
+            policy: serde_json::from_value(
+                envelope
+                    .payload
+                    .get("policy")
+                    .cloned()
+                    .ok_or(CommandDecodeError::InvalidField("policy"))?,
+            )
+            .map_err(|_| CommandDecodeError::InvalidField("policy"))?,
+        }),
+        "previewLightPlan" => Ok(SessionCommand::PreviewLightPlan {
+            track_id: positive_unsigned(&envelope.payload, "trackId")?,
+            expected_timeline_revision: positive_unsigned(
+                &envelope.payload,
+                "expectedTimelineRevision",
+            )?,
+            theme_id: positive_unsigned(&envelope.payload, "themeId")?,
+            variation_seed: positive_unsigned(&envelope.payload, "variationSeed")?,
+            policy: serde_json::from_value(
+                envelope
+                    .payload
+                    .get("policy")
+                    .cloned()
+                    .ok_or(CommandDecodeError::InvalidField("policy"))?,
+            )
+            .map_err(|_| CommandDecodeError::InvalidField("policy"))?,
+        }),
         "publishMidiSource" => Ok(SessionCommand::PublishMidiSource),
         "stopMidiSource" => Ok(SessionCommand::StopMidiSource),
         "setAbletonLinkEnabled" => Ok(SessionCommand::SetAbletonLinkEnabled {
@@ -534,11 +580,22 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
 fn midi_address(
     payload: &serde_json::Map<String, Value>,
 ) -> Result<MidiAddress, CommandDecodeError> {
-    let number = u8::try_from(positive_unsigned(payload, "targetNumber")?)
-        .map_err(|_| CommandDecodeError::InvalidField("targetNumber"))?;
-    match string(payload, "targetKind")? {
+    let kind = string(payload, "targetKind")?;
+    let raw_number = if kind == "custom" {
+        unsigned(payload, "targetNumber")?
+    } else {
+        positive_unsigned(payload, "targetNumber")?
+    };
+    let number =
+        u8::try_from(raw_number).map_err(|_| CommandDecodeError::InvalidField("targetNumber"))?;
+    match kind {
         "bank" => MidiAddress::bank(number),
         "autoloop" => MidiAddress::autoloop(number),
+        "custom" => MidiAddress::custom(
+            u8::try_from(positive_unsigned(payload, "channel")?)
+                .map_err(|_| CommandDecodeError::InvalidField("channel"))?,
+            number,
+        ),
         _ => return Err(CommandDecodeError::InvalidField("targetKind")),
     }
     .ok_or(CommandDecodeError::InvalidField("targetNumber"))
@@ -1124,6 +1181,57 @@ mod tests {
         assert_eq!(
             decode_command(&invalid),
             Err(CommandDecodeError::InvalidField("millis"))
+        );
+    }
+
+    #[test]
+    fn custom_modifier_midi_address_accepts_note_zero_on_an_explicit_channel() {
+        let envelope = command_envelope(serde_json::json!({
+            "kind": "sendMidiAddressLearnPulse",
+            "targetKind": "custom",
+            "targetNumber": 0,
+            "channel": 14,
+        }));
+        let Some(expected) = MidiAddress::custom(14, 0) else {
+            panic!("custom modifier address must be valid");
+        };
+        assert_eq!(
+            decode_command(&envelope),
+            Ok(SessionCommand::SendMidiAddressLearnPulse { address: expected })
+        );
+    }
+
+    #[test]
+    fn light_plan_preview_carries_the_complete_draft_policy() {
+        let envelope = command_envelope(serde_json::json!({
+            "kind": "previewLightPlan",
+            "trackId": 42,
+            "expectedTimelineRevision": 7,
+            "themeId": 2,
+            "variationSeed": 9,
+            "policy": {
+                "revision": 3,
+                "themeCooldownTracks": 1,
+                "autoloopCooldownUses": 2,
+                "duplicatePlanWindow": 4,
+                "rules": [],
+                "modifiers": [],
+                "modifierRules": []
+            }
+        }));
+        let policy = LightPlanningPolicy {
+            revision: 3,
+            ..LightPlanningPolicy::default()
+        };
+        assert_eq!(
+            decode_command(&envelope),
+            Ok(SessionCommand::PreviewLightPlan {
+                track_id: 42,
+                expected_timeline_revision: 7,
+                theme_id: 2,
+                variation_seed: 9,
+                policy,
+            })
         );
     }
 

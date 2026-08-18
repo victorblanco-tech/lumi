@@ -27,6 +27,8 @@ final class EngineStatusModel: ObservableObject {
 
     @Published private(set) var workspaceState = LiveWorkspacePresenter.stopped()
     @Published private(set) var libraryState = LibraryWorkspaceState.importing()
+    @Published private(set) var lightPlanningState = LightPlanningState.loading
+    @Published private(set) var lightPlanningFeedback: String?
     @Published private(set) var timelineEditFeedback: String?
     @Published private(set) var phraseRoleFeedback: String?
     @Published private(set) var autoloopCatalogFeedback: String?
@@ -58,6 +60,7 @@ final class EngineStatusModel: ObservableObject {
     private let supervisor = EngineProcessSupervisor()
     private let snapshotDecoder = EngineSnapshotDecoder()
     private let libraryDecoder = LibrarySnapshotDecoder()
+    private let lightPlanningDecoder = LightPlanningSnapshotDecoder()
     private var lifecycle: Lifecycle = .stopped
     private var monitoringTask: Task<Void, Never>?
     private var localAudioControllers: [UInt64: LocalDeckAudioController] = [:]
@@ -88,6 +91,8 @@ final class EngineStatusModel: ObservableObject {
         lifecycle = .starting
         workspaceState = LiveWorkspacePresenter.starting()
         libraryState = .importing()
+        lightPlanningState = .loading
+        lightPlanningFeedback = nil
         timelineEditFeedback = nil
         phraseRoleFeedback = nil
         autoloopCatalogFeedback = nil
@@ -900,6 +905,13 @@ final class EngineStatusModel: ObservableObject {
         )
     }
 
+    func sendCustomMidiLearnPulse(channel: UInt8, note: UInt8) async {
+        await exchangeMidiCommand(
+            .sendCustomMidiLearnPulse(channel: channel, note: note),
+            success: "Custom MIDI learn pulse sent on channel \(channel), note \(note)."
+        )
+    }
+
     func triggerMidiAutoloop(bankNumber: UInt16, autoloopNumber: UInt16) async {
         await exchangeMidiCommand(
             .triggerMidiAutoloop(
@@ -1347,6 +1359,87 @@ final class EngineStatusModel: ObservableObject {
         }
     }
 
+    func replaceLightPlanningPolicy(_ policy: LightPlanningPolicyState) async {
+        guard lifecycle == .ready,
+              let endpointDescription,
+              let protocolVersion,
+              await acquireInteractiveExchange() else {
+            return
+        }
+        defer { isExchangingCommand = false }
+        do {
+            let envelope = try await supervisor.send(
+                .replaceLightPlanningPolicy(
+                    expectedRevision: policy.revision,
+                    policy: policy.payload()
+                )
+            )
+            if let failure = EngineCommandFailure(envelope) {
+                lightPlanningFeedback = failure.message
+                if failure.code.contains("Revision") {
+                    let refreshed = try await supervisor.getSnapshot()
+                    _ = try decodeLibraryState(refreshed)
+                }
+                return
+            }
+            let (snapshot, snapshotEnvelope) = try await decodeSnapshotWithRecovery(
+                envelope,
+                endpointDescription: endpointDescription,
+                protocolVersion: protocolVersion,
+                context: "Light Planning Policy mutation"
+            )
+            latestSnapshot = snapshot
+            workspaceState = LiveWorkspacePresenter.ready(snapshot)
+            libraryState = try decodeLibraryState(snapshotEnvelope)
+            lightPlanningFeedback = "Light Planning Policy saved. Revision \(lightPlanningState.policy.revision)."
+        } catch {
+            lightPlanningFeedback = (error as? LocalizedError)?.errorDescription
+                ?? "The Light Planning Policy could not be saved."
+        }
+    }
+
+    func previewLightPlan(
+        trackID: UInt64,
+        expectedTimelineRevision: UInt64,
+        themeID: UInt64,
+        variationSeed: UInt64,
+        policy: LightPlanningPolicyState
+    ) async {
+        guard lifecycle == .ready,
+              let endpointDescription,
+              let protocolVersion,
+              await acquireInteractiveExchange() else { return }
+        defer { isExchangingCommand = false }
+        do {
+            let envelope = try await supervisor.send(
+                .previewLightPlan(
+                    trackID: trackID,
+                    expectedTimelineRevision: expectedTimelineRevision,
+                    themeID: themeID,
+                    variationSeed: variationSeed,
+                    policy: policy.payload()
+                )
+            )
+            if let failure = EngineCommandFailure(envelope) {
+                lightPlanningFeedback = failure.message
+                return
+            }
+            let (snapshot, snapshotEnvelope) = try await decodeSnapshotWithRecovery(
+                envelope,
+                endpointDescription: endpointDescription,
+                protocolVersion: protocolVersion,
+                context: "Light Plan preview"
+            )
+            latestSnapshot = snapshot
+            workspaceState = LiveWorkspacePresenter.ready(snapshot)
+            libraryState = try decodeLibraryState(snapshotEnvelope)
+            lightPlanningFeedback = nil
+        } catch {
+            lightPlanningFeedback = (error as? LocalizedError)?.errorDescription
+                ?? "The Light Plan preview could not be compiled."
+        }
+    }
+
     private func engineAutoloopCatalogMutation(
         _ request: AutoloopCatalogMutationRequest
     ) -> EngineAutoloopCatalogMutation {
@@ -1597,7 +1690,8 @@ final class EngineStatusModel: ObservableObject {
     }
 
     private func decodeLibraryState(_ envelope: MessageEnvelope) throws -> LibraryWorkspaceState {
-        try libraryDecoder.decode(envelope).preservingDeviceInspection(
+        lightPlanningState = try lightPlanningDecoder.decode(envelope)
+        return try libraryDecoder.decode(envelope).preservingDeviceInspection(
             libraryState.rekordboxDeviceInspection
         )
     }

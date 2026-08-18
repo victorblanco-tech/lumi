@@ -8,6 +8,7 @@ license.workspace = true
 [dependencies]
 lumi-domain = { path = "../lumi-domain" }
 lumi-library = { path = "../lumi-library" }
+lumi-light-plans = { path = "../lumi-light-plans" }
 rusqlite = { version = "0.40.1", features = ["backup", "bundled-sqlcipher-vendored-openssl"] }
 serde_json = "1"
 thiserror = "2"

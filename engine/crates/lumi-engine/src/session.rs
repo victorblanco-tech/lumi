@@ -19,6 +19,7 @@ use lumi_domain::{
     UserCommandEnvelope, WorkerId,
 };
 use lumi_library::AutoloopCatalog;
+use lumi_light_plans::{CompiledLightPlan, LightPlanningPolicy, VariationHistory};
 use lumi_lighting_output::LightingOutputProvider as _;
 use lumi_local_playback::{LocalPlaybackDeckSourceProvider, LocalPlaybackError};
 #[cfg(not(test))]
@@ -546,7 +547,9 @@ fn initialized_runtime_for_mode(
     }
     let library_worker = LibraryWorker::demo()?;
     let autoloop_catalog = library_worker.autoloop_catalog()?;
+    let light_planning_policy = library_worker.light_planning_policy()?;
     let mut planning_worker = PlanningWorker::new(&autoloop_catalog);
+    planning_worker.synchronize_light_policy(light_planning_policy);
     match deck_source_mode {
         DeckSourceMode::ConnectedDecks => {
             #[cfg(not(test))]
@@ -873,7 +876,11 @@ struct PlanningWorker {
     planner: DeterministicPlanner<StableChoiceSource>,
     effect_sequence: u64,
     recent_theme_ids: Vec<lumi_domain::ThemeId>,
+    reserved_theme_ids: BTreeMap<TrackLoadId, lumi_domain::ThemeId>,
     library_contexts: BTreeMap<TrackLoadId, LibraryPlanContext>,
+    light_policy: LightPlanningPolicy,
+    variation_history: VariationHistory,
+    compiled_light_plans: BTreeMap<TrackLoadId, CompiledLightPlan>,
 }
 
 fn planner_track(metadata: &TrackMetadata) -> PlannerTrack {
@@ -890,12 +897,20 @@ impl PlanningWorker {
             planner: planner_for_catalog(catalog),
             effect_sequence: 0,
             recent_theme_ids: Vec::new(),
+            reserved_theme_ids: BTreeMap::new(),
             library_contexts: BTreeMap::new(),
+            light_policy: LightPlanningPolicy::default(),
+            variation_history: VariationHistory::default(),
+            compiled_light_plans: BTreeMap::new(),
         }
     }
 
     fn synchronize_themes(&mut self, catalog: &AutoloopCatalog) {
         self.planner = planner_for_catalog(catalog);
+    }
+
+    fn synchronize_light_policy(&mut self, policy: LightPlanningPolicy) {
+        self.light_policy = policy;
     }
 
     fn register_library_context(
@@ -916,9 +931,58 @@ impl PlanningWorker {
         self.library_contexts.get(&track_load_id)
     }
 
-    fn materialize_library_plan(&self, plan: LightingPlan) -> Result<LightingPlan, EngineError> {
+    fn materialize_library_plan(
+        &mut self,
+        plan: LightingPlan,
+    ) -> Result<LightingPlan, EngineError> {
         let Some(context) = self.library_context(plan.track_load_id()) else {
             return Ok(plan);
+        };
+        let theme_id = plan
+            .theme_decision()
+            .map(lumi_domain::ThemeDecision::theme_id)
+            .or_else(|| {
+                plan.cues()
+                    .iter()
+                    .find_map(|cue| action_theme_id(cue.action()))
+            })
+            .ok_or(EngineError::MissingLibraryAutoloopResolution)?;
+        // An upgraded installation keeps the exact pre-0.5 behavior until the
+        // user creates at least one planning rule. This avoids silently changing
+        // an established show after a schema migration.
+        let compiled = if self.light_policy.rules.is_empty() {
+            None
+        } else {
+            Some(context.compile_light_plan(
+                theme_id,
+                &self.light_policy,
+                self.effect_sequence ^ plan.track_load_id().value(),
+                &self.variation_history,
+            )?)
+        };
+        let resolved = if let Some(compiled) = &compiled {
+            compiled
+                .choices
+                .iter()
+                .map(|choice| {
+                    (
+                        choice.phrase_index,
+                        (choice.autoloop_number, choice.display_name.clone()),
+                    )
+                })
+                .collect::<BTreeMap<_, _>>()
+        } else {
+            context
+                .resolve(theme_id)
+                .map_err(LibraryWorkerError::from)?
+                .into_iter()
+                .map(|choice| {
+                    choice
+                        .autoloop_number
+                        .map(|number| (choice.phrase_index, (number, choice.entry_name)))
+                        .ok_or(EngineError::MissingLibraryAutoloopAddress)
+                })
+                .collect::<Result<BTreeMap<_, _>, _>>()?
         };
         let cues = plan
             .cues()
@@ -927,20 +991,15 @@ impl PlanningWorker {
                 let SemanticLightingAction::ApplyLook(look) = cue.action() else {
                     return Ok(cue.clone());
                 };
-                let resolution = context
-                    .resolve(look.theme_id())
-                    .map_err(LibraryWorkerError::from)?
-                    .into_iter()
-                    .find(|candidate| candidate.phrase_index == cue.phrase_index())
+                let resolution = resolved
+                    .get(&cue.phrase_index())
                     .ok_or(EngineError::MissingLibraryAutoloopResolution)?;
-                let autoloop_number = resolution
-                    .autoloop_number
-                    .ok_or(EngineError::MissingLibraryAutoloopAddress)?;
+                let autoloop_number = resolution.0;
                 let materialized = LightingLook::try_new(
                     look.theme_id(),
                     look.theme_name().to_owned(),
                     SceneId::new(u64::from(autoloop_number)),
-                    resolution.entry_name,
+                    resolution.1.clone(),
                     look.category(),
                     look.loop_selection(),
                 )?;
@@ -951,6 +1010,20 @@ impl PlanningWorker {
                 ))
             })
             .collect::<Result<Vec<_>, EngineError>>()?;
+        if let Some(compiled) = &compiled {
+            self.variation_history.reserve(
+                format!("track-load:{}", plan.track_load_id().value()),
+                compiled,
+            );
+            self.compiled_light_plans
+                .insert(plan.track_load_id(), compiled.clone());
+            while self.compiled_light_plans.len() > LIBRARY_CONTEXT_CAPACITY {
+                let Some(oldest) = self.compiled_light_plans.keys().next().copied() else {
+                    break;
+                };
+                self.compiled_light_plans.remove(&oldest);
+            }
+        }
         Ok(plan.with_materialized_cues(cues)?)
     }
 
@@ -961,6 +1034,26 @@ impl PlanningWorker {
         event: DomainEvent,
         leader_deck_id: Option<lumi_domain::DeckId>,
     ) -> Result<(), EngineError> {
+        let replaced_reservation = match &event {
+            DomainEvent::Observation(lumi_domain::ObservationEnvelope {
+                observation:
+                    DeckObservation::TrackLoaded {
+                        deck_id,
+                        track_load_id,
+                        ..
+                    },
+                ..
+            }) => runtime
+                .state()
+                .deck(*deck_id)
+                .map(lumi_domain::DeckState::track_load_id)
+                .filter(|existing| existing != track_load_id),
+            DomainEvent::Observation(lumi_domain::ObservationEnvelope {
+                observation: DeckObservation::TrackUnloaded { track_load_id, .. },
+                ..
+            }) => Some(*track_load_id),
+            _ => None,
+        };
         let transport_epoch = transport_epoch_cause(runtime.state(), &event);
         let stops_live_transport = matches!(
             &event,
@@ -1022,6 +1115,26 @@ impl PlanningWorker {
             output_worker.activate_pending_timing_offset();
         }
         process_domain_event(runtime, output_worker, event)?;
+        if let Some(track_load_id) = replaced_reservation {
+            let reservation_id = format!("track-load:{}", track_load_id.value());
+            self.variation_history.release(&reservation_id);
+            self.compiled_light_plans.remove(&track_load_id);
+            self.reserved_theme_ids.remove(&track_load_id);
+        }
+        if activates_pending_timing
+            && let Some(track_load_id) = leader_deck_id
+                .and_then(|deck_id| runtime.state().deck(deck_id))
+                .map(lumi_domain::DeckState::track_load_id)
+        {
+            self.variation_history
+                .commit(&format!("track-load:{}", track_load_id.value()));
+            if let Some(theme_id) = self.reserved_theme_ids.remove(&track_load_id) {
+                self.recent_theme_ids.push(theme_id);
+                if self.recent_theme_ids.len() > 32 {
+                    self.recent_theme_ids.remove(0);
+                }
+            }
+        }
         if let Some((deck_id, beat)) = exact_live_beat {
             output_worker.observe_exact_live_beat(runtime.state(), deck_id, beat);
         }
@@ -1030,7 +1143,21 @@ impl PlanningWorker {
                 .effect_sequence
                 .checked_add(1)
                 .ok_or(EngineError::PlanningEffectSequenceOverflow)?;
-            let context = ThemeSelectionContext::new(self.recent_theme_ids.clone());
+            let theme_window = usize::from(self.light_policy.theme_cooldown_tracks);
+            let mut unavailable_themes = self
+                .recent_theme_ids
+                .iter()
+                .rev()
+                .take(theme_window)
+                .copied()
+                .collect::<Vec<_>>();
+            unavailable_themes.extend(
+                self.reserved_theme_ids
+                    .iter()
+                    .filter(|(track_load_id, _)| **track_load_id != input.track_load_id)
+                    .map(|(_, theme_id)| *theme_id),
+            );
+            let context = ThemeSelectionContext::new(unavailable_themes);
             let generated = if let Some(library_context) = self.library_context(input.track_load_id)
             {
                 let themes = library_context.executable_themes();
@@ -1041,10 +1168,8 @@ impl PlanningWorker {
             };
             let plan = self.materialize_library_plan(generated)?;
             if let Some(decision) = plan.theme_decision() {
-                self.recent_theme_ids.push(decision.theme_id());
-                if self.recent_theme_ids.len() > 8 {
-                    self.recent_theme_ids.remove(0);
-                }
+                self.reserved_theme_ids
+                    .insert(plan.track_load_id(), decision.theme_id());
             }
             process_domain_event(
                 runtime,
@@ -2904,6 +3029,32 @@ fn apply_command(
             runtime.planning_worker.synchronize_themes(&catalog);
             return Ok(());
         }
+        SessionCommand::ReplaceLightPlanningPolicy {
+            expected_revision,
+            policy,
+        } => {
+            let stored = runtime
+                .library_worker
+                .replace_light_planning_policy(expected_revision, policy)?;
+            runtime.planning_worker.synchronize_light_policy(stored);
+            return Ok(());
+        }
+        SessionCommand::PreviewLightPlan {
+            track_id,
+            expected_timeline_revision,
+            theme_id,
+            variation_seed,
+            policy,
+        } => {
+            runtime.library_worker.preview_light_plan(
+                track_id,
+                expected_timeline_revision,
+                theme_id,
+                variation_seed,
+                &policy,
+            )?;
+            return Ok(());
+        }
         SessionCommand::PublishMidiSource => {
             runtime
                 .output_worker
@@ -3298,6 +3449,8 @@ fn apply_command(
         | SessionCommand::RestoreLibraryTimelineRevision { .. }
         | SessionCommand::MutatePhraseRoleCatalog { .. }
         | SessionCommand::MutateAutoloopCatalog { .. }
+        | SessionCommand::ReplaceLightPlanningPolicy { .. }
+        | SessionCommand::PreviewLightPlan { .. }
         | SessionCommand::PublishMidiSource
         | SessionCommand::StopMidiSource
         | SessionCommand::SetAbletonLinkEnabled { .. }
@@ -4447,6 +4600,9 @@ fn plan_json(
     planning_worker: &PlanningWorker,
 ) -> Result<Value, LibraryWorkerError> {
     let library_context = planning_worker.library_context(plan.track_load_id());
+    let compiled_light_plan = planning_worker
+        .compiled_light_plans
+        .get(&plan.track_load_id());
     let library_track = library_context.map_or(Value::Null, LibraryPlanContext::identity_json);
     let mut library_cues = BTreeMap::new();
     let mut library_choices = BTreeMap::new();
@@ -4455,17 +4611,21 @@ fn plan_json(
             let Some(theme_id) = action_theme_id(cue.action()) else {
                 continue;
             };
-            if let Some(resolved) = context
-                .resolve(theme_id)?
-                .into_iter()
-                .find(|resolved| resolved.phrase_index == cue.phrase_index())
+            let choices = context.autoloop_choices(theme_id, cue.phrase_index());
+            let selected_number = match cue.action() {
+                SemanticLightingAction::ApplyLook(look) => {
+                    u16::try_from(look.scene_id().value()).ok()
+                }
+                _ => None,
+            };
+            if let Some(resolved) = choices
+                .iter()
+                .find(|resolved| resolved.autoloop_number == selected_number)
+                .cloned()
             {
                 library_cues.insert(cue.phrase_index(), resolved);
             }
-            library_choices.insert(
-                cue.phrase_index(),
-                context.autoloop_choices(theme_id, cue.phrase_index()),
-            );
+            library_choices.insert(cue.phrase_index(), choices);
         }
     }
     Ok(json!({
@@ -4496,12 +4656,28 @@ fn plan_json(
             "libraryResolution": library_cues
                 .get(&cue.phrase_index())
                 .map_or(Value::Null, |resolution| {
-                    library_resolution_with_choices_json(
+                    let mut value = library_resolution_with_choices_json(
                         resolution,
                         library_choices
                             .get(&cue.phrase_index())
                             .map_or(&[], Vec::as_slice),
-                    )
+                    );
+                    if let Some(compiled_choice) = compiled_light_plan
+                        .and_then(|compiled| compiled.choices.iter().find(|choice| {
+                            choice.phrase_index == cue.phrase_index()
+                        }))
+                        && let Value::Object(ref mut object) = value
+                    {
+                        object.insert("planningEvidence".to_owned(), json!({
+                            "policyRevision": compiled_light_plan.map(|plan| plan.policy_revision),
+                            "variationSeed": compiled_light_plan.map(|plan| plan.variation_seed.to_string()),
+                            "reason": compiled_choice.evidence.reason,
+                            "effectiveWeight": compiled_choice.evidence.effective_weight,
+                            "colorInfluence": compiled_choice.evidence.color_influence,
+                            "repeatProtection": compiled_choice.evidence.repeat_protection,
+                        }));
+                    }
+                    value
                 }),
         })).collect::<Vec<_>>(),
     }))
@@ -4811,6 +4987,8 @@ pub enum EngineError {
     ProLinkBridge(#[from] BridgeSupervisorError),
     #[error("planner failed: {0}")]
     Planner(#[from] PlannerError),
+    #[error("Light Plan compiler failed: {0}")]
+    LightPlan(#[from] lumi_light_plans::LightPlanError),
     #[error("a Library plan could not be materialized: {0}")]
     PlanMaterialization(#[from] PlanValidationError),
     #[error("a Library phrase has no resolved Autoloop")]

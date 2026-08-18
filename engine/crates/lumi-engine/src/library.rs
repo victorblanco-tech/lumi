@@ -27,6 +27,11 @@ use lumi_library_sqlite::{
     DevicePlaylistUpsert, DeviceTrackImport, LibraryResetImpact,
 };
 use lumi_library_sqlite::{SqliteLibraryError, SqliteLibraryRepository};
+use lumi_light_plans::{
+    Candidate as LightPlanCandidate, CompiledLightPlan, LightPlanError, LightPlanningPolicy,
+    PhraseRequest as LightPlanPhraseRequest, PhraseSelection as LightPlanPhraseSelection,
+    VariationHistory,
+};
 use lumi_rekordbox_analysis::{
     AnalysisError, AnalysisWaveformPoint, ResolvedAnalysisRequest, ResolvedAnalysisTrack,
     ResolvedTrackAnalysis, snapshot_resolved_analysis_data,
@@ -75,6 +80,7 @@ pub struct LibraryWorker {
     last_rekordbox_apply: Option<SourceMirrorDiff>,
     pending_device_inspection: Option<DeviceInspection>,
     pending_library_reset: Option<LibraryResetPreviewState>,
+    pending_light_plan_preview: Option<Value>,
 }
 
 #[derive(Clone, Debug)]
@@ -142,6 +148,7 @@ pub struct LibraryPlanContext {
     beat_grid: lumi_library::BeatGrid,
     waveform: Vec<lumi_library::WaveformPoint>,
     hot_cues: Vec<lumi_library::HotCue>,
+    track_color: Option<TrackColor>,
     catalog: AutoloopCatalog,
     phrases: Vec<LibraryPhrasePlanContext>,
     autoloop_overrides: BTreeMap<u16, VariantId>,
@@ -150,6 +157,8 @@ pub struct LibraryPlanContext {
 #[derive(Clone, Debug)]
 struct LibraryPhrasePlanContext {
     phrase_index: u16,
+    start_beat: u32,
+    end_beat: u32,
     role_id: PhraseRoleId,
     role_name: String,
     strategy: PhraseLoopStrategy,
@@ -408,6 +417,72 @@ impl LibraryPlanContext {
             .collect()
     }
 
+    /// Compiles all automatic variation before playback. The returned values are
+    /// immutable physical AutoLoop addresses; the realtime executor never sees
+    /// the policy, history or weighted-selection algorithm.
+    pub fn compile_light_plan(
+        &self,
+        theme_id: ThemeId,
+        policy: &LightPlanningPolicy,
+        variation_seed: u64,
+        history: &VariationHistory,
+    ) -> Result<CompiledLightPlan, LightPlanError> {
+        let phrases = self
+            .phrases
+            .iter()
+            .map(|phrase| {
+                let selection =
+                    if let Some(variant) = self.autoloop_overrides.get(&phrase.phrase_index) {
+                        LightPlanPhraseSelection::PlanOverride(variant.as_str().to_owned())
+                    } else {
+                        match &phrase.strategy {
+                            PhraseLoopStrategy::Auto => LightPlanPhraseSelection::Automatic,
+                            PhraseLoopStrategy::FixedVariant(variant) => {
+                                LightPlanPhraseSelection::FixedVariant(variant.as_str().to_owned())
+                            }
+                            PhraseLoopStrategy::ThemeSpecificExact(overrides) => overrides
+                                .iter()
+                                .find(|value| value.theme_id() == theme_id)
+                                .map_or(LightPlanPhraseSelection::Automatic, |value| {
+                                    LightPlanPhraseSelection::FixedVariant(
+                                        value.variant_id().as_str().to_owned(),
+                                    )
+                                }),
+                        }
+                    };
+                LightPlanPhraseRequest {
+                    phrase_index: phrase.phrase_index,
+                    role_id: phrase.role_id.as_str().to_owned(),
+                    selection,
+                }
+            })
+            .collect::<Vec<_>>();
+        let candidates = self
+            .catalog
+            .cells()
+            .iter()
+            .filter_map(|cell| {
+                Some(LightPlanCandidate {
+                    theme_id: cell.theme_id().value(),
+                    role_id: cell.role_id().as_str().to_owned(),
+                    variant_id: cell.variant_id().as_str().to_owned(),
+                    entry_id: cell.entry_id().as_str().to_owned(),
+                    display_name: cell.display_name().to_owned(),
+                    autoloop_number: mapping_number(cell.variant_id())?,
+                })
+            })
+            .collect::<Vec<_>>();
+        lumi_light_plans::compile(
+            policy,
+            theme_id.value(),
+            self.track_color.map(TrackColor::rgb_u32),
+            variation_seed,
+            &phrases,
+            &candidates,
+            history,
+        )
+    }
+
     pub fn autoloop_choices(
         &self,
         theme_id: ThemeId,
@@ -431,14 +506,23 @@ impl LibraryPlanContext {
                     phrase_index,
                     role_id: phrase.role_id.as_str().to_owned(),
                     role_name: phrase.role_name.clone(),
-                    strategy: "planOverride",
+                    strategy: if self.autoloop_overrides.contains_key(&phrase_index) {
+                        "planOverride"
+                    } else {
+                        loop_strategy_name(&phrase.strategy)
+                    },
                     variant_id: cell.variant_id().as_str().to_owned(),
                     entry_id: cell.entry_id().as_str().to_owned(),
                     entry_name: cell.display_name().to_owned(),
                     bank_number: theme_id.value(),
                     autoloop_number: Some(autoloop_number),
                     catalog_revision: self.catalog.revision(),
-                    resolution_reason: "planOverride".to_owned(),
+                    resolution_reason: if self.autoloop_overrides.contains_key(&phrase_index) {
+                        "planOverride"
+                    } else {
+                        loop_strategy_name(&phrase.strategy)
+                    }
+                    .to_owned(),
                 })
             })
             .collect::<Vec<_>>();
@@ -584,6 +668,75 @@ impl LibraryWorker {
         Ok(self.repository.autoloop_catalog()?)
     }
 
+    pub fn light_planning_policy(&self) -> Result<LightPlanningPolicy, LibraryWorkerError> {
+        Ok(self.repository.light_planning_policy()?)
+    }
+
+    pub fn replace_light_planning_policy(
+        &mut self,
+        expected_revision: u64,
+        policy: LightPlanningPolicy,
+    ) -> Result<LightPlanningPolicy, LibraryWorkerError> {
+        Ok(self
+            .repository
+            .replace_light_planning_policy(expected_revision, policy)?)
+    }
+
+    /// Builds an inspectable Light Plan through the exact compiler used by
+    /// playback. This transient result never enters an output or timing lane.
+    pub fn preview_light_plan(
+        &mut self,
+        track_id: u64,
+        expected_timeline_revision: u64,
+        theme_id: u64,
+        variation_seed: u64,
+        policy: &LightPlanningPolicy,
+    ) -> Result<(), LibraryWorkerError> {
+        let prepared = self.local_playback_track(track_id, expected_timeline_revision)?;
+        let (metadata, context) = prepared.into_parts();
+        let compiled = context.compile_light_plan(
+            ThemeId::new(theme_id),
+            policy,
+            variation_seed,
+            &VariationHistory::default(),
+        )?;
+        self.pending_light_plan_preview = Some(json!({
+            "trackId": track_id,
+            "trackTitle": metadata.title(),
+            "themeId": theme_id,
+            "policyRevision": compiled.policy_revision,
+            "variationSeed": compiled.variation_seed.to_string(),
+            "signature": compiled.signature.to_string(),
+            "phrases": compiled.choices.iter().filter_map(|choice| {
+                let phrase = context.phrases.iter()
+                    .find(|phrase| phrase.phrase_index == choice.phrase_index)?;
+                Some(json!({
+                    "phraseIndex": choice.phrase_index,
+                    "startBeat": phrase.start_beat,
+                    "endBeat": phrase.end_beat,
+                    "roleId": choice.role_id,
+                    "roleName": phrase.role_name,
+                    "variantId": choice.variant_id,
+                    "entryId": choice.entry_id,
+                    "autoloopName": choice.display_name,
+                    "autoloopNumber": choice.autoloop_number,
+                    "reason": choice.evidence.reason,
+                    "effectiveWeight": choice.evidence.effective_weight,
+                    "colorInfluence": choice.evidence.color_influence,
+                    "repeatProtection": choice.evidence.repeat_protection,
+                }))
+            }).collect::<Vec<_>>(),
+            "modifiers": policy.modifiers.iter().map(|modifier| json!({
+                "id": modifier.id,
+                "name": modifier.display_name,
+                "kind": modifier.kind,
+                "automaticExecutionReady": modifier.automatic_execution_ready(),
+                "execution": if modifier.automatic_execution_ready() { "eligible" } else { "pocRequired" },
+            })).collect::<Vec<_>>(),
+        }));
+        Ok(())
+    }
+
     #[cfg(test)]
     fn demo_at(path: &std::path::Path) -> Result<Self, LibraryWorkerError> {
         Self::demo_with_repository(
@@ -653,6 +806,7 @@ impl LibraryWorker {
             last_rekordbox_apply: None,
             pending_device_inspection: None,
             pending_library_reset: None,
+            pending_light_plan_preview: None,
         };
         worker.ensure_imported_timelines()?;
         if phrase_mapping_defaults_upgraded {
@@ -685,6 +839,7 @@ impl LibraryWorker {
         self.last_rekordbox_apply = None;
         self.pending_device_inspection = None;
         self.pending_library_reset = None;
+        self.pending_light_plan_preview = None;
         let persisted = self
             .repository
             .library_source(&lumi_library::LibrarySourceId::try_new(&self.source_id)?)?
@@ -1600,6 +1755,7 @@ impl LibraryWorker {
             beat_grid: track.beat_grid().clone(),
             waveform: track.waveform().to_vec(),
             hot_cues: track.hot_cues().to_vec(),
+            track_color: track.summary().color(),
             catalog,
             autoloop_overrides: BTreeMap::new(),
             phrases: timeline
@@ -1607,6 +1763,8 @@ impl LibraryWorker {
                 .iter()
                 .map(|phrase| LibraryPhrasePlanContext {
                     phrase_index: phrase.index(),
+                    start_beat: phrase.start_beat(),
+                    end_beat: phrase.end_beat(),
                     role_id: phrase.role_id().clone(),
                     role_name: role_display_name(role_catalog.roles(), phrase.role_id()),
                     strategy: phrase.loop_strategy().clone(),
@@ -2261,6 +2419,7 @@ impl LibraryWorker {
         let data_summary = self.repository.data_summary()?;
         let reset_candidates = self.repository.reset_preservable_tracks()?;
         let creative_archives = self.repository.creative_archives()?;
+        let light_planning_policy = self.repository.light_planning_policy()?;
         let source_refresh = match &self.pending_source_refresh {
             Some(baseline) => json!({
                 "revision": baseline.source_revision().as_str(),
@@ -2324,6 +2483,16 @@ impl LibraryWorker {
                 "waveform": true,
                 "rawPhrases": true,
                 "localAudio": true,
+            },
+            "lightPlanning": {
+                "policy": light_planning_policy,
+                "preview": self.pending_light_plan_preview,
+                "execution": {
+                    "compiledBeforePlayback": true,
+                    "realtimePolicyEvaluation": false,
+                    "staticLookOutput": "pocRequired",
+                    "colorOverrideOutput": "pocRequired",
+                },
             },
             "dataManagement": {
                 "trackCount": data_summary.track_count,
@@ -3632,6 +3801,8 @@ pub enum LibraryWorkerError {
     Io(#[from] std::io::Error),
     #[error("library persistence failed: {0}")]
     Persistence(#[from] SqliteLibraryError),
+    #[error("Light Plan compilation failed: {0}")]
+    LightPlan(#[from] LightPlanError),
     #[error("Rekordbox XML source failed: {0}")]
     RekordboxXml(#[from] RekordboxXmlError),
     #[error("Rekordbox identity resolver failed: {0}")]

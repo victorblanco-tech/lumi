@@ -6,6 +6,7 @@ import SwiftUI
 private enum AppDestination: String, CaseIterable, Identifiable {
     case live
     case library
+    case plans
     case integrations
     case settings
 
@@ -135,6 +136,40 @@ struct FoundationView: View {
                                 await engineStatus.syncRekordboxDevice(
                                     root: root,
                                     playlistIDs: playlistIDs
+                                )
+                            }
+                        }
+                    )
+                case .plans:
+                    LightPlansWorkspaceView(
+                        state: engineStatus.lightPlanningState,
+                        library: engineStatus.libraryState,
+                        feedback: engineStatus.lightPlanningFeedback,
+                        onSave: { policy in
+                            Task { await engineStatus.replaceLightPlanningPolicy(policy) }
+                        },
+                        onOpenTrack: { trackID in
+                            Task { await engineStatus.openLibraryTrackEditor(trackID: trackID) }
+                        },
+                        onPreview: { trackID, timelineRevision, themeID, seed, policy in
+                            Task {
+                                await engineStatus.previewLightPlan(
+                                    trackID: trackID,
+                                    expectedTimelineRevision: timelineRevision,
+                                    themeID: themeID,
+                                    variationSeed: seed,
+                                    policy: policy
+                                )
+                            }
+                        },
+                        onOpenLightingOutputs: {
+                            destination = .integrations
+                        },
+                        onSendModifierLearnPulse: { channel, note in
+                            Task {
+                                await engineStatus.sendCustomMidiLearnPulse(
+                                    channel: channel,
+                                    note: note
                                 )
                             }
                         }
@@ -277,7 +312,7 @@ struct FoundationView: View {
             VStack(spacing: LumiSpacing.xSmall) {
                 destinationButton(.live, title: "Live", systemImage: "waveform")
                 destinationButton(.library, title: "Library", systemImage: "music.note.list")
-                unavailableNavigation("Plans", systemImage: "list.bullet.rectangle")
+                destinationButton(.plans, title: "Light Plans", systemImage: "list.bullet.rectangle")
                 destinationButton(.integrations, title: "Integrations", systemImage: "cable.connector")
             }
             Spacer()
@@ -306,10 +341,11 @@ struct FoundationView: View {
             .accessibilityIdentifier("lumi.navigation.brandMark")
             compactDestinationButton(.live, systemImage: "waveform", title: "Live")
             compactDestinationButton(.library, systemImage: "music.note.list", title: "Library")
-            Image(systemName: "list.bullet.rectangle")
-                .foregroundStyle(LumiColor.textSecondary)
-                .frame(width: 32, height: 32)
-                .accessibilityLabel("Plans, coming soon")
+            compactDestinationButton(
+                .plans,
+                systemImage: "list.bullet.rectangle",
+                title: "Light Plans"
+            )
             compactDestinationButton(
                 .integrations,
                 systemImage: "cable.connector",

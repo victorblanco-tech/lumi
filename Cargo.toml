@@ -9,6 +9,7 @@ members = [
     "engine/crates/lumi-library-source",
     "engine/crates/lumi-library-sqlite",
     "engine/crates/lumi-lighting-output",
+    "engine/crates/lumi-light-plans",
     "engine/crates/lumi-local-playback",
     "engine/crates/lumi-midi-coremidi",
     "engine/crates/lumi-midi-output",
@@ -26,7 +27,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.5.0-dev-1"
+version = "0.5.0-dev-2"
 edition = "2024"
 rust-version = "1.97.1"
 license = "EPL-2.0"
