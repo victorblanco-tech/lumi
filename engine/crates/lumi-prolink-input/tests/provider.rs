@@ -1,7 +1,7 @@
 use lumi_deck_source::DeckSourceProvider;
 use lumi_domain::{
     DeckObservation, DeckSourceStatus, DomainEvent, KeyMode, MonotonicTime, MusicalKey, PhraseKind,
-    PitchClass, TrackId, TrackMetadata, TrackPhrase,
+    PitchClass, SerializedRuntime, TrackId, TrackMetadata, TrackPhrase,
 };
 use lumi_prolink_input::{BridgeDecoder, ProLinkDeckSourceProvider};
 
@@ -881,4 +881,124 @@ fn bridge_failure_is_visible_and_a_ready_event_clears_it_after_recovery() {
         DeckSourceStatus::Ready
     );
     assert_eq!(provider.diagnostics().last_error, None);
+}
+
+#[test]
+fn bridge_recovery_keeps_source_sequences_and_track_load_ids_monotone() {
+    let mut runtime = SerializedRuntime::try_new(64)
+        .unwrap_or_else(|error| panic!("runtime should initialize: {error}"));
+    runtime
+        .submit(DomainEvent::RuntimeStarted {
+            at: MonotonicTime::new(0),
+        })
+        .unwrap_or_else(|error| panic!("runtime start should submit: {error}"));
+    runtime
+        .process_next()
+        .unwrap_or_else(|error| panic!("runtime should start: {error}"));
+    let mut provider = ProLinkDeckSourceProvider::new(MonotonicTime::new(0))
+        .unwrap_or_else(|error| panic!("provider should initialize: {error}"));
+    let mut first_decoder = BridgeDecoder::new();
+    for (line, time) in [(HELLO, 1), (READY, 2), (STATUS, 3)] {
+        provider
+            .ingest(
+                first_decoder
+                    .decode_line(line)
+                    .unwrap_or_else(|error| panic!("first session should decode: {error}")),
+                MonotonicTime::new(time),
+            )
+            .unwrap_or_else(|error| panic!("first session should ingest: {error}"));
+    }
+    let first_events = provider
+        .drain_events()
+        .unwrap_or_else(|error| panic!("first events should drain: {error}"));
+    let last_first_sequence = first_events
+        .iter()
+        .filter_map(|event| match event {
+            DomainEvent::Observation(envelope) => Some(envelope.sequence.value()),
+            _ => None,
+        })
+        .max()
+        .unwrap_or_default();
+    for event in first_events {
+        runtime
+            .submit(event)
+            .unwrap_or_else(|error| panic!("first event should submit: {error}"));
+        runtime
+            .process_next()
+            .unwrap_or_else(|error| panic!("first event should reduce: {error}"));
+    }
+    assert!(runtime.state().deck(lumi_domain::DeckId::new(1)).is_some());
+
+    provider
+        .mark_degraded("bridge exited", MonotonicTime::new(4))
+        .unwrap_or_else(|error| panic!("failure should be recorded: {error}"));
+    provider
+        .clear(MonotonicTime::new(4))
+        .unwrap_or_else(|error| panic!("loaded deck should clear: {error}"));
+    let failure_events = provider
+        .drain_events()
+        .unwrap_or_else(|error| panic!("failure events should drain: {error}"));
+    let last_failure_sequence = failure_events
+        .iter()
+        .filter_map(|event| match event {
+            DomainEvent::Observation(envelope) => Some(envelope.sequence.value()),
+            _ => None,
+        })
+        .max()
+        .unwrap_or(last_first_sequence);
+    for event in failure_events {
+        runtime
+            .submit(event)
+            .unwrap_or_else(|error| panic!("failure event should submit: {error}"));
+        runtime
+            .process_next()
+            .unwrap_or_else(|error| panic!("failure event should reduce: {error}"));
+    }
+    assert!(runtime.state().deck(lumi_domain::DeckId::new(1)).is_none());
+
+    provider
+        .begin_bridge_recovery(MonotonicTime::new(5))
+        .unwrap_or_else(|error| panic!("recovery should begin: {error}"));
+    let mut recovered_decoder = BridgeDecoder::new();
+    for (line, time) in [(HELLO, 6), (READY, 7), (STATUS, 8)] {
+        provider
+            .ingest(
+                recovered_decoder
+                    .decode_line(line)
+                    .unwrap_or_else(|error| panic!("recovered session should decode: {error}")),
+                MonotonicTime::new(time),
+            )
+            .unwrap_or_else(|error| panic!("recovered session should ingest: {error}"));
+    }
+    let recovered_events = provider
+        .drain_events()
+        .unwrap_or_else(|error| panic!("recovered events should drain: {error}"));
+    assert!(recovered_events.iter().all(|event| match event {
+        DomainEvent::Observation(envelope) => envelope.sequence.value() > last_failure_sequence,
+        _ => true,
+    }));
+    assert!(recovered_events.iter().any(|event| matches!(
+        event,
+        DomainEvent::Observation(envelope)
+            if matches!(
+                envelope.observation,
+                DeckObservation::TrackLoaded { track_load_id, .. }
+                    if track_load_id.value() == 2
+            )
+    )));
+    for event in recovered_events {
+        runtime
+            .submit(event)
+            .unwrap_or_else(|error| panic!("recovered event should submit: {error}"));
+        runtime
+            .process_next()
+            .unwrap_or_else(|error| panic!("recovered event should reduce: {error}"));
+    }
+    assert_eq!(
+        runtime
+            .state()
+            .deck(lumi_domain::DeckId::new(1))
+            .map(|deck| deck.track_load_id().value()),
+        Some(2)
+    );
 }

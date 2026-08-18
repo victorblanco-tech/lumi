@@ -51,34 +51,44 @@ final class BeatLinkRuntime implements AutoCloseable {
 
         DeviceFinder.getInstance().addDeviceAnnouncementListener(deviceListener);
         VirtualCdj.getInstance().addUpdateListener(this::receivedDeviceUpdate);
-        BeatFinder.getInstance().addBeatListener(beat -> publisher.publishCritical(
-                "beat",
-                new BridgePayloads.Beat(
-                        beat.getDeviceNumber(),
-                        beat.getDeviceName(),
-                        beat.getEffectiveTempo(),
-                        beat.getBeatWithinBar(),
-                        beat.isTempoMaster()
-                )
-        ));
+        BeatFinder.getInstance().addBeatListener(beat -> {
+            if (!hasExactBeat(beat.getEffectiveTempo(), beat.getBeatWithinBar())) {
+                return;
+            }
+            publisher.publishCritical(
+                    "beat",
+                    new BridgePayloads.Beat(
+                            beat.getDeviceNumber(),
+                            beat.getDeviceName(),
+                            beat.getEffectiveTempo(),
+                            beat.getBeatWithinBar(),
+                            beat.isTempoMaster()
+                    )
+            );
+        });
         // Modern players such as the CDJ-1500X publish their exact transport
         // position independently from the beat packet. Lumi uses this fact as
         // the sole authority for phrase changes and AutoLoop decisions. A beat
         // packet contains only the beat within the bar and cannot distinguish
         // normal playback from a hotcue jump before the next CdjStatus frame.
-        BeatFinder.getInstance().addPrecisePositionListener(position -> publisher.publishLatest(
-                BridgeTrafficClass.TRANSPORT,
-                position.getDeviceNumber(),
-                "precisePosition",
-                new BridgePayloads.PrecisePosition(
-                        position.getDeviceNumber(),
-                        position.getDeviceName(),
-                        position.getPlaybackPosition(),
-                        position.getEffectiveTempo(),
-                        position.getBeatWithinBar(),
-                        position.isTempoMaster()
-                )
-        ));
+        BeatFinder.getInstance().addPrecisePositionListener(position -> {
+            if (!hasRealtimeTempo(position.getEffectiveTempo(), position.getBeatWithinBar())) {
+                return;
+            }
+            publisher.publishLatest(
+                    BridgeTrafficClass.TRANSPORT,
+                    position.getDeviceNumber(),
+                    "precisePosition",
+                    new BridgePayloads.PrecisePosition(
+                            position.getDeviceNumber(),
+                            position.getDeviceName(),
+                            position.getPlaybackPosition(),
+                            position.getEffectiveTempo(),
+                            position.getBeatWithinBar(),
+                            position.isTempoMaster()
+                    )
+            );
+        });
         DeviceFinder.getInstance().start();
         publisher.publish("sourceStatus", new BridgePayloads.SourceStatus(
                 "discovering", "Waiting for a supported Pro DJ Link device"
@@ -141,6 +151,14 @@ final class BeatLinkRuntime implements AutoCloseable {
         if (!(update instanceof CdjStatus status)) {
             return;
         }
+        // A player that has only just joined the network briefly reports the
+        // Beat Link sentinel values (no BPM/beat yet). Those frames describe
+        // normal device warm-up, not a bridge protocol failure. Wait for one
+        // coherent loaded-track status before publishing it, while still
+        // allowing a real unloaded status to clear an existing deck.
+        if (status.getRekordboxId() != 0 && !hasCoherentLoadedTrack(status)) {
+            return;
+        }
         BridgePayloads.DeckStatus payload = new BridgePayloads.DeckStatus(
                 status.getDeviceNumber(),
                 status.getDeviceName(),
@@ -171,19 +189,40 @@ final class BeatLinkRuntime implements AutoCloseable {
                     payload
             );
         }
-        publisher.publishLatest(
-                BridgeTrafficClass.TEMPO,
-                status.getDeviceNumber(),
-                "tempoStatus",
-                new BridgePayloads.TempoStatus(
-                        status.getDeviceNumber(),
-                        status.getDeviceName(),
-                        status.getEffectiveTempo(),
-                        status.getBeatWithinBar(),
-                        status.isTempoMaster(),
-                        status.isPlaying()
-                )
-        );
+        if (hasRealtimeTempo(status.getEffectiveTempo(), status.getBeatWithinBar())) {
+            publisher.publishLatest(
+                    BridgeTrafficClass.TEMPO,
+                    status.getDeviceNumber(),
+                    "tempoStatus",
+                    new BridgePayloads.TempoStatus(
+                            status.getDeviceNumber(),
+                            status.getDeviceName(),
+                            status.getEffectiveTempo(),
+                            status.getBeatWithinBar(),
+                            status.isTempoMaster(),
+                            status.isPlaying()
+                    )
+            );
+        }
+    }
+
+    private static boolean hasCoherentLoadedTrack(CdjStatus status) {
+        return status.getTrackSourcePlayer() != 0
+                && status.getBeatNumber() >= 0
+                && hasRealtimeTempo(status.getBpm() / 100.0, status.getBeatWithinBar())
+                && hasRealtimeTempo(status.getEffectiveTempo(), status.getBeatWithinBar());
+    }
+
+    static boolean hasRealtimeTempo(double effectiveTempo, int beatWithinBar) {
+        return Double.isFinite(effectiveTempo)
+                && effectiveTempo >= 20.0
+                && effectiveTempo <= 300.0
+                && beatWithinBar >= 0
+                && beatWithinBar <= 4;
+    }
+
+    static boolean hasExactBeat(double effectiveTempo, int beatWithinBar) {
+        return hasRealtimeTempo(effectiveTempo, beatWithinBar) && beatWithinBar >= 1;
     }
 
     private void publishFailure(String operation, Exception failure) {

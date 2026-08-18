@@ -86,6 +86,21 @@ Link-only, realtime MIDI-only and all lanes combined with 40 Hz snapshot
 polling, pitch changes, seeks and lighting Pause/Start cycles. It emits one
 bounded JSON evidence artifact without track metadata or credentials.
 
+## Implementation record — `0.4.0-dev-57`
+
+Device discovery and deck transport have separate lifecycle semantics. A CDJ
+joining the network may temporarily advertise a device while its loaded-track
+BPM, source player and beat are still sentinel values. The bridge withholds
+those incomplete realtime facts instead of converting normal player warm-up
+into a process-wide protocol failure. Already healthy devices and their Link
+and AutoLoop consumers continue uninterrupted.
+
+A genuine supervised bridge restart resets only bridge-session state. The
+provider object, source ID sequence and track-load allocator survive, because
+the domain reducer intentionally remembers the last sequence for that source.
+This preserves fail-closed unload semantics while allowing rediscovered decks
+to be accepted and hydrated automatically after recovery.
+
 ## Rejected alternatives
 
 - increasing the Java FIFO: delays failure and permits a larger stale backlog;

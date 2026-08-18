@@ -12,10 +12,22 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 final class BridgePublisherTest {
     private final ObjectMapper mapper = new ObjectMapper();
+
+    @Test
+    void rejectsTransientPlayerWarmupTempoWithoutRejectingValidDeckTempo() {
+        assertFalse(BeatLinkRuntime.hasRealtimeTempo(-0.01, 0));
+        assertFalse(BeatLinkRuntime.hasRealtimeTempo(0.0, 0));
+        assertFalse(BeatLinkRuntime.hasRealtimeTempo(Double.NaN, 1));
+        assertTrue(BeatLinkRuntime.hasRealtimeTempo(155.0, 0));
+        assertTrue(BeatLinkRuntime.hasRealtimeTempo(155.0, 4));
+        assertFalse(BeatLinkRuntime.hasExactBeat(155.0, 0));
+        assertTrue(BeatLinkRuntime.hasExactBeat(155.0, 1));
+    }
 
     @Test
     void publishesVersionedMonotoneNdjsonWithoutDroppedEvents() throws Exception {

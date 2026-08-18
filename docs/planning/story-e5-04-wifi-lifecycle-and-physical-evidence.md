@@ -2,7 +2,7 @@
 
 - Status: **Implementation and automated evidence complete; physical duration evidence pending**
 - Priority: **P0 Critical**
-- Target: `0.4.0-dev-56`
+- Target: `0.4.0-dev-57`
 - GitHub tracking: [#120](https://github.com/victorblanco-tech/lumi/issues/120)
 
 ## Outcome
@@ -75,3 +75,33 @@ background. The final runtime snapshot showed one Link peer, zero late
 AutoLoop output, zero queue saturation and zero provider failures. UI Quit
 removed the Link peer while leaving the same launchd engine safely parked;
 reopening attached to that existing process.
+
+## Dev-57 dynamic-device recovery
+
+Physical testing found one lifecycle defect that the fixed simulator topology
+did not cover: powering on player 2 while player 1 was already live could emit
+temporary no-track/no-BPM sentinel values. The bridge published those values as
+realtime tempo, Rust rejected the invalid tempo envelope and restarted the
+entire Pro DJ Link child process. Discovery recovered, but the replacement
+provider restarted its domain sequence at 1 under the existing source ID, so
+the reducer correctly rejected all reconstructed deck loads as stale.
+
+Dev-57 makes a joining device local to its own warm-up lifecycle. Incomplete
+loaded-track and invalid realtime-tempo frames are withheld until coherent;
+they cannot degrade an existing deck, Link clock or AutoLoop lane. If the child
+process genuinely fails, recovery preserves the provider's monotone source
+sequence and track-load allocator while resetting only bridge-session state.
+Both decks must therefore rehydrate automatically without restarting Lumi.
+
+Regression evidence covers the observed sentinel values, a complete
+fail/clear/recover cycle, monotone post-recovery observations and a new deck
+load after the bridge decoder itself starts again at sequence 1.
+
+The installed dev-57 build was also tested against both physical CDJ-1500X
+players and the DJM-V5. Terminating the supervised bridge while both loaded
+decks were present left the engine alive, produced one bounded automatic
+restart and restored both library-backed decks without an engine or Lumi UI
+restart. The recovered snapshot reported zero queue saturation, ignored
+events and provider failures. A real player-2 power-on during an active show is
+still required as the final acceptance check for the originally observed
+sequence.

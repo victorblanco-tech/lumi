@@ -265,6 +265,25 @@ impl ProLinkDeckSourceProvider {
         Ok(())
     }
 
+    /// Starts a fresh bridge transport session without resetting the domain
+    /// source sequence or track-load identity allocator. The reducer keeps the
+    /// last sequence per source ID, so replacing this provider after a bridge
+    /// restart would make every recovered deck observation look stale.
+    pub fn begin_bridge_recovery(&mut self, at: MonotonicTime) -> Result<(), ProLinkProviderError> {
+        self.clear(at)?;
+        self.devices.clear();
+        self.signatures.clear();
+        self.leader_deck_id = None;
+        self.last_bridge_sequence = None;
+        self.bridge_version = None;
+        self.beat_link_version = None;
+        self.last_error = None;
+        self.last_precise_position_received_at = None;
+        self.timing_observations.clear();
+        self.precise_position_observations.clear();
+        self.update_source_status(DeckSourceStatus::Starting, at)
+    }
+
     #[must_use]
     pub const fn leader_deck_id(&self) -> Option<DeckId> {
         self.leader_deck_id

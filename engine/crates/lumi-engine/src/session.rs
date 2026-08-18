@@ -2538,7 +2538,13 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
             runtime.prolink_start_error = error;
             if let Some(bridge) = bridge {
                 runtime.prolink_bridge = Some(bridge);
-                runtime.direct_deck_source = ProLinkDeckSourceProvider::new(runtime.clock.now())?;
+                // Keep the provider's source sequence and track-load allocator
+                // monotone across a child-process restart. Replacing the
+                // provider here reused source ID 31 from sequence 1, causing
+                // the reducer to reject every recovered deck load as stale.
+                runtime
+                    .direct_deck_source
+                    .begin_bridge_recovery(runtime.clock.now())?;
                 runtime.prolink_recovery_pending = false;
                 runtime.prolink_restart_count = runtime.prolink_restart_count.saturating_add(1);
             }
