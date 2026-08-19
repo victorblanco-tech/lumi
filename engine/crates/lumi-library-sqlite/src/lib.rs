@@ -25,7 +25,7 @@ use rusqlite::backup::Backup;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Row, Transaction, params};
 use thiserror::Error;
 
-const SCHEMA_VERSION: u32 = 12;
+const SCHEMA_VERSION: u32 = 13;
 const DEFAULTS_VERSION_KEY: &str = "phrase-role-defaults-version";
 const CATALOG_REVISION_KEY: &str = "phrase-role-catalog-revision";
 const AUTOLOOP_DEFAULTS_VERSION_KEY: &str = "autoloop-catalog-defaults-version";
@@ -69,6 +69,10 @@ pub struct DeviceAliasUpsert {
     pub duration_millis: u64,
     pub file_size: u32,
     pub metadata_revision: String,
+    pub color_rgb: Option<u32>,
+    pub master_database_id: u32,
+    pub master_content_id: u32,
+    pub information_update_count: u32,
     pub analysis_revision: String,
     pub audio_signature: String,
     pub analyzed_at: String,
@@ -189,6 +193,12 @@ pub struct LibraryDataSummary {
     pub user_edited_track_count: u64,
     pub creative_archive_count: u64,
     pub pending_archive_count: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TrackColorSummary {
+    pub color_rgb: u32,
+    pub track_count: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -653,6 +663,10 @@ impl SqliteLibraryRepository {
                     params![source_id, legacy_source_id],
                 )?;
                 transaction.execute(
+                    "UPDATE track_metadata_provenance SET source_id = ?1 WHERE source_id = ?2",
+                    params![source_id, legacy_source_id],
+                )?;
+                transaction.execute(
                     "DELETE FROM device_library_track_aliases WHERE source_id = ?1",
                     [&legacy_source_id],
                 )?;
@@ -734,6 +748,81 @@ impl SqliteLibraryRepository {
                     imported.analyzed_at,
                 ],
             )?;
+        }
+        // Track color is metadata, not analysis. Keep an independent monotone
+        // provenance lane so an older backup USB cannot undo a newer
+        // Rekordbox color while information-only changes still resync.
+        for alias in aliases.iter() {
+            let Some(canonical_track_id) = alias.canonical_track_id else {
+                continue;
+            };
+            let track_id = to_i64(canonical_track_id.value())?;
+            let active = transaction
+                .query_row(
+                    "SELECT metadata_revision, analyzed_at, master_database_id,
+                            master_content_id, information_update_count
+                       FROM track_metadata_provenance WHERE track_id = ?1",
+                    [track_id],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, String>(1)?,
+                            row.get::<_, i64>(2)?,
+                            row.get::<_, i64>(3)?,
+                            row.get::<_, i64>(4)?,
+                        ))
+                    },
+                )
+                .optional()?;
+            let promotes = match active.as_ref() {
+                None => true,
+                Some((revision, _, _, _, _)) if revision == &alias.metadata_revision => false,
+                Some((_, _, master_database_id, master_content_id, information_update_count))
+                    if alias.master_database_id != 0
+                        && alias.master_content_id != 0
+                        && i64::from(alias.master_database_id) == *master_database_id
+                        && i64::from(alias.master_content_id) == *master_content_id
+                        && i64::from(alias.information_update_count)
+                            != *information_update_count =>
+                {
+                    i64::from(alias.information_update_count) > *information_update_count
+                }
+                Some((_, analyzed_at, _, _, _)) => matches!(
+                    compare_rekordbox_dates(&alias.analyzed_at, analyzed_at),
+                    Some(std::cmp::Ordering::Greater)
+                ),
+            };
+            if promotes {
+                transaction.execute(
+                    "UPDATE tracks SET color_rgb = ?1 WHERE id = ?2",
+                    params![alias.color_rgb.map(i64::from), track_id],
+                )?;
+                transaction.execute(
+                    "INSERT INTO track_metadata_provenance
+                     (track_id, source_id, device_track_id, metadata_revision, analyzed_at,
+                      master_database_id, master_content_id, information_update_count)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                     ON CONFLICT(track_id) DO UPDATE SET
+                       source_id = excluded.source_id,
+                       device_track_id = excluded.device_track_id,
+                       metadata_revision = excluded.metadata_revision,
+                       analyzed_at = excluded.analyzed_at,
+                       master_database_id = excluded.master_database_id,
+                       master_content_id = excluded.master_content_id,
+                       information_update_count = excluded.information_update_count,
+                       imported_at = CURRENT_TIMESTAMP",
+                    params![
+                        track_id,
+                        source_id,
+                        i64::from(alias.device_track_id),
+                        alias.metadata_revision,
+                        alias.analyzed_at,
+                        i64::from(alias.master_database_id),
+                        i64::from(alias.master_content_id),
+                        i64::from(alias.information_update_count),
+                    ],
+                )?;
+            }
         }
         transaction.execute(
             "UPDATE device_library_track_aliases SET archived = 1 WHERE source_id = ?1",
@@ -1200,6 +1289,37 @@ impl SqliteLibraryRepository {
                 "pending creative archive count",
             )?,
         })
+    }
+
+    pub fn track_color_summaries(&self) -> Result<Vec<TrackColorSummary>, SqliteLibraryError> {
+        let mut statement = self.connection.prepare(
+            "SELECT t.color_rgb, COUNT(*)
+               FROM tracks t
+              WHERE t.color_rgb IS NOT NULL
+                AND EXISTS (
+                    SELECT 1
+                      FROM track_metadata_provenance p
+                     WHERE p.track_id = t.id
+                )
+              GROUP BY t.color_rgb
+              ORDER BY t.color_rgb",
+        )?;
+        statement
+            .query_map([], |row| {
+                let color = row.get::<_, i64>(0)?;
+                let count = row.get::<_, i64>(1)?;
+                Ok((color, count))
+            })?
+            .map(|row| {
+                let (color, count) = row?;
+                Ok(TrackColorSummary {
+                    color_rgb: u32::try_from(color).map_err(|_| {
+                        SqliteLibraryError::CorruptData("invalid track color RGB".to_owned())
+                    })?,
+                    track_count: from_nonnegative_i64(count, "track color count")?,
+                })
+            })
+            .collect()
     }
 
     pub fn reset_preservable_tracks(
@@ -1854,6 +1974,7 @@ impl SqliteLibraryRepository {
                 COMMIT;
                 ",
             )?;
+            current = 12;
         }
         if current == 1 {
             self.connection.execute_batch(
@@ -2202,6 +2323,27 @@ impl SqliteLibraryRepository {
                     updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
                 PRAGMA user_version = 12;
+                COMMIT;
+                ",
+            )?;
+            current = 12;
+        }
+        if current == 12 {
+            self.connection.execute_batch(
+                "
+                BEGIN IMMEDIATE;
+                CREATE TABLE track_metadata_provenance (
+                    track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+                    source_id TEXT NOT NULL,
+                    device_track_id INTEGER NOT NULL,
+                    metadata_revision TEXT NOT NULL,
+                    analyzed_at TEXT NOT NULL,
+                    master_database_id INTEGER NOT NULL,
+                    master_content_id INTEGER NOT NULL,
+                    information_update_count INTEGER NOT NULL,
+                    imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                PRAGMA user_version = 13;
                 COMMIT;
                 ",
             )?;
@@ -4650,7 +4792,7 @@ fn search_pattern(search: &str) -> String {
 mod fault_tests {
     use lumi_library::{
         HotCue, ImportedLibraryBaseline, ImportedTrackAnalysis, LibraryRepository, SourceRevision,
-        TrackPageRequest,
+        TrackColor, TrackPageRequest,
     };
     use lumi_library_demo::DemoLibrarySourceProvider;
     use lumi_library_source::MusicLibrarySourceProvider;
@@ -4743,6 +4885,10 @@ mod fault_tests {
             duration_millis: source_track.duration_millis(),
             file_size: 123,
             metadata_revision: "metadata-v1".to_owned(),
+            color_rgb: Some(0x32_80_ff),
+            master_database_id: 1,
+            master_content_id: 1_256,
+            information_update_count: 1,
             analysis_revision: "analysis-v1".to_owned(),
             audio_signature: "audio:test:1256".to_owned(),
             analyzed_at: "2026-08-13".to_owned(),
@@ -4788,6 +4934,57 @@ mod fault_tests {
         assert_eq!(after.raw_phrases(), before.raw_phrases());
         assert_eq!(after.hot_cues(), &[cue]);
         assert_eq!(
+            after.summary().color().map(TrackColor::rgb_u32),
+            Some(0x32_80_ff)
+        );
+        assert_eq!(repository.track_color_summaries()?[0].track_count, 1);
+
+        aliases[0].metadata_revision = "metadata-older".to_owned();
+        aliases[0].color_rgb = Some(0xff_33_33);
+        aliases[0].information_update_count = 0;
+        aliases[0].analyzed_at = "2026-08-12".to_owned();
+        repository.sync_device_aliases(
+            "usb-fs:gray",
+            "DJ VIC GRAY",
+            "database-older",
+            &mut aliases,
+            &[],
+            &[],
+            &[],
+            &[],
+        )?;
+        assert_eq!(
+            repository
+                .track(track_id)?
+                .and_then(|track| track.summary().color())
+                .map(TrackColor::rgb_u32),
+            Some(0x32_80_ff),
+            "an older USB metadata revision must not overwrite the active color"
+        );
+
+        aliases[0].metadata_revision = "metadata-newer".to_owned();
+        aliases[0].color_rgb = Some(0x32_d7_4b);
+        aliases[0].information_update_count = 2;
+        aliases[0].analyzed_at = "2026-08-14".to_owned();
+        repository.sync_device_aliases(
+            "usb-fs:gray",
+            "DJ VIC GRAY",
+            "database-newer",
+            &mut aliases,
+            &[],
+            &[],
+            &[],
+            &[],
+        )?;
+        assert_eq!(
+            repository
+                .track(track_id)?
+                .and_then(|track| track.summary().color())
+                .map(TrackColor::rgb_u32),
+            Some(0x32_d7_4b),
+            "a monotone information revision must promote its Rekordbox color"
+        );
+        assert_eq!(
             repository.device_hot_cue_decision(
                 track_id,
                 "usb-fs:gray",
@@ -4825,6 +5022,10 @@ mod fault_tests {
             duration_millis: source_track.duration_millis(),
             file_size: 123,
             metadata_revision: "metadata-v1".to_owned(),
+            color_rgb: Some(0x32_80_ff),
+            master_database_id: 1,
+            master_content_id: 1_256,
+            information_update_count: 1,
             analysis_revision: "analysis-v1".to_owned(),
             analyzed_at: "2026-08-10".to_owned(),
             sync_disposition: "promoted-initial".to_owned(),
@@ -4983,6 +5184,10 @@ mod fault_tests {
             duration_millis: source_track.duration_millis(),
             file_size: 321,
             metadata_revision: "metadata-new".to_owned(),
+            color_rgb: Some(0xff_33_33),
+            master_database_id: 1,
+            master_content_id: 9_001,
+            information_update_count: 1,
             analysis_revision: "analysis-new".to_owned(),
             analyzed_at: "2026-08-10".to_owned(),
             sync_disposition: "unmatched".to_owned(),
@@ -5124,6 +5329,10 @@ mod fault_tests {
                     duration_millis: source_track.duration_millis(),
                     file_size: 123,
                     metadata_revision: "metadata-v1".to_owned(),
+                    color_rgb: None,
+                    master_database_id: 1,
+                    master_content_id: 90 + u32::try_from(offset)?,
+                    information_update_count: 1,
                     analysis_revision: "analysis-v1".to_owned(),
                     analyzed_at: "2026-08-13".to_owned(),
                     sync_disposition: "current".to_owned(),
@@ -5220,6 +5429,10 @@ mod fault_tests {
                 duration_millis: 180_000,
                 file_size: 123,
                 metadata_revision: "metadata-v1".to_owned(),
+                color_rgb: None,
+                master_database_id: 1,
+                master_content_id: 1_256,
+                information_update_count: 1,
                 analysis_revision: "analysis-v1".to_owned(),
                 analyzed_at: "2026-08-16".to_owned(),
                 sync_disposition: "current".to_owned(),
@@ -5266,6 +5479,10 @@ mod fault_tests {
             duration_millis: source_track.duration_millis(),
             file_size: 123,
             metadata_revision: "metadata-v1".to_owned(),
+            color_rgb: None,
+            master_database_id: 1,
+            master_content_id: 88,
+            information_update_count: 1,
             analysis_revision: "analysis-v1".to_owned(),
             analyzed_at: "2026-08-10".to_owned(),
             sync_disposition: "current".to_owned(),
@@ -5345,6 +5562,10 @@ mod fault_tests {
             duration_millis: source_track.duration_millis(),
             file_size: 123,
             metadata_revision: "metadata-v1".to_owned(),
+            color_rgb: None,
+            master_database_id: 1,
+            master_content_id: 1_256,
+            information_update_count: 1,
             analysis_revision: "analysis-v1".to_owned(),
             analyzed_at: "2026-08-10".to_owned(),
             sync_disposition: "current".to_owned(),
@@ -5416,7 +5637,7 @@ mod fault_tests {
         let schema: u32 = repository
             .connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))?;
-        assert_eq!(schema, 12);
+        assert_eq!(schema, 13);
         Ok(())
     }
 }

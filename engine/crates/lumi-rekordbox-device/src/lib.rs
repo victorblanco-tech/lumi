@@ -30,6 +30,8 @@ pub struct DeviceTrack {
     pub title: String,
     pub artist: String,
     pub musical_key: String,
+    /// Canonical RGB projection of Rekordbox's fixed track-color catalog.
+    pub color_rgb: Option<u32>,
     pub bpm_milli: u32,
     pub duration_millis: u32,
     pub file_size: u32,
@@ -113,7 +115,8 @@ pub fn read_device_library(root: impl AsRef<Path>) -> Result<DeviceLibrarySnapsh
     let mut statement = database
         .prepare(
             "SELECT c.content_id, COALESCE(c.title, ''), COALESCE(a.name, ''),
-                    COALESCE(k.name, ''), CAST(COALESCE(c.bpmx100, 0) AS INTEGER),
+                    COALESCE(k.name, ''), COALESCE(color.name, ''),
+                    CAST(COALESCE(c.bpmx100, 0) AS INTEGER),
                     CAST(COALESCE(c.length, 0) AS INTEGER),
                     CAST(COALESCE(c.fileSize, 0) AS INTEGER),
                     COALESCE(c.path, ''), COALESCE(c.analysisDataFilePath, ''),
@@ -125,6 +128,7 @@ pub fn read_device_library(root: impl AsRef<Path>) -> Result<DeviceLibrarySnapsh
                FROM content c
                LEFT JOIN artist a ON c.artist_id_artist = a.artist_id
                LEFT JOIN key k ON c.key_id = k.key_id
+               LEFT JOIN color ON c.color_id = color.color_id
               ORDER BY c.content_id",
         )
         .map_err(database_error)?;
@@ -135,16 +139,17 @@ pub fn read_device_library(root: impl AsRef<Path>) -> Result<DeviceLibrarySnapsh
                 title: row.get(1)?,
                 artist: row.get(2)?,
                 musical_key: row.get(3)?,
-                bpm_centi: checked_u32(row.get::<_, i64>(4)?, 4)?,
-                duration: checked_u32(row.get::<_, i64>(5)?, 5)?,
-                file_size: checked_u32(row.get::<_, i64>(6)?, 6)?,
-                file_path: row.get(7)?,
-                analysis_path: row.get(8)?,
-                master_database_id: checked_u32(row.get::<_, i64>(9)?, 9)?,
-                master_content_id: checked_u32(row.get::<_, i64>(10)?, 10)?,
-                analysis_update_count: checked_u32(row.get::<_, i64>(11)?, 11)?,
-                information_update_count: checked_u32(row.get::<_, i64>(12)?, 12)?,
-                cue_update_count: checked_u32(row.get::<_, i64>(13)?, 13)?,
+                color_name: row.get(4)?,
+                bpm_centi: checked_u32(row.get::<_, i64>(5)?, 5)?,
+                duration: checked_u32(row.get::<_, i64>(6)?, 6)?,
+                file_size: checked_u32(row.get::<_, i64>(7)?, 7)?,
+                file_path: row.get(8)?,
+                analysis_path: row.get(9)?,
+                master_database_id: checked_u32(row.get::<_, i64>(10)?, 10)?,
+                master_content_id: checked_u32(row.get::<_, i64>(11)?, 11)?,
+                analysis_update_count: checked_u32(row.get::<_, i64>(12)?, 12)?,
+                information_update_count: checked_u32(row.get::<_, i64>(13)?, 13)?,
+                cue_update_count: checked_u32(row.get::<_, i64>(14)?, 14)?,
             })
         })
         .map_err(database_error)?;
@@ -164,6 +169,7 @@ pub fn read_device_library(root: impl AsRef<Path>) -> Result<DeviceLibrarySnapsh
             id: track.id,
             title: &track.title,
             artist: &track.artist,
+            color: &track.color_name,
             tempo: track.bpm_centi,
             duration: track.duration,
             file_size: track.file_size,
@@ -183,6 +189,7 @@ pub fn read_device_library(root: impl AsRef<Path>) -> Result<DeviceLibrarySnapsh
             title: track.title.clone(),
             artist: track.artist.clone(),
             musical_key: track.musical_key,
+            color_rgb: rekordbox_track_color_rgb(&track.color_name),
             bpm_milli: track.bpm_centi.saturating_mul(10),
             duration_millis: onelibrary_duration_millis(track.duration),
             file_size: track.file_size,
@@ -401,6 +408,7 @@ struct OneLibraryTrackRow {
     title: String,
     artist: String,
     musical_key: String,
+    color_name: String,
     bpm_centi: u32,
     duration: u32,
     file_size: u32,
@@ -493,6 +501,7 @@ struct MetadataRevisionInput<'a> {
     id: u32,
     title: &'a str,
     artist: &'a str,
+    color: &'a str,
     tempo: u32,
     duration: u32,
     file_size: u32,
@@ -507,6 +516,7 @@ fn metadata_revision(input: MetadataRevisionInput<'_>) -> String {
         input.id.to_string(),
         input.title.to_owned(),
         input.artist.to_owned(),
+        input.color.to_owned(),
         input.tempo.to_string(),
         input.duration.to_string(),
         input.file_size.to_string(),
@@ -518,6 +528,44 @@ fn metadata_revision(input: MetadataRevisionInput<'_>) -> String {
         digest.update([0]);
     }
     format!("onelibrary:{}", hex_digest(digest.finalize().as_slice()))
+}
+
+/// Rekordbox OneLibrary stores track colors as one of eight named catalog
+/// entries rather than arbitrary RGB. Lumi projects those stable identities
+/// to vivid RGB values so the same value can be persisted, rendered and used
+/// by deterministic Light Plan rules.
+pub const REKORDBOX_TRACK_COLORS: [(&str, u32); 8] = [
+    ("Pink", 0xff_33_cc),
+    ("Red", 0xff_33_33),
+    ("Orange", 0xff_8c_1a),
+    ("Yellow", 0xff_d6_00),
+    ("Green", 0x32_d7_4b),
+    ("Aqua", 0x32_d7_d5),
+    ("Blue", 0x32_80_ff),
+    ("Purple", 0xaf_52_de),
+];
+
+#[must_use]
+pub fn rekordbox_track_color_rgb(name: &str) -> Option<u32> {
+    REKORDBOX_TRACK_COLORS
+        .iter()
+        .find(|(catalog_name, _)| catalog_name.eq_ignore_ascii_case(name.trim()))
+        .map(|(_, rgb)| *rgb)
+}
+
+#[must_use]
+pub const fn rekordbox_track_color_name(rgb: u32) -> Option<&'static str> {
+    match rgb {
+        0xff_33_cc => Some("Pink"),
+        0xff_33_33 => Some("Red"),
+        0xff_8c_1a => Some("Orange"),
+        0xff_d6_00 => Some("Yellow"),
+        0x32_d7_4b => Some("Green"),
+        0x32_d7_d5 => Some("Aqua"),
+        0x32_80_ff => Some("Blue"),
+        0xaf_52_de => Some("Purple"),
+        _ => None,
+    }
 }
 
 fn sha256_file(path: &Path, maximum_bytes: u64) -> Result<String, DeviceError> {
@@ -649,15 +697,17 @@ mod tests {
                  INSERT INTO artist VALUES (2, 'Artist');
                  CREATE TABLE key(key_id INTEGER PRIMARY KEY, name TEXT);
                  INSERT INTO key VALUES (3, '8A');
+                 CREATE TABLE color(color_id INTEGER PRIMARY KEY, name TEXT);
+                 INSERT INTO color VALUES (7, 'Blue');
                  CREATE TABLE content(
                     content_id INTEGER PRIMARY KEY, title TEXT, artist_id_artist INTEGER,
-                    key_id INTEGER, bpmx100 INTEGER, length INTEGER, fileSize INTEGER,
+                    key_id INTEGER, color_id INTEGER, bpmx100 INTEGER, length INTEGER, fileSize INTEGER,
                     path TEXT, analysisDataFilePath TEXT, masterDbId INTEGER,
                     masterContentId INTEGER, analysisDataUpdateCount INTEGER,
                     informationUpdateCount INTEGER, cueUpdateCount TEXT
                  );
                  INSERT INTO content VALUES (
-                    10, 'Track', 2, 3, 12800, 180, 5,
+                    10, 'Track', 2, 3, 7, 12800, 180, 5,
                     '/Contents/track.wav', '/PIONEER/USBANLZ/000/ABCDEF/ANLZ0000.DAT',
                     20, 30, 4, 5, '6'
                  );
@@ -678,8 +728,28 @@ mod tests {
         assert_eq!(before, after);
         assert_eq!(snapshot.database_version, "1000");
         assert_eq!(snapshot.tracks[&10].analysis_update_count, 4);
+        assert_eq!(snapshot.tracks[&10].color_rgb, Some(0x32_80_ff));
         assert_eq!(snapshot.playlists[0].path, "Folder/Set");
         assert_eq!(snapshot.playlists[0].track_ids, vec![10]);
         Ok(())
+    }
+
+    #[test]
+    fn maps_the_fixed_rekordbox_track_color_catalog() {
+        let expected = [
+            ("Pink", 0xff_33_cc),
+            ("Red", 0xff_33_33),
+            ("Orange", 0xff_8c_1a),
+            ("Yellow", 0xff_d6_00),
+            ("Green", 0x32_d7_4b),
+            ("Aqua", 0x32_d7_d5),
+            ("Blue", 0x32_80_ff),
+            ("Purple", 0xaf_52_de),
+        ];
+        for (name, rgb) in expected {
+            assert_eq!(rekordbox_track_color_rgb(name), Some(rgb));
+            assert_eq!(rekordbox_track_color_name(rgb), Some(name));
+        }
+        assert_eq!(rekordbox_track_color_rgb(""), None);
     }
 }

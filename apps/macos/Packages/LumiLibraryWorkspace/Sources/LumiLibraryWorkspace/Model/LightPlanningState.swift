@@ -193,13 +193,22 @@ public struct LightPlanningExecutionState: Equatable, Sendable {
     public let colorOverrideOutput: String
 }
 
+public struct LightPlanTrackColorState: Identifiable, Equatable, Sendable {
+    public var id: UInt32 { rgb }
+    public let rgb: UInt32
+    public let name: String
+    public let trackCount: UInt64
+}
+
 public struct LightPlanningState: Equatable, Sendable {
     public let policy: LightPlanningPolicyState
+    public let trackColors: [LightPlanTrackColorState]
     public let execution: LightPlanningExecutionState
     public let preview: LightPlanPreview?
 
     public static let loading = Self(
         policy: .init(),
+        trackColors: [],
         execution: .init(
             compiledBeforePlayback: true,
             realtimePolicyEvaluation: false,

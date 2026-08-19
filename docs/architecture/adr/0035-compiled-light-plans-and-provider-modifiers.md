@@ -73,6 +73,15 @@ Track overrides always take precedence. The compiler never falls back to a
 different Phrase Role. If all repeat constraints exclude valid candidates, the
 oldest repeat constraint may be relaxed and the evidence states this explicitly.
 
+Rekordbox OneLibrary track colors are read from `content.color_id` and its fixed
+named `color` catalog during trusted USB sync. Lumi persists their canonical RGB
+projection on the track and exposes the distinct, Library-wide catalog to Light
+Plans. Track metadata has provenance independent from analysis and hot cues:
+`informationUpdateCount` orders updates from matching Rekordbox identities, with
+export date as a conservative fallback. Consequently an information-only color
+change can promote without reimporting analysis, while an older backup USB cannot
+overwrite newer color metadata.
+
 ### 4. Repetition protection
 
 The default policy is:
@@ -128,10 +137,11 @@ Library, phrases and SoundSwitch mapping.
 - Modifier mappings can be prepared now; their runtime execution requires a
   separate physical POC and explicit capability verification.
 - A policy change affects newly compiled plans, not a currently executing show.
+- Contextual help is part of the contract for non-obvious planning controls;
+  terse labels do not require users to infer cooldown or color semantics.
 
 ## Sources
 
 - SoundSwitch, [Static Looks Explained](https://support.soundswitch.com/en/support/solutions/articles/69000863339-soundswitch-static-looks-explained)
 - SoundSwitch, [Software features](https://www.soundswitch.com/software.html)
 - SoundSwitch, [Control One User Guide](https://cdn.inmusicbrands.com/soundswitch/files/User%20Guide%20Control%20One.pdf)
-

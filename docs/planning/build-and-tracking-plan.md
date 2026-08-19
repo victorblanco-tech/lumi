@@ -205,7 +205,7 @@ upgrade/recovery en volledige schone-Mac hardening blijven onderdeel van
 
 ### Fase 5 – Compiled Light Plans (`0.5.0`)
 
-Status op 2026-08-19: **geïmplementeerd in `0.5.0-dev-2`; fysieke
+Status op 2026-08-19: **geïmplementeerd in `0.5.0-dev-3`; fysieke
 modifier-output blijft bewust achter de POC-gate**.
 
 - deterministic AutoLoop variation per Phrase Role;

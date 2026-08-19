@@ -18,3 +18,11 @@ workspace.
 - `New variation` changes the recorded seed; reloading does not.
 - Empty/error/loading states are clear and do not shift the surrounding layout.
 - Controls have full hit targets, keyboard accessibility and responsive scrolling.
+- Contextual `i` help explains compile-time behavior, Selection Weight, Track
+  Color and every Repeat Protection setting without making the workspace noisy.
+- Track Color shows the named Rekordbox color catalog actually present across
+  the complete Lumi Library, with a per-color track count; it is not derived
+  from the currently visible 50-row page.
+- A trusted OneLibrary USB resync imports information-only color changes for new
+  and existing tracks while monotone metadata provenance prevents an older
+  backup USB from downgrading the active color.

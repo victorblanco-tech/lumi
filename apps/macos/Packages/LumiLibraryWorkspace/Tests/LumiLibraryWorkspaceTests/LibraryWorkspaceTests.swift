@@ -209,6 +209,13 @@ struct LibraryWorkspaceTests {
                 "library": .object([
                     "lightPlanning": .object([
                         "policy": policy,
+                        "trackColors": .array([
+                            .object([
+                                "rgb": .number(0x32_80_ff),
+                                "name": .string("Blue"),
+                                "trackCount": .number(17)
+                            ])
+                        ]),
                         "preview": preview,
                         "execution": .object([
                             "compiledBeforePlayback": .boolean(true),
@@ -223,6 +230,8 @@ struct LibraryWorkspaceTests {
 
         let state = try LightPlanningSnapshotDecoder().decode(message)
         #expect(state.policy.modifierRules.first?.applicationRate == 25)
+        #expect(state.trackColors.first?.name == "Blue")
+        #expect(state.trackColors.first?.trackCount == 17)
         #expect(state.preview?.phrases.first?.autoloopName == "INTRO BLUE PINK")
         #expect(state.preview?.phrases.first?.startBeat == 0)
     }

@@ -24,6 +24,16 @@ public struct LightPlanningSnapshotDecoder: Sendable {
                 modifiers: try modifierValues.map(decodeModifier),
                 modifierRules: try modifierRuleValues.map(decodeModifierRule)
             ),
+            trackColors: try optionalArray(lightPlanning, "trackColors", maximum: 64).map { value in
+                guard case let .object(color) = value else {
+                    throw LightPlanningSnapshotError.invalidState
+                }
+                return LightPlanTrackColorState(
+                    rgb: try decodeRGB(required(color, "rgb")),
+                    name: try string(color, "name"),
+                    trackCount: try unsigned(color, "trackCount")
+                )
+            },
             execution: LightPlanningExecutionState(
                 compiledBeforePlayback: try boolean(execution, "compiledBeforePlayback"),
                 realtimePolicyEvaluation: try boolean(execution, "realtimePolicyEvaluation"),
@@ -149,6 +159,23 @@ public struct LightPlanningSnapshotDecoder: Sendable {
             throw LightPlanningSnapshotError.invalidState
         }
         return values
+    }
+
+    private func optionalArray(
+        _ object: [String: JSONValue],
+        _ key: String,
+        maximum: Int
+    ) throws -> [JSONValue] {
+        guard let value = object[key] else { return [] }
+        guard case let .array(values) = value, values.count <= maximum else {
+            throw LightPlanningSnapshotError.invalidState
+        }
+        return values
+    }
+
+    private func required(_ object: [String: JSONValue], _ key: String) throws -> JSONValue {
+        guard let value = object[key] else { throw LightPlanningSnapshotError.invalidState }
+        return value
     }
 
     private func string(_ object: [String: JSONValue], _ key: String) throws -> String {

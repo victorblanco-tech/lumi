@@ -83,7 +83,13 @@ public struct LightPlansWorkspaceView: View {
     private var header: some View {
         HStack(alignment: .top) {
             VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-                Text("Light Plans").font(LumiTypography.screenTitle)
+                HStack(spacing: LumiSpacing.xSmall) {
+                    Text("Light Plans").font(LumiTypography.screenTitle)
+                    LightPlanInfoTip(
+                        "Lumi compiles a complete, deterministic lighting plan before playback. "
+                        + "Editing these rules never adds work to the time-critical Pro DJ Link or MIDI lanes."
+                    )
+                }
                 Text("Compile musical variation before playback. Live timing lanes stay isolated.")
                     .font(LumiTypography.body)
                     .foregroundStyle(LumiColor.textSecondary)
@@ -139,11 +145,26 @@ public struct LightPlansWorkspaceView: View {
     }
 
     private var repeatProtection: some View {
-        GroupBox("Repeat Protection") {
+        GroupBox {
             HStack(spacing: LumiSpacing.xLarge) {
-                stepper("Theme cooldown", value: $draft.themeCooldownTracks, suffix: "tracks")
-                stepper("AutoLoop cooldown", value: $draft.autoloopCooldownUses, suffix: "role uses")
-                stepper("Whole-plan duplicate", value: $draft.duplicatePlanWindow, suffix: "tracks")
+                stepper(
+                    "Theme cooldown",
+                    value: $draft.themeCooldownTracks,
+                    suffix: "tracks",
+                    help: "The number of previously executed tracks during which Lumi avoids selecting the same Theme again. Explicit choices remain authoritative; Lumi only relaxes this protection when no valid automatic option exists."
+                )
+                stepper(
+                    "AutoLoop cooldown",
+                    value: $draft.autoloopCooldownUses,
+                    suffix: "role uses",
+                    help: "The number of recent uses within the same Phrase Role that exclude an AutoLoop from automatic selection. An Intro never consumes the cooldown history of a Drop."
+                )
+                stepper(
+                    "Whole-plan duplicate",
+                    value: $draft.duplicatePlanWindow,
+                    suffix: "tracks",
+                    help: "The number of previously executed tracks whose complete AutoLoop sequence may not be repeated. Sparse mappings can require a safe fallback, which remains visible in Plan Preview."
+                )
                 Spacer()
                 Button("Save Rules") {
                     draft = materializedPolicyDraft()
@@ -154,16 +175,27 @@ public struct LightPlansWorkspaceView: View {
             if let feedback {
                 Text(feedback).font(LumiTypography.technical).foregroundStyle(LumiColor.textSecondary)
             }
+        } label: {
+            HStack(spacing: LumiSpacing.xSmall) {
+                Text("Repeat Protection")
+                LightPlanInfoTip(
+                    "These protections reduce repetition across consecutive tracks. They affect automatic choices only and are evaluated while the plan is compiled."
+                )
+            }
         }
     }
 
     private func stepper(
         _ title: String,
         value: Binding<UInt8>,
-        suffix: String
+        suffix: String,
+        help: String
     ) -> some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(title).font(LumiTypography.metadata)
+            HStack(spacing: 4) {
+                Text(title).font(LumiTypography.metadata)
+                LightPlanInfoTip(help)
+            }
             Stepper("\(value.wrappedValue) \(suffix)", value: value, in: 0...8)
                 .frame(width: 170)
         }
@@ -174,8 +206,13 @@ public struct LightPlansWorkspaceView: View {
             HStack {
                 VStack(alignment: .leading) {
                     Text(role.name).font(LumiTypography.sectionTitle)
-                    Text("Selection Weight controls relative use; it is not a playback frequency.")
-                        .foregroundStyle(LumiColor.textSecondary)
+                    HStack(spacing: LumiSpacing.xSmall) {
+                        Text("Selection Weight controls relative use; it is not a playback frequency.")
+                            .foregroundStyle(LumiColor.textSecondary)
+                        LightPlanInfoTip(
+                            "Weight compares eligible AutoLoops with each other. Primary is more likely than Normal, but does not mean it plays on every phrase. Repeat protection and Track Color are applied first."
+                        )
+                    }
                 }
                 Spacer()
                 Button("Physical mappings") { onOpenLightingOutputs() }
@@ -225,6 +262,8 @@ public struct LightPlansWorkspaceView: View {
                 ForEach(LightPlanColorBehavior.allCases) { Text($0.label).tag($0) }
             }
             .frame(width: 130)
+            .help(trackColorBehaviorHelp(binding.wrappedValue.colorBehavior))
+            LightPlanInfoTip(trackColorBehaviorHelp(binding.wrappedValue.colorBehavior))
             colorChips(binding)
             Spacer()
         }
@@ -233,7 +272,14 @@ public struct LightPlansWorkspaceView: View {
 
     private func colorChips(_ binding: Binding<LightPlanAutoloopRule>) -> some View {
         HStack(spacing: 5) {
-            ForEach(Array(library.page.tracks.compactMap(\.colorRGB).uniqued().prefix(8)), id: \.self) { rgb in
+            if state.trackColors.isEmpty {
+                Text("No USB colors")
+                    .font(LumiTypography.technical)
+                    .foregroundStyle(LumiColor.textSecondary)
+                    .help("No Rekordbox track colors are stored in the Lumi Library yet. Resync a trusted OneLibrary USB to import them.")
+            }
+            ForEach(state.trackColors) { trackColor in
+                let rgb = trackColor.rgb
                 Button {
                     if binding.wrappedValue.colorRGB.contains(rgb) {
                         binding.wrappedValue.colorRGB.removeAll { $0 == rgb }
@@ -250,7 +296,7 @@ public struct LightPlansWorkspaceView: View {
                         ))
                 }
                 .buttonStyle(.plain)
-                .help("Track color #\(String(rgb, radix: 16, uppercase: true))")
+                .help("\(trackColor.name) · \(trackColor.trackCount) Library track\(trackColor.trackCount == 1 ? "" : "s")")
             }
         }
         .frame(minWidth: 160, alignment: .leading)
@@ -524,6 +570,8 @@ public struct LightPlansWorkspaceView: View {
                     ForEach(LightPlanColorBehavior.allCases) { Text($0.label).tag($0) }
                 }
                 .frame(width: 150)
+                .help(trackColorBehaviorHelp(binding.wrappedValue.colorBehavior))
+                LightPlanInfoTip(trackColorBehaviorHelp(binding.wrappedValue.colorBehavior))
                 modifierColorChips(binding)
                 Spacer()
                 Button(role: .destructive, action: onDelete) {
@@ -537,7 +585,13 @@ public struct LightPlansWorkspaceView: View {
 
     private func modifierColorChips(_ binding: Binding<LightPlanModifierRule>) -> some View {
         HStack(spacing: 5) {
-            ForEach(Array(library.page.tracks.compactMap(\.colorRGB).uniqued().prefix(8)), id: \.self) { rgb in
+            if state.trackColors.isEmpty {
+                Text("No USB colors")
+                    .font(LumiTypography.technical)
+                    .foregroundStyle(LumiColor.textSecondary)
+            }
+            ForEach(state.trackColors) { trackColor in
+                let rgb = trackColor.rgb
                 Button {
                     if binding.wrappedValue.colorRGB.contains(rgb) {
                         binding.wrappedValue.colorRGB.removeAll { $0 == rgb }
@@ -554,17 +608,37 @@ public struct LightPlansWorkspaceView: View {
                         ))
                 }
                 .buttonStyle(.plain)
-                .help("Track color #\(String(rgb, radix: 16, uppercase: true))")
+                .help("\(trackColor.name) · \(trackColor.trackCount) Library track\(trackColor.trackCount == 1 ? "" : "s")")
             }
         }
         .frame(minWidth: 160, alignment: .leading)
     }
+
+    private func trackColorBehaviorHelp(_ behavior: LightPlanColorBehavior) -> String {
+        switch behavior {
+        case .neutral:
+            "Neutral ignores the Rekordbox track color for this candidate."
+        case .prefer:
+            "Prefer boosts this candidate when the playing track has one of the selected Rekordbox colors. It can still be selected for other colors."
+        case .only:
+            "Only makes this candidate eligible when the playing track has one of the selected Rekordbox colors. A track without a color will not match it."
+        }
+    }
 }
 
-private extension Array where Element == UInt32 {
-    func uniqued() -> [UInt32] {
-        var seen = Set<UInt32>()
-        return filter { seen.insert($0).inserted }
+private struct LightPlanInfoTip: View {
+    let text: String
+
+    init(_ text: String) {
+        self.text = text
+    }
+
+    var body: some View {
+        Image(systemName: "info.circle")
+            .font(.system(size: 12, weight: .medium))
+            .foregroundStyle(LumiColor.textSecondary)
+            .help(text)
+            .accessibilityLabel(text)
     }
 }
 

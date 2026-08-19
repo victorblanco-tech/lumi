@@ -37,7 +37,8 @@ use lumi_rekordbox_analysis::{
     ResolvedTrackAnalysis, snapshot_resolved_analysis_data,
 };
 use lumi_rekordbox_device::{
-    DeviceError, DeviceLibrarySnapshot, DeviceTrack, audio_content_signature, read_device_library,
+    DeviceError, DeviceLibrarySnapshot, DeviceTrack, REKORDBOX_TRACK_COLORS,
+    audio_content_signature, read_device_library,
 };
 use lumi_rekordbox_resolver::{
     DatabaseKey, RequestedTrack, ResolverError, SqlCipherResolver, create_database_snapshot,
@@ -1296,6 +1297,10 @@ impl LibraryWorker {
                 duration_millis: u64::from(device_track.duration_millis),
                 file_size: device_track.file_size,
                 metadata_revision: device_track.metadata_revision.clone(),
+                color_rgb: device_track.color_rgb,
+                master_database_id: device_track.master_database_id,
+                master_content_id: device_track.master_content_id,
+                information_update_count: device_track.information_update_count,
                 analysis_revision: device_track.analysis_revision.clone(),
                 audio_signature: device_track.audio_signature.clone(),
                 analyzed_at: device_track.analyzed_at.clone(),
@@ -1465,7 +1470,7 @@ impl LibraryWorker {
                         bpm_milli,
                         musical_key,
                         duration_millis,
-                        None,
+                        device_track.color_rgb.map(TrackColor::from_rgb_u32),
                         device_audio_uri(&device_track.audio_path),
                         beat_grid,
                         downsample_waveform(&analysis.waveform, MAX_IMPORTED_WAVEFORM_POINTS),
@@ -2420,6 +2425,12 @@ impl LibraryWorker {
         let reset_candidates = self.repository.reset_preservable_tracks()?;
         let creative_archives = self.repository.creative_archives()?;
         let light_planning_policy = self.repository.light_planning_policy()?;
+        let track_color_counts = self
+            .repository
+            .track_color_summaries()?
+            .into_iter()
+            .map(|color| (color.color_rgb, color.track_count))
+            .collect::<BTreeMap<_, _>>();
         let source_refresh = match &self.pending_source_refresh {
             Some(baseline) => json!({
                 "revision": baseline.source_revision().as_str(),
@@ -2486,6 +2497,11 @@ impl LibraryWorker {
             },
             "lightPlanning": {
                 "policy": light_planning_policy,
+                "trackColors": REKORDBOX_TRACK_COLORS.iter().map(|(name, rgb)| json!({
+                    "rgb": rgb,
+                    "name": name,
+                    "trackCount": track_color_counts.get(rgb).copied().unwrap_or(0),
+                })).collect::<Vec<_>>(),
                 "preview": self.pending_light_plan_preview,
                 "execution": {
                     "compiledBeforePlayback": true,
@@ -3991,6 +4007,7 @@ mod tests {
             title: "90s Bitch - Extended Mix".to_owned(),
             artist: "Maddix, The Rocketman".to_owned(),
             musical_key: "4A".to_owned(),
+            color_rgb: Some(0x32_80_ff),
             bpm_milli: 145_000,
             duration_millis: 192_000,
             file_size: 123_456,
