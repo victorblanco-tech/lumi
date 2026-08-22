@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.0-dev-13 - 2026-08-22
+
+### Fixed
+
+- Renders configured Phrase Colors at their full persisted sRGB value in the
+  Track Editor detail and overview lanes.
+- Keeps beat-range selection visible through its outline and handles without
+  placing an accent tint over the user's Phrase Color.
+
 ## 0.5.0-dev-12 - 2026-08-22
 
 ### Added

@@ -911,7 +911,11 @@ public struct TrackLightingEditorView: View {
             let start = viewport.x(forBeat: Double(phrase.startBeat), width: width)
             let end = viewport.x(forBeat: Double(phrase.endBeat), width: width)
             let rect = CGRect(x: start + 1, y: phraseTop, width: max(2, end - start - 2), height: 54)
-            context.fill(Path(roundedRect: rect, cornerRadius: 4), with: .color(phraseColor(phrase.roleID).opacity(0.74)))
+            // Phrase colors are user-authored visual identity. Render the
+            // persisted sRGB value without blending it into the dark canvas,
+            // so the Editor matches the Settings swatch and every other
+            // phrase-aware surface.
+            context.fill(Path(roundedRect: rect, cornerRadius: 4), with: .color(phraseColor(phrase.roleID)))
             if phrase.id == selectedPhraseID {
                 context.stroke(Path(roundedRect: rect, cornerRadius: 4), with: .color(.white), lineWidth: 2)
             }
@@ -975,7 +979,9 @@ public struct TrackLightingEditorView: View {
                 width: max(2, end - start),
                 height: 62
             )
-            context.fill(Path(rect), with: .color(accent.opacity(0.10)))
+            // Keep the configured phrase color intact. The outline and beat
+            // handles communicate the editable selection without a tinted
+            // overlay that changes its perceived color.
             context.stroke(Path(rect), with: .color(accent), lineWidth: 1.5)
             context.fill(
                 Path(ellipseIn: CGRect(x: start - 4, y: phraseTop - 8, width: 8, height: 8)),
@@ -1027,7 +1033,7 @@ public struct TrackLightingEditorView: View {
                 analysis: analysis
             )) / duration * width
             let lane = CGRect(x: start, y: waveformBottom + 2, width: max(1, end - start), height: 12)
-            context.fill(Path(lane), with: .color(phraseColor(phrase.roleID).opacity(0.88)))
+            context.fill(Path(lane), with: .color(phraseColor(phrase.roleID)))
         }
         for cue in analysis.hotCues {
             let x = Double(cue.timeMillis) / Double(max(1, analysis.track.durationMillis)) * width
