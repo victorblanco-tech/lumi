@@ -1087,8 +1087,9 @@ impl SqliteLibraryRepository {
     }
 
     /// Classifies an incoming device analysis without mutating the active
-    /// track. Different hashes are only ordered by Rekordbox's analysis date;
-    /// an equal/unknown date is deliberately held for review.
+    /// track. A changed content revision from the same trusted USB is a newer
+    /// export of that source and is promoted. Competing USB sources remain
+    /// conservatively ordered by Rekordbox's export date.
     pub fn device_analysis_decision(
         &self,
         track_id: TrackId,
@@ -1105,14 +1106,15 @@ impl SqliteLibraryRepository {
         let provenance = self
             .connection
             .query_row(
-                "SELECT analysis_revision, analyzed_at, hot_cues_loaded
+                "SELECT source_id, analysis_revision, analyzed_at, hot_cues_loaded
                FROM track_analysis_provenance WHERE track_id = ?1",
                 [track_id_value],
                 |row| {
                     Ok((
                         row.get::<_, String>(0)?,
                         row.get::<_, String>(1)?,
-                        row.get::<_, i64>(2)? != 0,
+                        row.get::<_, String>(2)?,
+                        row.get::<_, i64>(3)? != 0,
                     ))
                 },
             )
@@ -1120,26 +1122,29 @@ impl SqliteLibraryRepository {
 
         if provenance
             .as_ref()
-            .is_some_and(|(revision, _, loaded)| revision == analysis_revision && !loaded)
+            .is_some_and(|(_, revision, _, loaded)| revision == analysis_revision && !loaded)
         {
             return Ok(DeviceAnalysisDecision::PromoteInitial);
         }
         if provenance
             .as_ref()
-            .is_some_and(|(revision, _, loaded)| revision == analysis_revision && *loaded)
+            .is_some_and(|(_, revision, _, loaded)| revision == analysis_revision && *loaded)
             || active_revision == format!("device:{source_id}:{analysis_revision}")
             || (active_revision.starts_with("device:")
                 && active_revision.ends_with(analysis_revision))
         {
             return Ok(DeviceAnalysisDecision::Current);
         }
-        let Some((_, active_date, _)) = provenance else {
+        let Some((active_source, _, active_date, _)) = provenance else {
             return Ok(if active_revision.starts_with("device:") {
                 DeviceAnalysisDecision::HoldConflict
             } else {
                 DeviceAnalysisDecision::PromoteInitial
             });
         };
+        if active_source == source_id {
+            return Ok(DeviceAnalysisDecision::PromoteNewer);
+        }
         match compare_rekordbox_dates(analyzed_at, &active_date) {
             Some(std::cmp::Ordering::Greater) => Ok(DeviceAnalysisDecision::PromoteNewer),
             Some(std::cmp::Ordering::Less) => Ok(DeviceAnalysisDecision::ProtectOlder),
@@ -5303,6 +5308,15 @@ mod fault_tests {
                 "2026-08-09",
             )?,
             DeviceAnalysisDecision::ProtectOlder
+        );
+        assert_eq!(
+            repository.device_analysis_decision(
+                track_id,
+                "rekordbox-device:test",
+                "analysis-v2-content-change",
+                "2026-08-10",
+            )?,
+            DeviceAnalysisDecision::PromoteNewer
         );
         assert_eq!(
             repository.device_analysis_decision(

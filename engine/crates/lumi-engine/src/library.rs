@@ -1415,7 +1415,7 @@ impl LibraryWorker {
                     ),
                     source_analysis_revision: device_track.analysis_revision.clone(),
                     analyzed_at: device_track.analyzed_at.clone(),
-                    beat_grid: canonical_beat_grid(analysis)?,
+                    beat_grid: canonical_beat_grid(analysis)?.beat_grid,
                     waveform: downsample_waveform(&analysis.waveform, MAX_IMPORTED_WAVEFORM_POINTS),
                     hot_cues: canonical_hot_cues(
                         analysis,
@@ -1481,7 +1481,8 @@ impl LibraryWorker {
                                 device_track.device_track_id.to_string(),
                             )
                         })?;
-                    let beat_grid = canonical_beat_grid(analysis)?;
+                    let canonical_grid = canonical_beat_grid(analysis)?;
+                    let beat_grid = canonical_grid.beat_grid;
                     let total_beats = u32::try_from(beat_grid.markers().len())
                         .map_err(|_| LibraryWorkerError::RekordboxImportOverflow)?;
                     let bpm_milli = (20_000..=300_000)
@@ -1519,7 +1520,11 @@ impl LibraryWorker {
                         device_audio_uri(&device_track.audio_path),
                         beat_grid,
                         downsample_waveform(&analysis.waveform, MAX_IMPORTED_WAVEFORM_POINTS),
-                        canonical_phrases(analysis, total_beats)?,
+                        canonical_phrases(
+                            analysis,
+                            total_beats,
+                            canonical_grid.source_beat_offset,
+                        )?,
                     )?
                     .with_hot_cues(canonical_hot_cues(analysis, duration_millis)?)?;
                     Ok(DeviceTrackImport {
@@ -3430,7 +3435,8 @@ fn rekordbox_canonical_baseline(
                     track.source_track_id().to_owned(),
                 )
             })?;
-            let beat_grid = canonical_beat_grid(parsed)?;
+            let canonical_grid = canonical_beat_grid(parsed)?;
+            let beat_grid = canonical_grid.beat_grid;
             let total_beats = u32::try_from(beat_grid.markers().len())
                 .map_err(|_| LibraryWorkerError::RekordboxImportOverflow)?;
             let bpm_milli = parse_bpm_milli(track.average_bpm())
@@ -3451,7 +3457,8 @@ fn rekordbox_canonical_baseline(
                 .or_else(|| inferred_duration_millis(&beat_grid, bpm_milli))
                 .ok_or(LibraryWorkerError::RekordboxImportOverflow)?;
             let waveform = downsample_waveform(&parsed.waveform, MAX_IMPORTED_WAVEFORM_POINTS);
-            let phrases = canonical_phrases(parsed, total_beats)?;
+            let phrases =
+                canonical_phrases(parsed, total_beats, canonical_grid.source_beat_offset)?;
             ImportedTrackAnalysis::try_new(
                 lumi_library::SourceTrackId::try_new(track.source_track_id())?,
                 source_revision.clone(),
@@ -3503,29 +3510,57 @@ fn rekordbox_canonical_baseline(
     .map_err(LibraryWorkerError::InvalidRekordboxBaseline)
 }
 
-fn canonical_beat_grid(parsed: &ResolvedTrackAnalysis) -> Result<BeatGrid, LibraryWorkerError> {
-    let complete_beats = parsed.beat_grid.len() - parsed.beat_grid.len() % 4;
+struct CanonicalBeatGrid {
+    beat_grid: BeatGrid,
+    /// Number of leading source beats discarded before Rekordbox's first
+    /// downbeat. Phrase beat indexes use the original source coordinate space
+    /// and must be projected by this exact offset.
+    source_beat_offset: u32,
+}
+
+fn canonical_beat_grid(
+    parsed: &ResolvedTrackAnalysis,
+) -> Result<CanonicalBeatGrid, LibraryWorkerError> {
+    let source_beat_offset = parsed
+        .beat_grid
+        .iter()
+        .position(|beat| beat.beat_number == 1)
+        .ok_or(LibraryWorkerError::IncompleteRekordboxBeatGrid)?;
+    let source_beats = &parsed.beat_grid[source_beat_offset..];
+    let complete_beats = source_beats.len() - source_beats.len() % 4;
     if complete_beats == 0 {
         return Err(LibraryWorkerError::IncompleteRekordboxBeatGrid);
     }
-    let markers = parsed
-        .beat_grid
+    let markers = source_beats
         .iter()
         .take(complete_beats)
         .enumerate()
         .map(|(index, beat)| {
             let beat_index =
                 u32::try_from(index).map_err(|_| LibraryWorkerError::RekordboxImportOverflow)?;
+            let beat_in_bar = u8::try_from(beat_index % 4 + 1)
+                .map_err(|_| LibraryWorkerError::RekordboxImportOverflow)?;
+            if beat.beat_number != u16::from(beat_in_bar) {
+                return Err(LibraryWorkerError::InconsistentRekordboxBeatGrid {
+                    source_index: source_beat_offset + index,
+                    expected: beat_in_bar,
+                    actual: beat.beat_number,
+                });
+            }
             Ok(BeatMarker::new(
                 beat_index,
                 u64::from(beat.time_millis),
                 beat_index / 4 + 1,
-                u8::try_from(beat_index % 4 + 1)
-                    .map_err(|_| LibraryWorkerError::RekordboxImportOverflow)?,
+                beat_in_bar,
             ))
         })
         .collect::<Result<Vec<_>, LibraryWorkerError>>()?;
-    BeatGrid::try_new(4, markers).map_err(LibraryWorkerError::InvalidRekordboxBeatGrid)
+    Ok(CanonicalBeatGrid {
+        beat_grid: BeatGrid::try_new(4, markers)
+            .map_err(LibraryWorkerError::InvalidRekordboxBeatGrid)?,
+        source_beat_offset: u32::try_from(source_beat_offset)
+            .map_err(|_| LibraryWorkerError::RekordboxImportOverflow)?,
+    })
 }
 
 fn canonical_hot_cues(
@@ -3670,15 +3705,17 @@ fn hexadecimal(value: u8) -> Option<u8> {
 fn canonical_phrases(
     parsed: &ResolvedTrackAnalysis,
     total_beats: u32,
+    source_beat_offset: u32,
 ) -> Result<Vec<RawPhraseObservation>, LibraryWorkerError> {
     if parsed.phrases.is_empty() {
         return Ok(Vec::new());
     }
     let mut labels_by_start = BTreeMap::<u32, String>::new();
     for phrase in &parsed.phrases {
-        if phrase.start_beat < total_beats {
+        let projected_start = phrase.start_beat.saturating_sub(source_beat_offset);
+        if projected_start < total_beats {
             labels_by_start
-                .entry(phrase.start_beat)
+                .entry(projected_start)
                 .or_insert_with(|| phrase.source_label.clone());
         }
     }
@@ -3920,6 +3957,14 @@ pub enum LibraryWorkerError {
     },
     #[error("Rekordbox analysis contains no complete beatgrid")]
     IncompleteRekordboxBeatGrid,
+    #[error(
+        "Rekordbox beatgrid phase is inconsistent at source beat {source_index}: expected {expected}, got {actual}"
+    )]
+    InconsistentRekordboxBeatGrid {
+        source_index: usize,
+        expected: u8,
+        actual: u16,
+    },
     #[error("Rekordbox analysis contains no usable phrases")]
     IncompleteRekordboxPhrases,
     #[error("Rekordbox beatgrid is invalid: {0}")]
@@ -4043,14 +4088,115 @@ mod tests {
     use lumi_library_demo::{DemoLibraryRevision, DemoLibrarySourceProvider};
     use lumi_library_source::MusicLibrarySourceProvider as _;
     use lumi_library_sqlite::DeviceMatchCandidate;
+    use lumi_rekordbox_analysis::{
+        AnalysisBeat, AnalysisPhrase, ResolvedTrackAnalysis, TrackAnalysisCoverage,
+    };
     use lumi_rekordbox_device::DeviceTrack;
     use serde_json::json;
 
     use super::{
         AutoloopCatalogMutation, LibraryWorker, LibraryWorkerError, PhraseRoleCatalogMutation,
-        deck_waveform_preview_points, device_audio_uri, device_metadata_matches,
-        device_track_matches, first_available_audio_uri,
+        canonical_beat_grid, canonical_phrases, deck_waveform_preview_points, device_audio_uri,
+        device_metadata_matches, device_track_matches, first_available_audio_uri,
     };
+
+    fn resolved_analysis_with_grid(beat_numbers: &[u16]) -> ResolvedTrackAnalysis {
+        ResolvedTrackAnalysis {
+            coverage: TrackAnalysisCoverage::default(),
+            beat_grid: beat_numbers
+                .iter()
+                .enumerate()
+                .map(|(index, beat_number)| AnalysisBeat {
+                    beat_number: *beat_number,
+                    tempo_centi_bpm: 15_500,
+                    time_millis: u32::try_from(index).unwrap_or_default() * 387,
+                })
+                .collect(),
+            waveform: Vec::new(),
+            phrases: Vec::new(),
+            hot_cues: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn rekordbox_downbeat_phase_and_exact_times_are_authoritative()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut analysis = resolved_analysis_with_grid(&[4, 1, 2, 3, 4, 1, 2, 3, 4, 1]);
+        analysis.phrases = vec![
+            AnalysisPhrase {
+                start_beat: 0,
+                end_beat: 5,
+                source_label: "Intro".to_owned(),
+            },
+            AnalysisPhrase {
+                start_beat: 5,
+                end_beat: 9,
+                source_label: "Drop".to_owned(),
+            },
+        ];
+
+        let canonical = canonical_beat_grid(&analysis)?;
+        assert_eq!(canonical.source_beat_offset, 1);
+        assert_eq!(canonical.beat_grid.markers().len(), 8);
+        assert_eq!(canonical.beat_grid.markers()[0].time_millis(), 387);
+        assert_eq!(canonical.beat_grid.markers()[0].bar_index(), 1);
+        assert_eq!(canonical.beat_grid.markers()[0].beat_in_bar(), 1);
+        assert_eq!(canonical.beat_grid.markers()[4].time_millis(), 1_935);
+        assert_eq!(canonical.beat_grid.markers()[4].bar_index(), 2);
+        assert_eq!(canonical.beat_grid.markers()[4].beat_in_bar(), 1);
+
+        let phrases = canonical_phrases(&analysis, 8, canonical.source_beat_offset)?;
+        assert_eq!(phrases[0].start_beat(), 0);
+        assert_eq!(phrases[0].end_beat(), 4);
+        assert_eq!(phrases[0].source_label(), "Intro");
+        assert_eq!(phrases[1].start_beat(), 4);
+        assert_eq!(phrases[1].end_beat(), 8);
+        assert_eq!(phrases[1].source_label(), "Drop");
+        Ok(())
+    }
+
+    #[test]
+    fn inconsistent_rekordbox_beat_phase_fails_closed() {
+        let analysis = resolved_analysis_with_grid(&[4, 1, 2, 4, 4, 1, 2, 3, 4]);
+        assert!(matches!(
+            canonical_beat_grid(&analysis),
+            Err(LibraryWorkerError::InconsistentRekordboxBeatGrid {
+                source_index: 3,
+                expected: 3,
+                actual: 4,
+            })
+        ));
+    }
+
+    #[test]
+    #[ignore = "requires LUMI_REKORDBOX_ANALYSIS_DAT"]
+    fn mounted_rekordbox_analysis_preserves_every_retained_source_beat()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let dat_path = PathBuf::from(std::env::var("LUMI_REKORDBOX_ANALYSIS_DAT")?);
+        let analysis_root = dat_path.parent().ok_or("analysis DAT has no parent")?;
+        let temporary = super::RekordboxImportTemporaryRoot::create()?;
+        let request = lumi_rekordbox_analysis::ResolvedAnalysisRequest::try_new(
+            analysis_root,
+            temporary.path().join("exact-grid-evidence"),
+            [lumi_rekordbox_analysis::ResolvedAnalysisTrack::try_new(
+                "track", &dat_path,
+            )?],
+        )?;
+        let resolved = lumi_rekordbox_analysis::snapshot_resolved_analysis_data(&request)?;
+        let source = resolved.tracks.get("track").ok_or("analysis is missing")?;
+        let canonical = canonical_beat_grid(source)?;
+        let offset = usize::try_from(canonical.source_beat_offset)?;
+
+        for (canonical_index, marker) in canonical.beat_grid.markers().iter().enumerate() {
+            let source_marker = &source.beat_grid[offset + canonical_index];
+            assert_eq!(marker.time_millis(), u64::from(source_marker.time_millis));
+            assert_eq!(
+                marker.beat_in_bar(),
+                u8::try_from(source_marker.beat_number)?
+            );
+        }
+        Ok(())
+    }
 
     #[test]
     fn exact_unique_metadata_can_match_when_usb_container_size_differs() {

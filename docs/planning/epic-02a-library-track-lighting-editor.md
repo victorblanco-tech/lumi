@@ -274,6 +274,12 @@ change classification, metadata-safe refresh, bar-aligned Rebase,
 per-conflict Merge, recoverable Replace, atomaire SQLite-transactie,
 golden previewfixture en native editorflow zijn gebouwd en geverifieerd.
 
+Correctness hardening in `0.5.0-dev-10`: USB analysis revisions include the
+authoritative DAT content hash, same-source DAT changes promote even when
+OneLibrary counters remain unchanged, and canonical grids preserve both exact
+source timestamps and the Rekordbox 1-2-3-4 bar phase. Invalid phase sequences
+fail closed. Lumi-owned phrase revisions and lighting choices remain separate.
+
 ### E2A-11 – Run imported tracks through the simulator
 
 Laadt een echte geïmporteerde track op Deck A/B, gebruikt uitsluitend de

@@ -18,6 +18,7 @@ use thiserror::Error;
 
 const DATABASE_RELATIVE_PATH: &str = "PIONEER/rekordbox/exportLibrary.db";
 const MAX_DATABASE_BYTES: u64 = 128 * 1024 * 1024;
+const MAX_ANALYSIS_FILE_BYTES: u64 = 64 * 1024 * 1024;
 const AUDIO_SIGNATURE_WINDOW_BYTES: usize = 64 * 1024;
 // OneLibrary media uses this shared SQLCipher format key. It is not a user
 // credential and compatible open-source readers implement the same key.
@@ -157,6 +158,7 @@ pub fn read_device_library(root: impl AsRef<Path>) -> Result<DeviceLibrarySnapsh
         let track = row.map_err(database_error)?;
         let audio_path = canonical_declared_child(&canonical_root, &track.file_path)?;
         let analysis_dat_path = canonical_declared_child(&canonical_root, &track.analysis_path)?;
+        let analysis_dat_revision = sha256_file(&analysis_dat_path, MAX_ANALYSIS_FILE_BYTES)?;
         let update_identity = format!(
             "{}:{}:{}:{}:{}",
             track.master_database_id,
@@ -178,11 +180,12 @@ pub fn read_device_library(root: impl AsRef<Path>) -> Result<DeviceLibrarySnapsh
             analyze_date: &update_identity,
         });
         let analysis_revision = format!(
-            "onelibrary:{}:{}:{}:{}",
+            "onelibrary:{}:{}:{}:{}:dat:{}",
             track.master_database_id,
             track.master_content_id,
             track.analysis_update_count,
-            track.cue_update_count
+            track.cue_update_count,
+            analysis_dat_revision,
         );
         let device_track = DeviceTrack {
             device_track_id: track.id,
@@ -731,6 +734,20 @@ mod tests {
         assert_eq!(snapshot.tracks[&10].color_rgb, Some(0x32_80_ff));
         assert_eq!(snapshot.playlists[0].path, "Folder/Set");
         assert_eq!(snapshot.playlists[0].track_ids, vec![10]);
+        let original_analysis_revision = snapshot.tracks[&10].analysis_revision.clone();
+        assert!(original_analysis_revision.starts_with("onelibrary:20:30:4:6:dat:"));
+
+        // Some Rekordbox exports update the authoritative DAT beatgrid without
+        // advancing the OneLibrary counters. Content identity must still make
+        // the next Lumi inspection classify the track as changed.
+        fs::write(analysis_directory.join("ANLZ0000.DAT"), b"updated analysis")?;
+        let updated = read_device_library(&device.0)?;
+        assert_eq!(updated.tracks[&10].analysis_update_count, 4);
+        assert_eq!(updated.tracks[&10].cue_update_count, 6);
+        assert_ne!(
+            updated.tracks[&10].analysis_revision,
+            original_analysis_revision
+        );
         Ok(())
     }
 

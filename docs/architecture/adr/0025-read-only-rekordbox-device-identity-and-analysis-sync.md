@@ -27,8 +27,9 @@ Lumi adds a provider adapter for a mounted current Rekordbox OneLibrary device:
   DAT/EXT/2EX analysis files
   only for reading;
 - it validates that every declared path remains below the selected device root;
-- it fingerprints the DeviceSQL database plus the complete DAT/EXT/2EX analysis
-  companion set on every sync;
+- it fingerprints the DeviceSQL database and the authoritative DAT analysis
+  content on every inspection; OneLibrary analysis/cue counters continue to
+  version EXT/2EX projections without requiring a 300 MB full-media hash;
 - it stores a durable alias from `(device source, device track ID)` to one
   canonical Lumi track;
 - it refreshes matched analysis projections atomically with that alias
@@ -38,6 +39,23 @@ Lumi adds a provider adapter for a mounted current Rekordbox OneLibrary device:
   and RGB color into Lumi's provider-neutral analysis model;
 - it never overwrites Lumi phrase timelines, phrase-role choices, Themes or
   track-specific AutoLoop choices.
+
+The canonical beatgrid is a lossless projection of Rekordbox's `PQTZ` facts:
+
+- source millisecond timestamps are copied exactly and are never regenerated
+  from average BPM;
+- Rekordbox's beat number is authoritative for bar phase;
+- a leading partial bar is omitted until the first source beat `1`, and the
+  same source offset is applied to imported raw phrases;
+- only a trailing partial bar is omitted because Lumi's domain stores complete
+  bars;
+- an invalid 1-2-3-4 sequence fails the sync closed instead of producing a
+  plausible but invented grid.
+
+Analysis promotion uses DAT content identity in addition to OneLibrary's
+counters. A changed DAT from the same trusted USB is promoted even when
+Rekordbox left its numeric update counters unchanged. A conflicting revision
+from a different USB remains subject to source/date protection.
 
 Canonical matching during sync uses normalized title and artist, BPM, duration
 and exact audio-file size. A match is accepted only when it is one-to-one in
@@ -62,8 +80,9 @@ model.
 ## Consequences
 
 - The same prepared Lumi timeline can drive Local Playback and Connected Decks.
-- A later USB sync picks up beatgrid or cue edits through changed analysis
-  revisions; no manual Lumi reconfiguration is required.
+- A later USB sync picks up beatgrid edits through the DAT content hash and cue
+  edits through changed OneLibrary revisions; no manual Lumi reconfiguration
+  is required.
 - The lighting engine never depends on UI timing or fuzzy live matching.
 - Unknown tracks continue safely as external metadata with `AUTO HELD`.
 - Older classic DeviceSQL media is not silently accepted as OneLibrary and
