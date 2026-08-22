@@ -628,6 +628,38 @@ public struct EngineSnapshotDecoder: Sendable {
                 )
             }
         }
+        let modifierChoices: [PlanModifierChoiceSnapshot]
+        if resolution["modifierChoices"] == nil || resolution["modifierChoices"] == .null {
+            modifierChoices = []
+        } else {
+            guard case let .array(values) = resolution["modifierChoices"], values.count <= 2 else {
+                throw EngineSnapshotDecodingError.invalidSnapshot
+            }
+            modifierChoices = try values.map { value in
+                guard case let .object(choice) = value,
+                      case let .string(id) = choice["id"], !id.isEmpty,
+                      case let .string(name) = choice["name"], !name.isEmpty,
+                      case let .string(kind) = choice["kind"],
+                      ["atmosphere", "color"].contains(kind),
+                      case let .string(scope) = choice["scope"],
+                      ["phrase", "track"].contains(scope),
+                      let channelValue = unsignedInteger(choice["midiChannel"]),
+                      let midiChannel = UInt8(exactly: channelValue),
+                      (1...16).contains(midiChannel),
+                      let noteValue = unsignedInteger(choice["midiNote"]),
+                      let midiNote = UInt8(exactly: noteValue), midiNote < 128 else {
+                    throw EngineSnapshotDecodingError.invalidSnapshot
+                }
+                return PlanModifierChoiceSnapshot(
+                    id: id,
+                    name: name,
+                    kind: kind,
+                    scope: scope,
+                    midiChannel: midiChannel,
+                    midiNote: midiNote
+                )
+            }
+        }
         return PlanCueLibraryResolutionSnapshot(
             roleID: roleID,
             roleName: roleName,
@@ -639,7 +671,8 @@ public struct EngineSnapshotDecoder: Sendable {
             entryName: entryName,
             bankNumber: unsignedInteger(resolution["bankNumber"]),
             autoloopNumber: unsignedInteger(resolution["autoloopNumber"]),
-            choices: choices
+            choices: choices,
+            modifierChoices: modifierChoices
         )
     }
 

@@ -66,6 +66,13 @@ public struct StaticLookCatalogSettingsView: View {
                 .font(LumiTypography.technical.weight(.bold))
                 .foregroundStyle(midiIntegration?.isReady == true ? LumiColor.success : LumiColor.warning)
             }
+            Label(
+                "AUTOMATION MODE: SoundSwitch does not report its active Static Look. While Lumi is in Start, change automated Static Looks through Lumi only; Control One AutoLoops remain fully parallel.",
+                systemImage: "exclamationmark.triangle.fill"
+            )
+            .font(LumiTypography.caption)
+            .foregroundStyle(LumiColor.warning)
+            .help("Lumi tracks only Static Look pulses it successfully sent. A direct Static Look change on Control One cannot be observed and can make a later toggle ambiguous.")
             guidedLearnCard
             LumiPanel { staticLookGrid }
         }

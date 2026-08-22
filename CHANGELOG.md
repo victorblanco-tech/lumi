@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.0-dev-6 - 2026-08-22
+
+- Compiles verified SoundSwitch Static Looks into deterministic phrase and
+  whole-track Light Plans using Application Rate, weight, cooldown and color.
+- Executes only sparse Static Look state transitions alongside the existing
+  exactly-once AutoLoop lane; no continuous SoundSwitch timeline control.
+- Shows `No Override` or the selected Static Look in Plan Preview and on Live
+  plan segments, with an inspectable active-state assumption in diagnostics.
+- Releases Lumi-managed Static Looks when the plan returns to `No Override`, on
+  `Off`, or before the virtual MIDI source is stopped.
+
 ## 0.5.0-dev-5 - 2026-08-22
 
 ### Added

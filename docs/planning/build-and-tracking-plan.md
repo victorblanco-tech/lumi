@@ -205,15 +205,17 @@ upgrade/recovery en volledige schone-Mac hardening blijven onderdeel van
 
 ### Fase 5 – Compiled Light Plans (`0.5.0`)
 
-Status op 2026-08-22: **geïmplementeerd t/m `0.5.0-dev-5`; Static Look
-toggle/exclusiviteit is fysiek bewezen en de 32-slot mapping-UI is gereed;
-automatische modifier-output blijft bewust fail-closed**.
+Status op 2026-08-22: **geïmplementeerd t/m `0.5.0-dev-6`; Static Look
+toggle/exclusiviteit is fysiek bewezen, de 32-slot mapping-UI is gereed en
+geverifieerde mappings worden als sparse state transitions automatisch
+uitgevoerd. Color Overrides blijven fail-closed**.
 
 - deterministic AutoLoop variation per Phrase Role;
 - Selection Weight, track-color affinity and repeat protection;
 - explainable full-track preview and explicit regeneration;
 - provider-neutral modifier model;
-- fail-closed preparation of SoundSwitch Static Looks and Color Overrides.
+- fail-closed verified execution of SoundSwitch Static Looks;
+- fail-closed preparation of SoundSwitch Color Overrides.
 
 De uitvoering staat in
 [Epic 6 – Compiled Light Plans](epic-06-compiled-light-plans.md).

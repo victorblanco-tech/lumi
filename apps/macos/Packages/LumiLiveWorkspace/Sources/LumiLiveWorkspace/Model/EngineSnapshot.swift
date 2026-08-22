@@ -771,6 +771,7 @@ public struct PlanCueLibraryResolutionSnapshot: Equatable, Sendable {
     public let bankNumber: UInt64?
     public let autoloopNumber: UInt64?
     public let choices: [PlanAutoloopChoiceSnapshot]
+    public let modifierChoices: [PlanModifierChoiceSnapshot]
 
     public init(
         roleID: String,
@@ -783,7 +784,8 @@ public struct PlanCueLibraryResolutionSnapshot: Equatable, Sendable {
         entryName: String,
         bankNumber: UInt64? = nil,
         autoloopNumber: UInt64? = nil,
-        choices: [PlanAutoloopChoiceSnapshot] = []
+        choices: [PlanAutoloopChoiceSnapshot] = [],
+        modifierChoices: [PlanModifierChoiceSnapshot] = []
     ) {
         self.roleID = roleID
         self.roleName = roleName
@@ -796,7 +798,17 @@ public struct PlanCueLibraryResolutionSnapshot: Equatable, Sendable {
         self.bankNumber = bankNumber
         self.autoloopNumber = autoloopNumber
         self.choices = choices
+        self.modifierChoices = modifierChoices
     }
+}
+
+public struct PlanModifierChoiceSnapshot: Equatable, Identifiable, Sendable {
+    public let id: String
+    public let name: String
+    public let kind: String
+    public let scope: String
+    public let midiChannel: UInt8
+    public let midiNote: UInt8
 }
 
 public struct PlanAutoloopChoiceSnapshot: Equatable, Identifiable, Sendable {

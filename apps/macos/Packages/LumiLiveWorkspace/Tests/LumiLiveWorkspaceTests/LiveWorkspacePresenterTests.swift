@@ -985,6 +985,7 @@ struct LiveWorkspacePresenterTests {
         #expect(items.first?.bankNumber == 1)
         #expect(items.first?.slotNumber == 1)
         #expect(items.first?.autoloopName == "Soft Motion")
+        #expect(items.first?.staticLookName == "Moving Heads Off")
     }
 
     @Test("Visual playhead beat advances AutoLoop status without waiting for a snapshot")

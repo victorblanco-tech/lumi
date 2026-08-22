@@ -13,6 +13,7 @@ public struct PlannedAutoloopPresentation: Equatable, Identifiable, Sendable {
     public let autoloopName: String
     public let bankNumber: UInt64?
     public let slotNumber: UInt64?
+    public let staticLookName: String?
     public let status: PlannedAutoloopStatus
     public let locked: Bool
     public let holdsCurrentLook: Bool
@@ -46,6 +47,8 @@ public enum PlannedAutoloopPresenter {
                 autoloopName: cue.libraryResolution?.entryName ?? action.name,
                 bankNumber: cue.libraryResolution?.bankNumber ?? action.bank,
                 slotNumber: cue.libraryResolution?.autoloopNumber ?? action.slot,
+                staticLookName: cue.libraryResolution?.modifierChoices
+                    .first(where: { $0.kind == "atmosphere" })?.name,
                 status: status(
                     cue: cue,
                     isMaster: isMaster,

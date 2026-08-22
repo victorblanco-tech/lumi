@@ -339,12 +339,17 @@ public struct LightPlansWorkspaceView: View {
                             previewPhrase(phrase)
                         }
                         HStack(spacing: LumiSpacing.large) {
-                            Label("Atmosphere: No Override", systemImage: "moon.stars")
-                            Label("Color: No Override", systemImage: "paintpalette")
-                            Spacer()
-                            Text("Automatic modifiers · POC required")
-                                .font(LumiTypography.technical)
+                            Label(
+                                "Static Looks: compiled and verified",
+                                systemImage: "checkmark.shield.fill"
+                            )
+                            .foregroundStyle(LumiColor.success)
+                            Label("Color Overrides: POC required", systemImage: "lock.circle")
                                 .foregroundStyle(LumiColor.warning)
+                            Spacer()
+                            Text("No Override remains a valid planned result")
+                                .font(LumiTypography.technical)
+                                .foregroundStyle(LumiColor.textSecondary)
                         }
                         .padding(LumiSpacing.medium)
                         .background(LumiColor.surface)
@@ -372,6 +377,19 @@ public struct LightPlansWorkspaceView: View {
                 Text("Bank \(selectedThemeID ?? 0) · AutoLoop \(phrase.autoloopNumber)")
                     .font(LumiTypography.technical)
                     .foregroundStyle(LumiColor.textSecondary)
+                if let atmosphere = phrase.modifiers.first(where: { $0.kind == .atmosphere }) {
+                    Label(
+                        "\(atmosphere.name) · \(atmosphere.scope.label)",
+                        systemImage: "moon.stars.fill"
+                    )
+                    .font(LumiTypography.technical)
+                    .foregroundStyle(LumiColor.accent)
+                    .help("\(atmosphere.reason) · \(atmosphere.colorInfluence) · Ch \(atmosphere.midiChannel), Note \(atmosphere.midiNote)")
+                } else {
+                    Label("Static Look: No Override", systemImage: "moon.stars")
+                        .font(LumiTypography.technical)
+                        .foregroundStyle(LumiColor.textSecondary)
+                }
             }
             Spacer()
             Text("\(phrase.reason) · weight \(phrase.effectiveWeight) · \(phrase.colorInfluence)")
@@ -576,15 +594,22 @@ public struct LightPlansWorkspaceView: View {
                 }.frame(width: 150)
                 Picker("Scope", selection: binding.scope) {
                     ForEach(LightPlanModifierScope.allCases) { Text($0.label).tag($0) }
-                }.frame(width: 120)
+                }
+                .frame(width: 120)
+                .help("Phrase applies only while that phrase is active. Whole Track starts at the first matching Phrase Role and remains active for the rest of the track.")
                 Stepper("Apply \(binding.wrappedValue.applicationRate)%", value: binding.applicationRate, in: 0...100)
                     .frame(width: 150)
+                    .help("Application Rate is the deterministic chance that this modifier is included for an eligible phrase or track. No Override remains valid.")
                 Picker("Selection Weight", selection: binding.selectionWeight) {
                     Text("Rare").tag(UInt8(1)); Text("Normal").tag(UInt8(2))
                     Text("Often").tag(UInt8(3)); Text("Primary").tag(UInt8(4))
-                }.frame(width: 130)
+                }
+                .frame(width: 130)
+                .help("Selection Weight controls which eligible modifier wins when more than one passes its Application Rate.")
                 Stepper("Cooldown \(binding.wrappedValue.cooldownUses)", value: binding.cooldownUses, in: 0...8)
                     .frame(width: 140)
+                    .help("Cooldown avoids reusing this Static Look for the configured number of recent modifier uses, including the prepared next track.")
+                LightPlanInfoTip("A modifier is chosen before playback. Runtime only executes the compiled Static Look transition once; it never continuously corrects SoundSwitch.")
                 Spacer()
             }
             HStack(spacing: LumiSpacing.medium) {

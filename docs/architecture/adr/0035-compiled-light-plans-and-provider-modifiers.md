@@ -141,6 +141,32 @@ remain separate user confirmations. Merely learning or testing a slot never
 enables automatic execution. Planning rules stay in Light Plans; provider
 addresses and names stay in Lighting Outputs.
 
+### 6.2 Write-only Static Look runtime contract
+
+After the physical proof, verified Atmosphere Modifiers may enter an immutable
+compiled plan. The output lane keeps only the last Static Look that Lumi itself
+successfully selected. At a cue it compares that assumed state with the compiled
+desired state:
+
+- `none → look`: one activation pulse;
+- `look A → look B`: one replacement pulse for B;
+- `look → none`: one release pulse for the active look;
+- unchanged: no MIDI.
+
+This is a sparse state-transition lane, not a timeline. Pause/resume, UI refresh,
+repeated deck packets and equivalent phrase observations never cause a pulse. A
+seek or hotcue only emits if the destination's compiled desired state differs.
+`Off` and an explicit source stop attempt one release of a Lumi-managed look.
+
+Because SoundSwitch exposes no feedback, Lumi never claims to know changes made
+directly on Control One. It also never reasserts the same Static Look: doing so
+could toggle it off. Automatic eligibility therefore remains fail-closed per
+slot, and diagnostics call the value an `activeAssumption`.
+
+Static Look execution shares the already isolated MIDI worker but never changes
+the AutoLoop execution epoch/generation and never sends transport, beat, BPM or
+Ableton Link corrections.
+
 ### 7. Revisioned persistence
 
 Planning policy, candidate rules and modifier mappings are revisioned and updated
@@ -152,12 +178,12 @@ Library, phrases and SoundSwitch mapping.
 
 - Variation becomes visible and predictable without adding work to a phrase
   boundary.
-- The current proven output lane remains unchanged: one optional bank selection
-  and one AutoLoop selection per execution epoch.
+- The current proven AutoLoop lane remains unchanged: one optional bank selection
+  and one AutoLoop selection per execution epoch. A separate sparse modifier
+  transition may add at most one Static Look pulse at a genuine state change.
 - Color and repetition logic can evolve independently of SoundSwitch.
-- Modifier mappings can be prepared now; their runtime execution requires a
-  per-slot explicit capability verification before it is eligible for automatic
-  execution.
+- Static Look execution requires per-slot activation and release verification;
+  Color Override execution remains unavailable pending its own physical proof.
 - A policy change affects newly compiled plans, not a currently executing show.
 - Contextual help is part of the contract for non-obvious planning controls;
   terse labels do not require users to infer cooldown or color semantics.

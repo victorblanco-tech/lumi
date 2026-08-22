@@ -174,6 +174,18 @@ public struct LightPlanPreviewPhrase: Identifiable, Equatable, Sendable {
     public let effectiveWeight: UInt8
     public let colorInfluence: String
     public let repeatProtection: String
+    public let modifiers: [LightPlanPreviewModifier]
+}
+
+public struct LightPlanPreviewModifier: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let name: String
+    public let kind: LightPlanModifierKind
+    public let scope: LightPlanModifierScope
+    public let midiChannel: UInt8
+    public let midiNote: UInt8
+    public let reason: String
+    public let colorInfluence: String
 }
 
 public struct LightPlanPreview: Equatable, Sendable {
@@ -212,7 +224,7 @@ public struct LightPlanningState: Equatable, Sendable {
         execution: .init(
             compiledBeforePlayback: true,
             realtimePolicyEvaluation: false,
-            staticLookOutput: "pocRequired",
+            staticLookOutput: "verifiedAutomatic",
             colorOverrideOutput: "pocRequired"
         ),
         preview: nil

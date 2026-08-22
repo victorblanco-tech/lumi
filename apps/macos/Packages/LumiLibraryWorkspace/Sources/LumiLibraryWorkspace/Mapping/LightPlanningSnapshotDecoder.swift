@@ -135,7 +135,24 @@ public struct LightPlanningSnapshotDecoder: Sendable {
                     reason: try string(phrase, "reason"),
                     effectiveWeight: try smallUnsigned(phrase, "effectiveWeight"),
                     colorInfluence: try string(phrase, "colorInfluence"),
-                    repeatProtection: try string(phrase, "repeatProtection")
+                    repeatProtection: try string(phrase, "repeatProtection"),
+                    modifiers: try optionalArray(phrase, "modifiers", maximum: 2).map { value in
+                        guard case let .object(modifier) = value,
+                              let kind = LightPlanModifierKind(rawValue: try string(modifier, "kind")),
+                              let scope = LightPlanModifierScope(rawValue: try string(modifier, "scope")) else {
+                            throw LightPlanningSnapshotError.invalidState
+                        }
+                        return LightPlanPreviewModifier(
+                            id: try string(modifier, "id"),
+                            name: try string(modifier, "name"),
+                            kind: kind,
+                            scope: scope,
+                            midiChannel: try smallUnsigned(modifier, "midiChannel"),
+                            midiNote: try smallUnsigned(modifier, "midiNote"),
+                            reason: try string(modifier, "reason"),
+                            colorInfluence: try string(modifier, "colorInfluence")
+                        )
+                    }
                 )
             }
         )

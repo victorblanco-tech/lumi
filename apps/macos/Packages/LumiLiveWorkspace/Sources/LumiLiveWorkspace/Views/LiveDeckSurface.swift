@@ -593,6 +593,7 @@ struct LiveDeckSurface<Details: View>: View {
                 autoloopName: nil,
                 bankNumber: nil,
                 slotNumber: nil,
+                staticLookName: nil,
                 status: nil,
                 selected: phrase.index == selectedPhraseIndex,
                 active: phrase.index == activePhraseIndex,
@@ -674,6 +675,7 @@ struct LiveDeckSurface<Details: View>: View {
                 autoloopName: item.autoloopName,
                 bankNumber: item.bankNumber,
                 slotNumber: item.slotNumber,
+                staticLookName: item.staticLookName,
                 status: item.status,
                 selected: item.phraseIndex == selectedPhraseIndex,
                 active: item.status == .active,
@@ -1014,6 +1016,7 @@ private struct LivePlanLayerSegment: Equatable {
     let autoloopName: String?
     let bankNumber: UInt64?
     let slotNumber: UInt64?
+    let staticLookName: String?
     let status: PlannedAutoloopStatus?
     let selected: Bool
     let active: Bool
@@ -1276,7 +1279,7 @@ private final class LivePlanLayerHostView: NSView {
                     )
                 }
                 if width >= 100 {
-                    let detail: String? = if let bank = segment.bankNumber,
+                    let baseDetail: String? = if let bank = segment.bankNumber,
                                              let slot = segment.slotNumber {
                         "BANK \(bank) · LOOP \(slot)"
                     } else if segment.holdsCurrentLook {
@@ -1284,7 +1287,10 @@ private final class LivePlanLayerHostView: NSView {
                     } else {
                         nil
                     }
-                    if let detail {
+                    let detail = [baseDetail, segment.staticLookName.map { "LOOK \($0)" }]
+                        .compactMap { $0 }
+                        .joined(separator: " · ")
+                    if !detail.isEmpty {
                         addText(
                             detail,
                             to: segmentLayer,

@@ -1,6 +1,6 @@
 # Epic 6 – Compiled Light Plans
 
-Status: **Implemented through `0.5.0-dev-5`**
+Status: **Implemented through `0.5.0-dev-6`**
 
 Target: **0.5.0**
 
@@ -63,6 +63,16 @@ separate and automatic execution clearly remains locked per unverified slot.
 Visible milestone: a full simulator track produces a stable compiled plan while
 the existing Ableton Link and AutoLoop lanes retain their timing behavior.
 
+### Phase F — verified Static Look execution
+
+- [E6-06](story-e6-06-automatic-static-look-execution.md): deterministic
+  modifier compilation, visible plan choices and exactly-once Static Look state
+  transitions.
+
+Visible milestone: a full Local Playback track selects, replaces and releases
+verified Static Looks alongside its existing AutoLoops, without continuous
+timeline control.
+
 ## Epic acceptance
 
 1. Rules survive restart and reject stale concurrent edits.
@@ -75,6 +85,8 @@ the existing Ableton Link and AutoLoop lanes retain their timing behavior.
 7. Current/next plans are compiled outside realtime execution.
 8. Unverified modifiers emit no automatic MIDI.
 9. Existing integration regression and latency tests remain green.
+10. A verified Static Look is emitted only when the compiled desired state
+    changes; `No Override` releases a Lumi-managed look once.
 
 ## Delivery evidence
 
@@ -89,7 +101,7 @@ the existing Ableton Link and AutoLoop lanes retain their timing behavior.
   Light Plans destination.
 
 The physical Static Look POC proved toggle-off and single-selection semantics.
-Its global catalog, rules, 32 unique MIDI addresses, guided learn and manual test
-are implemented. Automatic output and Color Override execution are intentionally
-not part of this completion claim and remain fail-closed behind explicit
-per-resource verification and follow-up runtime work.
+Its global catalog, rules, 32 unique MIDI addresses, guided learn, manual test and
+verified automatic execution are implemented. Automatic execution remains
+fail-closed per resource until activation and release are confirmed. Color
+Override execution remains gated behind its own future POC.

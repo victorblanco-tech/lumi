@@ -222,11 +222,26 @@ pub struct CompiledAutoloopChoice {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CompiledModifierChoice {
+    pub phrase_index: u16,
+    pub role_id: String,
+    pub modifier_id: String,
+    pub kind: ModifierKind,
+    pub scope: ModifierScope,
+    pub display_name: String,
+    pub provider_kind: String,
+    pub midi_channel: u8,
+    pub midi_note: u8,
+    pub evidence: SelectionEvidence,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CompiledLightPlan {
     pub policy_revision: u64,
     pub variation_seed: u64,
     pub theme_id: u64,
     pub choices: Vec<CompiledAutoloopChoice>,
+    pub modifier_choices: Vec<CompiledModifierChoice>,
     pub signature: u64,
 }
 
@@ -241,6 +256,7 @@ struct PlanHistoryEntry {
     theme_id: u64,
     signature: u64,
     by_role: BTreeMap<String, Vec<String>>,
+    modifiers: Vec<String>,
 }
 
 impl VariationHistory {
@@ -286,6 +302,17 @@ impl VariationHistory {
             .chain(self.reserved.values().rev())
             .take(limit)
             .map(|entry| entry.signature)
+            .collect()
+    }
+
+    fn recent_modifiers(&self, limit: usize) -> BTreeSet<&str> {
+        self.committed
+            .iter()
+            .rev()
+            .chain(self.reserved.values().rev())
+            .flat_map(|entry| entry.modifiers.iter().rev())
+            .take(limit)
+            .map(String::as_str)
             .collect()
     }
 
@@ -500,12 +527,30 @@ pub fn compile(
             evidence,
         });
     }
+    let modifier_choices =
+        compile_modifiers(policy, track_color_rgb, variation_seed, phrases, history);
+
     // A plan signature represents the observable result, not the random seed
     // that produced it. This makes whole-plan repeat protection catch two
     // different seeds that happen to select the same AutoLoops.
     let mut signature = stable_mix(theme_id);
     for choice in &choices {
         signature = stable_mix(signature ^ stable_text_hash(&choice.variant_id));
+    }
+    for phrase in phrases {
+        for kind in [ModifierKind::Atmosphere, ModifierKind::Color] {
+            let selected = modifier_choices
+                .iter()
+                .find(|choice| choice.phrase_index == phrase.phrase_index && choice.kind == kind);
+            signature = stable_mix(
+                signature
+                    ^ selected.map_or(0, |choice| stable_text_hash(&choice.modifier_id))
+                    ^ match kind {
+                        ModifierKind::Atmosphere => 0xa710_5001,
+                        ModifierKind::Color => 0xc010_7002,
+                    },
+            );
+        }
     }
     let recent_signatures = history.recent_signatures(usize::from(policy.duplicate_plan_window));
     if recent_signatures.contains(&signature) {
@@ -532,8 +577,161 @@ pub fn compile(
         variation_seed,
         theme_id,
         choices,
+        modifier_choices,
         signature,
     })
+}
+
+fn compile_modifiers(
+    policy: &LightPlanningPolicy,
+    track_color_rgb: Option<u32>,
+    variation_seed: u64,
+    phrases: &[PhraseRequest],
+    history: &VariationHistory,
+) -> Vec<CompiledModifierChoice> {
+    let mut choices = Vec::new();
+    for kind in [ModifierKind::Atmosphere, ModifierKind::Color] {
+        let mut carried: Option<CompiledModifierChoice> = None;
+        let mut local_uses: Vec<String> = Vec::new();
+        for phrase in phrases {
+            if let Some(active) = &carried {
+                let mut continued = active.clone();
+                continued.phrase_index = phrase.phrase_index;
+                continued.role_id = phrase.role_id.clone();
+                continued.evidence.reason = "whole-track modifier continued".to_owned();
+                choices.push(continued);
+                continue;
+            }
+            let mut eligible = policy
+                .modifier_rules
+                .iter()
+                .filter_map(|rule| {
+                    let modifier = policy.modifiers.iter().find(|modifier| {
+                        modifier.id == rule.modifier_id
+                            && modifier.kind == kind
+                            && modifier.automatic_execution_ready()
+                    })?;
+                    (rule.role_id == phrase.role_id).then_some((modifier, rule))
+                })
+                .filter(|(modifier, rule)| {
+                    let history_recent = history.recent_modifiers(usize::from(rule.cooldown_uses));
+                    let local_recent = local_uses
+                        .iter()
+                        .rev()
+                        .take(usize::from(rule.cooldown_uses))
+                        .map(String::as_str)
+                        .collect::<BTreeSet<_>>();
+                    !history_recent.contains(modifier.id.as_str())
+                        && !local_recent.contains(modifier.id.as_str())
+                })
+                .collect::<Vec<_>>();
+            let matching_only = eligible
+                .iter()
+                .copied()
+                .filter(|(_, rule)| {
+                    rule.color_behavior == ColorBehavior::Only
+                        && track_color_rgb.is_some_and(|color| rule.color_rgb.contains(&color))
+                })
+                .collect::<Vec<_>>();
+            if matching_only.is_empty() {
+                eligible.retain(|(_, rule)| rule.color_behavior != ColorBehavior::Only);
+            } else {
+                eligible = matching_only;
+            }
+            eligible.retain(|(modifier, rule)| {
+                if rule.application_rate == 0 {
+                    return false;
+                }
+                let roll = stable_mix(
+                    variation_seed
+                        ^ u64::from(phrase.phrase_index)
+                        ^ stable_text_hash(&modifier.id)
+                        ^ policy.revision
+                        ^ 0x4d4f_4449_4649_4552,
+                ) % 100;
+                roll < u64::from(rule.application_rate)
+            });
+            if eligible.is_empty() {
+                continue;
+            }
+            let weighted = eligible
+                .iter()
+                .map(|(modifier, rule)| {
+                    let preferred = rule.color_behavior == ColorBehavior::Prefer
+                        && track_color_rgb.is_some_and(|color| rule.color_rgb.contains(&color));
+                    let weight = rule.selection_weight.clamp(1, 4);
+                    (
+                        *modifier,
+                        *rule,
+                        if preferred {
+                            weight.saturating_mul(2)
+                        } else {
+                            weight
+                        },
+                        preferred,
+                    )
+                })
+                .collect::<Vec<_>>();
+            let total = weighted
+                .iter()
+                .map(|(_, _, weight, _)| u64::from(*weight))
+                .sum::<u64>();
+            let roll = stable_mix(
+                variation_seed
+                    ^ u64::from(phrase.phrase_index)
+                    ^ policy.revision
+                    ^ match kind {
+                        ModifierKind::Atmosphere => 0xa710_5001,
+                        ModifierKind::Color => 0xc010_7002,
+                    },
+            ) % total.max(1);
+            let mut cursor = 0_u64;
+            let mut selected = weighted[0];
+            for candidate in &weighted {
+                cursor = cursor.saturating_add(u64::from(candidate.2));
+                if roll < cursor {
+                    selected = *candidate;
+                    break;
+                }
+            }
+            let (modifier, rule, effective_weight, preferred) = selected;
+            let choice = CompiledModifierChoice {
+                phrase_index: phrase.phrase_index,
+                role_id: phrase.role_id.clone(),
+                modifier_id: modifier.id.clone(),
+                kind,
+                scope: rule.scope,
+                display_name: modifier.display_name.clone(),
+                provider_kind: modifier.provider_kind.clone(),
+                midi_channel: modifier.midi_channel,
+                midi_note: modifier.midi_note,
+                evidence: SelectionEvidence {
+                    reason: match rule.scope {
+                        ModifierScope::Phrase => "application rate selected phrase modifier",
+                        ModifierScope::Track => "application rate selected whole-track modifier",
+                    }
+                    .to_owned(),
+                    effective_weight,
+                    color_influence: if preferred {
+                        "prefer match"
+                    } else if rule.color_behavior == ColorBehavior::Only {
+                        "only match"
+                    } else {
+                        "neutral"
+                    }
+                    .to_owned(),
+                    repeat_protection: "modifier cooldown satisfied".to_owned(),
+                },
+            };
+            local_uses.push(modifier.id.clone());
+            if rule.scope == ModifierScope::Track {
+                carried = Some(choice.clone());
+            }
+            choices.push(choice);
+        }
+    }
+    choices.sort_by_key(|choice| (choice.phrase_index, choice.kind));
+    choices
 }
 
 impl VariationHistory {
@@ -573,10 +771,21 @@ fn history_entry(plan: &CompiledLightPlan) -> PlanHistoryEntry {
             .or_insert_with(Vec::new)
             .push(choice.variant_id.clone());
     }
+    let mut track_modifiers = BTreeSet::new();
+    let modifiers = plan
+        .modifier_choices
+        .iter()
+        .filter(|choice| {
+            choice.scope == ModifierScope::Phrase
+                || track_modifiers.insert(choice.modifier_id.as_str())
+        })
+        .map(|choice| choice.modifier_id.clone())
+        .collect();
     PlanHistoryEntry {
         theme_id: plan.theme_id,
         signature: plan.signature,
         by_role,
+        modifiers,
     }
 }
 
@@ -733,6 +942,136 @@ mod tests {
             release_verified: false,
         };
         assert!(!modifier.automatic_execution_ready());
+    }
+
+    fn verified_static_modifier(scope: ModifierScope) -> (OutputModifier, ModifierRule) {
+        let modifier = OutputModifier {
+            id: "dark-stage".to_owned(),
+            provider_kind: "soundswitch".to_owned(),
+            kind: ModifierKind::Atmosphere,
+            display_name: "Dark Stage".to_owned(),
+            enabled: true,
+            midi_channel: 12,
+            midi_note: 64,
+            activation_verified: true,
+            release_verified: true,
+        };
+        let rule = ModifierRule {
+            modifier_id: modifier.id.clone(),
+            role_id: "drop".to_owned(),
+            application_rate: 100,
+            selection_weight: 2,
+            cooldown_uses: 0,
+            scope,
+            color_behavior: ColorBehavior::Neutral,
+            color_rgb: Vec::new(),
+        };
+        (modifier, rule)
+    }
+
+    #[test]
+    fn verified_static_modifier_is_compiled_for_its_phrase_only() -> Result<(), LightPlanError> {
+        let (modifier, rule) = verified_static_modifier(ModifierScope::Phrase);
+        let policy = LightPlanningPolicy {
+            modifiers: vec![modifier],
+            modifier_rules: vec![rule],
+            ..LightPlanningPolicy::default()
+        };
+        let result = compile(
+            &policy,
+            1,
+            None,
+            42,
+            &[phrase(0), phrase(1)],
+            &[candidate("a", 1)],
+            &VariationHistory::default(),
+        )?;
+        assert_eq!(result.modifier_choices.len(), 2);
+        assert_eq!(result.modifier_choices[0].modifier_id, "dark-stage");
+        assert_eq!(result.modifier_choices[1].modifier_id, "dark-stage");
+        Ok(())
+    }
+
+    #[test]
+    fn unverified_static_modifier_is_never_compiled() -> Result<(), LightPlanError> {
+        let (mut modifier, rule) = verified_static_modifier(ModifierScope::Phrase);
+        modifier.release_verified = false;
+        let policy = LightPlanningPolicy {
+            modifiers: vec![modifier],
+            modifier_rules: vec![rule],
+            ..LightPlanningPolicy::default()
+        };
+        let result = compile(
+            &policy,
+            1,
+            None,
+            42,
+            &[phrase(0)],
+            &[candidate("a", 1)],
+            &VariationHistory::default(),
+        )?;
+        assert!(result.modifier_choices.is_empty());
+        Ok(())
+    }
+
+    #[test]
+    fn whole_track_modifier_continues_after_first_matching_phrase() -> Result<(), LightPlanError> {
+        let (modifier, rule) = verified_static_modifier(ModifierScope::Track);
+        let policy = LightPlanningPolicy {
+            modifiers: vec![modifier],
+            modifier_rules: vec![rule],
+            ..LightPlanningPolicy::default()
+        };
+        let phrases = [
+            PhraseRequest {
+                phrase_index: 0,
+                role_id: "intro".to_owned(),
+                selection: PhraseSelection::Automatic,
+            },
+            phrase(1),
+            PhraseRequest {
+                phrase_index: 2,
+                role_id: "outro".to_owned(),
+                selection: PhraseSelection::Automatic,
+            },
+        ];
+        let candidates = [
+            Candidate {
+                theme_id: 1,
+                role_id: "intro".to_owned(),
+                variant_id: "intro".to_owned(),
+                entry_id: "intro".to_owned(),
+                display_name: "Intro".to_owned(),
+                autoloop_number: 1,
+            },
+            candidate("drop", 2),
+            Candidate {
+                theme_id: 1,
+                role_id: "outro".to_owned(),
+                variant_id: "outro".to_owned(),
+                entry_id: "outro".to_owned(),
+                display_name: "Outro".to_owned(),
+                autoloop_number: 3,
+            },
+        ];
+        let result = compile(
+            &policy,
+            1,
+            None,
+            42,
+            &phrases,
+            &candidates,
+            &VariationHistory::default(),
+        )?;
+        assert_eq!(
+            result
+                .modifier_choices
+                .iter()
+                .map(|choice| choice.phrase_index)
+                .collect::<Vec<_>>(),
+            vec![1, 2]
+        );
+        Ok(())
     }
 
     #[test]

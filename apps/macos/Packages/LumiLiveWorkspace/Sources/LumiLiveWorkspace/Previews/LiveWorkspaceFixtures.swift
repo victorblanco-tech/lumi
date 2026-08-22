@@ -3,7 +3,7 @@ import Foundation
 public enum LiveWorkspaceFixtures {
     public static let readySnapshot = EngineSnapshot(
         endpoint: "127.0.0.1:52841",
-        engineVersion: "0.5.0-dev-5",
+        engineVersion: "0.5.0-dev-6",
         protocolVersion: 1,
         snapshotSequence: 42,
         stateRevision: 8,
@@ -500,7 +500,17 @@ public enum LiveWorkspaceFixtures {
                 entryID: "theme-\(themeID)--\(role.id)--variant-1",
                 entryName: scene,
                 bankNumber: bank,
-                autoloopNumber: slot
+                autoloopNumber: slot,
+                modifierChoices: index == 0 ? [
+                    PlanModifierChoiceSnapshot(
+                        id: "static-dark",
+                        name: "Moving Heads Off",
+                        kind: "atmosphere",
+                        scope: "phrase",
+                        midiChannel: 12,
+                        midiNote: 64
+                    )
+                ] : []
             )
         )
     }

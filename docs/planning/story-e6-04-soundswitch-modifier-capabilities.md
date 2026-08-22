@@ -31,6 +31,6 @@ planning variation without risking a stuck or ambiguous live override.
 - Existing policy data and rule references are preserved because the new surface
   projects mappings by provider address rather than generated identifier.
 
-Automatic Static Look selection/output is intentionally a follow-up execution
-story. It remains fail-closed until each configured slot records activation and
-release verification.
+Automatic Static Look selection/output is implemented by
+[E6-06](story-e6-06-automatic-static-look-execution.md). This capability story
+continues to own the per-slot physical verification gate.

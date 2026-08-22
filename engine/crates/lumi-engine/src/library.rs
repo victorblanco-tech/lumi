@@ -725,9 +725,24 @@ impl LibraryWorker {
                     "effectiveWeight": choice.evidence.effective_weight,
                     "colorInfluence": choice.evidence.color_influence,
                     "repeatProtection": choice.evidence.repeat_protection,
+                    "modifiers": compiled.modifier_choices.iter()
+                        .filter(|modifier| modifier.phrase_index == choice.phrase_index)
+                        .map(|modifier| json!({
+                            "id": modifier.modifier_id,
+                            "name": modifier.display_name,
+                            "kind": modifier.kind,
+                            "scope": modifier.scope,
+                            "providerKind": modifier.provider_kind,
+                            "midiChannel": modifier.midi_channel,
+                            "midiNote": modifier.midi_note,
+                            "reason": modifier.evidence.reason,
+                            "effectiveWeight": modifier.evidence.effective_weight,
+                            "colorInfluence": modifier.evidence.color_influence,
+                            "repeatProtection": modifier.evidence.repeat_protection,
+                        })).collect::<Vec<_>>(),
                 }))
             }).collect::<Vec<_>>(),
-            "modifiers": policy.modifiers.iter().map(|modifier| json!({
+            "availableModifiers": policy.modifiers.iter().map(|modifier| json!({
                 "id": modifier.id,
                 "name": modifier.display_name,
                 "kind": modifier.kind,
@@ -2506,7 +2521,7 @@ impl LibraryWorker {
                 "execution": {
                     "compiledBeforePlayback": true,
                     "realtimePolicyEvaluation": false,
-                    "staticLookOutput": "pocRequired",
+                    "staticLookOutput": "verifiedAutomatic",
                     "colorOverrideOutput": "pocRequired",
                 },
             },

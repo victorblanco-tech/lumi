@@ -158,7 +158,19 @@ struct LibraryWorkspaceTests {
             "autoloopCooldownUses": .number(2),
             "duplicatePlanWindow": .number(4),
             "rules": .array([]),
-            "modifiers": .array([]),
+            "modifiers": .array([
+                .object([
+                    "id": .string("static-dark"),
+                    "providerKind": .string("soundswitch"),
+                    "kind": .string("atmosphere"),
+                    "displayName": .string("Moving Heads Off"),
+                    "enabled": .boolean(true),
+                    "midiChannel": .number(12),
+                    "midiNote": .number(64),
+                    "activationVerified": .boolean(true),
+                    "releaseVerified": .boolean(true)
+                ])
+            ]),
             "modifierRules": .array([
                 .object([
                     "modifierId": .string("static-dark"),
@@ -193,10 +205,25 @@ struct LibraryWorkspaceTests {
                     "reason": .string("weighted variation"),
                     "effectiveWeight": .number(2),
                     "colorInfluence": .string("neutral"),
-                    "repeatProtection": .string("recent variants excluded")
+                    "repeatProtection": .string("recent variants excluded"),
+                    "modifiers": .array([
+                        .object([
+                            "id": .string("static-dark"),
+                            "name": .string("Moving Heads Off"),
+                            "kind": .string("atmosphere"),
+                            "scope": .string("phrase"),
+                            "providerKind": .string("soundswitch"),
+                            "midiChannel": .number(12),
+                            "midiNote": .number(64),
+                            "reason": .string("application rate selected phrase modifier"),
+                            "effectiveWeight": .number(2),
+                            "colorInfluence": .string("neutral"),
+                            "repeatProtection": .string("modifier cooldown satisfied")
+                        ])
+                    ])
                 ])
             ]),
-            "modifiers": .array([])
+            "availableModifiers": .array([])
         ])
         let message = MessageEnvelope(
             protocolVersion: 1,
@@ -220,7 +247,7 @@ struct LibraryWorkspaceTests {
                         "execution": .object([
                             "compiledBeforePlayback": .boolean(true),
                             "realtimePolicyEvaluation": .boolean(false),
-                            "staticLookOutput": .string("pocRequired"),
+                            "staticLookOutput": .string("verifiedAutomatic"),
                             "colorOverrideOutput": .string("pocRequired")
                         ])
                     ])
@@ -234,6 +261,8 @@ struct LibraryWorkspaceTests {
         #expect(state.trackColors.first?.trackCount == 17)
         #expect(state.preview?.phrases.first?.autoloopName == "INTRO BLUE PINK")
         #expect(state.preview?.phrases.first?.startBeat == 0)
+        #expect(state.preview?.phrases.first?.modifiers.first?.name == "Moving Heads Off")
+        #expect(state.preview?.phrases.first?.modifiers.first?.midiNote == 64)
     }
 
     @Test("SoundSwitch Static Looks project one fixed 32-slot surface in controller order")

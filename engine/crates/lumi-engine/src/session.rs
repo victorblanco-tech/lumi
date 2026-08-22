@@ -19,7 +19,9 @@ use lumi_domain::{
     UserCommandEnvelope, WorkerId,
 };
 use lumi_library::AutoloopCatalog;
-use lumi_light_plans::{CompiledLightPlan, LightPlanningPolicy, VariationHistory};
+use lumi_light_plans::{
+    CompiledLightPlan, CompiledModifierChoice, LightPlanningPolicy, ModifierKind, VariationHistory,
+};
 use lumi_lighting_output::LightingOutputProvider as _;
 use lumi_local_playback::{LocalPlaybackDeckSourceProvider, LocalPlaybackError};
 #[cfg(not(test))]
@@ -1120,6 +1122,7 @@ impl PlanningWorker {
             self.variation_history.release(&reservation_id);
             self.compiled_light_plans.remove(&track_load_id);
             self.reserved_theme_ids.remove(&track_load_id);
+            output_worker.remove_static_look_plan(track_load_id);
         }
         if activates_pending_timing
             && let Some(track_load_id) = leader_deck_id
@@ -1167,6 +1170,10 @@ impl PlanningWorker {
                 self.planner.generate_with_context(&input, &context)?
             };
             let plan = self.materialize_library_plan(generated)?;
+            output_worker.synchronize_static_look_plan(
+                plan.track_load_id(),
+                self.compiled_light_plans.get(&plan.track_load_id()),
+            );
             if let Some(decision) = plan.theme_decision() {
                 self.reserved_theme_ids
                     .insert(plan.track_load_id(), decision.theme_id());
@@ -1309,6 +1316,41 @@ struct OutputWorker {
     transport_epoch_cause: Option<TransportEpochCause>,
     reassert_current_on_next_cue: bool,
     scheduled_future_autoloop: Option<ScheduledFutureAutoloop>,
+    static_look_plans: BTreeMap<TrackLoadId, BTreeMap<u16, StaticLookTarget>>,
+    active_static_look: Option<StaticLookTarget>,
+    static_look_transition_count: u64,
+    static_look_release_count: u64,
+    static_look_unchanged_count: u64,
+    static_look_failed_count: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct StaticLookTarget {
+    modifier_id: String,
+    display_name: String,
+    static_look_number: u8,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum StaticLookTransition {
+    Activate(StaticLookTarget),
+    Release(StaticLookTarget),
+}
+
+fn static_look_transition(
+    active: Option<&StaticLookTarget>,
+    desired: Option<&StaticLookTarget>,
+) -> Option<StaticLookTransition> {
+    if matches!((active, desired), (Some(active), Some(desired))
+        if active.static_look_number == desired.static_look_number)
+        || active.is_none() && desired.is_none()
+    {
+        return None;
+    }
+    desired
+        .cloned()
+        .map(StaticLookTransition::Activate)
+        .or_else(|| active.cloned().map(StaticLookTransition::Release))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1356,6 +1398,123 @@ impl OutputWorker {
             transport_epoch_cause: None,
             reassert_current_on_next_cue: false,
             scheduled_future_autoloop: None,
+            static_look_plans: BTreeMap::new(),
+            active_static_look: None,
+            static_look_transition_count: 0,
+            static_look_release_count: 0,
+            static_look_unchanged_count: 0,
+            static_look_failed_count: 0,
+        }
+    }
+
+    fn synchronize_static_look_plan(
+        &mut self,
+        track_load_id: TrackLoadId,
+        compiled: Option<&CompiledLightPlan>,
+    ) {
+        let choices = compiled
+            .into_iter()
+            .flat_map(|plan| plan.modifier_choices.iter())
+            .filter_map(static_look_target)
+            .collect::<BTreeMap<_, _>>();
+        if choices.is_empty() {
+            self.static_look_plans.remove(&track_load_id);
+        } else {
+            self.static_look_plans.insert(track_load_id, choices);
+        }
+        while self.static_look_plans.len() > LIBRARY_CONTEXT_CAPACITY {
+            let Some(oldest) = self.static_look_plans.keys().next().copied() else {
+                break;
+            };
+            self.static_look_plans.remove(&oldest);
+        }
+    }
+
+    fn remove_static_look_plan(&mut self, track_load_id: TrackLoadId) {
+        self.static_look_plans.remove(&track_load_id);
+    }
+
+    fn execute_static_look_transition(&mut self, request: &OutputExecutionRequest) {
+        let desired = self
+            .static_look_plans
+            .get(&request.track_load_id())
+            .and_then(|choices| choices.get(&request.phrase_index()))
+            .cloned();
+        let transition = static_look_transition(self.active_static_look.as_ref(), desired.as_ref());
+        if transition.is_none() {
+            if desired.is_some() {
+                self.active_static_look = desired;
+            }
+            self.static_look_unchanged_count = self.static_look_unchanged_count.saturating_add(1);
+            return;
+        }
+        let Some(transition) = transition else {
+            return;
+        };
+        let pulse_target = match &transition {
+            StaticLookTransition::Activate(target) | StaticLookTransition::Release(target) => {
+                target
+            }
+        };
+        if self.ensure_lighting_midi().is_err()
+            || self.midi_output.status().source.state != MidiSourceState::Ready
+        {
+            self.static_look_failed_count = self.static_look_failed_count.saturating_add(1);
+            return;
+        }
+        match self
+            .midi_output
+            .toggle_static_look(pulse_target.static_look_number)
+        {
+            Ok(()) => {
+                if matches!(transition, StaticLookTransition::Release(_)) {
+                    self.static_look_release_count =
+                        self.static_look_release_count.saturating_add(1);
+                } else {
+                    self.static_look_transition_count =
+                        self.static_look_transition_count.saturating_add(1);
+                }
+                self.active_static_look = desired;
+            }
+            Err(_) => {
+                self.static_look_failed_count = self.static_look_failed_count.saturating_add(1);
+            }
+        }
+    }
+
+    fn toggle_static_look_manually(&mut self, static_look_number: u8) -> Result<(), EngineError> {
+        self.midi_output
+            .toggle_static_look(static_look_number)
+            .map_err(|error| EngineError::Midi(error.to_string()))?;
+        self.active_static_look = if self
+            .active_static_look
+            .as_ref()
+            .is_some_and(|active| active.static_look_number == static_look_number)
+        {
+            None
+        } else {
+            Some(StaticLookTarget {
+                modifier_id: format!("manual-static-look-{static_look_number}"),
+                display_name: format!("Static Look {static_look_number}"),
+                static_look_number,
+            })
+        };
+        Ok(())
+    }
+
+    fn release_active_static_look(&mut self) {
+        let Some(active) = self.active_static_look.clone() else {
+            return;
+        };
+        if self
+            .midi_output
+            .toggle_static_look(active.static_look_number)
+            .is_ok()
+        {
+            self.active_static_look = None;
+            self.static_look_release_count = self.static_look_release_count.saturating_add(1);
+        } else {
+            self.static_look_failed_count = self.static_look_failed_count.saturating_add(1);
         }
     }
 
@@ -2096,6 +2255,7 @@ impl OutputWorker {
         for effect in effects {
             let (result, completed_at) = match effect {
                 lumi_domain::Effect::EnsureOutputClosed { .. } => {
+                    self.release_active_static_look();
                     let _ = self.midi_output.cancel_all();
                     self.autoloop_executor.cancel_pending();
                     (EffectResult::OutputGateClosed, MonotonicTime::new(0))
@@ -2114,6 +2274,7 @@ impl OutputWorker {
                                 self.execute_autoloop(&request, bank_number, autoloop_number);
                             }
                         }
+                        self.execute_static_look_transition(&request);
                         result
                     } else {
                         OutputEffectResult::new(
@@ -2228,6 +2389,7 @@ impl OutputWorker {
     }
 
     fn stop_midi(&mut self) -> Result<(), EngineError> {
+        self.release_active_static_look();
         self.midi_auto_publish_enabled = false;
         self.last_midi_publish_attempt = None;
         self.midi_output.stop();
@@ -2349,6 +2511,24 @@ fn automatic_midi_target(action: &SemanticLightingAction) -> Result<Option<(u8, 
         EngineError::Midi("Autoloop button does not fit the MIDI profile".to_owned())
     })?;
     Ok(Some((bank_number, autoloop_number)))
+}
+
+fn static_look_target(choice: &CompiledModifierChoice) -> Option<(u16, StaticLookTarget)> {
+    if choice.kind != ModifierKind::Atmosphere
+        || choice.provider_kind != "soundswitch"
+        || choice.midi_channel != lumi_midi_output::STATIC_LOOK_CHANNEL
+        || !(64..=95).contains(&choice.midi_note)
+    {
+        return None;
+    }
+    Some((
+        choice.phrase_index,
+        StaticLookTarget {
+            modifier_id: choice.modifier_id.clone(),
+            display_name: choice.display_name.clone(),
+            static_look_number: choice.midi_note - 63,
+        },
+    ))
 }
 
 fn execution_context_is_current(
@@ -3140,9 +3320,8 @@ fn apply_command(
         SessionCommand::TriggerMidiStaticLook { static_look_number } => {
             runtime
                 .output_worker
-                .midi_output
-                .toggle_static_look(static_look_number)
-                .map_err(|error| CommandApplicationError::Midi(error.to_string()))?;
+                .toggle_static_look_manually(static_look_number)
+                .map_err(CommandApplicationError::Engine)?;
             return Ok(());
         }
         SessionCommand::LoadLibraryTrackOnLocalDeck {
@@ -3563,6 +3742,13 @@ fn apply_command(
         .planning_worker
         .materialize_library_plan(revised)
         .map_err(CommandApplicationError::Engine)?;
+    runtime.output_worker.synchronize_static_look_plan(
+        revised.track_load_id(),
+        runtime
+            .planning_worker
+            .compiled_light_plans
+            .get(&revised.track_load_id()),
+    );
     runtime
         .planning_worker
         .accept_revised_plan(&mut runtime.state, revised)
@@ -4192,6 +4378,18 @@ fn snapshot_envelope_internal(
             "timingOffsetMillis": runtime.output_worker.timing_offset_millis(),
             "pendingTimingOffsetMillis": runtime.output_worker.pending_timing_offset_millis(),
             "bankPreRollMillis": BANK_SETTLE_DELAY.as_millis(),
+            "staticLookExecution": {
+                "mode": "exactlyOnceTransition",
+                "activeAssumption": runtime.output_worker.active_static_look.as_ref().map(|active| json!({
+                    "id": active.modifier_id,
+                    "name": active.display_name,
+                    "staticLookNumber": active.static_look_number,
+                })),
+                "transitionCount": runtime.output_worker.static_look_transition_count,
+                "releaseCount": runtime.output_worker.static_look_release_count,
+                "unchangedCount": runtime.output_worker.static_look_unchanged_count,
+                "failedCount": runtime.output_worker.static_look_failed_count,
+            },
             "realtimeScheduler": realtime_scheduler,
         }),
     );
@@ -4692,10 +4890,41 @@ fn plan_json(
                             "repeatProtection": compiled_choice.evidence.repeat_protection,
                         }));
                     }
+                    if let Some(compiled) = compiled_light_plan
+                        && let Value::Object(ref mut object) = value
+                    {
+                        object.insert(
+                            "modifierChoices".to_owned(),
+                            Value::Array(
+                                compiled
+                                    .modifier_choices
+                                    .iter()
+                                    .filter(|choice| choice.phrase_index == cue.phrase_index())
+                                    .map(compiled_modifier_json)
+                                    .collect(),
+                            ),
+                        );
+                    }
                     value
                 }),
         })).collect::<Vec<_>>(),
     }))
+}
+
+fn compiled_modifier_json(choice: &CompiledModifierChoice) -> Value {
+    json!({
+        "id": choice.modifier_id,
+        "name": choice.display_name,
+        "kind": choice.kind,
+        "scope": choice.scope,
+        "providerKind": choice.provider_kind,
+        "midiChannel": choice.midi_channel,
+        "midiNote": choice.midi_note,
+        "reason": choice.evidence.reason,
+        "effectiveWeight": choice.evidence.effective_weight,
+        "colorInfluence": choice.evidence.color_influence,
+        "repeatProtection": choice.evidence.repeat_protection,
+    })
 }
 
 fn library_resolution_json(cue: &ResolvedLibraryCue) -> Value {
@@ -5077,6 +5306,43 @@ mod tests {
             negative_offset_trigger_delay(2, 300_000, -250),
             Some(beat_at_300.saturating_mul(2) - Duration::from_millis(250))
         );
+    }
+
+    #[test]
+    fn static_look_transition_is_sparse_and_never_reasserts_the_same_toggle() {
+        let first = StaticLookTarget {
+            modifier_id: "first".to_owned(),
+            display_name: "Moving Heads Off".to_owned(),
+            static_look_number: 1,
+        };
+        let second = StaticLookTarget {
+            modifier_id: "second".to_owned(),
+            display_name: "Only Lasers".to_owned(),
+            static_look_number: 2,
+        };
+        assert_eq!(
+            static_look_transition(None, Some(&first)),
+            Some(StaticLookTransition::Activate(first.clone()))
+        );
+        assert_eq!(static_look_transition(Some(&first), Some(&first)), None);
+        let same_address_from_manual_control = StaticLookTarget {
+            modifier_id: "manual".to_owned(),
+            display_name: "Static Look 1".to_owned(),
+            static_look_number: 1,
+        };
+        assert_eq!(
+            static_look_transition(Some(&same_address_from_manual_control), Some(&first)),
+            None
+        );
+        assert_eq!(
+            static_look_transition(Some(&first), Some(&second)),
+            Some(StaticLookTransition::Activate(second.clone()))
+        );
+        assert_eq!(
+            static_look_transition(Some(&second), None),
+            Some(StaticLookTransition::Release(second))
+        );
+        assert_eq!(static_look_transition(None, None), None);
     }
 
     #[test]
