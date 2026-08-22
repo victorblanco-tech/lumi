@@ -460,6 +460,15 @@ relinking after a clean reimport. See
 [`story-e2a-23-data-backup-library-rebuild-and-creative-relink.md`](story-e2a-09-data-backup-library-rebuild-and-creative-relink.md)
 and [ADR-0029](../architecture/adr/0029-atomic-backups-library-rebuild-and-creative-archive.md).
 
+### E2A-24 – Configure one Phrase Role color across Lumi
+
+Status: **implemented for 0.5.0-dev-12**. `Settings > Phrase Model` owns one
+revisioned sRGB color per stable Phrase Role. The authoritative Library snapshot
+drives the same palette in the Track Editor, Live Decks, Light Plans,
+SoundSwitch Banks & AutoLoops and the Virtual Controller. SQLite schema v15
+migrates existing catalogs without changing role identity, timelines, plans or
+output mappings. ADR-0036 records the cross-feature ownership boundary.
+
 ## 6.1 Provider-neutrale bouwvolgorde
 
 De Rekordbox-spike is alleen een harde gate voor `E2A-02`, niet voor de

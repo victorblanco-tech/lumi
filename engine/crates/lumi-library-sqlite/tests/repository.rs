@@ -22,7 +22,7 @@ use rusqlite::Connection;
 #[test]
 fn migrates_an_empty_database() -> Result<(), Box<dyn Error>> {
     let repository = SqliteLibraryRepository::in_memory()?;
-    assert_eq!(repository.schema_version()?, 14);
+    assert_eq!(repository.schema_version()?, 15);
     assert_eq!(
         repository
             .page_tracks(TrackPageRequest::try_new(0, 25)?)?
@@ -41,11 +41,12 @@ fn migrates_version_thirteen_device_audio_locations_atomically() -> Result<(), B
         connection.execute_batch(
             "DROP INDEX device_audio_by_canonical_track;
              DROP TABLE device_track_audio_locations;
+             ALTER TABLE phrase_roles DROP COLUMN color_rgb;
              PRAGMA user_version = 13;",
         )?;
     }
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 14);
+    assert_eq!(repository.schema_version()?, 15);
     drop(repository);
     let connection = Connection::open(&path)?;
     let table_exists: bool = connection.query_row(
@@ -203,7 +204,7 @@ fn migrates_version_one_timeline_history_without_losing_rows() -> Result<(), Box
     }
 
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 14);
+    assert_eq!(repository.schema_version()?, 15);
     drop(repository);
     let connection = Connection::open(&path)?;
     let reason: String = connection.query_row(
@@ -260,7 +261,7 @@ fn migrates_version_two_phrase_roles_into_an_unseeded_catalog() -> Result<(), Bo
     }
 
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 14);
+    assert_eq!(repository.schema_version()?, 15);
     let catalog = repository.phrase_role_catalog()?;
     assert_eq!(catalog.revision(), 0);
     assert_eq!(catalog.defaults_version(), 0);
@@ -303,7 +304,7 @@ fn migrates_version_three_into_an_unseeded_autoloop_catalog() -> Result<(), Box<
     }
 
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 14);
+    assert_eq!(repository.schema_version()?, 15);
     let catalog = repository.autoloop_catalog()?;
     assert_eq!(catalog.revision(), 0);
     assert_eq!(catalog.defaults_version(), 0);
@@ -782,21 +783,24 @@ fn phrase_role_catalog_mutation_usage_and_conflict_survive_restart() -> Result<(
         repository.replace_phrase_role_catalog(&renamed, 1)?;
         let moved = renamed.move_role(&PhraseRoleId::try_new("synth")?, PhraseRoleMove::Earlier)?;
         repository.replace_phrase_role_catalog(&moved, 2)?;
-        let conflict = repository.replace_phrase_role_catalog(&moved, 2);
+        let recolored = moved.set_color_rgb(&PhraseRoleId::try_new("synth")?, 0x1234AB)?;
+        repository.replace_phrase_role_catalog(&recolored, 3)?;
+        let conflict = repository.replace_phrase_role_catalog(&recolored, 3);
         assert!(matches!(
             conflict,
             Err(SqliteLibraryError::PhraseRoleCatalogRevisionConflict {
-                expected: 2,
-                actual: 3,
+                expected: 3,
+                actual: 4,
             })
         ));
     }
 
     let repository = SqliteLibraryRepository::open(&path)?;
     let catalog = repository.phrase_role_catalog()?;
-    assert_eq!(catalog.revision(), 3);
+    assert_eq!(catalog.revision(), 4);
     assert_eq!(catalog.roles()[0].id().as_str(), "synth");
     assert_eq!(catalog.roles()[0].display_name(), "Lead Synth");
+    assert_eq!(catalog.roles()[0].color_rgb(), 0x1234AB);
     let usages = repository.phrase_role_usages()?;
     assert_eq!(usages.len(), 1);
     assert_eq!(usages[0].role_id().as_str(), "synth");

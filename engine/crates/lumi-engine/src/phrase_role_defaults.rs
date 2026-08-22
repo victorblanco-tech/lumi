@@ -84,11 +84,12 @@ pub fn seeded_phrase_role_catalog(
         .into_iter()
         .enumerate()
         .map(|(index, role)| {
-            PhraseRole::try_new(
+            PhraseRole::try_new_with_color_rgb(
                 role.id().clone(),
                 role.display_name(),
                 u16::try_from(index + 1).map_err(|_| PhraseRoleDefaultsError::TooManyRoles)?,
                 role.is_archived(),
+                role.color_rgb(),
             )
             .map_err(PhraseRoleDefaultsError::Catalog)
         })

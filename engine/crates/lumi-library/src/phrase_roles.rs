@@ -5,6 +5,7 @@ use lumi_domain::TrackId;
 use crate::PhraseRoleId;
 
 pub const PHRASE_ROLE_DEFAULTS_VERSION: u16 = 2;
+pub const DEFAULT_CUSTOM_PHRASE_ROLE_COLOR_RGB: u32 = 0x33AD99;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PhraseRole {
@@ -12,6 +13,7 @@ pub struct PhraseRole {
     display_name: String,
     sort_order: u16,
     archived: bool,
+    color_rgb: u32,
 }
 
 impl PhraseRole {
@@ -21,15 +23,30 @@ impl PhraseRole {
         sort_order: u16,
         archived: bool,
     ) -> Result<Self, PhraseRoleCatalogError> {
+        let color_rgb = default_phrase_role_color_rgb(id.as_str());
+        Self::try_new_with_color_rgb(id, display_name, sort_order, archived, color_rgb)
+    }
+
+    pub fn try_new_with_color_rgb(
+        id: PhraseRoleId,
+        display_name: impl Into<String>,
+        sort_order: u16,
+        archived: bool,
+        color_rgb: u32,
+    ) -> Result<Self, PhraseRoleCatalogError> {
         let display_name = validated_display_name(display_name.into())?;
         if sort_order == 0 {
             return Err(PhraseRoleCatalogError::InvalidSortOrder);
+        }
+        if color_rgb > 0xFF_FF_FF {
+            return Err(PhraseRoleCatalogError::InvalidColor);
         }
         Ok(Self {
             id,
             display_name,
             sort_order,
             archived,
+            color_rgb,
         })
     }
 
@@ -53,30 +70,48 @@ impl PhraseRole {
         self.archived
     }
 
+    #[must_use]
+    pub const fn color_rgb(&self) -> u32 {
+        self.color_rgb
+    }
+
     fn with_display_name(&self, display_name: String) -> Result<Self, PhraseRoleCatalogError> {
-        Self::try_new(
+        Self::try_new_with_color_rgb(
             self.id.clone(),
             display_name,
             self.sort_order,
             self.archived,
+            self.color_rgb,
         )
     }
 
     fn with_sort_order(&self, sort_order: u16) -> Result<Self, PhraseRoleCatalogError> {
-        Self::try_new(
+        Self::try_new_with_color_rgb(
             self.id.clone(),
             self.display_name.clone(),
             sort_order,
             self.archived,
+            self.color_rgb,
         )
     }
 
     fn with_archived(&self, archived: bool) -> Result<Self, PhraseRoleCatalogError> {
-        Self::try_new(
+        Self::try_new_with_color_rgb(
             self.id.clone(),
             self.display_name.clone(),
             self.sort_order,
             archived,
+            self.color_rgb,
+        )
+    }
+
+    fn with_color_rgb(&self, color_rgb: u32) -> Result<Self, PhraseRoleCatalogError> {
+        Self::try_new_with_color_rgb(
+            self.id.clone(),
+            self.display_name.clone(),
+            self.sort_order,
+            self.archived,
+            color_rgb,
         )
     }
 }
@@ -290,6 +325,20 @@ impl PhraseRoleCatalog {
         self.revised(roles, self.mappings.clone())
     }
 
+    pub fn set_color_rgb(
+        &self,
+        role_id: &PhraseRoleId,
+        color_rgb: u32,
+    ) -> Result<Self, PhraseRoleCatalogError> {
+        let index = self.role_index(role_id)?;
+        if self.roles[index].color_rgb() == color_rgb {
+            return Err(PhraseRoleCatalogError::NoChange);
+        }
+        let mut roles = self.roles.clone();
+        roles[index] = roles[index].with_color_rgb(color_rgb)?;
+        self.revised(roles, self.mappings.clone())
+    }
+
     pub fn upsert_mapping(
         &self,
         mapping: SourcePhraseMapping,
@@ -463,6 +512,7 @@ pub enum PhraseRoleCatalogError {
     DuplicateDisplayName,
     DuplicateRoleId,
     InvalidSortOrder,
+    InvalidColor,
     NoActiveRoles,
     UnknownRole,
     EmptyProviderKind,
@@ -486,6 +536,7 @@ impl std::fmt::Display for PhraseRoleCatalogError {
             Self::DuplicateDisplayName => "phrase-role display names must be unique",
             Self::DuplicateRoleId => "phrase-role IDs must be unique",
             Self::InvalidSortOrder => "phrase-role ordering must be contiguous and start at one",
+            Self::InvalidColor => "phrase-role color must be a 24-bit sRGB value",
             Self::NoActiveRoles => "at least one phrase role must remain active",
             Self::UnknownRole => "phrase role does not exist",
             Self::EmptyProviderKind => "source provider kind may not be empty",
@@ -498,6 +549,20 @@ impl std::fmt::Display for PhraseRoleCatalogError {
             Self::IdentifierOverflow => "phrase-role identifier could not be generated",
             Self::ArithmeticOverflow => "phrase-role catalog arithmetic overflow",
         })
+    }
+}
+
+#[must_use]
+pub fn default_phrase_role_color_rgb(role_id: &str) -> u32 {
+    match role_id {
+        "intro-outro" | "intro" | "outro" => 0x408CF2,
+        "bridge" => 0x5E6BC7,
+        "breakdown-1" | "breakdown-2" | "breakdown-3" | "breakdown" => 0x7A47D4,
+        "synth" => 0xD13DB8,
+        "pre-drop" => 0xF27433,
+        "buildup-1" | "buildup-2" | "buildup-3" | "build" => 0xF5A81F,
+        "drop" => 0xEB3342,
+        _ => DEFAULT_CUSTOM_PHRASE_ROLE_COLOR_RGB,
     }
 }
 

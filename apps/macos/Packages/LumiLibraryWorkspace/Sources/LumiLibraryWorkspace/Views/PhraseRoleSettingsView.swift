@@ -1,3 +1,4 @@
+import AppKit
 import Foundation
 import LumiDesignSystem
 import SwiftUI
@@ -31,6 +32,7 @@ public struct PhraseRoleSettingsView: View {
     @State private var section: PhraseRoleSettingsSection
     @State private var selectedRoleID: String?
     @State private var renameDraft = ""
+    @State private var colorDraftRGB: UInt32
     @State private var newRoleName = ""
     @State private var showsAddRole = false
 
@@ -70,6 +72,10 @@ public struct PhraseRoleSettingsView: View {
         _section = State(initialValue: initialSection)
         _selectedRoleID = State(initialValue: settings?.roles.first?.id)
         _renameDraft = State(initialValue: settings?.roles.first?.name ?? "")
+        _colorDraftRGB = State(
+            initialValue: settings?.roles.first?.colorRGB
+                ?? LumiPhraseColorPalette.fallbackRGB
+        )
     }
 
     public var body: some View {
@@ -328,11 +334,16 @@ public struct PhraseRoleSettingsView: View {
             Button {
                 selectedRoleID = role.id
                 renameDraft = role.name
+                colorDraftRGB = role.colorRGB
             } label: {
                 HStack(spacing: LumiSpacing.medium) {
                     Image(systemName: role.archived ? "archivebox.fill" : "circle.fill")
                         .font(.system(size: role.archived ? 12 : 7))
-                        .foregroundStyle(role.archived ? LumiColor.textSecondary : LumiColor.accent)
+                        .foregroundStyle(
+                            role.archived
+                                ? LumiColor.textSecondary
+                                : settingsColorPalette.color(for: role.id)
+                        )
                         .frame(width: 18)
                     VStack(alignment: .leading, spacing: 2) {
                         Text(role.name)
@@ -398,6 +409,49 @@ public struct PhraseRoleSettingsView: View {
                     } else {
                         staticControl(role.name)
                     }
+
+                    Divider()
+                    Text("Phrase Color")
+                        .font(LumiTypography.caption.weight(.semibold))
+                        .foregroundStyle(LumiColor.textSecondary)
+                    HStack(spacing: LumiSpacing.medium) {
+                        RoundedRectangle(cornerRadius: LumiRadius.compact)
+                            .fill(colorDraft)
+                            .frame(width: 46, height: 32)
+                            .overlay {
+                                RoundedRectangle(cornerRadius: LumiRadius.compact)
+                                    .stroke(Color.white.opacity(0.24), lineWidth: 1)
+                            }
+                        if rendersInteractiveControls {
+                            ColorPicker(
+                                "Choose phrase color",
+                                selection: Binding(
+                                    get: { colorDraft },
+                                    set: { colorDraftRGB = Self.rgb24($0) }
+                                ),
+                                supportsOpacity: false
+                            )
+                            .labelsHidden()
+                            .accessibilityIdentifier("lumi.settings.role.color")
+                            Text(hexColor(colorDraftRGB))
+                                .font(LumiTypography.technical)
+                                .foregroundStyle(LumiColor.textSecondary)
+                            Spacer()
+                            Button("Save Color") {
+                                onMutation(.setColor(roleID: role.id, colorRGB: colorDraftRGB))
+                            }
+                            .disabled(colorDraftRGB == role.colorRGB)
+                            .accessibilityIdentifier("lumi.settings.role.color.save")
+                        } else {
+                            Text(hexColor(role.colorRGB))
+                                .font(LumiTypography.technical)
+                                .foregroundStyle(LumiColor.textSecondary)
+                            Spacer()
+                        }
+                    }
+                    Text("Used consistently in the Editor, Live Decks, Light Plans and MIDI mappings.")
+                        .font(LumiTypography.metadata)
+                        .foregroundStyle(LumiColor.textSecondary)
 
                     HStack {
                         Button {
@@ -559,12 +613,35 @@ public struct PhraseRoleSettingsView: View {
         LibraryWorkspaceLocalization.value(key)
     }
 
+    private var settingsColorPalette: LumiPhraseColorPalette {
+        settings?.colorPalette ?? .defaults
+    }
+
+    private var colorDraft: Color {
+        LumiPhraseColorPalette(roleColors: ["draft": colorDraftRGB]).color(for: "draft")
+    }
+
+    private func hexColor(_ rgb: UInt32) -> String {
+        String(format: "#%06X", rgb)
+    }
+
+    private static func rgb24(_ color: Color) -> UInt32 {
+        guard let converted = NSColor(color).usingColorSpace(.sRGB) else {
+            return LumiPhraseColorPalette.fallbackRGB
+        }
+        let red = UInt32((converted.redComponent * 255).rounded())
+        let green = UInt32((converted.greenComponent * 255).rounded())
+        let blue = UInt32((converted.blueComponent * 255).rounded())
+        return (red << 16) | (green << 8) | blue
+    }
+
     private func synchronizeSelection() {
         guard let settings else { return }
-        if !settings.roles.contains(where: { $0.id == selectedRoleID }),
-           let first = settings.roles.first {
-            selectedRoleID = first.id
-            renameDraft = first.name
-        }
+        let selected = settings.roles.first(where: { $0.id == selectedRoleID })
+            ?? settings.roles.first
+        guard let selected else { return }
+        selectedRoleID = selected.id
+        renameDraft = selected.name
+        colorDraftRGB = selected.colorRGB
     }
 }

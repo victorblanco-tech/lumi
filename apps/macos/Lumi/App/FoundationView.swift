@@ -50,6 +50,7 @@ struct FoundationView: View {
                         localPlaybackWaveforms: engineStatus.localPlaybackWaveforms,
                         localPlaybackFeedback: engineStatus.localPlaybackFeedback,
                         localPlaybackFeedbackIsError: engineStatus.localPlaybackFeedbackIsError,
+                        phraseColorPalette: engineStatus.libraryState.phraseRoleSettings?.colorPalette ?? .defaults,
                         onPlanMutation: { request in
                             Task { await engineStatus.mutatePlan(request) }
                         },

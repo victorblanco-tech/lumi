@@ -78,6 +78,9 @@ public struct LightPlansWorkspaceView: View {
     }
 
     private var catalog: AutoloopCatalogState? { library.autoloopCatalog }
+    private var phraseColorPalette: LumiPhraseColorPalette {
+        library.phraseRoleSettings?.colorPalette ?? .defaults
+    }
     private var activeRoles: [AutoloopRoleMatrixState] {
         catalog?.roles.filter { !$0.archived } ?? []
     }
@@ -228,6 +231,9 @@ public struct LightPlansWorkspaceView: View {
                         selectedRoleID = role.id
                     } label: {
                         HStack {
+                            Circle()
+                                .fill(phraseColorPalette.color(for: role.id))
+                                .frame(width: 8, height: 8)
                             Text(role.name)
                             Spacer()
                             Text("\(mappedCandidateCount(role))")
@@ -524,6 +530,9 @@ public struct LightPlansWorkspaceView: View {
         return HStack(spacing: LumiSpacing.medium) {
             Text("\(phrase.startBeat)–\(phrase.endBeat)")
                 .font(LumiTypography.technical).frame(width: 90, alignment: .leading)
+            Circle()
+                .fill(phraseColorPalette.color(for: phrase.roleID))
+                .frame(width: 8, height: 8)
             Text(phrase.roleName).frame(width: 160, alignment: .leading)
             Image(systemName: "arrow.right").foregroundStyle(LumiColor.textSecondary)
             VStack(alignment: .leading, spacing: 2) {

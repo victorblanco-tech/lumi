@@ -1524,6 +1524,8 @@ final class EngineStatusModel: ObservableObject {
             .archive(roleID: roleID)
         case let .restore(roleID):
             .restore(roleID: roleID)
+        case let .setColor(roleID, colorRGB):
+            .setColor(roleID: roleID, colorRGB: colorRGB)
         case let .setSourceMapping(providerKind, rawLabel, roleID):
             .setSourceMapping(providerKind: providerKind, rawLabel: rawLabel, roleID: roleID)
         }

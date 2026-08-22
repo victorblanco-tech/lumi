@@ -33,9 +33,9 @@ pub use mirror::{
     SourceMirrorTrack, SourceMirrorValidationError,
 };
 pub use phrase_roles::{
-    PHRASE_ROLE_DEFAULTS_VERSION, PhraseRole, PhraseRoleCatalog, PhraseRoleCatalogError,
-    PhraseRoleMove, PhraseRoleTrackUsage, PhraseRoleUsage, SourcePhraseMapping,
-    normalize_source_label,
+    DEFAULT_CUSTOM_PHRASE_ROLE_COLOR_RGB, PHRASE_ROLE_DEFAULTS_VERSION, PhraseRole,
+    PhraseRoleCatalog, PhraseRoleCatalogError, PhraseRoleMove, PhraseRoleTrackUsage,
+    PhraseRoleUsage, SourcePhraseMapping, default_phrase_role_color_rgb, normalize_source_label,
 };
 pub use reconciliation::{
     PhraseConflict, PhraseConflictChoice, ReconcileError, ReconcilePreview, ReconcileSide,

@@ -614,17 +614,24 @@ public struct LibrarySnapshotDecoder: Sendable {
             guard case let .object(role) = value else {
                 throw LibrarySnapshotError.invalidObject
             }
+            let roleID = try string(role, "id")
             let usage = try object(role, "usage")
             let affectedTrackValues = try array(usage, "affectedTracks")
             guard affectedTrackValues.count <= 100 else {
                 throw LibrarySnapshotError.unboundedPhraseRoleSettings
             }
             return PhraseRoleDefinition(
-                id: try string(role, "id"),
+                id: roleID,
                 name: try string(role, "name"),
                 sortOrder: try UInt16(exactly: unsigned(role, "sortOrder"))
                     .required(.invalidNumber("phraseRole.sortOrder")),
                 archived: try boolean(role, "archived"),
+                colorRGB: try optionalUnsigned(role, "colorRgb")
+                    .map {
+                        try UInt32(exactly: $0)
+                            .required(.invalidNumber("phraseRole.colorRgb"))
+                    }
+                    ?? LumiPhraseColorPalette.defaults.rgb(for: roleID),
                 usage: PhraseRoleUsage(
                     phraseCount: try unsigned(usage, "phraseCount"),
                     trackCount: try unsigned(usage, "trackCount"),

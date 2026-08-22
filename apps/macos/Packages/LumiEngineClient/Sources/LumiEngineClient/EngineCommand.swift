@@ -152,6 +152,7 @@ public enum EnginePhraseRoleMutation: Equatable, Sendable {
     case moveLater(roleID: String)
     case archive(roleID: String)
     case restore(roleID: String)
+    case setColor(roleID: String, colorRGB: UInt32)
     case setSourceMapping(providerKind: String, rawLabel: String, roleID: String)
 
     fileprivate var payload: [String: JSONValue] {
@@ -172,6 +173,12 @@ public enum EnginePhraseRoleMutation: Equatable, Sendable {
             rolePayload("archive", roleID: roleID)
         case let .restore(roleID):
             rolePayload("restore", roleID: roleID)
+        case let .setColor(roleID, colorRGB):
+            [
+                "operation": .string("setColor"),
+                "roleId": .string(roleID),
+                "colorRgb": .number(Double(colorRGB))
+            ]
         case let .setSourceMapping(providerKind, rawLabel, roleID):
             [
                 "operation": .string("setSourceMapping"),

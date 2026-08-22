@@ -25,7 +25,7 @@ use rusqlite::backup::Backup;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Row, Transaction, params};
 use thiserror::Error;
 
-const SCHEMA_VERSION: u32 = 14;
+const SCHEMA_VERSION: u32 = 15;
 const DEFAULTS_VERSION_KEY: &str = "phrase-role-defaults-version";
 const CATALOG_REVISION_KEY: &str = "phrase-role-catalog-revision";
 const AUTOLOOP_DEFAULTS_VERSION_KEY: &str = "autoloop-catalog-defaults-version";
@@ -2420,6 +2420,39 @@ impl SqliteLibraryRepository {
                 COMMIT;
                 ",
             )?;
+            current = 14;
+        }
+        if current == 14 {
+            self.connection
+                .execute_batch(if self.table_exists("phrase_roles")? {
+                    "
+                BEGIN IMMEDIATE;
+                ALTER TABLE phrase_roles
+                    ADD COLUMN color_rgb INTEGER NOT NULL DEFAULT 3386777
+                    CHECK(color_rgb BETWEEN 0 AND 16777215);
+                UPDATE phrase_roles SET color_rgb = CASE role_id
+                    WHEN 'intro-outro' THEN 4230386
+                    WHEN 'bridge' THEN 6187975
+                    WHEN 'breakdown-1' THEN 8013780
+                    WHEN 'breakdown-2' THEN 8013780
+                    WHEN 'breakdown-3' THEN 8013780
+                    WHEN 'synth' THEN 13712824
+                    WHEN 'pre-drop' THEN 15889459
+                    WHEN 'buildup-1' THEN 16099359
+                    WHEN 'buildup-2' THEN 16099359
+                    WHEN 'buildup-3' THEN 16099359
+                    WHEN 'drop' THEN 15414082
+                    ELSE 3386777
+                END;
+                PRAGMA user_version = 15;
+                COMMIT;
+                "
+                } else {
+                    // Some deliberately minimal legacy fixtures contain only the
+                    // timeline tables. Keep those migrations valid without
+                    // weakening the production schema created for a full library.
+                    "PRAGMA user_version = 15;"
+                })?;
         }
         Ok(())
     }
@@ -3481,17 +3514,18 @@ impl LibraryRepository for SqliteLibraryRepository {
         let defaults_version = u16::try_from(setting_u64(&self.connection, DEFAULTS_VERSION_KEY)?)
             .map_err(|_| SqliteLibraryError::ArithmeticOverflow)?;
         let mut statement = self.connection.prepare(
-            "SELECT role_id, display_name, sort_order, archived
+            "SELECT role_id, display_name, sort_order, archived, color_rgb
              FROM phrase_roles ORDER BY sort_order, display_name COLLATE NOCASE, role_id",
         )?;
         let mut rows = statement.query([])?;
         let mut roles = Vec::new();
         while let Some(row) = rows.next()? {
-            roles.push(PhraseRole::try_new(
+            roles.push(PhraseRole::try_new_with_color_rgb(
                 PhraseRoleId::try_new(row.get::<_, String>(0)?)?,
                 row.get::<_, String>(1)?,
                 to_u16(row.get(2)?, "phrase role sort order")?,
                 row.get(3)?,
+                to_u32(row.get(4)?, "phrase role color")?,
             )?);
         }
         let mut statement = self.connection.prepare(
@@ -3956,17 +3990,19 @@ fn upsert_phrase_role(
     role: &PhraseRole,
 ) -> Result<(), SqliteLibraryError> {
     transaction.execute(
-        "INSERT INTO phrase_roles(role_id, display_name, sort_order, archived)
-         VALUES (?1, ?2, ?3, ?4)
+        "INSERT INTO phrase_roles(role_id, display_name, sort_order, archived, color_rgb)
+         VALUES (?1, ?2, ?3, ?4, ?5)
          ON CONFLICT(role_id) DO UPDATE SET
            display_name = excluded.display_name,
            sort_order = excluded.sort_order,
-           archived = excluded.archived",
+           archived = excluded.archived,
+           color_rgb = excluded.color_rgb",
         params![
             role.id().as_str(),
             role.display_name(),
             i64::from(role.sort_order()),
             role.is_archived(),
+            i64::from(role.color_rgb()),
         ],
     )?;
     Ok(())
@@ -6230,7 +6266,7 @@ mod fault_tests {
         let schema: u32 = repository
             .connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))?;
-        assert_eq!(schema, 14);
+        assert_eq!(schema, 15);
         Ok(())
     }
 }

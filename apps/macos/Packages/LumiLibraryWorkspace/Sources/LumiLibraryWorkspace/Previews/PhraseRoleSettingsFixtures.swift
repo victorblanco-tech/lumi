@@ -1,3 +1,5 @@
+import LumiDesignSystem
+
 public enum PhraseRoleSettingsFixtures {
     public static func ready() -> PhraseRoleSettingsState {
         let definitions: [(String, String, UInt64, UInt64)] = [
@@ -20,6 +22,7 @@ public enum PhraseRoleSettingsFixtures {
                 name: name,
                 sortOrder: UInt16(index + 1),
                 archived: false,
+                colorRGB: LumiPhraseColorPalette.defaults.rgb(for: id),
                 usage: PhraseRoleUsage(
                     phraseCount: phraseCount,
                     trackCount: trackCount,

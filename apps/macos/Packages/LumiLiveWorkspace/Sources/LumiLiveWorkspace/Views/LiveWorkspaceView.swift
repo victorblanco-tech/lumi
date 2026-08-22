@@ -17,6 +17,7 @@ public struct LiveWorkspaceView: View {
     private let localPlaybackWaveforms: [UInt64: DeckWaveformPreviewSnapshot]
     private let localPlaybackFeedback: String?
     private let localPlaybackFeedbackIsError: Bool
+    private let phraseColorPalette: LumiPhraseColorPalette
     @Binding private var appearance: AppearancePreference
     @Binding private var keyNotation: KeyNotationPreference
     @Binding private var lightingTimingOffsetMillis: Int
@@ -39,6 +40,7 @@ public struct LiveWorkspaceView: View {
         localPlaybackWaveforms: [UInt64: DeckWaveformPreviewSnapshot] = [:],
         localPlaybackFeedback: String? = nil,
         localPlaybackFeedbackIsError: Bool = false,
+        phraseColorPalette: LumiPhraseColorPalette = .defaults,
         onPlanMutation: @escaping @MainActor (PlanMutationRequest) -> Void = { _ in },
         onSessionCommand: @escaping @MainActor (SessionCommandRequest) -> Void = { _ in },
         onLocalPlayback: @escaping @MainActor (LocalPlaybackRequest) -> Void = { _ in },
@@ -53,6 +55,7 @@ public struct LiveWorkspaceView: View {
         self.localPlaybackWaveforms = localPlaybackWaveforms
         self.localPlaybackFeedback = localPlaybackFeedback
         self.localPlaybackFeedbackIsError = localPlaybackFeedbackIsError
+        self.phraseColorPalette = phraseColorPalette
         self.onPlanMutation = onPlanMutation
         self.onSessionCommand = onSessionCommand
         self.onLocalPlayback = onLocalPlayback
@@ -578,6 +581,7 @@ public struct LiveWorkspaceView: View {
                                     waveformOverride: localPlaybackWaveforms[deck.deckID],
                                     lightingTimingOffsetMillis: content.lightingTimingOffsetMillis,
                                     pendingLightingTimingOffsetMillis: content.pendingLightingTimingOffsetMillis,
+                                    phraseColorPalette: phraseColorPalette,
                                     selectedPhraseIndex: selectedIndex,
                                     onSelectPhrase: { phraseIndex in
                                         if isMaster {
@@ -1253,7 +1257,7 @@ private struct PlanSelectionControl: View {
 #Preview("Ready · Dark") {
     LiveWorkspaceView(
         state: LiveWorkspaceFixtures.ready,
-        productVersion: "0.5.0-dev-11",
+        productVersion: "0.5.0-dev-12",
         appearance: .constant(.dark),
         keyNotation: .constant(.camelot)
     )
@@ -1264,7 +1268,7 @@ private struct PlanSelectionControl: View {
 #Preview("Fallback · Light") {
     LiveWorkspaceView(
         state: LiveWorkspaceFixtures.fallback,
-        productVersion: "0.5.0-dev-11",
+        productVersion: "0.5.0-dev-12",
         appearance: .constant(.light),
         keyNotation: .constant(.classic)
     )

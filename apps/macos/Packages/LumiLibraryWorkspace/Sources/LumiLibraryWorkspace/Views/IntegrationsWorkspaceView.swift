@@ -148,6 +148,7 @@ public struct IntegrationsWorkspaceView: View {
                 midiClockIntegration: library.midiClockIntegration,
                 abletonLinkIntegration: library.abletonLinkIntegration,
                 lightPlanningPolicy: lightPlanningPolicy,
+                phraseColorPalette: library.phraseRoleSettings?.colorPalette ?? .defaults,
                 feedback: autoloopFeedback,
                 midiIntegrationFeedback: midiIntegrationFeedback,
                 lightPlanningFeedback: lightPlanningFeedback,

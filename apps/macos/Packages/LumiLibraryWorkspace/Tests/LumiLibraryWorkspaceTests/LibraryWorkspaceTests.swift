@@ -845,6 +845,8 @@ struct LibraryWorkspaceTests {
         let settings = try #require(state.phraseRoleSettings)
         #expect(settings.revision == 4)
         #expect(settings.roles.map(\.id) == ["intro-outro", "synth"])
+        #expect(settings.roles.map(\.colorRGB) == [0x408CF2, 0x1234AB])
+        #expect(settings.colorPalette.rgb(for: "synth") == 0x1234AB)
         #expect(settings.roles[1].usage.trackCount == 1)
         #expect(settings.roles[1].usage.affectedTracks.first?.title == "Northern Pulse")
         #expect(settings.mappingProfiles.first?.providerKind == "rekordbox7")
@@ -1630,6 +1632,7 @@ private func phraseRoleSettingsValue() -> JSONValue {
             .object([
                 "id": .string("intro-outro"),
                 "name": .string("Intro / Outro"),
+                "colorRgb": .number(0x408CF2),
                 "sortOrder": .number(1),
                 "archived": .boolean(false),
                 "usage": .object([
@@ -1643,6 +1646,7 @@ private func phraseRoleSettingsValue() -> JSONValue {
             .object([
                 "id": .string("synth"),
                 "name": .string("Synth"),
+                "colorRgb": .number(0x1234AB),
                 "sortOrder": .number(2),
                 "archived": .boolean(false),
                 "usage": .object([

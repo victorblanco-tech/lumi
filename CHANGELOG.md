@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.5.0-dev-12 - 2026-08-22
+
+### Added
+
+- Adds a revisioned Phrase Color picker to `Settings > Phrase Model`.
+- Uses the same authoritative role color in Track Editor, Live Decks, Light
+  Plans, SoundSwitch Banks & AutoLoops and the Virtual Controller.
+
+### Safety
+
+- Migrates existing Phrase Roles to schema v15 without changing timelines,
+  plans or lighting-output mappings.
+- Keeps phrase colors out of the realtime planning and output paths.
+
 ## 0.5.0-dev-11 - 2026-08-22
 
 ### Fixed

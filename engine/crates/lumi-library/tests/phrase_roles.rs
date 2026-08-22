@@ -62,6 +62,23 @@ fn custom_ids_are_stable_and_never_derived_from_a_rename() -> Result<(), Box<dyn
 }
 
 #[test]
+fn phrase_colors_are_24_bit_revisioned_and_preserved_by_other_mutations()
+-> Result<(), Box<dyn std::error::Error>> {
+    let catalog = catalog()?;
+    assert_eq!(catalog.roles()[0].color_rgb(), 0x408CF2);
+
+    let recolored = catalog.set_color_rgb(&PhraseRoleId::try_new("intro-outro")?, 0x12ABEF)?;
+    let renamed = recolored.rename_role(&PhraseRoleId::try_new("intro-outro")?, "Opening")?;
+    assert_eq!(renamed.revision(), 3);
+    assert_eq!(renamed.roles()[0].color_rgb(), 0x12ABEF);
+    assert_eq!(
+        catalog.set_color_rgb(&PhraseRoleId::try_new("intro-outro")?, 0x1_00_00_00),
+        Err(PhraseRoleCatalogError::InvalidColor)
+    );
+    Ok(())
+}
+
+#[test]
 fn archive_is_reversible_and_cannot_remove_the_last_active_role()
 -> Result<(), Box<dyn std::error::Error>> {
     let first = catalog()?.set_archived(&PhraseRoleId::try_new("intro-outro")?, true)?;

@@ -13,6 +13,8 @@ timeline references.
   never derived from the display name;
 - display names are non-empty, bounded, and unique case-insensitively;
 - ordering is contiguous and independent from identity;
+- every role owns one revisioned 24-bit sRGB color used by every phrase-aware
+  Lumi surface;
 - at least one role remains active;
 - archiving is reversible and never deletes an ID, timeline reference, mapping,
   or future matrix reference;
@@ -44,12 +46,14 @@ silently assigning it.
 
 Phrase-role management was introduced by SQLite schema v3, which added
 `library_settings` for the one-time defaults marker and catalog revision plus
-`source_phrase_mappings`. The current schema is v4. Role and mapping changes
+`source_phrase_mappings`. Schema v15 adds the role-owned `color_rgb` value and
+migrates every built-in role to the accepted palette. Role, color and mapping changes
 are written in one optimistic-concurrency transaction. The Rust engine remains
-the single writer; Swift submits typed add, rename, move, archive/restore, and
-mapping commands and renders only the returned authoritative snapshot.
+the single writer; Swift submits typed add, rename, move, archive/restore,
+color and mapping commands and renders only the returned authoritative
+snapshot. See ADR-0036.
 
 Verification covers domain invariants, v2→v3 migration, persistence and
-restart, stale revisions, usage diagnostics, future-only initialization,
+restart, color persistence, stale revisions, usage diagnostics, future-only initialization,
 Swift decoding, real Swift↔Rust process commands, dark/light visual evidence,
 and the exact Terminal-built macOS app.

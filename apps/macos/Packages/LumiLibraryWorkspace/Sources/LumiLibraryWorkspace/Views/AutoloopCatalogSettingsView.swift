@@ -15,6 +15,7 @@ public struct AutoloopCatalogSettingsView: View {
     private let midiClockIntegration: MidiClockIntegrationState?
     private let abletonLinkIntegration: AbletonLinkIntegrationState?
     private let lightPlanningPolicy: LightPlanningPolicyState
+    private let phraseColorPalette: LumiPhraseColorPalette
     private let profile = SoundSwitchOutputProfileState.builtIn
     private let feedback: String?
     private let midiIntegrationFeedback: String?
@@ -41,6 +42,7 @@ public struct AutoloopCatalogSettingsView: View {
         midiClockIntegration: MidiClockIntegrationState? = nil,
         abletonLinkIntegration: AbletonLinkIntegrationState? = nil,
         lightPlanningPolicy: LightPlanningPolicyState = .init(),
+        phraseColorPalette: LumiPhraseColorPalette = .defaults,
         feedback: String? = nil,
         midiIntegrationFeedback: String? = nil,
         lightPlanningFeedback: String? = nil,
@@ -58,6 +60,7 @@ public struct AutoloopCatalogSettingsView: View {
         self.midiClockIntegration = midiClockIntegration
         self.abletonLinkIntegration = abletonLinkIntegration
         self.lightPlanningPolicy = lightPlanningPolicy
+        self.phraseColorPalette = phraseColorPalette
         self.feedback = feedback
         self.midiIntegrationFeedback = midiIntegrationFeedback
         self.lightPlanningFeedback = lightPlanningFeedback
@@ -834,28 +837,7 @@ public struct AutoloopCatalogSettingsView: View {
 
     private func phraseRoleColor(_ roleID: String?) -> Color {
         guard let roleID else { return LumiColor.textSecondary }
-        if roleID == "intro-outro" {
-            return Color(red: 0.25, green: 0.55, blue: 0.95)
-        }
-        if roleID == "bridge" {
-            return Color(red: 0.37, green: 0.42, blue: 0.78)
-        }
-        if roleID.hasPrefix("breakdown") {
-            return Color(red: 0.48, green: 0.28, blue: 0.83)
-        }
-        if roleID == "synth" {
-            return Color(red: 0.82, green: 0.24, blue: 0.72)
-        }
-        if roleID == "pre-drop" {
-            return Color(red: 0.95, green: 0.46, blue: 0.20)
-        }
-        if roleID.hasPrefix("buildup") {
-            return Color(red: 0.20, green: 0.78, blue: 0.36)
-        }
-        if roleID == "drop" {
-            return Color(red: 0.92, green: 0.20, blue: 0.26)
-        }
-        return Color(red: 0.20, green: 0.68, blue: 0.60)
+        return phraseColorPalette.color(for: roleID)
     }
 
     private func selectBank(_ bank: AutoloopThemeState, catalog: AutoloopCatalogState) {

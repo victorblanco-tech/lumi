@@ -605,6 +605,10 @@ pub enum PhraseRoleCatalogMutation {
         role_id: PhraseRoleId,
         archived: bool,
     },
+    SetColor {
+        role_id: PhraseRoleId,
+        color_rgb: u32,
+    },
     SetSourceMapping {
         provider_kind: String,
         raw_label: String,
@@ -2059,6 +2063,9 @@ impl LibraryWorker {
             PhraseRoleCatalogMutation::SetArchived { role_id, archived } => {
                 catalog.set_archived(&role_id, archived)?
             }
+            PhraseRoleCatalogMutation::SetColor { role_id, color_rgb } => {
+                catalog.set_color_rgb(&role_id, color_rgb)?
+            }
             PhraseRoleCatalogMutation::SetSourceMapping {
                 provider_kind,
                 raw_label,
@@ -2785,6 +2792,7 @@ impl LibraryWorker {
                     "name": role.display_name(),
                     "sortOrder": role.sort_order(),
                     "archived": role.is_archived(),
+                    "colorRgb": role.color_rgb(),
                     "usage": {
                         "phraseCount": usage.map_or(0, |value| value.phrase_count()),
                         "trackCount": affected_tracks.len(),
@@ -2837,6 +2845,7 @@ impl LibraryWorker {
                 "id": role.id().as_str(),
                 "name": role.display_name(),
                 "archived": role.is_archived(),
+                "colorRgb": role.color_rgb(),
                 "variants": catalog.variants().iter()
                     .filter(|variant| variant.role_id() == role.id())
                     .map(|variant| json!({

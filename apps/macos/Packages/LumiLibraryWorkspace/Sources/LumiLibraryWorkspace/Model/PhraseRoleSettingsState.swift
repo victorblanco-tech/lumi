@@ -39,6 +39,7 @@ public struct PhraseRoleDefinition: Identifiable, Equatable, Sendable {
     public let name: String
     public let sortOrder: UInt16
     public let archived: Bool
+    public let colorRGB: UInt32
     public let usage: PhraseRoleUsage
 
     public init(
@@ -46,12 +47,14 @@ public struct PhraseRoleDefinition: Identifiable, Equatable, Sendable {
         name: String,
         sortOrder: UInt16,
         archived: Bool,
+        colorRGB: UInt32,
         usage: PhraseRoleUsage
     ) {
         self.id = id
         self.name = name
         self.sortOrder = sortOrder
         self.archived = archived
+        self.colorRGB = colorRGB
         self.usage = usage
     }
 }
@@ -115,5 +118,6 @@ public enum PhraseRoleMutationRequest: Equatable, Sendable {
     case moveLater(roleID: String)
     case archive(roleID: String)
     case restore(roleID: String)
+    case setColor(roleID: String, colorRGB: UInt32)
     case setSourceMapping(providerKind: String, rawLabel: String, roleID: String)
 }

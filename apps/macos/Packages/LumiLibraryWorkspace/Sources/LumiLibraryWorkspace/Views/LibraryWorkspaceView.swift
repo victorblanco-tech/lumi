@@ -90,6 +90,7 @@ public struct LibraryWorkspaceView: View {
                         TrackLightingEditorView(
                             analysis: analysis,
                             autoloopCatalog: state.autoloopCatalog,
+                            phraseColorPalette: state.phraseRoleSettings?.colorPalette ?? .defaults,
                             keyNotation: keyNotation,
                             feedback: timelineFeedback,
                             isEmbedded: true,

@@ -14,6 +14,7 @@ struct LiveDeckSurface<Details: View>: View {
     let waveformOverride: DeckWaveformPreviewSnapshot?
     let lightingTimingOffsetMillis: Int
     let pendingLightingTimingOffsetMillis: Int?
+    let phraseColorPalette: LumiPhraseColorPalette
     let selectedPhraseIndex: UInt64?
     let onSelectPhrase: (UInt64) -> Void
     let onTogglePlayback: () -> Void
@@ -42,6 +43,7 @@ struct LiveDeckSurface<Details: View>: View {
         waveformOverride: DeckWaveformPreviewSnapshot? = nil,
         lightingTimingOffsetMillis: Int = 0,
         pendingLightingTimingOffsetMillis: Int? = nil,
+        phraseColorPalette: LumiPhraseColorPalette = .defaults,
         selectedPhraseIndex: UInt64?,
         onSelectPhrase: @escaping (UInt64) -> Void,
         onTogglePlayback: @escaping () -> Void = {},
@@ -60,6 +62,7 @@ struct LiveDeckSurface<Details: View>: View {
         self.waveformOverride = waveformOverride
         self.lightingTimingOffsetMillis = lightingTimingOffsetMillis
         self.pendingLightingTimingOffsetMillis = pendingLightingTimingOffsetMillis
+        self.phraseColorPalette = phraseColorPalette
         self.selectedPhraseIndex = selectedPhraseIndex
         self.onSelectPhrase = onSelectPhrase
         self.onTogglePlayback = onTogglePlayback
@@ -609,6 +612,7 @@ struct LiveDeckSurface<Details: View>: View {
                 renderingViewport: renderingViewport
             ),
             segments: segments,
+            phraseColorPalette: phraseColorPalette,
             onSelectPhrase: onSelectPhrase
         )
         .frame(height: 28)
@@ -691,6 +695,7 @@ struct LiveDeckSurface<Details: View>: View {
                 renderingViewport: renderingViewport
             ),
             segments: segments,
+            phraseColorPalette: phraseColorPalette,
             onSelectPhrase: onSelectPhrase
         )
         .frame(height: 82)
@@ -1029,6 +1034,7 @@ private struct LivePlanLayerView: NSViewRepresentable {
     let style: LivePlanLayerStyle
     let motion: LiveWaveformMotionPlan
     let segments: [LivePlanLayerSegment]
+    let phraseColorPalette: LumiPhraseColorPalette
     let onSelectPhrase: (UInt64) -> Void
 
     func makeNSView(context: Context) -> LivePlanLayerHostView {
@@ -1040,6 +1046,7 @@ private struct LivePlanLayerView: NSViewRepresentable {
             style: style,
             motion: motion,
             segments: segments,
+            phraseColorPalette: phraseColorPalette,
             onSelectPhrase: onSelectPhrase
         )
     }
@@ -1052,6 +1059,7 @@ private final class LivePlanLayerHostView: NSView {
     private var style: LivePlanLayerStyle = .phrases
     private var motion: LiveWaveformMotionPlan?
     private var segments: [LivePlanLayerSegment] = []
+    private var phraseColorPalette: LumiPhraseColorPalette = .defaults
     private var onSelectPhrase: ((UInt64) -> Void)?
     private var animationIdentity: LiveWaveformMotionPlan.AnimationIdentity?
     private var appliedBoundsSize = CGSize.zero
@@ -1119,17 +1127,20 @@ private final class LivePlanLayerHostView: NSView {
         style: LivePlanLayerStyle,
         motion: LiveWaveformMotionPlan,
         segments: [LivePlanLayerSegment],
+        phraseColorPalette: LumiPhraseColorPalette,
         onSelectPhrase: @escaping (UInt64) -> Void
     ) {
         let styleChanged = self.style != style
         let segmentsChanged = self.segments != segments
+        let paletteChanged = self.phraseColorPalette != phraseColorPalette
         let motionChanged = animationIdentity != motion.animationIdentity
         self.style = style
         self.motion = motion
         self.segments = segments
+        self.phraseColorPalette = phraseColorPalette
         self.onSelectPhrase = onSelectPhrase
-        segmentsNeedRebuild = segmentsNeedRebuild || styleChanged || segmentsChanged
-        guard styleChanged || segmentsChanged || motionChanged else { return }
+        segmentsNeedRebuild = segmentsNeedRebuild || styleChanged || segmentsChanged || paletteChanged
+        guard styleChanged || segmentsChanged || paletteChanged || motionChanged else { return }
         animationIdentity = motion.animationIdentity
         applyCurrentState(restartAnimation: motionChanged || styleChanged)
     }
@@ -1217,7 +1228,7 @@ private final class LivePlanLayerHostView: NSView {
 
             switch style {
             case .phrases:
-                segmentLayer.backgroundColor = roleColor(segment.roleID).cgColor
+                segmentLayer.backgroundColor = phraseColorPalette.nsColor(for: segment.roleID).cgColor
                 if width >= 28 {
                     addText(
                         (segment.locked ? "◆ " : "") + segment.phraseName,
@@ -1241,6 +1252,10 @@ private final class LivePlanLayerHostView: NSView {
                     height: segment.active ? 3 : 2
                 )
                 segmentLayer.addSublayer(topLine)
+                let phraseLine = CALayer()
+                phraseLine.backgroundColor = phraseColorPalette.nsColor(for: segment.roleID).cgColor
+                phraseLine.frame = CGRect(x: 0, y: 0, width: width, height: 2)
+                segmentLayer.addSublayer(phraseLine)
                 if width >= 22 {
                     let dot = CALayer()
                     dot.backgroundColor = statusColor.cgColor
@@ -1340,27 +1355,6 @@ private final class LivePlanLayerHostView: NSView {
 
     private var accentColor: NSColor {
         NSColor(red: 0.20, green: 0.67, blue: 0.96, alpha: 1)
-    }
-
-    private func roleColor(_ role: String) -> NSColor {
-        switch role {
-        case "intro-outro", "intro", "outro":
-            NSColor(red: 0.25, green: 0.55, blue: 0.95, alpha: 1)
-        case "bridge":
-            NSColor(red: 0.37, green: 0.42, blue: 0.78, alpha: 1)
-        case "breakdown-1", "breakdown-2", "breakdown-3", "breakdown":
-            NSColor(red: 0.48, green: 0.28, blue: 0.83, alpha: 1)
-        case "synth":
-            NSColor(red: 0.82, green: 0.24, blue: 0.72, alpha: 1)
-        case "pre-drop":
-            NSColor(red: 0.95, green: 0.46, blue: 0.20, alpha: 1)
-        case "buildup-1", "buildup-2", "buildup-3", "build":
-            NSColor(red: 0.96, green: 0.66, blue: 0.12, alpha: 1)
-        case "drop":
-            NSColor(red: 0.92, green: 0.20, blue: 0.26, alpha: 1)
-        default:
-            NSColor(red: 0.20, green: 0.68, blue: 0.60, alpha: 1)
-        }
     }
 
     private func autoloopColor(_ status: PlannedAutoloopStatus) -> NSColor {

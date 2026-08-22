@@ -754,6 +754,11 @@ fn phrase_role_mutation(
             role_id: phrase_role_id(payload)?,
             archived: false,
         }),
+        "setColor" => Ok(PhraseRoleCatalogMutation::SetColor {
+            role_id: phrase_role_id(payload)?,
+            color_rgb: u32::try_from(unsigned(payload, "colorRgb")?)
+                .map_err(|_| CommandDecodeError::InvalidField("colorRgb"))?,
+        }),
         "setSourceMapping" => Ok(PhraseRoleCatalogMutation::SetSourceMapping {
             provider_kind: string(payload, "providerKind")?.to_owned(),
             raw_label: string(payload, "rawLabel")?.to_owned(),

@@ -5,6 +5,7 @@ import SwiftUI
 public struct TrackLightingEditorView: View {
     private let analysis: TrackEditorAnalysis
     private let autoloopCatalog: AutoloopCatalogState?
+    private let phraseColorPalette: LumiPhraseColorPalette
     private let keyNotation: KeyNotationPreference
     private let feedback: String?
     private let rendersInteractiveControls: Bool
@@ -39,6 +40,7 @@ public struct TrackLightingEditorView: View {
     public init(
         analysis: TrackEditorAnalysis,
         autoloopCatalog: AutoloopCatalogState? = nil,
+        phraseColorPalette: LumiPhraseColorPalette = .defaults,
         keyNotation: KeyNotationPreference,
         feedback: String? = nil,
         rendersInteractiveControls: Bool = true,
@@ -49,6 +51,7 @@ public struct TrackLightingEditorView: View {
     ) {
         self.analysis = analysis
         self.autoloopCatalog = autoloopCatalog
+        self.phraseColorPalette = phraseColorPalette
         self.keyNotation = keyNotation
         self.feedback = feedback
         self.rendersInteractiveControls = rendersInteractiveControls
@@ -833,7 +836,7 @@ public struct TrackLightingEditorView: View {
             }
             Spacer()
             if let phrase = selectedPhrase {
-                Circle().fill(phraseColor(phrase.role)).frame(width: 9, height: 9)
+                Circle().fill(phraseColor(phrase.roleID)).frame(width: 9, height: 9)
                 Text("\(phrase.role) · beats \(phrase.startBeat + 1)–\(phrase.endBeat) · \(phrase.origin)")
             }
             if let feedback {
@@ -908,7 +911,7 @@ public struct TrackLightingEditorView: View {
             let start = viewport.x(forBeat: Double(phrase.startBeat), width: width)
             let end = viewport.x(forBeat: Double(phrase.endBeat), width: width)
             let rect = CGRect(x: start + 1, y: phraseTop, width: max(2, end - start - 2), height: 54)
-            context.fill(Path(roundedRect: rect, cornerRadius: 4), with: .color(phraseColor(phrase.role).opacity(0.74)))
+            context.fill(Path(roundedRect: rect, cornerRadius: 4), with: .color(phraseColor(phrase.roleID).opacity(0.74)))
             if phrase.id == selectedPhraseID {
                 context.stroke(Path(roundedRect: rect, cornerRadius: 4), with: .color(.white), lineWidth: 2)
             }
@@ -923,7 +926,7 @@ public struct TrackLightingEditorView: View {
                 markerLine.addLine(to: CGPoint(x: start, y: phraseTop))
                 context.stroke(
                     markerLine,
-                    with: .color(phraseColor(phrase.role).opacity(0.92)),
+                    with: .color(phraseColor(phrase.roleID).opacity(0.92)),
                     lineWidth: 1.5
                 )
                 var marker = Path()
@@ -931,7 +934,7 @@ public struct TrackLightingEditorView: View {
                 marker.addLine(to: CGPoint(x: start + 6, y: 43))
                 marker.addLine(to: CGPoint(x: start, y: 51))
                 marker.closeSubpath()
-                context.fill(marker, with: .color(phraseColor(phrase.role)))
+                context.fill(marker, with: .color(phraseColor(phrase.roleID)))
                 let pointLabel = Text("P\(phrase.id + 1)")
                     .font(.system(size: 8, weight: .bold, design: .monospaced))
                     .foregroundColor(primary)
@@ -1024,7 +1027,7 @@ public struct TrackLightingEditorView: View {
                 analysis: analysis
             )) / duration * width
             let lane = CGRect(x: start, y: waveformBottom + 2, width: max(1, end - start), height: 12)
-            context.fill(Path(lane), with: .color(phraseColor(phrase.role).opacity(0.88)))
+            context.fill(Path(lane), with: .color(phraseColor(phrase.roleID).opacity(0.88)))
         }
         for cue in analysis.hotCues {
             let x = Double(cue.timeMillis) / Double(max(1, analysis.track.durationMillis)) * width
@@ -1476,17 +1479,8 @@ public struct TrackLightingEditorView: View {
         )
     }
 
-    private func phraseColor(_ role: String) -> Color {
-        switch role.lowercased() {
-        case "intro", "outro", "intro / outro": Color(red: 0.25, green: 0.55, blue: 0.95)
-        case "bridge": Color(red: 0.37, green: 0.42, blue: 0.78)
-        case "breakdown", "breakdown 1", "breakdown 2", "breakdown 3": Color(red: 0.48, green: 0.28, blue: 0.83)
-        case "synth": Color(red: 0.82, green: 0.24, blue: 0.72)
-        case "pre-drop": Color(red: 0.95, green: 0.46, blue: 0.20)
-        case "build", "buildup 1", "buildup 2", "buildup 3": Color(red: 0.96, green: 0.66, blue: 0.12)
-        case "drop": Color(red: 0.92, green: 0.20, blue: 0.26)
-        default: Color(red: 0.20, green: 0.68, blue: 0.60)
-        }
+    private func phraseColor(_ roleID: String) -> Color {
+        phraseColorPalette.color(for: roleID)
     }
 }
 
