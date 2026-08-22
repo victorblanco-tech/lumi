@@ -31,7 +31,7 @@ Control One remains usable and continues to provide working DMX output?
 - **Passed:** Control One can override Lumi and Lumi can take control again.
 - **Passed:** fixtures visibly respond through Control One DMX while Lumi drives
   SoundSwitch.
-- **Passed:** Test Controller and MIDI Status remain permanent diagnostics.
+- **Passed:** Virtual Controller and MIDI Status remain permanent diagnostics.
 - **Pending:** deterministic repetition over at least 100 triggers.
 - **Pending:** independent disconnect/reconnect of Lumi and Control One without
   unsolicited MIDI or light changes.

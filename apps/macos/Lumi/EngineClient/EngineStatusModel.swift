@@ -893,15 +893,24 @@ final class EngineStatusModel: ObservableObject {
         )
     }
 
-    func sendMidiAddressLearnPulse(targetKind: String, targetNumber: UInt16) async {
+    func sendMidiAddressLearnPulse(
+        targetKind: String,
+        targetNumber: UInt16,
+        bankNumber: UInt16? = nil
+    ) async {
         let label = targetKind == "bank" ? "Bank" : "AutoLoop"
         let note = targetKind == "bank" ? 59 + targetNumber : 63 + targetNumber
+        let channel = targetKind == "bank" ? 16 : 12 + (bankNumber ?? 1)
+        let targetDescription = targetKind == "autoloop"
+            ? "Bank \(bankNumber ?? 1) · \(label) \(targetNumber)"
+            : "\(label) \(targetNumber)"
         await exchangeMidiCommand(
             .sendMidiAddressLearnPulse(
                 targetKind: targetKind,
-                targetNumber: targetNumber
+                targetNumber: targetNumber,
+                bankNumber: bankNumber
             ),
-            success: "\(label) \(targetNumber) learn pulse sent on Channel 16, Note \(note)."
+            success: "\(targetDescription) learn pulse sent on Channel \(channel), Note \(note)."
         )
     }
 

@@ -59,7 +59,7 @@ buiten deze epic.
 - simulatorintegratie met echte geïmporteerde tracks;
 - diff, rebase, merge en replace bij sourcewijzigingen;
 - contract-, parser-, persistence-, UI-, golden-, performance- en end-to-endtests.
-- demo-data SoundSwitch Lighting Output met Banks & Autoloops, Test Controller
+- demo-data SoundSwitch Lighting Output met Banks & Autoloops, Virtual Controller
   en MIDI Status onder de taakgerichte Integrations-workspace;
 - taakgerichte desktopinformatiearchitectuur met Library Sources, Deck Inputs,
   Lighting Outputs, Diagnostics en opgeschoonde globale Settings.
@@ -385,10 +385,10 @@ configureerbaar Lumi `Phrase Type`. De mapping wordt atomair en persistent
 opgeslagen; interne mapping-ID's worden niet als Variant Name getoond. Een
 range- of pagina-indeling is bewust afwezig; de inspector vervangt de gekozen
 bank niet. De
-Test Controller spiegelt dezelfde 4×32-configuratie en blijft send-disabled tot
+Virtual Controller spiegelt dezelfde 4×32-configuratie en blijft send-disabled tot
 de virtuele MIDI-bron expliciet wordt gepubliceerd. De permanente `MIDI Status`-
 pagina toont bronstatus, protocol, configured surface, laatste event, pulsteller,
-integratiechecks en handmatige testacties. De Test Controller gebruikt dezelfde
+integratiechecks en handmatige testacties. De Virtual Controller gebruikt dezelfde
 SoundSwitch-volgorde: 1–8 verticaal, gevolgd door 9–16, 17–24 en 25–32.
 De E3-02 fysieke run vond dat de oorspronkelijke mappingweergave deze volgorde
 alleen visueel nabootste maar de posities row-major opsloeg. Defaults version 4

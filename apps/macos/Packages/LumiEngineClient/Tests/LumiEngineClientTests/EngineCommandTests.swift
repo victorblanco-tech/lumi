@@ -63,6 +63,20 @@ struct EngineCommandTests {
         #expect(payload["targetNumber"] == .number(0))
     }
 
+    @Test("AutoLoop MIDI learn carries its bank-specific address identity")
+    func autoloopMidiLearnPayload() {
+        let payload = EngineCommand.sendMidiAddressLearnPulse(
+            targetKind: "autoloop",
+            targetNumber: 17,
+            bankNumber: 3
+        ).payload()
+
+        #expect(payload["kind"] == .string("sendMidiAddressLearnPulse"))
+        #expect(payload["targetKind"] == .string("autoloop"))
+        #expect(payload["targetNumber"] == .number(17))
+        #expect(payload["bankNumber"] == .number(3))
+    }
+
     @Test("Rekordbox preview carries the exact selected playlist paths")
     func rekordboxPreviewPayload() {
         let payload = EngineCommand.previewRekordboxXMLSync(

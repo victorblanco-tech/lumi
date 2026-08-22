@@ -1,6 +1,6 @@
 # Epic 6 – Compiled Light Plans
 
-Status: **Implemented in `0.5.0-dev-3`**
+Status: **Implemented in `0.5.0-dev-4`**
 
 Target: **0.5.0**
 

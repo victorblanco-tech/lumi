@@ -56,7 +56,7 @@ duplicate editable configuration or repair actions.
 provider-neutral `DeckSource` boundary.
 
 `Lighting Outputs` owns SoundSwitch and future output profiles. The accepted
-Banks & AutoLoops, Test Controller, and MIDI Status surfaces remain part of the
+Banks & AutoLoops, Virtual Controller, and MIDI Status surfaces remain part of the
 built-in SoundSwitch profile.
 
 `Diagnostics` is the technical troubleshooting destination. The initial

@@ -20,7 +20,7 @@ public struct AutoloopCatalogSettingsView: View {
     private let onMutation: @Sendable (AutoloopCatalogMutationRequest) -> Void
     private let onPublishMidi: @Sendable () -> Void
     private let onStopMidi: @Sendable () -> Void
-    private let onSendMidiAddressLearnPulse: @Sendable (String, UInt16) -> Void
+    private let onSendMidiAddressLearnPulse: @Sendable (String, UInt16, UInt16?) -> Void
     private let onTriggerMidiAutoloop: @Sendable (UInt16, UInt16) -> Void
 
     @State private var section: ProfileSection = .banks
@@ -41,7 +41,7 @@ public struct AutoloopCatalogSettingsView: View {
         onMutation: @escaping @Sendable (AutoloopCatalogMutationRequest) -> Void = { _ in },
         onPublishMidi: @escaping @Sendable () -> Void = {},
         onStopMidi: @escaping @Sendable () -> Void = {},
-        onSendMidiAddressLearnPulse: @escaping @Sendable (String, UInt16) -> Void = { _, _ in },
+        onSendMidiAddressLearnPulse: @escaping @Sendable (String, UInt16, UInt16?) -> Void = { _, _, _ in },
         onTriggerMidiAutoloop: @escaping @Sendable (UInt16, UInt16) -> Void = { _, _ in }
     ) {
         self.catalog = catalog
@@ -82,6 +82,19 @@ public struct AutoloopCatalogSettingsView: View {
                     case .banks: banksAndAutoloops(catalog)
                     case .controller: virtualController(catalog)
                     case .midi: midiPreparation
+                    }
+                    if let midiIntegrationFeedback {
+                        Label(
+                            midiIntegrationFeedback,
+                            systemImage: midiIntegrationFeedback.lowercased().contains("could not")
+                                ? "exclamationmark.triangle.fill" : "checkmark.circle.fill"
+                        )
+                        .font(LumiTypography.caption)
+                        .foregroundStyle(
+                            midiIntegrationFeedback.lowercased().contains("could not")
+                                ? LumiColor.warning : LumiColor.success
+                        )
+                        .accessibilityIdentifier("lumi.settings.outputProfiles.midiFeedback")
                     }
                     if let feedback {
                         Label(feedback, systemImage: "checkmark.circle")
@@ -140,7 +153,7 @@ public struct AutoloopCatalogSettingsView: View {
     private var sectionTabs: some View {
         HStack(spacing: 4) {
             profileTab(.banks, "Banks & AutoLoops")
-            profileTab(.controller, "Test Controller")
+            profileTab(.controller, "Virtual Controller")
             profileTab(.midi, "MIDI Status")
             Spacer()
         }
@@ -267,24 +280,46 @@ public struct AutoloopCatalogSettingsView: View {
         let displayedRoleName = selected && !phraseRoleDraft.isEmpty
             ? roleName(phraseRoleDraft, catalog: catalog)
             : slot.roleName
-        return Button {
-            guard let bank else { return }
-            selectBankAndSlot(bank, slot: slot, catalog: catalog)
-        } label: {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(slot.entryName ?? "EMPTY AUTOLOOP")
-                    .font(LumiTypography.caption.weight(.semibold))
-                    .lineLimit(1)
-                Text("\(slot.number) · \(displayedRoleName ?? "Choose Phrase Type")")
-                    .font(LumiTypography.technical)
-                    .foregroundStyle(LumiColor.textSecondary)
-                    .lineLimit(1)
+        return HStack(spacing: 0) {
+            Button {
+                guard let bank else { return }
+                selectBankAndSlot(bank, slot: slot, catalog: catalog)
+            } label: {
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(slot.entryName ?? "EMPTY AUTOLOOP")
+                        .font(LumiTypography.caption.weight(.semibold))
+                        .lineLimit(1)
+                    Text("\(slot.number) · \(displayedRoleName ?? "Choose Phrase Type")")
+                        .font(LumiTypography.technical)
+                        .foregroundStyle(LumiColor.textSecondary)
+                        .lineLimit(1)
+                }
+                .padding(.leading, 9)
+                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                .contentShape(Rectangle())
             }
-            .padding(.horizontal, 9)
-            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-            .contentShape(Rectangle())
+            .buttonStyle(.plain)
+            .accessibilityIdentifier(
+                "lumi.settings.outputProfiles.bank.\(bank?.id ?? 0).button.\(slot.number)"
+            )
+            Divider().frame(height: 30)
+            Button {
+                guard let bank else { return }
+                onTriggerMidiAutoloop(bank.sortOrder, slot.number)
+            } label: {
+                Image(systemName: "play.fill")
+                    .font(.system(size: 10, weight: .bold))
+                    .frame(width: 34, height: 48)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(LumiColor.accent)
+            .disabled(midiIntegration?.isReady != true)
+            .help("Test Bank \(bank?.sortOrder ?? 1) · AutoLoop \(slot.number) in SoundSwitch")
+            .accessibilityIdentifier(
+                "lumi.settings.outputProfiles.bank.\(bank?.id ?? 0).button.\(slot.number).test"
+            )
         }
-        .buttonStyle(.plain)
         .foregroundStyle(LumiColor.textPrimary)
         .background(selected ? LumiColor.accent.opacity(0.15) : LumiColor.surfaceElevated)
         .overlay(alignment: .top) {
@@ -295,9 +330,6 @@ public struct AutoloopCatalogSettingsView: View {
                 .stroke(selected ? LumiColor.accent : LumiColor.border, lineWidth: selected ? 2 : 1)
         }
         .contentShape(Rectangle())
-        .accessibilityIdentifier(
-            "lumi.settings.outputProfiles.bank.\(bank?.id ?? 0).button.\(slot.number)"
-        )
     }
 
     private func mappingInspector(_ catalog: AutoloopCatalogState) -> some View {
@@ -389,8 +421,8 @@ public struct AutoloopCatalogSettingsView: View {
         VStack(alignment: .leading, spacing: LumiSpacing.medium) {
             HStack {
                 VStack(alignment: .leading, spacing: 3) {
-                    Text("MIDI Learn Controller").font(LumiTypography.cardTitle)
-                    Text("Learn actions send one address pulse. The Runtime Test below sends the bank + AutoLoop sequence.")
+                    Text("Virtual Controller").font(LumiTypography.cardTitle)
+                    Text("Map and verify every SoundSwitch AutoLoop using Lumi's unique MIDI addresses.")
                         .font(LumiTypography.caption)
                         .foregroundStyle(LumiColor.textSecondary)
                 }
@@ -403,7 +435,12 @@ public struct AutoloopCatalogSettingsView: View {
                 .foregroundStyle(midiIntegration?.isReady == true ? LumiColor.success : LumiColor.warning)
             }
             bankSelector(catalog)
-            runtimeTestTrigger
+            Label(
+                "Each Bank now has 32 unique MIDI addresses. SoundSwitch mappings created with the former shared addresses must be learned again once.",
+                systemImage: "info.circle.fill"
+            )
+            .font(LumiTypography.caption)
+            .foregroundStyle(LumiColor.textSecondary)
             if let bank = selectedBank(catalog) {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
@@ -415,7 +452,7 @@ public struct AutoloopCatalogSettingsView: View {
                     }
                     Spacer()
                     Button("Send Bank \(bank.sortOrder) Learn") {
-                        onSendMidiAddressLearnPulse("bank", bank.sortOrder)
+                        onSendMidiAddressLearnPulse("bank", bank.sortOrder, nil)
                     }
                     .buttonStyle(.borderedProminent)
                     .tint(LumiColor.accent)
@@ -424,37 +461,44 @@ public struct AutoloopCatalogSettingsView: View {
                 .padding(LumiSpacing.medium)
                 .background(LumiColor.surfaceElevated)
                 .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
-            }
-            LumiPanel { autoloopLearnGrid(catalog) }
-            if let midiIntegrationFeedback {
-                Text(midiIntegrationFeedback)
-                    .font(LumiTypography.caption)
-                    .foregroundStyle(
-                        midiIntegrationFeedback.lowercased().contains("could not")
-                            ? LumiColor.warning
-                            : LumiColor.success
-                    )
+                guidedLearnCard(bank: bank, catalog: catalog)
+                LumiPanel { autoloopLearnGrid(catalog, bank: bank) }
             }
         }
     }
 
-    private var runtimeTestTrigger: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 2) {
-                Text("RUNTIME TEST · BANK 1 → AUTOLOOP 1")
+    private func guidedLearnCard(
+        bank: AutoloopThemeState,
+        catalog: AutoloopCatalogState
+    ) -> some View {
+        let slot = selectedSlot(catalog)
+        return HStack(spacing: LumiSpacing.medium) {
+            Image(systemName: "arrow.right.circle.fill")
+                .font(.system(size: 22))
+                .foregroundStyle(LumiColor.accent)
+            VStack(alignment: .leading, spacing: 3) {
+                Text("GUIDED MIDI LEARN")
                     .font(LumiTypography.technical.weight(.bold))
-                Text("Channel 16 · Notes 60 → 64 · 50 ms bank settle delay")
-                    .font(LumiTypography.caption)
-                    .foregroundStyle(LumiColor.textSecondary)
+                Text(
+                    "In SoundSwitch, arm Map for this button. Then send the pulse; Lumi advances to the next AutoLoop automatically."
+                )
+                .font(LumiTypography.caption)
+                .foregroundStyle(LumiColor.textSecondary)
+                Text(
+                    "READY: BANK \(bank.sortOrder) · AUTOLOOP \(selectedButtonNumber) · CHANNEL \(autoloopLearnChannel(bank.sortOrder)) · NOTE \(autoloopLearnNote(selectedButtonNumber))"
+                )
+                .font(LumiTypography.technical)
+                .foregroundStyle(LumiColor.accent)
             }
             Spacer()
-            Button("Trigger Bank 1 → AutoLoop 1") {
-                onTriggerMidiAutoloop(1, 1)
+            Button("Send Learn & Next") {
+                onSendMidiAddressLearnPulse("autoloop", selectedButtonNumber, bank.sortOrder)
+                advanceLearnTarget(catalog)
             }
             .buttonStyle(.borderedProminent)
             .tint(LumiColor.accent)
-            .disabled(midiIntegration?.isReady != true)
-            .accessibilityIdentifier("lumi.settings.outputProfiles.runtimeTest.bank1.autoloop1")
+            .disabled(midiIntegration?.isReady != true || slot == nil)
+            .accessibilityIdentifier("lumi.settings.outputProfiles.guidedLearn.next")
         }
         .padding(LumiSpacing.medium)
         .background(LumiColor.accent.opacity(0.10))
@@ -462,42 +506,101 @@ public struct AutoloopCatalogSettingsView: View {
         .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
     }
 
-    private func autoloopLearnGrid(_ catalog: AutoloopCatalogState) -> some View {
+    private func selectedRuntimeTrigger(
+        bank: AutoloopThemeState,
+        slot: SoundSwitchAutoloopSlotState
+    ) -> some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("TEST · BANK \(bank.sortOrder) → AUTOLOOP \(slot.number)")
+                    .font(LumiTypography.technical.weight(.bold))
+                Text(
+                    "Bank Ch 16 · Note \(bankLearnNote(bank.sortOrder)) → AutoLoop Ch \(autoloopLearnChannel(bank.sortOrder)) · Note \(autoloopLearnNote(slot.number))"
+                )
+                    .font(LumiTypography.caption)
+                    .foregroundStyle(LumiColor.textSecondary)
+            }
+            Spacer()
+            Button("Trigger in SoundSwitch") {
+                onTriggerMidiAutoloop(bank.sortOrder, slot.number)
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(LumiColor.accent)
+            .disabled(midiIntegration?.isReady != true)
+            .accessibilityIdentifier(
+                "lumi.settings.outputProfiles.virtualController.bank.\(bank.sortOrder).autoloop.\(slot.number).test"
+            )
+        }
+    }
+
+    private func autoloopLearnGrid(
+        _ catalog: AutoloopCatalogState,
+        bank: AutoloopThemeState
+    ) -> some View {
         let columns = Array(repeating: GridItem(.flexible(minimum: 130), spacing: 7), count: 4)
         return VStack(alignment: .leading, spacing: 8) {
             HStack {
-                Text("AUTOLOOP LEARN ADDRESSES")
+                Text("BANK \(bank.sortOrder) · AUTOLOOP ADDRESSES")
                     .font(LumiTypography.technical.weight(.bold))
                 Spacer()
-                Text("CHANNEL 16 · NOTES 64–95")
+                Text("CHANNEL \(autoloopLearnChannel(bank.sortOrder)) · NOTES 64–95")
                     .font(LumiTypography.technical)
                     .foregroundStyle(LumiColor.textSecondary)
             }
             LazyVGrid(columns: columns, spacing: 7) {
                 ForEach(controllerGridSlots(catalog)) { slot in
-                    Button {
-                        onSendMidiAddressLearnPulse("autoloop", slot.number)
-                    } label: {
-                        VStack(alignment: .leading, spacing: 3) {
-                            Text("AUTOLOOP \(slot.number)")
-                                .font(LumiTypography.caption.weight(.semibold))
-                            Text("Learn · Note \(autoloopLearnNote(slot.number))")
-                                .font(LumiTypography.technical)
-                                .foregroundStyle(LumiColor.textSecondary)
+                    let selected = selectedButtonNumber == slot.number
+                    VStack(alignment: .leading, spacing: 5) {
+                        Button {
+                            selectBankAndSlot(bank, slot: slot, catalog: catalog)
+                        } label: {
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text("AUTOLOOP \(slot.number)")
+                                    .font(LumiTypography.caption.weight(.semibold))
+                                Text("Ch \(autoloopLearnChannel(bank.sortOrder)) · Note \(autoloopLearnNote(slot.number))")
+                                    .font(LumiTypography.technical)
+                                    .foregroundStyle(LumiColor.textSecondary)
+                            }
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .contentShape(Rectangle())
                         }
-                        .padding(.horizontal, 9)
-                        .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
-                        .contentShape(Rectangle())
+                        .buttonStyle(.plain)
+                        HStack(spacing: 6) {
+                            Button("Learn") {
+                                selectBankAndSlot(bank, slot: slot, catalog: catalog)
+                                onSendMidiAddressLearnPulse("autoloop", slot.number, bank.sortOrder)
+                            }
+                            .disabled(midiIntegration?.isReady != true)
+                            .accessibilityIdentifier(
+                                "lumi.settings.outputProfiles.learn.bank.\(bank.sortOrder).autoloop.\(slot.number)"
+                            )
+                            Button("Test") {
+                                selectBankAndSlot(bank, slot: slot, catalog: catalog)
+                                onTriggerMidiAutoloop(bank.sortOrder, slot.number)
+                            }
+                            .disabled(midiIntegration?.isReady != true)
+                            .accessibilityIdentifier(
+                                "lumi.settings.outputProfiles.test.bank.\(bank.sortOrder).autoloop.\(slot.number)"
+                            )
+                        }
+                        .buttonStyle(.borderless)
+                        .font(LumiTypography.technical.weight(.semibold))
                     }
-                    .buttonStyle(.plain)
-                    .background(LumiColor.surfaceElevated)
-                    .overlay { Rectangle().stroke(LumiColor.border) }
-                    .contentShape(Rectangle())
-                    .disabled(midiIntegration?.isReady != true)
-                    .accessibilityIdentifier(
-                        "lumi.settings.outputProfiles.learn.autoloop.\(slot.number)"
-                    )
+                    .padding(.horizontal, 9)
+                    .padding(.vertical, 7)
+                    .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+                    .background(selected ? LumiColor.accent.opacity(0.15) : LumiColor.surfaceElevated)
+                    .overlay {
+                        Rectangle().stroke(
+                            selected ? LumiColor.accent : LumiColor.border,
+                            lineWidth: selected ? 2 : 1
+                        )
+                    }
                 }
+            }
+            if let slot = selectedSlot(catalog) {
+                Divider()
+                selectedRuntimeTrigger(bank: bank, slot: slot)
             }
         }
     }
@@ -519,7 +622,10 @@ public struct AutoloopCatalogSettingsView: View {
                     }
                     inspectorValue("Output Device", midiIntegration?.sourceName ?? "Lumi Virtual MIDI")
                     inspectorValue("Protocol", midiIntegration?.midiProtocol ?? "MIDI 1.0 UMP")
-                    inspectorValue("Configured Surface", "4 banks · 32 AutoLoops per bank")
+                    inspectorValue(
+                        "Configured Surface",
+                        "4 banks · 128 unique AutoLoop MIDI addresses"
+                    )
                     inspectorValue(
                         "Beat / BPM Timing",
                         abletonLinkIntegration.map {
@@ -588,7 +694,7 @@ public struct AutoloopCatalogSettingsView: View {
                         .background(LumiColor.surfaceElevated)
                         .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
                     Button("Send Bank 1 Learn Pulse") {
-                        onSendMidiAddressLearnPulse("bank", 1)
+                        onSendMidiAddressLearnPulse("bank", 1, nil)
                     }
                         .buttonStyle(.borderedProminent)
                         .tint(LumiColor.accent)
@@ -596,15 +702,6 @@ public struct AutoloopCatalogSettingsView: View {
                     Text("One Note On and its Note Off. Never sent automatically.")
                         .font(LumiTypography.technical)
                         .foregroundStyle(LumiColor.textSecondary)
-                    if let midiIntegrationFeedback {
-                        Text(midiIntegrationFeedback)
-                            .font(LumiTypography.caption)
-                            .foregroundStyle(
-                                midiIntegrationFeedback.lowercased().contains("could not")
-                                    ? LumiColor.warning
-                                    : LumiColor.success
-                            )
-                    }
                     Text("Pulses sent: \(midiIntegration?.sentPulseCount ?? 0)")
                         .font(LumiTypography.technical)
                         .foregroundStyle(LumiColor.textSecondary)
@@ -637,6 +734,27 @@ public struct AutoloopCatalogSettingsView: View {
 
     private func autoloopLearnNote(_ number: UInt16) -> UInt16 {
         63 + number
+    }
+
+    private func autoloopLearnChannel(_ bankNumber: UInt16) -> UInt16 {
+        12 + bankNumber
+    }
+
+    private func advanceLearnTarget(_ catalog: AutoloopCatalogState) {
+        if selectedButtonNumber < profile.slotsPerBank {
+            selectedButtonNumber += 1
+            refreshDrafts(
+                bankID: selectedBankID,
+                buttonNumber: selectedButtonNumber,
+                catalog: catalog
+            )
+            return
+        }
+        guard
+            let currentIndex = catalog.themes.firstIndex(where: { $0.id == selectedBankID }),
+            catalog.themes.indices.contains(currentIndex + 1)
+        else { return }
+        selectBank(catalog.themes[currentIndex + 1], catalog: catalog)
     }
 
     private func slots(_ catalog: AutoloopCatalogState) -> [SoundSwitchAutoloopSlotState] {

@@ -346,7 +346,11 @@ public enum EngineCommand: Equatable, Sendable {
     case testAbletonLinkHelper
     case setOutputTimingOffset(millis: Int16)
     case sendMidiLearnPulse
-    case sendMidiAddressLearnPulse(targetKind: String, targetNumber: UInt16)
+    case sendMidiAddressLearnPulse(
+        targetKind: String,
+        targetNumber: UInt16,
+        bankNumber: UInt16? = nil
+    )
     case sendCustomMidiLearnPulse(channel: UInt8, note: UInt8)
     case triggerMidiAutoloop(bankNumber: UInt16, autoloopNumber: UInt16)
     case loadLibraryTrackOnLocalDeck(
@@ -574,12 +578,16 @@ public enum EngineCommand: Equatable, Sendable {
             ]
         case .sendMidiLearnPulse:
             return ["kind": .string("sendMidiLearnPulse")]
-        case let .sendMidiAddressLearnPulse(targetKind, targetNumber):
-            return [
+        case let .sendMidiAddressLearnPulse(targetKind, targetNumber, bankNumber):
+            var payload: [String: JSONValue] = [
                 "kind": .string("sendMidiAddressLearnPulse"),
                 "targetKind": .string(targetKind),
                 "targetNumber": .number(Double(targetNumber))
             ]
+            if let bankNumber {
+                payload["bankNumber"] = .number(Double(bankNumber))
+            }
+            return payload
         case let .sendCustomMidiLearnPulse(channel, note):
             return [
                 "kind": .string("sendMidiAddressLearnPulse"),

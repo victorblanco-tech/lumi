@@ -204,7 +204,11 @@ func launchesRealEngine() async throws {
         #expect(midiIntegrationPulseCount(snapshot) == 1)
 
         snapshot = try await supervisor.send(
-            .sendMidiAddressLearnPulse(targetKind: "autoloop", targetNumber: 32),
+            .sendMidiAddressLearnPulse(
+                targetKind: "autoloop",
+                targetNumber: 32,
+                bankNumber: 4
+            ),
             messageID: "swift-send-midi-autoloop-32-learn-pulse"
         )
         #expect(midiIntegrationPulseCount(snapshot) == 2)

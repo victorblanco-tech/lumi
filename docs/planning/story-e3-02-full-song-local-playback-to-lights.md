@@ -137,7 +137,7 @@ but incorrect AutoLoops:
 - automatic planning is restricted to a Theme that has complete real mappings
   for the loaded track, so an unfinished Bank cannot enter rotation;
 - the mapping view now uses the same 1,9,17,25 first visual row as Learn and the
-  Test Controller.
+  Virtual Controller.
 
 ## Acceptance criteria
 

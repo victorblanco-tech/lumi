@@ -23,7 +23,7 @@ public struct IntegrationsWorkspaceView: View {
     private let onStopMidi: @Sendable () -> Void
     private let onSetAbletonLinkEnabled: @Sendable (Bool) -> Void
     private let onTestAbletonLinkHelper: @Sendable () -> Void
-    private let onSendMidiAddressLearnPulse: @Sendable (String, UInt16) -> Void
+    private let onSendMidiAddressLearnPulse: @Sendable (String, UInt16, UInt16?) -> Void
     private let onTriggerMidiAutoloop: @Sendable (UInt16, UInt16) -> Void
 
     @State private var section: IntegrationsWorkspaceSection
@@ -43,7 +43,7 @@ public struct IntegrationsWorkspaceView: View {
         onStopMidi: @escaping @Sendable () -> Void = {},
         onSetAbletonLinkEnabled: @escaping @Sendable (Bool) -> Void = { _ in },
         onTestAbletonLinkHelper: @escaping @Sendable () -> Void = {},
-        onSendMidiAddressLearnPulse: @escaping @Sendable (String, UInt16) -> Void = { _, _ in },
+        onSendMidiAddressLearnPulse: @escaping @Sendable (String, UInt16, UInt16?) -> Void = { _, _, _ in },
         onTriggerMidiAutoloop: @escaping @Sendable (UInt16, UInt16) -> Void = { _, _ in }
     ) {
         self.library = library

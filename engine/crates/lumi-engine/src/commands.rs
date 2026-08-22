@@ -590,7 +590,7 @@ fn midi_address(
         u8::try_from(raw_number).map_err(|_| CommandDecodeError::InvalidField("targetNumber"))?;
     match kind {
         "bank" => MidiAddress::bank(number),
-        "autoloop" => MidiAddress::autoloop(number),
+        "autoloop" => MidiAddress::autoloop(midi_number(payload, "bankNumber", 4)?, number),
         "custom" => MidiAddress::custom(
             u8::try_from(positive_unsigned(payload, "channel")?)
                 .map_err(|_| CommandDecodeError::InvalidField("channel"))?,
@@ -1198,6 +1198,51 @@ mod tests {
         assert_eq!(
             decode_command(&envelope),
             Ok(SessionCommand::SendMidiAddressLearnPulse { address: expected })
+        );
+    }
+
+    #[test]
+    fn autoloop_learn_address_requires_its_bank_and_is_unique_across_banks() {
+        let bank_one = command_envelope(serde_json::json!({
+            "kind": "sendMidiAddressLearnPulse",
+            "targetKind": "autoloop",
+            "targetNumber": 1,
+            "bankNumber": 1,
+        }));
+        let bank_four = command_envelope(serde_json::json!({
+            "kind": "sendMidiAddressLearnPulse",
+            "targetKind": "autoloop",
+            "targetNumber": 1,
+            "bankNumber": 4,
+        }));
+        let missing_bank = command_envelope(serde_json::json!({
+            "kind": "sendMidiAddressLearnPulse",
+            "targetKind": "autoloop",
+            "targetNumber": 1,
+        }));
+        let Some(bank_one_address) = MidiAddress::autoloop(1, 1) else {
+            panic!("bank one address must be valid");
+        };
+        let Some(bank_four_address) = MidiAddress::autoloop(4, 1) else {
+            panic!("bank four address must be valid");
+        };
+
+        assert_ne!(bank_one_address, bank_four_address);
+        assert_eq!(
+            decode_command(&bank_one),
+            Ok(SessionCommand::SendMidiAddressLearnPulse {
+                address: bank_one_address,
+            })
+        );
+        assert_eq!(
+            decode_command(&bank_four),
+            Ok(SessionCommand::SendMidiAddressLearnPulse {
+                address: bank_four_address,
+            })
+        );
+        assert_eq!(
+            decode_command(&missing_bank),
+            Err(CommandDecodeError::InvalidField("bankNumber"))
         );
     }
 

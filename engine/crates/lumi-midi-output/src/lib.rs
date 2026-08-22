@@ -52,13 +52,19 @@ impl MidiAddress {
         }
     }
 
-    pub const fn autoloop(number: u8) -> Option<Self> {
-        if number >= 1 && number <= 32 {
+    /// Returns the unique SoundSwitch MIDI address for one AutoLoop slot.
+    ///
+    /// SoundSwitch MIDI Learn keys controls by source, channel and note. Bank
+    /// selection therefore does not namespace a reused note. Give every bank
+    /// its own channel while keeping the familiar 64–95 note range:
+    /// Bank 1 → Ch 13, Bank 2 → Ch 14, Bank 3 → Ch 15, Bank 4 → Ch 16.
+    pub const fn autoloop(bank_number: u8, number: u8) -> Option<Self> {
+        if bank_number >= 1 && bank_number <= 4 && number >= 1 && number <= 32 {
             Some(Self {
                 kind: MidiAddressKind::Autoloop,
                 number,
                 note: AUTOLOOP_NOTE_BASE + number - 1,
-                channel: MIDI_CHANNEL,
+                channel: 12 + bank_number,
             })
         } else {
             None
@@ -605,7 +611,7 @@ pub enum RealtimeMidiError {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum RealtimeMidiAction {
     SelectBank(u8),
-    TriggerAutoloop(u8),
+    TriggerAutoloop { bank: u8, autoloop: u8 },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -620,7 +626,7 @@ enum RealtimeMidiCommand {
     Stop(mpsc::Sender<()>),
     SendLearnPulse(MidiAddress, mpsc::Sender<Result<(), String>>),
     SelectBank(u8, mpsc::Sender<Result<(), String>>),
-    TriggerAutoloop(u8, mpsc::Sender<Result<(), String>>),
+    TriggerAutoloop(u8, u8, mpsc::Sender<Result<(), String>>),
     TriggerSequence(u8, u8, mpsc::Sender<Result<(), String>>),
     SetGeneration(u64),
     Schedule(ScheduledRealtimeMidiAction),
@@ -692,8 +698,14 @@ where
         self.synchronous(|reply| RealtimeMidiCommand::SelectBank(bank_number, reply))
     }
 
-    pub fn trigger_autoloop_button(&self, autoloop_number: u8) -> Result<(), RealtimeMidiError> {
-        self.synchronous(|reply| RealtimeMidiCommand::TriggerAutoloop(autoloop_number, reply))
+    pub fn trigger_autoloop_button(
+        &self,
+        bank_number: u8,
+        autoloop_number: u8,
+    ) -> Result<(), RealtimeMidiError> {
+        self.synchronous(|reply| {
+            RealtimeMidiCommand::TriggerAutoloop(bank_number, autoloop_number, reply)
+        })
     }
 
     pub fn trigger_autoloop(
@@ -726,13 +738,17 @@ where
     pub fn schedule_autoloop(
         &self,
         generation: u64,
+        bank_number: u8,
         autoloop_number: u8,
         deadline: Instant,
     ) -> Result<(), RealtimeMidiError> {
         self.schedule(
             generation,
             deadline,
-            RealtimeMidiAction::TriggerAutoloop(autoloop_number),
+            RealtimeMidiAction::TriggerAutoloop {
+                bank: bank_number,
+                autoloop: autoloop_number,
+            },
         )
     }
 
@@ -927,8 +943,8 @@ where
         F: FnOnce(Duration),
     {
         let bank = MidiAddress::bank(bank_number).ok_or(MidiOutputError::InvalidAddress)?;
-        let autoloop =
-            MidiAddress::autoloop(autoloop_number).ok_or(MidiOutputError::InvalidAddress)?;
+        let autoloop = MidiAddress::autoloop(bank_number, autoloop_number)
+            .ok_or(MidiOutputError::InvalidAddress)?;
         // Reassert the bank for every phrase. A physical controller can change
         // SoundSwitch's active bank between Lumi cues, so cached selection is
         // not authoritative. The engine schedules this pulse before the phrase.
@@ -941,8 +957,9 @@ where
         wait(BANK_SETTLE_DELAY);
         self.send_address_pulse(autoloop)?;
         self.last_event = Some(format!(
-            "Triggered Bank {bank_number} → AutoLoop {autoloop_number} · Ch {MIDI_CHANNEL} · Notes {} → {} · {} ms bank gap",
+            "Triggered Bank {bank_number} → AutoLoop {autoloop_number} · Bank Ch {MIDI_CHANNEL} Note {} → AutoLoop Ch {} Note {} · {} ms bank gap",
             bank.note(),
+            autoloop.channel(),
             autoloop.note(),
             BANK_SETTLE_DELAY.as_millis()
         ));
@@ -966,13 +983,15 @@ where
     /// has already satisfied `BANK_SETTLE_DELAY`.
     pub fn trigger_autoloop_button(
         &mut self,
+        bank_number: u8,
         autoloop_number: u8,
     ) -> Result<(), MidiOutputError<P::Error>> {
-        let autoloop =
-            MidiAddress::autoloop(autoloop_number).ok_or(MidiOutputError::InvalidAddress)?;
+        let autoloop = MidiAddress::autoloop(bank_number, autoloop_number)
+            .ok_or(MidiOutputError::InvalidAddress)?;
         self.send_address_pulse(autoloop)?;
         self.last_event = Some(format!(
-            "Triggered AutoLoop {autoloop_number} · Ch {MIDI_CHANNEL} · Note {} · Bank pre-armed",
+            "Triggered Bank {bank_number} → AutoLoop {autoloop_number} · Ch {} · Note {} · Bank pre-armed",
+            autoloop.channel(),
             autoloop.note()
         ));
         Ok(())
@@ -1087,9 +1106,9 @@ fn run_realtime_midi_worker<P>(
                         publish_controller_status(shared_status, &controller);
                         let _ = reply.send(result);
                     }
-                    RealtimeMidiCommand::TriggerAutoloop(autoloop, reply) => {
+                    RealtimeMidiCommand::TriggerAutoloop(bank, autoloop, reply) => {
                         let result = controller
-                            .trigger_autoloop_button(autoloop)
+                            .trigger_autoloop_button(bank, autoloop)
                             .map_err(|error| error.to_string());
                         publish_controller_status(shared_status, &controller);
                         let _ = reply.send(result);
@@ -1168,8 +1187,8 @@ fn run_realtime_midi_worker<P>(
                     let (kind, number) = realtime_action_identity(item.action);
                     let result = match item.action {
                         RealtimeMidiAction::SelectBank(bank) => controller.select_bank(bank),
-                        RealtimeMidiAction::TriggerAutoloop(autoloop) => {
-                            controller.trigger_autoloop_button(autoloop)
+                        RealtimeMidiAction::TriggerAutoloop { bank, autoloop } => {
+                            controller.trigger_autoloop_button(bank, autoloop)
                         }
                     };
                     let elapsed = Instant::now().saturating_duration_since(item.deadline);
@@ -1206,7 +1225,9 @@ fn run_realtime_midi_worker<P>(
 const fn realtime_action_identity(action: RealtimeMidiAction) -> (RealtimeMidiActionKind, u8) {
     match action {
         RealtimeMidiAction::SelectBank(number) => (RealtimeMidiActionKind::Bank, number),
-        RealtimeMidiAction::TriggerAutoloop(number) => (RealtimeMidiActionKind::Autoloop, number),
+        RealtimeMidiAction::TriggerAutoloop { autoloop, .. } => {
+            (RealtimeMidiActionKind::Autoloop, autoloop)
+        }
     }
 }
 
@@ -1304,27 +1325,32 @@ mod tests {
     }
 
     #[test]
-    fn four_banks_and_thirty_two_autoloops_have_stable_unique_notes() {
+    fn four_banks_and_one_hundred_twenty_eight_autoloops_have_stable_unique_addresses() {
         let bank_notes = (1..=4)
             .filter_map(MidiAddress::bank)
             .map(MidiAddress::note)
             .collect::<Vec<_>>();
-        let autoloop_notes = (1..=32)
-            .filter_map(MidiAddress::autoloop)
-            .map(MidiAddress::note)
+        let autoloop_addresses = (1..=4)
+            .flat_map(|bank| (1..=32).filter_map(move |slot| MidiAddress::autoloop(bank, slot)))
+            .map(|address| (address.channel(), address.note()))
             .collect::<Vec<_>>();
 
         assert_eq!(bank_notes, [60, 61, 62, 63]);
-        assert_eq!(autoloop_notes.first(), Some(&64));
-        assert_eq!(autoloop_notes.last(), Some(&95));
-        assert!(bank_notes.iter().all(|note| !autoloop_notes.contains(note)));
+        assert_eq!(autoloop_addresses.len(), 128);
+        assert_eq!(autoloop_addresses.first(), Some(&(13, 64)));
+        assert_eq!(autoloop_addresses.last(), Some(&(16, 95)));
+        let unique = autoloop_addresses
+            .iter()
+            .copied()
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(unique.len(), 128);
     }
 
     #[test]
     fn address_learn_pulse_uses_the_requested_autoloop_note() {
         let mut controller = MidiOutputController::new(RecordingProvider::default());
         assert!(controller.publish().is_ok());
-        let Some(address) = MidiAddress::autoloop(32) else {
+        let Some(address) = MidiAddress::autoloop(4, 32) else {
             panic!("AutoLoop 32 must have a MIDI address");
         };
         assert!(controller.send_address_learn_pulse(address).is_ok());
@@ -1362,8 +1388,8 @@ mod tests {
         assert_eq!(controller.provider.messages.len(), 4);
         assert_eq!(controller.provider.messages[0].bytes(), [0x9f, 60, 100]);
         assert_eq!(controller.provider.messages[1].bytes(), [0x8f, 60, 0]);
-        assert_eq!(controller.provider.messages[2].bytes(), [0x9f, 64, 100]);
-        assert_eq!(controller.provider.messages[3].bytes(), [0x8f, 64, 0]);
+        assert_eq!(controller.provider.messages[2].bytes(), [0x9c, 64, 100]);
+        assert_eq!(controller.provider.messages[3].bytes(), [0x8c, 64, 0]);
         assert_eq!(controller.status().sent_pulse_count, 2);
         assert!(
             controller
@@ -1390,7 +1416,7 @@ mod tests {
         assert_eq!(observed_delay, Some(BANK_SETTLE_DELAY));
         assert_eq!(controller.provider.messages.len(), 8);
         assert_eq!(controller.provider.messages[4].bytes(), [0x9f, 61, 100]);
-        assert_eq!(controller.provider.messages[6].bytes(), [0x9f, 67, 100]);
+        assert_eq!(controller.provider.messages[6].bytes(), [0x9d, 67, 100]);
         assert_eq!(controller.status().sent_pulse_count, 4);
         assert_eq!(controller.status().active_bank, Some(2));
     }
@@ -1405,7 +1431,7 @@ mod tests {
         assert_eq!(controller.provider.messages[0].bytes(), [0x9f, 63, 100]);
         assert_eq!(controller.active_bank(), Some(4));
 
-        assert!(controller.trigger_autoloop_button(32).is_ok());
+        assert!(controller.trigger_autoloop_button(4, 32).is_ok());
         assert_eq!(controller.provider.messages.len(), 4);
         assert_eq!(controller.provider.messages[2].bytes(), [0x9f, 95, 100]);
         assert_eq!(controller.status().sent_pulse_count, 2);
@@ -1422,7 +1448,7 @@ mod tests {
                 .is_ok()
         );
         assert!(
-            lane.schedule_autoloop(7, 13, now + Duration::from_millis(65))
+            lane.schedule_autoloop(7, 2, 13, now + Duration::from_millis(65))
                 .is_ok()
         );
 
@@ -1444,7 +1470,7 @@ mod tests {
         assert!(lane.publish().is_ok());
         assert!(lane.set_generation(10).is_ok());
         assert!(
-            lane.schedule_autoloop(10, 31, Instant::now() + Duration::from_millis(80))
+            lane.schedule_autoloop(10, 1, 31, Instant::now() + Duration::from_millis(80))
                 .is_ok()
         );
         assert!(lane.set_generation(11).is_ok());
@@ -1463,7 +1489,7 @@ mod tests {
         assert!(lane.set_generation(12).is_ok());
         let now = Instant::now();
         assert!(
-            lane.schedule_autoloop(12, 7, now + Duration::from_millis(30))
+            lane.schedule_autoloop(12, 2, 7, now + Duration::from_millis(30))
                 .is_ok()
         );
         thread::sleep(Duration::from_millis(25));
@@ -1495,7 +1521,7 @@ mod tests {
 
         for index in 0..=REALTIME_SCHEDULE_CAPACITY {
             assert!(
-                lane.schedule_autoloop(21, (index % 32 + 1) as u8, distant_deadline)
+                lane.schedule_autoloop(21, 1, (index % 32 + 1) as u8, distant_deadline)
                     .is_ok()
             );
             let accepted_deadline = Instant::now() + Duration::from_secs(1);

@@ -12,10 +12,11 @@ SoundSwitch target.
 
 - `Lumi Virtual MIDI` is discovered by SoundSwitch.
 - Channel 16 notes 60–63 address Bank 1–4.
-- Channel 16 notes 64–95 address AutoLoop 1–32.
+- Bank-specific Channels 13–16 and notes 64–95 address all 128 AutoLoops
+  uniquely; a later Bank learn cannot overwrite an earlier binding.
 - Bank 1 → 50 ms → AutoLoop 1 works physically.
 - Control One remains usable in parallel and DMX output visibly works.
-- Test Controller and MIDI Status are permanent product diagnostics.
+- Virtual Controller and MIDI Status are permanent product diagnostics.
 - `Lumi Virtual MIDI` now publishes automatically, self-recovers independently
   from the clock endpoint and participates in the compact Tech Ready status.
 - A first physical run confirmed that Lumi and Control One can operate in
@@ -23,12 +24,16 @@ SoundSwitch target.
 
 ## Acceptance criteria
 
-- Test Controller can explicitly trigger any selected Bank 1–4 and AutoLoop
+- Virtual Controller can explicitly trigger any selected Bank 1–4 and AutoLoop
   1–32 combination.
+- Banks & AutoLoops exposes a Test action on every mapped or empty slot.
+- Guided MIDI Learn sends the selected unique address and advances to the next
+  slot, while clearly leaving the required SoundSwitch `Map` action and mapping
+  confirmation with the user.
 - Every trigger sends Bank Note On/Off, waits the validated bank-settle delay,
   then sends AutoLoop Note On/Off.
-- The 128 logical `Bank + AutoLoop Name + Phrase Type` mappings resolve to the
-  canonical four bank and 32 AutoLoop MIDI addresses without duplicating MIDI
+- The 128 logical `Bank + AutoLoop Name + Phrase Type` mappings resolve to 128
+  unique AutoLoop MIDI addresses plus four bank selectors without duplicating MIDI
   state in the library domain.
 - Publishing the virtual source sends no MIDI; stopped or missing endpoints fail
   silent.

@@ -200,11 +200,12 @@ struct FoundationView: View {
                         onTestAbletonLinkHelper: {
                             Task { await engineStatus.testAbletonLinkHelper() }
                         },
-                        onSendMidiAddressLearnPulse: { targetKind, targetNumber in
+                        onSendMidiAddressLearnPulse: { targetKind, targetNumber, bankNumber in
                             Task {
                                 await engineStatus.sendMidiAddressLearnPulse(
                                     targetKind: targetKind,
-                                    targetNumber: targetNumber
+                                    targetNumber: targetNumber,
+                                    bankNumber: bankNumber
                                 )
                             }
                         },

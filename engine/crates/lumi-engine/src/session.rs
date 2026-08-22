@@ -1449,7 +1449,7 @@ impl OutputWorker {
         if is_safely_prearmed && delayed_after_boundary.is_zero() {
             if self
                 .midi_output
-                .schedule_autoloop(self.realtime_generation, autoloop_number, now)
+                .schedule_autoloop(self.realtime_generation, bank_number, autoloop_number, now)
                 .is_ok()
             {
                 self.autoloop_emitted_count = self.autoloop_emitted_count.saturating_add(1);
@@ -1462,7 +1462,12 @@ impl OutputWorker {
             let due_at = now + delayed_after_boundary;
             if self
                 .midi_output
-                .schedule_autoloop(self.realtime_generation, autoloop_number, due_at)
+                .schedule_autoloop(
+                    self.realtime_generation,
+                    bank_number,
+                    autoloop_number,
+                    due_at,
+                )
                 .is_err()
             {
                 return;
@@ -1499,7 +1504,7 @@ impl OutputWorker {
         let due_at = now + BANK_SETTLE_DELAY.max(delayed_after_boundary);
         if self
             .midi_output
-            .schedule_autoloop(generation, autoloop_number, due_at)
+            .schedule_autoloop(generation, bank_number, autoloop_number, due_at)
             .is_err()
         {
             return;
@@ -1659,6 +1664,7 @@ impl OutputWorker {
             .midi_output
             .schedule_autoloop(
                 self.realtime_generation,
+                scheduled.bank_number,
                 scheduled.autoloop_number,
                 Instant::now(),
             )
@@ -1922,7 +1928,7 @@ impl OutputWorker {
             };
         if self
             .midi_output
-            .schedule_autoloop(generation, autoloop_number, autoloop_deadline)
+            .schedule_autoloop(generation, bank_number, autoloop_number, autoloop_deadline)
             .is_err()
         {
             let _ = self.midi_output.cancel_all();
@@ -2047,7 +2053,7 @@ impl OutputWorker {
         self.autoloop_executor.mark_bank_prepared(schedule);
         if self
             .midi_output
-            .schedule_autoloop(generation, autoloop_number, deadline)
+            .schedule_autoloop(generation, bank_number, autoloop_number, deadline)
             .is_err()
         {
             let _ = self.midi_output.cancel_all();

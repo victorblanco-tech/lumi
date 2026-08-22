@@ -59,6 +59,7 @@ fn realtime_lane_configurable_soak_retains_correctness_and_latency() -> Result<(
         lane.schedule_bank(generation, ((generation - 1) % 4 + 1) as u8, now)?;
         lane.schedule_autoloop(
             generation,
+            ((generation - 1) % 4 + 1) as u8,
             ((generation - 1) % 32 + 1) as u8,
             now + Duration::from_millis(52),
         )?;
@@ -73,7 +74,12 @@ fn realtime_lane_configurable_soak_retains_correctness_and_latency() -> Result<(
             return Err(format!("missed or duplicate output: {:?}", lane.status()).into());
         }
         if generation.is_multiple_of(10) {
-            lane.schedule_autoloop(generation, 32, Instant::now() + Duration::from_millis(400))?;
+            lane.schedule_autoloop(
+                generation,
+                4,
+                32,
+                Instant::now() + Duration::from_millis(400),
+            )?;
             generation = generation.saturating_add(1);
             lane.set_generation(generation)?;
             expected_cancelled = expected_cancelled.saturating_add(1);

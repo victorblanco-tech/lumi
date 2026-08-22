@@ -1,5 +1,24 @@
 # Changelog
 
+## 0.5.0-dev-4 - 2026-08-22
+
+### Fixed
+
+- SoundSwitch AutoLoop MIDI Learn uses 128 unique `(channel, note)` addresses;
+  learning the same numbered button in another bank no longer overwrites an
+  earlier bank.
+- Runtime scheduling retains the bank identity through the final CoreMIDI
+  pulse instead of collapsing back to a shared AutoLoop note.
+
+### Changed
+
+- `Virtual Controller` replaces the former Test Controller label and adds
+  per-button Learn and Test actions.
+- Guided MIDI Learn sends the selected address and automatically advances to
+  the next AutoLoop and bank, while SoundSwitch remains responsible for arming
+  and confirming each Map action.
+- Banks & AutoLoops exposes a direct Test action for every one of its 128 slots.
+
 ## 0.4.0 - 2026-08-18
 
 ### Added
@@ -640,7 +659,7 @@ Lumi gebruikt [Semantic Versioning](https://semver.org/).
 - Een ingebouwd `SoundSwitch Autoloops` Output Profile met vier benoemde banks,
   32 stabiele AutoLoop-posities per bank, vier pagina's van acht fysieke
   buttons, exacte bewerkbare AutoLoop Names,
-  configureerbare Phrase Types, een gespiegelde Test Controller en een
+  configureerbare Phrase Types, een gespiegelde Virtual Controller en een
   expliciete MIDI/POC-readinessweergave op basis van demo-data.
 - ADR-0015 en een timeboxed CoreMIDI/SoundSwitch-POC-plan dat parallelle Control
   One-bediening en zichtbare DMX-output via Control One als harde acceptatie

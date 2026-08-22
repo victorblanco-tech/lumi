@@ -38,8 +38,18 @@ De eerste ingebouwde outputpresentatie heet `SoundSwitch Autoloops`.
   track-specifieke keuze, maar blijft implementatiedetail.
 - De eerste demo-projectie gebruikt één Theme-group per bank. Dat is een preset,
   geen invariant van het generieke outputprofielmodel.
-- De `Test Controller` spiegelt exact dezelfde bankselectie en 32 posities en
+- De `Virtual Controller` spiegelt exact dezelfde bankselectie en 32 posities en
   introduceert geen tweede mappingmodel. Zij heet niet `Virtual Control One`.
+- Bankselectie gebruikt kanaal 16, notes 60–63. Elke bank krijgt voor zijn 32
+  AutoLoops een eigen MIDI-kanaal met notes 64–95: Bank 1–4 gebruiken
+  respectievelijk kanaal 13–16. Daardoor zijn alle 128 AutoLoops uniek en kan
+  het leren van een latere bank nooit een eerdere bankbinding overschrijven.
+- Het banknummer blijft onderdeel van het adres vanaf UI-command tot en met de
+  realtime deadline lane. Voor runtimebediening wordt eerst de bankselectie
+  herbevestigd en daarna de bankspecifieke AutoLoop-puls verstuurd.
+- SoundSwitch biedt geen ondersteunde bulk-import- of bevestigings-API voor MIDI
+  Learn. Lumi automatiseert daarom alleen de eigen helft met `Send Learn &
+  Next`; de gebruiker activeert per SoundSwitch-button nog steeds `Map`.
 
 ```text
 Pro DJ Link / Local Playback -> Lumi -> Ableton Link timing ---------+

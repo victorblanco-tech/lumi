@@ -35,16 +35,27 @@ The spatial layout is part of the product contract: selecting Bank 1, 2, 3, or
 shared slot state is presented. The inspector augments that surface; it never
 replaces it. Slot numbering follows SoundSwitch/Control One column-major order:
 1–8 run top-to-bottom in the first column, followed by 9–16, 17–24 and 25–32.
-The mapping surface, Learn surface, Test Controller and MIDI adapter must all
+The mapping surface, Learn surface, Virtual Controller and MIDI adapter must all
 use this exact same coordinate system.
 
-### Test Controller
+Every Banks & AutoLoops tile also has a small Test action. It emits the actual
+Bank + AutoLoop runtime sequence without changing the saved mapping.
+
+### Virtual Controller
 
 - `Lumi Virtual MIDI Controller` identity;
 - the same bank selector and 32 positions for the selected bank;
 - the exact same names and Phrase Types as the Banks view;
 - no second configuration model;
-- explicit learn and runtime-test actions that never run automatically.
+- explicit Learn and Test actions per button that never run automatically;
+- a guided `Send Learn & Next` workflow that advances across all 32 positions
+  and then the next bank. It does not claim that SoundSwitch accepted a mapping,
+  because SoundSwitch exposes no feedback API for that state.
+
+Bank selectors use Channel 16 / Notes 60–63. AutoLoops use Notes 64–95 on one
+channel per bank: Bank 1 = Channel 13, Bank 2 = Channel 14, Bank 3 = Channel 15,
+Bank 4 = Channel 16. The tuple `(channel, note)` is therefore unique for all 128
+AutoLoop controls.
 
 ### MIDI Status
 
@@ -72,7 +83,7 @@ the generic controller and status-page model.
 ## Version 4 slot migration
 
 The initial 4×32 mapping view accidentally stored the four-column screen
-position in row-major order while Learn and Test Controller already used the
+position in row-major order while Learn and Virtual Controller already used the
 SoundSwitch column-major order. Catalog defaults version 4 applies a one-time
 bijection from the old screen positions to the physical slots and preserves
 every user-authored Bank name, Phrase Type and exact AutoLoop name. Generated
