@@ -12,11 +12,19 @@ public struct LightPlanningSnapshotDecoder: Sendable {
             throw LightPlanningSnapshotError.missingState
         }
         let ruleValues = try array(policy, "rules", maximum: 8_192)
+        let themeRuleValues = try optionalArray(policy, "themeRules", maximum: 64)
         let modifierValues = try array(policy, "modifiers", maximum: 256)
         let modifierRuleValues = try array(policy, "modifierRules", maximum: 4_096)
         return LightPlanningState(
             policy: LightPlanningPolicyState(
                 revision: try unsigned(policy, "revision"),
+                bankOrganization: try decodeBankOrganization(policy["bankOrganization"]),
+                defaultThemeID: try optionalUnsigned(policy["defaultThemeId"]),
+                automaticMidTrackThemeChanges: try optionalBoolean(
+                    policy["automaticMidTrackThemeChanges"],
+                    default: false
+                ),
+                themeRules: try themeRuleValues.map(decodeThemeRule),
                 themeCooldownTracks: try smallUnsigned(policy, "themeCooldownTracks"),
                 autoloopCooldownUses: try smallUnsigned(policy, "autoloopCooldownUses"),
                 duplicatePlanWindow: try smallUnsigned(policy, "duplicatePlanWindow"),
@@ -41,6 +49,29 @@ public struct LightPlanningSnapshotDecoder: Sendable {
                 colorOverrideOutput: try string(execution, "colorOverrideOutput")
             ),
             preview: try decodePreview(lightPlanning["preview"])
+        )
+    }
+
+    private func decodeBankOrganization(_ value: JSONValue?) throws -> LightPlanBankOrganization {
+        guard let value else { return .themes }
+        guard case let .string(rawValue) = value,
+              let organization = LightPlanBankOrganization(rawValue: rawValue) else {
+            throw LightPlanningSnapshotError.invalidState
+        }
+        return organization
+    }
+
+    private func decodeThemeRule(_ value: JSONValue) throws -> LightPlanThemeRule {
+        guard case let .object(rule) = value,
+              let behavior = LightPlanColorBehavior(rawValue: try string(rule, "colorBehavior")) else {
+            throw LightPlanningSnapshotError.invalidState
+        }
+        return LightPlanThemeRule(
+            themeID: try unsigned(rule, "themeId"),
+            enabled: try boolean(rule, "enabled"),
+            selectionWeight: try smallUnsigned(rule, "selectionWeight"),
+            colorBehavior: behavior,
+            colorRGB: try array(rule, "colorRgb", maximum: 64).map(decodeRGB)
         )
     }
 
@@ -112,6 +143,7 @@ public struct LightPlanningSnapshotDecoder: Sendable {
             trackID: try unsigned(preview, "trackId"),
             trackTitle: try string(preview, "trackTitle"),
             themeID: try unsigned(preview, "themeId"),
+            themeReason: try optionalString(preview["themeReason"], default: "manualPreviewOverride"),
             policyRevision: try unsigned(preview, "policyRevision"),
             variationSeed: try string(preview, "variationSeed"),
             signature: try string(preview, "signature"),
@@ -202,11 +234,36 @@ public struct LightPlanningSnapshotDecoder: Sendable {
         return value
     }
 
+    private func optionalString(_ value: JSONValue?, default defaultValue: String) throws -> String {
+        guard let value else { return defaultValue }
+        guard case let .string(result) = value, !result.isEmpty else {
+            throw LightPlanningSnapshotError.invalidState
+        }
+        return result
+    }
+
     private func boolean(_ object: [String: JSONValue], _ key: String) throws -> Bool {
         guard case let .boolean(value)? = object[key] else {
             throw LightPlanningSnapshotError.invalidState
         }
         return value
+    }
+
+    private func optionalBoolean(_ value: JSONValue?, default defaultValue: Bool) throws -> Bool {
+        guard let value else { return defaultValue }
+        guard case let .boolean(result) = value else {
+            throw LightPlanningSnapshotError.invalidState
+        }
+        return result
+    }
+
+    private func optionalUnsigned(_ value: JSONValue?) throws -> UInt64? {
+        guard let value, value != .null else { return nil }
+        guard case let .number(number) = value, number > 0,
+              number <= Double(UInt64.max), number.rounded(.towardZero) == number else {
+            throw LightPlanningSnapshotError.invalidState
+        }
+        return UInt64(number)
     }
 
     private func unsigned(_ object: [String: JSONValue], _ key: String) throws -> UInt64 {

@@ -336,7 +336,7 @@ public enum EngineCommand: Equatable, Sendable {
     case previewLightPlan(
         trackID: UInt64,
         expectedTimelineRevision: UInt64,
-        themeID: UInt64,
+        themeID: UInt64?,
         variationSeed: UInt64,
         policy: JSONValue
     )
@@ -557,7 +557,7 @@ public enum EngineCommand: Equatable, Sendable {
                 "kind": .string("previewLightPlan"),
                 "trackId": .number(Double(trackID)),
                 "expectedTimelineRevision": .number(Double(expectedTimelineRevision)),
-                "themeId": .number(Double(themeID)),
+                "themeId": themeID.map { .number(Double($0)) } ?? .null,
                 "variationSeed": .number(Double(variationSeed)),
                 "policy": policy
             ]

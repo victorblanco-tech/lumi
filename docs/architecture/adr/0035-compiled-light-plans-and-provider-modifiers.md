@@ -54,6 +54,12 @@ The compiler never:
 Themes remain late-bound. Track color is an input to selection and does not become
 a fixed Theme in the Track Editor.
 
+For the built-in SoundSwitch output profile, physical Banks 1–4 are explicitly
+organized as Lumi Themes. The planner selects one base Theme for a complete track
+before phrase-level AutoLoop compilation. Automatic phrase changes cannot cross
+Themes. A deliberate plan-instance edit may still retheme a future phrase and all
+following phrases.
+
 ### 3. Deterministic variation
 
 `AUTO` considers mapped variants for the exact Phrase Role and selected Theme.
@@ -93,6 +99,25 @@ The default policy is:
 The history includes the current plan and the reserved next plan. Replacing an
 unexecuted next plan releases its reservation; a plan is committed when execution
 starts. History is bounded and can be cleared explicitly.
+
+### 4.1 Theme Strategy
+
+Each enabled Theme has Selection Weight and Track Color behavior:
+
+- `Neutral` participates in normal weighted rotation;
+- `Prefer` doubles effective weight for a matching Rekordbox color but remains a
+  fallback for other colors;
+- `Only` is eligible only for configured colors, and matching `Only` Themes take
+  precedence over Neutral and Prefer candidates.
+
+The fallback Theme is used when a plan has no prior Theme history and no color
+rule takes precedence. Subsequent plans use deterministic weighted rotation after
+excluding the configured number of committed and reserved recent Themes. Policy
+evaluation remains outside all realtime lanes.
+
+Stored policies from before Theme Strategy retain their exact former selection
+behavior until the user saves the explicit strategy. Saving materializes one rule
+per existing Bank without changing its ID, name, MIDI mapping or AutoLoops.
 
 ### 5. Explainability
 

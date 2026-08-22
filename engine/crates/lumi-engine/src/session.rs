@@ -15,12 +15,13 @@ use lumi_domain::{
     OutputEffectReason, OutputEffectResult, OutputEffectStatus, OutputExecutionRequest, PhraseKind,
     PitchClass, PlanConfigurationRevision, PlanRevision, PlanStatus, PlanValidationError,
     RuntimeHealth, SceneCategory, SceneId, SemanticLightingAction, SerializedRuntime,
-    SerializedRuntimeError, TimelineResult, TimelineSource, TrackLoadId, TrackMetadata,
+    SerializedRuntimeError, TimelineResult, TimelineSource, TrackColor, TrackLoadId, TrackMetadata,
     UserCommandEnvelope, WorkerId,
 };
 use lumi_library::AutoloopCatalog;
 use lumi_light_plans::{
-    CompiledLightPlan, CompiledModifierChoice, LightPlanningPolicy, ModifierKind, VariationHistory,
+    ColorBehavior, CompiledLightPlan, CompiledModifierChoice, LightPlanningPolicy, ModifierKind,
+    VariationHistory,
 };
 use lumi_lighting_output::LightingOutputProvider as _;
 use lumi_local_playback::{LocalPlaybackDeckSourceProvider, LocalPlaybackError};
@@ -38,7 +39,8 @@ use lumi_midi_output::{
 use lumi_output_dry_run::{DryRunLightingOutputProvider, DryRunOutputError};
 use lumi_planner::{
     DeterministicPlanner, PlanMutationError, PlannerError, PlannerTrack, PlanningConfiguration,
-    PlanningInput, PlanningOptions, StableChoiceSource, ThemeOption, ThemeSelectionContext,
+    PlanningInput, PlanningOptions, StableChoiceSource, ThemeOption, ThemeRuleColorBehavior,
+    ThemeSelectionContext, ThemeSelectionRule,
 };
 #[cfg(not(test))]
 use lumi_prolink_input::{
@@ -876,6 +878,8 @@ fn hydrate_connected_library_event(
 
 struct PlanningWorker {
     planner: DeterministicPlanner<StableChoiceSource>,
+    planner_catalog_revision: u64,
+    planner_theme_options: Vec<ThemeOption>,
     effect_sequence: u64,
     recent_theme_ids: Vec<lumi_domain::ThemeId>,
     reserved_theme_ids: BTreeMap<TrackLoadId, lumi_domain::ThemeId>,
@@ -895,24 +899,46 @@ fn planner_track(metadata: &TrackMetadata) -> PlannerTrack {
 
 impl PlanningWorker {
     fn new(catalog: &AutoloopCatalog) -> Self {
+        let planner_theme_options = theme_options(catalog);
+        let light_policy = LightPlanningPolicy::default();
         Self {
-            planner: planner_for_catalog(catalog),
+            planner: planner_for_theme_options(
+                catalog.revision(),
+                planner_theme_options.clone(),
+                &light_policy,
+            )
+            .unwrap_or_else(|_| DeterministicPlanner::epic_one()),
+            planner_catalog_revision: catalog.revision(),
+            planner_theme_options,
             effect_sequence: 0,
             recent_theme_ids: Vec::new(),
             reserved_theme_ids: BTreeMap::new(),
             library_contexts: BTreeMap::new(),
-            light_policy: LightPlanningPolicy::default(),
+            light_policy,
             variation_history: VariationHistory::default(),
             compiled_light_plans: BTreeMap::new(),
         }
     }
 
     fn synchronize_themes(&mut self, catalog: &AutoloopCatalog) {
-        self.planner = planner_for_catalog(catalog);
+        self.planner_catalog_revision = catalog.revision();
+        self.planner_theme_options = theme_options(catalog);
+        self.rebuild_planner();
     }
 
     fn synchronize_light_policy(&mut self, policy: LightPlanningPolicy) {
         self.light_policy = policy;
+        self.rebuild_planner();
+    }
+
+    fn rebuild_planner(&mut self) {
+        if let Ok(planner) = planner_for_theme_options(
+            self.planner_catalog_revision,
+            self.planner_theme_options.clone(),
+            &self.light_policy,
+        ) {
+            self.planner = planner;
+        }
     }
 
     fn register_library_context(
@@ -1164,7 +1190,11 @@ impl PlanningWorker {
             let generated = if let Some(library_context) = self.library_context(input.track_load_id)
             {
                 let themes = library_context.executable_themes();
-                let planner = planner_for_themes(library_context.catalog_revision(), themes)?;
+                let planner = planner_for_themes(
+                    library_context.catalog_revision(),
+                    themes,
+                    &self.light_policy,
+                )?;
                 planner.generate_with_context(&input, &context)?
             } else {
                 self.planner.generate_with_context(&input, &context)?
@@ -1260,22 +1290,21 @@ fn transport_epoch_cause(
     }
 }
 
-fn planner_for_catalog(catalog: &AutoloopCatalog) -> DeterministicPlanner<StableChoiceSource> {
-    let themes = catalog
+fn theme_options(catalog: &AutoloopCatalog) -> Vec<ThemeOption> {
+    catalog
         .themes()
         .iter()
         .map(|theme| ThemeOption {
             id: theme.id(),
             name: theme.display_name().to_owned(),
         })
-        .collect::<Vec<_>>();
-    planner_for_theme_options(catalog.revision(), themes)
-        .unwrap_or_else(|_| DeterministicPlanner::epic_one())
+        .collect()
 }
 
-fn planner_for_themes(
+pub(crate) fn planner_for_themes(
     catalog_revision: u64,
     themes: Vec<(lumi_domain::ThemeId, String)>,
+    policy: &LightPlanningPolicy,
 ) -> Result<DeterministicPlanner<StableChoiceSource>, EngineError> {
     planner_for_theme_options(
         catalog_revision,
@@ -1283,23 +1312,79 @@ fn planner_for_themes(
             .into_iter()
             .map(|(id, name)| ThemeOption { id, name })
             .collect(),
+        policy,
     )
 }
 
 fn planner_for_theme_options(
     catalog_revision: u64,
-    themes: Vec<ThemeOption>,
+    mut themes: Vec<ThemeOption>,
+    policy: &LightPlanningPolicy,
 ) -> Result<DeterministicPlanner<StableChoiceSource>, EngineError> {
+    if !policy.theme_rules.is_empty() {
+        themes.retain(|theme| {
+            policy
+                .theme_rules
+                .iter()
+                .find(|rule| rule.theme_id == theme.id.value())
+                .is_some_and(|rule| rule.enabled)
+        });
+    }
     let Some(default_theme) = themes.first().map(|theme| theme.id) else {
         return Err(EngineError::NoExecutableLibraryTheme);
     };
+    let default_theme = policy
+        .default_theme_id
+        .map(lumi_domain::ThemeId::new)
+        .filter(|candidate| themes.iter().any(|theme| theme.id == *candidate))
+        .unwrap_or(default_theme);
+    let selection_rules = themes
+        .iter()
+        .filter_map(|theme| {
+            let rule = policy
+                .theme_rules
+                .iter()
+                .find(|rule| rule.theme_id == theme.id.value())?;
+            Some(ThemeSelectionRule {
+                theme_id: theme.id,
+                enabled: true,
+                weight: u16::from(rule.effective_weight()),
+                color_behavior: match rule.color_behavior {
+                    ColorBehavior::Prefer => ThemeRuleColorBehavior::Prefer,
+                    ColorBehavior::Only => ThemeRuleColorBehavior::Only,
+                    ColorBehavior::Neutral => ThemeRuleColorBehavior::Neutral,
+                },
+                colors: rule
+                    .color_rgb
+                    .iter()
+                    .copied()
+                    .map(track_color_from_rgb)
+                    .collect(),
+            })
+        })
+        .collect::<Vec<_>>();
     let configuration = PlanningConfiguration::epic_one()
         .with_themes(
             PlanConfigurationRevision::new(catalog_revision.max(1)),
             themes,
         )
         .with_default_theme(default_theme);
+    let configuration = if policy.theme_rules.is_empty() {
+        configuration
+    } else {
+        configuration
+            .with_color_rules(Vec::new())
+            .with_theme_selection_rules(selection_rules)
+    };
     Ok(DeterministicPlanner::new(configuration, StableChoiceSource))
+}
+
+const fn track_color_from_rgb(rgb: u32) -> TrackColor {
+    TrackColor::new(
+        ((rgb >> 16) & 0xff) as u8,
+        ((rgb >> 8) & 0xff) as u8,
+        (rgb & 0xff) as u8,
+    )
 }
 
 struct OutputWorker {
@@ -4977,7 +5062,9 @@ fn action_theme_id(action: &SemanticLightingAction) -> Option<lumi_domain::Theme
     }
 }
 
-const fn theme_selection_reason_name(reason: lumi_domain::ThemeSelectionReason) -> &'static str {
+pub(crate) const fn theme_selection_reason_name(
+    reason: lumi_domain::ThemeSelectionReason,
+) -> &'static str {
     match reason {
         lumi_domain::ThemeSelectionReason::GlobalLock => "globalLock",
         lumi_domain::ThemeSelectionReason::PlanInstanceUserChoice => "planInstanceUserChoice",

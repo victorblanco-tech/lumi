@@ -98,6 +98,22 @@ pub struct ThemeColorRule {
     pub candidates: Vec<WeightedThemeCandidate>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum ThemeRuleColorBehavior {
+    Neutral,
+    Prefer,
+    Only,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ThemeSelectionRule {
+    pub theme_id: ThemeId,
+    pub enabled: bool,
+    pub weight: u16,
+    pub color_behavior: ThemeRuleColorBehavior,
+    pub colors: Vec<TrackColor>,
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ThemeSelectionContext {
     recent_theme_ids: Vec<ThemeId>,
@@ -139,6 +155,7 @@ pub struct PlanningConfiguration {
     scenes: Vec<SceneDefinition>,
     global_theme_lock: Option<ThemeId>,
     color_rules: Vec<ThemeColorRule>,
+    theme_selection_rules: Vec<ThemeSelectionRule>,
     default_theme_id: ThemeId,
 }
 
@@ -216,6 +233,7 @@ impl PlanningConfiguration {
                     }],
                 },
             ],
+            theme_selection_rules: Vec::new(),
             default_theme_id: ThemeId::new(1),
         }
     }
@@ -234,6 +252,12 @@ impl PlanningConfiguration {
     #[must_use]
     pub fn with_color_rules(mut self, rules: Vec<ThemeColorRule>) -> Self {
         self.color_rules = rules;
+        self
+    }
+
+    #[must_use]
+    pub fn with_theme_selection_rules(mut self, rules: Vec<ThemeSelectionRule>) -> Self {
+        self.theme_selection_rules = rules;
         self
     }
 
@@ -266,6 +290,8 @@ impl PlanningConfiguration {
         }
         self.color_rules
             .retain(|rule| rule.candidates.iter().any(|candidate| candidate.weight > 0));
+        self.theme_selection_rules
+            .retain(|rule| theme_ids.contains(&rule.theme_id));
         if self
             .global_theme_lock
             .is_some_and(|theme_id| !theme_ids.contains(&theme_id))
@@ -713,6 +739,9 @@ impl<C: ChoiceSource> DeterministicPlanner<C> {
         if let Some(theme_id) = self.configuration.global_theme_lock {
             return self.decision(theme_id, ThemeSelectionReason::GlobalLock, None);
         }
+        if !self.configuration.theme_selection_rules.is_empty() {
+            return self.select_policy_theme(track, seed, context);
+        }
         if let Some(color) = track.color {
             for mode in [ThemeColorRuleMode::Force, ThemeColorRuleMode::Prefer] {
                 if let Some(rule) = self
@@ -743,13 +772,7 @@ impl<C: ChoiceSource> DeterministicPlanner<C> {
             }
         }
         if !context.recent_theme_ids().is_empty() {
-            let recent = context
-                .recent_theme_ids()
-                .iter()
-                .rev()
-                .take(2)
-                .copied()
-                .collect::<Vec<_>>();
+            let recent = context.recent_theme_ids();
             let candidates = self
                 .configuration
                 .themes
@@ -767,6 +790,96 @@ impl<C: ChoiceSource> DeterministicPlanner<C> {
             self.configuration.default_theme_id,
             ThemeSelectionReason::DefaultTheme,
             None,
+        )
+    }
+
+    fn select_policy_theme(
+        &self,
+        track: &PlannerTrack,
+        seed: u64,
+        context: &ThemeSelectionContext,
+    ) -> Result<ThemeDecision, PlannerError> {
+        let matches_color = |rule: &ThemeSelectionRule| {
+            track
+                .color
+                .is_some_and(|color| rule.colors.contains(&color))
+        };
+        let matching_only = self
+            .configuration
+            .theme_selection_rules
+            .iter()
+            .filter(|rule| {
+                rule.enabled
+                    && rule.color_behavior == ThemeRuleColorBehavior::Only
+                    && matches_color(rule)
+            })
+            .collect::<Vec<_>>();
+        let uses_color_only = !matching_only.is_empty();
+        let eligible = if uses_color_only {
+            matching_only
+        } else {
+            self.configuration
+                .theme_selection_rules
+                .iter()
+                .filter(|rule| rule.enabled && rule.color_behavior != ThemeRuleColorBehavior::Only)
+                .collect::<Vec<_>>()
+        };
+        let weighted = eligible
+            .iter()
+            .map(|rule| WeightedThemeCandidate {
+                theme_id: rule.theme_id,
+                weight: if rule.color_behavior == ThemeRuleColorBehavior::Prefer
+                    && matches_color(rule)
+                {
+                    rule.weight.saturating_mul(2)
+                } else {
+                    rule.weight
+                }
+                .max(1),
+            })
+            .collect::<Vec<_>>();
+        let matching_prefer = eligible.iter().any(|rule| {
+            rule.color_behavior == ThemeRuleColorBehavior::Prefer && matches_color(rule)
+        });
+        if !uses_color_only
+            && !matching_prefer
+            && context.recent_theme_ids().is_empty()
+            && weighted
+                .iter()
+                .any(|candidate| candidate.theme_id == self.configuration.default_theme_id)
+        {
+            return self.decision(
+                self.configuration.default_theme_id,
+                ThemeSelectionReason::DefaultTheme,
+                None,
+            );
+        }
+        let without_recent = without_recent(&weighted, context.recent_theme_ids());
+        let candidates = if without_recent.is_empty() {
+            &weighted
+        } else {
+            &without_recent
+        };
+        if candidates.is_empty() {
+            return Err(PlannerError::InvalidThemeRule);
+        }
+        let reason = if uses_color_only {
+            ThemeSelectionReason::ColorForce
+        } else if matching_prefer {
+            ThemeSelectionReason::ColorPrefer
+        } else {
+            ThemeSelectionReason::Rotation
+        };
+        let decision = track.color.map_or(0x0054_4845_4d45, |color| {
+            u64::from(color.rgb_u32()) ^ 0x0054_4845_4d45
+        });
+        let selected = self.weighted_choice(seed, decision, candidates)?;
+        self.decision(
+            selected,
+            reason,
+            (uses_color_only || matching_prefer)
+                .then(|| track.color.map(TrackColor::rgb_u32))
+                .flatten(),
         )
     }
 
@@ -876,7 +989,6 @@ fn without_recent(
     candidates: &[WeightedThemeCandidate],
     recent: &[ThemeId],
 ) -> Vec<WeightedThemeCandidate> {
-    let recent = recent.iter().rev().take(2).copied().collect::<Vec<_>>();
     candidates
         .iter()
         .copied()

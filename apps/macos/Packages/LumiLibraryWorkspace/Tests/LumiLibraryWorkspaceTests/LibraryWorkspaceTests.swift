@@ -154,6 +154,18 @@ struct LibraryWorkspaceTests {
     func decodesLightPlanningState() throws {
         let policy: JSONValue = .object([
             "revision": .number(3),
+            "bankOrganization": .string("themes"),
+            "defaultThemeId": .number(1),
+            "automaticMidTrackThemeChanges": .boolean(false),
+            "themeRules": .array([
+                .object([
+                    "themeId": .number(1),
+                    "enabled": .boolean(true),
+                    "selectionWeight": .number(3),
+                    "colorBehavior": .string("prefer"),
+                    "colorRgb": .array([.number(4_747_469)])
+                ])
+            ]),
             "themeCooldownTracks": .number(1),
             "autoloopCooldownUses": .number(2),
             "duplicatePlanWindow": .number(4),
@@ -188,6 +200,7 @@ struct LibraryWorkspaceTests {
             "trackId": .number(42),
             "trackTitle": .string("90s Bitch"),
             "themeId": .number(1),
+            "themeReason": .string("colorPrefer"),
             "policyRevision": .number(3),
             "variationSeed": .string("9"),
             "signature": .string("123"),
@@ -257,12 +270,17 @@ struct LibraryWorkspaceTests {
 
         let state = try LightPlanningSnapshotDecoder().decode(message)
         #expect(state.policy.modifierRules.first?.applicationRate == 25)
+        #expect(state.policy.bankOrganization == .themes)
+        #expect(state.policy.defaultThemeID == 1)
+        #expect(state.policy.themeRules.first?.selectionWeight == 3)
+        #expect(state.policy.themeRules.first?.colorBehavior == .prefer)
         #expect(state.trackColors.first?.name == "Blue")
         #expect(state.trackColors.first?.trackCount == 17)
         #expect(state.preview?.phrases.first?.autoloopName == "INTRO BLUE PINK")
         #expect(state.preview?.phrases.first?.startBeat == 0)
         #expect(state.preview?.phrases.first?.modifiers.first?.name == "Moving Heads Off")
         #expect(state.preview?.phrases.first?.modifiers.first?.midiNote == 64)
+        #expect(state.preview?.themeReason == "colorPrefer")
     }
 
     @Test("SoundSwitch Static Looks project one fixed 32-slot surface in controller order")

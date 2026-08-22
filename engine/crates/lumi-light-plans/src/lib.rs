@@ -23,6 +23,33 @@ pub enum ColorBehavior {
     Only,
 }
 
+/// Describes how physical provider banks participate in planning. SoundSwitch
+/// currently exposes four banks which the built-in Lumi profile treats as four
+/// coherent visual Themes.
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum BankOrganization {
+    #[default]
+    Themes,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ThemeRule {
+    pub theme_id: u64,
+    pub enabled: bool,
+    pub selection_weight: u8,
+    pub color_behavior: ColorBehavior,
+    pub color_rgb: Vec<u32>,
+}
+
+impl ThemeRule {
+    #[must_use]
+    pub fn effective_weight(&self) -> u8 {
+        self.selection_weight.clamp(1, 4)
+    }
+}
+
 #[derive(Clone, Copy, Debug, Deserialize, Eq, Ord, PartialEq, PartialOrd, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ModifierKind {
@@ -94,6 +121,14 @@ pub struct ModifierRule {
 #[serde(rename_all = "camelCase")]
 pub struct LightPlanningPolicy {
     pub revision: u64,
+    #[serde(default)]
+    pub bank_organization: BankOrganization,
+    #[serde(default)]
+    pub default_theme_id: Option<u64>,
+    #[serde(default)]
+    pub automatic_mid_track_theme_changes: bool,
+    #[serde(default)]
+    pub theme_rules: Vec<ThemeRule>,
     pub theme_cooldown_tracks: u8,
     pub autoloop_cooldown_uses: u8,
     pub duplicate_plan_window: u8,
@@ -106,6 +141,10 @@ impl Default for LightPlanningPolicy {
     fn default() -> Self {
         Self {
             revision: 1,
+            bank_organization: BankOrganization::Themes,
+            default_theme_id: None,
+            automatic_mid_track_theme_changes: false,
+            theme_rules: Vec::new(),
             theme_cooldown_tracks: DEFAULT_THEME_COOLDOWN_TRACKS,
             autoloop_cooldown_uses: DEFAULT_AUTOLOOP_COOLDOWN_USES,
             duplicate_plan_window: DEFAULT_DUPLICATE_PLAN_WINDOW,
@@ -120,6 +159,26 @@ impl LightPlanningPolicy {
     pub fn validate(&self) -> Result<(), LightPlanError> {
         if self.revision == 0 {
             return Err(LightPlanError::InvalidRevision);
+        }
+        if self.automatic_mid_track_theme_changes {
+            return Err(LightPlanError::AutomaticMidTrackThemeChangesUnsupported);
+        }
+        let mut theme_ids = BTreeSet::new();
+        for rule in &self.theme_rules {
+            if rule.theme_id == 0 || !(1..=4).contains(&rule.selection_weight) {
+                return Err(LightPlanError::InvalidThemeRule);
+            }
+            if !theme_ids.insert(rule.theme_id) {
+                return Err(LightPlanError::DuplicateThemeRule);
+            }
+        }
+        if self.default_theme_id.is_some_and(|theme_id| {
+            theme_id == 0 || !theme_ids.is_empty() && !theme_ids.contains(&theme_id)
+        }) {
+            return Err(LightPlanError::InvalidDefaultTheme);
+        }
+        if !self.theme_rules.is_empty() && !self.theme_rules.iter().any(|rule| rule.enabled) {
+            return Err(LightPlanError::NoEnabledTheme);
         }
         let mut keys = BTreeSet::new();
         for rule in &self.rules {
@@ -810,6 +869,16 @@ fn stable_mix(mut value: u64) -> u64 {
 pub enum LightPlanError {
     #[error("light planning policy revision must be positive")]
     InvalidRevision,
+    #[error("invalid Theme planning rule")]
+    InvalidThemeRule,
+    #[error("duplicate Theme planning rule")]
+    DuplicateThemeRule,
+    #[error("the fallback Theme is not part of the Theme Strategy")]
+    InvalidDefaultTheme,
+    #[error("at least one Theme must be enabled")]
+    NoEnabledTheme,
+    #[error("automatic mid-track Theme changes are not supported")]
+    AutomaticMidTrackThemeChangesUnsupported,
     #[error("invalid AutoLoop planning rule")]
     InvalidRule,
     #[error("selection weight must be between 1 and 4")]
@@ -876,6 +945,30 @@ mod tests {
             &VariationHistory::default(),
         )?;
         assert_eq!(first, second);
+        Ok(())
+    }
+
+    #[test]
+    fn pre_theme_strategy_policy_migrates_without_losing_existing_rules()
+    -> Result<(), serde_json::Error> {
+        let policy: LightPlanningPolicy = serde_json::from_str(
+            r#"{
+                "revision": 7,
+                "themeCooldownTracks": 1,
+                "autoloopCooldownUses": 2,
+                "duplicatePlanWindow": 4,
+                "rules": [],
+                "modifiers": [],
+                "modifierRules": []
+            }"#,
+        )?;
+
+        assert_eq!(policy.bank_organization, BankOrganization::Themes);
+        assert_eq!(policy.default_theme_id, None);
+        assert!(!policy.automatic_mid_track_theme_changes);
+        assert!(policy.theme_rules.is_empty());
+        assert_eq!(policy.revision, 7);
+        assert_eq!(policy.validate(), Ok(()));
         Ok(())
     }
 

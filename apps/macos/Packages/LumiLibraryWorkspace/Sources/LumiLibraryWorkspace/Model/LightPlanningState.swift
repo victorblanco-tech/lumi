@@ -16,6 +16,35 @@ public enum LightPlanColorBehavior: String, CaseIterable, Identifiable, Sendable
     }
 }
 
+public enum LightPlanBankOrganization: String, CaseIterable, Identifiable, Sendable {
+    case themes
+    public var id: String { rawValue }
+    public var label: String { "Themes · one Bank per visual identity" }
+}
+
+public struct LightPlanThemeRule: Identifiable, Equatable, Sendable {
+    public var id: UInt64 { themeID }
+    public let themeID: UInt64
+    public var enabled: Bool
+    public var selectionWeight: UInt8
+    public var colorBehavior: LightPlanColorBehavior
+    public var colorRGB: [UInt32]
+
+    public init(
+        themeID: UInt64,
+        enabled: Bool = true,
+        selectionWeight: UInt8 = 2,
+        colorBehavior: LightPlanColorBehavior = .neutral,
+        colorRGB: [UInt32] = []
+    ) {
+        self.themeID = themeID
+        self.enabled = enabled
+        self.selectionWeight = selectionWeight
+        self.colorBehavior = colorBehavior
+        self.colorRGB = colorRGB
+    }
+}
+
 public struct LightPlanAutoloopRule: Identifiable, Equatable, Sendable {
     public var id: String { "\(themeID):\(roleID):\(variantID)" }
     public let themeID: UInt64
@@ -89,6 +118,10 @@ public struct LightPlanModifierRule: Identifiable, Equatable, Sendable {
 
 public struct LightPlanningPolicyState: Equatable, Sendable {
     public var revision: UInt64
+    public var bankOrganization: LightPlanBankOrganization
+    public var defaultThemeID: UInt64?
+    public var automaticMidTrackThemeChanges: Bool
+    public var themeRules: [LightPlanThemeRule]
     public var themeCooldownTracks: UInt8
     public var autoloopCooldownUses: UInt8
     public var duplicatePlanWindow: UInt8
@@ -98,6 +131,10 @@ public struct LightPlanningPolicyState: Equatable, Sendable {
 
     public init(
         revision: UInt64 = 1,
+        bankOrganization: LightPlanBankOrganization = .themes,
+        defaultThemeID: UInt64? = nil,
+        automaticMidTrackThemeChanges: Bool = false,
+        themeRules: [LightPlanThemeRule] = [],
         themeCooldownTracks: UInt8 = 1,
         autoloopCooldownUses: UInt8 = 2,
         duplicatePlanWindow: UInt8 = 4,
@@ -106,6 +143,10 @@ public struct LightPlanningPolicyState: Equatable, Sendable {
         modifierRules: [LightPlanModifierRule] = []
     ) {
         self.revision = revision
+        self.bankOrganization = bankOrganization
+        self.defaultThemeID = defaultThemeID
+        self.automaticMidTrackThemeChanges = automaticMidTrackThemeChanges
+        self.themeRules = themeRules
         self.themeCooldownTracks = themeCooldownTracks
         self.autoloopCooldownUses = autoloopCooldownUses
         self.duplicatePlanWindow = duplicatePlanWindow
@@ -117,6 +158,18 @@ public struct LightPlanningPolicyState: Equatable, Sendable {
     public func payload() -> JSONValue {
         .object([
             "revision": .number(Double(revision)),
+            "bankOrganization": .string(bankOrganization.rawValue),
+            "defaultThemeId": defaultThemeID.map { .number(Double($0)) } ?? .null,
+            "automaticMidTrackThemeChanges": .boolean(automaticMidTrackThemeChanges),
+            "themeRules": .array(themeRules.map { rule in
+                .object([
+                    "themeId": .number(Double(rule.themeID)),
+                    "enabled": .boolean(rule.enabled),
+                    "selectionWeight": .number(Double(rule.selectionWeight)),
+                    "colorBehavior": .string(rule.colorBehavior.rawValue),
+                    "colorRgb": .array(rule.colorRGB.map { .number(Double($0)) })
+                ])
+            }),
             "themeCooldownTracks": .number(Double(themeCooldownTracks)),
             "autoloopCooldownUses": .number(Double(autoloopCooldownUses)),
             "duplicatePlanWindow": .number(Double(duplicatePlanWindow)),
@@ -192,6 +245,7 @@ public struct LightPlanPreview: Equatable, Sendable {
     public let trackID: UInt64
     public let trackTitle: String
     public let themeID: UInt64
+    public let themeReason: String
     public let policyRevision: UInt64
     public let variationSeed: String
     public let signature: String

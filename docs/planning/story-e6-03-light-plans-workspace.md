@@ -10,11 +10,14 @@ workspace.
 ## Acceptance criteria
 
 - `Light Plans` replaces the Plans placeholder in primary navigation.
+- `Theme Strategy` explicitly maps SoundSwitch Banks to coherent Lumi Themes and
+  configures fallback, weight, Track Color affinity and Theme cooldown.
 - `AutoLoop Rules` shows Phrase Roles, mapped candidates, Selection Weight,
   track-color behavior and cooldown status.
 - The physical mapping is read-only here and links to Lighting Outputs.
-- `Plan Preview` selects a real Library track and Theme and shows phrases in order,
-  selected AutoLoops, addresses and reasons.
+- `Plan Preview` selects a real Library track and defaults to automatic Theme
+  selection through the same compiler as runtime. A manual Theme is an explicit
+  Preview override; both paths show phrases, AutoLoops, addresses and reasons.
 - `New variation` changes the recorded seed; reloading does not.
 - Empty/error/loading states are clear and do not shift the surrounding layout.
 - Controls have full hit targets, keyboard accessibility and responsive scrolling.

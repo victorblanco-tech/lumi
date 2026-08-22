@@ -134,7 +134,7 @@ pub enum SessionCommand {
     PreviewLightPlan {
         track_id: u64,
         expected_timeline_revision: u64,
-        theme_id: u64,
+        theme_id: Option<u64>,
         variation_seed: u64,
         policy: LightPlanningPolicy,
     },
@@ -455,7 +455,15 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
                 &envelope.payload,
                 "expectedTimelineRevision",
             )?,
-            theme_id: positive_unsigned(&envelope.payload, "themeId")?,
+            theme_id: optional_unsigned(&envelope.payload, "themeId")?
+                .map(|value| {
+                    if value == 0 {
+                        Err(CommandDecodeError::InvalidField("themeId"))
+                    } else {
+                        Ok(value)
+                    }
+                })
+                .transpose()?,
             variation_seed: positive_unsigned(&envelope.payload, "variationSeed")?,
             policy: serde_json::from_value(
                 envelope
@@ -1317,9 +1325,25 @@ mod tests {
             Ok(SessionCommand::PreviewLightPlan {
                 track_id: 42,
                 expected_timeline_revision: 7,
-                theme_id: 2,
+                theme_id: Some(2),
                 variation_seed: 9,
                 policy,
+            })
+        );
+
+        let mut automatic = envelope.clone();
+        automatic.payload.insert("themeId".to_owned(), Value::Null);
+        assert_eq!(
+            decode_command(&automatic),
+            Ok(SessionCommand::PreviewLightPlan {
+                track_id: 42,
+                expected_timeline_revision: 7,
+                theme_id: None,
+                variation_seed: 9,
+                policy: LightPlanningPolicy {
+                    revision: 3,
+                    ..LightPlanningPolicy::default()
+                },
             })
         );
     }

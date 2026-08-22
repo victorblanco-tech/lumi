@@ -205,13 +205,15 @@ upgrade/recovery en volledige schone-Mac hardening blijven onderdeel van
 
 ### Fase 5 – Compiled Light Plans (`0.5.0`)
 
-Status op 2026-08-22: **geïmplementeerd t/m `0.5.0-dev-6`; Static Look
+Status op 2026-08-22: **geïmplementeerd t/m `0.5.0-dev-7`; Static Look
 toggle/exclusiviteit is fysiek bewezen, de 32-slot mapping-UI is gereed en
 geverifieerde mappings worden als sparse state transitions automatisch
-uitgevoerd. Color Overrides blijven fail-closed**.
+uitgevoerd en een expliciete Theme Strategy kiest één SoundSwitch Bank per
+track. Color Overrides blijven fail-closed**.
 
 - deterministic AutoLoop variation per Phrase Role;
 - Selection Weight, track-color affinity and repeat protection;
+- coherent Bank-as-Theme selection with current/next-track rotation;
 - explainable full-track preview and explicit regeneration;
 - provider-neutral modifier model;
 - fail-closed verified execution of SoundSwitch Static Looks;

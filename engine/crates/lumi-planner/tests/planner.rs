@@ -7,8 +7,8 @@ use lumi_domain::{
 };
 use lumi_planner::{
     ChoiceSource, DeterministicPlanner, PlannerTrack, PlanningConfiguration, PlanningInput,
-    ThemeColorRule, ThemeColorRuleMode, ThemeOption, ThemeSelectionContext, WeightedThemeCandidate,
-    canonical_plan,
+    ThemeColorRule, ThemeColorRuleMode, ThemeOption, ThemeRuleColorBehavior, ThemeSelectionContext,
+    ThemeSelectionRule, WeightedThemeCandidate, canonical_plan,
 };
 
 #[test]
@@ -361,6 +361,76 @@ fn weighted_preference_and_no_repeat_are_deterministic() {
     assert_eq!(decision.theme_id(), ThemeId::new(3));
     assert_eq!(decision.reason(), ThemeSelectionReason::ColorPrefer);
     assert_eq!(decision.matched_color(), Some(color.rgb_u32()));
+}
+
+#[test]
+fn theme_strategy_keeps_color_only_themes_out_of_unmatched_tracks() {
+    let pink = TrackColor::new(255, 0, 160);
+    let rules = vec![
+        ThemeSelectionRule {
+            theme_id: ThemeId::new(1),
+            enabled: true,
+            weight: 2,
+            color_behavior: ThemeRuleColorBehavior::Neutral,
+            colors: vec![],
+        },
+        ThemeSelectionRule {
+            theme_id: ThemeId::new(2),
+            enabled: true,
+            weight: 2,
+            color_behavior: ThemeRuleColorBehavior::Only,
+            colors: vec![pink],
+        },
+    ];
+    let planner = DeterministicPlanner::new(
+        PlanningConfiguration::epic_one().with_theme_selection_rules(rules),
+        StableFirstChoice,
+    );
+
+    let matching = generate(&planner, &colored_input(pink));
+    assert_eq!(
+        matching.theme_decision().map(|value| value.theme_id()),
+        Some(ThemeId::new(2))
+    );
+    assert_eq!(
+        matching.theme_decision().map(|value| value.reason()),
+        Some(ThemeSelectionReason::ColorForce)
+    );
+
+    let unmatched = generate(&planner, &colored_input(TrackColor::new(0, 120, 255)));
+    assert_eq!(
+        unmatched.theme_decision().map(|value| value.theme_id()),
+        Some(ThemeId::new(1))
+    );
+}
+
+#[test]
+fn theme_strategy_applies_the_complete_configured_cooldown_window() {
+    let rules = (1_u64..=4)
+        .map(|id| ThemeSelectionRule {
+            theme_id: ThemeId::new(id),
+            enabled: true,
+            weight: 2,
+            color_behavior: ThemeRuleColorBehavior::Neutral,
+            colors: vec![],
+        })
+        .collect();
+    let planner = DeterministicPlanner::new(
+        PlanningConfiguration::epic_one().with_theme_selection_rules(rules),
+        StableFirstChoice,
+    );
+    let context =
+        ThemeSelectionContext::new(vec![ThemeId::new(1), ThemeId::new(2), ThemeId::new(3)]);
+
+    let plan = generate_with_context(&planner, &demo_input(), &context);
+    assert_eq!(
+        plan.theme_decision().map(|value| value.theme_id()),
+        Some(ThemeId::new(4))
+    );
+    assert!(plan.cues().iter().all(|cue| match cue.action() {
+        SemanticLightingAction::ApplyLook(look) => look.theme_id() == ThemeId::new(4),
+        SemanticLightingAction::HoldCurrentLook => false,
+    }));
 }
 
 #[test]

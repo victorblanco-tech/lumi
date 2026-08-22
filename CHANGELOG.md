@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.0-dev-7 - 2026-08-22
+
+- Adds an explicit `Light Plans → Theme Strategy` workspace where SoundSwitch
+  Banks 1–4 are named and planned as coherent Lumi Themes.
+- Selects one automatic Theme for the complete track, with configurable fallback,
+  weight, Rekordbox Track Color affinity and next-track-aware cooldown.
+- Adds an Automatic Plan Preview that exposes the selected Bank, Theme and reason;
+  manual Theme selection remains an explicit preview override.
+- Preserves pre-Theme-Strategy policy behavior and every existing Bank, AutoLoop,
+  Static Look and MIDI mapping until the new strategy is deliberately saved.
+
 ## 0.5.0-dev-6 - 2026-08-22
 
 - Compiles verified SoundSwitch Static Looks into deterministic phrase and

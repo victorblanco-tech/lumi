@@ -3,6 +3,7 @@ import SwiftUI
 
 public struct LightPlansWorkspaceView: View {
     private enum Section: String, CaseIterable, Identifiable {
+        case strategy = "Theme Strategy"
         case rules = "AutoLoop Rules"
         case preview = "Plan Preview"
         case modifiers = "SoundSwitch Modifiers"
@@ -14,11 +15,11 @@ public struct LightPlansWorkspaceView: View {
     public let feedback: String?
     public let onSave: (LightPlanningPolicyState) -> Void
     public let onOpenTrack: (UInt64) -> Void
-    public let onPreview: (UInt64, UInt64, UInt64, UInt64, LightPlanningPolicyState) -> Void
+    public let onPreview: (UInt64, UInt64, UInt64?, UInt64, LightPlanningPolicyState) -> Void
     public let onOpenLightingOutputs: () -> Void
     public let onSendModifierLearnPulse: (UInt8, UInt8) -> Void
 
-    @State private var section: Section = .rules
+    @State private var section: Section = .strategy
     @State private var draft: LightPlanningPolicyState
     @State private var selectedRoleID: String?
     @State private var selectedThemeID: UInt64?
@@ -31,7 +32,7 @@ public struct LightPlansWorkspaceView: View {
         feedback: String?,
         onSave: @escaping (LightPlanningPolicyState) -> Void,
         onOpenTrack: @escaping (UInt64) -> Void,
-        onPreview: @escaping (UInt64, UInt64, UInt64, UInt64, LightPlanningPolicyState) -> Void,
+        onPreview: @escaping (UInt64, UInt64, UInt64?, UInt64, LightPlanningPolicyState) -> Void,
         onOpenLightingOutputs: @escaping () -> Void,
         onSendModifierLearnPulse: @escaping (UInt8, UInt8) -> Void
     ) {
@@ -56,6 +57,7 @@ public struct LightPlansWorkspaceView: View {
             .frame(maxWidth: 620)
             Group {
                 switch section {
+                case .strategy: themeStrategyWorkspace
                 case .rules: rulesWorkspace
                 case .preview: previewWorkspace
                 case .modifiers: modifiersWorkspace
@@ -67,8 +69,8 @@ public struct LightPlansWorkspaceView: View {
         .background(LumiColor.canvas)
         .onChange(of: state.policy) { _, value in draft = value }
         .onAppear {
+            draft = materializedPolicyDraft()
             selectedRoleID = selectedRoleID ?? activeRoles.first?.id
-            selectedThemeID = selectedThemeID ?? catalog?.themes.first?.id
             selectedTrackID = selectedTrackID ?? library.page.tracks.first?.id
             requestPreview()
         }
@@ -102,6 +104,117 @@ public struct LightPlansWorkspaceView: View {
                     .font(LumiTypography.technical)
                     .foregroundStyle(LumiColor.textSecondary)
             }
+        }
+    }
+
+    private var themeStrategyWorkspace: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: LumiSpacing.large) {
+                GroupBox("Planning model") {
+                    HStack(spacing: LumiSpacing.xLarge) {
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("BANK ORGANIZATION").font(LumiTypography.technical)
+                                .foregroundStyle(LumiColor.textSecondary)
+                            Label(draft.bankOrganization.label, systemImage: "rectangle.3.group")
+                            Text("SoundSwitch Bank 1–4 are Lumi Themes. Lumi selects one base Theme for the complete track.")
+                                .font(LumiTypography.body)
+                                .foregroundStyle(LumiColor.textSecondary)
+                        }
+                        Spacer()
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text("MID-TRACK BEHAVIOR").font(LumiTypography.technical)
+                                .foregroundStyle(LumiColor.textSecondary)
+                            Label("Automatic changes off", systemImage: "lock.shield")
+                                .foregroundStyle(LumiColor.success)
+                            Text("Only an explicit Live override can change Theme from a future phrase onward.")
+                                .font(LumiTypography.body)
+                                .foregroundStyle(LumiColor.textSecondary)
+                        }
+                    }
+                    .padding(.vertical, LumiSpacing.xSmall)
+                }
+
+                GroupBox {
+                    HStack(spacing: LumiSpacing.xLarge) {
+                        Picker("Fallback Theme", selection: $draft.defaultThemeID) {
+                            ForEach(catalog?.themes ?? []) { theme in
+                                Text("Bank \(theme.sortOrder) · \(theme.name)").tag(Optional(theme.id))
+                            }
+                        }
+                        .frame(maxWidth: 330)
+                        stepper(
+                            "Theme cooldown",
+                            value: $draft.themeCooldownTracks,
+                            suffix: "tracks",
+                            help: "The number of executed or already reserved next-track plans during which Lumi excludes the same Theme. If no other complete Theme is executable, Lumi safely relaxes the oldest restriction."
+                        )
+                        Spacer()
+                        Button("Save Theme Strategy") {
+                            draft = materializedPolicyDraft()
+                            onSave(draft)
+                        }
+                        .buttonStyle(.borderedProminent)
+                    }
+                } label: {
+                    HStack(spacing: LumiSpacing.xSmall) {
+                        Text("Automatic Theme selection")
+                        LightPlanInfoTip(
+                            "Theme is selected once while the track plan is compiled. Weight, Track Color and cooldown affect the Theme; Phrase Roles then select AutoLoops only inside that Theme."
+                        )
+                    }
+                }
+
+                VStack(alignment: .leading, spacing: LumiSpacing.medium) {
+                    HStack {
+                        Text("THEME BANKS").font(LumiTypography.technical)
+                            .foregroundStyle(LumiColor.textSecondary)
+                        Spacer()
+                        Button("Physical mappings") { onOpenLightingOutputs() }
+                    }
+                    ForEach(catalog?.themes ?? []) { theme in
+                        themeStrategyRow(theme)
+                    }
+                }
+                if let feedback {
+                    Text(feedback).font(LumiTypography.technical)
+                        .foregroundStyle(LumiColor.textSecondary)
+                }
+            }
+        }
+    }
+
+    private func themeStrategyRow(_ theme: AutoloopThemeState) -> some View {
+        let binding = themeRuleBinding(themeID: theme.id)
+        return GroupBox {
+            HStack(spacing: LumiSpacing.medium) {
+                Toggle("Use automatically", isOn: binding.enabled)
+                    .frame(width: 150, alignment: .leading)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(theme.name).font(LumiTypography.sectionTitle)
+                    Text("SoundSwitch Bank \(theme.sortOrder) · Lumi Theme \(theme.sortOrder)")
+                        .font(LumiTypography.technical)
+                        .foregroundStyle(LumiColor.textSecondary)
+                }
+                .frame(minWidth: 240, alignment: .leading)
+                Picker("Selection Weight", selection: binding.selectionWeight) {
+                    Text("Rare").tag(UInt8(1))
+                    Text("Normal").tag(UInt8(2))
+                    Text("Often").tag(UInt8(3))
+                    Text("Primary").tag(UInt8(4))
+                }
+                .frame(width: 150)
+                Picker("Track Color", selection: binding.colorBehavior) {
+                    ForEach(LightPlanColorBehavior.allCases) { Text($0.label).tag($0) }
+                }
+                .frame(width: 130)
+                .help(themeColorBehaviorHelp(binding.wrappedValue.colorBehavior))
+                LightPlanInfoTip(themeColorBehaviorHelp(binding.wrappedValue.colorBehavior))
+                themeColorChips(binding)
+                Spacer()
+            }
+            .padding(.vertical, LumiSpacing.xSmall)
+        } label: {
+            Text("Bank \(theme.sortOrder)")
         }
     }
 
@@ -147,12 +260,6 @@ public struct LightPlansWorkspaceView: View {
     private var repeatProtection: some View {
         GroupBox {
             HStack(spacing: LumiSpacing.xLarge) {
-                stepper(
-                    "Theme cooldown",
-                    value: $draft.themeCooldownTracks,
-                    suffix: "tracks",
-                    help: "The number of previously executed tracks during which Lumi avoids selecting the same Theme again. Explicit choices remain authoritative; Lumi only relaxes this protection when no valid automatic option exists."
-                )
                 stepper(
                     "AutoLoop cooldown",
                     value: $draft.autoloopCooldownUses,
@@ -302,6 +409,37 @@ public struct LightPlansWorkspaceView: View {
         .frame(minWidth: 160, alignment: .leading)
     }
 
+    private func themeColorChips(_ binding: Binding<LightPlanThemeRule>) -> some View {
+        HStack(spacing: 5) {
+            if state.trackColors.isEmpty {
+                Text("No USB colors")
+                    .font(LumiTypography.technical)
+                    .foregroundStyle(LumiColor.textSecondary)
+            }
+            ForEach(state.trackColors) { trackColor in
+                let rgb = trackColor.rgb
+                Button {
+                    if binding.wrappedValue.colorRGB.contains(rgb) {
+                        binding.wrappedValue.colorRGB.removeAll { $0 == rgb }
+                    } else {
+                        binding.wrappedValue.colorRGB.append(rgb)
+                    }
+                } label: {
+                    Circle()
+                        .fill(Color(rgb: rgb))
+                        .frame(width: 16, height: 16)
+                        .overlay(Circle().stroke(
+                            binding.wrappedValue.colorRGB.contains(rgb) ? Color.white : Color.clear,
+                            lineWidth: 2
+                        ))
+                }
+                .buttonStyle(.plain)
+                .help("\(trackColor.name) · \(trackColor.trackCount) Library track\(trackColor.trackCount == 1 ? "" : "s")")
+            }
+        }
+        .frame(minWidth: 160, alignment: .leading)
+    }
+
     private var previewWorkspace: some View {
         VStack(alignment: .leading, spacing: LumiSpacing.large) {
             HStack {
@@ -318,6 +456,7 @@ public struct LightPlansWorkspaceView: View {
                     }
                 }
                 Picker("Theme", selection: $selectedThemeID) {
+                    Text("Automatic · Theme Strategy").tag(Optional<UInt64>.none)
                     ForEach(catalog?.themes ?? []) { Text($0.name).tag(Optional($0.id)) }
                 }
                 .frame(width: 220)
@@ -332,9 +471,23 @@ public struct LightPlansWorkspaceView: View {
             }
             if let preview = state.preview,
                preview.trackID == selectedTrackID,
-               preview.themeID == selectedThemeID {
-                ScrollView {
-                    LazyVStack(spacing: LumiSpacing.small) {
+               (selectedThemeID == nil || preview.themeID == selectedThemeID) {
+                VStack(alignment: .leading, spacing: LumiSpacing.medium) {
+                    HStack {
+                        Label(
+                            "Selected Theme · \(themeName(preview.themeID))",
+                            systemImage: "rectangle.3.group.fill"
+                        )
+                        .foregroundStyle(LumiColor.accent)
+                        Text(themeReasonLabel(preview.themeReason))
+                            .font(LumiTypography.technical)
+                            .foregroundStyle(LumiColor.textSecondary)
+                        Spacer()
+                        Text("Bank \(themeBankNumber(preview.themeID))")
+                            .font(LumiTypography.technical)
+                    }
+                    ScrollView {
+                        LazyVStack(spacing: LumiSpacing.small) {
                         ForEach(preview.phrases) { phrase in
                             previewPhrase(phrase)
                         }
@@ -355,6 +508,7 @@ public struct LightPlansWorkspaceView: View {
                         .background(LumiColor.surface)
                         .clipShape(RoundedRectangle(cornerRadius: LumiRadius.panel))
                     }
+                    }
                 }
             } else {
                 ContentUnavailableView(
@@ -374,7 +528,7 @@ public struct LightPlansWorkspaceView: View {
             Image(systemName: "arrow.right").foregroundStyle(LumiColor.textSecondary)
             VStack(alignment: .leading, spacing: 2) {
                 Text(phrase.autoloopName)
-                Text("Bank \(selectedThemeID ?? 0) · AutoLoop \(phrase.autoloopNumber)")
+                Text("Bank \(themeBankNumber(state.preview?.themeID)) · AutoLoop \(phrase.autoloopNumber)")
                     .font(LumiTypography.technical)
                     .foregroundStyle(LumiColor.textSecondary)
                 if let atmosphere = phrase.modifiers.first(where: { $0.kind == .atmosphere }) {
@@ -513,6 +667,26 @@ public struct LightPlansWorkspaceView: View {
         variant.cells.first { $0.themeID == themeID && !$0.isMissing }
     }
 
+    private func themeName(_ themeID: UInt64) -> String {
+        catalog?.themes.first(where: { $0.id == themeID })?.name ?? "Theme \(themeID)"
+    }
+
+    private func themeBankNumber(_ themeID: UInt64?) -> UInt64 {
+        guard let themeID else { return 0 }
+        return UInt64(catalog?.themes.first(where: { $0.id == themeID })?.sortOrder ?? 0)
+    }
+
+    private func themeReasonLabel(_ reason: String) -> String {
+        switch reason {
+        case "colorForce": "Track Color · Only"
+        case "colorPrefer": "Track Color · Prefer"
+        case "rotation": "Weighted rotation + cooldown"
+        case "defaultTheme": "Fallback Theme"
+        case "manualPreviewOverride": "Manual Preview override"
+        default: reason
+        }
+    }
+
     private func ruleBinding(themeID: UInt64, roleID: String, variantID: String) -> Binding<LightPlanAutoloopRule> {
         Binding {
             draft.rules.first { $0.themeID == themeID && $0.roleID == roleID && $0.variantID == variantID }
@@ -526,16 +700,45 @@ public struct LightPlansWorkspaceView: View {
         }
     }
 
+    private func themeRuleBinding(themeID: UInt64) -> Binding<LightPlanThemeRule> {
+        Binding {
+            draft.themeRules.first { $0.themeID == themeID }
+                ?? LightPlanThemeRule(themeID: themeID)
+        } set: { value in
+            if let index = draft.themeRules.firstIndex(where: { $0.themeID == themeID }) {
+                draft.themeRules[index] = value
+            } else {
+                draft.themeRules.append(value)
+            }
+        }
+    }
+
     private func requestPreview(trackID: UInt64? = nil) {
         guard let track = library.page.tracks.first(where: { $0.id == (trackID ?? selectedTrackID) }),
-              let timelineRevision = track.timelineRevision,
-              let themeID = selectedThemeID else { return }
-        onPreview(track.id, timelineRevision, themeID, variationSeed, materializedPolicyDraft())
+              let timelineRevision = track.timelineRevision else { return }
+        onPreview(track.id, timelineRevision, selectedThemeID, variationSeed, materializedPolicyDraft())
     }
 
     private func materializedPolicyDraft() -> LightPlanningPolicyState {
         var policy = draft
         guard let catalog else { return policy }
+        policy.bankOrganization = .themes
+        policy.automaticMidTrackThemeChanges = false
+        if policy.defaultThemeID == nil
+            || !catalog.themes.contains(where: { $0.id == policy.defaultThemeID }) {
+            policy.defaultThemeID = catalog.themes.first?.id
+        }
+        for theme in catalog.themes where !policy.themeRules.contains(where: { $0.themeID == theme.id }) {
+            policy.themeRules.append(LightPlanThemeRule(themeID: theme.id))
+        }
+        policy.themeRules.removeAll { rule in
+            !catalog.themes.contains(where: { $0.id == rule.themeID })
+        }
+        if !policy.themeRules.contains(where: {
+            $0.themeID == policy.defaultThemeID && $0.enabled
+        }) {
+            policy.defaultThemeID = policy.themeRules.first(where: { $0.enabled })?.themeID
+        }
         for role in catalog.roles where !role.archived {
             for variant in role.variants where !variant.archived {
                 for cell in variant.cells where !cell.isMissing {
@@ -669,6 +872,17 @@ public struct LightPlansWorkspaceView: View {
             "Prefer boosts this candidate when the playing track has one of the selected Rekordbox colors. It can still be selected for other colors."
         case .only:
             "Only makes this candidate eligible when the playing track has one of the selected Rekordbox colors. A track without a color will not match it."
+        }
+    }
+
+    private func themeColorBehaviorHelp(_ behavior: LightPlanColorBehavior) -> String {
+        switch behavior {
+        case .neutral:
+            "Neutral keeps this Theme in normal weighted rotation for every track color."
+        case .prefer:
+            "Prefer doubles this Theme's effective weight when the track has one of the selected Rekordbox colors. It remains a fallback for other colors."
+        case .only:
+            "Only makes this Theme eligible only for the selected Rekordbox colors. Matching Only Themes take precedence over Neutral and Prefer Themes."
         }
     }
 }

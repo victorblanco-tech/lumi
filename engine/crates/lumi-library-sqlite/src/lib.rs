@@ -4796,6 +4796,7 @@ mod fault_tests {
     };
     use lumi_library_demo::DemoLibrarySourceProvider;
     use lumi_library_source::MusicLibrarySourceProvider;
+    use lumi_light_plans::{BankOrganization, ColorBehavior, ThemeRule};
 
     use super::{
         DeviceAliasUpsert, DeviceAnalysisDecision, DeviceAnalysisUpsert, DeviceHotCueUpsert,
@@ -5624,8 +5625,29 @@ mod fault_tests {
         assert_eq!(initial.revision, 1);
         let mut replacement = initial.clone();
         replacement.theme_cooldown_tracks = 2;
+        replacement.bank_organization = BankOrganization::Themes;
+        replacement.default_theme_id = Some(2);
+        replacement.automatic_mid_track_theme_changes = false;
+        replacement.theme_rules = vec![
+            ThemeRule {
+                theme_id: 1,
+                enabled: true,
+                selection_weight: 2,
+                color_behavior: ColorBehavior::Neutral,
+                color_rgb: Vec::new(),
+            },
+            ThemeRule {
+                theme_id: 2,
+                enabled: true,
+                selection_weight: 4,
+                color_behavior: ColorBehavior::Prefer,
+                color_rgb: vec![0xff_00_00],
+            },
+        ];
         let stored = repository.replace_light_planning_policy(1, replacement)?;
         assert_eq!(stored.revision, 2);
+        assert_eq!(stored.default_theme_id, Some(2));
+        assert_eq!(stored.theme_rules.len(), 2);
         assert_eq!(repository.light_planning_policy()?, stored);
         assert!(matches!(
             repository.replace_light_planning_policy(1, initial),

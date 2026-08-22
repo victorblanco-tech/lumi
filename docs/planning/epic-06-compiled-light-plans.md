@@ -1,6 +1,6 @@
 # Epic 6 – Compiled Light Plans
 
-Status: **Implemented through `0.5.0-dev-6`**
+Status: **Implemented through `0.5.0-dev-7`**
 
 Target: **0.5.0**
 
@@ -73,6 +73,15 @@ Visible milestone: a full Local Playback track selects, replaces and releases
 verified Static Looks alongside its existing AutoLoops, without continuous
 timeline control.
 
+### Phase G — explicit Theme Strategy
+
+- [E6-07](story-e6-07-theme-strategy.md): Bank-as-Theme organization, coherent
+  whole-track selection, Track Color affinity and next-track-aware rotation.
+
+Visible milestone: Automatic Plan Preview names one selected SoundSwitch Bank and
+explains whether fallback, weighted rotation, Track Color Prefer or Track Color
+Only selected it.
+
 ## Epic acceptance
 
 1. Rules survive restart and reject stale concurrent edits.
@@ -87,6 +96,9 @@ timeline control.
 9. Existing integration regression and latency tests remain green.
 10. A verified Static Look is emitted only when the compiled desired state
     changes; `No Override` releases a Lumi-managed look once.
+11. Automatic phrase selection never crosses the Theme chosen for that track.
+12. Theme rotation includes the reserved next plan and is configurable without
+    changing physical MIDI mappings.
 
 ## Delivery evidence
 

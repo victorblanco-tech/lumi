@@ -51,6 +51,15 @@ struct EngineCommandTests {
         #expect(payload["themeId"] == .number(2))
         #expect(payload["variationSeed"] == .number(11))
         #expect(payload["policy"] == policy)
+
+        let automatic = EngineCommand.previewLightPlan(
+            trackID: 90,
+            expectedTimelineRevision: 36,
+            themeID: nil,
+            variationSeed: 12,
+            policy: policy
+        ).payload()
+        #expect(automatic["themeId"] == .null)
     }
 
     @Test("Custom MIDI learn keeps the one-based channel and exact note")

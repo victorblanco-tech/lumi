@@ -8,6 +8,7 @@ mod transcript;
 pub use planner::{
     ChoiceSource, DeterministicPlanner, PlanMutationError, PlannerError, PlannerTrack,
     PlanningConfiguration, PlanningInput, PlanningOptions, SceneOption, StableChoiceSource,
-    ThemeColorRule, ThemeColorRuleMode, ThemeOption, ThemeSelectionContext, WeightedThemeCandidate,
+    ThemeColorRule, ThemeColorRuleMode, ThemeOption, ThemeRuleColorBehavior, ThemeSelectionContext,
+    ThemeSelectionRule, WeightedThemeCandidate,
 };
 pub use transcript::{CanonicalPlanError, canonical_plan};

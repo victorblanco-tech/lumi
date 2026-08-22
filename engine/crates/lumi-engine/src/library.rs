@@ -5,8 +5,8 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use lumi_domain::{
-    KeyMode, PhraseKind, PitchClass, ThemeId, TrackId, TrackIdentityFacts, TrackMetadata,
-    TrackPhrase,
+    DeckId, KeyMode, PhraseKind, PitchClass, ThemeId, TrackId, TrackIdentityFacts, TrackLoadId,
+    TrackMetadata, TrackPhrase,
 };
 use lumi_library::{
     AutoloopCatalog, AutoloopCatalogError, AutoloopResolutionReason, AutoloopVariantMove, BeatGrid,
@@ -32,6 +32,7 @@ use lumi_light_plans::{
     PhraseRequest as LightPlanPhraseRequest, PhraseSelection as LightPlanPhraseSelection,
     VariationHistory,
 };
+use lumi_planner::{PlannerTrack, PlanningInput, ThemeSelectionContext};
 use lumi_rekordbox_analysis::{
     AnalysisError, AnalysisWaveformPoint, ResolvedAnalysisRequest, ResolvedAnalysisTrack,
     ResolvedTrackAnalysis, snapshot_resolved_analysis_data,
@@ -689,12 +690,39 @@ impl LibraryWorker {
         &mut self,
         track_id: u64,
         expected_timeline_revision: u64,
-        theme_id: u64,
+        theme_id: Option<u64>,
         variation_seed: u64,
         policy: &LightPlanningPolicy,
     ) -> Result<(), LibraryWorkerError> {
         let prepared = self.local_playback_track(track_id, expected_timeline_revision)?;
         let (metadata, context) = prepared.into_parts();
+        let (theme_id, theme_reason) = if let Some(theme_id) = theme_id {
+            (theme_id, "manualPreviewOverride")
+        } else {
+            let planner = crate::session::planner_for_themes(
+                context.catalog_revision(),
+                context.executable_themes(),
+                policy,
+            )
+            .map_err(|error| LibraryWorkerError::Configuration(error.to_string()))?;
+            let planning_input = PlanningInput {
+                deck_id: DeckId::new(1),
+                track_load_id: TrackLoadId::new(track_id),
+                track: PlannerTrack::analyzed(&metadata),
+            };
+            let plan = planner
+                .generate_with_context(&planning_input, &ThemeSelectionContext::default())
+                .map_err(|error| LibraryWorkerError::Configuration(error.to_string()))?;
+            let decision = plan.theme_decision().ok_or_else(|| {
+                LibraryWorkerError::Configuration(
+                    "automatic Light Plan preview has no Theme decision".to_owned(),
+                )
+            })?;
+            (
+                decision.theme_id().value(),
+                crate::session::theme_selection_reason_name(decision.reason()),
+            )
+        };
         let compiled = context.compile_light_plan(
             ThemeId::new(theme_id),
             policy,
@@ -705,6 +733,7 @@ impl LibraryWorker {
             "trackId": track_id,
             "trackTitle": metadata.title(),
             "themeId": theme_id,
+            "themeReason": theme_reason,
             "policyRevision": compiled.policy_revision,
             "variationSeed": compiled.variation_seed.to_string(),
             "signature": compiled.signature.to_string(),
