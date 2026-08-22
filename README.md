@@ -23,7 +23,7 @@ Het bouwplan voor de eerste verticale productmilestone staat in
 Het gerefineerde ontwerp en storyplan voor de volgende verticale milestone staat
 in [`docs/planning/epic-02a-library-track-lighting-editor.md`](docs/planning/epic-02a-library-track-lighting-editor.md).
 
-> Status: `0.5.0-dev-7` is de actieve ontwikkellijn. `0.4.0` is de actuele
+> Status: `0.5.0-dev-8` is de actieve ontwikkellijn. `0.4.0` is de actuele
 > productieversie met trusted Rekordbox USB sources, directe read-only Pro DJ
 > Link-integratie, geïsoleerde Ableton Link BPM-sync, show-grade AutoLoop-output
 > naar SoundSwitch en de native Track Lighting Editor en Live Decks.

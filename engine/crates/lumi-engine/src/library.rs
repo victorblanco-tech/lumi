@@ -1340,6 +1340,7 @@ impl LibraryWorker {
                 bpm_milli: device_track.bpm_milli,
                 duration_millis: u64::from(device_track.duration_millis),
                 file_size: device_track.file_size,
+                audio_uri: device_audio_uri(&device_track.audio_path),
                 metadata_revision: device_track.metadata_revision.clone(),
                 color_rgb: device_track.color_rgb,
                 master_database_id: device_track.master_database_id,
@@ -1799,7 +1800,7 @@ impl LibraryWorker {
             source_track_id: track.summary().source_track_id().as_str().to_owned(),
             analysis_revision: track.summary().source_revision().as_str().to_owned(),
             timeline_revision: timeline.revision().value(),
-            audio_uri: track.audio_uri().to_owned(),
+            audio_uri: self.resolved_audio_uri(&track)?,
             duration_millis: track.summary().duration_millis(),
             beat_grid: track.beat_grid().clone(),
             waveform: track.waveform().to_vec(),
@@ -2877,9 +2878,10 @@ impl LibraryWorker {
         let revisions = self
             .repository
             .timeline_revisions(track_id, TrackPageRequest::try_new(0, 200)?)?;
+        let audio_uri = self.resolved_audio_uri(&track)?;
         Ok(json!({
             "track": track_json(track.summary()),
-            "audioUri": track.audio_uri(),
+            "audioUri": audio_uri,
             "beatGrid": {
                 "beatsPerBar": track.beat_grid().beats_per_bar(),
                 "markers": track.beat_grid().markers().iter().map(|marker| json!({
@@ -2938,6 +2940,14 @@ impl LibraryWorker {
             })).collect::<Vec<_>>(),
             "sourceReconciliation": self.source_reconciliation_json(&track, &timeline)?,
         }))
+    }
+
+    fn resolved_audio_uri(
+        &self,
+        track: &lumi_library::StoredTrack,
+    ) -> Result<String, LibraryWorkerError> {
+        let candidates = self.repository.device_audio_uris(track.summary().id())?;
+        Ok(first_available_audio_uri(track.audio_uri(), &candidates))
     }
 
     fn source_reconciliation_json(
@@ -3640,6 +3650,14 @@ fn file_uri_path(value: &str) -> Option<PathBuf> {
     String::from_utf8(decoded).ok().map(PathBuf::from)
 }
 
+fn first_available_audio_uri(canonical: &str, device_candidates: &[String]) -> String {
+    std::iter::once(canonical)
+        .chain(device_candidates.iter().map(String::as_str))
+        .find(|audio_uri| file_uri_path(audio_uri).is_some_and(|path| path.is_file()))
+        .unwrap_or(canonical)
+        .to_owned()
+}
+
 fn hexadecimal(value: u8) -> Option<u8> {
     match value {
         b'0'..=b'9' => Some(value - b'0'),
@@ -4030,7 +4048,8 @@ mod tests {
 
     use super::{
         AutoloopCatalogMutation, LibraryWorker, LibraryWorkerError, PhraseRoleCatalogMutation,
-        deck_waveform_preview_points, device_metadata_matches, device_track_matches,
+        deck_waveform_preview_points, device_audio_uri, device_metadata_matches,
+        device_track_matches, first_available_audio_uri,
     };
 
     #[test]
@@ -5073,6 +5092,25 @@ mod tests {
         assert_eq!(resumed["source"]["status"], "changesAvailable");
 
         std::fs::remove_file(path)?;
+        Ok(())
+    }
+
+    #[test]
+    fn playback_prefers_an_existing_device_audio_location_when_canonical_is_unmounted()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let mounted = std::env::temp_dir().join(format!("lumi-mounted-audio-{unique}.mp3"));
+        std::fs::write(&mounted, b"test audio location")?;
+        let mounted_uri = device_audio_uri(&mounted);
+        let selected = first_available_audio_uri(
+            "file://localhost/Volumes/Disconnected/Track.mp3",
+            &[
+                "file://localhost/Volumes/Also%20Disconnected/Track.mp3".to_owned(),
+                mounted_uri.clone(),
+            ],
+        );
+        assert_eq!(selected, mounted_uri);
+        std::fs::remove_file(mounted)?;
         Ok(())
     }
 

@@ -25,7 +25,7 @@ use rusqlite::backup::Backup;
 use rusqlite::{Connection, OpenFlags, OptionalExtension, Row, Transaction, params};
 use thiserror::Error;
 
-const SCHEMA_VERSION: u32 = 13;
+const SCHEMA_VERSION: u32 = 14;
 const DEFAULTS_VERSION_KEY: &str = "phrase-role-defaults-version";
 const CATALOG_REVISION_KEY: &str = "phrase-role-catalog-revision";
 const AUTOLOOP_DEFAULTS_VERSION_KEY: &str = "autoloop-catalog-defaults-version";
@@ -68,6 +68,7 @@ pub struct DeviceAliasUpsert {
     pub bpm_milli: u32,
     pub duration_millis: u64,
     pub file_size: u32,
+    pub audio_uri: String,
     pub metadata_revision: String,
     pub color_rgb: Option<u32>,
     pub master_database_id: u32,
@@ -587,6 +588,25 @@ impl SqliteLibraryRepository {
         Ok(paths)
     }
 
+    /// Returns every known device-specific playback location for a canonical
+    /// track, newest trusted source first. The canonical track URI remains the
+    /// durable identity URI; these locations allow playback to follow whichever
+    /// synchronized USB is currently mounted.
+    pub fn device_audio_uris(&self, track_id: TrackId) -> Result<Vec<String>, SqliteLibraryError> {
+        let mut statement = self.connection.prepare(
+            "SELECT l.audio_uri
+               FROM device_track_audio_locations l
+               JOIN device_library_sources s ON s.source_id = l.source_id
+               JOIN device_library_track_aliases a
+                 ON a.source_id = l.source_id
+                AND a.device_track_id = l.device_track_id
+              WHERE l.canonical_track_id = ?1 AND a.archived = 0
+              ORDER BY s.synced_at DESC, l.source_id, l.device_track_id",
+        )?;
+        let rows = statement.query_map([to_i64(track_id.value())?], |row| row.get(0))?;
+        Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
     // The four synchronized collections form one atomic device snapshot. A
     // request object would only move these explicit transaction inputs around.
     #[allow(clippy::too_many_arguments)]
@@ -874,6 +894,36 @@ impl SqliteLibraryRepository {
             ])?;
         }
         drop(statement);
+
+        let mut statement = transaction.prepare(
+            "INSERT INTO device_track_audio_locations
+             (source_id, device_track_id, canonical_track_id, audio_uri)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(source_id, device_track_id) DO UPDATE SET
+               canonical_track_id = excluded.canonical_track_id,
+               audio_uri = excluded.audio_uri,
+               updated_at = CURRENT_TIMESTAMP",
+        )?;
+        for alias in aliases.iter() {
+            let Some(track_id) = alias.canonical_track_id else {
+                continue;
+            };
+            statement.execute(params![
+                source_id,
+                i64::from(alias.device_track_id),
+                to_i64(track_id.value())?,
+                alias.audio_uri,
+            ])?;
+        }
+        drop(statement);
+
+        // macOS can assign a new filesystem UUID after a device repair or
+        // reformat. Consolidate an older stable USB identity only when both
+        // identities resolve to the exact same complete canonical track set.
+        // A matching display name alone is never considered sufficient.
+        if source_id.starts_with("usb-fs:") {
+            consolidate_equivalent_usb_sources(&transaction, source_id, display_name)?;
+        }
         let alias_tracks = aliases
             .iter()
             .filter_map(|alias| {
@@ -2344,6 +2394,29 @@ impl SqliteLibraryRepository {
                     imported_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
                 );
                 PRAGMA user_version = 13;
+                COMMIT;
+                ",
+            )?;
+            current = 13;
+        }
+        if current == 13 {
+            self.connection.execute_batch(
+                "
+                BEGIN IMMEDIATE;
+                CREATE TABLE device_track_audio_locations (
+                    source_id TEXT NOT NULL,
+                    device_track_id INTEGER NOT NULL,
+                    canonical_track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+                    audio_uri TEXT NOT NULL,
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    PRIMARY KEY(source_id, device_track_id),
+                    FOREIGN KEY(source_id, device_track_id)
+                        REFERENCES device_library_track_aliases(source_id, device_track_id)
+                        ON DELETE CASCADE
+                );
+                CREATE INDEX device_audio_by_canonical_track
+                    ON device_track_audio_locations(canonical_track_id, source_id);
+                PRAGMA user_version = 14;
                 COMMIT;
                 ",
             )?;
@@ -4370,6 +4443,128 @@ fn compare_rekordbox_dates(incoming: &str, active: &str) -> Option<std::cmp::Ord
     (valid(incoming) && valid(active)).then(|| incoming.cmp(active))
 }
 
+fn consolidate_equivalent_usb_sources(
+    transaction: &Transaction<'_>,
+    source_id: &str,
+    display_name: &str,
+) -> Result<(), SqliteLibraryError> {
+    let current_tracks = complete_active_canonical_set(transaction, source_id)?;
+    let Some(current_tracks) = current_tracks.filter(|tracks| !tracks.is_empty()) else {
+        return Ok(());
+    };
+    let candidates = {
+        let mut statement = transaction.prepare(
+            "SELECT source_id
+               FROM device_library_sources
+              WHERE source_id <> ?1
+                AND source_id LIKE 'usb-fs:%'
+                AND display_name = ?2 COLLATE NOCASE",
+        )?;
+        statement
+            .query_map(params![source_id, display_name], |row| {
+                row.get::<_, String>(0)
+            })?
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    for previous_source_id in candidates {
+        if complete_active_canonical_set(transaction, &previous_source_id)?.as_ref()
+            != Some(&current_tracks)
+        {
+            continue;
+        }
+        let playlist_ids = {
+            let mut statement =
+                transaction.prepare("SELECT id FROM playlists WHERE source_id = ?1")?;
+            statement
+                .query_map([&previous_source_id], |row| row.get::<_, i64>(0))?
+                .collect::<Result<Vec<_>, _>>()?
+        };
+        for playlist_id in playlist_ids {
+            transaction.execute(
+                "DELETE FROM playlist_tracks WHERE playlist_id = ?1",
+                [playlist_id],
+            )?;
+            transaction.execute("DELETE FROM playlists WHERE id = ?1", [playlist_id])?;
+        }
+        transaction.execute(
+            "UPDATE track_analysis_provenance
+                SET source_id = ?1,
+                    device_track_id = COALESCE(
+                        (SELECT MIN(a.device_track_id)
+                           FROM device_library_track_aliases a
+                          WHERE a.source_id = ?1
+                            AND a.canonical_track_id = track_analysis_provenance.track_id
+                            AND a.archived = 0),
+                        device_track_id)
+              WHERE source_id = ?2",
+            params![source_id, previous_source_id],
+        )?;
+        transaction.execute(
+            "UPDATE track_hot_cue_provenance
+                SET source_id = ?1,
+                    device_track_id = COALESCE(
+                        (SELECT MIN(a.device_track_id)
+                           FROM device_library_track_aliases a
+                          WHERE a.source_id = ?1
+                            AND a.canonical_track_id = track_hot_cue_provenance.track_id
+                            AND a.archived = 0),
+                        device_track_id)
+              WHERE source_id = ?2",
+            params![source_id, previous_source_id],
+        )?;
+        transaction.execute(
+            "UPDATE track_metadata_provenance
+                SET source_id = ?1,
+                    device_track_id = COALESCE(
+                        (SELECT MIN(a.device_track_id)
+                           FROM device_library_track_aliases a
+                          WHERE a.source_id = ?1
+                            AND a.canonical_track_id = track_metadata_provenance.track_id
+                            AND a.archived = 0),
+                        device_track_id)
+              WHERE source_id = ?2",
+            params![source_id, previous_source_id],
+        )?;
+        transaction.execute(
+            "DELETE FROM device_library_track_aliases WHERE source_id = ?1",
+            [&previous_source_id],
+        )?;
+        transaction.execute(
+            "DELETE FROM device_library_sources WHERE source_id = ?1",
+            [&previous_source_id],
+        )?;
+        transaction.execute(
+            "DELETE FROM library_sources
+              WHERE source_id = ?1
+                AND NOT EXISTS (SELECT 1 FROM tracks WHERE source_id = ?1)",
+            [&previous_source_id],
+        )?;
+    }
+    Ok(())
+}
+
+/// Returns `None` when an active alias is unresolved. Such a partial snapshot
+/// is never safe evidence for automatic source consolidation.
+fn complete_active_canonical_set(
+    transaction: &Transaction<'_>,
+    source_id: &str,
+) -> Result<Option<BTreeSet<i64>>, SqliteLibraryError> {
+    let mut statement = transaction.prepare(
+        "SELECT canonical_track_id
+           FROM device_library_track_aliases
+          WHERE source_id = ?1 AND archived = 0",
+    )?;
+    let rows = statement.query_map([source_id], |row| row.get::<_, Option<i64>>(0))?;
+    let mut tracks = BTreeSet::new();
+    for row in rows {
+        let Some(track_id) = row? else {
+            return Ok(None);
+        };
+        tracks.insert(track_id);
+    }
+    Ok(Some(tracks))
+}
+
 fn backup_staging_path(destination: &Path) -> PathBuf {
     let mut value = destination.as_os_str().to_os_string();
     value.push(".partial");
@@ -4790,6 +4985,7 @@ fn search_pattern(search: &str) -> String {
 
 #[cfg(test)]
 mod fault_tests {
+    use lumi_domain::TrackId;
     use lumi_library::{
         HotCue, ImportedLibraryBaseline, ImportedTrackAnalysis, LibraryRepository, SourceRevision,
         TrackColor, TrackPageRequest,
@@ -4885,6 +5081,7 @@ mod fault_tests {
             bpm_milli: source_track.bpm_milli(),
             duration_millis: source_track.duration_millis(),
             file_size: 123,
+            audio_uri: "file://localhost/Volumes/Test/Track.mp3".to_owned(),
             metadata_revision: "metadata-v1".to_owned(),
             color_rgb: Some(0x32_80_ff),
             master_database_id: 1,
@@ -5022,6 +5219,7 @@ mod fault_tests {
             bpm_milli: source_track.bpm_milli(),
             duration_millis: source_track.duration_millis(),
             file_size: 123,
+            audio_uri: "file://localhost/Volumes/Test/Track.mp3".to_owned(),
             metadata_revision: "metadata-v1".to_owned(),
             color_rgb: Some(0x32_80_ff),
             master_database_id: 1,
@@ -5184,6 +5382,7 @@ mod fault_tests {
             bpm_milli: source_track.bpm_milli(),
             duration_millis: source_track.duration_millis(),
             file_size: 321,
+            audio_uri: "file://localhost/Volumes/Test/A%20New%20USB%20Track.wav".to_owned(),
             metadata_revision: "metadata-new".to_owned(),
             color_rgb: Some(0xff_33_33),
             master_database_id: 1,
@@ -5329,6 +5528,7 @@ mod fault_tests {
                     bpm_milli: source_track.bpm_milli(),
                     duration_millis: source_track.duration_millis(),
                     file_size: 123,
+                    audio_uri: format!("file://localhost/Volumes/Test/Track-{offset}.mp3"),
                     metadata_revision: "metadata-v1".to_owned(),
                     color_rgb: None,
                     master_database_id: 1,
@@ -5429,6 +5629,7 @@ mod fault_tests {
                 bpm_milli: 140_000,
                 duration_millis: 180_000,
                 file_size: 123,
+                audio_uri: "file://localhost/Volumes/Test/Ambiguous.mp3".to_owned(),
                 metadata_revision: "metadata-v1".to_owned(),
                 color_rgb: None,
                 master_database_id: 1,
@@ -5479,6 +5680,7 @@ mod fault_tests {
             bpm_milli: source_track.bpm_milli(),
             duration_millis: source_track.duration_millis(),
             file_size: 123,
+            audio_uri: "file://localhost/Volumes/Test/Track.mp3".to_owned(),
             metadata_revision: "metadata-v1".to_owned(),
             color_rgb: None,
             master_database_id: 1,
@@ -5538,6 +5740,94 @@ mod fault_tests {
     }
 
     #[test]
+    fn changed_filesystem_uuid_consolidates_only_an_equivalent_named_usb()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let baseline = DemoLibrarySourceProvider::curated().load_baseline()?;
+        let mut repository = SqliteLibraryRepository::in_memory()?;
+        repository.import_baseline(&baseline)?;
+        let track_ids = repository
+            .page_tracks(TrackPageRequest::try_new(0, 25)?)?
+            .tracks()
+            .iter()
+            .take(2)
+            .map(lumi_library::TrackSummary::id)
+            .collect::<Vec<_>>();
+        let source_track = &baseline.tracks()[0];
+        let alias_for = |track_id: TrackId, audio_uri: &str| DeviceAliasUpsert {
+            device_track_id: 88,
+            simulator_signature: 99,
+            audio_signature: "audio:test:88".to_owned(),
+            canonical_track_id: Some(track_id),
+            match_kind: "metadata+file-size".to_owned(),
+            title: source_track.title().to_owned(),
+            artist: source_track.artist().to_owned(),
+            bpm_milli: source_track.bpm_milli(),
+            duration_millis: source_track.duration_millis(),
+            file_size: 123,
+            audio_uri: audio_uri.to_owned(),
+            metadata_revision: "metadata-v1".to_owned(),
+            color_rgb: None,
+            master_database_id: 1,
+            master_content_id: 88,
+            information_update_count: 1,
+            analysis_revision: "analysis-v1".to_owned(),
+            analyzed_at: "2026-08-22".to_owned(),
+            sync_disposition: "current".to_owned(),
+        };
+
+        let mut old_aliases = vec![alias_for(
+            track_ids[0],
+            "file://localhost/Volumes/Old%20Gray/Track.mp3",
+        )];
+        repository.sync_device_aliases(
+            "usb-fs:old-gray-uuid",
+            "DJ VIC GRAY",
+            "database-old",
+            &mut old_aliases,
+            &[],
+            &[],
+            &[],
+            &[],
+        )?;
+        let mut equivalent_aliases = vec![alias_for(
+            track_ids[0],
+            "file://localhost/Volumes/DJ%20VIC%20GRAY/Track.mp3",
+        )];
+        repository.sync_device_aliases(
+            "usb-fs:new-gray-uuid",
+            "DJ VIC GRAY",
+            "database-new",
+            &mut equivalent_aliases,
+            &[],
+            &[],
+            &[],
+            &[],
+        )?;
+        assert_eq!(repository.device_source_summaries()?.len(), 1);
+        assert_eq!(
+            repository.device_audio_uris(track_ids[0])?,
+            vec!["file://localhost/Volumes/DJ%20VIC%20GRAY/Track.mp3"]
+        );
+
+        let mut different_aliases = vec![alias_for(
+            track_ids[1],
+            "file://localhost/Volumes/Other%20Gray/Track.mp3",
+        )];
+        repository.sync_device_aliases(
+            "usb-fs:different-gray-uuid",
+            "DJ VIC GRAY",
+            "database-different",
+            &mut different_aliases,
+            &[],
+            &[],
+            &[],
+            &[],
+        )?;
+        assert_eq!(repository.device_source_summaries()?.len(), 2);
+        Ok(())
+    }
+
+    #[test]
     fn stable_filesystem_identity_replaces_reset_pending_provider_identity()
     -> Result<(), Box<dyn std::error::Error>> {
         let baseline = DemoLibrarySourceProvider::curated().load_baseline()?;
@@ -5562,6 +5852,7 @@ mod fault_tests {
             bpm_milli: source_track.bpm_milli(),
             duration_millis: source_track.duration_millis(),
             file_size: 123,
+            audio_uri: "file://localhost/Volumes/Test/Track.mp3".to_owned(),
             metadata_revision: "metadata-v1".to_owned(),
             color_rgb: None,
             master_database_id: 1,
@@ -5659,7 +5950,7 @@ mod fault_tests {
         let schema: u32 = repository
             .connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))?;
-        assert_eq!(schema, 13);
+        assert_eq!(schema, 14);
         Ok(())
     }
 }

@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.5.0-dev-8 - 2026-08-22
+
+### Fixed
+
+- Consolidates duplicate trusted USB identities only when their display name and
+  complete active canonical track set agree; a matching name alone is never
+  sufficient.
+- Persists an audio location per synchronized USB and resolves playback against
+  the currently mounted source, while preserving a valid local Mac audio file.
+- Restores Track Editor and Local Playback audio when a canonical track was first
+  imported from a different, currently disconnected backup USB.
+
+### Safety
+
+- Existing phrases, timelines, playlists, Light Plans and lighting mappings are
+  preserved. Consolidation happens atomically inside the next successful sync.
+
 ## 0.5.0-dev-7 - 2026-08-22
 
 - Adds an explicit `Light Plans → Theme Strategy` workspace where SoundSwitch
