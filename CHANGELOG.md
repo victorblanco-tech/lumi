@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.5.0-dev-5 - 2026-08-22
+
+### Added
+
+- A dedicated `Integrations → Lighting Outputs → Static Looks` workspace
+  with the familiar SoundSwitch 32-slot, four-column layout.
+- Named Static Look mappings, guided MIDI Learn, per-slot Toggle tests and
+  separate activation/release verification.
+- A fixed global MIDI surface on Channel 12, Notes 64–95, isolated from the 128
+  bank-specific AutoLoop addresses.
+
+### Changed
+
+- Static Look provider mapping now belongs to Lighting Outputs; Light Plans keeps
+  only eligibility and variation rules.
+- Existing Static Look mappings and rule references are projected by their MIDI
+  address, preserving the two mappings created during the physical POC.
+
+### Safety
+
+- Learning or testing a Static Look never enables automatic execution. A slot is
+  eligible only after both activation and release have been confirmed; automatic
+  runtime output remains a separate follow-up.
+
 ## 0.5.0-dev-4 - 2026-08-22
 
 ### Fixed

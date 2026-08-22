@@ -5,6 +5,7 @@ import SwiftUI
 public struct AutoloopCatalogSettingsView: View {
     private enum ProfileSection: String {
         case banks
+        case staticLooks
         case controller
         case midi
     }
@@ -13,6 +14,7 @@ public struct AutoloopCatalogSettingsView: View {
     private let midiIntegration: MidiIntegrationState?
     private let midiClockIntegration: MidiClockIntegrationState?
     private let abletonLinkIntegration: AbletonLinkIntegrationState?
+    private let lightPlanningPolicy: LightPlanningPolicyState
     private let profile = SoundSwitchOutputProfileState.builtIn
     private let feedback: String?
     private let midiIntegrationFeedback: String?
@@ -22,6 +24,9 @@ public struct AutoloopCatalogSettingsView: View {
     private let onStopMidi: @Sendable () -> Void
     private let onSendMidiAddressLearnPulse: @Sendable (String, UInt16, UInt16?) -> Void
     private let onTriggerMidiAutoloop: @Sendable (UInt16, UInt16) -> Void
+    private let onSaveLightPlanningPolicy: @Sendable (LightPlanningPolicyState) -> Void
+    private let onToggleMidiStaticLook: @Sendable (UInt16) -> Void
+    private let lightPlanningFeedback: String?
 
     @State private var section: ProfileSection = .banks
     @State private var selectedBankID: UInt64?
@@ -35,27 +40,35 @@ public struct AutoloopCatalogSettingsView: View {
         midiIntegration: MidiIntegrationState? = nil,
         midiClockIntegration: MidiClockIntegrationState? = nil,
         abletonLinkIntegration: AbletonLinkIntegrationState? = nil,
+        lightPlanningPolicy: LightPlanningPolicyState = .init(),
         feedback: String? = nil,
         midiIntegrationFeedback: String? = nil,
+        lightPlanningFeedback: String? = nil,
         rendersInteractiveControls: Bool = true,
         onMutation: @escaping @Sendable (AutoloopCatalogMutationRequest) -> Void = { _ in },
         onPublishMidi: @escaping @Sendable () -> Void = {},
         onStopMidi: @escaping @Sendable () -> Void = {},
         onSendMidiAddressLearnPulse: @escaping @Sendable (String, UInt16, UInt16?) -> Void = { _, _, _ in },
-        onTriggerMidiAutoloop: @escaping @Sendable (UInt16, UInt16) -> Void = { _, _ in }
+        onTriggerMidiAutoloop: @escaping @Sendable (UInt16, UInt16) -> Void = { _, _ in },
+        onSaveLightPlanningPolicy: @escaping @Sendable (LightPlanningPolicyState) -> Void = { _ in },
+        onToggleMidiStaticLook: @escaping @Sendable (UInt16) -> Void = { _ in }
     ) {
         self.catalog = catalog
         self.midiIntegration = midiIntegration
         self.midiClockIntegration = midiClockIntegration
         self.abletonLinkIntegration = abletonLinkIntegration
+        self.lightPlanningPolicy = lightPlanningPolicy
         self.feedback = feedback
         self.midiIntegrationFeedback = midiIntegrationFeedback
+        self.lightPlanningFeedback = lightPlanningFeedback
         self.rendersInteractiveControls = rendersInteractiveControls
         self.onMutation = onMutation
         self.onPublishMidi = onPublishMidi
         self.onStopMidi = onStopMidi
         self.onSendMidiAddressLearnPulse = onSendMidiAddressLearnPulse
         self.onTriggerMidiAutoloop = onTriggerMidiAutoloop
+        self.onSaveLightPlanningPolicy = onSaveLightPlanningPolicy
+        self.onToggleMidiStaticLook = onToggleMidiStaticLook
         let firstBank = catalog?.themes.first
         let firstSlot = catalog.flatMap { value in
             firstBank.flatMap {
@@ -80,6 +93,18 @@ public struct AutoloopCatalogSettingsView: View {
                     sectionTabs
                     switch section {
                     case .banks: banksAndAutoloops(catalog)
+                    case .staticLooks:
+                        StaticLookCatalogSettingsView(
+                            policy: lightPlanningPolicy,
+                            midiIntegration: midiIntegration,
+                            feedback: lightPlanningFeedback,
+                            rendersInteractiveControls: rendersInteractiveControls,
+                            onSave: onSaveLightPlanningPolicy,
+                            onSendLearnPulse: { slotNumber in
+                                onSendMidiAddressLearnPulse("staticLook", slotNumber, nil)
+                            },
+                            onToggleStaticLook: onToggleMidiStaticLook
+                        )
                     case .controller: virtualController(catalog)
                     case .midi: midiPreparation
                     }
@@ -130,7 +155,7 @@ public struct AutoloopCatalogSettingsView: View {
                     .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
                 VStack(alignment: .leading, spacing: 2) {
                     Text(profile.name).font(LumiTypography.cardTitle)
-                    Text("4 banks · 32 AutoLoops per bank · 128 mappings total")
+                    Text("4 banks · 128 AutoLoops · 32 global Static Looks")
                         .font(LumiTypography.caption)
                         .foregroundStyle(LumiColor.textSecondary)
                 }
@@ -141,18 +166,28 @@ public struct AutoloopCatalogSettingsView: View {
                     .background(LumiColor.surfaceElevated)
                     .clipShape(Capsule())
                 Spacer()
-                Label("Demo configuration", systemImage: "shippingbox.fill")
+                Label("SoundSwitch output", systemImage: "shippingbox.fill")
                     .font(LumiTypography.caption.weight(.semibold))
                     .foregroundStyle(LumiColor.accent)
-                Text("\(totalMapped(catalog)) / 128 mapped")
-                    .font(LumiTypography.technical.weight(.semibold))
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text("\(totalMapped(catalog)) / 128 AutoLoops mapped")
+                    Text("\(mappedStaticLookCount) / 32 Static Looks mapped")
+                }
+                .font(LumiTypography.technical.weight(.semibold))
             }
         }
+    }
+
+    private var mappedStaticLookCount: Int {
+        SoundSwitchStaticLookProjection.slots(policy: lightPlanningPolicy)
+            .filter { $0.status != .available }
+            .count
     }
 
     private var sectionTabs: some View {
         HStack(spacing: 4) {
             profileTab(.banks, "Banks & AutoLoops")
+            profileTab(.staticLooks, "Static Looks")
             profileTab(.controller, "Virtual Controller")
             profileTab(.midi, "MIDI Status")
             Spacer()

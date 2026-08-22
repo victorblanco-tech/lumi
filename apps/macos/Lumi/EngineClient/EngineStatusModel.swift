@@ -898,12 +898,27 @@ final class EngineStatusModel: ObservableObject {
         targetNumber: UInt16,
         bankNumber: UInt16? = nil
     ) async {
-        let label = targetKind == "bank" ? "Bank" : "AutoLoop"
-        let note = targetKind == "bank" ? 59 + targetNumber : 63 + targetNumber
-        let channel = targetKind == "bank" ? 16 : 12 + (bankNumber ?? 1)
-        let targetDescription = targetKind == "autoloop"
-            ? "Bank \(bankNumber ?? 1) · \(label) \(targetNumber)"
-            : "\(label) \(targetNumber)"
+        let label: String
+        let note: UInt16
+        let channel: UInt16
+        let targetDescription: String
+        switch targetKind {
+        case "bank":
+            label = "Bank"
+            note = 59 + targetNumber
+            channel = 16
+            targetDescription = "\(label) \(targetNumber)"
+        case "staticLook":
+            label = "Static Look"
+            note = 63 + targetNumber
+            channel = 12
+            targetDescription = "\(label) \(targetNumber)"
+        default:
+            label = "AutoLoop"
+            note = 63 + targetNumber
+            channel = 12 + (bankNumber ?? 1)
+            targetDescription = "Bank \(bankNumber ?? 1) · \(label) \(targetNumber)"
+        }
         await exchangeMidiCommand(
             .sendMidiAddressLearnPulse(
                 targetKind: targetKind,
@@ -928,6 +943,13 @@ final class EngineStatusModel: ObservableObject {
                 autoloopNumber: autoloopNumber
             ),
             success: "Triggered Bank \(bankNumber) → AutoLoop \(autoloopNumber) with a 50 ms settle delay."
+        )
+    }
+
+    func toggleMidiStaticLook(slotNumber: UInt16) async {
+        await exchangeMidiCommand(
+            .triggerMidiStaticLook(slotNumber: slotNumber),
+            success: "Toggled SoundSwitch Static Look \(slotNumber) on Channel 12, Note \(63 + slotNumber)."
         )
     }
 

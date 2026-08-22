@@ -3,7 +3,7 @@ import Foundation
 public enum LiveWorkspaceFixtures {
     public static let readySnapshot = EngineSnapshot(
         endpoint: "127.0.0.1:52841",
-        engineVersion: "0.5.0-dev-4",
+        engineVersion: "0.5.0-dev-5",
         protocolVersion: 1,
         snapshotSequence: 42,
         stateRevision: 8,

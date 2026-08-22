@@ -120,6 +120,27 @@ established activation, release, toggle/exclusivity and reconnect semantics. An
 unverified modifier can never emit MIDI from automatic execution. Manual Control
 One operation remains parallel.
 
+### 6.1 SoundSwitch Static Look capability proof
+
+The physical SoundSwitch POC on 2026-08-22 established the concrete first-output
+contract:
+
+- SoundSwitch exposes one global Static Look surface with 32 slots, ordered as
+  four columns of eight (`1–8`, `9–16`, `17–24`, `25–32`);
+- a learned note pulse toggles the selected Static Look both on and off;
+- at most one Static Look is active; selecting another replaces the current one;
+- SoundSwitch exposes no selected-look feedback to Lumi.
+
+The built-in SoundSwitch profile therefore reserves MIDI Channel 12, Notes
+64–95 for Static Looks 1–32. This surface is configured under `Integrations →
+Lighting Outputs → Static Looks`, next to the existing Banks & AutoLoops
+surface. The UI supports guided Learn and a deliberate manual Toggle action.
+
+Because output state is write-only, `activationVerified` and `releaseVerified`
+remain separate user confirmations. Merely learning or testing a slot never
+enables automatic execution. Planning rules stay in Light Plans; provider
+addresses and names stay in Lighting Outputs.
+
 ### 7. Revisioned persistence
 
 Planning policy, candidate rules and modifier mappings are revisioned and updated
@@ -135,7 +156,8 @@ Library, phrases and SoundSwitch mapping.
   and one AutoLoop selection per execution epoch.
 - Color and repetition logic can evolve independently of SoundSwitch.
 - Modifier mappings can be prepared now; their runtime execution requires a
-  separate physical POC and explicit capability verification.
+  per-slot explicit capability verification before it is eligible for automatic
+  execution.
 - A policy change affects newly compiled plans, not a currently executing show.
 - Contextual help is part of the contract for non-obvious planning controls;
   terse labels do not require users to infer cooldown or color semantics.

@@ -236,6 +236,37 @@ struct LibraryWorkspaceTests {
         #expect(state.preview?.phrases.first?.startBeat == 0)
     }
 
+    @Test("SoundSwitch Static Looks project one fixed 32-slot surface in controller order")
+    func staticLookProjectionUsesSoundSwitchLayout() {
+        let policy = LightPlanningPolicyState(
+            revision: 4,
+            modifiers: [
+                LightPlanOutputModifier(
+                    id: "soundswitch-static-look-1",
+                    providerKind: "soundswitch",
+                    kind: .atmosphere,
+                    displayName: "Moving Heads OFF",
+                    enabled: true,
+                    midiChannel: 12,
+                    midiNote: 64,
+                    activationVerified: true,
+                    releaseVerified: true
+                )
+            ]
+        )
+
+        let slots = SoundSwitchStaticLookProjection.slots(policy: policy)
+        #expect(slots.count == 32)
+        #expect(slots.first?.displayName == "Moving Heads OFF")
+        #expect(slots.first?.status == .verified)
+        #expect(slots.last?.midiChannel == 12)
+        #expect(slots.last?.midiNote == 95)
+
+        let grid = SoundSwitchStaticLookProjection.controllerGridSlots(policy: policy)
+        #expect(Array(grid.prefix(4).map(\.number)) == [1, 9, 17, 25])
+        #expect(Array(grid.suffix(4).map(\.number)) == [8, 16, 24, 32])
+    }
+
     @Test("Rekordbox device sync diagnostics decode match and cue revision status")
     func decodesRekordboxDeviceState() throws {
         let devices: JSONValue = .array([

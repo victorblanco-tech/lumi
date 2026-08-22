@@ -13,6 +13,7 @@ pub const MIDI_CLOCK_SOURCE_NAME: &str = "Lumi Clock";
 pub const MIDI_CHANNEL: u8 = 16;
 const BANK_NOTE_BASE: u8 = 60;
 const AUTOLOOP_NOTE_BASE: u8 = 64;
+pub const STATIC_LOOK_CHANNEL: u8 = 12;
 pub const BANK_SETTLE_DELAY: Duration = Duration::from_millis(50);
 const REALTIME_LATE_DISPATCH_THRESHOLD: Duration = Duration::from_millis(20);
 
@@ -20,6 +21,7 @@ const REALTIME_LATE_DISPATCH_THRESHOLD: Duration = Duration::from_millis(20);
 pub enum MidiAddressKind {
     Bank,
     Autoloop,
+    StaticLook,
     Custom,
 }
 
@@ -65,6 +67,21 @@ impl MidiAddress {
                 number,
                 note: AUTOLOOP_NOTE_BASE + number - 1,
                 channel: 12 + bank_number,
+            })
+        } else {
+            None
+        }
+    }
+
+    /// SoundSwitch exposes one global 32-slot Static Look surface. Keep it on
+    /// a dedicated channel while preserving its familiar 64–95 note range.
+    pub const fn static_look(number: u8) -> Option<Self> {
+        if number >= 1 && number <= 32 {
+            Some(Self {
+                kind: MidiAddressKind::StaticLook,
+                number,
+                note: AUTOLOOP_NOTE_BASE + number - 1,
+                channel: STATIC_LOOK_CHANNEL,
             })
         } else {
             None
@@ -628,6 +645,7 @@ enum RealtimeMidiCommand {
     SelectBank(u8, mpsc::Sender<Result<(), String>>),
     TriggerAutoloop(u8, u8, mpsc::Sender<Result<(), String>>),
     TriggerSequence(u8, u8, mpsc::Sender<Result<(), String>>),
+    ToggleStaticLook(u8, mpsc::Sender<Result<(), String>>),
     SetGeneration(u64),
     Schedule(ScheduledRealtimeMidiAction),
     CancelAll,
@@ -716,6 +734,10 @@ where
         self.synchronous(|reply| {
             RealtimeMidiCommand::TriggerSequence(bank_number, autoloop_number, reply)
         })
+    }
+
+    pub fn toggle_static_look(&self, static_look_number: u8) -> Result<(), RealtimeMidiError> {
+        self.synchronous(|reply| RealtimeMidiCommand::ToggleStaticLook(static_look_number, reply))
     }
 
     pub fn set_generation(&self, generation: u64) -> Result<(), RealtimeMidiError> {
@@ -914,6 +936,7 @@ where
         let target = match address.kind() {
             MidiAddressKind::Bank => "Bank",
             MidiAddressKind::Autoloop => "AutoLoop",
+            MidiAddressKind::StaticLook => "Static Look",
             MidiAddressKind::Custom => "Custom",
         };
         self.last_event = Some(format!(
@@ -931,6 +954,21 @@ where
         autoloop_number: u8,
     ) -> Result<(), MidiOutputError<P::Error>> {
         self.trigger_autoloop_with_wait(bank_number, autoloop_number, std::thread::sleep)
+    }
+
+    pub fn toggle_static_look(
+        &mut self,
+        static_look_number: u8,
+    ) -> Result<(), MidiOutputError<P::Error>> {
+        let address =
+            MidiAddress::static_look(static_look_number).ok_or(MidiOutputError::InvalidAddress)?;
+        self.send_address_pulse(address)?;
+        self.last_event = Some(format!(
+            "Toggled Static Look {static_look_number} · Ch {} · Note {}",
+            address.channel(),
+            address.note()
+        ));
+        Ok(())
     }
 
     fn trigger_autoloop_with_wait<F>(
@@ -1116,6 +1154,13 @@ fn run_realtime_midi_worker<P>(
                     RealtimeMidiCommand::TriggerSequence(bank, autoloop, reply) => {
                         let result = controller
                             .trigger_autoloop(bank, autoloop)
+                            .map_err(|error| error.to_string());
+                        publish_controller_status(shared_status, &controller);
+                        let _ = reply.send(result);
+                    }
+                    RealtimeMidiCommand::ToggleStaticLook(number, reply) => {
+                        let result = controller
+                            .toggle_static_look(number)
                             .map_err(|error| error.to_string());
                         publish_controller_status(shared_status, &controller);
                         let _ = reply.send(result);
@@ -1370,6 +1415,30 @@ mod tests {
 
         assert_eq!(controller.provider.messages[0].bytes(), [0x9d, 0, 100]);
         assert_eq!(controller.provider.messages[1].bytes(), [0x8d, 0, 0]);
+    }
+
+    #[test]
+    fn static_looks_have_one_dedicated_32_slot_surface_and_toggle_with_a_pulse() {
+        let addresses = (1..=32)
+            .filter_map(MidiAddress::static_look)
+            .map(|address| (address.channel(), address.note()))
+            .collect::<Vec<_>>();
+        assert_eq!(addresses.first(), Some(&(12, 64)));
+        assert_eq!(addresses.last(), Some(&(12, 95)));
+        assert_eq!(addresses.len(), 32);
+
+        let mut controller = MidiOutputController::new(RecordingProvider::default());
+        assert!(controller.publish().is_ok());
+        assert!(controller.toggle_static_look(2).is_ok());
+        assert_eq!(controller.provider.messages[0].bytes(), [0x9b, 65, 100]);
+        assert_eq!(controller.provider.messages[1].bytes(), [0x8b, 65, 0]);
+        assert!(
+            controller
+                .status()
+                .last_event
+                .as_deref()
+                .is_some_and(|event| event.contains("Static Look 2"))
+        );
     }
 
     #[test]

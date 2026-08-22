@@ -25,6 +25,10 @@ public struct IntegrationsWorkspaceView: View {
     private let onTestAbletonLinkHelper: @Sendable () -> Void
     private let onSendMidiAddressLearnPulse: @Sendable (String, UInt16, UInt16?) -> Void
     private let onTriggerMidiAutoloop: @Sendable (UInt16, UInt16) -> Void
+    private let lightPlanningPolicy: LightPlanningPolicyState
+    private let lightPlanningFeedback: String?
+    private let onSaveLightPlanningPolicy: @Sendable (LightPlanningPolicyState) -> Void
+    private let onToggleMidiStaticLook: @Sendable (UInt16) -> Void
 
     @State private var section: IntegrationsWorkspaceSection
     @Binding private var abletonLinkAutoStart: Bool
@@ -35,6 +39,8 @@ public struct IntegrationsWorkspaceView: View {
         autoloopFeedback: String? = nil,
         midiIntegrationFeedback: String? = nil,
         abletonLinkFeedback: String? = nil,
+        lightPlanningPolicy: LightPlanningPolicyState = .init(),
+        lightPlanningFeedback: String? = nil,
         abletonLinkAutoStart: Binding<Bool> = .constant(false),
         rendersInteractiveControls: Bool = true,
         onOpenLibrarySources: @escaping @MainActor () -> Void = {},
@@ -44,7 +50,9 @@ public struct IntegrationsWorkspaceView: View {
         onSetAbletonLinkEnabled: @escaping @Sendable (Bool) -> Void = { _ in },
         onTestAbletonLinkHelper: @escaping @Sendable () -> Void = {},
         onSendMidiAddressLearnPulse: @escaping @Sendable (String, UInt16, UInt16?) -> Void = { _, _, _ in },
-        onTriggerMidiAutoloop: @escaping @Sendable (UInt16, UInt16) -> Void = { _, _ in }
+        onTriggerMidiAutoloop: @escaping @Sendable (UInt16, UInt16) -> Void = { _, _ in },
+        onSaveLightPlanningPolicy: @escaping @Sendable (LightPlanningPolicyState) -> Void = { _ in },
+        onToggleMidiStaticLook: @escaping @Sendable (UInt16) -> Void = { _ in }
     ) {
         self.library = library
         _section = State(initialValue: initialSection)
@@ -52,6 +60,8 @@ public struct IntegrationsWorkspaceView: View {
         self.autoloopFeedback = autoloopFeedback
         self.midiIntegrationFeedback = midiIntegrationFeedback
         self.abletonLinkFeedback = abletonLinkFeedback
+        self.lightPlanningPolicy = lightPlanningPolicy
+        self.lightPlanningFeedback = lightPlanningFeedback
         self.rendersInteractiveControls = rendersInteractiveControls
         self.onOpenLibrarySources = onOpenLibrarySources
         self.onAutoloopMutation = onAutoloopMutation
@@ -61,6 +71,8 @@ public struct IntegrationsWorkspaceView: View {
         self.onTestAbletonLinkHelper = onTestAbletonLinkHelper
         self.onSendMidiAddressLearnPulse = onSendMidiAddressLearnPulse
         self.onTriggerMidiAutoloop = onTriggerMidiAutoloop
+        self.onSaveLightPlanningPolicy = onSaveLightPlanningPolicy
+        self.onToggleMidiStaticLook = onToggleMidiStaticLook
     }
 
     public var body: some View {
@@ -135,14 +147,18 @@ public struct IntegrationsWorkspaceView: View {
                 midiIntegration: library.midiIntegration,
                 midiClockIntegration: library.midiClockIntegration,
                 abletonLinkIntegration: library.abletonLinkIntegration,
+                lightPlanningPolicy: lightPlanningPolicy,
                 feedback: autoloopFeedback,
                 midiIntegrationFeedback: midiIntegrationFeedback,
+                lightPlanningFeedback: lightPlanningFeedback,
                 rendersInteractiveControls: rendersInteractiveControls,
                 onMutation: onAutoloopMutation,
                 onPublishMidi: onPublishMidi,
                 onStopMidi: onStopMidi,
                 onSendMidiAddressLearnPulse: onSendMidiAddressLearnPulse,
-                onTriggerMidiAutoloop: onTriggerMidiAutoloop
+                onTriggerMidiAutoloop: onTriggerMidiAutoloop,
+                onSaveLightPlanningPolicy: onSaveLightPlanningPolicy,
+                onToggleMidiStaticLook: onToggleMidiStaticLook
             )
         case .diagnostics:
             diagnostics

@@ -205,8 +205,9 @@ upgrade/recovery en volledige schone-Mac hardening blijven onderdeel van
 
 ### Fase 5 – Compiled Light Plans (`0.5.0`)
 
-Status op 2026-08-19: **geïmplementeerd in `0.5.0-dev-4`; fysieke
-modifier-output blijft bewust achter de POC-gate**.
+Status op 2026-08-22: **geïmplementeerd t/m `0.5.0-dev-5`; Static Look
+toggle/exclusiviteit is fysiek bewezen en de 32-slot mapping-UI is gereed;
+automatische modifier-output blijft bewust fail-closed**.
 
 - deterministic AutoLoop variation per Phrase Role;
 - Selection Weight, track-color affinity and repeat protection;

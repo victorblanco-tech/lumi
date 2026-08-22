@@ -1,6 +1,6 @@
 # Epic 6 – Compiled Light Plans
 
-Status: **Implemented in `0.5.0-dev-4`**
+Status: **Implemented through `0.5.0-dev-5`**
 
 Target: **0.5.0**
 
@@ -45,13 +45,14 @@ explains each selection.
 Visible milestone: a user can configure a Phrase Role and preview a real Library
 track without opening Lighting Outputs.
 
-### Phase D — SoundSwitch modifiers, safely prepared
+### Phase D — SoundSwitch modifiers, safely prepared and mapped
 
 - [E6-04](story-e6-04-soundswitch-modifier-capabilities.md): Static Look and Color
   Override catalog/mapping, MIDI-learn addressing and fail-closed capability gate.
 
-Visible milestone: provider resources are nameable and mappable, and their planned
-use is visible; automatic execution clearly remains `POC required`.
+Visible milestone: the global 32-slot SoundSwitch Static Look surface is nameable,
+guided-learnable and directly testable in Lighting Outputs. Planning rules remain
+separate and automatic execution clearly remains locked per unverified slot.
 
 ### Phase E — hardening and release evidence
 
@@ -87,7 +88,8 @@ the existing Ableton Link and AutoLoop lanes retain their timing behavior.
 - installed Dev app opened with its real 65-track library and exposed the new
   Light Plans destination.
 
-Physical Static Look and Color Override execution is intentionally not part of
-this completion claim. Its catalog, rules, MIDI addresses and learn pulses are
-implemented, while automatic output remains locked behind the separately
-recorded SoundSwitch POC gate.
+The physical Static Look POC proved toggle-off and single-selection semantics.
+Its global catalog, rules, 32 unique MIDI addresses, guided learn and manual test
+are implemented. Automatic output and Color Override execution are intentionally
+not part of this completion claim and remain fail-closed behind explicit
+per-resource verification and follow-up runtime work.

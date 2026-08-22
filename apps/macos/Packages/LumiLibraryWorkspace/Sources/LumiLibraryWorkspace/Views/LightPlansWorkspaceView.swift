@@ -387,11 +387,15 @@ public struct LightPlansWorkspaceView: View {
         ScrollView {
             VStack(alignment: .leading, spacing: LumiSpacing.large) {
                 GroupBox {
-                    Label("Automatic output is disabled until activation and clear semantics pass the SoundSwitch POC.", systemImage: "lock.shield")
-                        .foregroundStyle(LumiColor.warning)
+                    HStack {
+                        Label("Map and verify Static Looks in Integrations. This workspace only defines when verified looks may be planned.", systemImage: "point.3.connected.trianglepath.dotted")
+                        Spacer()
+                        Button("Open Lighting Outputs", action: onOpenLightingOutputs)
+                            .buttonStyle(.borderedProminent)
+                    }
                 }
                 ForEach(LightPlanModifierKind.allCases) { kind in
-                    GroupBox(kind == .atmosphere ? "Static Looks" : "Color Overrides") {
+                    GroupBox(kind == .atmosphere ? "Static Look Planning" : "Color Overrides") {
                         VStack(alignment: .leading, spacing: LumiSpacing.small) {
                             ForEach(
                                 draft.modifiers.indices.filter { draft.modifiers[$0].kind == kind },
@@ -400,27 +404,39 @@ public struct LightPlansWorkspaceView: View {
                                 let modifierBinding: Binding<LightPlanOutputModifier> = $draft.modifiers[index]
                                 HStack {
                                     Toggle("", isOn: modifierBinding.enabled).labelsHidden()
-                                    TextField(kind.label, text: modifierBinding.displayName)
-                                    Stepper("Ch \(modifierBinding.wrappedValue.midiChannel)", value: modifierBinding.midiChannel, in: 1...16)
-                                    Stepper("Note \(modifierBinding.wrappedValue.midiNote)", value: modifierBinding.midiNote, in: 0...127)
+                                    if kind == .atmosphere {
+                                        Text(modifierBinding.wrappedValue.displayName)
+                                            .frame(minWidth: 180, alignment: .leading)
+                                        Text("Ch \(modifierBinding.wrappedValue.midiChannel) · Note \(modifierBinding.wrappedValue.midiNote)")
+                                            .font(LumiTypography.technical)
+                                            .foregroundStyle(LumiColor.textSecondary)
+                                    } else {
+                                        TextField(kind.label, text: modifierBinding.displayName)
+                                        Stepper("Ch \(modifierBinding.wrappedValue.midiChannel)", value: modifierBinding.midiChannel, in: 1...16)
+                                        Stepper("Note \(modifierBinding.wrappedValue.midiNote)", value: modifierBinding.midiNote, in: 0...127)
+                                    }
                                     Label(
                                         modifierBinding.wrappedValue.automaticExecutionReady ? "Verified" : "POC required",
                                         systemImage: modifierBinding.wrappedValue.automaticExecutionReady ? "checkmark.circle.fill" : "lock.circle"
                                     )
                                     .foregroundStyle(modifierBinding.wrappedValue.automaticExecutionReady ? LumiColor.success : LumiColor.warning)
-                                    Button("Learn") {
-                                        onSendModifierLearnPulse(
-                                            modifierBinding.wrappedValue.midiChannel,
-                                            modifierBinding.wrappedValue.midiNote
-                                        )
+                                    if kind == .color {
+                                        Button("Learn") {
+                                            onSendModifierLearnPulse(
+                                                modifierBinding.wrappedValue.midiChannel,
+                                                modifierBinding.wrappedValue.midiNote
+                                            )
+                                        }
                                     }
                                     Button("Add Rule") {
                                         addModifierRule(for: modifierBinding.wrappedValue.id)
                                     }
-                                    Button(role: .destructive) {
-                                        removeModifier(id: modifierBinding.wrappedValue.id)
-                                    } label: {
-                                        Image(systemName: "trash")
+                                    if kind == .color {
+                                        Button(role: .destructive) {
+                                            removeModifier(id: modifierBinding.wrappedValue.id)
+                                        } label: {
+                                            Image(systemName: "trash")
+                                        }
                                     }
                                 }
                                 ForEach(
@@ -435,13 +451,19 @@ public struct LightPlansWorkspaceView: View {
                                     )
                                 }
                             }
-                            Button("Add \(kind.label)") { addModifier(kind) }
+                            if kind == .color {
+                                Button("Add \(kind.label)") { addModifier(kind) }
+                            } else if !draft.modifiers.contains(where: { $0.kind == .atmosphere }) {
+                                Text("No Static Looks mapped yet.")
+                                    .font(LumiTypography.caption)
+                                    .foregroundStyle(LumiColor.textSecondary)
+                            }
                         }
                     }
                 }
                 HStack {
                     Spacer()
-                    Button("Save Modifier Mappings") {
+                    Button("Save Planning Rules") {
                         draft = materializedPolicyDraft()
                         onSave(draft)
                     }
@@ -456,9 +478,9 @@ public struct LightPlansWorkspaceView: View {
             id: "soundswitch-\(kind.rawValue)-\(UUID().uuidString.lowercased())",
             providerKind: "soundswitch",
             kind: kind,
-            displayName: kind == .atmosphere ? "New Static Look" : "New Color Override",
+            displayName: "New Color Override",
             enabled: true,
-            midiChannel: kind == .atmosphere ? 15 : 14,
+            midiChannel: 14,
             midiNote: 0,
             activationVerified: false,
             releaseVerified: false

@@ -77,6 +77,14 @@ struct EngineCommandTests {
         #expect(payload["bankNumber"] == .number(3))
     }
 
+    @Test("Static Look toggle targets one fixed global slot")
+    func staticLookTogglePayload() {
+        let payload = EngineCommand.triggerMidiStaticLook(slotNumber: 2).payload()
+
+        #expect(payload["kind"] == .string("triggerMidiStaticLook"))
+        #expect(payload["staticLookNumber"] == .number(2))
+    }
+
     @Test("Rekordbox preview carries the exact selected playlist paths")
     func rekordboxPreviewPayload() {
         let payload = EngineCommand.previewRekordboxXMLSync(

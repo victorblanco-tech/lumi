@@ -353,6 +353,7 @@ public enum EngineCommand: Equatable, Sendable {
     )
     case sendCustomMidiLearnPulse(channel: UInt8, note: UInt8)
     case triggerMidiAutoloop(bankNumber: UInt16, autoloopNumber: UInt16)
+    case triggerMidiStaticLook(slotNumber: UInt16)
     case loadLibraryTrackOnLocalDeck(
         trackID: UInt64,
         deckID: UInt64,
@@ -600,6 +601,11 @@ public enum EngineCommand: Equatable, Sendable {
                 "kind": .string("triggerMidiAutoloop"),
                 "bankNumber": .number(Double(bankNumber)),
                 "autoloopNumber": .number(Double(autoloopNumber))
+            ]
+        case let .triggerMidiStaticLook(slotNumber):
+            return [
+                "kind": .string("triggerMidiStaticLook"),
+                "staticLookNumber": .number(Double(slotNumber))
             ]
         case let .loadLibraryTrackOnLocalDeck(
             trackID,

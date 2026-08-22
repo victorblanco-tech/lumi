@@ -180,6 +180,8 @@ struct FoundationView: View {
                         autoloopFeedback: engineStatus.autoloopCatalogFeedback,
                         midiIntegrationFeedback: engineStatus.midiIntegrationFeedback,
                         abletonLinkFeedback: engineStatus.abletonLinkFeedback,
+                        lightPlanningPolicy: engineStatus.lightPlanningState.policy,
+                        lightPlanningFeedback: engineStatus.lightPlanningFeedback,
                         abletonLinkAutoStart: $preferences.abletonLinkAutoStart,
                         onOpenLibrarySources: {
                             librarySection = .sources
@@ -216,6 +218,12 @@ struct FoundationView: View {
                                     autoloopNumber: autoloopNumber
                                 )
                             }
+                        },
+                        onSaveLightPlanningPolicy: { policy in
+                            Task { await engineStatus.replaceLightPlanningPolicy(policy) }
+                        },
+                        onToggleMidiStaticLook: { slotNumber in
+                            Task { await engineStatus.toggleMidiStaticLook(slotNumber: slotNumber) }
                         }
                     )
                 case .settings:

@@ -155,6 +155,9 @@ pub enum SessionCommand {
         bank_number: u8,
         autoloop_number: u8,
     },
+    TriggerMidiStaticLook {
+        static_look_number: u8,
+    },
     LoadLibraryTrackOnLocalDeck {
         track_id: u64,
         deck_id: DeckId,
@@ -271,6 +274,7 @@ impl SessionCommand {
             | Self::SendMidiLearnPulse
             | Self::SendMidiAddressLearnPulse { .. }
             | Self::TriggerMidiAutoloop { .. }
+            | Self::TriggerMidiStaticLook { .. }
             | Self::LoadLibraryTrackOnLocalDeck { .. }
             | Self::UpdateLocalPlaybackTransport { .. }
             | Self::SetLocalPlaybackLeader { .. }
@@ -490,6 +494,9 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
                 autoloop_number,
             })
         }
+        "triggerMidiStaticLook" => Ok(SessionCommand::TriggerMidiStaticLook {
+            static_look_number: midi_number(&envelope.payload, "staticLookNumber", 32)?,
+        }),
         "loadLibraryTrackOnLocalDeck" => Ok(SessionCommand::LoadLibraryTrackOnLocalDeck {
             track_id: positive_unsigned(&envelope.payload, "trackId")?,
             deck_id: DeckId::new(
@@ -591,6 +598,7 @@ fn midi_address(
     match kind {
         "bank" => MidiAddress::bank(number),
         "autoloop" => MidiAddress::autoloop(midi_number(payload, "bankNumber", 4)?, number),
+        "staticLook" => MidiAddress::static_look(number),
         "custom" => MidiAddress::custom(
             u8::try_from(positive_unsigned(payload, "channel")?)
                 .map_err(|_| CommandDecodeError::InvalidField("channel"))?,
@@ -1198,6 +1206,42 @@ mod tests {
         assert_eq!(
             decode_command(&envelope),
             Ok(SessionCommand::SendMidiAddressLearnPulse { address: expected })
+        );
+    }
+
+    #[test]
+    fn static_look_learn_and_toggle_use_the_bounded_global_surface() {
+        let learn = command_envelope(serde_json::json!({
+            "kind": "sendMidiAddressLearnPulse",
+            "targetKind": "staticLook",
+            "targetNumber": 32,
+        }));
+        let Some(expected) = MidiAddress::static_look(32) else {
+            panic!("static look address must be valid");
+        };
+        assert_eq!(
+            decode_command(&learn),
+            Ok(SessionCommand::SendMidiAddressLearnPulse { address: expected })
+        );
+
+        let toggle = command_envelope(serde_json::json!({
+            "kind": "triggerMidiStaticLook",
+            "staticLookNumber": 2,
+        }));
+        assert_eq!(
+            decode_command(&toggle),
+            Ok(SessionCommand::TriggerMidiStaticLook {
+                static_look_number: 2,
+            })
+        );
+
+        let invalid = command_envelope(serde_json::json!({
+            "kind": "triggerMidiStaticLook",
+            "staticLookNumber": 33,
+        }));
+        assert_eq!(
+            decode_command(&invalid),
+            Err(CommandDecodeError::InvalidField("staticLookNumber"))
         );
     }
 

@@ -3137,6 +3137,14 @@ fn apply_command(
                 .map_err(|error| CommandApplicationError::Midi(error.to_string()))?;
             return Ok(());
         }
+        SessionCommand::TriggerMidiStaticLook { static_look_number } => {
+            runtime
+                .output_worker
+                .midi_output
+                .toggle_static_look(static_look_number)
+                .map_err(|error| CommandApplicationError::Midi(error.to_string()))?;
+            return Ok(());
+        }
         SessionCommand::LoadLibraryTrackOnLocalDeck {
             track_id,
             deck_id,
@@ -3465,6 +3473,7 @@ fn apply_command(
         | SessionCommand::SendMidiLearnPulse
         | SessionCommand::SendMidiAddressLearnPulse { .. }
         | SessionCommand::TriggerMidiAutoloop { .. }
+        | SessionCommand::TriggerMidiStaticLook { .. }
         | SessionCommand::LoadLibraryTrackOnLocalDeck { .. }
         | SessionCommand::UpdateLocalPlaybackTransport { .. }
         | SessionCommand::SetLocalPlaybackLeader { .. }
