@@ -123,8 +123,10 @@ pub struct DeviceAnalysisUpsert {
     pub analysis_revision: String,
     pub source_analysis_revision: String,
     pub analyzed_at: String,
+    pub duration_millis: u64,
     pub beat_grid: BeatGrid,
     pub waveform: Vec<WaveformPoint>,
+    pub raw_phrases: Vec<RawPhraseObservation>,
     pub hot_cues: Vec<HotCue>,
 }
 
@@ -991,14 +993,7 @@ impl SqliteLibraryRepository {
             )?;
         }
         for analysis in analyses {
-            replace_track_analysis_in_transaction(
-                &transaction,
-                analysis.track_id,
-                &analysis.analysis_revision,
-                &analysis.beat_grid,
-                &analysis.waveform,
-                &analysis.hot_cues,
-            )?;
+            replace_track_analysis_in_transaction(&transaction, analysis)?;
             transaction.execute(
                 "INSERT INTO track_analysis_provenance
                  (track_id, source_id, device_track_id, analysis_revision, analyzed_at,
@@ -4241,16 +4236,23 @@ fn replace_autoloop_rows(
 
 fn replace_track_analysis_in_transaction(
     transaction: &Transaction<'_>,
-    track_id: TrackId,
-    analysis_revision: &str,
-    beat_grid: &BeatGrid,
-    waveform: &[WaveformPoint],
-    hot_cues: &[HotCue],
+    analysis: &DeviceAnalysisUpsert,
 ) -> Result<(), SqliteLibraryError> {
-    let track_id = to_i64(track_id.value())?;
+    let track_id = to_i64(analysis.track_id.value())?;
+    let reconciled_timeline = timeline_for_analysis_refresh(
+        transaction,
+        track_id,
+        &analysis.analysis_revision,
+        &analysis.beat_grid,
+        &analysis.raw_phrases,
+    )?;
     let updated = transaction.execute(
-        "UPDATE tracks SET analysis_revision = ?1 WHERE id = ?2",
-        params![analysis_revision, track_id],
+        "UPDATE tracks SET analysis_revision = ?1, duration_millis = ?2 WHERE id = ?3",
+        params![
+            analysis.analysis_revision,
+            to_i64(analysis.duration_millis)?,
+            track_id
+        ],
     )?;
     if updated != 1 {
         return Err(SqliteLibraryError::MissingTrack);
@@ -4261,10 +4263,11 @@ fn replace_track_analysis_in_transaction(
         "DELETE FROM waveform_points WHERE track_id = ?1",
         [track_id],
     )?;
+    transaction.execute("DELETE FROM raw_phrases WHERE track_id = ?1", [track_id])?;
     transaction.execute("DELETE FROM hot_cues WHERE track_id = ?1", [track_id])?;
     transaction.execute(
         "INSERT INTO beat_grids(track_id, beats_per_bar) VALUES (?1, ?2)",
-        params![track_id, i64::from(beat_grid.beats_per_bar())],
+        params![track_id, i64::from(analysis.beat_grid.beats_per_bar())],
     )?;
     {
         let mut statement = transaction.prepare(
@@ -4272,7 +4275,7 @@ fn replace_track_analysis_in_transaction(
              (track_id, beat_index, time_millis, bar_index, beat_in_bar)
              VALUES (?1, ?2, ?3, ?4, ?5)",
         )?;
-        for marker in beat_grid.markers() {
+        for marker in analysis.beat_grid.markers() {
             statement.execute(params![
                 track_id,
                 i64::from(marker.beat_index()),
@@ -4287,7 +4290,7 @@ fn replace_track_analysis_in_transaction(
             "INSERT INTO waveform_points(track_id, point_index, low, mid, high)
              VALUES (?1, ?2, ?3, ?4, ?5)",
         )?;
-        for (index, point) in waveform.iter().enumerate() {
+        for (index, point) in analysis.waveform.iter().enumerate() {
             statement.execute(params![
                 track_id,
                 usize_to_i64(index)?,
@@ -4299,11 +4302,27 @@ fn replace_track_analysis_in_transaction(
     }
     {
         let mut statement = transaction.prepare(
+            "INSERT INTO raw_phrases
+             (track_id, phrase_index, start_beat, end_beat, source_label)
+             VALUES (?1, ?2, ?3, ?4, ?5)",
+        )?;
+        for (index, phrase) in analysis.raw_phrases.iter().enumerate() {
+            statement.execute(params![
+                track_id,
+                usize_to_i64(index)?,
+                i64::from(phrase.start_beat()),
+                i64::from(phrase.end_beat()),
+                phrase.source_label(),
+            ])?;
+        }
+    }
+    {
+        let mut statement = transaction.prepare(
             "INSERT INTO hot_cues
              (track_id, cue_index, time_millis, loop_end_millis, name, color_rgb)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         )?;
-        for cue in hot_cues {
+        for cue in &analysis.hot_cues {
             statement.execute(params![
                 track_id,
                 i64::from(cue.index()),
@@ -4314,6 +4333,199 @@ fn replace_track_analysis_in_transaction(
             ])?;
         }
     }
+    if let Some(timeline) = reconciled_timeline {
+        insert_timeline_revision_in_transaction(transaction, &timeline)?;
+    }
+    Ok(())
+}
+
+fn timeline_for_analysis_refresh(
+    transaction: &Transaction<'_>,
+    track_id: i64,
+    analysis_revision: &str,
+    beat_grid: &BeatGrid,
+    new_raw_phrases: &[RawPhraseObservation],
+) -> Result<Option<LumiPhraseTimeline>, SqliteLibraryError> {
+    let Some((head_revision, baseline_revision)) = transaction
+        .query_row(
+            "SELECT h.revision, r.baseline_revision
+               FROM timeline_heads h
+               JOIN timeline_revisions r
+                 ON r.track_id = h.track_id AND r.revision = h.revision
+              WHERE h.track_id = ?1",
+            [track_id],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
+        )
+        .optional()?
+    else {
+        return Ok(None);
+    };
+    if baseline_revision == analysis_revision {
+        return Ok(None);
+    }
+
+    let old_raw_phrases = {
+        let mut statement = transaction.prepare(
+            "SELECT start_beat, end_beat, source_label
+               FROM raw_phrases WHERE track_id = ?1 ORDER BY phrase_index",
+        )?;
+        statement
+            .query_map([track_id], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, i64>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?
+    };
+    let mut points = {
+        let mut statement = transaction.prepare(
+            "SELECT beat, role_id, loop_strategy
+               FROM phrase_points
+              WHERE track_id = ?1 AND revision = ?2
+              ORDER BY phrase_index",
+        )?;
+        statement
+            .query_map(params![track_id, head_revision], |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })?
+            .collect::<Result<Vec<_>, _>>()?
+    };
+
+    points = repair_legacy_partial_bar_timeline_points(&old_raw_phrases, new_raw_phrases, points);
+
+    let total_beats = i64::from(beat_grid.total_beats());
+    points.retain(|(beat, _, _)| *beat >= 0 && *beat < total_beats);
+    if points.first().map(|point| point.0) != Some(0) {
+        return Err(SqliteLibraryError::CorruptData(
+            "analysis refresh lost the first phrase boundary".to_owned(),
+        ));
+    }
+    let revision = timeline_revision(head_revision, "timeline head")?
+        .checked_next()
+        .ok_or(SqliteLibraryError::ArithmeticOverflow)?;
+    let parent = timeline_revision(head_revision, "timeline head")?;
+    let phrases = points
+        .iter()
+        .enumerate()
+        .map(|(index, (start, role_id, loop_strategy))| {
+            let end = points.get(index + 1).map_or(total_beats, |point| point.0);
+            Ok(PhraseInstance::new(
+                u16::try_from(index).map_err(|_| SqliteLibraryError::ArithmeticOverflow)?,
+                to_u32(*start, "phrase start")?,
+                to_u32(end, "phrase end")?,
+                PhraseRoleId::try_new(role_id.clone())?,
+            )
+            .with_loop_strategy(decode_loop_strategy(loop_strategy)?))
+        })
+        .collect::<Result<Vec<_>, SqliteLibraryError>>()?;
+    let timeline = LumiPhraseTimeline::try_new_with_history(
+        TrackId::new(from_positive_i64(track_id, "timeline track id")?),
+        revision,
+        SourceRevision::try_new(analysis_revision)?,
+        to_u32(total_beats, "timeline total beats")?,
+        TimelineRevisionOrigin::SourceReconcile,
+        TimelineRevisionReason::SourceReconcile,
+        Some(parent),
+        None,
+        phrases,
+    )?;
+    Ok(Some(timeline))
+}
+
+fn legacy_partial_bar_phrase_projection(
+    old: &[(i64, i64, String)],
+    new: &[RawPhraseObservation],
+) -> bool {
+    old.len() == new.len() + 1
+        && old.len() >= 2
+        && old[0].0 == 0
+        && old[0].1 == 1
+        && old[0].2 == old[1].2
+        && old.iter().skip(1).zip(new).all(|(old_phrase, new_phrase)| {
+            old_phrase.0 == i64::from(new_phrase.start_beat()) + 1
+                && old_phrase.2 == new_phrase.source_label()
+        })
+}
+
+fn repair_legacy_partial_bar_timeline_points(
+    old_raw_phrases: &[(i64, i64, String)],
+    new_raw_phrases: &[RawPhraseObservation],
+    points: Vec<(i64, String, String)>,
+) -> Vec<(i64, String, String)> {
+    if !legacy_partial_bar_phrase_projection(old_raw_phrases, new_raw_phrases) {
+        return points;
+    }
+    let source_start_mapping = old_raw_phrases
+        .iter()
+        .skip(1)
+        .zip(new_raw_phrases)
+        .map(|(old, new)| (old.0, i64::from(new.start_beat())))
+        .collect::<BTreeMap<_, _>>();
+    let mut repaired = BTreeMap::<i64, (String, String)>::new();
+    for (beat, role_id, loop_strategy) in points {
+        let mapped = source_start_mapping.get(&beat).copied().unwrap_or(beat);
+        // Insertion order deliberately lets the later one-beat source phrase
+        // win when it collapses onto beat zero. User-moved boundaries are not
+        // source starts and therefore remain exactly where the user put them.
+        repaired.insert(mapped, (role_id, loop_strategy));
+    }
+    repaired
+        .into_iter()
+        .map(|(beat, (role_id, loop_strategy))| (beat, role_id, loop_strategy))
+        .collect()
+}
+
+fn insert_timeline_revision_in_transaction(
+    transaction: &Transaction<'_>,
+    timeline: &LumiPhraseTimeline,
+) -> Result<(), SqliteLibraryError> {
+    transaction.execute(
+        "INSERT INTO timeline_revisions
+         (track_id, revision, baseline_revision, total_beats, origin, reason,
+          parent_revision, restored_from_revision)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, NULL)",
+        params![
+            to_i64(timeline.track_id().value())?,
+            to_i64(timeline.revision().value())?,
+            timeline.baseline_revision().as_str(),
+            i64::from(timeline.total_beats()),
+            encode_origin(timeline.origin()),
+            encode_reason(timeline.reason()),
+            timeline
+                .parent_revision()
+                .map(|revision| to_i64(revision.value()))
+                .transpose()?,
+        ],
+    )?;
+    let mut statement = transaction.prepare(
+        "INSERT INTO phrase_points
+         (track_id, revision, phrase_index, beat, role_id, loop_strategy)
+         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+    )?;
+    for phrase in timeline.phrases() {
+        statement.execute(params![
+            to_i64(timeline.track_id().value())?,
+            to_i64(timeline.revision().value())?,
+            i64::from(phrase.index()),
+            i64::from(phrase.start_beat()),
+            phrase.role_id().as_str(),
+            encode_loop_strategy(phrase.loop_strategy())?,
+        ])?;
+    }
+    drop(statement);
+    transaction.execute(
+        "UPDATE timeline_heads SET revision = ?1 WHERE track_id = ?2",
+        params![
+            to_i64(timeline.revision().value())?,
+            to_i64(timeline.track_id().value())?,
+        ],
+    )?;
     Ok(())
 }
 
@@ -4992,8 +5204,8 @@ fn search_pattern(search: &str) -> String {
 mod fault_tests {
     use lumi_domain::TrackId;
     use lumi_library::{
-        HotCue, ImportedLibraryBaseline, ImportedTrackAnalysis, LibraryRepository, SourceRevision,
-        TrackColor, TrackPageRequest,
+        HotCue, ImportedLibraryBaseline, ImportedTrackAnalysis, LibraryRepository,
+        RawPhraseObservation, SourceRevision, TrackColor, TrackPageRequest,
     };
     use lumi_library_demo::DemoLibrarySourceProvider;
     use lumi_library_source::MusicLibrarySourceProvider;
@@ -5002,7 +5214,47 @@ mod fault_tests {
     use super::{
         DeviceAliasUpsert, DeviceAnalysisDecision, DeviceAnalysisUpsert, DeviceHotCueUpsert,
         DevicePlaylistUpsert, DeviceTrackImport, SqliteLibraryError, SqliteLibraryRepository,
+        legacy_partial_bar_phrase_projection, repair_legacy_partial_bar_timeline_points,
     };
+
+    #[test]
+    fn detects_only_the_legacy_partial_bar_phrase_projection()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let legacy = vec![
+            (0, 1, "Intro".to_owned()),
+            (1, 33, "Intro".to_owned()),
+            (33, 65, "Drop".to_owned()),
+        ];
+        let corrected = vec![
+            RawPhraseObservation::try_new(0, 32, "Intro")?,
+            RawPhraseObservation::try_new(32, 64, "Drop")?,
+        ];
+        assert!(legacy_partial_bar_phrase_projection(&legacy, &corrected));
+
+        let unrelated = vec![(0, 32, "Intro".to_owned()), (32, 64, "Drop".to_owned())];
+        assert!(!legacy_partial_bar_phrase_projection(
+            &unrelated, &corrected
+        ));
+
+        let repaired = repair_legacy_partial_bar_timeline_points(
+            &legacy,
+            &corrected,
+            vec![
+                (0, "old-leading".to_owned(), "auto".to_owned()),
+                (1, "intro".to_owned(), "fixed".to_owned()),
+                // A user deliberately moved the old source boundary from 33.
+                (29, "custom".to_owned(), "auto".to_owned()),
+            ],
+        );
+        assert_eq!(
+            repaired,
+            vec![
+                (0, "intro".to_owned(), "fixed".to_owned()),
+                (29, "custom".to_owned(), "auto".to_owned()),
+            ]
+        );
+        Ok(())
+    }
 
     #[test]
     fn failed_analysis_refresh_rolls_back_the_complete_previous_track()
@@ -5234,6 +5486,12 @@ mod fault_tests {
             analyzed_at: "2026-08-10".to_owned(),
             sync_disposition: "promoted-initial".to_owned(),
         }];
+        let refreshed_duration = source_track.duration_millis() + 7;
+        let refreshed_raw_phrases = vec![RawPhraseObservation::try_new(
+            0,
+            source_track.beat_grid().total_beats(),
+            "Refreshed source phrase",
+        )?];
         let analyses = vec![DeviceAnalysisUpsert {
             track_id,
             source_id: "rekordbox-device:test".to_owned(),
@@ -5241,8 +5499,10 @@ mod fault_tests {
             analysis_revision: "device:test:analysis-v1".to_owned(),
             source_analysis_revision: "analysis-v1".to_owned(),
             analyzed_at: "2026-08-10".to_owned(),
+            duration_millis: refreshed_duration,
             beat_grid: source_track.beat_grid().clone(),
             waveform: source_track.waveform().to_vec(),
+            raw_phrases: refreshed_raw_phrases.clone(),
             hot_cues: source_track.hot_cues().to_vec(),
         }];
         repository.sync_device_aliases(
@@ -5259,6 +5519,12 @@ mod fault_tests {
                 device_track_ids: vec![1_256],
             }],
         )?;
+
+        let refreshed = repository
+            .track(track_id)?
+            .ok_or("refreshed track missing")?;
+        assert_eq!(refreshed.summary().duration_millis(), refreshed_duration);
+        assert_eq!(refreshed.raw_phrases(), refreshed_raw_phrases);
 
         let device_playlist = repository
             .page_playlists(TrackPageRequest::try_new(0, 25)?)?

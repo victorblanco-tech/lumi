@@ -27,14 +27,15 @@ Lumi adds a provider adapter for a mounted current Rekordbox OneLibrary device:
   DAT/EXT/2EX analysis files
   only for reading;
 - it validates that every declared path remains below the selected device root;
-- it fingerprints the DeviceSQL database and the authoritative DAT analysis
-  content on every inspection; OneLibrary analysis/cue counters continue to
-  version EXT/2EX projections without requiring a 300 MB full-media hash;
+- it fingerprints the DeviceSQL database and the complete authoritative
+  DAT/EXT/2EX analysis set on every inspection; DAT owns beatgrid facts while
+  EXT/2EX can own the detailed RGB waveform, phrases and cues, so no companion
+  file may change invisibly behind unchanged OneLibrary counters;
 - it stores a durable alias from `(device source, device track ID)` to one
   canonical Lumi track;
 - it refreshes matched analysis projections atomically with that alias
-  snapshot, while beatgrid/waveform promotion and hot-cue promotion retain
-  independent provenance;
+  snapshot, including exact duration, beatgrid, RGB waveform, raw phrases and
+  hot cues, while analysis and hot-cue promotion retain independent provenance;
 - it normalizes hot-cue letter/index, source time, optional loop end, comment
   and RGB color into Lumi's provider-neutral analysis model;
 - it never overwrites Lumi phrase timelines, phrase-role choices, Themes or
@@ -53,9 +54,26 @@ The canonical beatgrid is a lossless projection of Rekordbox's `PQTZ` facts:
   plausible but invented grid.
 
 Analysis promotion uses DAT content identity in addition to OneLibrary's
-counters. A changed DAT from the same trusted USB is promoted even when
-Rekordbox left its numeric update counters unchanged. A conflicting revision
-from a different USB remains subject to source/date protection.
+counters. The identity covers DAT, EXT and 2EX with explicit missing-file
+markers. A changed beatgrid, waveform, phrase analysis or cue set from the same
+trusted USB is therefore promoted even when Rekordbox left its numeric update
+counters unchanged. A conflicting revision from a different USB remains
+subject to source/date protection.
+
+Waveform geometry uses the PWV5 independent five-bit height and its native
+150-columns-per-second clock. The editor converts every beat through the exact
+PQTZ millisecond timestamp before sampling the waveform; it never stretches
+waveform columns evenly over a beat count. PWV5 RGB channel order follows the
+Rekordbox/Crate Digger representation (red, blue, green in the packed word).
+This makes audio, beatgrid, waveform, hot cues and phrase lanes share one time
+coordinate system even for tracks with tempo changes.
+
+Raw provider phrases are replaced with every promoted analysis set. The Lumi
+timeline remains user-owned: a source refresh appends a `source-reconcile`
+revision with the new baseline while retaining role and AutoLoop choices. The
+known legacy leading-partial-bar projection is repaired deterministically:
+source-derived boundaries shift to their corrected canonical beat, the bogus
+one-beat prefix collapses, and boundaries moved by the user remain untouched.
 
 Canonical matching during sync uses normalized title and artist, BPM, duration
 and exact audio-file size. A match is accepted only when it is one-to-one in
@@ -80,9 +98,8 @@ model.
 ## Consequences
 
 - The same prepared Lumi timeline can drive Local Playback and Connected Decks.
-- A later USB sync picks up beatgrid edits through the DAT content hash and cue
-  edits through changed OneLibrary revisions; no manual Lumi reconfiguration
-  is required.
+- A later USB sync picks up beatgrid, waveform, phrase and cue edits through the
+  complete analysis-set hash; no manual Lumi reconfiguration is required.
 - The lighting engine never depends on UI timing or fuzzy live matching.
 - Unknown tracks continue safely as external metadata with `AUTO HELD`.
 - Older classic DeviceSQL media is not silently accepted as OneLibrary and
@@ -90,8 +107,9 @@ model.
 - Track Editor, Local Playback and Live Decks render the same persisted hot-cue
   facts subtly over their shared waveform and in a compact letter/name strip.
 - Upgrading an existing library invalidates only read-only analysis promotion
-  evidence, so the next explicit USB sync fills cue data without rebuilding
-  the Library or touching authored phrases and lighting configuration.
+  evidence, so the next explicit USB sync refreshes the coherent analysis set
+  without rebuilding the Library or discarding authored phrases and lighting
+  configuration.
 
 ## Rejected alternatives
 

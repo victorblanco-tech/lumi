@@ -78,6 +78,7 @@ public struct LibrarySourcesWorkspaceView: View {
     @State private var selectedUSBSourceID: String?
     @State private var selectedUSBPlaylistIDs: Set<UInt32> = []
     @State private var expandedUSBPlaylistIDs: Set<UInt32> = []
+    @State private var expandedUSBPlaylistFolderPaths: Set<String> = []
     @State private var usbPlaylistSearch = ""
     @State private var mountRevision = 0
     @State private var mountedUSBChoices: [URL] = []
@@ -154,8 +155,14 @@ public struct LibrarySourcesWorkspaceView: View {
                 self.selectedUSBSourceID = nil
             }
         }
-        .onChange(of: selectedUSBSourceID) { _, _ in restoreDevicePlaylistSelection() }
+        .onChange(of: selectedUSBSourceID) { _, _ in
+            expandedUSBPlaylistIDs.removeAll()
+            expandedUSBPlaylistFolderPaths.removeAll()
+            restoreDevicePlaylistSelection()
+        }
         .onChange(of: library.rekordboxDeviceInspection) { _, _ in
+            expandedUSBPlaylistIDs.removeAll()
+            expandedUSBPlaylistFolderPaths.removeAll()
             restoreDevicePlaylistSelection()
         }
         .onAppear {
@@ -572,88 +579,40 @@ public struct LibrarySourcesWorkspaceView: View {
             selectionImpact(inspection)
             ScrollView {
                 LazyVStack(spacing: LumiSpacing.xSmall) {
-                    ForEach(filteredDevicePlaylists(inspection)) { playlist in
-                        VStack(spacing: 0) {
-                            HStack(spacing: LumiSpacing.medium) {
-                                Button {
-                                    if selectedUSBPlaylistIDs.contains(playlist.id) {
-                                        selectedUSBPlaylistIDs.remove(playlist.id)
-                                    } else {
-                                        selectedUSBPlaylistIDs.insert(playlist.id)
-                                    }
-                                    persistDevicePlaylistSelection()
-                                } label: {
-                                    Image(systemName: selectedUSBPlaylistIDs.contains(playlist.id) ? "checkmark.square.fill" : "square")
-                                        .foregroundStyle(selectedUSBPlaylistIDs.contains(playlist.id) ? LumiColor.accent : LumiColor.textSecondary)
-                                        .frame(width: 28, height: 40)
-                                        .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                                Button {
-                                    if expandedUSBPlaylistIDs.contains(playlist.id) {
-                                        expandedUSBPlaylistIDs.remove(playlist.id)
-                                    } else {
-                                        expandedUSBPlaylistIDs.insert(playlist.id)
-                                    }
-                                } label: {
-                                    HStack(spacing: LumiSpacing.medium) {
-                                VStack(alignment: .leading, spacing: 2) {
-                                    Text(playlist.name)
-                                        .font(LumiTypography.body.weight(.semibold))
-                                        .foregroundStyle(LumiColor.textPrimary)
-                                        .lineLimit(1)
-                                        .truncationMode(.middle)
-                                        .help(playlist.name)
-                                    if playlist.path != playlist.name {
-                                        Text(playlist.path)
-                                            .font(LumiTypography.caption)
-                                            .foregroundStyle(LumiColor.textSecondary)
-                                            .lineLimit(1)
-                                            .truncationMode(.middle)
-                                            .help(playlist.path)
-                                    }
-                                    if inspection.selectedPlaylistIDs.contains(playlist.id) {
-                                        Text("Previously synchronized")
-                                            .font(LumiTypography.technical)
-                                            .foregroundStyle(LumiColor.accent)
-                                    }
-                                }
-                                Spacer()
-                                        playlistStatusSummary(playlist.statusCounts)
-                                        Text("\(playlist.trackCount)")
-                                            .font(LumiTypography.technical)
-                                            .foregroundStyle(LumiColor.textSecondary)
-                                        Image(systemName: expandedUSBPlaylistIDs.contains(playlist.id) ? "chevron.down" : "chevron.right")
-                                            .foregroundStyle(LumiColor.textSecondary)
-                                    }
-                                    .contentShape(Rectangle())
-                                }
-                                .buttonStyle(.plain)
-                            }
-                            .padding(.horizontal, LumiSpacing.medium)
-                            .frame(minHeight: 44)
-                            if expandedUSBPlaylistIDs.contains(playlist.id) {
-                                Divider()
-                                LazyVStack(spacing: 0) {
-                                    ForEach(playlist.tracks) { track in
-                                        deviceTrackRow(track)
-                                    }
-                                }
-                                .padding(.leading, 44)
-                            }
-                        }
-                        .background(
-                            selectedUSBPlaylistIDs.contains(playlist.id)
-                                ? LumiColor.accent.opacity(0.10)
-                                : LumiColor.surfaceElevated
+                    ForEach(
+                        usbPlaylistOutlineRows(
+                            playlists: inspection.playlists,
+                            expandedFolderPaths: expandedUSBPlaylistFolderPaths,
+                            search: usbPlaylistSearch
                         )
-                        .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
-                        .accessibilityIdentifier("lumi.library.sources.usb.playlist.\(playlist.id)")
+                    ) { row in
+                        switch row.kind {
+                        case let .folder(path, name, playlistCount, trackCount):
+                            usbPlaylistFolderRow(
+                                path: path,
+                                name: name,
+                                playlistCount: playlistCount,
+                                trackCount: trackCount,
+                                depth: row.depth,
+                                forceExpanded: !usbPlaylistSearch
+                                    .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                            )
+                        case let .playlist(playlist):
+                            usbPlaylistRow(
+                                playlist,
+                                previouslySynchronized: inspection.selectedPlaylistIDs.contains(playlist.id),
+                                depth: row.depth
+                            )
+                        }
                     }
                 }
             }
-            .frame(minHeight: 220, maxHeight: 520)
-            if filteredDevicePlaylists(inspection).isEmpty {
+            .frame(minHeight: 160, maxHeight: 360)
+            if usbPlaylistOutlineRows(
+                playlists: inspection.playlists,
+                expandedFolderPaths: expandedUSBPlaylistFolderPaths,
+                search: usbPlaylistSearch
+            ).isEmpty {
                 Text("No playlists match this search.")
                     .font(LumiTypography.caption)
                     .foregroundStyle(LumiColor.textSecondary)
@@ -662,6 +621,124 @@ public struct LibrarySourcesWorkspaceView: View {
                 .font(LumiTypography.caption)
                 .foregroundStyle(LumiColor.textSecondary)
         }
+    }
+
+    private func usbPlaylistFolderRow(
+        path: String,
+        name: String,
+        playlistCount: Int,
+        trackCount: UInt64,
+        depth: Int,
+        forceExpanded: Bool
+    ) -> some View {
+        let expanded = forceExpanded || expandedUSBPlaylistFolderPaths.contains(path)
+        return Button {
+            if expandedUSBPlaylistFolderPaths.contains(path) {
+                expandedUSBPlaylistFolderPaths.remove(path)
+            } else {
+                expandedUSBPlaylistFolderPaths.insert(path)
+            }
+        } label: {
+            HStack(spacing: LumiSpacing.small) {
+                Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                    .frame(width: 16)
+                Image(systemName: expanded ? "folder.fill" : "folder")
+                    .foregroundStyle(LumiColor.accent)
+                Text(name)
+                    .font(LumiTypography.body.weight(.semibold))
+                    .foregroundStyle(LumiColor.textPrimary)
+                    .lineLimit(1)
+                Spacer()
+                Text("\(playlistCount) playlist\(playlistCount == 1 ? "" : "s") · \(trackCount) tracks")
+                    .font(LumiTypography.technical)
+                    .foregroundStyle(LumiColor.textSecondary)
+            }
+            .padding(.leading, CGFloat(depth) * 20 + LumiSpacing.medium)
+            .padding(.trailing, LumiSpacing.medium)
+            .frame(minHeight: 38)
+            .background(LumiColor.surface)
+            .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help(path)
+        .accessibilityIdentifier("lumi.library.sources.usb.folder.\(path)")
+    }
+
+    private func usbPlaylistRow(
+        _ playlist: RekordboxDevicePlaylistState,
+        previouslySynchronized: Bool,
+        depth: Int
+    ) -> some View {
+        VStack(spacing: 0) {
+            HStack(spacing: LumiSpacing.small) {
+                Button {
+                    if selectedUSBPlaylistIDs.contains(playlist.id) {
+                        selectedUSBPlaylistIDs.remove(playlist.id)
+                    } else {
+                        selectedUSBPlaylistIDs.insert(playlist.id)
+                    }
+                    persistDevicePlaylistSelection()
+                } label: {
+                    Image(systemName: selectedUSBPlaylistIDs.contains(playlist.id) ? "checkmark.square.fill" : "square")
+                        .foregroundStyle(selectedUSBPlaylistIDs.contains(playlist.id) ? LumiColor.accent : LumiColor.textSecondary)
+                        .frame(width: 28, height: 36)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                Button {
+                    if expandedUSBPlaylistIDs.contains(playlist.id) {
+                        expandedUSBPlaylistIDs.remove(playlist.id)
+                    } else {
+                        expandedUSBPlaylistIDs.insert(playlist.id)
+                    }
+                } label: {
+                    HStack(spacing: LumiSpacing.small) {
+                        Image(systemName: "music.note.list")
+                            .foregroundStyle(LumiColor.textSecondary)
+                        Text(playlist.name)
+                            .font(LumiTypography.body.weight(.semibold))
+                            .foregroundStyle(LumiColor.textPrimary)
+                            .lineLimit(1)
+                            .truncationMode(.middle)
+                        if previouslySynchronized {
+                            Text("SYNCED")
+                                .font(LumiTypography.technical)
+                                .foregroundStyle(LumiColor.accent)
+                        }
+                        Spacer()
+                        playlistStatusSummary(playlist.statusCounts)
+                        Text("\(playlist.trackCount)")
+                            .font(LumiTypography.technical)
+                            .foregroundStyle(LumiColor.textSecondary)
+                        Image(systemName: expandedUSBPlaylistIDs.contains(playlist.id) ? "chevron.down" : "chevron.right")
+                            .foregroundStyle(LumiColor.textSecondary)
+                    }
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            .padding(.leading, CGFloat(depth) * 20 + LumiSpacing.medium)
+            .padding(.trailing, LumiSpacing.medium)
+            .frame(minHeight: 40)
+            if expandedUSBPlaylistIDs.contains(playlist.id) {
+                Divider()
+                LazyVStack(spacing: 0) {
+                    ForEach(playlist.tracks) { track in
+                        deviceTrackRow(track)
+                    }
+                }
+                .padding(.leading, CGFloat(depth) * 20 + 44)
+            }
+        }
+        .background(
+            selectedUSBPlaylistIDs.contains(playlist.id)
+                ? LumiColor.accent.opacity(0.10)
+                : LumiColor.surfaceElevated
+        )
+        .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
+        .help(playlist.path)
+        .accessibilityIdentifier("lumi.library.sources.usb.playlist.\(playlist.id)")
     }
 
     @ViewBuilder
@@ -1423,17 +1500,6 @@ public struct LibrarySourcesWorkspaceView: View {
             return nil
         }
         return inspection
-    }
-
-    private func filteredDevicePlaylists(
-        _ inspection: RekordboxDeviceInspectionState
-    ) -> [RekordboxDevicePlaylistState] {
-        let query = usbPlaylistSearch.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else { return inspection.playlists }
-        return inspection.playlists.filter {
-            $0.path.localizedCaseInsensitiveContains(query)
-                || $0.name.localizedCaseInsensitiveContains(query)
-        }
     }
 
     private func restoreDevicePlaylistSelection() {

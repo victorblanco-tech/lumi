@@ -1001,8 +1001,10 @@ public struct TrackLightingEditorView: View {
         let amplitude = max(4, center - 3)
         for pixel in 0..<max(1, Int(width.rounded(.up))) {
             let x = Double(pixel)
-            let beat = x / max(1, width) * Double(analysis.totalBeats)
-            let point = interpolatedWaveformPoint(atBeat: beat)
+            let progress = x / max(1, width)
+            let point = interpolatedWaveformPoint(
+                atTimeMillis: UInt64(progress * Double(analysis.track.durationMillis))
+            )
             drawRGBWaveformSample(
                 context: &context,
                 x: x,
@@ -1012,21 +1014,35 @@ public struct TrackLightingEditorView: View {
             )
         }
         for phrase in analysis.phrases {
-            let start = Double(phrase.startBeat) / Double(max(1, analysis.totalBeats)) * width
-            let end = Double(phrase.endBeat) / Double(max(1, analysis.totalBeats)) * width
+            let duration = Double(max(1, analysis.track.durationMillis))
+            let start = Double(TrackEditorCoordinateMapper.timeMillis(
+                atBeat: Double(phrase.startBeat),
+                analysis: analysis
+            )) / duration * width
+            let end = Double(TrackEditorCoordinateMapper.timeMillis(
+                atBeat: Double(phrase.endBeat),
+                analysis: analysis
+            )) / duration * width
             let lane = CGRect(x: start, y: waveformBottom + 2, width: max(1, end - start), height: 12)
             context.fill(Path(lane), with: .color(phraseColor(phrase.role).opacity(0.88)))
         }
         for cue in analysis.hotCues {
-            let beat = TrackEditorCoordinateMapper.beat(atTimeMillis: cue.timeMillis, beats: analysis.beats)
-            let x = beat / Double(max(1, analysis.totalBeats)) * width
+            let x = Double(cue.timeMillis) / Double(max(1, analysis.track.durationMillis)) * width
             context.fill(
                 Path(CGRect(x: x - 1, y: 0, width: 2, height: waveformBottom)),
                 with: .color(hotCueColor(cue.colorRGB).opacity(0.86))
             )
         }
-        let start = viewport.startBeat / Double(max(1, analysis.totalBeats)) * width
-        let visible = viewport.visibleBeats / Double(max(1, analysis.totalBeats)) * width
+        let duration = Double(max(1, analysis.track.durationMillis))
+        let start = Double(TrackEditorCoordinateMapper.timeMillis(
+            atBeat: viewport.startBeat,
+            analysis: analysis
+        )) / duration * width
+        let end = Double(TrackEditorCoordinateMapper.timeMillis(
+            atBeat: viewport.endBeat,
+            analysis: analysis
+        )) / duration * width
+        let visible = max(1, end - start)
         let frame = CGRect(x: start, y: 2, width: visible, height: Double(size.height) - 4)
         context.fill(Path(frame), with: .color(Color.white.opacity(0.08)))
         context.stroke(Path(frame), with: .color(Color.white.opacity(0.76)), lineWidth: 1.2)
@@ -1407,8 +1423,19 @@ public struct TrackLightingEditorView: View {
     }
 
     private func interpolatedWaveformPoint(atBeat beat: Double) -> (low: Double, mid: Double, high: Double) {
+        interpolatedWaveformPoint(
+            atTimeMillis: TrackEditorCoordinateMapper.timeMillis(atBeat: beat, analysis: analysis)
+        )
+    }
+
+    private func interpolatedWaveformPoint(
+        atTimeMillis timeMillis: UInt64
+    ) -> (low: Double, mid: Double, high: Double) {
         guard !analysis.waveform.isEmpty else { return (0, 0, 0) }
-        let progress = min(max(0, beat / Double(max(1, analysis.totalBeats))), 1)
+        let progress = min(
+            max(0, Double(timeMillis) / Double(max(1, analysis.track.durationMillis))),
+            1
+        )
         let position = progress * Double(max(0, analysis.waveform.count - 1))
         let lower = Int(position.rounded(.down))
         let upper = min(analysis.waveform.count - 1, lower + 1)

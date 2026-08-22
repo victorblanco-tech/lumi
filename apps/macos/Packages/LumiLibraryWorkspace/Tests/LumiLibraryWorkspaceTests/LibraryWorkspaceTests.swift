@@ -1709,3 +1709,72 @@ private func trackValue() -> JSONValue {
         ])
     ])
 }
+
+@Suite("USB playlist outline")
+struct USBPlaylistOutlineTests {
+    @Test("Folders are hierarchical and collapsed by default")
+    func collapsedHierarchy() {
+        let playlists = [
+            usbPlaylist(id: 1, path: "Genre 5 Stars/MainStage 140+", tracks: 63),
+            usbPlaylist(id: 2, path: "Genre 5 Stars/Trance/Closing", tracks: 12),
+            usbPlaylist(id: 3, path: "Warmup", tracks: 8),
+        ]
+
+        let collapsed = usbPlaylistOutlineRows(
+            playlists: playlists,
+            expandedFolderPaths: [],
+            search: ""
+        )
+        #expect(collapsed.map(\.id) == ["folder:Genre 5 Stars", "playlist:3"])
+
+        let genreExpanded = usbPlaylistOutlineRows(
+            playlists: playlists,
+            expandedFolderPaths: ["Genre 5 Stars"],
+            search: ""
+        )
+        #expect(genreExpanded.map(\.id) == [
+            "folder:Genre 5 Stars",
+            "folder:Genre 5 Stars/Trance",
+            "playlist:1",
+            "playlist:3",
+        ])
+    }
+
+    @Test("Search retains ancestors and reveals matching playlists")
+    func searchableHierarchy() {
+        let rows = usbPlaylistOutlineRows(
+            playlists: [
+                usbPlaylist(id: 1, path: "Genre 5 Stars/MainStage 140+", tracks: 63),
+                usbPlaylist(id: 2, path: "Genre 5 Stars/Trance/Closing", tracks: 12),
+            ],
+            expandedFolderPaths: [],
+            search: "closing"
+        )
+        #expect(rows.map(\.id) == [
+            "folder:Genre 5 Stars",
+            "folder:Genre 5 Stars/Trance",
+            "playlist:2",
+        ])
+    }
+
+    private func usbPlaylist(
+        id: UInt32,
+        path: String,
+        tracks: UInt64
+    ) -> RekordboxDevicePlaylistState {
+        RekordboxDevicePlaylistState(
+            id: id,
+            path: path,
+            name: path.split(separator: "/").last.map(String.init) ?? path,
+            trackCount: tracks,
+            statusCounts: RekordboxDeviceStatusCounts(
+                current: tracks,
+                usbNewer: 0,
+                usbOutdated: 0,
+                notInLumi: 0,
+                conflict: 0
+            ),
+            tracks: []
+        )
+    }
+}

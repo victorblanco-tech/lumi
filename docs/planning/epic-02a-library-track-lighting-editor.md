@@ -280,6 +280,14 @@ OneLibrary counters remain unchanged, and canonical grids preserve both exact
 source timestamps and the Rekordbox 1-2-3-4 bar phase. Invalid phase sequences
 fail closed. Lumi-owned phrase revisions and lighting choices remain separate.
 
+Analysis-coherence hardening in `0.5.0-dev-11`: a USB revision fingerprints the
+complete DAT/EXT/2EX set; one atomic refresh updates exact waveform duration,
+beatgrid, RGB waveform, raw provider phrases and cues. Track Editor projects
+beats to waveform through Rekordbox millisecond timestamps. Existing timelines
+receive a revisioned source reconcile that preserves user-moved boundaries and
+loop strategies while removing the legacy leading partial-bar artifact. The
+USB playlist picker mirrors the Rekordbox folder tree and starts fully collapsed.
+
 ### E2A-11 – Run imported tracks through the simulator
 
 Laadt een echte geïmporteerde track op Deck A/B, gebruikt uitsluitend de

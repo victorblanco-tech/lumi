@@ -1058,11 +1058,21 @@ fn parse_color_detailed_waveform(body: &[u8]) -> Result<Vec<AnalysisWaveformPoin
         .map(|index| {
             let value = be_u16(body, 12 + index * 2)?;
             let red = u32::from((value & 0xE000) >> 13);
-            let green = u32::from((value & 0x1C00) >> 10);
-            let blue = u32::from((value & 0x0380) >> 7);
+            // PWV5 stores red, blue and green in that order. This matches the
+            // reference Crate Digger / beat-link renderer; treating the middle
+            // field as green produces a visibly different Rekordbox waveform.
+            let blue = u32::from((value & 0x1C00) >> 10);
+            let green = u32::from((value & 0x0380) >> 7);
             let height = u32::from((value & 0x007C) >> 2);
+            let strongest_color = red.max(green).max(blue);
             let scale = |component: u32| -> Result<u8, AnalysisError> {
-                u8::try_from(component * height * 255 / (7 * 31))
+                if strongest_color == 0 || height == 0 {
+                    return Ok(0);
+                }
+                // Geometry is owned by the independent five-bit height field.
+                // Normalize hue around that height so the renderer does not
+                // accidentally shrink quiet colors a second time.
+                u8::try_from(component * height * 255 / (strongest_color * 31))
                     .map_err(|_| AnalysisError::MalformedAnalysisFile)
             };
             Ok(AnalysisWaveformPoint {
@@ -1452,6 +1462,21 @@ mod tests {
         assert_eq!(parsed.waveform[0].high, 255);
         assert_eq!(parsed.waveform[0].mid, 0);
         assert_eq!(parsed.waveform[0].low, 0);
+        Ok(())
+    }
+
+    #[test]
+    fn rgb_detail_preserves_rekordbox_height_and_channel_order()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut rgb = declared_body(2, 1);
+        // red=1, blue=2, green=4, height=31
+        let packed = (1_u16 << 13) | (2_u16 << 10) | (4_u16 << 7) | (31_u16 << 2);
+        rgb[12..14].copy_from_slice(&packed.to_be_bytes());
+        let parsed = parse_analysis_file(&analysis_file(&[tag(*b"PWV5", rgb)]))?;
+
+        assert_eq!(parsed.waveform[0].high, 63);
+        assert_eq!(parsed.waveform[0].mid, 255);
+        assert_eq!(parsed.waveform[0].low, 127);
         Ok(())
     }
 

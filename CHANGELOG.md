@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.5.0-dev-11 - 2026-08-22
+
+### Fixed
+
+- Treats Rekordbox DAT, EXT and 2EX as one versioned analysis set so beatgrid,
+  RGB waveform, raw phrases, exact duration and cues refresh together.
+- Draws waveform samples and phrase lanes against the exact Rekordbox time axis
+  instead of stretching waveform data evenly over the number of beats.
+- Corrects PWV5 RGB channel order and preserves its independent waveform height.
+- Repairs the historic leading-partial-bar phrase projection while preserving
+  every user-moved phrase boundary, role and AutoLoop strategy in a new timeline
+  revision.
+
+### Changed
+
+- Shows USB playlists in their Rekordbox folder hierarchy, collapsed by default,
+  with compact folder totals and searchable ancestor disclosure.
+
 ## 0.5.0-dev-8 - 2026-08-22
 
 ### Fixed

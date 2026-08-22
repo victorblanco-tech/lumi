@@ -158,7 +158,7 @@ pub fn read_device_library(root: impl AsRef<Path>) -> Result<DeviceLibrarySnapsh
         let track = row.map_err(database_error)?;
         let audio_path = canonical_declared_child(&canonical_root, &track.file_path)?;
         let analysis_dat_path = canonical_declared_child(&canonical_root, &track.analysis_path)?;
-        let analysis_dat_revision = sha256_file(&analysis_dat_path, MAX_ANALYSIS_FILE_BYTES)?;
+        let analysis_set_revision = analysis_set_revision(&analysis_dat_path)?;
         let update_identity = format!(
             "{}:{}:{}:{}:{}",
             track.master_database_id,
@@ -180,12 +180,12 @@ pub fn read_device_library(root: impl AsRef<Path>) -> Result<DeviceLibrarySnapsh
             analyze_date: &update_identity,
         });
         let analysis_revision = format!(
-            "onelibrary:{}:{}:{}:{}:dat:{}",
+            "onelibrary:{}:{}:{}:{}:anlz-set:{}",
             track.master_database_id,
             track.master_content_id,
             track.analysis_update_count,
             track.cue_update_count,
-            analysis_dat_revision,
+            analysis_set_revision,
         );
         let device_track = DeviceTrack {
             device_track_id: track.id,
@@ -575,6 +575,29 @@ fn sha256_file(path: &Path, maximum_bytes: u64) -> Result<String, DeviceError> {
     Ok(hex_digest(&sha256_file_bytes(path, maximum_bytes)?))
 }
 
+/// Fingerprints the complete Rekordbox analysis set that can affect Lumi.
+///
+/// DAT owns the beat grid, while EXT/2EX can own the detailed RGB waveform,
+/// phrases and cues. Rekordbox does not consistently advance the OneLibrary
+/// counters for last-minute analysis edits, so content identity is the only
+/// safe change detector. File names and explicit missing markers make the
+/// digest unambiguous without ever writing to the device.
+fn analysis_set_revision(dat_path: &Path) -> Result<String, DeviceError> {
+    let mut digest = Sha256::new();
+    for extension in ["DAT", "EXT", "2EX"] {
+        let path = dat_path.with_extension(extension);
+        digest.update(extension.as_bytes());
+        digest.update([0]);
+        if path.is_file() {
+            digest.update(sha256_file_bytes(&path, MAX_ANALYSIS_FILE_BYTES)?);
+        } else {
+            digest.update(b"missing");
+        }
+        digest.update([0]);
+    }
+    Ok(hex_digest(digest.finalize().as_slice()))
+}
+
 fn sha256_file_bytes(path: &Path, maximum_bytes: u64) -> Result<Vec<u8>, DeviceError> {
     let metadata = fs::metadata(path)?;
     if metadata.len() > maximum_bytes {
@@ -688,6 +711,8 @@ mod tests {
         fs::create_dir_all(&audio_directory)?;
         fs::write(audio_directory.join("track.wav"), b"audio")?;
         fs::write(analysis_directory.join("ANLZ0000.DAT"), b"analysis")?;
+        fs::write(analysis_directory.join("ANLZ0000.EXT"), b"waveform")?;
+        fs::write(analysis_directory.join("ANLZ0000.2EX"), b"three-band")?;
         let database_path = database_directory.join("exportLibrary.db");
         let database = Connection::open(&database_path).map_err(database_error)?;
         database
@@ -735,7 +760,7 @@ mod tests {
         assert_eq!(snapshot.playlists[0].path, "Folder/Set");
         assert_eq!(snapshot.playlists[0].track_ids, vec![10]);
         let original_analysis_revision = snapshot.tracks[&10].analysis_revision.clone();
-        assert!(original_analysis_revision.starts_with("onelibrary:20:30:4:6:dat:"));
+        assert!(original_analysis_revision.starts_with("onelibrary:20:30:4:6:anlz-set:"));
 
         // Some Rekordbox exports update the authoritative DAT beatgrid without
         // advancing the OneLibrary counters. Content identity must still make
@@ -747,6 +772,17 @@ mod tests {
         assert_ne!(
             updated.tracks[&10].analysis_revision,
             original_analysis_revision
+        );
+
+        let dat_changed_revision = updated.tracks[&10].analysis_revision.clone();
+        fs::write(
+            analysis_directory.join("ANLZ0000.EXT"),
+            b"updated waveform and phrases",
+        )?;
+        let companion_updated = read_device_library(&device.0)?;
+        assert_ne!(
+            companion_updated.tracks[&10].analysis_revision, dat_changed_revision,
+            "EXT-only phrase/waveform changes must invalidate the analysis revision"
         );
         Ok(())
     }

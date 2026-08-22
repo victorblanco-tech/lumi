@@ -1405,6 +1405,18 @@ impl LibraryWorker {
                             device_track.device_track_id.to_string(),
                         )
                     })?;
+                let canonical_grid = canonical_beat_grid(analysis)?;
+                let duration_millis = waveform_duration_millis(analysis)
+                    .or_else(|| {
+                        (device_track.duration_millis > 0)
+                            .then_some(u64::from(device_track.duration_millis))
+                    })
+                    .or_else(|| {
+                        inferred_duration_millis(&canonical_grid.beat_grid, device_track.bpm_milli)
+                    })
+                    .ok_or(LibraryWorkerError::RekordboxImportOverflow)?;
+                let total_beats = u32::try_from(canonical_grid.beat_grid.markers().len())
+                    .map_err(|_| LibraryWorkerError::RekordboxImportOverflow)?;
                 Ok(DeviceAnalysisUpsert {
                     track_id: *track_id,
                     source_id: snapshot.source_id.clone(),
@@ -1415,12 +1427,15 @@ impl LibraryWorker {
                     ),
                     source_analysis_revision: device_track.analysis_revision.clone(),
                     analyzed_at: device_track.analyzed_at.clone(),
-                    beat_grid: canonical_beat_grid(analysis)?.beat_grid,
+                    duration_millis,
+                    beat_grid: canonical_grid.beat_grid,
                     waveform: downsample_waveform(&analysis.waveform, MAX_IMPORTED_WAVEFORM_POINTS),
-                    hot_cues: canonical_hot_cues(
+                    raw_phrases: canonical_phrases(
                         analysis,
-                        u64::from(device_track.duration_millis),
+                        total_beats,
+                        canonical_grid.source_beat_offset,
                     )?,
+                    hot_cues: canonical_hot_cues(analysis, duration_millis)?,
                 })
             })
             .collect::<Result<Vec<_>, LibraryWorkerError>>()?;
@@ -1498,8 +1513,11 @@ impl LibraryWorker {
                             track_id: device_track.device_track_id.to_string(),
                             field: "key",
                         })?;
-                    let duration_millis = (device_track.duration_millis > 0)
-                        .then_some(u64::from(device_track.duration_millis))
+                    let duration_millis = waveform_duration_millis(analysis)
+                        .or_else(|| {
+                            (device_track.duration_millis > 0)
+                                .then_some(u64::from(device_track.duration_millis))
+                        })
                         .or_else(|| inferred_duration_millis(&beat_grid, bpm_milli))
                         .ok_or(LibraryWorkerError::RekordboxImportOverflow)?;
                     let imported = ImportedTrackAnalysis::try_new(
@@ -3451,9 +3469,12 @@ fn rekordbox_canonical_baseline(
                     field: "key",
                 }
             })?;
-            let duration_millis = track
-                .total_time_seconds()
-                .and_then(|seconds| seconds.checked_mul(1_000))
+            let duration_millis = waveform_duration_millis(parsed)
+                .or_else(|| {
+                    track
+                        .total_time_seconds()
+                        .and_then(|seconds| seconds.checked_mul(1_000))
+                })
                 .or_else(|| inferred_duration_millis(&beat_grid, bpm_milli))
                 .ok_or(LibraryWorkerError::RekordboxImportOverflow)?;
             let waveform = downsample_waveform(&parsed.waveform, MAX_IMPORTED_WAVEFORM_POINTS);
@@ -3763,6 +3784,14 @@ fn downsample_waveform(points: &[AnalysisWaveformPoint], maximum: usize) -> Vec<
             WaveformPoint::new(low, mid, high)
         })
         .collect()
+}
+
+/// Detailed Rekordbox waveforms contain one column per half-frame (1/150 s).
+/// This is more precise than OneLibrary's integer-second duration and keeps
+/// waveform, audio and beat-grid coordinates on the same clock.
+fn waveform_duration_millis(parsed: &ResolvedTrackAnalysis) -> Option<u64> {
+    let frames = u64::try_from(parsed.waveform.len()).ok()?;
+    (!parsed.waveform.is_empty()).then(|| frames.saturating_mul(1_000) / 150)
 }
 
 fn parse_bpm_milli(value: Option<&str>) -> Option<u32> {
@@ -4186,6 +4215,23 @@ mod tests {
         let source = resolved.tracks.get("track").ok_or("analysis is missing")?;
         let canonical = canonical_beat_grid(source)?;
         let offset = usize::try_from(canonical.source_beat_offset)?;
+
+        let phrases = canonical_phrases(
+            source,
+            u32::try_from(canonical.beat_grid.markers().len())?,
+            canonical.source_beat_offset,
+        )?;
+        assert_eq!(phrases.len(), source.phrases.len());
+        assert_eq!(phrases.first().map(|phrase| phrase.start_beat()), Some(0));
+        for (phrase, source_phrase) in phrases.iter().zip(&source.phrases) {
+            assert_eq!(
+                phrase.start_beat(),
+                source_phrase
+                    .start_beat
+                    .checked_sub(canonical.source_beat_offset)
+                    .ok_or("source phrase precedes the canonical beat grid")?
+            );
+        }
 
         for (canonical_index, marker) in canonical.beat_grid.markers().iter().enumerate() {
             let source_marker = &source.beat_grid[offset + canonical_index];
