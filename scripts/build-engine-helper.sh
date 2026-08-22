@@ -42,6 +42,7 @@ plutil -create xml1 "$engine_info_plist"
 /usr/libexec/PlistBuddy -c "Add :CFBundlePackageType string BNDL" "$engine_info_plist"
 /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $LUMI_PRODUCT_VERSION" "$engine_info_plist"
 /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $CURRENT_PROJECT_VERSION" "$engine_info_plist"
+/usr/libexec/PlistBuddy -c "Add :NSRemovableVolumesUsageDescription string Lumi reads trusted Rekordbox USB media to synchronize playlists, analysis, cue points, and playable track locations. Lumi never writes to the USB disk." "$engine_info_plist"
 plutil -lint "$engine_info_plist" >/dev/null
 
 # A standalone LaunchAgent executable must carry an embedded Info.plist. The

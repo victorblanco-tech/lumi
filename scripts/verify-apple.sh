@@ -76,6 +76,16 @@ if [[ ! -x "$built_engine_helper" ]]; then
   echo "ERROR: the built app does not contain an executable Lumi engine helper." >&2
   exit 1
 fi
+
+if [[ -z "$(/usr/libexec/PlistBuddy -c 'Print :NSRemovableVolumesUsageDescription' "$built_info_plist" 2>/dev/null)" ]]; then
+  echo "ERROR: the built app does not explain its read-only USB access." >&2
+  exit 1
+fi
+if ! otool -v -s __TEXT __info_plist "$built_engine_helper" \
+  | grep -q '<key>NSRemovableVolumesUsageDescription</key>'; then
+  echo "ERROR: the built Lumi engine helper does not explain its read-only USB access." >&2
+  exit 1
+fi
 if [[ ! -f "$built_launch_agent" ]]; then
   echo "ERROR: the built app does not contain the SMAppService LaunchAgent." >&2
   exit 1

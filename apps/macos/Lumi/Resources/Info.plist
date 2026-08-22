@@ -28,6 +28,8 @@
 	<true/>
 	<key>NSLocalNetworkUsageDescription</key>
 	<string>Lumi connects to Pro DJ Link players, mixers, and Ableton Link peers on your local network.</string>
+	<key>NSRemovableVolumesUsageDescription</key>
+	<string>Lumi reads trusted Rekordbox USB media to synchronize playlists, analysis, cue points, and playable track locations. Lumi never writes to the USB disk.</string>
 	<key>LumiProductVersion</key>
 	<string>$(LUMI_PRODUCT_VERSION)</string>
 	<key>LumiReleaseChannel</key>

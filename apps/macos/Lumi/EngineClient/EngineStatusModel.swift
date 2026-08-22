@@ -1148,7 +1148,7 @@ final class EngineStatusModel: ObservableObject {
         usbSourceOperation = USBSourceOperationState(
             phase: .reading,
             title: "Reading USB disk",
-            detail: "Indexing OneLibrary playlists and track update state. The disk remains read-only."
+            detail: "Indexing OneLibrary playlists and track update state. If macOS asks, allow Lumi to read removable volumes. The disk remains read-only."
         )
         guard lifecycle == .ready,
               let endpointDescription,
