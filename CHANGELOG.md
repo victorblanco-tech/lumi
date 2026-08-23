@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.5.0-dev-19 - 2026-08-23
+
+### Fixed
+
+- Treats `Do Not Sync to Lumi` as a complete exact-revision hold: analysis,
+  beatgrid, waveform and hot cues remain on the active Lumi version.
+- Shows that held revision as current in playlist impact instead of counting it
+  as an update that would appear eligible for synchronization.
+- A genuinely newer USB analysis revision automatically becomes reviewable
+  again.
+
+### Verification
+
+- Adds regression coverage for exact-revision scoping across analysis and hot
+  cue synchronization.
+- Re-runs the persistent choice through the connected GRAY device in the real
+  macOS UI.
+
 ## 0.5.0-dev-18 - 2026-08-23
 
 ### Fixed

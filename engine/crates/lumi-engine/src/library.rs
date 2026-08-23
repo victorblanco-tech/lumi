@@ -1337,22 +1337,28 @@ impl LibraryWorker {
                     &device_track.analysis_revision,
                     &device_track.analyzed_at,
                 )?;
-                if stored_aliases
+                let keeps_exact_revision = stored_aliases
                     .get(&device_track.device_track_id)
                     .is_some_and(|previous| {
-                        previous.sync_disposition == "kept-active"
-                            && previous.analysis_revision == device_track.analysis_revision
-                    })
-                {
+                        is_kept_active_revision(
+                            &previous.sync_disposition,
+                            &previous.analysis_revision,
+                            &device_track.analysis_revision,
+                        )
+                    });
+                if keeps_exact_revision {
                     decision = lumi_library_sqlite::DeviceAnalysisDecision::KeepActive;
                 }
                 matched_tracks.insert(track_id, (device_track, decision));
-                let hot_cue_decision = self.repository.device_hot_cue_decision(
+                let mut hot_cue_decision = self.repository.device_hot_cue_decision(
                     track_id,
                     &snapshot.source_id,
                     &device_track.analysis_revision,
                     &device_track.analyzed_at,
                 )?;
+                if keeps_exact_revision {
+                    hot_cue_decision = lumi_library_sqlite::DeviceAnalysisDecision::KeepActive;
+                }
                 matched_hot_cues.insert(track_id, (device_track, hot_cue_decision));
             }
             let sync_disposition = canonical_track_id
@@ -1721,6 +1727,17 @@ impl LibraryWorker {
                         status: "not-in-lumi",
                         detail: "This USB track was not matched to a Lumi track during the previous sync."
                             .to_owned(),
+                    }
+                } else if is_kept_active_revision(
+                    &previous.sync_disposition,
+                    &previous.analysis_revision,
+                    &track.analysis_revision,
+                ) {
+                    DeviceInspectionTrack {
+                        status: "current",
+                        detail:
+                            "You chose to keep the active Lumi version for this exact USB revision."
+                                .to_owned(),
                     }
                 } else if previous.sync_disposition == "held-conflict" {
                     DeviceInspectionTrack {
@@ -3968,6 +3985,14 @@ fn device_metadata_matches(candidate: &DeviceMatchCandidate, device: &DeviceTrac
     true
 }
 
+fn is_kept_active_revision(
+    disposition: &str,
+    stored_analysis_revision: &str,
+    incoming_analysis_revision: &str,
+) -> bool {
+    disposition == "kept-active" && stored_analysis_revision == incoming_analysis_revision
+}
+
 fn device_status_counts<'a>(tracks: impl Iterator<Item = &'a DeviceInspectionTrack>) -> Value {
     let mut current = 0_u64;
     let mut usb_newer = 0_u64;
@@ -4634,8 +4659,27 @@ mod tests {
         AutoloopCatalogMutation, DeviceInspection, DeviceReviewComparison, LibraryWorker,
         LibraryWorkerError, PhraseRoleCatalogMutation, canonical_beat_grid, canonical_phrases,
         deck_waveform_preview_points, device_audio_uri, device_metadata_matches,
-        device_track_matches, first_available_audio_uri,
+        device_track_matches, first_available_audio_uri, is_kept_active_revision,
     };
+
+    #[test]
+    fn kept_active_is_exact_revision_scoped_for_analysis_and_hot_cues() {
+        assert!(is_kept_active_revision(
+            "kept-active",
+            "analysis-gray-1",
+            "analysis-gray-1"
+        ));
+        assert!(!is_kept_active_revision(
+            "kept-active",
+            "analysis-gray-1",
+            "analysis-gray-2"
+        ));
+        assert!(!is_kept_active_revision(
+            "held-conflict",
+            "analysis-gray-1",
+            "analysis-gray-1"
+        ));
+    }
 
     fn resolved_analysis_with_grid(beat_numbers: &[u16]) -> ResolvedTrackAnalysis {
         ResolvedTrackAnalysis {
