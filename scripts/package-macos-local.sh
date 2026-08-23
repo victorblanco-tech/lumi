@@ -136,6 +136,7 @@ case "$channel" in
 esac
 packaged_app="$staging_directory/$packaged_bundle_name"
 packaged_helper="$packaged_app/Contents/Helpers/lumi-engine"
+packaged_usb_worker="$packaged_app/Contents/Helpers/lumi-usb-worker"
 packaged_launch_agent="$packaged_app/Contents/Library/LaunchAgents/$expected_bundle_identifier.engine.plist"
 packaged_prolink_bridge="$packaged_app/Contents/Resources/prolink/lumi-prolink-bridge.jar"
 packaged_prolink_java="$packaged_app/Contents/Resources/prolink-runtime/bin/java"
@@ -145,6 +146,10 @@ ditto "$source_app" "$packaged_app"
 
 if [[ ! -x "$packaged_helper" ]]; then
   echo "ERROR: packaged app does not contain an executable lumi-engine helper." >&2
+  exit 1
+fi
+if [[ ! -x "$packaged_usb_worker" ]]; then
+  echo "ERROR: packaged app does not contain an executable lumi-usb-worker." >&2
   exit 1
 fi
 if [[ ! -f "$packaged_launch_agent" ]]; then
@@ -174,8 +179,16 @@ if ! file "$packaged_helper" | grep -q 'arm64'; then
   echo "ERROR: packaged lumi-engine helper is not Apple Silicon arm64." >&2
   exit 1
 fi
+if ! file "$packaged_usb_worker" | grep -q 'arm64'; then
+  echo "ERROR: packaged lumi-usb-worker is not Apple Silicon arm64." >&2
+  exit 1
+fi
 if ! otool -s __TEXT __info_plist "$packaged_helper" >/dev/null 2>&1; then
   echo "ERROR: packaged lumi-engine helper has no embedded Info.plist." >&2
+  exit 1
+fi
+if otool -l "$packaged_usb_worker" | grep -q 'sectname __info_plist'; then
+  echo "ERROR: packaged lumi-usb-worker unexpectedly carries a service identity." >&2
   exit 1
 fi
 if [[ -z "$(/usr/libexec/PlistBuddy -c 'Print :NSRemovableVolumesUsageDescription' "$packaged_app/Contents/Info.plist" 2>/dev/null)" ]]; then
@@ -299,6 +312,7 @@ hdiutil attach "$temporary_dmg" \
 mounted=1
 codesign --verify --deep --strict --verbose=2 "$mount_directory/$packaged_bundle_name"
 test -x "$mount_directory/$packaged_bundle_name/Contents/Helpers/lumi-engine"
+test -x "$mount_directory/$packaged_bundle_name/Contents/Helpers/lumi-usb-worker"
 test -f "$mount_directory/$packaged_bundle_name/Contents/Library/LaunchAgents/$expected_bundle_identifier.engine.plist"
 if [[ "$(readlink "$mount_directory/$install_shortcut_name")" != "$install_directory" ]]; then
   echo "ERROR: packaged install shortcut does not target '$install_directory'." >&2

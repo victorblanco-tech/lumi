@@ -62,6 +62,7 @@ public struct LibraryWorkspaceView: View {
     @State private var tableSortOrder: [KeyPathComparator<LibraryTrack>] = []
     @State private var editorAnalysis: TrackEditorAnalysis?
     @State private var requestedEditorTrackID: UInt64?
+    @FocusState private var isSearchFocused: Bool
     @AppStorage(LumiPreferenceKey.libraryTableColumns)
     private var trackTableCustomization = TableColumnCustomization<LibraryTrack>()
 
@@ -134,6 +135,14 @@ public struct LibraryWorkspaceView: View {
         .accessibilityIdentifier("lumi.library.workspace")
         .task { requestInitialEditorIfNeeded() }
         .onChange(of: state.query.search) { _, value in search = value }
+        .onChange(of: search) { _, value in
+            guard rendersInteractiveControls,
+                  value != state.query.search else { return }
+            // The engine coalesces rapid requests by generation. Sending each
+            // edit immediately avoids depending on a view task restart while
+            // the native search field owns keyboard focus.
+            submitQuery(search: value, offset: 0)
+        }
         .onChange(of: state.query.playlistID) { _, value in selectedPlaylistID = value }
         .onChange(of: state.query.sortBy) { _, value in sortBy = value }
         .onChange(of: state.query.sortDirection) { _, value in sortDirection = value }
@@ -150,17 +159,6 @@ public struct LibraryWorkspaceView: View {
                 requestedEditorTrackID = nil
                 selectedTrackID = editor.track.id
             }
-        }
-        .task(id: search) {
-            guard rendersInteractiveControls,
-                  search != state.query.search else { return }
-            do {
-                try await Task.sleep(for: .milliseconds(180))
-            } catch {
-                return
-            }
-            guard !Task.isCancelled, search != state.query.search else { return }
-            submitQuery(search: search, offset: 0)
         }
     }
 
@@ -348,12 +346,13 @@ public struct LibraryWorkspaceView: View {
             if rendersInteractiveControls {
                 TextField(localized("library.search"), text: $search)
                     .textFieldStyle(.roundedBorder)
+                    .focused($isSearchFocused)
                     .padding(.trailing, search.isEmpty ? 0 : 22)
                     .overlay(alignment: .trailing) {
                         if !search.isEmpty {
                             Button {
+                                isSearchFocused = false
                                 search = ""
-                                submitQuery(search: "", offset: 0)
                             } label: {
                                 Image(systemName: "xmark.circle.fill")
                                     .foregroundStyle(LumiColor.textSecondary)

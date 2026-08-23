@@ -27,7 +27,7 @@ members = [
 resolver = "3"
 
 [workspace.package]
-version = "0.5.0-dev-23"
+version = "0.5.0-dev-24"
 edition = "2024"
 rust-version = "1.97.1"
 license = "EPL-2.0"

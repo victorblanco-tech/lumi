@@ -65,6 +65,8 @@ public struct LibrarySourcesWorkspaceView: View {
     private var rekordboxDeviceRoot = ""
     @AppStorage(LumiPreferenceKey.rekordboxDevicePlaylistSelections)
     private var devicePlaylistSelectionsJSON = "{}"
+    @AppStorage(LumiPreferenceKey.rekordboxDeviceBookmarks)
+    private var deviceBookmarksJSON = "{}"
 
     @State private var selectedProviderKind: String?
     @State private var followedPaths: Set<String> = []
@@ -2079,24 +2081,113 @@ public struct LibrarySourcesWorkspaceView: View {
 
     private func inspectRekordboxDevice(at url: URL) {
         usbSelectionFeedback = nil
-        rekordboxDeviceRoot = url.path
         let selected = USBSourceIdentityResolver.selectedSourceID(
             for: mountedIdentity(url),
             devices: visibleUSBDevices
         )
-        selectedUSBSourceID = stableSourceID(for: url, preferredSourceID: selected)
+        guard let sourceID = stableSourceID(for: url, preferredSourceID: selected),
+              let authorizedURL = authorizedDeviceURL(
+                expected: url,
+                sourceID: sourceID
+              ) else { return }
+        rekordboxDeviceRoot = authorizedURL.path
+        selectedUSBSourceID = sourceID
         selectedUSBPlaylistIDs = []
         usbPlaylistSearch = ""
-        onDeviceInspect(url.path, selectedUSBSourceID)
+        onDeviceInspect(authorizedURL.path, selectedUSBSourceID)
     }
 
     private func inspectTrustedDevice(_ device: RekordboxDeviceState, root: String) {
+        usbSelectionFeedback = nil
         let url = URL(fileURLWithPath: root, isDirectory: true)
+        guard let authorizedURL = authorizedDeviceURL(
+            expected: url,
+            sourceID: device.sourceID
+        ) else { return }
         selectedUSBSourceID = stableSourceID(
-            for: url,
+            for: authorizedURL,
             preferredSourceID: device.sourceID
         )
-        onDeviceInspect(root, selectedUSBSourceID)
+        rekordboxDeviceRoot = authorizedURL.path
+        onDeviceInspect(authorizedURL.path, selectedUSBSourceID)
+    }
+
+    private func authorizedDeviceURL(expected: URL, sourceID: String) -> URL? {
+        var bookmarks = decodedDeviceBookmarks()
+        if let encodedBookmark = bookmarks[sourceID],
+           let bookmark = Data(base64Encoded: encodedBookmark) {
+            var stale = false
+            if let resolved = try? URL(
+                resolvingBookmarkData: bookmark,
+                options: [.withSecurityScope, .withoutUI],
+                relativeTo: nil,
+                bookmarkDataIsStale: &stale
+            ), !stale,
+               resolved.standardizedFileURL.path == expected.standardizedFileURL.path {
+                return resolved
+            }
+
+            // A re-formatted or re-mounted USB can invalidate its bookmark.
+            // Remove the stale grant before asking for authorization again so
+            // the trusted-source row never gets trapped in a retry loop.
+            bookmarks.removeValue(forKey: sourceID)
+            if let data = try? JSONEncoder().encode(bookmarks),
+               let encoded = String(data: data, encoding: .utf8) {
+                deviceBookmarksJSON = encoded
+            }
+        }
+
+        let panel = NSOpenPanel()
+        panel.title = "Authorize Rekordbox USB"
+        panel.message = "Select \(volumeDisplayName(expected)) once. Lumi stores secure read-only access for future reconnects."
+        panel.prompt = "Authorize USB"
+        panel.canChooseFiles = false
+        panel.canChooseDirectories = true
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = false
+        panel.directoryURL = expected.deletingLastPathComponent()
+        guard panel.runModal() == .OK, let selected = panel.url else { return nil }
+        let database = selected.appendingPathComponent("PIONEER/rekordbox/exportLibrary.db")
+        guard FileManager.default.fileExists(atPath: database.path) else {
+            usbSelectionFeedback = "The selected folder is not a Rekordbox OneLibrary USB source."
+            return nil
+        }
+        let selectedSourceID = stableSourceID(
+            for: selected,
+            preferredSourceID: USBSourceIdentityResolver.selectedSourceID(
+                for: mountedIdentity(selected),
+                devices: visibleUSBDevices
+            )
+        )
+        guard selectedSourceID == sourceID else {
+            usbSelectionFeedback = "Select \(volumeDisplayName(expected)); another trusted USB was chosen."
+            return nil
+        }
+        do {
+            let bookmark = try selected.bookmarkData(
+                options: .withSecurityScope,
+                includingResourceValuesForKeys: nil,
+                relativeTo: nil
+            )
+            bookmarks = decodedDeviceBookmarks()
+            bookmarks[sourceID] = bookmark.base64EncodedString()
+            let data = try JSONEncoder().encode(bookmarks)
+            guard let encoded = String(data: data, encoding: .utf8) else { return nil }
+            deviceBookmarksJSON = encoded
+            usbSelectionFeedback = nil
+            return selected
+        } catch {
+            usbSelectionFeedback = "Lumi could not retain read-only access to this USB. Choose it again."
+            return nil
+        }
+    }
+
+    private func decodedDeviceBookmarks() -> [String: String] {
+        guard let data = deviceBookmarksJSON.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode([String: String].self, from: data) else {
+            return [:]
+        }
+        return decoded
     }
 
     private func stableSourceID(for url: URL, preferredSourceID: String?) -> String? {

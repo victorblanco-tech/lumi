@@ -14,6 +14,7 @@ public struct LocalPlaybackLibraryBrowserView: View {
     @State private var search: String
     @State private var selectedPlaylistID: UInt64?
     @State private var selectedTrackID: UInt64?
+    @FocusState private var isSearchFocused: Bool
 
     public init(
         state: LibraryWorkspaceState,
@@ -54,21 +55,15 @@ public struct LocalPlaybackLibraryBrowserView: View {
         }
         .accessibilityIdentifier("lumi.localPlayback.library")
         .onChange(of: state.query.search) { _, value in search = value }
+        .onChange(of: search) { _, value in
+            guard value != state.query.search else { return }
+            submitQuery(search: value, offset: 0)
+        }
         .onChange(of: state.query.playlistID) { _, value in selectedPlaylistID = value }
         .onChange(of: state.page.tracks) { _, tracks in
             if !tracks.contains(where: { $0.id == selectedTrackID }) {
                 selectedTrackID = tracks.first?.id
             }
-        }
-        .task(id: search) {
-            guard search != state.query.search else { return }
-            do {
-                try await Task.sleep(for: .milliseconds(180))
-            } catch {
-                return
-            }
-            guard !Task.isCancelled, search != state.query.search else { return }
-            submitQuery(offset: 0)
         }
     }
 
@@ -177,12 +172,13 @@ public struct LocalPlaybackLibraryBrowserView: View {
                 Spacer()
                 TextField("Search title, artist, or source ID", text: $search)
                     .textFieldStyle(.roundedBorder)
+                    .focused($isSearchFocused)
                     .padding(.trailing, search.isEmpty ? 0 : 22)
                     .overlay(alignment: .trailing) {
                         if !search.isEmpty {
                             Button {
+                                isSearchFocused = false
                                 search = ""
-                                submitQuery(search: "", offset: 0)
                             } label: {
                                 Image(systemName: "xmark.circle.fill")
                                     .foregroundStyle(LumiColor.textSecondary)

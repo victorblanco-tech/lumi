@@ -2,11 +2,68 @@ import AVFoundation
 import Combine
 import Darwin
 import Foundation
+import LumiDesignSystem
 import LumiEngineClient
 import LumiLibraryWorkspace
 import LumiLiveWorkspace
 import LumiProtocol
 import OSLog
+
+/// Bridges Foundation's blocking process reaper into Swift concurrency without
+/// requiring a run loop on the calling task. `Process.isRunning` and
+/// `terminationHandler` can both remain stale when a child is launched from a
+/// detached worker; `waitUntilExit()` is the authoritative completion source.
+private final class IsolatedUSBProcessWaiter: @unchecked Sendable {
+    private let process: Process
+    private let lock = NSLock()
+    private var timedOut = false
+    private var finished = false
+
+    init(process: Process) {
+        self.process = process
+    }
+
+    func wait(timeoutSeconds: Double) async -> Int32? {
+        await withCheckedContinuation { continuation in
+            DispatchQueue.global(qos: .utility).async { [self] in
+                process.waitUntilExit()
+                let result: Int32?
+                lock.lock()
+                guard !finished else {
+                    lock.unlock()
+                    return
+                }
+                finished = true
+                result = timedOut ? nil : process.terminationStatus
+                lock.unlock()
+                continuation.resume(returning: result)
+            }
+
+            DispatchQueue.global(qos: .utility).asyncAfter(
+                deadline: .now() + timeoutSeconds
+            ) { [self] in
+                lock.lock()
+                guard !finished else {
+                    lock.unlock()
+                    return
+                }
+                timedOut = true
+                lock.unlock()
+                _ = Darwin.kill(process.processIdentifier, SIGTERM)
+                DispatchQueue.global(qos: .utility).asyncAfter(
+                    deadline: .now() + .milliseconds(250)
+                ) { [self] in
+                    lock.lock()
+                    let shouldForceExit = !finished
+                    lock.unlock()
+                    if shouldForceExit {
+                        _ = Darwin.kill(process.processIdentifier, SIGKILL)
+                    }
+                }
+            }
+        }
+    }
+}
 
 @MainActor
 final class EngineStatusModel: ObservableObject {
@@ -1355,9 +1412,18 @@ final class EngineStatusModel: ObservableObject {
     private func runIsolatedUSBWorker(
         payload: [String: JSONValue]
     ) async throws -> MessageEnvelope {
-        let executable = try engineExecutable()
+        let executable = try usbWorkerExecutable()
         let database = try libraryDatabaseURL()
         let protocolVersion = protocolVersion ?? 1
+        var workerPayload = payload
+        guard case let .string(root)? = payload["root"],
+              case let .string(sourceID)? = payload["sourceId"],
+              let scopedURL = try securityScopedUSBURL(root: root, sourceID: sourceID),
+              scopedURL.startAccessingSecurityScopedResource() else {
+            throw IsolatedUSBWorkerError.authorizationRequired
+        }
+        workerPayload["root"] = .string(scopedURL.path)
+        defer { scopedURL.stopAccessingSecurityScopedResource() }
         return try await Task.detached(priority: .utility) {
             let manager = FileManager.default
             let directory = manager.temporaryDirectory.appendingPathComponent(
@@ -1370,7 +1436,7 @@ final class EngineStatusModel: ObservableObject {
             let request = directory.appendingPathComponent("request.json")
             let response = directory.appendingPathComponent("response.json")
             let errorLog = directory.appendingPathComponent("stderr.log")
-            try JSONEncoder().encode(payload).write(to: request, options: .atomic)
+            try JSONEncoder().encode(workerPayload).write(to: request, options: .atomic)
             guard manager.createFile(atPath: errorLog.path, contents: nil),
                   let standardError = FileHandle(forWritingAtPath: errorLog.path),
                   let nullOutput = FileHandle(forWritingAtPath: "/dev/null") else {
@@ -1399,22 +1465,13 @@ final class EngineStatusModel: ObservableObject {
                 }
             }
 
-            let deadline = Date().addingTimeInterval(75)
-            while process.isRunning, Date() < deadline {
-                try await Task.sleep(for: .milliseconds(50))
-            }
-            if process.isRunning {
-                _ = Darwin.kill(process.processIdentifier, SIGTERM)
-                try await Task.sleep(for: .milliseconds(250))
-                if process.isRunning {
-                    _ = Darwin.kill(process.processIdentifier, SIGKILL)
-                }
-                process.waitUntilExit()
+            guard let terminationStatus = await IsolatedUSBProcessWaiter(
+                process: process
+            ).wait(timeoutSeconds: 75) else {
                 throw IsolatedUSBWorkerError.timedOut
             }
-            process.waitUntilExit()
             try? standardError.synchronize()
-            guard process.terminationStatus == 0 else {
+            guard terminationStatus == 0 else {
                 let detail = (try? String(contentsOf: errorLog, encoding: .utf8))?
                     .trimmingCharacters(in: .whitespacesAndNewlines)
                 throw IsolatedUSBWorkerError.failed(detail)
@@ -1438,8 +1495,35 @@ final class EngineStatusModel: ObservableObject {
         }.value
     }
 
+    private func securityScopedUSBURL(root: String, sourceID: String) throws -> URL? {
+        guard let encoded = UserDefaults.standard.string(
+            forKey: LumiPreferenceKey.rekordboxDeviceBookmarks
+        ), let payload = encoded.data(using: String.Encoding.utf8),
+        let bookmarks = try? JSONDecoder().decode([String: String].self, from: payload),
+        let bookmarkString = bookmarks[sourceID],
+        let bookmark = Data(base64Encoded: bookmarkString) else {
+            return nil
+        }
+        var stale = false
+        let resolved = try URL(
+            resolvingBookmarkData: bookmark,
+            options: [.withSecurityScope, .withoutUI],
+            relativeTo: nil,
+            bookmarkDataIsStale: &stale
+        )
+        guard !stale,
+              resolved.standardizedFileURL.path == URL(
+                fileURLWithPath: root,
+                isDirectory: true
+              ).standardizedFileURL.path else {
+            return nil
+        }
+        return resolved
+    }
+
     private enum IsolatedUSBWorkerError: LocalizedError {
         case temporaryFileUnavailable
+        case authorizationRequired
         case timedOut
         case failed(String?)
         case missingResponse
@@ -1448,6 +1532,8 @@ final class EngineStatusModel: ObservableObject {
             switch self {
             case .temporaryFileUnavailable:
                 "Lumi could not create a protected temporary USB workspace."
+            case .authorizationRequired:
+                "USB access needs one-time authorization. Choose this trusted source again and select its volume in the macOS dialog."
             case .timedOut:
                 "The USB stopped responding. Lumi ended the isolated scan after 75 seconds; the realtime engine was not affected. Reconnect the disk and try again."
             case let .failed(detail):
@@ -2486,6 +2572,24 @@ final class EngineStatusModel: ObservableObject {
             .appendingPathComponent("Contents")
             .appendingPathComponent("Helpers")
             .appendingPathComponent("lumi-engine")
+
+        guard FileManager.default.isExecutableFile(atPath: executable.path) else {
+            throw EngineClientError.executableMissing
+        }
+        return executable
+    }
+
+    /// The persistent engine carries its own embedded bundle identity because
+    /// SMAppService requires one. Reusing that executable for removable-media
+    /// work makes macOS attribute volume access to the background service and
+    /// can leave `open()` waiting forever without a user-visible prompt. This
+    /// unbundled one-shot copy remains a child of Lumi, so Files & Folders
+    /// consent is attributed to the foreground app that initiated the scan.
+    private func usbWorkerExecutable() throws -> URL {
+        let executable = Bundle.main.bundleURL
+            .appendingPathComponent("Contents")
+            .appendingPathComponent("Helpers")
+            .appendingPathComponent("lumi-usb-worker")
 
         guard FileManager.default.isExecutableFile(atPath: executable.path) else {
             throw EngineClientError.executableMissing

@@ -31,6 +31,7 @@ for required_variable in PRODUCT_BUNDLE_IDENTIFIER LUMI_DATA_DIRECTORY_NAME LUMI
 done
 
 profile_directory="release"
+service_target_directory="$repository_root/build/engine-service-target"
 engine_info_plist_directory="$repository_root/build/generated"
 engine_info_plist="$engine_info_plist_directory/lumi-engine-info.plist"
 install -d "$engine_info_plist_directory"
@@ -51,11 +52,23 @@ plutil -lint "$engine_info_plist" >/dev/null
 engine_info_link_argument="-Wl,-sectcreate,__TEXT,__info_plist,$engine_info_plist"
 cd "$repository_root"
 RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C link-arg=$engine_info_link_argument" \
-  cargo build --locked --release -p lumi-engine
+  cargo build --locked --release -p lumi-engine --target-dir "$service_target_directory"
 install -d "$helpers_directory"
-install -m 755 "target/$profile_directory/lumi-engine" "$helpers_directory/lumi-engine"
+install -m 755 "$service_target_directory/$profile_directory/lumi-engine" "$helpers_directory/lumi-engine"
 if ! otool -s __TEXT __info_plist "$helpers_directory/lumi-engine" >/dev/null 2>&1; then
   echo "ERROR: lumi-engine is missing its embedded LaunchAgent Info.plist." >&2
+  exit 1
+fi
+
+# Build the exact same bounded USB mode without a standalone bundle identity.
+# macOS then attributes removable-volume consent to the foreground Lumi app
+# that launches it, instead of to the persistent SMAppService engine. Keep the
+# two executables separate: only lumi-engine may be registered with launchd.
+cargo build --locked --release -p lumi-engine
+install -m 755 "target/$profile_directory/lumi-engine" "$helpers_directory/lumi-usb-worker"
+if otool -l "$helpers_directory/lumi-usb-worker" \
+  | grep -q 'sectname __info_plist'; then
+  echo "ERROR: lumi-usb-worker must not carry the LaunchAgent bundle identity." >&2
   exit 1
 fi
 

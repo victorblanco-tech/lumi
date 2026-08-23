@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.0-dev-23 - 2026-08-23
+## 0.5.0-dev-24 - 2026-08-24
 
 ### Added
 
@@ -18,6 +18,13 @@
   scanning, synchronization and review actions complete.
 - Runs USB parsing in a bounded, short-lived worker so a stalled removable
   volume can never block Pro DJ Link, Ableton Link or MIDI output.
+- Uses the worker's actual process-termination event instead of asynchronously
+  polling Foundation state, preventing completed physical scans from being
+  reported as 75-second timeouts.
+- Packages USB inspection as a separate one-shot helper without the permanent
+  engine's launch-service identity, so macOS volume consent follows Lumi.
+- Persists one explicit security-scoped authorization per trusted USB source;
+  subsequent scans reuse it and fail immediately with guidance when missing.
 - Documents the short pre-show beatgrid refresh workflow and confirms that
   Rekordbox library, analysis and media data remains read-only.
 - Ranks likely `v003` → `v004` successors without silently merging track
