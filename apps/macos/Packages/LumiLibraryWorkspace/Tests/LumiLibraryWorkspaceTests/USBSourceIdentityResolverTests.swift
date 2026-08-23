@@ -191,6 +191,7 @@ struct USBSourceIdentityResolverTests {
             conflictTracks: 0,
             beatGridRefresh: true,
             cueRevisionTracked: true,
+            reviewTracks: [],
             playlists: []
         )
     }

@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.0-dev-15 - 2026-08-23
+
+### Fixed
+
+- Keeps USB analysis conflicts visible after synchronization instead of
+  presenting a previously held conflict as current.
+- Shows the exact tracks and provenance reason behind every USB review state.
+- Replaces the layout-shifting USB scan banner with a compact, fixed operation
+  status in the Trusted USB Sources header.
+
+### Safety
+
+- Review conflicts remain non-destructive: Lumi keeps the active analysis and
+  never writes to the connected Rekordbox media.
+
 ## 0.5.0-dev-14 - 2026-08-23
 
 ### Fixed

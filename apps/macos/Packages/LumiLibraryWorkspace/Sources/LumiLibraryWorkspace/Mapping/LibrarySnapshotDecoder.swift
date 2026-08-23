@@ -262,7 +262,11 @@ public struct LibrarySnapshotDecoder: Sendable {
                 throw LibrarySnapshotError.invalidObject
             }
             let playlistValues = try optionalArray(device, "playlists")
+            let reviewValues = try optionalArray(device, "reviewTracks")
             guard playlistValues.count <= 20_000 else {
+                throw LibrarySnapshotError.invalidObject
+            }
+            guard reviewValues.count <= 200 else {
                 throw LibrarySnapshotError.invalidObject
             }
             return RekordboxDeviceState(
@@ -280,6 +284,21 @@ public struct LibrarySnapshotDecoder: Sendable {
                 conflictTracks: optionalUnsigned(device, "conflictTracks") ?? 0,
                 beatGridRefresh: try boolean(device, "beatGridRefresh"),
                 cueRevisionTracked: try boolean(device, "cueRevisionTracked"),
+                reviewTracks: try reviewValues.map { value in
+                    guard case let .object(track) = value else {
+                        throw LibrarySnapshotError.invalidObject
+                    }
+                    return RekordboxDeviceReviewTrackState(
+                        deviceTrackID: try UInt32(exactly: unsigned(track, "deviceTrackId"))
+                            .required(.invalidNumber("review device track id")),
+                        canonicalTrackID: optionalUnsigned(track, "canonicalTrackId"),
+                        title: try string(track, "title"),
+                        artist: try string(track, "artist"),
+                        bpmMilli: try unsigned(track, "bpmMilli"),
+                        durationMillis: try unsigned(track, "durationMillis"),
+                        reason: try string(track, "reason")
+                    )
+                },
                 playlists: try playlistValues.map { value in
                     guard case let .object(playlist) = value else {
                         throw LibrarySnapshotError.invalidObject

@@ -219,12 +219,12 @@ public struct LibrarySourcesWorkspaceView: View {
             HStack {
                 Text("Trusted USB Sources").font(LumiTypography.sectionTitle)
                 Spacer()
-                Text("SOURCE  ·  CONNECTION  ·  SYNC HEALTH")
-                    .font(LumiTypography.technical)
-                    .foregroundStyle(LumiColor.textSecondary)
-            }
-            if !hasExpandedUSBSourceLane {
-                usbOperationStatus
+                VStack(alignment: .trailing, spacing: LumiSpacing.xSmall) {
+                    compactUSBOperationStatus
+                    Text("SOURCE  ·  CONNECTION  ·  SYNC HEALTH")
+                        .font(LumiTypography.technical)
+                        .foregroundStyle(LumiColor.textSecondary)
+                }
             }
             if visibleUSBDevices.isEmpty, provisionalUSBInspection == nil {
                 LumiPanel {
@@ -383,7 +383,6 @@ public struct LibrarySourcesWorkspaceView: View {
                             compactStatus("CONNECT USB TO SYNC", .empty)
                         }
                     }
-                    usbOperationStatus
                     if let inspection = activeDeviceInspection {
                         Divider()
                         devicePlaylistSelection(inspection)
@@ -399,13 +398,22 @@ public struct LibrarySourcesWorkspaceView: View {
                         metric("Current", device.currentTracks)
                         metric("Updated", device.promotedTracks)
                     }
-                    if device.protectedTracks > 0 || device.conflictTracks > 0 {
+                    if !device.reviewTracks.isEmpty {
+                        usbReviewTracks(device)
+                    } else if device.conflictTracks > 0 {
                         Label(
-                            "\(device.protectedTracks) older track version\(device.protectedTracks == 1 ? "" : "s") protected · \(device.conflictTracks) incomparable change\(device.conflictTracks == 1 ? "" : "s") held for review",
-                            systemImage: "shield.lefthalf.filled"
+                            "\(device.conflictTracks) track\(device.conflictTracks == 1 ? "" : "s") need review. Reconnect and refresh this USB source to load their details.",
+                            systemImage: "exclamationmark.triangle.fill"
                         )
                         .font(LumiTypography.caption.weight(.semibold))
-                        .foregroundStyle(device.conflictTracks > 0 ? LumiColor.warning : LumiColor.success)
+                        .foregroundStyle(LumiColor.warning)
+                    } else if device.protectedTracks > 0 {
+                        Label(
+                            "\(device.protectedTracks) older USB track version\(device.protectedTracks == 1 ? " was" : "s were") safely held; no review is required.",
+                            systemImage: "checkmark.shield.fill"
+                        )
+                        .font(LumiTypography.caption.weight(.semibold))
+                        .foregroundStyle(LumiColor.success)
                     } else {
                         Label("No downgrade risk detected. Active Lumi analysis and all Lumi-owned phrases and AutoLoop choices are protected.", systemImage: "checkmark.shield.fill")
                             .font(LumiTypography.caption)
@@ -436,7 +444,6 @@ public struct LibrarySourcesWorkspaceView: View {
                             .disabled(selectedUSBPlaylistIDs.isEmpty || usbOperation.isActive || !rendersInteractiveControls)
                         }
                     }
-                    usbOperationStatus
                     Divider()
                     devicePlaylistSelection(inspection)
                 }
@@ -497,56 +504,110 @@ public struct LibrarySourcesWorkspaceView: View {
         }
     }
 
-    @ViewBuilder
-    private var usbOperationStatus: some View {
-        if usbOperation.phase != .idle {
-            HStack(alignment: .top, spacing: LumiSpacing.medium) {
-                if usbOperation.isActive {
-                    ProgressView()
-                        .controlSize(.small)
-                        .padding(.top, 2)
-                } else {
-                    Image(systemName: usbOperation.phase == .failed
-                        ? "exclamationmark.triangle.fill"
-                        : "checkmark.circle.fill")
-                        .foregroundStyle(usbOperation.phase == .failed
-                            ? LumiColor.warning
-                            : LumiColor.success)
-                        .padding(.top, 2)
-                }
-                VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-                    Text(usbOperation.title)
-                        .font(LumiTypography.body.weight(.semibold))
-                    Text(usbOperation.detail)
-                        .font(LumiTypography.caption)
-                        .foregroundStyle(LumiColor.textSecondary)
-                    if usbOperation.isActive {
-                        ProgressView()
-                            .progressViewStyle(.linear)
-                            .accessibilityLabel(usbOperation.title)
-                    } else if usbOperation.phase == .completed {
-                        Text("Completed safely · the USB disk was not modified")
-                            .font(LumiTypography.technical)
-                            .foregroundStyle(LumiColor.success)
-                    }
-                }
-                Spacer()
+    private var compactUSBOperationStatus: some View {
+        HStack(spacing: LumiSpacing.xSmall) {
+            if usbOperation.isActive {
+                ProgressView().controlSize(.small)
+            } else {
+                Image(systemName: compactUSBOperationIcon)
+                    .foregroundStyle(compactUSBOperationState.color)
             }
-            .padding(LumiSpacing.medium)
-            .background(
-                (usbOperation.phase == .failed ? LumiColor.warning : LumiColor.accent)
-                    .opacity(0.10)
-            )
-            .overlay {
-                RoundedRectangle(cornerRadius: LumiRadius.control)
-                    .stroke(
-                        usbOperation.phase == .failed ? LumiColor.warning : LumiColor.border,
-                        lineWidth: 1
-                    )
-            }
-            .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
-            .accessibilityIdentifier("lumi.library.sources.usb.operation")
+            Text(compactUSBOperationLabel)
+                .font(LumiTypography.technical)
+                .foregroundStyle(compactUSBOperationState.color)
+                .lineLimit(1)
         }
+        .padding(.horizontal, LumiSpacing.small)
+        .frame(width: 158, alignment: .center)
+        .frame(minHeight: 26)
+        .background(compactUSBOperationState.color.opacity(0.10))
+        .overlay {
+            RoundedRectangle(cornerRadius: LumiRadius.control)
+                .stroke(compactUSBOperationState.color.opacity(0.45), lineWidth: 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
+        .help("\(usbOperation.title)\n\(usbOperation.detail)")
+        .accessibilityIdentifier("lumi.library.sources.usb.operation")
+    }
+
+    private var compactUSBOperationLabel: String {
+        switch usbOperation.phase {
+        case .idle: "USB READY"
+        case .reading: "SCANNING USB"
+        case .synchronizing: "SYNCING USB"
+        case .completed:
+            usbOperation.title.localizedCaseInsensitiveContains("sync")
+                ? "SYNC COMPLETE"
+                : "SCAN COMPLETE"
+        case .failed: "USB ACTION FAILED"
+        }
+    }
+
+    private var compactUSBOperationIcon: String {
+        switch usbOperation.phase {
+        case .idle: "externaldrive"
+        case .reading, .synchronizing: "arrow.triangle.2.circlepath"
+        case .completed: "checkmark.circle.fill"
+        case .failed: "exclamationmark.triangle.fill"
+        }
+    }
+
+    private var compactUSBOperationState: LumiComponentState {
+        switch usbOperation.phase {
+        case .idle: .empty
+        case .reading, .synchronizing: .stale
+        case .completed: .ready
+        case .failed: .degraded
+        }
+    }
+
+    private func usbReviewTracks(_ device: RekordboxDeviceState) -> some View {
+        VStack(alignment: .leading, spacing: LumiSpacing.medium) {
+            HStack {
+                Label("Tracks to review", systemImage: "exclamationmark.triangle.fill")
+                    .font(LumiTypography.cardTitle)
+                    .foregroundStyle(LumiColor.warning)
+                Spacer()
+                compactStatus("\(device.conflictTracks) REVIEW", .degraded)
+            }
+            Text("Lumi did not overwrite these tracks. Their USB analysis differs from the active analysis, but the source dates do not establish a safe newer version.")
+                .font(LumiTypography.caption)
+                .foregroundStyle(LumiColor.textSecondary)
+            VStack(spacing: LumiSpacing.xSmall) {
+                ForEach(device.reviewTracks) { track in
+                    HStack(alignment: .top, spacing: LumiSpacing.medium) {
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(track.title)
+                                .font(LumiTypography.body.weight(.semibold))
+                                .foregroundStyle(LumiColor.textPrimary)
+                            Text(track.artist.isEmpty ? "Unknown artist" : track.artist)
+                                .font(LumiTypography.caption)
+                                .foregroundStyle(LumiColor.textSecondary)
+                            Text(track.reason)
+                                .font(LumiTypography.caption)
+                                .foregroundStyle(LumiColor.textSecondary)
+                                .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: LumiSpacing.medium)
+                        Text(String(format: "%.2f BPM", Double(track.bpmMilli) / 1_000))
+                            .font(LumiTypography.technical)
+                            .foregroundStyle(LumiColor.textSecondary)
+                        compactStatus("REVIEW", .degraded)
+                    }
+                    .padding(LumiSpacing.medium)
+                    .background(LumiColor.surfaceElevated)
+                    .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
+                }
+            }
+        }
+        .padding(LumiSpacing.medium)
+        .background(LumiColor.warning.opacity(0.08))
+        .overlay {
+            RoundedRectangle(cornerRadius: LumiRadius.control)
+                .stroke(LumiColor.warning.opacity(0.45), lineWidth: 1)
+        }
+        .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
+        .accessibilityIdentifier("lumi.library.sources.usb.reviewTracks")
     }
 
     private func devicePlaylistSelection(
@@ -1459,12 +1520,6 @@ public struct LibrarySourcesWorkspaceView: View {
         return alreadyTrusted ? nil : inspection
     }
 
-    private var hasExpandedUSBSourceLane: Bool {
-        guard let selectedUSBSourceID else { return false }
-        return visibleUSBDevices.contains { $0.sourceID == selectedUSBSourceID }
-            || provisionalUSBInspection?.sourceID == selectedUSBSourceID
-    }
-
     private var deviceSyncButtonTitle: String {
         if usbOperation.phase == .synchronizing { return "Synchronizing…" }
         return "Sync \(selectedUSBPlaylistIDs.count) Playlist\(selectedUSBPlaylistIDs.count == 1 ? "" : "s")"
@@ -1606,8 +1661,8 @@ public struct LibrarySourcesWorkspaceView: View {
     }
 
     private func deviceSyncLabel(_ device: RekordboxDeviceState) -> String {
-        if device.conflictTracks > 0 { return "REVIEW" }
-        if device.protectedTracks > 0 { return "OLDER HELD" }
+        if device.conflictTracks > 0 { return "\(device.conflictTracks) REVIEW" }
+        if device.protectedTracks > 0 { return "\(device.protectedTracks) OLDER HELD" }
         return "CURRENT"
     }
 

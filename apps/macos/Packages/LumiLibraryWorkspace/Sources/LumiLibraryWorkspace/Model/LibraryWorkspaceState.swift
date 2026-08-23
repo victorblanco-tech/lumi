@@ -572,9 +572,22 @@ public struct RekordboxDeviceState: Equatable, Sendable, Identifiable {
     public let conflictTracks: UInt64
     public let beatGridRefresh: Bool
     public let cueRevisionTracked: Bool
+    public let reviewTracks: [RekordboxDeviceReviewTrackState]
     public let playlists: [RekordboxDeviceSyncedPlaylistState]
 
     public var id: String { sourceID }
+}
+
+public struct RekordboxDeviceReviewTrackState: Equatable, Sendable, Identifiable {
+    public let deviceTrackID: UInt32
+    public let canonicalTrackID: UInt64?
+    public let title: String
+    public let artist: String
+    public let bpmMilli: UInt64
+    public let durationMillis: UInt64
+    public let reason: String
+
+    public var id: UInt32 { deviceTrackID }
 }
 
 public struct RekordboxDeviceSyncedPlaylistState: Equatable, Sendable, Identifiable {

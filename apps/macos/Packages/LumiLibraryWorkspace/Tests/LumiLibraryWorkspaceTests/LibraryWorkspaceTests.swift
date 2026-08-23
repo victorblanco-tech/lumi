@@ -329,9 +329,20 @@ struct LibraryWorkspaceTests {
                 "currentTracks": .number(40),
                 "promotedTracks": .number(2),
                 "protectedTracks": .number(1),
-                "conflictTracks": .number(0),
+                "conflictTracks": .number(1),
                 "beatGridRefresh": .boolean(true),
                 "cueRevisionTracked": .boolean(true),
+                "reviewTracks": .array([
+                    .object([
+                        "deviceTrackId": .number(1_031),
+                        "canonicalTrackId": .number(202),
+                        "title": .string("90s Bitch - Extended Mix"),
+                        "artist": .string("Maddix, The Rocketman"),
+                        "bpmMilli": .number(155_000),
+                        "durationMillis": .number(291_000),
+                        "reason": .string("Both analyses have the same Rekordbox date.")
+                    ])
+                ]),
                 "playlists": .array([
                     .object([
                         "id": .number(86),
@@ -351,7 +362,9 @@ struct LibraryWorkspaceTests {
         #expect(device.matchedTracks == 43)
         #expect(device.unmatchedTracks == 1_095)
         #expect(device.protectedTracks == 1)
-        #expect(device.conflictTracks == 0)
+        #expect(device.conflictTracks == 1)
+        #expect(device.reviewTracks.first?.title == "90s Bitch - Extended Mix")
+        #expect(device.reviewTracks.first?.canonicalTrackID == 202)
         #expect(device.playlists.first?.libraryPlaylistID == 57)
         #expect(device.playlists.first?.trackCount == 63)
         #expect(device.beatGridRefresh)

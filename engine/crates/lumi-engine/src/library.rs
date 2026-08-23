@@ -1629,6 +1629,18 @@ impl LibraryWorker {
                         detail: "This USB track was not matched to a Lumi track during the previous sync."
                             .to_owned(),
                     }
+                } else if previous.sync_disposition == "held-conflict" {
+                    DeviceInspectionTrack {
+                        status: "conflict",
+                        detail: "This USB analysis differs from the active Lumi analysis and their source dates cannot order them safely. Lumi kept the active analysis for review."
+                            .to_owned(),
+                    }
+                } else if previous.sync_disposition == "protected-older" {
+                    DeviceInspectionTrack {
+                        status: "usb-outdated",
+                        detail: "Lumi has a newer protected analysis; sync did not downgrade it."
+                            .to_owned(),
+                    }
                 } else if previous.metadata_revision == track.metadata_revision
                     && previous.analysis_revision == track.analysis_revision
                 {
@@ -2495,6 +2507,7 @@ impl LibraryWorker {
             .repository
             .page_playlists(TrackPageRequest::try_new(0, 200)?)?;
         let device_sources = self.repository.device_source_summaries()?;
+        let device_review_tracks = self.repository.device_review_tracks()?;
         let stored_device_playlists = self.repository.stored_device_playlists()?;
         let data_summary = self.repository.data_summary()?;
         let reset_candidates = self.repository.reset_preservable_tracks()?;
@@ -2539,6 +2552,10 @@ impl LibraryWorker {
                     .get(&source.source_id)
                     .map(Vec::as_slice)
                     .unwrap_or(&[]);
+                let review_tracks = device_review_tracks
+                    .get(&source.source_id)
+                    .map(Vec::as_slice)
+                    .unwrap_or(&[]);
                 json!({
                     "sourceId": source.source_id,
                     "displayName": source.display_name,
@@ -2554,6 +2571,32 @@ impl LibraryWorker {
                     "conflictTracks": source.conflict_tracks,
                     "beatGridRefresh": true,
                     "cueRevisionTracked": true,
+                    "reviewTracks": review_tracks.iter().take(200).map(|track| {
+                        let active_source = track.active_source_name
+                            .as_deref()
+                            .unwrap_or("the active Lumi analysis");
+                        let reason = match track.active_analyzed_at.as_deref() {
+                            Some(active_date) if active_date == track.incoming_analyzed_at => format!(
+                                "This USB analysis differs from {active_source}. Both are dated {active_date}, so Lumi cannot safely determine which is newer and kept the active analysis."
+                            ),
+                            Some(active_date) => format!(
+                                "This USB analysis ({}) differs from {active_source} ({active_date}), but the revisions could not be ordered safely. Lumi kept the active analysis.",
+                                track.incoming_analyzed_at
+                            ),
+                            None => format!(
+                                "This USB analysis differs from {active_source}, but comparable provenance is unavailable. Lumi kept the active analysis."
+                            ),
+                        };
+                        json!({
+                            "deviceTrackId": track.device_track_id,
+                            "canonicalTrackId": track.canonical_track_id.map(TrackId::value),
+                            "title": track.title,
+                            "artist": track.artist,
+                            "bpmMilli": track.bpm_milli,
+                            "durationMillis": track.duration_millis,
+                            "reason": reason,
+                        })
+                    }).collect::<Vec<_>>(),
                     "playlists": playlists.iter().map(|playlist| json!({
                         "id": playlist.device_playlist_id,
                         "libraryPlaylistId": playlist.playlist_id.value(),

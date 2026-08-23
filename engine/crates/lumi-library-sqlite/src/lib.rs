@@ -190,6 +190,20 @@ pub struct DeviceSourceSummary {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeviceReviewTrackSummary {
+    pub source_id: String,
+    pub device_track_id: u32,
+    pub canonical_track_id: Option<TrackId>,
+    pub title: String,
+    pub artist: String,
+    pub bpm_milli: u32,
+    pub duration_millis: u64,
+    pub incoming_analyzed_at: String,
+    pub active_source_name: Option<String>,
+    pub active_analyzed_at: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LibraryDataSummary {
     pub track_count: u64,
     pub playlist_count: u64,
@@ -1279,6 +1293,62 @@ impl SqliteLibraryRepository {
             })
         })?;
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
+    }
+
+    pub fn device_review_tracks(
+        &self,
+    ) -> Result<BTreeMap<String, Vec<DeviceReviewTrackSummary>>, SqliteLibraryError> {
+        let mut statement = self.connection.prepare(
+            "SELECT a.source_id, a.device_track_id, a.canonical_track_id,
+                    a.title, a.artist, a.bpm_milli, a.duration_millis, a.analyzed_at,
+                    active_source.display_name, provenance.analyzed_at
+               FROM device_library_track_aliases a
+               LEFT JOIN track_analysis_provenance provenance
+                 ON provenance.track_id = a.canonical_track_id
+               LEFT JOIN device_library_sources active_source
+                 ON active_source.source_id = provenance.source_id
+              WHERE a.archived = 0 AND a.sync_disposition = 'held-conflict'
+              ORDER BY a.source_id, a.title COLLATE NOCASE, a.artist COLLATE NOCASE,
+                       a.device_track_id",
+        )?;
+        let rows = statement.query_map([], |row| {
+            let raw_device_track_id = row.get::<_, i64>(1)?;
+            let device_track_id = u32::try_from(raw_device_track_id)
+                .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(1, raw_device_track_id))?;
+            let canonical_track_id = row
+                .get::<_, Option<i64>>(2)?
+                .map(|value| {
+                    u64::try_from(value)
+                        .map(TrackId::new)
+                        .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(2, value))
+                })
+                .transpose()?;
+            let raw_bpm = row.get::<_, i64>(5)?;
+            let raw_duration = row.get::<_, i64>(6)?;
+            Ok(DeviceReviewTrackSummary {
+                source_id: row.get(0)?,
+                device_track_id,
+                canonical_track_id,
+                title: row.get(3)?,
+                artist: row.get(4)?,
+                bpm_milli: u32::try_from(raw_bpm)
+                    .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(5, raw_bpm))?,
+                duration_millis: u64::try_from(raw_duration)
+                    .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(6, raw_duration))?,
+                incoming_analyzed_at: row.get(7)?,
+                active_source_name: row.get(8)?,
+                active_analyzed_at: row.get(9)?,
+            })
+        })?;
+        let mut review_tracks = BTreeMap::<String, Vec<DeviceReviewTrackSummary>>::new();
+        for row in rows {
+            let track = row?;
+            review_tracks
+                .entry(track.source_id.clone())
+                .or_default()
+                .push(track);
+        }
+        Ok(review_tracks)
     }
 
     pub fn device_track_source_relations(
@@ -5419,6 +5489,15 @@ mod fault_tests {
             }],
             &[],
         )?;
+
+        let review_tracks = repository.device_review_tracks()?;
+        let gray_review = review_tracks
+            .get("usb-fs:gray")
+            .ok_or("held conflict was not exposed for review")?;
+        assert_eq!(gray_review.len(), 1);
+        assert_eq!(gray_review[0].device_track_id, 1_256);
+        assert_eq!(gray_review[0].canonical_track_id, Some(track_id));
+        assert_eq!(gray_review[0].title, source_track.title());
 
         let after = repository
             .track(track_id)?
