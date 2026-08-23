@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.0-dev-17 - 2026-08-23
+
+### Fixed
+
+- Keeps component-level review details available per trusted USB source instead
+  of retaining them only for the most recently scanned disk.
+- Shows the same green/orange Beatgrid, Cue Points, File Data, Rekordbox
+  Phrases and Waveform comparison after switching between CHRM and GRAY.
+
+### Verification
+
+- Adds regression coverage for inspecting two independent USB sources in one
+  session and verifies the fix read-only against the connected CHRM and GRAY
+  OneLibrary disks.
+
 ## 0.5.0-dev-16 - 2026-08-23
 
 - Adds component-level USB conflict review for Beatgrid, Cue Points, File Data, Rekordbox Phrases and waveform projection.

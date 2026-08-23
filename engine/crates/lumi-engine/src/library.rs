@@ -81,6 +81,7 @@ pub struct LibraryWorker {
     pending_rekordbox_diff: Option<SourceMirrorDiff>,
     last_rekordbox_apply: Option<SourceMirrorDiff>,
     pending_device_inspection: Option<DeviceInspection>,
+    device_review_comparisons_by_source: BTreeMap<String, BTreeMap<u32, DeviceReviewComparison>>,
     pending_library_reset: Option<LibraryResetPreviewState>,
     pending_light_plan_preview: Option<Value>,
 }
@@ -875,6 +876,7 @@ impl LibraryWorker {
             pending_rekordbox_diff: None,
             last_rekordbox_apply: None,
             pending_device_inspection: None,
+            device_review_comparisons_by_source: BTreeMap::new(),
             pending_library_reset: None,
             pending_light_plan_preview: None,
         };
@@ -908,6 +910,7 @@ impl LibraryWorker {
         self.pending_rekordbox_diff = None;
         self.last_rekordbox_apply = None;
         self.pending_device_inspection = None;
+        self.device_review_comparisons_by_source.clear();
         self.pending_library_reset = None;
         self.pending_light_plan_preview = None;
         let persisted = self
@@ -1034,6 +1037,7 @@ impl LibraryWorker {
         self.pending_rekordbox_diff = None;
         self.last_rekordbox_apply = None;
         self.pending_device_inspection = None;
+        self.device_review_comparisons_by_source.clear();
         self.editor_track_id = None;
         self.playlist_id = None;
         self.search.clear();
@@ -1179,7 +1183,8 @@ impl LibraryWorker {
         if let Some(source_id) = source_id.filter(|value| !value.trim().is_empty()) {
             snapshot.source_id = source_id.to_owned();
         }
-        self.pending_device_inspection = Some(self.prepare_device_inspection(snapshot)?);
+        let inspection = self.prepare_device_inspection(snapshot)?;
+        self.remember_device_inspection(inspection);
         Ok(())
     }
 
@@ -1577,7 +1582,8 @@ impl LibraryWorker {
         )?;
         self.ensure_imported_timelines()?;
         let _ = self.repository.relink_creative_archives()?;
-        self.pending_device_inspection = Some(self.prepare_device_inspection(inspection)?);
+        let inspection = self.prepare_device_inspection(inspection)?;
+        self.remember_device_inspection(inspection);
         let matched = aliases
             .iter()
             .filter(|alias| alias.canonical_track_id.is_some())
@@ -1633,7 +1639,8 @@ impl LibraryWorker {
                 )?;
                 let mut snapshot = read_device_library(root.as_ref())?;
                 snapshot.source_id = source_id.to_owned();
-                self.pending_device_inspection = Some(self.prepare_device_inspection(snapshot)?);
+                let inspection = self.prepare_device_inspection(snapshot)?;
+                self.remember_device_inspection(inspection);
                 return Ok(());
             }
             DeviceReviewChoice::UseUsb => {}
@@ -1687,8 +1694,17 @@ impl LibraryWorker {
         self.repository
             .promote_reviewed_device_analysis(&analysis, expected_active_revision)?;
         self.ensure_imported_timelines()?;
-        self.pending_device_inspection = Some(self.prepare_device_inspection(snapshot)?);
+        let inspection = self.prepare_device_inspection(snapshot)?;
+        self.remember_device_inspection(inspection);
         Ok(())
+    }
+
+    fn remember_device_inspection(&mut self, inspection: DeviceInspection) {
+        self.device_review_comparisons_by_source.insert(
+            inspection.snapshot.source_id.clone(),
+            inspection.review_comparisons.clone(),
+        );
+        self.pending_device_inspection = Some(inspection);
     }
 
     fn prepare_device_inspection(
@@ -2777,10 +2793,9 @@ impl LibraryWorker {
                     .get(&source.source_id)
                     .map(Vec::as_slice)
                     .unwrap_or(&[]);
-                let review_comparisons = self.pending_device_inspection
-                    .as_ref()
-                    .filter(|inspection| inspection.snapshot.source_id == source.source_id)
-                    .map(|inspection| &inspection.review_comparisons);
+                let review_comparisons = self
+                    .device_review_comparisons_by_source
+                    .get(&source.source_id);
                 json!({
                     "sourceId": source.source_id,
                     "displayName": source.display_name,
@@ -4597,6 +4612,7 @@ pub enum LibraryWorkerError {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeMap;
     use std::path::PathBuf;
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -4611,13 +4627,14 @@ mod tests {
     use lumi_rekordbox_analysis::{
         AnalysisBeat, AnalysisPhrase, ResolvedTrackAnalysis, TrackAnalysisCoverage,
     };
-    use lumi_rekordbox_device::DeviceTrack;
+    use lumi_rekordbox_device::{DeviceLibrarySnapshot, DeviceTrack};
     use serde_json::json;
 
     use super::{
-        AutoloopCatalogMutation, LibraryWorker, LibraryWorkerError, PhraseRoleCatalogMutation,
-        canonical_beat_grid, canonical_phrases, deck_waveform_preview_points, device_audio_uri,
-        device_metadata_matches, device_track_matches, first_available_audio_uri,
+        AutoloopCatalogMutation, DeviceInspection, DeviceReviewComparison, LibraryWorker,
+        LibraryWorkerError, PhraseRoleCatalogMutation, canonical_beat_grid, canonical_phrases,
+        deck_waveform_preview_points, device_audio_uri, device_metadata_matches,
+        device_track_matches, first_available_audio_uri,
     };
 
     fn resolved_analysis_with_grid(beat_numbers: &[u16]) -> ResolvedTrackAnalysis {
@@ -5798,18 +5815,91 @@ mod tests {
     }
 
     #[test]
+    fn review_comparisons_remain_available_after_inspecting_another_usb()
+    -> Result<(), Box<dyn std::error::Error>> {
+        fn inspection(source_id: &str, device_track_id: u32) -> DeviceInspection {
+            DeviceInspection {
+                snapshot: DeviceLibrarySnapshot {
+                    source_id: source_id.to_owned(),
+                    display_name: source_id.to_owned(),
+                    database_path: std::path::PathBuf::from("/tmp/exportLibrary.db"),
+                    database_revision: "revision".to_owned(),
+                    database_version: "1".to_owned(),
+                    exported_at: "2026-08-23".to_owned(),
+                    tracks: BTreeMap::new(),
+                    playlists: Vec::new(),
+                },
+                selected_playlist_ids: Vec::new(),
+                tracks: BTreeMap::new(),
+                review_comparisons: BTreeMap::from([(
+                    device_track_id,
+                    DeviceReviewComparison {
+                        beat_grid_changed: false,
+                        hot_cues_changed: false,
+                        file_data_changed: true,
+                        raw_phrases_changed: false,
+                        waveform_changed: true,
+                        beat_grid_detail: "unchanged grid".to_owned(),
+                        hot_cues_detail: "unchanged cues".to_owned(),
+                        raw_phrases_detail: "unchanged phrases".to_owned(),
+                        waveform_detail: "changed waveform".to_owned(),
+                        file_detail: "changed file data".to_owned(),
+                    },
+                )]),
+            }
+        }
+
+        let mut worker = LibraryWorker::demo()?;
+        worker.remember_device_inspection(inspection("usb-chrm", 1031));
+        worker.remember_device_inspection(inspection("usb-gray", 1256));
+
+        assert!(worker.device_review_comparisons_by_source["usb-chrm"].contains_key(&1031));
+        assert!(worker.device_review_comparisons_by_source["usb-gray"].contains_key(&1256));
+        assert_eq!(
+            worker
+                .pending_device_inspection
+                .as_ref()
+                .map(|current| current.snapshot.source_id.as_str()),
+            Some("usb-gray")
+        );
+        Ok(())
+    }
+
+    #[test]
     #[ignore = "requires a mounted OneLibrary USB selected by LUMI_TEST_USB_ROOT"]
     fn mounted_usb_inspection_fits_the_local_protocol() -> Result<(), Box<dyn std::error::Error>> {
         let root = std::env::var("LUMI_TEST_USB_ROOT")?;
         let mut worker = LibraryWorker::demo()?;
         let trusted_source_id = std::env::var("LUMI_TEST_USB_SOURCE_ID").ok();
         worker.inspect_rekordbox_device(root, trusted_source_id.as_deref())?;
+        let second_source_id = std::env::var("LUMI_TEST_USB_SECOND_SOURCE_ID").ok();
+        if let Ok(second_root) = std::env::var("LUMI_TEST_USB_SECOND_ROOT") {
+            worker.inspect_rekordbox_device(second_root, second_source_id.as_deref())?;
+        }
         let encoded = serde_json::to_vec(&worker.snapshot_json()?)?;
         eprintln!("USB inspection snapshot: {} bytes", encoded.len());
         if let Ok(output_path) = std::env::var("LUMI_TEST_USB_SNAPSHOT_OUTPUT") {
             std::fs::write(output_path, &encoded)?;
         }
         assert!(encoded.len() <= lumi_protocol::MAX_MESSAGE_BYTES);
+        if let (Some(first_source_id), Some(second_source_id)) =
+            (trusted_source_id.as_deref(), second_source_id.as_deref())
+        {
+            let snapshot: serde_json::Value = serde_json::from_slice(&encoded)?;
+            for source_id in [first_source_id, second_source_id] {
+                let source = snapshot["rekordboxDevices"]
+                    .as_array()
+                    .and_then(|sources| {
+                        sources
+                            .iter()
+                            .find(|source| source["sourceId"] == source_id)
+                    })
+                    .ok_or("inspected USB source missing from snapshot")?;
+                assert!(source["reviewTracks"].as_array().is_some_and(|tracks| {
+                    tracks.iter().all(|track| !track["components"].is_null())
+                }));
+            }
+        }
         Ok(())
     }
 }
