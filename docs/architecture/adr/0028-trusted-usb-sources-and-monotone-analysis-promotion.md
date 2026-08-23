@@ -111,12 +111,13 @@ between two equal-model USB devices.
 
 Rekordbox library, analysis and media data remains read-only. In practice,
 separately managed equal-model FAT media can expose the same filesystem UUID
-and an unreliable or duplicated hardware serial. After an explicit Add,
-Refresh or Sync, Lumi therefore atomically creates one root-level
-`.lumi-source.json` sidecar containing only its opaque trusted-source ID and a
-format timestamp. Existing trusted IDs are preserved during this registration.
-The marker is authoritative on later mounts, is never stored inside PIONEER or
-Rekordbox directories and never contains track or playlist data.
+and an unreliable or duplicated hardware serial. Lumi therefore combines the
+available hardware/filesystem evidence with the trusted volume label and keeps
+any collision-resolving opaque source ID only in its local database. Physical
+CHRM and GRAY testing rejected a USB-side marker: a new root-level file write
+could block indefinitely in the macOS FAT stack even though database reads
+remained healthy. No source-identification step may write to removable media or
+delay a read-only scan.
 
 Removable-media parsing runs in a short-lived `lumi-engine --usb-worker`
 process with a hard deadline. The persistent realtime engine never opens the
@@ -138,6 +139,7 @@ bridge using the upstream `beat-link` library.
   promotion policy or guessing from a timestamp alone.
 - Primary and backup devices remain distinct even when their volume names or
   exported track IDs overlap.
+- USB files remain entirely untouched, including during identity registration.
 - Selecting the same track through multiple playlists never analyzes it more
   than once in a synchronization run.
 - The Pro DJ Link source contract will expose media-slot identity when the

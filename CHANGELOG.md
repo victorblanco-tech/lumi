@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.0-dev-22 - 2026-08-23
+## 0.5.0-dev-23 - 2026-08-23
 
 ### Added
 
@@ -9,8 +9,8 @@
   pages, with native macOS sort indicators.
 - Adds `Reuse Lumi Phrases` for copying an exact-beat-compatible authored
   timeline from an older edit or mashup into a new target revision.
-- Registers equal-model USB disks independently with one hidden, opaque
-  `.lumi-source.json` marker while leaving every Rekordbox file untouched.
+- Registers equal-model USB disks independently with local trusted-source
+  identities while leaving every file on removable media untouched.
 
 ### Improved
 

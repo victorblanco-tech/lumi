@@ -11,9 +11,9 @@ identity or timeline mutation.
 
 - CHRM and GRAY remain independent sources even when they share manufacturer,
   model, playlist names and tracks.
-- USB inspection keeps all Rekordbox data read-only; sync is source-scoped,
-  playlist-scoped, atomic and idempotent. An explicit Add, Refresh or Sync may
-  create one hidden `.lumi-source.json` identity marker at the volume root.
+- USB inspection keeps every file on removable media read-only; sync is
+  source-scoped, playlist-scoped, atomic and idempotent. Collision-resolving
+  source identities are stored only in Lumi's local database.
 - A same-source changed analysis promotes the coherent beatgrid, waveform, cue
   and raw-phrase projection while preserving Lumi-owned phrase work.
 - Older and incomparable revisions remain protected or reviewable.
@@ -33,14 +33,12 @@ identity or timeline mutation.
 - Rust repository tests cover stable server-side ordering across pages and
   revision-safe creative reuse.
 - Existing USB identity tests cover equal-model media, duplicate FAT identity,
-  persistent marker identity, stable filesystem identity and legacy migration.
+  independent local identity, stable filesystem identity and legacy migration.
 - Swift package tests cover bounded decoding and source identity presentation.
 - The development app is exercised through the real macOS UI with both mounted
   trusted USB sources, live search, clear, sort and source-lane expansion.
 
 ## Non-goals
 
-- Lumi never changes Rekordbox library, analysis or media data. Its only USB
-  write is the explicit, atomic identity marker used to separate otherwise
-  indistinguishable FAT media.
+- Lumi never changes Rekordbox library, analysis, media or other USB data.
 - Lumi does not automatically rebase phrases across a changed total beat count.

@@ -6,15 +6,10 @@
 
 use std::fs;
 use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::time::{SystemTime, UNIX_EPOCH};
 
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::json;
-use sha2::{Digest, Sha256};
 use thiserror::Error;
-use time::OffsetDateTime;
-use time::format_description::well_known::Rfc3339;
 
 use crate::library::{DeviceReviewChoice, LibraryWorker, LibraryWorkerError};
 
@@ -54,7 +49,7 @@ pub fn run_usb_worker(request_path: &Path, response_path: &Path) -> Result<(), U
     let mut worker = LibraryWorker::demo()?;
     match request {
         UsbWorkerRequest::Inspect { root, source_id } => {
-            let source_id = ensure_source_marker(Path::new(&root), source_id.as_deref())?;
+            let source_id = validated_source_id(Path::new(&root), source_id)?;
             worker.inspect_rekordbox_device(root, Some(&source_id))?;
         }
         UsbWorkerRequest::Sync {
@@ -62,7 +57,7 @@ pub fn run_usb_worker(request_path: &Path, response_path: &Path) -> Result<(), U
             source_id,
             playlist_ids,
         } => {
-            let source_id = ensure_source_marker(Path::new(&root), source_id.as_deref())?;
+            let source_id = validated_source_id(Path::new(&root), source_id)?;
             worker.sync_rekordbox_device(root, Some(&source_id), &playlist_ids)?;
         }
         UsbWorkerRequest::ResolveConflict {
@@ -73,7 +68,7 @@ pub fn run_usb_worker(request_path: &Path, response_path: &Path) -> Result<(), U
             expected_active_revision,
             choice,
         } => {
-            let source_id = ensure_source_marker(Path::new(&root), Some(&source_id))?;
+            let source_id = validated_source_id(Path::new(&root), Some(source_id))?;
             let choice = match choice.as_str() {
                 "keep-lumi" => DeviceReviewChoice::KeepLumi,
                 "use-usb" => DeviceReviewChoice::UseUsb,
@@ -96,84 +91,26 @@ pub fn run_usb_worker(request_path: &Path, response_path: &Path) -> Result<(), U
     Ok(())
 }
 
-const SOURCE_MARKER_FILE: &str = ".lumi-source.json";
-
-#[derive(Debug, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct SourceMarker {
-    format_version: u8,
-    source_id: String,
-    created_at: String,
-}
-
-/// Marker access is deliberately inside the disposable USB worker. Even a
-/// tiny FAT `open(2)` can stall indefinitely on unhealthy removable media;
-/// no marker read or write may therefore happen on SwiftUI's main thread or
-/// inside the channel-persistent realtime engine.
-fn ensure_source_marker(root: &Path, preferred: Option<&str>) -> Result<String, UsbWorkerError> {
+/// Source identity is selected locally before the USB operation begins. A
+/// physical equal-model FAT test proved that an otherwise healthy volume can
+/// block indefinitely on a new root-level file write. Identity metadata must
+/// therefore never touch removable media or prevent read-only inspection.
+fn validated_source_id(root: &Path, preferred: Option<String>) -> Result<String, UsbWorkerError> {
     if !root.is_absolute() || !root.join("PIONEER/rekordbox/exportLibrary.db").is_file() {
         return Err(UsbWorkerError::InvalidDeviceRoot(
             root.display().to_string(),
         ));
     }
-    let marker_path = root.join(SOURCE_MARKER_FILE);
-    match fs::read(&marker_path) {
-        Ok(data) => {
-            if data.len() <= 4_096
-                && let Ok(marker) = serde_json::from_slice::<SourceMarker>(&data)
-                && marker.format_version == 1
-                && valid_source_id(&marker.source_id)
-            {
-                return Ok(marker.source_id);
-            }
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
-        Err(error) => return Err(error.into()),
-    }
-
-    let source_id = preferred
+    preferred
         .filter(|value| valid_source_id(value))
-        .map(str::to_owned)
-        .unwrap_or_else(generated_source_id);
-    let marker = SourceMarker {
-        format_version: 1,
-        source_id: source_id.clone(),
-        created_at: OffsetDateTime::now_utc()
-            .format(&Rfc3339)
-            .unwrap_or_else(|_| "unknown".to_owned()),
-    };
-    let temporary = root.join(format!(
-        "{SOURCE_MARKER_FILE}.{}.partial",
-        std::process::id()
-    ));
-    fs::write(&temporary, serde_json::to_vec(&marker)?)?;
-    if let Err(error) = fs::rename(&temporary, &marker_path) {
-        let _ = fs::remove_file(&temporary);
-        return Err(error.into());
-    }
-    Ok(source_id)
+        .ok_or(UsbWorkerError::InvalidSourceIdentity)
 }
 
 fn valid_source_id(value: &str) -> bool {
     (8..=200).contains(&value.len())
-        && value.starts_with("usb-")
+        && (value.starts_with("usb-fs:") || value.starts_with("usb-local:"))
         && !value.contains('/')
         && !value.contains('\\')
-}
-
-fn generated_source_id() -> String {
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .unwrap_or_default()
-        .as_nanos();
-    let counter = COUNTER.fetch_add(1, Ordering::Relaxed);
-    let digest = Sha256::digest(format!("{}:{now}:{counter}", std::process::id()).as_bytes());
-    let suffix = digest[..16]
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect::<String>();
-    format!("usb-marker:{suffix}")
 }
 
 #[derive(Debug, Error)]
@@ -188,6 +125,8 @@ pub enum UsbWorkerError {
     InvalidReviewChoice(String),
     #[error("USB device root is invalid or has no OneLibrary database: {0}")]
     InvalidDeviceRoot(String),
+    #[error("USB source identity is missing or invalid")]
+    InvalidSourceIdentity,
 }
 
 #[cfg(test)]
@@ -200,7 +139,7 @@ mod tests {
         let request: UsbWorkerRequest = serde_json::from_value(json!({
             "kind": "sync",
             "root": "/Volumes/USB",
-            "sourceId": "usb-marker:one",
+            "sourceId": "usb-local:one",
             "playlistIds": [7, 9]
         }))?;
         assert!(matches!(
@@ -217,63 +156,56 @@ mod tests {
     }
 
     #[test]
-    fn marker_preserves_preferred_identity_and_is_idempotent() -> Result<(), UsbWorkerError> {
+    fn source_identity_is_local_and_does_not_write_to_usb() -> Result<(), UsbWorkerError> {
         let root = device_root("preserve")?;
         let preferred = "usb-fs:hardware-existing-source";
-        assert_eq!(ensure_source_marker(&root, Some(preferred))?, preferred);
         assert_eq!(
-            ensure_source_marker(&root, Some("usb-fs:ignored-later"))?,
+            validated_source_id(&root, Some(preferred.to_owned()))?,
             preferred
         );
+        let root_entries = fs::read_dir(&root)?.collect::<Result<Vec<_>, _>>()?;
+        assert_eq!(root_entries.len(), 1);
+        assert_eq!(root_entries[0].file_name(), "PIONEER");
         fs::remove_dir_all(root)?;
         Ok(())
     }
 
     #[test]
-    fn equal_model_media_without_a_preference_receive_distinct_markers()
-    -> Result<(), UsbWorkerError> {
-        let first = device_root("first")?;
-        let second = device_root("second")?;
-        let first_id = ensure_source_marker(&first, None)?;
-        let second_id = ensure_source_marker(&second, None)?;
-        assert!(first_id.starts_with("usb-marker:"));
-        assert!(second_id.starts_with("usb-marker:"));
-        assert_ne!(first_id, second_id);
-        fs::remove_dir_all(first)?;
-        fs::remove_dir_all(second)?;
-        Ok(())
-    }
-
-    #[test]
-    fn invalid_marker_is_replaced_only_beside_a_valid_onelibrary() -> Result<(), UsbWorkerError> {
-        let root = device_root("repair")?;
-        fs::write(root.join(SOURCE_MARKER_FILE), b"not-json")?;
-        let repaired = ensure_source_marker(&root, Some("usb-fs:hardware-repaired"))?;
-        assert_eq!(repaired, "usb-fs:hardware-repaired");
-
-        let invalid_root = std::env::temp_dir().join(format!(
-            "lumi-usb-worker-no-library-{}",
-            generated_source_id().replace(':', "-")
+    fn invalid_source_or_non_library_root_fails_before_usb_mutation() -> Result<(), UsbWorkerError>
+    {
+        let root = device_root("invalid-source")?;
+        assert!(matches!(
+            validated_source_id(&root, None),
+            Err(UsbWorkerError::InvalidSourceIdentity)
         ));
+
+        let invalid_root = unique_temp_root("no-library");
         fs::create_dir_all(&invalid_root)?;
         assert!(matches!(
-            ensure_source_marker(&invalid_root, None),
+            validated_source_id(&invalid_root, Some("usb-local:valid".to_owned())),
             Err(UsbWorkerError::InvalidDeviceRoot(_))
         ));
-        assert!(!invalid_root.join(SOURCE_MARKER_FILE).exists());
         fs::remove_dir_all(root)?;
         fs::remove_dir_all(invalid_root)?;
         Ok(())
     }
 
     fn device_root(label: &str) -> Result<PathBuf, UsbWorkerError> {
-        let root = std::env::temp_dir().join(format!(
-            "lumi-usb-worker-{label}-{}",
-            generated_source_id().replace(':', "-")
-        ));
+        let root = unique_temp_root(label);
         let library = root.join("PIONEER/rekordbox");
         fs::create_dir_all(&library)?;
         fs::write(library.join("exportLibrary.db"), b"fixture")?;
         Ok(root)
+    }
+
+    fn unique_temp_root(label: &str) -> PathBuf {
+        std::env::temp_dir().join(format!(
+            "lumi-usb-worker-{label}-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        ))
     }
 }

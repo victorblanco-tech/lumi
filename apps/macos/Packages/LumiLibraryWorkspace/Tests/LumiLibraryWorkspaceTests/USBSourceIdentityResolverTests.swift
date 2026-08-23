@@ -198,13 +198,13 @@ struct USBSourceIdentityResolverTests {
         )
     }
 
-    @Test("Generated marker identities are independent and syntactically stable")
-    func generatedMarkerIdentitiesDoNotAlias() {
-        let first = USBSourceMarkerIdentity.generated()
-        let second = USBSourceMarkerIdentity.generated()
+    @Test("Generated local identities are independent and syntactically stable")
+    func generatedLocalIdentitiesDoNotAlias() {
+        let first = USBLocalSourceIdentity.generated()
+        let second = USBLocalSourceIdentity.generated()
 
-        #expect(first.hasPrefix("usb-marker:"))
-        #expect(second.hasPrefix("usb-marker:"))
+        #expect(first.hasPrefix("usb-local:"))
+        #expect(second.hasPrefix("usb-local:"))
         #expect(first != second)
         #expect(!first.contains("/"))
     }

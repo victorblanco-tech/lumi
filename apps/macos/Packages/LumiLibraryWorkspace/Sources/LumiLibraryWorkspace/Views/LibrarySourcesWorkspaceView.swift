@@ -237,7 +237,7 @@ public struct LibrarySourcesWorkspaceView: View {
                         Text("\(visibleUSBDevices.count) trusted · \(mountedTrustedSources.count) connected · Rekordbox data read only")
                             .font(LumiTypography.technical)
                             .foregroundStyle(LumiColor.textSecondary)
-                        Text("Trusted media identifies live Pro DJ Link tracks. Lumi may add one tiny identity marker; Rekordbox data is never changed.")
+                        Text("Trusted media identifies live Pro DJ Link tracks. Source identity stays in Lumi; Rekordbox and USB files are never changed.")
                             .font(LumiTypography.caption)
                             .foregroundStyle(LumiColor.textSecondary)
                     }
@@ -2105,15 +2105,14 @@ public struct LibrarySourcesWorkspaceView: View {
             guard let existing = visibleUSBDevices.first(where: { $0.sourceID == sourceID }) else {
                 return sourceID
             }
-            // Before a marker exists, an equal-model FAT disk can publish the
-            // same UUID/serial as a different trusted disk. Reuse an existing
-            // identity only when its source label also matches. Once written,
-            // the marker remains authoritative across later volume renames.
+            // Equal-model FAT disks can publish the same UUID/serial. Reuse an
+            // existing identity only when its trusted source label also
+            // matches; otherwise allocate an independent local identity.
             return existing.displayName.caseInsensitiveCompare(displayName) == .orderedSame
                 ? sourceID
                 : nil
         }
-        return collisionSafePreferredID ?? USBSourceMarkerIdentity.generated()
+        return collisionSafePreferredID ?? USBLocalSourceIdentity.generated()
     }
 
     private func mountedRekordboxUSBs() -> [URL] {

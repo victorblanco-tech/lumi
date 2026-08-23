@@ -3,11 +3,12 @@ import DiskArbitration
 import Foundation
 import IOKit
 
-/// Creates only the opaque identifier value. Reading or writing its USB
-/// sidecar belongs to the isolated Rust worker, never the SwiftUI process.
-enum USBSourceMarkerIdentity {
+/// Creates an opaque identity stored only in Lumi's local database. Physical
+/// testing showed that even a tiny FAT root write can stall an otherwise
+/// healthy USB source, so identity metadata never touches removable media.
+enum USBLocalSourceIdentity {
     static func generated() -> String {
-        "usb-marker:\(UUID().uuidString.lowercased())"
+        "usb-local:\(UUID().uuidString.lowercased())"
     }
 }
 
@@ -151,7 +152,7 @@ enum USBSourceIdentityResolver {
     }
 
     static func isStable(_ sourceID: String) -> Bool {
-        sourceID.hasPrefix("usb-fs:") || sourceID.hasPrefix("usb-marker:")
+        sourceID.hasPrefix("usb-fs:") || sourceID.hasPrefix("usb-local:")
     }
 
     static func isLegacy(_ sourceID: String) -> Bool {
