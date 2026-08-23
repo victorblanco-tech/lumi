@@ -179,7 +179,13 @@ public struct LibrarySourcesWorkspaceView: View {
             expandedUSBPlaylistFolderPaths.removeAll()
             restoreDevicePlaylistSelection()
         }
-        .onChange(of: library.rekordboxDeviceInspection) { _, _ in
+        .onChange(of: library.rekordboxDeviceInspection) { _, inspection in
+            if let inspection, selectedUSBSourceID != inspection.sourceID {
+                // The isolated worker may recover an authoritative marker ID
+                // after a volume rename. Follow that completed result without
+                // reading any USB file on the SwiftUI main thread.
+                selectedUSBSourceID = inspection.sourceID
+            }
             expandedUSBPlaylistIDs.removeAll()
             expandedUSBPlaylistFolderPaths.removeAll()
             restoreDevicePlaylistSelection()
@@ -1861,7 +1867,6 @@ public struct LibrarySourcesWorkspaceView: View {
     }
 
     private func volumeSourceID(_ url: URL) -> String? {
-        if let marker = USBSourceMarkerStore.sourceID(for: url) { return marker }
         let stable = try? url.resourceValues(forKeys: [.volumeUUIDStringKey]).volumeUUIDString
         return USBStableSourceIdentity.sourceID(
             fileSystemUUID: stable,
@@ -1871,9 +1876,16 @@ public struct LibrarySourcesWorkspaceView: View {
     }
 
     private func mountedIdentity(_ url: URL) -> MountedUSBIdentity {
-        MountedUSBIdentity(
-            sourceID: volumeSourceID(url),
-            displayName: volumeDisplayName(url)
+        let displayName = volumeDisplayName(url)
+        let nameMatches = visibleUSBDevices.filter {
+            $0.displayName.caseInsensitiveCompare(displayName) == .orderedSame
+        }
+        return MountedUSBIdentity(
+            // The completed worker snapshot is the local source of truth. A
+            // unique trusted label lets us recognize its marker identity on a
+            // later mount without ever opening the USB marker on the UI thread.
+            sourceID: nameMatches.count == 1 ? nameMatches[0].sourceID : volumeSourceID(url),
+            displayName: displayName
         )
     }
 
@@ -2088,9 +2100,6 @@ public struct LibrarySourcesWorkspaceView: View {
     }
 
     private func stableSourceID(for url: URL, preferredSourceID: String?) -> String? {
-        if let marker = USBSourceMarkerStore.sourceID(for: url) {
-            return marker
-        }
         let displayName = volumeDisplayName(url)
         let collisionSafePreferredID = preferredSourceID.flatMap { sourceID in
             guard let existing = visibleUSBDevices.first(where: { $0.sourceID == sourceID }) else {
@@ -2104,15 +2113,7 @@ public struct LibrarySourcesWorkspaceView: View {
                 ? sourceID
                 : nil
         }
-        do {
-            return try USBSourceMarkerStore.ensureSourceID(
-                for: url,
-                preferredSourceID: collisionSafePreferredID
-            )
-        } catch {
-            usbSelectionFeedback = "Lumi could not create the optional USB identity marker. This disk remains usable, but identical FAT media may be harder to distinguish."
-            return collisionSafePreferredID ?? volumeSourceID(url)
-        }
+        return collisionSafePreferredID ?? USBSourceMarkerIdentity.generated()
     }
 
     private func mountedRekordboxUSBs() -> [URL] {

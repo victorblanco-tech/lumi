@@ -198,79 +198,15 @@ struct USBSourceIdentityResolverTests {
         )
     }
 
-    @Test("A Lumi USB marker preserves the trusted source identity")
-    func markerPreservesPreferredIdentity() throws {
-        let volume = try temporaryVolume(named: "marker-preserves")
-        defer { try? FileManager.default.removeItem(at: volume) }
+    @Test("Generated marker identities are independent and syntactically stable")
+    func generatedMarkerIdentitiesDoNotAlias() {
+        let first = USBSourceMarkerIdentity.generated()
+        let second = USBSourceMarkerIdentity.generated()
 
-        let preferred = "usb-fs:hardware-existing-source"
-        let created = try USBSourceMarkerStore.ensureSourceID(
-            for: volume,
-            preferredSourceID: preferred
-        )
-
-        #expect(created == preferred)
-        #expect(USBSourceMarkerStore.sourceID(for: volume) == preferred)
-        #expect(
-            FileManager.default.fileExists(
-                atPath: volume.appendingPathComponent(USBSourceMarkerStore.fileName).path
-            )
-        )
-    }
-
-    @Test("Separately registered equal-model media receive independent markers")
-    func independentMarkersDoNotAlias() throws {
-        let first = try temporaryVolume(named: "marker-first")
-        let second = try temporaryVolume(named: "marker-second")
-        defer {
-            try? FileManager.default.removeItem(at: first)
-            try? FileManager.default.removeItem(at: second)
-        }
-
-        let firstID = try USBSourceMarkerStore.ensureSourceID(
-            for: first,
-            preferredSourceID: nil
-        )
-        let secondID = try USBSourceMarkerStore.ensureSourceID(
-            for: second,
-            preferredSourceID: nil
-        )
-
-        #expect(firstID.hasPrefix("usb-marker:"))
-        #expect(secondID.hasPrefix("usb-marker:"))
-        #expect(firstID != secondID)
-        #expect(
-            try USBSourceMarkerStore.ensureSourceID(
-                for: first,
-                preferredSourceID: "usb-fs:ignored-after-registration"
-            ) == firstID
-        )
-    }
-
-    @Test("Invalid marker content is replaced atomically")
-    func invalidMarkerIsReplaced() throws {
-        let volume = try temporaryVolume(named: "marker-invalid")
-        defer { try? FileManager.default.removeItem(at: volume) }
-        try Data("not-json".utf8).write(
-            to: volume.appendingPathComponent(USBSourceMarkerStore.fileName)
-        )
-
-        let repaired = try USBSourceMarkerStore.ensureSourceID(
-            for: volume,
-            preferredSourceID: "usb-fs:hardware-repaired"
-        )
-
-        #expect(repaired == "usb-fs:hardware-repaired")
-        #expect(USBSourceMarkerStore.sourceID(for: volume) == repaired)
-    }
-
-    private func temporaryVolume(named name: String) throws -> URL {
-        let url = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "lumi-\(name)-\(UUID().uuidString)",
-            isDirectory: true
-        )
-        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
-        return url
+        #expect(first.hasPrefix("usb-marker:"))
+        #expect(second.hasPrefix("usb-marker:"))
+        #expect(first != second)
+        #expect(!first.contains("/"))
     }
 
     private func device(sourceID: String, displayName: String) -> RekordboxDeviceState {
