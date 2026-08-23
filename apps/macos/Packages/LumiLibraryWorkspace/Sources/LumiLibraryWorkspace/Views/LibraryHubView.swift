@@ -23,6 +23,7 @@ public struct LibraryHubView: View {
     private let onTimelineEdit: @MainActor (TrackTimelineEditRequest) -> Void
     private let onTimelineHistory: @MainActor (TrackTimelineHistoryRequest) -> Void
     private let onSourceReconcile: @MainActor (TrackSourceReconcileRequest) -> Void
+    private let onReuseTimeline: @MainActor (CreativeTimelineReuseRequest) -> Void
     private let onLoadOnLocalDeck: @MainActor (LibraryDeckLoadRequest) -> Void
     private let onPhraseRoleMutation: @Sendable (PhraseRoleMutationRequest) -> Void
     private let onRekordboxSyncPreview: @Sendable (RekordboxXMLSyncPreviewRequest) -> Void
@@ -50,6 +51,7 @@ public struct LibraryHubView: View {
         onTimelineEdit: @escaping @MainActor (TrackTimelineEditRequest) -> Void = { _ in },
         onTimelineHistory: @escaping @MainActor (TrackTimelineHistoryRequest) -> Void = { _ in },
         onSourceReconcile: @escaping @MainActor (TrackSourceReconcileRequest) -> Void = { _ in },
+        onReuseTimeline: @escaping @MainActor (CreativeTimelineReuseRequest) -> Void = { _ in },
         onLoadOnLocalDeck: @escaping @MainActor (LibraryDeckLoadRequest) -> Void = { _ in },
         onPhraseRoleMutation: @escaping @Sendable (PhraseRoleMutationRequest) -> Void = { _ in },
         onRekordboxSyncPreview: @escaping @Sendable (RekordboxXMLSyncPreviewRequest) -> Void = { _ in },
@@ -74,6 +76,7 @@ public struct LibraryHubView: View {
         self.onTimelineEdit = onTimelineEdit
         self.onTimelineHistory = onTimelineHistory
         self.onSourceReconcile = onSourceReconcile
+        self.onReuseTimeline = onReuseTimeline
         self.onLoadOnLocalDeck = onLoadOnLocalDeck
         self.onPhraseRoleMutation = onPhraseRoleMutation
         self.onRekordboxSyncPreview = onRekordboxSyncPreview
@@ -99,6 +102,7 @@ public struct LibraryHubView: View {
                         onTimelineEdit: onTimelineEdit,
                         onTimelineHistory: onTimelineHistory,
                         onSourceReconcile: onSourceReconcile,
+                        onReuseTimeline: onReuseTimeline,
                         onLoadOnLocalDeck: onLoadOnLocalDeck,
                         timelineFeedback: timelineFeedback,
                         localPlaybackFeedback: localPlaybackFeedback,

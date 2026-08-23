@@ -277,9 +277,21 @@ public enum EngineAutoloopCatalogMutation: Equatable, Sendable {
 }
 
 public enum EngineCommand: Equatable, Sendable {
-    case queryLibrary(search: String, playlistID: UInt64?, offset: UInt32, limit: UInt16)
+    case queryLibrary(
+        search: String,
+        playlistID: UInt64?,
+        offset: UInt32,
+        limit: UInt16,
+        sortBy: String,
+        sortDirection: String
+    )
     case openLibraryTrackEditor(trackID: UInt64)
     case closeLibraryTrackEditor
+    case reuseLibraryTimeline(
+        sourceTrackID: UInt64,
+        targetTrackID: UInt64,
+        expectedTargetRevision: UInt64
+    )
     case previewDemoSourceRefresh
     case previewRekordboxXMLSync(
         folder: String,
@@ -411,12 +423,14 @@ public enum EngineCommand: Equatable, Sendable {
 
     func payload() -> [String: JSONValue] {
         switch self {
-        case let .queryLibrary(search, playlistID, offset, limit):
+        case let .queryLibrary(search, playlistID, offset, limit, sortBy, sortDirection):
             var payload: [String: JSONValue] = [
                 "kind": .string("queryLibrary"),
                 "search": .string(search),
                 "offset": .number(Double(offset)),
-                "limit": .number(Double(limit))
+                "limit": .number(Double(limit)),
+                "sortBy": .string(sortBy),
+                "sortDirection": .string(sortDirection)
             ]
             payload["playlistId"] = playlistID.map { .number(Double($0)) } ?? .null
             return payload
@@ -427,6 +441,13 @@ public enum EngineCommand: Equatable, Sendable {
             ]
         case .closeLibraryTrackEditor:
             return ["kind": .string("closeLibraryTrackEditor")]
+        case let .reuseLibraryTimeline(sourceTrackID, targetTrackID, expectedTargetRevision):
+            return [
+                "kind": .string("reuseLibraryTimeline"),
+                "sourceTrackId": .number(Double(sourceTrackID)),
+                "targetTrackId": .number(Double(targetTrackID)),
+                "expectedTargetRevision": .number(Double(expectedTargetRevision))
+            ]
         case .previewDemoSourceRefresh:
             return ["kind": .string("previewDemoSourceRefresh")]
         case let .previewRekordboxXMLSync(

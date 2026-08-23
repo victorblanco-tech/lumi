@@ -151,6 +151,16 @@ public struct LibraryTrack: Identifiable, Equatable, Sendable {
     }
 }
 
+public extension LibraryTrack {
+    var sortKey: UInt16 {
+        let mode: Int = musicalKey.mode == .major ? 0 : 1
+        return UInt16(musicalKey.pitchClass.rawValue * 2 + mode)
+    }
+    var sortUSBSources: String { usbSources.map(\.displayName).joined(separator: "\u{001F}") }
+    var sortTimelineRevision: UInt64 { timelineRevision ?? 0 }
+    var sortReadiness: String { readiness.rawValue }
+}
+
 public struct LibraryTrackUSBSource: Identifiable, Equatable, Sendable {
     public var id: String { sourceID }
     public let sourceID: String
@@ -169,13 +179,43 @@ public struct LibraryQuery: Equatable, Sendable {
     public let playlistID: UInt64?
     public let offset: UInt32
     public let limit: UInt16
+    public let sortBy: LibraryTrackSortField
+    public let sortDirection: LibraryTrackSortDirection
 
-    public init(search: String, playlistID: UInt64?, offset: UInt32, limit: UInt16) {
+    public init(
+        search: String,
+        playlistID: UInt64?,
+        offset: UInt32,
+        limit: UInt16,
+        sortBy: LibraryTrackSortField = .playlist,
+        sortDirection: LibraryTrackSortDirection = .ascending
+    ) {
         self.search = search
         self.playlistID = playlistID
         self.offset = offset
         self.limit = limit
+        self.sortBy = sortBy
+        self.sortDirection = sortDirection
     }
+}
+
+public enum LibraryTrackSortField: String, CaseIterable, Equatable, Sendable {
+    case playlist
+    case title
+    case artist
+    case bpm
+    case key
+    case duration
+    case usbSources
+    case timelineRevision
+    case readiness
+    case sourceTrackID
+    case analysisRevision
+}
+
+public enum LibraryTrackSortDirection: String, Equatable, Sendable {
+    case ascending
+    case descending
 }
 
 public struct LibraryPage: Equatable, Sendable {

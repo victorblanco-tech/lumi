@@ -58,6 +58,20 @@ The complete backup retains all revision history. Creative Archive deliberately
 retains the authored head needed to carry work forward; a future review UI may
 offer explicit reconciliation for incompatible beat structures.
 
+That review workflow is also used for deliberately versioned edits and mashups.
+A new audio file such as `v004` is always imported as a new canonical track;
+Lumi never aliases it silently to `v003`. The Track Editor lists other
+Lumi-authored timelines, ranks an equal artist and version-normalized title as a
+suggested predecessor, and offers `Reuse Lumi Phrases`. Applying it copies the
+phrase boundaries, Phrase Roles and per-phrase AutoLoop strategy into a new
+revision on the target. The source remains unchanged and recoverable.
+
+Automatic reuse is allowed only when source and target expose the exact same
+total beat count. A candidate with a changed arrangement remains visible but is
+disabled for automatic application. Future explicit rebase tooling may support
+that case, but it must preview each moved boundary and cannot guess during USB
+synchronization.
+
 ## Consequences
 
 - A DJ can rebuild a USB-driven Library without losing authored lighting work.

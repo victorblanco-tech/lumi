@@ -11,14 +11,15 @@ use lumi_domain::{KeyMode, MusicalKey, PitchClass, ThemeId, TrackId};
 use lumi_library::{
     AutoloopCatalog, AutoloopCatalogError, AutoloopEntryId, AutoloopMatrixCell, AutoloopTheme,
     AutoloopVariant, BeatGrid, BeatMarker, HotCue, ImportResult, ImportedLibraryBaseline,
-    ImportedTrackAnalysis, LibraryRepository, LibraryTrackQuery, LumiPhraseTimeline,
-    PhraseInstance, PhraseLoopStrategy, PhraseRole, PhraseRoleCatalog, PhraseRoleCatalogError,
-    PhraseRoleId, PhraseRoleTrackUsage, PhraseRoleUsage, PlaylistId, PlaylistPage, PlaylistSummary,
-    RawPhraseObservation, SourceMirrorDiff, SourceMirrorSnapshot, SourceMirrorSummary,
-    SourcePhraseMapping, SourcePlaylistId, SourceRevision, SourceTrackId, StoredTrack,
-    TextIdentifierError, ThemeSpecificVariant, TimelineRevision, TimelineRevisionOrigin,
-    TimelineRevisionPage, TimelineRevisionReason, TimelineRevisionSummary, TrackColor, TrackPage,
-    TrackPageRequest, TrackSummary, VariantId, WaveformPoint, normalize_source_label,
+    ImportedTrackAnalysis, LibraryRepository, LibraryTrackQuery, LibraryTrackSortDirection,
+    LibraryTrackSortField, LumiPhraseTimeline, PhraseInstance, PhraseLoopStrategy, PhraseRole,
+    PhraseRoleCatalog, PhraseRoleCatalogError, PhraseRoleId, PhraseRoleTrackUsage, PhraseRoleUsage,
+    PlaylistId, PlaylistPage, PlaylistSummary, RawPhraseObservation, SourceMirrorDiff,
+    SourceMirrorSnapshot, SourceMirrorSummary, SourcePhraseMapping, SourcePlaylistId,
+    SourceRevision, SourceTrackId, StoredTrack, TextIdentifierError, ThemeSpecificVariant,
+    TimelineRevision, TimelineRevisionOrigin, TimelineRevisionPage, TimelineRevisionReason,
+    TimelineRevisionSummary, TrackColor, TrackPage, TrackPageRequest, TrackSummary, VariantId,
+    WaveformPoint, normalize_source_label,
 };
 use lumi_light_plans::LightPlanningPolicy;
 use rusqlite::backup::Backup;
@@ -241,6 +242,17 @@ pub struct ResetPreservableTrackSummary {
     pub title: String,
     pub artist: String,
     pub timeline_revision: u64,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CreativeTimelineCandidate {
+    pub track_id: TrackId,
+    pub title: String,
+    pub artist: String,
+    pub phrase_count: u64,
+    pub total_beats: u32,
+    pub exact_beat_compatibility: bool,
+    pub likely_version: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1667,6 +1679,70 @@ impl SqliteLibraryRepository {
             });
         }
         Ok(archives)
+    }
+
+    pub fn creative_timeline_candidates(
+        &self,
+        target_track_id: TrackId,
+    ) -> Result<Vec<CreativeTimelineCandidate>, SqliteLibraryError> {
+        let (target_title, target_artist, target_total_beats) = self.connection.query_row(
+            "SELECT t.title, t.artist, r.total_beats
+               FROM tracks t
+               JOIN timeline_heads h ON h.track_id = t.id
+               JOIN timeline_revisions r
+                 ON r.track_id = h.track_id AND r.revision = h.revision
+              WHERE t.id = ?1",
+            [to_i64(target_track_id.value())?],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, i64>(2)?,
+                ))
+            },
+        )?;
+        let target_family = creative_version_family(&target_title);
+        let target_artist = target_artist.trim().to_lowercase();
+        let mut statement = self.connection.prepare(
+            "SELECT t.id, t.title, t.artist, COUNT(p.phrase_index), r.total_beats
+               FROM tracks t
+               JOIN timeline_heads h ON h.track_id = t.id
+               JOIN timeline_revisions r
+                 ON r.track_id = h.track_id AND r.revision = h.revision
+               JOIN phrase_points p
+                 ON p.track_id = h.track_id AND p.revision = h.revision
+              WHERE t.id <> ?1
+                AND r.origin IN ('user-edit', 'revision-restore')
+              GROUP BY t.id, t.title, t.artist, r.total_beats
+              ORDER BY t.title COLLATE NOCASE, t.artist COLLATE NOCASE, t.id",
+        )?;
+        let rows = statement.query_map([to_i64(target_track_id.value())?], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
+            ))
+        })?;
+        let mut candidates = Vec::new();
+        for row in rows {
+            let (track_id, title, artist, phrase_count, total_beats) = row?;
+            let likely_version = creative_version_family(&title) == target_family
+                && artist.trim().to_lowercase() == target_artist;
+            candidates.push(CreativeTimelineCandidate {
+                track_id: TrackId::new(from_positive_i64(track_id, "track id")?),
+                title,
+                artist,
+                phrase_count: from_nonnegative_i64(phrase_count, "phrase count")?,
+                total_beats: i64_to_u32(total_beats, "timeline total beats")?,
+                exact_beat_compatibility: total_beats == target_total_beats,
+                likely_version,
+            });
+        }
+        candidates.sort_by_key(|candidate| !candidate.likely_version);
+        candidates.truncate(100);
+        Ok(candidates)
     }
 
     pub fn preview_library_reset(
@@ -3456,6 +3532,7 @@ impl LibraryRepository for SqliteLibraryRepository {
     fn query_tracks(&self, query: &LibraryTrackQuery) -> Result<TrackPage, Self::Error> {
         let pattern = search_pattern(query.search());
         let page = query.page();
+        let order_by = track_query_order_by(query);
         match query.playlist_id() {
             Some(playlist_id) => {
                 let total = self.connection.query_row(
@@ -3469,7 +3546,7 @@ impl LibraryRepository for SqliteLibraryRepository {
                     params![to_i64(playlist_id.value())?, pattern],
                     |row| row.get::<_, i64>(0),
                 )?;
-                let mut statement = self.connection.prepare(
+                let sql = format!(
                     "SELECT t.id, t.source_track_id, t.title, t.artist, t.bpm_milli,
                             t.key_pitch, t.key_mode, t.duration_millis, t.color_rgb,
                             t.analysis_revision, h.revision
@@ -3481,9 +3558,10 @@ impl LibraryRepository for SqliteLibraryRepository {
                        LOWER(t.artist) LIKE LOWER(?2) ESCAPE '\\' OR
                        LOWER(t.source_track_id) LIKE LOWER(?2) ESCAPE '\\'
                      )
-                     ORDER BY pt.position
-                     LIMIT ?3 OFFSET ?4",
-                )?;
+                     ORDER BY {order_by}
+                     LIMIT ?3 OFFSET ?4"
+                );
+                let mut statement = self.connection.prepare(&sql)?;
                 let mut rows = statement.query(params![
                     to_i64(playlist_id.value())?,
                     pattern,
@@ -3509,7 +3587,7 @@ impl LibraryRepository for SqliteLibraryRepository {
                     [&pattern],
                     |row| row.get::<_, i64>(0),
                 )?;
-                let mut statement = self.connection.prepare(
+                let sql = format!(
                     "SELECT t.id, t.source_track_id, t.title, t.artist, t.bpm_milli,
                             t.key_pitch, t.key_mode, t.duration_millis, t.color_rgb,
                             t.analysis_revision, h.revision
@@ -3517,9 +3595,10 @@ impl LibraryRepository for SqliteLibraryRepository {
                      WHERE LOWER(t.title) LIKE LOWER(?1) ESCAPE '\\' OR
                            LOWER(t.artist) LIKE LOWER(?1) ESCAPE '\\' OR
                            LOWER(t.source_track_id) LIKE LOWER(?1) ESCAPE '\\'
-                     ORDER BY t.title COLLATE NOCASE, t.artist COLLATE NOCASE, t.id
-                     LIMIT ?2 OFFSET ?3",
-                )?;
+                     ORDER BY {order_by}
+                     LIMIT ?2 OFFSET ?3"
+                );
+                let mut statement = self.connection.prepare(&sql)?;
                 let mut rows = statement.query(params![
                     pattern,
                     i64::from(page.limit()),
@@ -5458,6 +5537,53 @@ fn search_pattern(search: &str) -> String {
         .replace('%', "\\%")
         .replace('_', "\\_");
     format!("%{escaped}%")
+}
+
+fn creative_version_family(title: &str) -> String {
+    title
+        .split_whitespace()
+        .filter(|token| {
+            let normalized = token
+                .trim_matches(|character: char| !character.is_ascii_alphanumeric())
+                .to_ascii_lowercase();
+            !(normalized.len() > 1
+                && normalized.starts_with('v')
+                && normalized[1..]
+                    .chars()
+                    .all(|character| character.is_ascii_digit()))
+        })
+        .map(|token| token.to_ascii_lowercase())
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn track_query_order_by(query: &LibraryTrackQuery) -> String {
+    let direction = match query.sort().direction() {
+        LibraryTrackSortDirection::Ascending => "ASC",
+        LibraryTrackSortDirection::Descending => "DESC",
+    };
+    let expression = match query.sort().field() {
+        LibraryTrackSortField::Playlist if query.playlist_id().is_some() => "pt.position",
+        LibraryTrackSortField::Playlist | LibraryTrackSortField::Title => "t.title COLLATE NOCASE",
+        LibraryTrackSortField::Artist => "t.artist COLLATE NOCASE",
+        LibraryTrackSortField::Bpm => "t.bpm_milli",
+        LibraryTrackSortField::Key => {
+            return format!(
+                "t.key_pitch {direction}, t.key_mode COLLATE NOCASE {direction}, t.title COLLATE NOCASE ASC, t.artist COLLATE NOCASE ASC, t.id ASC"
+            );
+        }
+        LibraryTrackSortField::Duration => "t.duration_millis",
+        LibraryTrackSortField::UsbSources => {
+            "COALESCE((SELECT MIN(s.display_name) FROM device_library_track_aliases a JOIN device_library_sources s ON s.source_id = a.source_id WHERE a.canonical_track_id = t.id AND a.archived = 0), '') COLLATE NOCASE"
+        }
+        LibraryTrackSortField::TimelineRevision => "COALESCE(h.revision, 0)",
+        LibraryTrackSortField::Readiness => "CASE WHEN h.revision IS NULL THEN 1 ELSE 0 END",
+        LibraryTrackSortField::SourceTrackId => "t.source_track_id COLLATE NOCASE",
+        LibraryTrackSortField::AnalysisRevision => "t.analysis_revision COLLATE NOCASE",
+    };
+    format!(
+        "{expression} {direction}, t.title COLLATE NOCASE ASC, t.artist COLLATE NOCASE ASC, t.id ASC"
+    )
 }
 
 #[cfg(test)]

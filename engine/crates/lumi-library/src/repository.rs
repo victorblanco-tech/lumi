@@ -72,6 +72,53 @@ pub struct LibraryTrackQuery {
     search: String,
     playlist_id: Option<PlaylistId>,
     page: TrackPageRequest,
+    sort: LibraryTrackSort,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum LibraryTrackSortField {
+    #[default]
+    Playlist,
+    Title,
+    Artist,
+    Bpm,
+    Key,
+    Duration,
+    UsbSources,
+    TimelineRevision,
+    Readiness,
+    SourceTrackId,
+    AnalysisRevision,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum LibraryTrackSortDirection {
+    #[default]
+    Ascending,
+    Descending,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct LibraryTrackSort {
+    field: LibraryTrackSortField,
+    direction: LibraryTrackSortDirection,
+}
+
+impl LibraryTrackSort {
+    #[must_use]
+    pub const fn new(field: LibraryTrackSortField, direction: LibraryTrackSortDirection) -> Self {
+        Self { field, direction }
+    }
+
+    #[must_use]
+    pub const fn field(self) -> LibraryTrackSortField {
+        self.field
+    }
+
+    #[must_use]
+    pub const fn direction(self) -> LibraryTrackSortDirection {
+        self.direction
+    }
 }
 
 impl LibraryTrackQuery {
@@ -88,7 +135,19 @@ impl LibraryTrackQuery {
             search: search.trim().to_owned(),
             playlist_id,
             page,
+            sort: LibraryTrackSort::default(),
         })
+    }
+
+    pub fn try_new_sorted(
+        search: impl Into<String>,
+        playlist_id: Option<PlaylistId>,
+        page: TrackPageRequest,
+        sort: LibraryTrackSort,
+    ) -> Result<Self, TrackPageRequestError> {
+        let mut query = Self::try_new(search, playlist_id, page)?;
+        query.sort = sort;
+        Ok(query)
     }
 
     #[must_use]
@@ -104,6 +163,11 @@ impl LibraryTrackQuery {
     #[must_use]
     pub const fn page(&self) -> TrackPageRequest {
         self.page
+    }
+
+    #[must_use]
+    pub const fn sort(&self) -> LibraryTrackSort {
+        self.sort
     }
 }
 

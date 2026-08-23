@@ -5,9 +5,9 @@ use lumi_domain::{
     DeckId, OperationCommand, PlanId, PlanRevision, SceneId, StateRevision, ThemeId, TrackLoadId,
 };
 use lumi_library::{
-    AutoloopVariantMove, PhraseAbsorption, PhraseConflictChoice, PhraseLoopStrategy, PhraseRoleId,
-    PhraseRoleMove, ReconcileSide, ReconcileStrategy, ThemeSpecificVariant, TimelineEditCommand,
-    VariantId,
+    AutoloopVariantMove, LibraryTrackSort, LibraryTrackSortDirection, LibraryTrackSortField,
+    PhraseAbsorption, PhraseConflictChoice, PhraseLoopStrategy, PhraseRoleId, PhraseRoleMove,
+    ReconcileSide, ReconcileStrategy, ThemeSpecificVariant, TimelineEditCommand, VariantId,
 };
 use lumi_light_plans::LightPlanningPolicy;
 use lumi_midi_output::MidiAddress;
@@ -40,6 +40,7 @@ pub enum SessionCommand {
         playlist_id: Option<u64>,
         offset: u32,
         limit: u16,
+        sort: LibraryTrackSort,
     },
     OpenLibraryTrackEditor {
         track_id: u64,
@@ -126,6 +127,11 @@ pub enum SessionCommand {
         track_id: u64,
         expected_revision: u64,
         target_revision: u64,
+    },
+    ReuseLibraryTimeline {
+        source_track_id: u64,
+        target_track_id: u64,
+        expected_target_revision: u64,
     },
     MutatePhraseRoleCatalog {
         expected_revision: u64,
@@ -271,6 +277,7 @@ impl SessionCommand {
             | Self::UndoLibraryTimeline { .. }
             | Self::RedoLibraryTimeline { .. }
             | Self::RestoreLibraryTimelineRevision { .. }
+            | Self::ReuseLibraryTimeline { .. }
             | Self::MutatePhraseRoleCatalog { .. }
             | Self::MutateAutoloopCatalog { .. }
             | Self::ReplaceLightPlanningPolicy { .. }
@@ -318,6 +325,7 @@ impl SessionCommand {
                 | Self::UndoLibraryTimeline { .. }
                 | Self::RedoLibraryTimeline { .. }
                 | Self::RestoreLibraryTimelineRevision { .. }
+                | Self::ReuseLibraryTimeline { .. }
                 | Self::MutatePhraseRoleCatalog { .. }
                 | Self::MutateAutoloopCatalog { .. }
                 | Self::ReplaceLightPlanningPolicy { .. }
@@ -340,9 +348,18 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
             offset: u32::try_from(optional_unsigned(&envelope.payload, "offset")?.unwrap_or(0))
                 .map_err(|_| CommandDecodeError::InvalidField("offset"))?,
             limit: library_limit(optional_unsigned(&envelope.payload, "limit")?.unwrap_or(50))?,
+            sort: library_sort(&envelope.payload)?,
         }),
         "openLibraryTrackEditor" => Ok(SessionCommand::OpenLibraryTrackEditor {
             track_id: positive_unsigned(&envelope.payload, "trackId")?,
+        }),
+        "reuseLibraryTimeline" => Ok(SessionCommand::ReuseLibraryTimeline {
+            source_track_id: positive_unsigned(&envelope.payload, "sourceTrackId")?,
+            target_track_id: positive_unsigned(&envelope.payload, "targetTrackId")?,
+            expected_target_revision: positive_unsigned(
+                &envelope.payload,
+                "expectedTargetRevision",
+            )?,
         }),
         "getLibraryTrackWaveform" => Ok(SessionCommand::GetLibraryTrackWaveform {
             track_id: positive_unsigned(&envelope.payload, "trackId")?,
@@ -1126,6 +1143,31 @@ fn library_search(payload: &serde_json::Map<String, Value>) -> Result<String, Co
         return Err(CommandDecodeError::InvalidField("search"));
     }
     Ok(search.to_owned())
+}
+
+fn library_sort(
+    payload: &serde_json::Map<String, Value>,
+) -> Result<LibraryTrackSort, CommandDecodeError> {
+    let field = match optional_string(payload, "sortBy").unwrap_or("playlist") {
+        "playlist" => LibraryTrackSortField::Playlist,
+        "title" => LibraryTrackSortField::Title,
+        "artist" => LibraryTrackSortField::Artist,
+        "bpm" => LibraryTrackSortField::Bpm,
+        "key" => LibraryTrackSortField::Key,
+        "duration" => LibraryTrackSortField::Duration,
+        "usbSources" => LibraryTrackSortField::UsbSources,
+        "timelineRevision" => LibraryTrackSortField::TimelineRevision,
+        "readiness" => LibraryTrackSortField::Readiness,
+        "sourceTrackID" => LibraryTrackSortField::SourceTrackId,
+        "analysisRevision" => LibraryTrackSortField::AnalysisRevision,
+        _ => return Err(CommandDecodeError::InvalidField("sortBy")),
+    };
+    let direction = match optional_string(payload, "sortDirection").unwrap_or("ascending") {
+        "ascending" => LibraryTrackSortDirection::Ascending,
+        "descending" => LibraryTrackSortDirection::Descending,
+        _ => return Err(CommandDecodeError::InvalidField("sortDirection")),
+    };
+    Ok(LibraryTrackSort::new(field, direction))
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

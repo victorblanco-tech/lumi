@@ -7,12 +7,23 @@ public struct LibraryQueryRequest: Equatable, Sendable {
     public let playlistID: UInt64?
     public let offset: UInt32
     public let limit: UInt16
+    public let sortBy: LibraryTrackSortField
+    public let sortDirection: LibraryTrackSortDirection
 
-    public init(search: String, playlistID: UInt64?, offset: UInt32, limit: UInt16 = 50) {
+    public init(
+        search: String,
+        playlistID: UInt64?,
+        offset: UInt32,
+        limit: UInt16 = 50,
+        sortBy: LibraryTrackSortField = .playlist,
+        sortDirection: LibraryTrackSortDirection = .ascending
+    ) {
         self.search = search
         self.playlistID = playlistID
         self.offset = offset
         self.limit = limit
+        self.sortBy = sortBy
+        self.sortDirection = sortDirection
     }
 }
 
@@ -35,6 +46,7 @@ public struct LibraryWorkspaceView: View {
     private let onTimelineEdit: @MainActor (TrackTimelineEditRequest) -> Void
     private let onTimelineHistory: @MainActor (TrackTimelineHistoryRequest) -> Void
     private let onSourceReconcile: @MainActor (TrackSourceReconcileRequest) -> Void
+    private let onReuseTimeline: @MainActor (CreativeTimelineReuseRequest) -> Void
     private let onLoadOnLocalDeck: @MainActor (LibraryDeckLoadRequest) -> Void
     private let timelineFeedback: String?
     private let localPlaybackFeedback: String?
@@ -45,6 +57,9 @@ public struct LibraryWorkspaceView: View {
     @State private var selectedTrackID: UInt64?
     @State private var selectedPlaylistID: UInt64?
     @State private var readinessFilter: LibraryReadinessFilter = .all
+    @State private var sortBy: LibraryTrackSortField
+    @State private var sortDirection: LibraryTrackSortDirection
+    @State private var tableSortOrder: [KeyPathComparator<LibraryTrack>] = []
     @State private var editorAnalysis: TrackEditorAnalysis?
     @State private var requestedEditorTrackID: UInt64?
     @AppStorage(LumiPreferenceKey.libraryTableColumns)
@@ -59,6 +74,7 @@ public struct LibraryWorkspaceView: View {
         onTimelineEdit: @escaping @MainActor (TrackTimelineEditRequest) -> Void = { _ in },
         onTimelineHistory: @escaping @MainActor (TrackTimelineHistoryRequest) -> Void = { _ in },
         onSourceReconcile: @escaping @MainActor (TrackSourceReconcileRequest) -> Void = { _ in },
+        onReuseTimeline: @escaping @MainActor (CreativeTimelineReuseRequest) -> Void = { _ in },
         onLoadOnLocalDeck: @escaping @MainActor (LibraryDeckLoadRequest) -> Void = { _ in },
         timelineFeedback: String? = nil,
         localPlaybackFeedback: String? = nil,
@@ -70,6 +86,7 @@ public struct LibraryWorkspaceView: View {
         self.onTimelineEdit = onTimelineEdit
         self.onTimelineHistory = onTimelineHistory
         self.onSourceReconcile = onSourceReconcile
+        self.onReuseTimeline = onReuseTimeline
         self.onLoadOnLocalDeck = onLoadOnLocalDeck
         self.timelineFeedback = timelineFeedback
         self.localPlaybackFeedback = localPlaybackFeedback
@@ -79,6 +96,8 @@ public struct LibraryWorkspaceView: View {
         _search = State(initialValue: state.query.search)
         _selectedTrackID = State(initialValue: state.page.tracks.first?.id)
         _selectedPlaylistID = State(initialValue: state.query.playlistID)
+        _sortBy = State(initialValue: state.query.sortBy)
+        _sortDirection = State(initialValue: state.query.sortDirection)
         _editorAnalysis = State(initialValue: state.editor)
     }
 
@@ -96,7 +115,8 @@ public struct LibraryWorkspaceView: View {
                             isEmbedded: true,
                             onTimelineEdit: onTimelineEdit,
                             onTimelineHistory: onTimelineHistory,
-                            onSourceReconcile: onSourceReconcile
+                            onSourceReconcile: onSourceReconcile,
+                            onReuseTimeline: onReuseTimeline
                         )
                         .id(analysis.track.id)
                     } else {
@@ -115,6 +135,9 @@ public struct LibraryWorkspaceView: View {
         .task { requestInitialEditorIfNeeded() }
         .onChange(of: state.query.search) { _, value in search = value }
         .onChange(of: state.query.playlistID) { _, value in selectedPlaylistID = value }
+        .onChange(of: state.query.sortBy) { _, value in sortBy = value }
+        .onChange(of: state.query.sortDirection) { _, value in sortDirection = value }
+        .onChange(of: tableSortOrder) { _, value in applyTableSort(value) }
         .onChange(of: state.page.tracks) { _, tracks in
             if !tracks.contains(where: { $0.id == selectedTrackID }) {
                 selectedTrackID = tracks.first?.id
@@ -127,6 +150,17 @@ public struct LibraryWorkspaceView: View {
                 requestedEditorTrackID = nil
                 selectedTrackID = editor.track.id
             }
+        }
+        .task(id: search) {
+            guard rendersInteractiveControls,
+                  search != state.query.search else { return }
+            do {
+                try await Task.sleep(for: .milliseconds(180))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled, search != state.query.search else { return }
+            submitQuery(search: search, offset: 0)
         }
     }
 
@@ -314,6 +348,21 @@ public struct LibraryWorkspaceView: View {
             if rendersInteractiveControls {
                 TextField(localized("library.search"), text: $search)
                     .textFieldStyle(.roundedBorder)
+                    .padding(.trailing, search.isEmpty ? 0 : 22)
+                    .overlay(alignment: .trailing) {
+                        if !search.isEmpty {
+                            Button {
+                                search = ""
+                                submitQuery(search: "", offset: 0)
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(LumiColor.textSecondary)
+                            }
+                            .buttonStyle(.plain)
+                            .help("Clear search")
+                            .accessibilityIdentifier("lumi.library.search.clear")
+                        }
+                    }
                     .frame(minWidth: 180, idealWidth: 260, maxWidth: 320)
                     .onSubmit { submitQuery(offset: 0) }
                     .accessibilityIdentifier("lumi.library.search")
@@ -350,9 +399,10 @@ public struct LibraryWorkspaceView: View {
         Table(
             visibleTracks,
             selection: $selectedTrackID,
+            sortOrder: $tableSortOrder,
             columnCustomization: $trackTableCustomization
         ) {
-            TableColumn(localized("library.trackTitle")) { track in
+            TableColumn(localized("library.trackTitle"), value: \.title) { track in
                 editorLoadingCell(track) {
                     HStack(spacing: LumiSpacing.small) {
                         colorSwatch(track.colorRGB, height: 18)
@@ -372,7 +422,7 @@ public struct LibraryWorkspaceView: View {
             .width(min: 160, ideal: 260, max: 520)
             .customizationID("title")
 
-            TableColumn(localized("library.artist")) { track in
+            TableColumn(localized("library.artist"), value: \.artist) { track in
                 editorLoadingCell(track) {
                     Text(track.artist).lineLimit(1)
                 }
@@ -380,7 +430,7 @@ public struct LibraryWorkspaceView: View {
             .width(min: 120, ideal: 190, max: 420)
             .customizationID("artist")
 
-            TableColumn(localized("library.bpm")) { track in
+            TableColumn(localized("library.bpm"), value: \.bpmMilli) { track in
                 editorLoadingCell(track) {
                     Text(formatBPM(track.bpmMilli)).font(LumiTypography.technical)
                 }
@@ -388,7 +438,7 @@ public struct LibraryWorkspaceView: View {
             .width(min: 54, ideal: 64, max: 90)
             .customizationID("bpm")
 
-            TableColumn(localized("library.key")) { track in
+            TableColumn(localized("library.key"), value: \.sortKey) { track in
                 editorLoadingCell(track) {
                     Text(KeyNotationFormatter(notation: keyNotation).string(from: track.musicalKey))
                         .font(LumiTypography.technical)
@@ -397,7 +447,7 @@ public struct LibraryWorkspaceView: View {
             .width(min: 44, ideal: 54, max: 80)
             .customizationID("key")
 
-            TableColumn(localized("library.duration")) { track in
+            TableColumn(localized("library.duration"), value: \.durationMillis) { track in
                 editorLoadingCell(track) {
                     Text(formatDuration(track.durationMillis)).font(LumiTypography.technical)
                 }
@@ -405,7 +455,7 @@ public struct LibraryWorkspaceView: View {
             .width(min: 56, ideal: 68, max: 100)
             .customizationID("duration")
 
-            TableColumn(localized("library.usbSources")) { track in
+            TableColumn(localized("library.usbSources"), value: \.sortUSBSources) { track in
                 editorLoadingCell(track) {
                     let sources = track.usbSources.map(\.displayName).joined(separator: ", ")
                     Text(sources.isEmpty ? "—" : sources)
@@ -415,7 +465,7 @@ public struct LibraryWorkspaceView: View {
             .width(min: 120, ideal: 180, max: 360)
             .customizationID("usbSources")
 
-            TableColumn(localized("library.timelineRevision")) { track in
+            TableColumn(localized("library.timelineRevision"), value: \.sortTimelineRevision) { track in
                 editorLoadingCell(track) {
                     Text(track.timelineRevision.map { "R\($0)" } ?? "—")
                         .font(LumiTypography.technical)
@@ -424,7 +474,7 @@ public struct LibraryWorkspaceView: View {
             .width(min: 70, ideal: 92, max: 140)
             .customizationID("timeline")
 
-            TableColumn(localized("library.readiness")) { track in
+            TableColumn(localized("library.readiness"), value: \.sortReadiness) { track in
                 editorLoadingCell(track) {
                     Label(readinessName(track.readiness), systemImage: readinessIcon(track.readiness))
                         .font(LumiTypography.caption)
@@ -434,7 +484,7 @@ public struct LibraryWorkspaceView: View {
             .width(min: 88, ideal: 112, max: 180)
             .customizationID("readiness")
 
-            TableColumn(localized("library.sourceTrackID")) { track in
+            TableColumn(localized("library.sourceTrackID"), value: \.sourceTrackID) { track in
                 editorLoadingCell(track) {
                     Text(track.sourceTrackID).font(LumiTypography.technical).lineLimit(1)
                 }
@@ -443,7 +493,7 @@ public struct LibraryWorkspaceView: View {
             .defaultVisibility(.hidden)
             .customizationID("sourceTrackID")
 
-            TableColumn(localized("library.analysisRevision")) { track in
+            TableColumn(localized("library.analysisRevision"), value: \.analysisRevision) { track in
                 editorLoadingCell(track) {
                     Text(track.analysisRevision).font(LumiTypography.technical).lineLimit(1)
                 }
@@ -569,7 +619,17 @@ public struct LibraryWorkspaceView: View {
 
     private func selectPlaylist(_ id: UInt64?) {
         selectedPlaylistID = id
-        onQuery(LibraryQueryRequest(search: search, playlistID: id, offset: 0))
+        let playlistSort = id == nil && sortBy == .playlist ? LibraryTrackSortField.title : sortBy
+        sortBy = playlistSort
+        onQuery(
+            LibraryQueryRequest(
+                search: search,
+                playlistID: id,
+                offset: 0,
+                sortBy: playlistSort,
+                sortDirection: sortDirection
+            )
+        )
     }
 
     private func submitQuery(search querySearch: String? = nil, offset: UInt32) {
@@ -578,7 +638,44 @@ public struct LibraryWorkspaceView: View {
                 search: querySearch ?? search,
                 playlistID: state.query.playlistID,
                 offset: offset,
-                limit: state.query.limit
+                limit: state.query.limit,
+                sortBy: sortBy,
+                sortDirection: sortDirection
+            )
+        )
+    }
+
+    private func applyTableSort(_ order: [KeyPathComparator<LibraryTrack>]) {
+        guard let comparator = order.first else { return }
+        let keyPath = comparator.keyPath as AnyKeyPath
+        let field: LibraryTrackSortField
+        switch keyPath {
+        case \LibraryTrack.title: field = .title
+        case \LibraryTrack.artist: field = .artist
+        case \LibraryTrack.bpmMilli: field = .bpm
+        case \LibraryTrack.sortKey: field = .key
+        case \LibraryTrack.durationMillis: field = .duration
+        case \LibraryTrack.sortUSBSources: field = .usbSources
+        case \LibraryTrack.sortTimelineRevision: field = .timelineRevision
+        case \LibraryTrack.sortReadiness: field = .readiness
+        case \LibraryTrack.sourceTrackID: field = .sourceTrackID
+        case \LibraryTrack.analysisRevision: field = .analysisRevision
+        default: return
+        }
+        let direction: LibraryTrackSortDirection = comparator.order == .forward
+            ? .ascending
+            : .descending
+        guard field != sortBy || direction != sortDirection else { return }
+        sortBy = field
+        sortDirection = direction
+        onQuery(
+            LibraryQueryRequest(
+                search: search,
+                playlistID: state.query.playlistID,
+                offset: 0,
+                limit: state.query.limit,
+                sortBy: field,
+                sortDirection: direction
             )
         )
     }

@@ -7,11 +7,12 @@ use lumi_domain::ThemeId;
 use lumi_library::{
     AUTOLOOP_CATALOG_DEFAULTS_VERSION, AutoloopCatalog, AutoloopEntryId, AutoloopMatrixCell,
     AutoloopTheme, AutoloopVariant, ImportedLibraryBaseline, ImportedTrackAnalysis,
-    LibraryRepository, LibraryTrackQuery, LumiPhraseTimeline, PHRASE_ROLE_DEFAULTS_VERSION,
-    PhraseInstance, PhraseLoopStrategy, PhraseRole, PhraseRoleCatalog, PhraseRoleId,
-    PhraseRoleMove, ReconcileStrategy, SourceMirrorPlaylist, SourceMirrorSnapshot,
-    SourceMirrorTrack, SourcePhraseMapping, SourceRevision, SourceTrackId, TimelineEditCommand,
-    TimelineRevision, TimelineRevisionOrigin, TimelineRevisionReason, TrackPageRequest, VariantId,
+    LibraryRepository, LibraryTrackQuery, LibraryTrackSort, LibraryTrackSortDirection,
+    LibraryTrackSortField, LumiPhraseTimeline, PHRASE_ROLE_DEFAULTS_VERSION, PhraseInstance,
+    PhraseLoopStrategy, PhraseRole, PhraseRoleCatalog, PhraseRoleId, PhraseRoleMove, PlaylistId,
+    ReconcileStrategy, SourceMirrorPlaylist, SourceMirrorSnapshot, SourceMirrorTrack,
+    SourcePhraseMapping, SourceRevision, SourceTrackId, TimelineEditCommand, TimelineRevision,
+    TimelineRevisionOrigin, TimelineRevisionReason, TrackPageRequest, VariantId,
     reconcile_timeline,
 };
 use lumi_library_demo::{DemoLibraryRevision, DemoLibrarySourceProvider};
@@ -1178,6 +1179,73 @@ fn ten_thousand_track_fixture_meets_epic_two_a_budgets() -> Result<(), Box<dyn E
     eprintln!(
         "Epic 2A 10k benchmark: fixture={fixture_elapsed:?}, import={import_elapsed:?}, pages={page_elapsed:?}, search={search_elapsed:?}"
     );
+    Ok(())
+}
+
+#[test]
+fn track_sorting_is_stable_across_server_pages() -> Result<(), Box<dyn Error>> {
+    let baseline = DemoLibrarySourceProvider::scaled(250)?.load_baseline()?;
+    let mut repository = SqliteLibraryRepository::in_memory()?;
+    repository.import_baseline(&baseline)?;
+    let first = repository.query_tracks(&LibraryTrackQuery::try_new_sorted(
+        "",
+        None,
+        TrackPageRequest::try_new(0, 50)?,
+        LibraryTrackSort::new(
+            LibraryTrackSortField::Title,
+            LibraryTrackSortDirection::Descending,
+        ),
+    )?)?;
+    let second = repository.query_tracks(&LibraryTrackQuery::try_new_sorted(
+        "",
+        None,
+        TrackPageRequest::try_new(50, 50)?,
+        LibraryTrackSort::new(
+            LibraryTrackSortField::Title,
+            LibraryTrackSortDirection::Descending,
+        ),
+    )?)?;
+    assert_eq!(first.total(), 250);
+    assert!(
+        first.tracks().last().ok_or("first page")?.title()
+            >= second.tracks().first().ok_or("second page")?.title()
+    );
+    assert!(
+        first
+            .tracks()
+            .windows(2)
+            .all(|tracks| tracks[0].title() >= tracks[1].title())
+    );
+
+    let fields = [
+        LibraryTrackSortField::Playlist,
+        LibraryTrackSortField::Title,
+        LibraryTrackSortField::Artist,
+        LibraryTrackSortField::Bpm,
+        LibraryTrackSortField::Key,
+        LibraryTrackSortField::Duration,
+        LibraryTrackSortField::UsbSources,
+        LibraryTrackSortField::TimelineRevision,
+        LibraryTrackSortField::Readiness,
+        LibraryTrackSortField::SourceTrackId,
+        LibraryTrackSortField::AnalysisRevision,
+    ];
+    for playlist_id in [None, Some(PlaylistId::new(1))] {
+        for field in fields {
+            for direction in [
+                LibraryTrackSortDirection::Ascending,
+                LibraryTrackSortDirection::Descending,
+            ] {
+                let page = repository.query_tracks(&LibraryTrackQuery::try_new_sorted(
+                    "",
+                    playlist_id,
+                    TrackPageRequest::try_new(0, 50)?,
+                    LibraryTrackSort::new(field, direction),
+                )?)?;
+                assert!(page.tracks().len() <= 50);
+            }
+        }
+    }
     Ok(())
 }
 

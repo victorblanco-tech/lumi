@@ -3088,10 +3088,11 @@ fn apply_command(
             playlist_id,
             offset,
             limit,
+            sort,
         } => {
             runtime
                 .library_worker
-                .query(search, playlist_id, offset, limit);
+                .query(search, playlist_id, offset, limit, sort);
             return Ok(());
         }
         SessionCommand::OpenLibraryTrackEditor { track_id } => {
@@ -3101,6 +3102,18 @@ fn apply_command(
         SessionCommand::GetLibraryTrackWaveform { .. } => return Ok(()),
         SessionCommand::CloseLibraryTrackEditor => {
             runtime.library_worker.close_editor();
+            return Ok(());
+        }
+        SessionCommand::ReuseLibraryTimeline {
+            source_track_id,
+            target_track_id,
+            expected_target_revision,
+        } => {
+            runtime.library_worker.reuse_creative_timeline(
+                source_track_id,
+                target_track_id,
+                expected_target_revision,
+            )?;
             return Ok(());
         }
         SessionCommand::PreviewDemoSourceRefresh => {
@@ -3744,6 +3757,7 @@ fn apply_command(
         | SessionCommand::UndoLibraryTimeline { .. }
         | SessionCommand::RedoLibraryTimeline { .. }
         | SessionCommand::RestoreLibraryTimelineRevision { .. }
+        | SessionCommand::ReuseLibraryTimeline { .. }
         | SessionCommand::MutatePhraseRoleCatalog { .. }
         | SessionCommand::MutateAutoloopCatalog { .. }
         | SessionCommand::ReplaceLightPlanningPolicy { .. }

@@ -13,6 +13,7 @@ public struct TrackLightingEditorView: View {
     private let onTimelineEdit: @MainActor (TrackTimelineEditRequest) -> Void
     private let onTimelineHistory: @MainActor (TrackTimelineHistoryRequest) -> Void
     private let onSourceReconcile: @MainActor (TrackSourceReconcileRequest) -> Void
+    private let onReuseTimeline: @MainActor (CreativeTimelineReuseRequest) -> Void
     @StateObject private var audio: TrackAudioPreviewController
     @State private var viewport: TrackEditorViewport
     @State private var selectedPhraseID: UInt64?
@@ -25,6 +26,7 @@ public struct TrackLightingEditorView: View {
     @State private var hoveredBoundaryAfterPhraseIndex: UInt16?
     @State private var pendingBoundaryBeat: UInt32?
     @State private var conflictSides: [UInt16: TrackSourceConflictSide]
+    @State private var pendingCreativeReuse: CreativeTimelineCandidate?
     @AppStorage(LumiPreferenceKey.waveformZoomAnchor)
     private var waveformZoomAnchorRaw = LumiWaveformZoomAnchor.mouse.rawValue
     @AppStorage(LumiPreferenceKey.waveformReverseHorizontalScroll)
@@ -47,7 +49,8 @@ public struct TrackLightingEditorView: View {
         isEmbedded: Bool = false,
         onTimelineEdit: @escaping @MainActor (TrackTimelineEditRequest) -> Void = { _ in },
         onTimelineHistory: @escaping @MainActor (TrackTimelineHistoryRequest) -> Void = { _ in },
-        onSourceReconcile: @escaping @MainActor (TrackSourceReconcileRequest) -> Void = { _ in }
+        onSourceReconcile: @escaping @MainActor (TrackSourceReconcileRequest) -> Void = { _ in },
+        onReuseTimeline: @escaping @MainActor (CreativeTimelineReuseRequest) -> Void = { _ in }
     ) {
         self.analysis = analysis
         self.autoloopCatalog = autoloopCatalog
@@ -59,6 +62,7 @@ public struct TrackLightingEditorView: View {
         self.onTimelineEdit = onTimelineEdit
         self.onTimelineHistory = onTimelineHistory
         self.onSourceReconcile = onSourceReconcile
+        self.onReuseTimeline = onReuseTimeline
         _audio = StateObject(wrappedValue: TrackAudioPreviewController(analysis: analysis))
         _viewport = State(
             initialValue: TrackEditorViewport(
@@ -143,6 +147,31 @@ public struct TrackLightingEditorView: View {
             )
         }
         .onDisappear { audio.shutdown() }
+        .confirmationDialog(
+            "Reuse Lumi phrases?",
+            isPresented: Binding(
+                get: { pendingCreativeReuse != nil },
+                set: { if !$0 { pendingCreativeReuse = nil } }
+            ),
+            presenting: pendingCreativeReuse
+        ) { candidate in
+            Button("Copy phrases from \(candidate.title)") {
+                onReuseTimeline(
+                    CreativeTimelineReuseRequest(
+                        sourceTrackID: candidate.trackID,
+                        targetTrackID: analysis.track.id,
+                        expectedTargetRevision: analysis.timeline.revision
+                    )
+                )
+                pendingCreativeReuse = nil
+            }
+            Button("Cancel", role: .cancel) { pendingCreativeReuse = nil }
+        } message: { candidate in
+            Text(
+                "This creates a new Lumi revision for \(analysis.track.title). "
+                    + "The old track and its phrase work remain unchanged."
+            )
+        }
     }
 
     private var header: some View {
@@ -159,6 +188,37 @@ public struct TrackLightingEditorView: View {
             metric("BPM", formatEditorBPM(analysis.track.bpmMilli))
             metric("REMAIN", formatEditorTime(remainingMillis))
             metric("BAR · BEAT", barBeatLabel)
+            if rendersInteractiveControls, !analysis.creativeReuseCandidates.isEmpty {
+                Menu {
+                    ForEach(analysis.creativeReuseCandidates) { candidate in
+                        Button {
+                            pendingCreativeReuse = candidate
+                        } label: {
+                            Label {
+                                Text(
+                                    candidate.title
+                                        + (candidate.likelyVersion ? " · Suggested version" : "")
+                                )
+                            } icon: {
+                                Image(
+                                    systemName: candidate.exactBeatCompatibility
+                                        ? "checkmark.circle"
+                                        : "exclamationmark.triangle"
+                                )
+                            }
+                        }
+                        .disabled(!candidate.exactBeatCompatibility)
+                    }
+                } label: {
+                    Label("Reuse Lumi Phrases", systemImage: "square.on.square")
+                }
+                .menuStyle(.borderlessButton)
+                .help(
+                    "Copy an existing Lumi-authored phrase timeline into this track as a new revision. "
+                        + "Only exact beat-compatible versions can be applied automatically."
+                )
+                .accessibilityIdentifier("lumi.trackEditor.reusePhrases")
+            }
             if !isEmbedded {
                 Button(editorCopy("editor.close")) {
                     dismiss()

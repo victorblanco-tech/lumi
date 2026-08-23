@@ -101,6 +101,26 @@ struct LibraryWorkspaceTests {
         #expect(state.page.tracks.first?.usbSources.first?.displayName == "DJ USB")
     }
 
+    @Test("Track sorting and creative phrase reuse remain explicit wire contracts")
+    func decodesTrackSortAndCreativeReuse() throws {
+        let state = try LibrarySnapshotDecoder().decode(
+            envelope(
+                trackValues: [trackValue()],
+                editorValue: editorValue(),
+                sortBy: "bpm",
+                sortDirection: "descending"
+            )
+        )
+
+        #expect(state.query.sortBy == .bpm)
+        #expect(state.query.sortDirection == .descending)
+        let candidate = try #require(state.editor?.creativeReuseCandidates.first)
+        #expect(candidate.trackID == 84)
+        #expect(candidate.title == "Horizon Lines v003")
+        #expect(candidate.exactBeatCompatibility)
+        #expect(candidate.likelyVersion)
+    }
+
     @Test("Data management decodes reset impact and detached creative work")
     func decodesDataManagementState() throws {
         let state = try LibrarySnapshotDecoder().decode(
@@ -1388,7 +1408,9 @@ private func envelope(
     rekordboxSyncPreview: JSONValue = .null,
     rekordboxDevices: JSONValue = .null,
     rekordboxDeviceInspection: JSONValue = .null,
-    dataManagement: JSONValue = .null
+    dataManagement: JSONValue = .null,
+    sortBy: String = "playlist",
+    sortDirection: String = "ascending"
 ) -> MessageEnvelope {
     MessageEnvelope(
         protocolVersion: 1,
@@ -1424,7 +1446,9 @@ private func envelope(
                     "search": .string(""),
                     "playlistId": .null,
                     "offset": .number(0),
-                    "limit": .number(50)
+                    "limit": .number(50),
+                    "sortBy": .string(sortBy),
+                    "sortDirection": .string(sortDirection)
                 ]),
                 "playlists": .array([
                     .object([
@@ -1606,6 +1630,17 @@ private func editorValue() -> JSONValue {
                 "endBeat": .number(8),
                 "rawLabel": .string("Up"),
                 "providerKind": .string("demo")
+            ])
+        ]),
+        "creativeReuseCandidates": .array([
+            .object([
+                "trackId": .number(84),
+                "title": .string("Horizon Lines v003"),
+                "artist": .string("Lumi Demo"),
+                "phraseCount": .number(2),
+                "totalBeats": .number(8),
+                "exactBeatCompatibility": .boolean(true),
+                "likelyVersion": .boolean(true)
             ])
         ]),
         "timeline": .object([

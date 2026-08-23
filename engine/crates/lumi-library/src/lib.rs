@@ -42,9 +42,10 @@ pub use reconciliation::{
     ReconcileStrategy, SourceChangeClass, SourceTrackDiff, reconcile_timeline,
 };
 pub use repository::{
-    ImportResult, LibraryRepository, LibrarySourceSummary, LibraryTrackQuery, PlaylistPage,
-    PlaylistSummary, StoredTrack, TimelineRevisionPage, TimelineRevisionSummary, TrackPage,
-    TrackPageRequest, TrackPageRequestError, TrackSummary,
+    ImportResult, LibraryRepository, LibrarySourceSummary, LibraryTrackQuery, LibraryTrackSort,
+    LibraryTrackSortDirection, LibraryTrackSortField, PlaylistPage, PlaylistSummary, StoredTrack,
+    TimelineRevisionPage, TimelineRevisionSummary, TrackPage, TrackPageRequest,
+    TrackPageRequestError, TrackSummary,
 };
 pub use timeline::{
     LumiPhraseTimeline, PhraseAbsorption, PhraseInstance, PhraseLoopStrategy, ThemeSpecificVariant,

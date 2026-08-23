@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.5.0-dev-20 - 2026-08-23
+
+### Added
+
+- Adds immediate, cancellation-safe Library search with a visible clear action.
+- Makes every Tracks column server-sortable across the complete result and all
+  pages, with native macOS sort indicators.
+- Adds `Reuse Lumi Phrases` for copying an exact-beat-compatible authored
+  timeline from an older edit or mashup into a new target revision.
+
+### Improved
+
+- Keeps Import & Sources status geometry stable and source-scoped while USB
+  scanning, synchronization and review actions complete.
+- Documents the short pre-show beatgrid refresh workflow and confirms that
+  trusted USB media remains read-only.
+- Ranks likely `v003` → `v004` successors without silently merging track
+  identities or guessing across a changed arrangement.
+
+### Verification
+
+- Adds deterministic server-side sorting coverage across page boundaries.
+- Adds revision, source-preservation and exact-beat safety coverage for creative
+  timeline reuse.
+- Re-runs the USB identity, inspection, selection-impact, source-review and
+  bounded Library UI suites.
+
 ## 0.5.0-dev-19 - 2026-08-23
 
 ### Fixed

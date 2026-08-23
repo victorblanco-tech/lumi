@@ -652,7 +652,9 @@ final class EngineStatusModel: ObservableObject {
                     search: request.search,
                     playlistID: request.playlistID,
                     offset: request.offset,
-                    limit: request.limit
+                    limit: request.limit,
+                    sortBy: request.sortBy.rawValue,
+                    sortDirection: request.sortDirection.rawValue
                 )
             )
             if let failure = EngineCommandFailure(envelope) {
@@ -996,6 +998,17 @@ final class EngineStatusModel: ObservableObject {
             success = "Source phrases adopted; the previous Lumi revision remains recoverable."
         }
         await exchangeTimelineCommand(command, success: success)
+    }
+
+    func reuseLibraryTimeline(_ request: CreativeTimelineReuseRequest) async {
+        await exchangeTimelineCommand(
+            .reuseLibraryTimeline(
+                sourceTrackID: request.sourceTrackID,
+                targetTrackID: request.targetTrackID,
+                expectedTargetRevision: request.expectedTargetRevision
+            ),
+            success: "Lumi phrases copied as a new track revision; the source remains unchanged."
+        )
     }
 
     func previewRekordboxXMLSync(_ request: RekordboxXMLSyncPreviewRequest) async {

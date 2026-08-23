@@ -100,6 +100,22 @@ never replaced by a USB review decision. Refreshing source analysis may
 reconcile its beat-coordinate baseline using the existing timeline preservation
 rules, but it does not turn Rekordbox phrases back into authored Lumi phrases.
 
+The normal pre-show refresh is intentionally short: reconnect a trusted source,
+open its stored playlist selection, scan, review the component impact and sync.
+A changed analysis revision from that same source refreshes beatgrid, waveform,
+cues and raw phrases in one SQLite transaction. Its existing Lumi timeline is
+rebased onto the new analysis revision in the same transaction; a failed parse,
+missing analysis file or invalid first phrase boundary rolls the complete sync
+back. Playlist rows are replaced only for the selected source and never leak
+between two equal-model USB devices.
+
+USB media remains read-only. Lumi uses the macOS filesystem UUID, supplemented
+by the physical hardware serial when duplicate FAT identities require it. A
+Lumi marker file is deliberately not written: it would weaken safe eject and
+read-only guarantees and is unnecessary while these stable identities are
+available. If a platform later cannot supply either identity, an explicit,
+opt-in media registration ADR is required before any USB write is introduced.
+
 The integration is named **Pro DJ Link** in all product UI. Beat Link Trigger
 is a legacy development fallback; the production path is Lumi's supervised
 bridge using the upstream `beat-link` library.

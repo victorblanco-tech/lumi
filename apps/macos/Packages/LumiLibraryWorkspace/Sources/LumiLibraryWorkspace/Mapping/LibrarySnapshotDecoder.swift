@@ -64,7 +64,14 @@ public struct LibrarySnapshotDecoder: Sendable {
             offset: try UInt32(exactly: unsigned(queryObject, "offset"))
                 .required(.invalidNumber("offset")),
             limit: try UInt16(exactly: unsigned(queryObject, "limit"))
-                .required(.invalidNumber("limit"))
+                .required(.invalidNumber("limit")),
+            sortBy: try LibraryTrackSortField(
+                rawValue: optionalString(queryObject, "sortBy") ?? "playlist"
+            )
+                .required(.invalidQuerySort),
+            sortDirection: try LibraryTrackSortDirection(
+                rawValue: optionalString(queryObject, "sortDirection") ?? "ascending"
+            ).required(.invalidQuerySort)
         )
         guard (1...200).contains(query.limit) else {
             throw LibrarySnapshotError.unboundedPage
@@ -1149,7 +1156,22 @@ public struct LibrarySnapshotDecoder: Sendable {
                 canRedo: try boolean(timeline, "canRedo"),
                 revisions: decodedRevisions
             ),
-            sourceReconciliation: try decodeSourceReconciliation(editor["sourceReconciliation"])
+            sourceReconciliation: try decodeSourceReconciliation(editor["sourceReconciliation"]),
+            creativeReuseCandidates: try optionalArray(editor, "creativeReuseCandidates").map {
+                guard case let .object(candidate) = $0 else {
+                    throw LibrarySnapshotError.invalidObject
+                }
+                return CreativeTimelineCandidate(
+                    trackID: try unsigned(candidate, "trackId"),
+                    title: try string(candidate, "title"),
+                    artist: try string(candidate, "artist"),
+                    phraseCount: try unsigned(candidate, "phraseCount"),
+                    totalBeats: try UInt32(exactly: unsigned(candidate, "totalBeats"))
+                        .required(.invalidNumber("creativeReuse.totalBeats")),
+                    exactBeatCompatibility: try boolean(candidate, "exactBeatCompatibility"),
+                    likelyVersion: try boolean(candidate, "likelyVersion")
+                )
+            }
         )
     }
 
@@ -1493,6 +1515,7 @@ public enum LibrarySnapshotError: Error, Equatable {
     case invalidCondition
     case invalidMusicalKey
     case invalidReadiness
+    case invalidQuerySort
     case invalidNumber(String)
     case unboundedPage
     case unboundedEditor

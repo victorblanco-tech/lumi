@@ -11,14 +11,14 @@ use lumi_domain::{
 use lumi_library::{
     AutoloopCatalog, AutoloopCatalogError, AutoloopResolutionReason, AutoloopVariantMove, BeatGrid,
     BeatMarker, HotCue, ImportedLibraryBaseline, ImportedPlaylist, ImportedTrackAnalysis,
-    LibraryRepository, LibraryTrackQuery, LumiPhraseTimeline, PhraseInstance, PhraseLoopStrategy,
-    PhraseRole, PhraseRoleCatalogError, PhraseRoleId, PhraseRoleMove, PlaylistId,
-    RawPhraseObservation, ReconcileError, ReconcilePreview, ReconcileStrategy, SourceChangeClass,
-    SourceMirrorDiff, SourceMirrorPlaylist, SourceMirrorSnapshot, SourceMirrorTrack,
-    SourcePhraseMapping, SourcePlaylistId, SourceRevision, SourceTrackDiff, TimelineEditCommand,
-    TimelineEditError, TimelineRevision, TimelineRevisionOrigin, TimelineRevisionReason,
-    TimelineRevisionSummary, TrackColor, TrackPageRequest, TrackSummary, VariantId, WaveformPoint,
-    reconcile_timeline,
+    LibraryRepository, LibraryTrackQuery, LibraryTrackSort, LibraryTrackSortDirection,
+    LibraryTrackSortField, LumiPhraseTimeline, PhraseInstance, PhraseLoopStrategy, PhraseRole,
+    PhraseRoleCatalogError, PhraseRoleId, PhraseRoleMove, PlaylistId, RawPhraseObservation,
+    ReconcileError, ReconcilePreview, ReconcileStrategy, SourceChangeClass, SourceMirrorDiff,
+    SourceMirrorPlaylist, SourceMirrorSnapshot, SourceMirrorTrack, SourcePhraseMapping,
+    SourcePlaylistId, SourceRevision, SourceTrackDiff, TimelineEditCommand, TimelineEditError,
+    TimelineRevision, TimelineRevisionOrigin, TimelineRevisionReason, TimelineRevisionSummary,
+    TrackColor, TrackPageRequest, TrackSummary, VariantId, WaveformPoint, reconcile_timeline,
 };
 use lumi_library_demo::{DemoLibraryError, DemoLibraryRevision, DemoLibrarySourceProvider};
 use lumi_library_source::MusicLibrarySourceProvider as _;
@@ -64,6 +64,29 @@ const MAX_IMPORTED_WAVEFORM_POINTS: usize = 16_384;
 const MAX_DECK_WAVEFORM_PREVIEW_POINTS: usize = 1_024;
 const MAX_DECK_WAVEFORM_DETAIL_POINTS: usize = 16_384;
 
+pub(crate) fn library_sort_field_name(field: LibraryTrackSortField) -> &'static str {
+    match field {
+        LibraryTrackSortField::Playlist => "playlist",
+        LibraryTrackSortField::Title => "title",
+        LibraryTrackSortField::Artist => "artist",
+        LibraryTrackSortField::Bpm => "bpm",
+        LibraryTrackSortField::Key => "key",
+        LibraryTrackSortField::Duration => "duration",
+        LibraryTrackSortField::UsbSources => "usbSources",
+        LibraryTrackSortField::TimelineRevision => "timelineRevision",
+        LibraryTrackSortField::Readiness => "readiness",
+        LibraryTrackSortField::SourceTrackId => "sourceTrackID",
+        LibraryTrackSortField::AnalysisRevision => "analysisRevision",
+    }
+}
+
+pub(crate) fn library_sort_direction_name(direction: LibraryTrackSortDirection) -> &'static str {
+    match direction {
+        LibraryTrackSortDirection::Ascending => "ascending",
+        LibraryTrackSortDirection::Descending => "descending",
+    }
+}
+
 pub struct LibraryWorker {
     repository: SqliteLibraryRepository,
     database_path: Option<std::path::PathBuf>,
@@ -75,6 +98,7 @@ pub struct LibraryWorker {
     playlist_id: Option<PlaylistId>,
     offset: u32,
     limit: u16,
+    sort: LibraryTrackSort,
     editor_track_id: Option<TrackId>,
     pending_source_refresh: Option<ImportedLibraryBaseline>,
     pending_rekordbox_preview: Option<RekordboxXmlMirrorSnapshot>,
@@ -870,6 +894,7 @@ impl LibraryWorker {
             playlist_id: None,
             offset: 0,
             limit: DEFAULT_PAGE_LIMIT,
+            sort: LibraryTrackSort::default(),
             editor_track_id: None,
             pending_source_refresh: None,
             pending_rekordbox_preview: None,
@@ -950,11 +975,19 @@ impl LibraryWorker {
         Ok(())
     }
 
-    pub fn query(&mut self, search: String, playlist_id: Option<u64>, offset: u32, limit: u16) {
+    pub fn query(
+        &mut self,
+        search: String,
+        playlist_id: Option<u64>,
+        offset: u32,
+        limit: u16,
+        sort: LibraryTrackSort,
+    ) {
         self.search = search;
         self.playlist_id = playlist_id.map(PlaylistId::new);
         self.offset = offset;
         self.limit = limit;
+        self.sort = sort;
     }
 
     pub fn preview_library_reset(
@@ -2221,6 +2254,68 @@ impl LibraryWorker {
         Ok(())
     }
 
+    pub fn reuse_creative_timeline(
+        &mut self,
+        source_track_id: u64,
+        target_track_id: u64,
+        expected_target_revision: u64,
+    ) -> Result<(), LibraryWorkerError> {
+        let source_track_id = TrackId::new(source_track_id);
+        let target_track_id = TrackId::new(target_track_id);
+        self.require_open_track(target_track_id)?;
+        let target = self.require_expected_head(target_track_id, expected_target_revision)?;
+        let source = self
+            .repository
+            .timeline_head(source_track_id)?
+            .ok_or(LibraryWorkerError::CreativeTimelineSourceUnavailable)?;
+        let eligible = self
+            .repository
+            .creative_timeline_candidates(target_track_id)?
+            .iter()
+            .any(|candidate| candidate.track_id == source_track_id);
+        if !eligible {
+            return Err(LibraryWorkerError::CreativeTimelineSourceUnavailable);
+        }
+        if source.total_beats() != target.total_beats() {
+            return Err(LibraryWorkerError::CreativeTimelineIncompatible {
+                source_beats: source.total_beats(),
+                target_beats: target.total_beats(),
+            });
+        }
+        let revision = target
+            .revision()
+            .checked_next()
+            .ok_or(LibraryWorkerError::HistoryOverflow)?;
+        let phrases = source
+            .phrases()
+            .iter()
+            .enumerate()
+            .map(|(index, phrase)| {
+                PhraseInstance::new(
+                    u16::try_from(index).unwrap_or(u16::MAX),
+                    phrase.start_beat(),
+                    phrase.end_beat(),
+                    phrase.role_id().clone(),
+                )
+                .with_loop_strategy(phrase.loop_strategy().clone())
+            })
+            .collect::<Vec<_>>();
+        let copied = LumiPhraseTimeline::try_new_with_history(
+            target_track_id,
+            revision,
+            target.baseline_revision().clone(),
+            target.total_beats(),
+            TimelineRevisionOrigin::RevisionRestore,
+            TimelineRevisionReason::RestoreRevision,
+            Some(target.revision()),
+            None,
+            phrases,
+        )?;
+        self.repository
+            .append_timeline_revision(&copied, Some(target.revision()))?;
+        Ok(())
+    }
+
     pub const fn close_editor(&mut self) {
         self.editor_track_id = None;
     }
@@ -2740,7 +2835,12 @@ impl LibraryWorker {
         include_device_inspection: bool,
     ) -> Result<Value, LibraryWorkerError> {
         let request = TrackPageRequest::try_new(self.offset, self.limit)?;
-        let query = LibraryTrackQuery::try_new(self.search.clone(), self.playlist_id, request)?;
+        let query = LibraryTrackQuery::try_new_sorted(
+            self.search.clone(),
+            self.playlist_id,
+            request,
+            self.sort,
+        )?;
         let page = self.repository.query_tracks(&query)?;
         let device_source_relations = self.repository.device_track_source_relations(
             &page
@@ -2933,6 +3033,8 @@ impl LibraryWorker {
                 "playlistId": self.playlist_id.map(|id| id.value()),
                 "offset": page.offset(),
                 "limit": self.limit,
+                "sortBy": library_sort_field_name(self.sort.field()),
+                "sortDirection": library_sort_direction_name(self.sort.direction()),
             },
             "playlists": playlist_page.playlists().iter().map(|playlist| json!({
                 "id": playlist.id().value(),
@@ -3222,6 +3324,7 @@ impl LibraryWorker {
             .repository
             .timeline_revisions(track_id, TrackPageRequest::try_new(0, 200)?)?;
         let audio_uri = self.resolved_audio_uri(&track)?;
+        let creative_reuse_candidates = self.repository.creative_timeline_candidates(track_id)?;
         Ok(json!({
             "track": track_json(track.summary()),
             "audioUri": audio_uri,
@@ -3282,6 +3385,15 @@ impl LibraryWorker {
                 "loopStrategy": loop_strategy_json(&autoloop_catalog, phrase),
             })).collect::<Vec<_>>(),
             "sourceReconciliation": self.source_reconciliation_json(&track, &timeline)?,
+            "creativeReuseCandidates": creative_reuse_candidates.iter().map(|candidate| json!({
+                "trackId": candidate.track_id.value(),
+                "title": candidate.title,
+                "artist": candidate.artist,
+                "phraseCount": candidate.phrase_count,
+                "totalBeats": candidate.total_beats,
+                "exactBeatCompatibility": candidate.exact_beat_compatibility,
+                "likelyVersion": candidate.likely_version,
+            })).collect::<Vec<_>>(),
         }))
     }
 
@@ -4490,6 +4602,15 @@ pub enum LibraryWorkerError {
     InvalidDevicePlaylistSelection,
     #[error("the selected USB playlists contain no tracks")]
     EmptyDevicePlaylistSelection,
+    #[error("the selected track has no reusable Lumi-authored phrase timeline")]
+    CreativeTimelineSourceUnavailable,
+    #[error(
+        "the source phrase timeline has {source_beats} beats but the target has {target_beats}; Lumi will not copy it without review"
+    )]
+    CreativeTimelineIncompatible {
+        source_beats: u32,
+        target_beats: u32,
+    },
     #[error("the USB review changed; refresh the source before choosing again")]
     DeviceReviewChanged,
     #[error("Rekordbox is not installed in a supported local location")]
@@ -4643,8 +4764,9 @@ mod tests {
 
     use lumi_domain::{PhraseKind, ThemeId, TrackId};
     use lumi_library::{
-        LibraryRepository as _, PhraseLoopStrategy, PhraseRoleId, ReconcileStrategy,
-        TimelineEditCommand, TrackPageRequest, VariantId, WaveformPoint,
+        LibraryRepository as _, LibraryTrackSort, PhraseLoopStrategy, PhraseRoleId,
+        ReconcileStrategy, TimelineEditCommand, TimelineRevisionOrigin, TrackPageRequest,
+        VariantId, WaveformPoint,
     };
     use lumi_library_demo::{DemoLibraryRevision, DemoLibrarySourceProvider};
     use lumi_library_source::MusicLibrarySourceProvider as _;
@@ -4906,7 +5028,7 @@ mod tests {
     fn collection_total_is_independent_from_the_active_playlist()
     -> Result<(), Box<dyn std::error::Error>> {
         let mut worker = LibraryWorker::demo()?;
-        worker.query(String::new(), Some(2), 0, 50);
+        worker.query(String::new(), Some(2), 0, 50, LibraryTrackSort::default());
 
         let snapshot = worker.snapshot_json()?;
 
@@ -5638,7 +5760,13 @@ mod tests {
             let afterglow_id = track_id("afterglow-drive")?;
             let northern_id = track_id("northern-pulse")?;
 
-            worker.query("Horizon Lines".to_owned(), None, 0, 50);
+            worker.query(
+                "Horizon Lines".to_owned(),
+                None,
+                0,
+                50,
+                LibraryTrackSort::default(),
+            );
             let browsed = worker.snapshot_json()?;
             assert_eq!(browsed["page"]["total"], 1);
             assert_eq!(browsed["page"]["tracks"][0]["id"], horizon_id);
@@ -5944,6 +6072,80 @@ mod tests {
                 }));
             }
         }
+        Ok(())
+    }
+
+    #[test]
+    fn creative_timeline_reuse_is_revisioned_and_exact_beat_safe()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut worker = LibraryWorker::demo()?;
+        let equal_fixture = DemoLibrarySourceProvider::scaled(2)?.load_baseline()?;
+        worker.repository.import_baseline(&equal_fixture)?;
+        worker.ensure_imported_timelines()?;
+        let tracks = worker
+            .repository
+            .page_tracks(TrackPageRequest::try_new(0, 200)?)?
+            .tracks()
+            .to_vec();
+        let pair = tracks.iter().enumerate().find_map(|(index, source)| {
+            let source_beats = worker
+                .repository
+                .timeline_head(source.id())
+                .ok()??
+                .total_beats();
+            tracks.iter().skip(index + 1).find_map(|target| {
+                let target_beats = worker
+                    .repository
+                    .timeline_head(target.id())
+                    .ok()??
+                    .total_beats();
+                (source_beats == target_beats).then_some((source.clone(), target.clone()))
+            })
+        });
+        let (source, target) = pair.ok_or("demo fixture needs an equal-beat track pair")?;
+        let source_head = worker
+            .repository
+            .timeline_head(source.id())?
+            .ok_or("source")?;
+        let edited = source_head.edit(TimelineEditCommand::ChangeRole {
+            phrase_index: 0,
+            role_id: PhraseRoleId::try_new("drop")?,
+        })?;
+        worker
+            .repository
+            .append_timeline_revision(&edited, Some(source_head.revision()))?;
+
+        let target_before = worker
+            .repository
+            .timeline_head(target.id())?
+            .ok_or("target")?;
+        worker.open_editor(target.id().value())?;
+        worker.reuse_creative_timeline(
+            source.id().value(),
+            target.id().value(),
+            target_before.revision().value(),
+        )?;
+
+        let target_after = worker
+            .repository
+            .timeline_head(target.id())?
+            .ok_or("target")?;
+        assert_eq!(
+            target_after.revision().value(),
+            target_before.revision().value() + 1
+        );
+        assert_eq!(
+            target_after.origin(),
+            TimelineRevisionOrigin::RevisionRestore
+        );
+        assert_eq!(target_after.phrases(), edited.phrases());
+        assert_eq!(
+            worker
+                .repository
+                .timeline_head(source.id())?
+                .ok_or("source")?,
+            edited
+        );
         Ok(())
     }
 }

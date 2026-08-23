@@ -104,6 +104,9 @@ struct FoundationView: View {
                         onSourceReconcile: { request in
                             Task { await engineStatus.reconcileLibrarySource(request) }
                         },
+                        onReuseTimeline: { request in
+                            Task { await engineStatus.reuseLibraryTimeline(request) }
+                        },
                         onLoadOnLocalDeck: { request in
                             Task { await engineStatus.loadLibraryTrackOnLocalDeck(request) }
                         },

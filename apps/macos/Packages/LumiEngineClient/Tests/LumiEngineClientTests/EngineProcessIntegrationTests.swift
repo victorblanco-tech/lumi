@@ -131,7 +131,10 @@ func syncsMountedUSBHotCuesWhenProvided() async throws {
             messageID: "swift-sync-mounted-usb-hot-cues"
         )
         let search = try await supervisor.send(
-            .queryLibrary(search: "90s Bitch", playlistID: nil, offset: 0, limit: 25),
+            .queryLibrary(
+                search: "90s Bitch", playlistID: nil, offset: 0, limit: 25,
+                sortBy: "title", sortDirection: "ascending"
+            ),
             messageID: "swift-search-hot-cue-track"
         )
         #expect(libraryTrackTitles(search) == ["90s Bitch - Extended Mix"])
@@ -295,7 +298,10 @@ func launchesRealEngine() async throws {
         #expect(EngineCommandFailure(staleAutoloop)?.actualAutoloopCatalogRevision == 3)
 
         let searchedLibrary = try await supervisor.send(
-            .queryLibrary(search: "Northern", playlistID: nil, offset: 0, limit: 50),
+            .queryLibrary(
+                search: "Northern", playlistID: nil, offset: 0, limit: 50,
+                sortBy: "title", sortDirection: "ascending"
+            ),
             messageID: "swift-library-search"
         )
         #expect(libraryTrackTitles(searchedLibrary) == ["Northern Pulse"])

@@ -60,6 +60,16 @@ public struct LocalPlaybackLibraryBrowserView: View {
                 selectedTrackID = tracks.first?.id
             }
         }
+        .task(id: search) {
+            guard search != state.query.search else { return }
+            do {
+                try await Task.sleep(for: .milliseconds(180))
+            } catch {
+                return
+            }
+            guard !Task.isCancelled, search != state.query.search else { return }
+            submitQuery(offset: 0)
+        }
     }
 
     private var header: some View {
@@ -167,6 +177,20 @@ public struct LocalPlaybackLibraryBrowserView: View {
                 Spacer()
                 TextField("Search title, artist, or source ID", text: $search)
                     .textFieldStyle(.roundedBorder)
+                    .padding(.trailing, search.isEmpty ? 0 : 22)
+                    .overlay(alignment: .trailing) {
+                        if !search.isEmpty {
+                            Button {
+                                search = ""
+                                submitQuery(search: "", offset: 0)
+                            } label: {
+                                Image(systemName: "xmark.circle.fill")
+                                    .foregroundStyle(LumiColor.textSecondary)
+                            }
+                            .buttonStyle(.plain)
+                            .accessibilityIdentifier("lumi.localPlayback.search.clear")
+                        }
+                    }
                     .frame(width: 280)
                     .onSubmit { submitQuery(offset: 0) }
                     .accessibilityIdentifier("lumi.localPlayback.search")
@@ -258,18 +282,22 @@ public struct LocalPlaybackLibraryBrowserView: View {
                 search: search,
                 playlistID: id,
                 offset: 0,
-                limit: state.query.limit
+                limit: state.query.limit,
+                sortBy: state.query.sortBy,
+                sortDirection: state.query.sortDirection
             )
         )
     }
 
-    private func submitQuery(offset: UInt32) {
+    private func submitQuery(search querySearch: String? = nil, offset: UInt32) {
         onQuery(
             LibraryQueryRequest(
-                search: search,
+                search: querySearch ?? search,
                 playlistID: selectedPlaylistID,
                 offset: offset,
-                limit: state.query.limit
+                limit: state.query.limit,
+                sortBy: state.query.sortBy,
+                sortDirection: state.query.sortDirection
             )
         )
     }

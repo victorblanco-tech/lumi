@@ -351,6 +351,7 @@ public struct TrackEditorAnalysis: Identifiable, Equatable, Sendable {
     public let sourcePhrases: [TrackEditorSourcePhrase]
     public let timeline: TrackEditorTimeline
     public let sourceReconciliation: TrackSourceReconciliation?
+    public let creativeReuseCandidates: [CreativeTimelineCandidate]
 
     public init(
         track: LibraryTrack,
@@ -363,7 +364,8 @@ public struct TrackEditorAnalysis: Identifiable, Equatable, Sendable {
         roles: [TrackEditorRole],
         sourcePhrases: [TrackEditorSourcePhrase] = [],
         timeline: TrackEditorTimeline,
-        sourceReconciliation: TrackSourceReconciliation? = nil
+        sourceReconciliation: TrackSourceReconciliation? = nil,
+        creativeReuseCandidates: [CreativeTimelineCandidate] = []
     ) {
         self.track = track
         self.audioURI = audioURI
@@ -376,6 +378,7 @@ public struct TrackEditorAnalysis: Identifiable, Equatable, Sendable {
         self.sourcePhrases = sourcePhrases
         self.timeline = timeline
         self.sourceReconciliation = sourceReconciliation
+        self.creativeReuseCandidates = creativeReuseCandidates
     }
 
     public var totalBars: UInt32 {
@@ -396,5 +399,28 @@ public struct TrackEditorAnalysis: Identifiable, Equatable, Sendable {
 
     public func phraseTimeRange(_ phrase: TrackEditorPhrase) -> Range<UInt64> {
         timeMillis(atBeat: phrase.startBeat)..<timeMillis(atBeat: phrase.endBeat)
+    }
+}
+
+public struct CreativeTimelineCandidate: Identifiable, Equatable, Sendable {
+    public var id: UInt64 { trackID }
+    public let trackID: UInt64
+    public let title: String
+    public let artist: String
+    public let phraseCount: UInt64
+    public let totalBeats: UInt32
+    public let exactBeatCompatibility: Bool
+    public let likelyVersion: Bool
+}
+
+public struct CreativeTimelineReuseRequest: Equatable, Sendable {
+    public let sourceTrackID: UInt64
+    public let targetTrackID: UInt64
+    public let expectedTargetRevision: UInt64
+
+    public init(sourceTrackID: UInt64, targetTrackID: UInt64, expectedTargetRevision: UInt64) {
+        self.sourceTrackID = sourceTrackID
+        self.targetTrackID = targetTrackID
+        self.expectedTargetRevision = expectedTargetRevision
     }
 }

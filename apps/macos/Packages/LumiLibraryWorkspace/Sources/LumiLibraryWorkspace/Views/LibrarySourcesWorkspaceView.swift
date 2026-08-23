@@ -128,12 +128,6 @@ public struct LibrarySourcesWorkspaceView: View {
             VStack(alignment: .leading, spacing: LumiSpacing.xLarge) {
                 header
                 usbMediaSummary
-                if let usbSelectionFeedback {
-                    Label(usbSelectionFeedback, systemImage: "exclamationmark.triangle.fill")
-                        .font(LumiTypography.caption.weight(.semibold))
-                        .foregroundStyle(LumiColor.warning)
-                        .accessibilityIdentifier("lumi.library.sources.usb.selectionFeedback")
-                }
                 trustedUSBSources
                 sourceMappings
             }
@@ -229,22 +223,35 @@ public struct LibrarySourcesWorkspaceView: View {
 
     private var usbMediaSummary: some View {
         LumiPanel {
-            HStack(spacing: LumiSpacing.xLarge) {
-                sourceIcon("externaldrive.fill.badge.checkmark", state: overallUSBState)
-                VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-                    Text("USB Sources").font(LumiTypography.cardTitle)
-                    Text("\(visibleUSBDevices.count) trusted · \(mountedTrustedSources.count) connected · read only")
-                        .font(LumiTypography.technical)
-                        .foregroundStyle(LumiColor.textSecondary)
-                    Text("Trusted media identifies live Pro DJ Link tracks. Older or incomparable backup analysis is registered but never replaces newer active Lumi data.")
-                        .font(LumiTypography.caption)
-                        .foregroundStyle(LumiColor.textSecondary)
+            VStack(alignment: .leading, spacing: LumiSpacing.small) {
+                HStack(spacing: LumiSpacing.xLarge) {
+                    sourceIcon("externaldrive.fill.badge.checkmark", state: overallUSBState)
+                    VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+                        Text("USB Sources").font(LumiTypography.cardTitle)
+                        Text("\(visibleUSBDevices.count) trusted · \(mountedTrustedSources.count) connected · read only")
+                            .font(LumiTypography.technical)
+                            .foregroundStyle(LumiColor.textSecondary)
+                        Text("Trusted media identifies live Pro DJ Link tracks. Older or incomparable backup analysis is registered but never replaces newer active Lumi data.")
+                            .font(LumiTypography.caption)
+                            .foregroundStyle(LumiColor.textSecondary)
+                    }
+                    Spacer()
+                    Button("Add USB Source…") { chooseRekordboxDevice() }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(!rendersInteractiveControls)
+                        .accessibilityIdentifier("lumi.library.sources.usb.add")
                 }
-                Spacer()
-                Button("Add USB Source…") { chooseRekordboxDevice() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(!rendersInteractiveControls)
-                    .accessibilityIdentifier("lumi.library.sources.usb.add")
+                Label(
+                    usbSelectionFeedback ?? "USB identities and synchronization are isolated per trusted source.",
+                    systemImage: usbSelectionFeedback == nil
+                        ? "checkmark.shield"
+                        : "exclamationmark.triangle.fill"
+                )
+                .font(LumiTypography.caption.weight(.semibold))
+                .foregroundStyle(usbSelectionFeedback == nil ? LumiColor.textSecondary : LumiColor.warning)
+                .lineLimit(1)
+                .frame(height: 16, alignment: .leading)
+                .accessibilityIdentifier("lumi.library.sources.usb.selectionFeedback")
             }
         }
     }
