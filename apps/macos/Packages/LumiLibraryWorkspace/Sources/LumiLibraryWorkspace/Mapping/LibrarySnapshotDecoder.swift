@@ -218,6 +218,7 @@ public struct LibrarySnapshotDecoder: Sendable {
                 id: try UInt32(exactly: unsigned(playlist, "id"))
                     .required(.invalidNumber("playlist.id")),
                 path: try string(playlist, "path"),
+                folderNames: try stringArray(playlist, "folderNames"),
                 name: try string(playlist, "name"),
                 trackCount: try unsigned(playlist, "trackCount"),
                 statusCounts: RekordboxDeviceStatusCounts(
@@ -1350,6 +1351,18 @@ public struct LibrarySnapshotDecoder: Sendable {
                 throw LibrarySnapshotError.invalidNumber(key)
             }
             return result
+        }
+    }
+
+    private func stringArray(
+        _ values: [String: JSONValue],
+        _ key: String
+    ) throws -> [String] {
+        try array(values, key).map { value in
+            guard case let .string(string) = value else {
+                throw LibrarySnapshotError.invalidObject
+            }
+            return string
         }
     }
 

@@ -61,6 +61,9 @@ pub struct DeviceTrack {
 pub struct DevicePlaylist {
     pub device_playlist_id: u32,
     pub path: String,
+    /// Exact Rekordbox folder ancestry. This must stay structural because
+    /// playlist and folder names are allowed to contain `/`.
+    pub folder_names: Vec<String>,
     pub name: String,
     pub track_ids: Vec<u32>,
 }
@@ -312,7 +315,8 @@ fn device_playlists(
         .iter()
         .filter(|node| !node.is_folder)
         .map(|node| {
-            let mut segments = vec![node.name.trim().to_owned()];
+            let playlist_name = node.name.trim().to_owned();
+            let mut folder_names = Vec::new();
             let mut parent_id = node.parent_id.unwrap_or(0);
             let mut visited = BTreeSet::from([node.id]);
             while parent_id != 0 {
@@ -333,15 +337,21 @@ fn device_playlists(
                         node.id
                     )));
                 }
-                segments.push(parent.name.trim().to_owned());
+                folder_names.push(parent.name.trim().to_owned());
                 parent_id = parent.parent_id.unwrap_or(0);
-                if segments.len() > 32 {
+                if folder_names.len() > 32 {
                     return Err(DeviceError::InvalidPlaylistTree(
                         "playlist nesting exceeds 32 levels".to_owned(),
                     ));
                 }
             }
-            segments.reverse();
+            folder_names.reverse();
+            let path = folder_names
+                .iter()
+                .chain(std::iter::once(&playlist_name))
+                .cloned()
+                .collect::<Vec<_>>()
+                .join("/");
             let mut playlist_entries = entries.remove(&node.id).unwrap_or_default();
             playlist_entries.sort_by_key(|(position, _)| *position);
             let mut seen = BTreeSet::new();
@@ -351,8 +361,9 @@ fn device_playlists(
                 .collect::<Vec<_>>();
             Ok(DevicePlaylist {
                 device_playlist_id: node.id,
-                path: segments.join("/"),
-                name: node.name.trim().to_owned(),
+                path,
+                folder_names,
+                name: playlist_name,
                 track_ids,
             })
         })

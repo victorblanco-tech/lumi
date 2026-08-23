@@ -2706,6 +2706,7 @@ impl LibraryWorker {
             "playlists": device.playlists.iter().map(|playlist| json!({
                 "id": playlist.device_playlist_id,
                 "path": playlist.path,
+                "folderNames": playlist.folder_names,
                 "name": playlist.name,
                 "trackCount": playlist.track_ids.len(),
                 "statusCounts": device_status_counts(

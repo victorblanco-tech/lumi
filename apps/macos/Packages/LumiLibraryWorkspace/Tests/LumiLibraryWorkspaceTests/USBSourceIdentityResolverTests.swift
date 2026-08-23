@@ -4,36 +4,88 @@ import Testing
 
 @Suite("USB source identity")
 struct USBSourceIdentityResolverTests {
+    @Test("Independent FAT volumes with the same UUID remain separate")
+    func independentMediaRemainSeparate() {
+        let gray = USBStableSourceIdentity.sourceID(
+            fileSystemUUID: "same-cloned-uuid",
+            displayName: "DJ VIC GRAY"
+        )
+        let chrm = USBStableSourceIdentity.sourceID(
+            fileSystemUUID: "same-cloned-uuid",
+            displayName: "DJ VIC CHRM"
+        )
+
+        #expect(gray != nil)
+        #expect(chrm != nil)
+        #expect(gray != chrm)
+        #expect(
+            gray == USBStableSourceIdentity.sourceID(
+                fileSystemUUID: "SAME-CLONED-UUID",
+                displayName: "dj vic gray"
+            )
+        )
+    }
+
+    @Test("Hardware serial separates equal models with the same FAT identity")
+    func hardwareSerialSeparatesEqualModels() {
+        let chrm = USBStableSourceIdentity.sourceID(
+            fileSystemUUID: "same-fat-uuid",
+            displayName: "DJ VIC CHRM",
+            hardwareSerial: "DD56419884401"
+        )
+        let renamedCHRM = USBStableSourceIdentity.sourceID(
+            fileSystemUUID: "changed-fat-uuid",
+            displayName: "CHRM RENAMED",
+            hardwareSerial: "DD56419884401"
+        )
+        let gray = USBStableSourceIdentity.sourceID(
+            fileSystemUUID: "same-fat-uuid",
+            displayName: "DJ VIC GRAY",
+            hardwareSerial: "DD56419884410"
+        )
+
+        #expect(chrm == renamedCHRM)
+        #expect(chrm != gray)
+        #expect(chrm?.hasPrefix("usb-fs:hardware-") == true)
+        #expect(
+            chrm == USBStableSourceIdentity.sourceID(
+                fileSystemUUID: nil,
+                displayName: "DJ VIC CHRM",
+                hardwareSerial: "DD56419884401"
+            )
+        )
+    }
+
     @Test("Stable USB sources match only their filesystem identity")
     func stableSourcesDoNotAliasByDisplayName() {
         let gray = device(
-            sourceID: "usb-fs:gray-volume",
+            sourceID: "usb-fs:hardware-gray",
             displayName: "DJ VIC GRAY"
         )
         let clonedName = MountedUSBIdentity(
-            sourceID: "usb-fs:chrm-volume",
+            sourceID: "usb-fs:hardware-chrm",
             displayName: "DJ VIC GRAY"
         )
 
         #expect(!USBSourceIdentityResolver.volume(clonedName, matches: gray))
         #expect(
             USBSourceIdentityResolver.selectedSourceID(for: clonedName, devices: [gray])
-                == "usb-fs:chrm-volume"
+                == "usb-fs:hardware-chrm"
         )
     }
 
     @Test("A mounted volume selects its exact stable trusted source")
     func exactStableIdentityWins() {
         let originalGray = device(
-            sourceID: "usb-fs:gray-volume",
+            sourceID: "usb-fs:hardware-gray",
             displayName: "DJ VIC GRAY"
         )
         let staleCHRMLabel = device(
-            sourceID: "usb-fs:chrm-volume",
+            sourceID: "usb-fs:hardware-chrm",
             displayName: "DJ VIC GRAY"
         )
         let chrm = MountedUSBIdentity(
-            sourceID: "usb-fs:chrm-volume",
+            sourceID: "usb-fs:hardware-chrm",
             displayName: "DJ VIC CHRM"
         )
 
@@ -50,7 +102,7 @@ struct USBSourceIdentityResolverTests {
     @Test("Current inspection label replaces a stale label for the same physical USB")
     func inspectionCorrectsPresentationName() {
         let stale = device(
-            sourceID: "usb-fs:chrm-volume",
+            sourceID: "usb-fs:hardware-chrm",
             displayName: "DJ VIC GRAY"
         )
         let inspection = RekordboxDeviceInspectionState(
@@ -79,7 +131,7 @@ struct USBSourceIdentityResolverTests {
             displayName: "DJ VIC GRAY"
         )
         let volume = MountedUSBIdentity(
-            sourceID: "usb-fs:new-stable-identity",
+            sourceID: "usb-fs:hardware-new-stable-identity",
             displayName: "dj vic gray"
         )
 
@@ -88,6 +140,39 @@ struct USBSourceIdentityResolverTests {
                 == legacy.sourceID
         )
         #expect(USBSourceIdentityResolver.volume(volume, matches: legacy))
+    }
+
+    @Test("A UUID-only trusted source attaches to its same-name hardware media for migration")
+    func uuidOnlySourceAttachesForMigration() {
+        let previousGray = device(
+            sourceID: "usb-fs:5abc7360-045c-3a24-98a2-0723c3cb10fb",
+            displayName: "DJ VIC GRAY"
+        )
+        let mountedGray = MountedUSBIdentity(
+            sourceID: "usb-fs:hardware-778c17789217e275",
+            displayName: "DJ VIC GRAY"
+        )
+        let currentInspection = RekordboxDeviceInspectionState(
+            sourceID: mountedGray.sourceID!,
+            displayName: mountedGray.displayName,
+            databaseRevision: "gray-current",
+            libraryFormat: "OneLibrary",
+            databaseVersion: "1",
+            exportedAt: "2026-08-23",
+            trackCount: 1_156,
+            playlistCount: 77,
+            selectedPlaylistIDs: [],
+            playlists: []
+        )
+
+        #expect(
+            USBSourceIdentityResolver.selectedSourceID(
+                for: mountedGray,
+                devices: [previousGray]
+            ) == previousGray.sourceID
+        )
+        #expect(USBSourceIdentityResolver.volume(mountedGray, matches: previousGray))
+        #expect(USBSourceIdentityResolver.inspection(currentInspection, matches: previousGray))
     }
 
     private func device(sourceID: String, displayName: String) -> RekordboxDeviceState {

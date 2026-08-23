@@ -594,6 +594,7 @@ struct LibraryWorkspaceTests {
                     "playlists": .array([
                         .object([
                             "path": .string("Sets/Beach Set"),
+                            "folderNames": .array([.string("Sets")]),
                             "name": .string("Beach Set"),
                             "trackCount": .number(42)
                         ])
@@ -649,6 +650,7 @@ struct LibraryWorkspaceTests {
                         .object([
                             "id": .number(77),
                             "path": .string("Sets/90s Dance/90s Club"),
+                            "folderNames": .array([.string("Sets"), .string("90s Dance")]),
                             "name": .string("90s Club"),
                             "trackCount": .number(48),
                             "statusCounts": .object([
@@ -673,6 +675,7 @@ struct LibraryWorkspaceTests {
                         .object([
                             "id": .number(88),
                             "path": .string("Genre 5 Stars/90s Dance"),
+                            "folderNames": .array([.string("Genre 5 Stars")]),
                             "name": .string("90s Dance"),
                             "trackCount": .number(1),
                             "statusCounts": .object([
@@ -754,6 +757,7 @@ struct LibraryWorkspaceTests {
                 RekordboxDevicePlaylistState(
                     id: 1,
                     path: "Sets/A",
+                    folderNames: ["Sets"],
                     name: "A",
                     trackCount: 2,
                     statusCounts: emptyCounts,
@@ -762,6 +766,7 @@ struct LibraryWorkspaceTests {
                 RekordboxDevicePlaylistState(
                     id: 2,
                     path: "Sets/B",
+                    folderNames: ["Sets"],
                     name: "B",
                     trackCount: 2,
                     statusCounts: emptyCounts,
@@ -1761,6 +1766,33 @@ struct USBPlaylistOutlineTests {
         ])
     }
 
+    @Test("Slashes in a playlist name never create synthetic folders")
+    func playlistNameWithSlashStaysAPlaylist() {
+        let playlist = RekordboxDevicePlaylistState(
+            id: 87,
+            path: "Genre 5 Stars/Psy/Tech Trance 135+",
+            folderNames: ["Genre 5 Stars"],
+            name: "Psy/Tech Trance 135+",
+            trackCount: 43,
+            statusCounts: RekordboxDeviceStatusCounts(
+                current: 43,
+                usbNewer: 0,
+                usbOutdated: 0,
+                notInLumi: 0,
+                conflict: 0
+            ),
+            tracks: []
+        )
+
+        let rows = usbPlaylistOutlineRows(
+            playlists: [playlist],
+            expandedFolderPaths: ["Genre 5 Stars"],
+            search: ""
+        )
+
+        #expect(rows.map(\.id) == ["folder:Genre 5 Stars", "playlist:87"])
+    }
+
     private func usbPlaylist(
         id: UInt32,
         path: String,
@@ -1769,6 +1801,7 @@ struct USBPlaylistOutlineTests {
         RekordboxDevicePlaylistState(
             id: id,
             path: path,
+            folderNames: Array(path.split(separator: "/").dropLast()).map(String.init),
             name: path.split(separator: "/").last.map(String.init) ?? path,
             trackCount: tracks,
             statusCounts: RekordboxDeviceStatusCounts(

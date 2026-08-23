@@ -171,7 +171,6 @@ public struct LibrarySourcesWorkspaceView: View {
             restoreFollowedPaths()
             if !rekordboxFolderPath.isEmpty { scanImportFolder() }
             restoreDevicePlaylistSelection()
-            inspectFirstMountedTrustedSource()
         }
         .onReceive(
             NSWorkspace.shared.notificationCenter.publisher(
@@ -255,6 +254,7 @@ public struct LibrarySourcesWorkspaceView: View {
                         }
                     }
                 }
+                .animation(.easeInOut(duration: 0.18), value: selectedUSBSourceID)
             }
         }
     }
@@ -1453,7 +1453,9 @@ public struct LibrarySourcesWorkspaceView: View {
 
     private var provisionalUSBInspection: RekordboxDeviceInspectionState? {
         guard let inspection = library.rekordboxDeviceInspection else { return nil }
-        let alreadyTrusted = visibleUSBDevices.contains { $0.sourceID == inspection.sourceID }
+        let alreadyTrusted = visibleUSBDevices.contains {
+            USBSourceIdentityResolver.inspection(inspection, matches: $0)
+        }
         return alreadyTrusted ? nil : inspection
     }
 
@@ -1545,15 +1547,6 @@ public struct LibrarySourcesWorkspaceView: View {
         return visibleUSBDevices.filter { mountedURL(for: $0) != nil }
     }
 
-    private func inspectFirstMountedTrustedSource() {
-        guard usbOperation.phase == .idle,
-              let device = visibleUSBDevices.first(where: { mountedURL(for: $0) != nil }),
-              let url = mountedURL(for: device) else { return }
-        selectedUSBSourceID = device.sourceID
-        rekordboxDeviceRoot = url.path
-        onDeviceInspect(url.path)
-    }
-
     private func inspectMountedTrustedSource(_ url: URL) {
         guard FileManager.default.fileExists(
             atPath: url.appendingPathComponent("PIONEER/rekordbox/exportLibrary.db").path
@@ -1565,7 +1558,9 @@ public struct LibrarySourcesWorkspaceView: View {
         ), let device = visibleUSBDevices.first(where: { $0.sourceID == sourceID }) else {
             return
         }
-        selectedUSBSourceID = device.sourceID
+        // A mount updates connection status, but never opens another source
+        // lane or moves the page underneath the user.
+        guard selectedUSBSourceID == device.sourceID else { return }
         rekordboxDeviceRoot = url.path
         onDeviceInspect(url.path)
     }
@@ -1589,9 +1584,12 @@ public struct LibrarySourcesWorkspaceView: View {
     }
 
     private func volumeSourceID(_ url: URL) -> String? {
-        guard let stable = try? url.resourceValues(forKeys: [.volumeUUIDStringKey]).volumeUUIDString,
-              !stable.isEmpty else { return nil }
-        return "usb-fs:\(stable.lowercased())"
+        let stable = try? url.resourceValues(forKeys: [.volumeUUIDStringKey]).volumeUUIDString
+        return USBStableSourceIdentity.sourceID(
+            fileSystemUUID: stable,
+            displayName: volumeDisplayName(url),
+            hardwareSerial: USBStableSourceIdentity.hardwareSerial(for: url)
+        )
     }
 
     private func mountedIdentity(_ url: URL) -> MountedUSBIdentity {

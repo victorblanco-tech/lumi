@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.5.0-dev-14 - 2026-08-23
+
+### Fixed
+
+- Keeps independent USB media such as GRAY and CHRM as separate trusted sources
+  even when FAT32 happens to expose the same filesystem UUID.
+- Preserves the exact OneLibrary playlist hierarchy when playlist names contain
+  `/`, instead of inventing synthetic folders such as `Psy` or `Tech`.
+- Keeps inspection, selection and synchronization state bound to the selected
+  trusted USB lane.
+
+### Safety
+
+- Migrates the previous UUID-only trusted source during its next successful
+  sync without deleting canonical tracks, Lumi phrases or Light Plans.
+- Continues to read Rekordbox media strictly read-only.
+
 ## 0.5.0-dev-13 - 2026-08-22
 
 ### Fixed

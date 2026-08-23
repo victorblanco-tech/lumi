@@ -27,12 +27,8 @@ func usbPlaylistOutlineRows(
     var playlistsByParent: [String: [RekordboxDevicePlaylistState]] = [:]
 
     for playlist in visiblePlaylists {
-        let components = playlist.path
-            .split(separator: "/")
-            .map(String.init)
-        let folderComponents = components.isEmpty ? [] : Array(components.dropLast())
         var parent = ""
-        for component in folderComponents {
+        for component in playlist.folderNames {
             let path = parent.isEmpty ? component : "\(parent)/\(component)"
             foldersByParent[parent, default: []].insert(path)
             parent = path

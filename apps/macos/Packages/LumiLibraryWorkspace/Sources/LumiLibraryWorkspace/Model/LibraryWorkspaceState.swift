@@ -519,6 +519,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
 public struct RekordboxDevicePlaylistState: Equatable, Sendable, Identifiable {
     public let id: UInt32
     public let path: String
+    public let folderNames: [String]
     public let name: String
     public let trackCount: UInt64
     public let statusCounts: RekordboxDeviceStatusCounts

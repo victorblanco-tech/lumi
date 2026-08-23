@@ -649,6 +649,13 @@ impl SqliteLibraryRepository {
                       WHERE source_id <> ?1
                         AND display_name = ?2 COLLATE NOCASE
                         AND (
+                            (source_id LIKE 'usb-fs:%'
+                             AND ?1 LIKE source_id || ':%')
+                            OR
+                            (source_id LIKE 'usb-fs:%'
+                             AND instr(substr(source_id, 8), ':') = 0
+                             AND ?1 LIKE 'usb-fs:hardware-%')
+                            OR
                             (source_id LIKE 'usb-volume:%' AND database_revision = ?3)
                             OR
                             (source_id LIKE 'rekordbox-device:%'

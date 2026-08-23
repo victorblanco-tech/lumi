@@ -1293,9 +1293,12 @@ final class EngineStatusModel: ObservableObject {
 
     private func trustedUSBSourceID(root: String) -> String? {
         let url = URL(fileURLWithPath: root, isDirectory: true)
-        guard let stable = try? url.resourceValues(forKeys: [.volumeUUIDStringKey]).volumeUUIDString,
-              !stable.isEmpty else { return nil }
-        return "usb-fs:\(stable.lowercased())"
+        let values = try? url.resourceValues(forKeys: [.volumeUUIDStringKey, .volumeNameKey])
+        return USBStableSourceIdentity.sourceID(
+            fileSystemUUID: values?.volumeUUIDString,
+            displayName: values?.volumeName ?? url.lastPathComponent,
+            hardwareSerial: USBStableSourceIdentity.hardwareSerial(for: url)
+        )
     }
 
     func mutatePhraseRoles(_ request: PhraseRoleMutationRequest) async {
