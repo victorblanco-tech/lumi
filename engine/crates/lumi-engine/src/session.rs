@@ -3165,6 +3165,24 @@ fn apply_command(
             )?;
             return Ok(());
         }
+        SessionCommand::ResolveRekordboxDeviceConflict {
+            root,
+            source_id,
+            device_track_id,
+            expected_incoming_revision,
+            expected_active_revision,
+            choice,
+        } => {
+            runtime.library_worker.resolve_rekordbox_device_conflict(
+                root,
+                &source_id,
+                device_track_id,
+                &expected_incoming_revision,
+                &expected_active_revision,
+                choice,
+            )?;
+            return Ok(());
+        }
         SessionCommand::PreviewLibraryReset { preserve_track_ids } => {
             if runtime.state.state().operation() != OperationState::Off {
                 return Err(CommandApplicationError::DataManagementRequiresOff);
@@ -3715,6 +3733,7 @@ fn apply_command(
         | SessionCommand::ImportRekordboxAnalysis { .. }
         | SessionCommand::InspectRekordboxDevice { .. }
         | SessionCommand::SyncRekordboxDevice { .. }
+        | SessionCommand::ResolveRekordboxDeviceConflict { .. }
         | SessionCommand::PreviewLibraryReset { .. }
         | SessionCommand::ApplyLibraryReset { .. }
         | SessionCommand::CreateLibraryBackup { .. }

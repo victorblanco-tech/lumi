@@ -15,7 +15,7 @@ use lumi_protocol::{MessageEnvelope, MessageType};
 use lumi_simulator::SimulationSpeed;
 use serde_json::Value;
 
-use crate::library::{AutoloopCatalogMutation, PhraseRoleCatalogMutation};
+use crate::library::{AutoloopCatalogMutation, DeviceReviewChoice, PhraseRoleCatalogMutation};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PlanCommandContext {
@@ -74,6 +74,14 @@ pub enum SessionCommand {
         root: String,
         source_id: Option<String>,
         playlist_ids: Vec<u32>,
+    },
+    ResolveRekordboxDeviceConflict {
+        root: String,
+        source_id: String,
+        device_track_id: u32,
+        expected_incoming_revision: String,
+        expected_active_revision: String,
+        choice: DeviceReviewChoice,
     },
     PreviewLibraryReset {
         preserve_track_ids: Vec<u64>,
@@ -252,6 +260,7 @@ impl SessionCommand {
             | Self::ImportRekordboxAnalysis { .. }
             | Self::InspectRekordboxDevice { .. }
             | Self::SyncRekordboxDevice { .. }
+            | Self::ResolveRekordboxDeviceConflict { .. }
             | Self::PreviewLibraryReset { .. }
             | Self::ApplyLibraryReset { .. }
             | Self::CreateLibraryBackup { .. }
@@ -300,6 +309,7 @@ impl SessionCommand {
             Self::ApplyRekordboxXmlSync { .. }
                 | Self::ImportRekordboxAnalysis { .. }
                 | Self::SyncRekordboxDevice { .. }
+                | Self::ResolveRekordboxDeviceConflict { .. }
                 | Self::ApplyLibraryReset { .. }
                 | Self::RestoreLibraryBackup { .. }
                 | Self::ReconcileLibrarySource { .. }
@@ -373,6 +383,21 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
             root: string(&envelope.payload, "root")?.to_owned(),
             source_id: optional_string(&envelope.payload, "sourceId").map(str::to_owned),
             playlist_ids: u32_array(&envelope.payload, "playlistIds")?,
+        }),
+        "resolveRekordboxDeviceConflict" => Ok(SessionCommand::ResolveRekordboxDeviceConflict {
+            root: string(&envelope.payload, "root")?.to_owned(),
+            source_id: string(&envelope.payload, "sourceId")?.to_owned(),
+            device_track_id: u32::try_from(positive_unsigned(&envelope.payload, "deviceTrackId")?)
+                .map_err(|_| CommandDecodeError::InvalidField("deviceTrackId"))?,
+            expected_incoming_revision: string(&envelope.payload, "expectedIncomingRevision")?
+                .to_owned(),
+            expected_active_revision: string(&envelope.payload, "expectedActiveRevision")?
+                .to_owned(),
+            choice: match string(&envelope.payload, "choice")? {
+                "keep-lumi" => DeviceReviewChoice::KeepLumi,
+                "use-usb" => DeviceReviewChoice::UseUsb,
+                _ => return Err(CommandDecodeError::InvalidField("choice")),
+            },
         }),
         "previewLibraryReset" => Ok(SessionCommand::PreviewLibraryReset {
             preserve_track_ids: u64_array(&envelope.payload, "preserveTrackIds")?,
@@ -1158,6 +1183,30 @@ mod tests {
         assert_eq!(
             decode_command(&invalid),
             Err(CommandDecodeError::InvalidField("includeLibrary"))
+        );
+    }
+
+    #[test]
+    fn usb_review_choice_is_explicit_and_revision_bound() {
+        let envelope = command_envelope(serde_json::json!({
+            "kind": "resolveRekordboxDeviceConflict",
+            "root": "/Volumes/DJ VIC CHRM",
+            "sourceId": "usb-fs:chrm",
+            "deviceTrackId": 1031,
+            "expectedIncomingRevision": "usb-analysis-v2",
+            "expectedActiveRevision": "device:gray:analysis-v1",
+            "choice": "use-usb",
+        }));
+        assert_eq!(
+            decode_command(&envelope),
+            Ok(SessionCommand::ResolveRekordboxDeviceConflict {
+                root: "/Volumes/DJ VIC CHRM".to_owned(),
+                source_id: "usb-fs:chrm".to_owned(),
+                device_track_id: 1031,
+                expected_incoming_revision: "usb-analysis-v2".to_owned(),
+                expected_active_revision: "device:gray:analysis-v1".to_owned(),
+                choice: DeviceReviewChoice::UseUsb,
+            })
         );
     }
 

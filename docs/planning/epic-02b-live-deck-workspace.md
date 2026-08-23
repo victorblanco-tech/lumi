@@ -6,6 +6,17 @@ Target milestone: **0.2.0 – Deck Intelligence**
 
 ## 2026-08-10 — OneLibrary USB foundation
 
+### 2026-08-23 — Actionable USB conflict review
+
+- Held cross-USB analysis conflicts expose exact component comparisons for
+  Beatgrid, Cue Points, file/track data, raw Rekordbox Phrases and waveform.
+- Review shows USB/active provenance dates and never implies that a combined
+  revision hash identifies the changed component.
+- `Ignore for Now`, revision-scoped `Keep Lumi Version`, and stale-safe
+  confirmed `Use USB Version` complete the workflow.
+- Explicit USB promotion preserves Lumi-owned phrase timelines, Phrase Roles,
+  AutoLoop choices and plan overrides.
+
 - [x] Define a read-only OneLibrary adapter and persistent performance aliases.
 - [x] Browse playlists and track-level freshness before an explicit sync.
 - [x] Restore selected playlist subscriptions by their complete folder path.

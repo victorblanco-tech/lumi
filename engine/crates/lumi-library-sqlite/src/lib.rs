@@ -151,6 +151,7 @@ pub struct DeviceTrackImport {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DeviceAnalysisDecision {
     Current,
+    KeepActive,
     PromoteInitial,
     PromoteNewer,
     ProtectOlder,
@@ -162,6 +163,7 @@ impl DeviceAnalysisDecision {
     pub const fn disposition(self) -> &'static str {
         match self {
             Self::Current => "current",
+            Self::KeepActive => "kept-active",
             Self::PromoteInitial => "promoted-initial",
             Self::PromoteNewer => "promoted-newer",
             Self::ProtectOlder => "protected-older",
@@ -199,8 +201,12 @@ pub struct DeviceReviewTrackSummary {
     pub bpm_milli: u32,
     pub duration_millis: u64,
     pub incoming_analyzed_at: String,
+    pub incoming_analysis_revision: String,
+    pub incoming_metadata_revision: String,
+    pub incoming_file_size: u32,
     pub active_source_name: Option<String>,
     pub active_analyzed_at: Option<String>,
+    pub active_analysis_revision: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1268,7 +1274,7 @@ impl SqliteLibraryRepository {
         let mut statement = self.connection.prepare(
             "SELECT s.source_id, s.display_name, s.database_revision,
                     COUNT(a.device_track_id), COUNT(a.canonical_track_id), s.synced_at,
-                    COALESCE(SUM(CASE WHEN a.sync_disposition = 'current' THEN 1 ELSE 0 END), 0),
+                    COALESCE(SUM(CASE WHEN a.sync_disposition IN ('current', 'kept-active') THEN 1 ELSE 0 END), 0),
                     COALESCE(SUM(CASE WHEN a.sync_disposition LIKE 'promoted-%' THEN 1 ELSE 0 END), 0),
                     COALESCE(SUM(CASE WHEN a.sync_disposition = 'protected-older' THEN 1 ELSE 0 END), 0),
                     COALESCE(SUM(CASE WHEN a.sync_disposition = 'held-conflict' THEN 1 ELSE 0 END), 0)
@@ -1301,8 +1307,13 @@ impl SqliteLibraryRepository {
         let mut statement = self.connection.prepare(
             "SELECT a.source_id, a.device_track_id, a.canonical_track_id,
                     a.title, a.artist, a.bpm_milli, a.duration_millis, a.analyzed_at,
-                    active_source.display_name, provenance.analyzed_at
+                    a.analysis_revision, a.metadata_revision, a.file_size,
+                    COALESCE(active_source.display_name, 'Lumi library'),
+                    provenance.analyzed_at,
+                    COALESCE(provenance.analysis_revision, canonical.analysis_revision)
                FROM device_library_track_aliases a
+               LEFT JOIN tracks canonical
+                 ON canonical.id = a.canonical_track_id
                LEFT JOIN track_analysis_provenance provenance
                  ON provenance.track_id = a.canonical_track_id
                LEFT JOIN device_library_sources active_source
@@ -1325,6 +1336,7 @@ impl SqliteLibraryRepository {
                 .transpose()?;
             let raw_bpm = row.get::<_, i64>(5)?;
             let raw_duration = row.get::<_, i64>(6)?;
+            let raw_file_size = row.get::<_, i64>(10)?;
             Ok(DeviceReviewTrackSummary {
                 source_id: row.get(0)?,
                 device_track_id,
@@ -1336,8 +1348,13 @@ impl SqliteLibraryRepository {
                 duration_millis: u64::try_from(raw_duration)
                     .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(6, raw_duration))?,
                 incoming_analyzed_at: row.get(7)?,
-                active_source_name: row.get(8)?,
-                active_analyzed_at: row.get(9)?,
+                incoming_analysis_revision: row.get(8)?,
+                incoming_metadata_revision: row.get(9)?,
+                incoming_file_size: u32::try_from(raw_file_size)
+                    .map_err(|_| rusqlite::Error::IntegralValueOutOfRange(10, raw_file_size))?,
+                active_source_name: row.get(11)?,
+                active_analyzed_at: row.get(12)?,
+                active_analysis_revision: row.get(13)?,
             })
         })?;
         let mut review_tracks = BTreeMap::<String, Vec<DeviceReviewTrackSummary>>::new();
@@ -1349,6 +1366,134 @@ impl SqliteLibraryRepository {
                 .push(track);
         }
         Ok(review_tracks)
+    }
+
+    /// Accepts the active Lumi projection for exactly the USB revision that
+    /// was reviewed. A later USB analysis revision automatically reopens the
+    /// conflict during the next sync.
+    pub fn keep_active_device_analysis(
+        &mut self,
+        source_id: &str,
+        device_track_id: u32,
+        expected_incoming_revision: &str,
+        expected_active_revision: &str,
+    ) -> Result<(), SqliteLibraryError> {
+        let transaction = self.connection.transaction()?;
+        let (canonical_track_id, incoming_revision, disposition) = transaction.query_row(
+            "SELECT canonical_track_id, analysis_revision, sync_disposition
+                   FROM device_library_track_aliases
+                  WHERE source_id = ?1 AND device_track_id = ?2 AND archived = 0",
+            params![source_id, i64::from(device_track_id)],
+            |row| {
+                Ok((
+                    row.get::<_, Option<i64>>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        )?;
+        let canonical_track_id = canonical_track_id.ok_or(SqliteLibraryError::MissingTrack)?;
+        let active_revision = transaction.query_row(
+            "SELECT analysis_revision FROM tracks WHERE id = ?1",
+            [canonical_track_id],
+            |row| row.get::<_, String>(0),
+        )?;
+        if incoming_revision != expected_incoming_revision
+            || active_revision != expected_active_revision
+        {
+            return Err(SqliteLibraryError::DeviceReviewChanged);
+        }
+        if disposition != "held-conflict" {
+            return Err(SqliteLibraryError::DeviceReviewChanged);
+        }
+        transaction.execute(
+            "UPDATE device_library_track_aliases
+                SET sync_disposition = 'kept-active'
+              WHERE source_id = ?1 AND device_track_id = ?2 AND archived = 0",
+            params![source_id, i64::from(device_track_id)],
+        )?;
+        transaction.commit()?;
+        Ok(())
+    }
+
+    /// Atomically replaces the imported Rekordbox projection after an explicit
+    /// review choice. Lumi's authored phrase timeline and AutoLoop choices live
+    /// in separate tables and are deliberately preserved.
+    pub fn promote_reviewed_device_analysis(
+        &mut self,
+        analysis: &DeviceAnalysisUpsert,
+        expected_active_revision: &str,
+    ) -> Result<(), SqliteLibraryError> {
+        let transaction = self.connection.transaction()?;
+        let incoming = transaction.query_row(
+            "SELECT analysis_revision, sync_disposition
+               FROM device_library_track_aliases
+              WHERE source_id = ?1 AND device_track_id = ?2 AND archived = 0
+                AND canonical_track_id = ?3",
+            params![
+                analysis.source_id,
+                i64::from(analysis.device_track_id),
+                to_i64(analysis.track_id.value())?,
+            ],
+            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?)),
+        )?;
+        let active_revision = transaction.query_row(
+            "SELECT analysis_revision FROM tracks WHERE id = ?1",
+            [to_i64(analysis.track_id.value())?],
+            |row| row.get::<_, String>(0),
+        )?;
+        if incoming.0 != analysis.source_analysis_revision
+            || incoming.1 != "held-conflict"
+            || active_revision != expected_active_revision
+        {
+            return Err(SqliteLibraryError::DeviceReviewChanged);
+        }
+        replace_track_analysis_in_transaction(&transaction, analysis)?;
+        transaction.execute(
+            "INSERT INTO track_analysis_provenance
+             (track_id, source_id, device_track_id, analysis_revision, analyzed_at, hot_cues_loaded)
+             VALUES (?1, ?2, ?3, ?4, ?5, 1)
+             ON CONFLICT(track_id) DO UPDATE SET
+               source_id = excluded.source_id,
+               device_track_id = excluded.device_track_id,
+               analysis_revision = excluded.analysis_revision,
+               analyzed_at = excluded.analyzed_at,
+               hot_cues_loaded = 1,
+               promoted_at = CURRENT_TIMESTAMP",
+            params![
+                to_i64(analysis.track_id.value())?,
+                analysis.source_id,
+                i64::from(analysis.device_track_id),
+                analysis.source_analysis_revision,
+                analysis.analyzed_at,
+            ],
+        )?;
+        transaction.execute(
+            "INSERT INTO track_hot_cue_provenance
+             (track_id, source_id, device_track_id, analysis_revision, analyzed_at)
+             VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(track_id) DO UPDATE SET
+               source_id = excluded.source_id,
+               device_track_id = excluded.device_track_id,
+               analysis_revision = excluded.analysis_revision,
+               analyzed_at = excluded.analyzed_at,
+               imported_at = CURRENT_TIMESTAMP",
+            params![
+                to_i64(analysis.track_id.value())?,
+                analysis.source_id,
+                i64::from(analysis.device_track_id),
+                analysis.source_analysis_revision,
+                analysis.analyzed_at,
+            ],
+        )?;
+        transaction.execute(
+            "UPDATE device_library_track_aliases
+                SET sync_disposition = 'promoted-reviewed'
+              WHERE source_id = ?1 AND device_track_id = ?2 AND archived = 0",
+            params![analysis.source_id, i64::from(analysis.device_track_id)],
+        )?;
+        transaction.commit()?;
+        Ok(())
     }
 
     pub fn device_track_source_relations(
@@ -4971,6 +5116,8 @@ pub enum SqliteLibraryError {
     ReconcileTrackIdentityMismatch,
     #[error("analysis revision changed; expected {expected}, actual {actual}")]
     AnalysisRevisionConflict { expected: String, actual: String },
+    #[error("the USB review changed; refresh the source before choosing again")]
+    DeviceReviewChanged,
     #[error("timeline head changed; expected {expected:?}, actual {actual:?}")]
     RevisionConflict {
         expected: Option<TimelineRevision>,
@@ -5498,6 +5645,15 @@ mod fault_tests {
         assert_eq!(gray_review[0].device_track_id, 1_256);
         assert_eq!(gray_review[0].canonical_track_id, Some(track_id));
         assert_eq!(gray_review[0].title, source_track.title());
+        assert_eq!(
+            gray_review[0].active_source_name.as_deref(),
+            Some("Lumi library")
+        );
+        assert_eq!(
+            gray_review[0].active_analysis_revision.as_deref(),
+            Some(before.summary().source_revision().as_str()),
+            "review actions remain available for tracks imported before provenance tracking"
+        );
 
         let after = repository
             .track(track_id)?
@@ -5570,6 +5726,158 @@ mod fault_tests {
             )?,
             DeviceAnalysisDecision::Current
         );
+        Ok(())
+    }
+
+    #[test]
+    fn keeping_a_review_is_exact_revision_scoped_and_stale_safe()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let baseline = DemoLibrarySourceProvider::curated().load_baseline()?;
+        let source_track = &baseline.tracks()[0];
+        let mut repository = SqliteLibraryRepository::in_memory()?;
+        repository.import_baseline(&baseline)?;
+        let track_id = repository
+            .page_tracks(TrackPageRequest::try_new(0, 25)?)?
+            .tracks()[0]
+            .id();
+        let active_revision = repository
+            .track(track_id)?
+            .ok_or("stored track missing")?
+            .summary()
+            .source_revision()
+            .as_str()
+            .to_owned();
+        let mut aliases = vec![DeviceAliasUpsert {
+            device_track_id: 7,
+            simulator_signature: 0,
+            canonical_track_id: Some(track_id),
+            match_kind: "metadata-exact".to_owned(),
+            title: source_track.title().to_owned(),
+            artist: source_track.artist().to_owned(),
+            bpm_milli: source_track.bpm_milli(),
+            duration_millis: source_track.duration_millis(),
+            file_size: 123,
+            audio_uri: "file://localhost/Volumes/Test/Track.mp3".to_owned(),
+            metadata_revision: "metadata-review".to_owned(),
+            color_rgb: source_track.color().map(TrackColor::rgb_u32),
+            master_database_id: 1,
+            master_content_id: 7,
+            information_update_count: 1,
+            analysis_revision: "analysis-review".to_owned(),
+            audio_signature: "audio:test:7".to_owned(),
+            analyzed_at: "2026-08-23".to_owned(),
+            sync_disposition: "held-conflict".to_owned(),
+        }];
+        repository.sync_device_aliases(
+            "usb-fs:review",
+            "Review USB",
+            "database-review",
+            &mut aliases,
+            &[],
+            &[],
+            &[],
+            &[],
+        )?;
+        assert!(matches!(
+            repository.keep_active_device_analysis(
+                "usb-fs:review",
+                7,
+                "analysis-review",
+                "stale-active",
+            ),
+            Err(SqliteLibraryError::DeviceReviewChanged)
+        ));
+        repository.keep_active_device_analysis(
+            "usb-fs:review",
+            7,
+            "analysis-review",
+            &active_revision,
+        )?;
+        assert!(repository.device_review_tracks()?.is_empty());
+        assert_eq!(repository.device_source_summaries()?[0].current_tracks, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn promoting_a_review_replaces_the_exact_source_projection_atomically()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let baseline = DemoLibrarySourceProvider::curated().load_baseline()?;
+        let source_track = &baseline.tracks()[0];
+        let mut repository = SqliteLibraryRepository::in_memory()?;
+        repository.import_baseline(&baseline)?;
+        let track_id = repository
+            .page_tracks(TrackPageRequest::try_new(0, 25)?)?
+            .tracks()[0]
+            .id();
+        let active_revision = repository
+            .track(track_id)?
+            .ok_or("stored track missing")?
+            .summary()
+            .source_revision()
+            .as_str()
+            .to_owned();
+        let mut aliases = vec![DeviceAliasUpsert {
+            device_track_id: 8,
+            simulator_signature: 0,
+            canonical_track_id: Some(track_id),
+            match_kind: "metadata-exact".to_owned(),
+            title: source_track.title().to_owned(),
+            artist: source_track.artist().to_owned(),
+            bpm_milli: source_track.bpm_milli(),
+            duration_millis: source_track.duration_millis(),
+            file_size: 123,
+            audio_uri: "file://localhost/Volumes/Test/Track.mp3".to_owned(),
+            metadata_revision: "metadata-review".to_owned(),
+            color_rgb: source_track.color().map(TrackColor::rgb_u32),
+            master_database_id: 1,
+            master_content_id: 8,
+            information_update_count: 1,
+            analysis_revision: "analysis-review".to_owned(),
+            audio_signature: "audio:test:8".to_owned(),
+            analyzed_at: "2026-08-23".to_owned(),
+            sync_disposition: "held-conflict".to_owned(),
+        }];
+        repository.sync_device_aliases(
+            "usb-fs:review",
+            "Review USB",
+            "database-review",
+            &mut aliases,
+            &[],
+            &[],
+            &[],
+            &[],
+        )?;
+        let reviewed_phrases = vec![RawPhraseObservation::try_new(
+            0,
+            source_track.beat_grid().total_beats(),
+            "Reviewed USB phrase",
+        )?];
+        repository.promote_reviewed_device_analysis(
+            &DeviceAnalysisUpsert {
+                track_id,
+                source_id: "usb-fs:review".to_owned(),
+                device_track_id: 8,
+                analysis_revision: "device:review:analysis-review".to_owned(),
+                source_analysis_revision: "analysis-review".to_owned(),
+                analyzed_at: "2026-08-23".to_owned(),
+                duration_millis: source_track.duration_millis() + 9,
+                beat_grid: source_track.beat_grid().clone(),
+                waveform: source_track.waveform().to_vec(),
+                raw_phrases: reviewed_phrases.clone(),
+                hot_cues: source_track.hot_cues().to_vec(),
+            },
+            &active_revision,
+        )?;
+        let promoted = repository
+            .track(track_id)?
+            .ok_or("promoted track missing")?;
+        assert_eq!(
+            promoted.summary().source_revision().as_str(),
+            "device:review:analysis-review"
+        );
+        assert_eq!(promoted.raw_phrases(), reviewed_phrases);
+        assert!(repository.device_review_tracks()?.is_empty());
+        assert_eq!(repository.device_source_summaries()?[0].promoted_tracks, 1);
         Ok(())
     }
 

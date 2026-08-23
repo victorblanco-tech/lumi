@@ -296,7 +296,15 @@ public struct LibrarySnapshotDecoder: Sendable {
                         artist: try string(track, "artist"),
                         bpmMilli: try unsigned(track, "bpmMilli"),
                         durationMillis: try unsigned(track, "durationMillis"),
-                        reason: try string(track, "reason")
+                        incomingAnalyzedAt: optionalString(track, "incomingAnalyzedAt") ?? "Unknown",
+                        activeAnalyzedAt: optionalString(track, "activeAnalyzedAt"),
+                        activeSourceName: optionalString(track, "activeSourceName"),
+                        incomingAnalysisRevision: optionalString(track, "incomingAnalysisRevision") ?? "unknown",
+                        activeAnalysisRevision: optionalString(track, "activeAnalysisRevision"),
+                        incomingMetadataRevision: optionalString(track, "incomingMetadataRevision") ?? "unknown",
+                        incomingFileSize: optionalUnsigned(track, "incomingFileSize") ?? 0,
+                        reason: try string(track, "reason"),
+                        components: try decodeDeviceReviewComponents(track["components"])
                     )
                 },
                 playlists: try playlistValues.map { value in
@@ -313,6 +321,31 @@ public struct LibrarySnapshotDecoder: Sendable {
                 }
             )
         }
+    }
+
+    private func decodeDeviceReviewComponents(
+        _ value: JSONValue?
+    ) throws -> RekordboxDeviceReviewComponentsState? {
+        guard let value, value != .null else { return nil }
+        guard case let .object(components) = value else {
+            throw LibrarySnapshotError.invalidObject
+        }
+        func component(_ key: String) throws -> RekordboxDeviceReviewComponentState {
+            guard case let .object(item)? = components[key] else {
+                throw LibrarySnapshotError.invalidObject
+            }
+            return RekordboxDeviceReviewComponentState(
+                status: try string(item, "status"),
+                detail: try string(item, "detail")
+            )
+        }
+        return try RekordboxDeviceReviewComponentsState(
+            beatGrid: component("beatGrid"),
+            cuePoints: component("cuePoints"),
+            fileData: component("fileData"),
+            rekordboxPhrases: component("rekordboxPhrases"),
+            waveform: component("waveform")
+        )
     }
 
     private func decodeRekordboxSyncPreview(

@@ -139,6 +139,9 @@ struct FoundationView: View {
                                     playlistIDs: playlistIDs
                                 )
                             }
+                        },
+                        onRekordboxDeviceConflictResolution: { request in
+                            Task { await engineStatus.resolveUSBConflict(request) }
                         }
                     )
                 case .plans:

@@ -1291,6 +1291,81 @@ final class EngineStatusModel: ObservableObject {
         }
     }
 
+    func resolveUSBConflict(_ request: USBConflictResolutionRequest) async {
+        sourceImportFeedback = request.choice == .useUSB
+            ? "Applying the reviewed USB version…"
+            : "Keeping the current Lumi version for this USB revision…"
+        sourceImportFeedbackIsError = false
+        usbSourceOperation = USBSourceOperationState(
+            phase: .synchronizing,
+            title: "Applying review choice",
+            detail: "Revalidating both revisions before changing the Lumi library."
+        )
+        guard lifecycle == .ready,
+              let endpointDescription,
+              let protocolVersion,
+              await acquireInteractiveExchange() else {
+            sourceImportFeedback = "The review choice could not be applied because the engine is not ready."
+            sourceImportFeedbackIsError = true
+            usbSourceOperation = USBSourceOperationState(
+                phase: .failed,
+                title: "Review choice failed",
+                detail: sourceImportFeedback ?? "The local engine is not ready."
+            )
+            return
+        }
+        defer { isExchangingCommand = false }
+        do {
+            let envelope = try await supervisor.send(
+                .resolveRekordboxDeviceConflict(
+                    root: request.root,
+                    sourceID: request.sourceID,
+                    deviceTrackID: request.deviceTrackID,
+                    expectedIncomingRevision: request.expectedIncomingRevision,
+                    expectedActiveRevision: request.expectedActiveRevision,
+                    choice: request.choice.rawValue
+                )
+            )
+            if let failure = EngineCommandFailure(envelope) {
+                sourceImportFeedback = failure.message
+                sourceImportFeedbackIsError = true
+                usbSourceOperation = USBSourceOperationState(
+                    phase: .failed,
+                    title: "Review choice failed",
+                    detail: failure.message
+                )
+                return
+            }
+            let (snapshot, snapshotEnvelope) = try await decodeSnapshotWithRecovery(
+                envelope,
+                endpointDescription: endpointDescription,
+                protocolVersion: protocolVersion,
+                context: "USB conflict resolution"
+            )
+            latestSnapshot = snapshot
+            workspaceState = LiveWorkspacePresenter.ready(snapshot)
+            libraryState = try decodeLibraryState(snapshotEnvelope)
+            let usedUSB = request.choice == .useUSB
+            sourceImportFeedback = usedUSB
+                ? "USB version applied. Lumi phrases and AutoLoop choices were preserved."
+                : "Current Lumi version kept for this exact USB revision."
+            usbSourceOperation = USBSourceOperationState(
+                phase: .completed,
+                title: "Review resolved",
+                detail: sourceImportFeedback ?? "The review choice was applied."
+            )
+        } catch {
+            sourceImportFeedback = (error as? LocalizedError)?.errorDescription
+                ?? "The review choice could not be applied."
+            sourceImportFeedbackIsError = true
+            usbSourceOperation = USBSourceOperationState(
+                phase: .failed,
+                title: "Review choice failed",
+                detail: sourceImportFeedback ?? "Unknown error"
+            )
+        }
+    }
+
     private func trustedUSBSourceID(root: String) -> String? {
         let url = URL(fileURLWithPath: root, isDirectory: true)
         let values = try? url.resourceValues(forKeys: [.volumeUUIDStringKey, .volumeNameKey])

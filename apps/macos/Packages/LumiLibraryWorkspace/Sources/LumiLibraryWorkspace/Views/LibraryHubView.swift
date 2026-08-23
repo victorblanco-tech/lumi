@@ -30,6 +30,7 @@ public struct LibraryHubView: View {
     private let onRekordboxAnalysisImport: @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void
     private let onRekordboxDeviceInspect: @Sendable (String) -> Void
     private let onRekordboxDeviceSync: @Sendable (String, [UInt32]) -> Void
+    private let onRekordboxDeviceConflictResolution: @Sendable (USBConflictResolutionRequest) -> Void
 
     @Binding private var section: LibraryHubSection
 
@@ -55,7 +56,8 @@ public struct LibraryHubView: View {
         onRekordboxSyncApply: @escaping @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void = { _, _ in },
         onRekordboxAnalysisImport: @escaping @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void = { _, _ in },
         onRekordboxDeviceInspect: @escaping @Sendable (String) -> Void = { _ in },
-        onRekordboxDeviceSync: @escaping @Sendable (String, [UInt32]) -> Void = { _, _ in }
+        onRekordboxDeviceSync: @escaping @Sendable (String, [UInt32]) -> Void = { _, _ in },
+        onRekordboxDeviceConflictResolution: @escaping @Sendable (USBConflictResolutionRequest) -> Void = { _ in }
     ) {
         self.state = state
         _keyNotation = keyNotation
@@ -79,6 +81,7 @@ public struct LibraryHubView: View {
         self.onRekordboxAnalysisImport = onRekordboxAnalysisImport
         self.onRekordboxDeviceInspect = onRekordboxDeviceInspect
         self.onRekordboxDeviceSync = onRekordboxDeviceSync
+        self.onRekordboxDeviceConflictResolution = onRekordboxDeviceConflictResolution
     }
 
     public var body: some View {
@@ -114,7 +117,8 @@ public struct LibraryHubView: View {
                         onSyncApply: onRekordboxSyncApply,
                         onAnalysisImport: onRekordboxAnalysisImport,
                         onDeviceInspect: onRekordboxDeviceInspect,
-                        onDeviceSync: onRekordboxDeviceSync
+                        onDeviceSync: onRekordboxDeviceSync,
+                        onDeviceConflictResolution: onRekordboxDeviceConflictResolution
                     )
                 }
             }

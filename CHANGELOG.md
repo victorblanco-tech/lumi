@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.0-dev-16 - 2026-08-23
+
+- Adds component-level USB conflict review for Beatgrid, Cue Points, File Data, Rekordbox Phrases and waveform projection.
+- Adds revision-safe `Ignore This Time`, `Do Not Sync to Lumi` and confirmed `Sync to Lumi & Overwrite` actions while preserving Lumi-authored phrases and AutoLoop choices.
+- Shows USB and active-source dates, revision fingerprints and concrete first differences for beatgrid, cue points, metadata, Rekordbox phrases and waveform data.
+
 ## 0.5.0-dev-15 - 2026-08-23
 
 ### Fixed

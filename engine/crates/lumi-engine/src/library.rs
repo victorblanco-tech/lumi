@@ -10,7 +10,7 @@ use lumi_domain::{
 };
 use lumi_library::{
     AutoloopCatalog, AutoloopCatalogError, AutoloopResolutionReason, AutoloopVariantMove, BeatGrid,
-    BeatMarker, ImportedLibraryBaseline, ImportedPlaylist, ImportedTrackAnalysis,
+    BeatMarker, HotCue, ImportedLibraryBaseline, ImportedPlaylist, ImportedTrackAnalysis,
     LibraryRepository, LibraryTrackQuery, LumiPhraseTimeline, PhraseInstance, PhraseLoopStrategy,
     PhraseRole, PhraseRoleCatalogError, PhraseRoleId, PhraseRoleMove, PlaylistId,
     RawPhraseObservation, ReconcileError, ReconcilePreview, ReconcileStrategy, SourceChangeClass,
@@ -98,12 +98,27 @@ struct DeviceInspection {
     snapshot: DeviceLibrarySnapshot,
     selected_playlist_ids: Vec<u32>,
     tracks: BTreeMap<u32, DeviceInspectionTrack>,
+    review_comparisons: BTreeMap<u32, DeviceReviewComparison>,
 }
 
 #[derive(Clone, Debug)]
 struct DeviceInspectionTrack {
     status: &'static str,
     detail: String,
+}
+
+#[derive(Clone, Debug)]
+struct DeviceReviewComparison {
+    beat_grid_changed: bool,
+    hot_cues_changed: bool,
+    file_data_changed: bool,
+    raw_phrases_changed: bool,
+    waveform_changed: bool,
+    beat_grid_detail: String,
+    hot_cues_detail: String,
+    raw_phrases_detail: String,
+    waveform_detail: String,
+    file_detail: String,
 }
 
 #[derive(Clone, Debug)]
@@ -123,6 +138,12 @@ pub struct RekordboxDeviceSyncResult {
     pub refreshed_analyses: usize,
     pub protected_older: usize,
     pub held_conflicts: usize,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DeviceReviewChoice {
+    KeepLumi,
+    UseUsb,
 }
 
 #[derive(Clone, Debug)]
@@ -1305,12 +1326,21 @@ impl LibraryWorker {
             let canonical_track_id = preliminary_track_id
                 .filter(|track_id| canonical_match_counts.get(track_id).copied() == Some(1));
             if let Some(track_id) = canonical_track_id {
-                let decision = self.repository.device_analysis_decision(
+                let mut decision = self.repository.device_analysis_decision(
                     track_id,
                     &snapshot.source_id,
                     &device_track.analysis_revision,
                     &device_track.analyzed_at,
                 )?;
+                if stored_aliases
+                    .get(&device_track.device_track_id)
+                    .is_some_and(|previous| {
+                        previous.sync_disposition == "kept-active"
+                            && previous.analysis_revision == device_track.analysis_revision
+                    })
+                {
+                    decision = lumi_library_sqlite::DeviceAnalysisDecision::KeepActive;
+                }
                 matched_tracks.insert(track_id, (device_track, decision));
                 let hot_cue_decision = self.repository.device_hot_cue_decision(
                     track_id,
@@ -1409,38 +1439,7 @@ impl LibraryWorker {
                             device_track.device_track_id.to_string(),
                         )
                     })?;
-                let canonical_grid = canonical_beat_grid(analysis)?;
-                let duration_millis = waveform_duration_millis(analysis)
-                    .or_else(|| {
-                        (device_track.duration_millis > 0)
-                            .then_some(u64::from(device_track.duration_millis))
-                    })
-                    .or_else(|| {
-                        inferred_duration_millis(&canonical_grid.beat_grid, device_track.bpm_milli)
-                    })
-                    .ok_or(LibraryWorkerError::RekordboxImportOverflow)?;
-                let total_beats = u32::try_from(canonical_grid.beat_grid.markers().len())
-                    .map_err(|_| LibraryWorkerError::RekordboxImportOverflow)?;
-                Ok(DeviceAnalysisUpsert {
-                    track_id: *track_id,
-                    source_id: snapshot.source_id.clone(),
-                    device_track_id: device_track.device_track_id,
-                    analysis_revision: format!(
-                        "device:{}:{}",
-                        snapshot.source_id, device_track.analysis_revision
-                    ),
-                    source_analysis_revision: device_track.analysis_revision.clone(),
-                    analyzed_at: device_track.analyzed_at.clone(),
-                    duration_millis,
-                    beat_grid: canonical_grid.beat_grid,
-                    waveform: downsample_waveform(&analysis.waveform, MAX_IMPORTED_WAVEFORM_POINTS),
-                    raw_phrases: canonical_phrases(
-                        analysis,
-                        total_beats,
-                        canonical_grid.source_beat_offset,
-                    )?,
-                    hot_cues: canonical_hot_cues(analysis, duration_millis)?,
-                })
+                device_analysis_upsert(&snapshot.source_id, *track_id, device_track, analysis)
             })
             .collect::<Result<Vec<_>, LibraryWorkerError>>()?;
         let hot_cue_updates = promotable_hot_cues
@@ -1614,6 +1613,84 @@ impl LibraryWorker {
         })
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub fn resolve_rekordbox_device_conflict(
+        &mut self,
+        root: impl AsRef<Path>,
+        source_id: &str,
+        device_track_id: u32,
+        expected_incoming_revision: &str,
+        expected_active_revision: &str,
+        choice: DeviceReviewChoice,
+    ) -> Result<(), LibraryWorkerError> {
+        match choice {
+            DeviceReviewChoice::KeepLumi => {
+                self.repository.keep_active_device_analysis(
+                    source_id,
+                    device_track_id,
+                    expected_incoming_revision,
+                    expected_active_revision,
+                )?;
+                let mut snapshot = read_device_library(root.as_ref())?;
+                snapshot.source_id = source_id.to_owned();
+                self.pending_device_inspection = Some(self.prepare_device_inspection(snapshot)?);
+                return Ok(());
+            }
+            DeviceReviewChoice::UseUsb => {}
+        }
+        let mut snapshot = read_device_library(root.as_ref())?;
+        snapshot.source_id = source_id.to_owned();
+        let device_track = snapshot
+            .tracks
+            .get(&device_track_id)
+            .ok_or(LibraryWorkerError::DeviceReviewChanged)?;
+        if device_track.analysis_revision != expected_incoming_revision {
+            return Err(LibraryWorkerError::DeviceReviewChanged);
+        }
+        let review = self
+            .repository
+            .device_review_tracks()?
+            .remove(source_id)
+            .and_then(|tracks| {
+                tracks
+                    .into_iter()
+                    .find(|track| track.device_track_id == device_track_id)
+            })
+            .ok_or(LibraryWorkerError::DeviceReviewChanged)?;
+        let canonical_track_id = review
+            .canonical_track_id
+            .ok_or(LibraryWorkerError::DeviceReviewChanged)?;
+        let analysis_root = snapshot
+            .database_path
+            .parent()
+            .and_then(Path::parent)
+            .ok_or(LibraryWorkerError::InvalidRekordboxDeviceRoot)?
+            .join("USBANLZ");
+        let temporary = RekordboxImportTemporaryRoot::create()?;
+        let request = ResolvedAnalysisRequest::try_new(
+            &analysis_root,
+            temporary.path().join("device-reviewed-analysis"),
+            vec![ResolvedAnalysisTrack::try_new(
+                device_track_id.to_string(),
+                &device_track.analysis_dat_path,
+            )?],
+        )?;
+        let parsed = snapshot_resolved_analysis_data(&request)?;
+        let resolved = parsed
+            .tracks
+            .get(&device_track_id.to_string())
+            .ok_or_else(|| {
+                LibraryWorkerError::MissingRekordboxTrackAnalysis(device_track_id.to_string())
+            })?;
+        let analysis =
+            device_analysis_upsert(source_id, canonical_track_id, device_track, resolved)?;
+        self.repository
+            .promote_reviewed_device_analysis(&analysis, expected_active_revision)?;
+        self.ensure_imported_timelines()?;
+        self.pending_device_inspection = Some(self.prepare_device_inspection(snapshot)?);
+        Ok(())
+    }
+
     fn prepare_device_inspection(
         &self,
         snapshot: DeviceLibrarySnapshot,
@@ -1673,6 +1750,13 @@ impl LibraryWorker {
                                 detail: "The OneLibrary analysis already matches Lumi.".to_owned(),
                             }
                         }
+                        lumi_library_sqlite::DeviceAnalysisDecision::KeepActive => {
+                            DeviceInspectionTrack {
+                                status: "current",
+                                detail: "You chose to keep the active Lumi version for this exact USB revision."
+                                    .to_owned(),
+                            }
+                        }
                         lumi_library_sqlite::DeviceAnalysisDecision::PromoteInitial
                         | lumi_library_sqlite::DeviceAnalysisDecision::PromoteNewer => {
                             DeviceInspectionTrack {
@@ -1710,6 +1794,7 @@ impl LibraryWorker {
             };
             tracks.insert(track.device_track_id, state);
         }
+        let review_comparisons = self.device_review_comparisons(&snapshot, &stored)?;
         let mut selected_playlist_ids = self
             .repository
             .device_selected_playlist_ids(&snapshot.source_id)?;
@@ -1731,7 +1816,143 @@ impl LibraryWorker {
             snapshot,
             selected_playlist_ids,
             tracks,
+            review_comparisons,
         })
+    }
+
+    fn device_review_comparisons(
+        &self,
+        snapshot: &DeviceLibrarySnapshot,
+        stored: &BTreeMap<u32, lumi_library_sqlite::StoredDeviceAliasState>,
+    ) -> Result<BTreeMap<u32, DeviceReviewComparison>, LibraryWorkerError> {
+        let conflicts = stored
+            .iter()
+            .filter_map(|(device_track_id, alias)| {
+                if alias.sync_disposition != "held-conflict" {
+                    return None;
+                }
+                Some((
+                    *device_track_id,
+                    alias.canonical_track_id?,
+                    snapshot.tracks.get(device_track_id)?,
+                ))
+            })
+            .collect::<Vec<_>>();
+        if conflicts.is_empty() {
+            return Ok(BTreeMap::new());
+        }
+        let analysis_root = snapshot
+            .database_path
+            .parent()
+            .and_then(Path::parent)
+            .ok_or(LibraryWorkerError::InvalidRekordboxDeviceRoot)?
+            .join("USBANLZ");
+        let temporary = RekordboxImportTemporaryRoot::create()?;
+        let request = ResolvedAnalysisRequest::try_new(
+            &analysis_root,
+            temporary.path().join("device-review-analysis"),
+            conflicts
+                .iter()
+                .map(|(device_track_id, _, track)| {
+                    ResolvedAnalysisTrack::try_new(
+                        device_track_id.to_string(),
+                        &track.analysis_dat_path,
+                    )
+                })
+                .collect::<Result<Vec<_>, _>>()?,
+        )?;
+        let parsed = snapshot_resolved_analysis_data(&request)?.tracks;
+        let mut comparisons = BTreeMap::new();
+        for (device_track_id, canonical_track_id, device_track) in conflicts {
+            let Some(resolved) = parsed.get(&device_track_id.to_string()) else {
+                continue;
+            };
+            let incoming = device_analysis_upsert(
+                &snapshot.source_id,
+                canonical_track_id,
+                device_track,
+                resolved,
+            )?;
+            let Some(active) = self.repository.track(canonical_track_id)? else {
+                continue;
+            };
+            let summary = active.summary();
+            let mut file_changes = Vec::new();
+            if summary.title() != device_track.title {
+                file_changes.push(format!(
+                    "title: USB ‘{}’ · Lumi ‘{}’",
+                    device_track.title,
+                    summary.title()
+                ));
+            }
+            if summary.artist() != device_track.artist {
+                file_changes.push(format!(
+                    "artist: USB ‘{}’ · Lumi ‘{}’",
+                    device_track.artist,
+                    summary.artist()
+                ));
+            }
+            if summary.bpm_milli() != device_track.bpm_milli {
+                file_changes.push(format!(
+                    "BPM: USB {:.3} · Lumi {:.3}",
+                    f64::from(device_track.bpm_milli) / 1_000.0,
+                    f64::from(summary.bpm_milli()) / 1_000.0
+                ));
+            }
+            if summary.duration_millis() != incoming.duration_millis {
+                file_changes.push(format!(
+                    "duration: USB {:.3}s · Lumi {:.3}s",
+                    incoming.duration_millis as f64 / 1_000.0,
+                    summary.duration_millis() as f64 / 1_000.0
+                ));
+            }
+            if summary.color().map(TrackColor::rgb_u32) != device_track.color_rgb {
+                file_changes.push(format!(
+                    "track color: USB {} · Lumi {}",
+                    optional_rgb(device_track.color_rgb),
+                    optional_rgb(summary.color().map(TrackColor::rgb_u32))
+                ));
+            }
+            let file_data_changed = !file_changes.is_empty();
+            let file_detail = if file_changes.is_empty() {
+                format!(
+                    "Track metadata is unchanged · USB file size {} bytes",
+                    device_track.file_size
+                )
+            } else {
+                format!(
+                    "{} · USB file size {} bytes",
+                    file_changes.join("; "),
+                    device_track.file_size
+                )
+            };
+            let beat_grid_changed = active.beat_grid() != &incoming.beat_grid;
+            let hot_cues_changed = active.hot_cues() != incoming.hot_cues.as_slice();
+            let raw_phrases_changed = active.raw_phrases() != incoming.raw_phrases.as_slice();
+            let waveform_changed = active.waveform() != incoming.waveform.as_slice();
+            comparisons.insert(
+                device_track_id,
+                DeviceReviewComparison {
+                    beat_grid_changed,
+                    hot_cues_changed,
+                    file_data_changed,
+                    raw_phrases_changed,
+                    waveform_changed,
+                    beat_grid_detail: beat_grid_review_detail(
+                        &incoming.beat_grid,
+                        active.beat_grid(),
+                    ),
+                    hot_cues_detail: hot_cue_review_detail(&incoming.hot_cues, active.hot_cues()),
+                    raw_phrases_detail: raw_phrases_review_detail(
+                        &incoming.raw_phrases,
+                        active.raw_phrases(),
+                    ),
+                    waveform_detail: waveform_review_detail(&incoming.waveform, active.waveform()),
+                    file_detail,
+                },
+            );
+        }
+        Ok(comparisons)
     }
 
     pub fn connected_track(
@@ -2556,6 +2777,10 @@ impl LibraryWorker {
                     .get(&source.source_id)
                     .map(Vec::as_slice)
                     .unwrap_or(&[]);
+                let review_comparisons = self.pending_device_inspection
+                    .as_ref()
+                    .filter(|inspection| inspection.snapshot.source_id == source.source_id)
+                    .map(|inspection| &inspection.review_comparisons);
                 json!({
                     "sourceId": source.source_id,
                     "displayName": source.display_name,
@@ -2587,6 +2812,8 @@ impl LibraryWorker {
                                 "This USB analysis differs from {active_source}, but comparable provenance is unavailable. Lumi kept the active analysis."
                             ),
                         };
+                        let comparison = review_comparisons
+                            .and_then(|items| items.get(&track.device_track_id));
                         json!({
                             "deviceTrackId": track.device_track_id,
                             "canonicalTrackId": track.canonical_track_id.map(TrackId::value),
@@ -2594,7 +2821,15 @@ impl LibraryWorker {
                             "artist": track.artist,
                             "bpmMilli": track.bpm_milli,
                             "durationMillis": track.duration_millis,
+                            "incomingAnalyzedAt": track.incoming_analyzed_at,
+                            "activeAnalyzedAt": track.active_analyzed_at,
+                            "activeSourceName": track.active_source_name,
+                            "incomingAnalysisRevision": track.incoming_analysis_revision,
+                            "activeAnalysisRevision": track.active_analysis_revision,
+                            "incomingMetadataRevision": track.incoming_metadata_revision,
+                            "incomingFileSize": track.incoming_file_size,
                             "reason": reason,
+                            "components": comparison.map(review_comparison_json),
                         })
                     }).collect::<Vec<_>>(),
                     "playlists": playlists.iter().map(|playlist| json!({
@@ -3637,6 +3872,36 @@ fn canonical_beat_grid(
     })
 }
 
+fn device_analysis_upsert(
+    source_id: &str,
+    track_id: TrackId,
+    device_track: &DeviceTrack,
+    analysis: &ResolvedTrackAnalysis,
+) -> Result<DeviceAnalysisUpsert, LibraryWorkerError> {
+    let canonical_grid = canonical_beat_grid(analysis)?;
+    let duration_millis = waveform_duration_millis(analysis)
+        .or_else(|| {
+            (device_track.duration_millis > 0).then_some(u64::from(device_track.duration_millis))
+        })
+        .or_else(|| inferred_duration_millis(&canonical_grid.beat_grid, device_track.bpm_milli))
+        .ok_or(LibraryWorkerError::RekordboxImportOverflow)?;
+    let total_beats = u32::try_from(canonical_grid.beat_grid.markers().len())
+        .map_err(|_| LibraryWorkerError::RekordboxImportOverflow)?;
+    Ok(DeviceAnalysisUpsert {
+        track_id,
+        source_id: source_id.to_owned(),
+        device_track_id: device_track.device_track_id,
+        analysis_revision: format!("device:{source_id}:{}", device_track.analysis_revision),
+        source_analysis_revision: device_track.analysis_revision.clone(),
+        analyzed_at: device_track.analyzed_at.clone(),
+        duration_millis,
+        beat_grid: canonical_grid.beat_grid,
+        waveform: downsample_waveform(&analysis.waveform, MAX_IMPORTED_WAVEFORM_POINTS),
+        raw_phrases: canonical_phrases(analysis, total_beats, canonical_grid.source_beat_offset)?,
+        hot_cues: canonical_hot_cues(analysis, duration_millis)?,
+    })
+}
+
 fn canonical_hot_cues(
     parsed: &ResolvedTrackAnalysis,
     duration_millis: u64,
@@ -3710,6 +3975,177 @@ fn device_status_counts<'a>(tracks: impl Iterator<Item = &'a DeviceInspectionTra
         "notInLumi": not_in_lumi,
         "conflict": conflict,
     })
+}
+
+fn review_component_json(changed: bool, detail: String) -> Value {
+    json!({
+        "status": if changed { "changed" } else { "unchanged" },
+        "detail": detail,
+    })
+}
+
+fn review_comparison_json(item: &DeviceReviewComparison) -> Value {
+    let mut components = serde_json::Map::new();
+    components.insert(
+        "beatGrid".to_owned(),
+        review_component_json(item.beat_grid_changed, item.beat_grid_detail.clone()),
+    );
+    components.insert(
+        "cuePoints".to_owned(),
+        review_component_json(item.hot_cues_changed, item.hot_cues_detail.clone()),
+    );
+    components.insert(
+        "fileData".to_owned(),
+        review_component_json(item.file_data_changed, item.file_detail.clone()),
+    );
+    components.insert(
+        "rekordboxPhrases".to_owned(),
+        review_component_json(item.raw_phrases_changed, item.raw_phrases_detail.clone()),
+    );
+    components.insert(
+        "waveform".to_owned(),
+        review_component_json(item.waveform_changed, item.waveform_detail.clone()),
+    );
+    Value::Object(components)
+}
+
+fn optional_rgb(value: Option<u32>) -> String {
+    value.map_or_else(|| "none".to_owned(), |rgb| format!("#{rgb:06X}"))
+}
+
+fn beat_grid_review_detail(incoming: &BeatGrid, active: &BeatGrid) -> String {
+    let incoming_count = incoming.markers().len();
+    let active_count = active.markers().len();
+    let first_change = incoming
+        .markers()
+        .iter()
+        .zip(active.markers())
+        .position(|(usb, lumi)| usb != lumi);
+    match first_change {
+        Some(index) => {
+            let usb = incoming.markers()[index];
+            let lumi = active.markers()[index];
+            format!(
+                "First change at beat {}: USB {:.3}s · Lumi {:.3}s · USB {incoming_count} beats · Lumi {active_count} beats",
+                index + 1,
+                usb.time_millis() as f64 / 1_000.0,
+                lumi.time_millis() as f64 / 1_000.0
+            )
+        }
+        None if incoming_count != active_count => {
+            format!("Beat count differs: USB {incoming_count} · Lumi {active_count}")
+        }
+        None => format!("USB {incoming_count} beats · Lumi {active_count} beats"),
+    }
+}
+
+fn hot_cue_review_detail(incoming: &[HotCue], active: &[HotCue]) -> String {
+    let labels = |cues: &[HotCue]| {
+        cues.iter()
+            .map(|cue| hot_cue_label(cue.index()))
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
+    let incoming_labels = labels(incoming);
+    let active_labels = labels(active);
+    let changed = incoming
+        .iter()
+        .map(HotCue::index)
+        .chain(active.iter().map(HotCue::index))
+        .collect::<BTreeSet<_>>()
+        .into_iter()
+        .filter(|index| {
+            incoming.iter().find(|cue| cue.index() == *index)
+                != active.iter().find(|cue| cue.index() == *index)
+        })
+        .map(hot_cue_label)
+        .collect::<Vec<_>>();
+    let inventory = format!(
+        "USB {} cues ({}) · Lumi {} cues ({})",
+        incoming.len(),
+        if incoming_labels.is_empty() {
+            "none"
+        } else {
+            &incoming_labels
+        },
+        active.len(),
+        if active_labels.is_empty() {
+            "none"
+        } else {
+            &active_labels
+        }
+    );
+    if changed.is_empty() {
+        inventory
+    } else {
+        format!("Changed cue details: {} · {inventory}", changed.join(", "))
+    }
+}
+
+fn hot_cue_label(index: u8) -> String {
+    char::from(b'A'.saturating_add(index.saturating_sub(1))).to_string()
+}
+
+fn raw_phrases_review_detail(
+    incoming: &[RawPhraseObservation],
+    active: &[RawPhraseObservation],
+) -> String {
+    let first_change = incoming
+        .iter()
+        .zip(active)
+        .position(|(usb, lumi)| usb != lumi);
+    match first_change {
+        Some(index) => {
+            let usb = &incoming[index];
+            let lumi = &active[index];
+            format!(
+                "First change at phrase {}: USB {} [{}–{}] · Lumi {} [{}–{}] · USB {} phrases · Lumi {} phrases",
+                index + 1,
+                usb.source_label(),
+                usb.start_beat(),
+                usb.end_beat(),
+                lumi.source_label(),
+                lumi.start_beat(),
+                lumi.end_beat(),
+                incoming.len(),
+                active.len()
+            )
+        }
+        None if incoming.len() != active.len() => format!(
+            "Phrase count differs after the shared prefix: USB {} · Lumi {}",
+            incoming.len(),
+            active.len()
+        ),
+        None => format!(
+            "USB {} phrases · Lumi source {} phrases",
+            incoming.len(),
+            active.len()
+        ),
+    }
+}
+
+fn waveform_review_detail(incoming: &[WaveformPoint], active: &[WaveformPoint]) -> String {
+    let first_change = incoming
+        .iter()
+        .zip(active)
+        .position(|(usb, lumi)| usb != lumi);
+    match first_change {
+        Some(index) => format!(
+            "First RGB waveform difference at sample {} · USB {} samples · Lumi {} samples",
+            index + 1,
+            incoming.len(),
+            active.len()
+        ),
+        None if incoming.len() != active.len() => format!(
+            "Waveform sample count differs: USB {} · Lumi {}",
+            incoming.len(),
+            active.len()
+        ),
+        None => format!(
+            "RGB waveform is identical · {} samples compared",
+            incoming.len()
+        ),
+    }
 }
 
 fn normalize_device_match(value: &str) -> String {
@@ -4014,6 +4450,8 @@ pub enum LibraryWorkerError {
     InvalidDevicePlaylistSelection,
     #[error("the selected USB playlists contain no tracks")]
     EmptyDevicePlaylistSelection,
+    #[error("the USB review changed; refresh the source before choosing again")]
+    DeviceReviewChanged,
     #[error("Rekordbox is not installed in a supported local location")]
     RekordboxInstallationUnavailable,
     #[error("the temporary Rekordbox import clock is unavailable")]
@@ -5364,7 +5802,8 @@ mod tests {
     fn mounted_usb_inspection_fits_the_local_protocol() -> Result<(), Box<dyn std::error::Error>> {
         let root = std::env::var("LUMI_TEST_USB_ROOT")?;
         let mut worker = LibraryWorker::demo()?;
-        worker.inspect_rekordbox_device(root, None)?;
+        let trusted_source_id = std::env::var("LUMI_TEST_USB_SOURCE_ID").ok();
+        worker.inspect_rekordbox_device(root, trusted_source_id.as_deref())?;
         let encoded = serde_json::to_vec(&worker.snapshot_json()?)?;
         eprintln!("USB inspection snapshot: {} bytes", encoded.len());
         if let Ok(output_path) = std::env::var("LUMI_TEST_USB_SNAPSHOT_OUTPUT") {

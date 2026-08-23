@@ -77,6 +77,29 @@ Sync persists provenance and the disposition per USB alias atomically. The UI
 shows indexed, matched, current, promoted, protected and conflict counts.
 Unmatched or ambiguous tracks remain held and cannot drive automatic output.
 
+A held conflict has an explicit, component-level review. While the exact USB is
+connected, Lumi parses its candidate analysis read-only and compares Beatgrid,
+Cue Points, file/track metadata, raw Rekordbox Phrases and the RGB waveform
+projection with the active Lumi projection. Source dates, active provenance and
+revision identities are visible evidence; one combined analysis hash is never
+presented as if it explained which component changed.
+
+Review decisions are revision-bound and fail closed:
+
+1. `Ignore This Time` is presentation-only and hides nothing beyond the current
+   screen session;
+2. `Do Not Sync to Lumi` records `kept-active` for that exact incoming USB
+   analysis revision; a later USB revision re-enters normal comparison;
+3. `Sync to Lumi & Overwrite` asks for confirmation, rereads the mounted source,
+   validates both the incoming and active revisions, and atomically promotes the
+   Rekordbox projection. A stale review is rejected and must be refreshed.
+
+Raw Rekordbox phrases are provider evidence. The Lumi-authored phrase timeline,
+Phrase Roles, AutoLoop choices and plan overrides are stored separately and are
+never replaced by a USB review decision. Refreshing source analysis may
+reconcile its beat-coordinate baseline using the existing timeline preservation
+rules, but it does not turn Rekordbox phrases back into authored Lumi phrases.
+
 The integration is named **Pro DJ Link** in all product UI. Beat Link Trigger
 is a legacy development fallback; the production path is Lumi's supervised
 bridge using the upstream `beat-link` library.
@@ -87,8 +110,8 @@ bridge using the upstream `beat-link` library.
   waveform or independently versioned hot-cue set.
 - Conflicting counters or identities are held for review rather than guessed.
 - Synchronizing a source later does not make its content newer.
-- A future review workflow can explicitly promote a held conflict without
-  changing the safe automatic policy.
+- A user can resolve a held conflict without weakening the safe automatic
+  promotion policy or guessing from a timestamp alone.
 - Primary and backup devices remain distinct even when their volume names or
   exported track IDs overlap.
 - Selecting the same track through multiple playlists never analyzes it more

@@ -53,6 +53,7 @@ public struct LibrarySourcesWorkspaceView: View {
     private let onAnalysisImport: @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void
     private let onDeviceInspect: @Sendable (String) -> Void
     private let onDeviceSync: @Sendable (String, [UInt32]) -> Void
+    private let onDeviceConflictResolution: @Sendable (USBConflictResolutionRequest) -> Void
 
     @AppStorage(LumiPreferenceKey.rekordboxXMLFolder)
     private var rekordboxFolderPath = ""
@@ -84,6 +85,8 @@ public struct LibrarySourcesWorkspaceView: View {
     @State private var mountedUSBChoices: [URL] = []
     @State private var isUSBSourceChoicePresented = false
     @State private var usbSelectionFeedback: String?
+    @State private var ignoredUSBReviews: Set<String> = []
+    @State private var pendingUSBVersionRequest: USBConflictResolutionRequest?
 
     public init(
         library: LibraryWorkspaceState,
@@ -98,7 +101,8 @@ public struct LibrarySourcesWorkspaceView: View {
         onSyncApply: @escaping @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void = { _, _ in },
         onAnalysisImport: @escaping @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void = { _, _ in },
         onDeviceInspect: @escaping @Sendable (String) -> Void = { _ in },
-        onDeviceSync: @escaping @Sendable (String, [UInt32]) -> Void = { _, _ in }
+        onDeviceSync: @escaping @Sendable (String, [UInt32]) -> Void = { _, _ in },
+        onDeviceConflictResolution: @escaping @Sendable (USBConflictResolutionRequest) -> Void = { _ in }
     ) {
         self.library = library
         self.settings = settings
@@ -113,6 +117,7 @@ public struct LibrarySourcesWorkspaceView: View {
         self.onAnalysisImport = onAnalysisImport
         self.onDeviceInspect = onDeviceInspect
         self.onDeviceSync = onDeviceSync
+        self.onDeviceConflictResolution = onDeviceConflictResolution
         _selectedProviderKind = State(initialValue: settings?.mappingProfiles.first?.providerKind)
     }
 
@@ -146,6 +151,24 @@ public struct LibrarySourcesWorkspaceView: View {
             Button("Cancel", role: .cancel) {}
         } message: {
             Text("Only connected Rekordbox OneLibrary USB sources are shown.")
+        }
+        .confirmationDialog(
+            "Use the USB version?",
+            isPresented: Binding(
+                get: { pendingUSBVersionRequest != nil },
+                set: { if !$0 { pendingUSBVersionRequest = nil } }
+            ),
+            titleVisibility: .visible
+        ) {
+            Button("Sync to Lumi & Overwrite", role: .destructive) {
+                if let request = pendingUSBVersionRequest {
+                    onDeviceConflictResolution(request)
+                }
+                pendingUSBVersionRequest = nil
+            }
+            Button("Cancel", role: .cancel) { pendingUSBVersionRequest = nil }
+        } message: {
+            Text("This replaces the imported Rekordbox beatgrid, waveform, cue points and raw Rekordbox phrases. Lumi-authored phrases and AutoLoop choices are preserved.")
         }
         .onChange(of: settings?.revision) { _, _ in synchronizeProvider() }
         .onChange(of: library.rekordboxDevices) { _, devices in
@@ -215,7 +238,7 @@ public struct LibrarySourcesWorkspaceView: View {
     }
 
     private var trustedUSBSources: some View {
-        VStack(alignment: .leading, spacing: LumiSpacing.medium) {
+        return VStack(alignment: .leading, spacing: LumiSpacing.medium) {
             HStack {
                 Text("Trusted USB Sources").font(LumiTypography.sectionTitle)
                 Spacer()
@@ -562,21 +585,25 @@ public struct LibrarySourcesWorkspaceView: View {
     }
 
     private func usbReviewTracks(_ device: RekordboxDeviceState) -> some View {
-        VStack(alignment: .leading, spacing: LumiSpacing.medium) {
+        let visibleTracks = device.reviewTracks.filter {
+            !ignoredUSBReviews.contains(reviewKey(device, $0))
+        }
+        return VStack(alignment: .leading, spacing: LumiSpacing.medium) {
             HStack {
                 Label("Tracks to review", systemImage: "exclamationmark.triangle.fill")
                     .font(LumiTypography.cardTitle)
                     .foregroundStyle(LumiColor.warning)
                 Spacer()
-                compactStatus("\(device.conflictTracks) REVIEW", .degraded)
+                compactStatus("\(visibleTracks.count) REVIEW", visibleTracks.isEmpty ? .ready : .degraded)
             }
-            Text("Lumi did not overwrite these tracks. Their USB analysis differs from the active analysis, but the source dates do not establish a safe newer version.")
+            Text("Lumi did not overwrite these tracks. Compare each imported Rekordbox component, then choose what should happen with this exact USB revision.")
                 .font(LumiTypography.caption)
                 .foregroundStyle(LumiColor.textSecondary)
             VStack(spacing: LumiSpacing.xSmall) {
-                ForEach(device.reviewTracks) { track in
-                    HStack(alignment: .top, spacing: LumiSpacing.medium) {
-                        VStack(alignment: .leading, spacing: 3) {
+                ForEach(visibleTracks) { track in
+                    VStack(alignment: .leading, spacing: LumiSpacing.medium) {
+                        HStack(alignment: .top, spacing: LumiSpacing.medium) {
+                            VStack(alignment: .leading, spacing: 3) {
                             Text(track.title)
                                 .font(LumiTypography.body.weight(.semibold))
                                 .foregroundStyle(LumiColor.textPrimary)
@@ -587,12 +614,77 @@ public struct LibrarySourcesWorkspaceView: View {
                                 .font(LumiTypography.caption)
                                 .foregroundStyle(LumiColor.textSecondary)
                                 .fixedSize(horizontal: false, vertical: true)
+                            }
+                            Spacer(minLength: LumiSpacing.medium)
+                            Text(String(format: "%.2f BPM", Double(track.bpmMilli) / 1_000))
+                                .font(LumiTypography.technical)
+                                .foregroundStyle(LumiColor.textSecondary)
+                            compactStatus("REVIEW", .degraded)
                         }
-                        Spacer(minLength: LumiSpacing.medium)
-                        Text(String(format: "%.2f BPM", Double(track.bpmMilli) / 1_000))
-                            .font(LumiTypography.technical)
-                            .foregroundStyle(LumiColor.textSecondary)
-                        compactStatus("REVIEW", .degraded)
+                        HStack(spacing: LumiSpacing.large) {
+                            reviewFact("USB source date", formattedReviewDate(track.incomingAnalyzedAt))
+                            reviewFact("Active Lumi source", track.activeSourceName ?? "Unknown source")
+                            reviewFact("Active source date", formattedReviewDate(track.activeAnalyzedAt))
+                        }
+                        HStack(spacing: LumiSpacing.large) {
+                            reviewFact("USB analysis revision", compactRevision(track.incomingAnalysisRevision))
+                            reviewFact("Lumi analysis revision", compactRevision(track.activeAnalysisRevision))
+                            reviewFact("USB metadata revision", compactRevision(track.incomingMetadataRevision))
+                        }
+                        if let components = track.components {
+                            LazyVGrid(
+                                columns: [GridItem(.adaptive(minimum: 150), spacing: LumiSpacing.small)],
+                                spacing: LumiSpacing.small
+                            ) {
+                                reviewComponent("Beatgrid", components.beatGrid, "metronome")
+                                reviewComponent("Cue Points", components.cuePoints, "mappin")
+                                reviewComponent("File Data", components.fileData, "doc.fill")
+                                reviewComponent("RB Phrases", components.rekordboxPhrases, "rectangle.split.3x1")
+                                reviewComponent("Waveform", components.waveform, "waveform")
+                            }
+                        } else {
+                            Label("Reconnect or refresh this USB to calculate the component-level differences.", systemImage: "arrow.clockwise")
+                                .font(LumiTypography.caption)
+                                .foregroundStyle(LumiColor.textSecondary)
+                        }
+                        HStack(spacing: LumiSpacing.small) {
+                            Button("Ignore This Time") {
+                                ignoredUSBReviews.insert(reviewKey(device, track))
+                            }
+                            .buttonStyle(.bordered)
+                            .help("Hide this item until you reopen this screen. Nothing is saved or synchronized.")
+                            if let root = mountedURL(for: device)?.path,
+                               let activeRevision = track.activeAnalysisRevision {
+                                Button("Do Not Sync to Lumi") {
+                                    onDeviceConflictResolution(
+                                        conflictRequest(
+                                            root: root,
+                                            device: device,
+                                            track: track,
+                                            activeRevision: activeRevision,
+                                            choice: .keepLumi
+                                        )
+                                    )
+                                }
+                                .buttonStyle(.bordered)
+                                .help("Do not import this exact USB analysis revision. A later USB revision will be reviewed again.")
+                                Button("Sync to Lumi & Overwrite") {
+                                    pendingUSBVersionRequest = conflictRequest(
+                                        root: root,
+                                        device: device,
+                                        track: track,
+                                        activeRevision: activeRevision,
+                                        choice: .useUSB
+                                    )
+                                }
+                                .buttonStyle(.borderedProminent)
+                                .help("Replace the imported Rekordbox projection after a final revision check. Lumi phrases and AutoLoops stay intact.")
+                            } else {
+                                Text("Connect and refresh this USB to apply a saved choice.")
+                                    .font(LumiTypography.technical)
+                                    .foregroundStyle(LumiColor.textSecondary)
+                            }
+                        }
                     }
                     .padding(LumiSpacing.medium)
                     .background(LumiColor.surfaceElevated)
@@ -608,6 +700,77 @@ public struct LibrarySourcesWorkspaceView: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
         .accessibilityIdentifier("lumi.library.sources.usb.reviewTracks")
+    }
+
+    private func reviewKey(
+        _ device: RekordboxDeviceState,
+        _ track: RekordboxDeviceReviewTrackState
+    ) -> String {
+        "\(device.sourceID):\(track.deviceTrackID):\(track.incomingAnalysisRevision)"
+    }
+
+    private func conflictRequest(
+        root: String,
+        device: RekordboxDeviceState,
+        track: RekordboxDeviceReviewTrackState,
+        activeRevision: String,
+        choice: USBConflictResolutionChoice
+    ) -> USBConflictResolutionRequest {
+        USBConflictResolutionRequest(
+            root: root,
+            sourceID: device.sourceID,
+            deviceTrackID: track.deviceTrackID,
+            expectedIncomingRevision: track.incomingAnalysisRevision,
+            expectedActiveRevision: activeRevision,
+            choice: choice
+        )
+    }
+
+    private func formattedReviewDate(_ value: String?) -> String {
+        guard let value, !value.isEmpty else { return "Unknown" }
+        return value
+    }
+
+    private func compactRevision(_ value: String?) -> String {
+        guard let value, !value.isEmpty else { return "Unknown" }
+        guard value.count > 18 else { return value }
+        return "\(value.prefix(8))…\(value.suffix(8))"
+    }
+
+    private func reviewFact(_ title: String, _ detail: String) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(title.uppercased())
+                .font(LumiTypography.technical)
+                .foregroundStyle(LumiColor.textSecondary)
+            Text(detail)
+                .font(LumiTypography.caption.weight(.semibold))
+                .foregroundStyle(LumiColor.textPrimary)
+                .lineLimit(2)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func reviewComponent(
+        _ title: String,
+        _ component: RekordboxDeviceReviewComponentState,
+        _ icon: String
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Label(title, systemImage: icon)
+                .font(LumiTypography.caption.weight(.semibold))
+                .foregroundStyle(component.changed ? LumiColor.warning : LumiColor.success)
+            Text(component.changed ? "CHANGED" : "UNCHANGED")
+                .font(LumiTypography.technical)
+                .foregroundStyle(component.changed ? LumiColor.warning : LumiColor.success)
+            Text(component.detail)
+                .font(LumiTypography.technical)
+                .foregroundStyle(LumiColor.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(LumiSpacing.small)
+        .frame(maxWidth: .infinity, minHeight: 92, alignment: .topLeading)
+        .background(LumiColor.surface)
+        .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
     }
 
     private func devicePlaylistSelection(

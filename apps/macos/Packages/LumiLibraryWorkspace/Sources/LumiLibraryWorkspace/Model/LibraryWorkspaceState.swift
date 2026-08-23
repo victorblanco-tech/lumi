@@ -585,9 +585,62 @@ public struct RekordboxDeviceReviewTrackState: Equatable, Sendable, Identifiable
     public let artist: String
     public let bpmMilli: UInt64
     public let durationMillis: UInt64
+    public let incomingAnalyzedAt: String
+    public let activeAnalyzedAt: String?
+    public let activeSourceName: String?
+    public let incomingAnalysisRevision: String
+    public let activeAnalysisRevision: String?
+    public let incomingMetadataRevision: String
+    public let incomingFileSize: UInt64
     public let reason: String
+    public let components: RekordboxDeviceReviewComponentsState?
 
     public var id: UInt32 { deviceTrackID }
+}
+
+public struct RekordboxDeviceReviewComponentState: Equatable, Sendable {
+    public let status: String
+    public let detail: String
+
+    public var changed: Bool { status == "changed" }
+}
+
+public struct RekordboxDeviceReviewComponentsState: Equatable, Sendable {
+    public let beatGrid: RekordboxDeviceReviewComponentState
+    public let cuePoints: RekordboxDeviceReviewComponentState
+    public let fileData: RekordboxDeviceReviewComponentState
+    public let rekordboxPhrases: RekordboxDeviceReviewComponentState
+    public let waveform: RekordboxDeviceReviewComponentState
+}
+
+public enum USBConflictResolutionChoice: String, Sendable {
+    case keepLumi = "keep-lumi"
+    case useUSB = "use-usb"
+}
+
+public struct USBConflictResolutionRequest: Sendable {
+    public let root: String
+    public let sourceID: String
+    public let deviceTrackID: UInt32
+    public let expectedIncomingRevision: String
+    public let expectedActiveRevision: String
+    public let choice: USBConflictResolutionChoice
+
+    public init(
+        root: String,
+        sourceID: String,
+        deviceTrackID: UInt32,
+        expectedIncomingRevision: String,
+        expectedActiveRevision: String,
+        choice: USBConflictResolutionChoice
+    ) {
+        self.root = root
+        self.sourceID = sourceID
+        self.deviceTrackID = deviceTrackID
+        self.expectedIncomingRevision = expectedIncomingRevision
+        self.expectedActiveRevision = expectedActiveRevision
+        self.choice = choice
+    }
 }
 
 public struct RekordboxDeviceSyncedPlaylistState: Equatable, Sendable, Identifiable {
