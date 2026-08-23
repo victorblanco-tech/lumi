@@ -129,13 +129,19 @@ struct FoundationView: View {
                                 )
                             }
                         },
-                        onRekordboxDeviceInspect: { root in
-                            Task { await engineStatus.inspectRekordboxDevice(root: root) }
+                        onRekordboxDeviceInspect: { root, sourceID in
+                            Task {
+                                await engineStatus.inspectRekordboxDevice(
+                                    root: root,
+                                    sourceID: sourceID
+                                )
+                            }
                         },
-                        onRekordboxDeviceSync: { root, playlistIDs in
+                        onRekordboxDeviceSync: { root, sourceID, playlistIDs in
                             Task {
                                 await engineStatus.syncRekordboxDevice(
                                     root: root,
+                                    sourceID: sourceID,
                                     playlistIDs: playlistIDs
                                 )
                             }

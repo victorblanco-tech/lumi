@@ -175,6 +175,29 @@ struct USBSourceIdentityResolverTests {
         #expect(USBSourceIdentityResolver.inspection(currentInspection, matches: previousGray))
     }
 
+    @Test("A duplicated hardware serial cannot attach GRAY to CHRM")
+    func duplicatedHardwareSerialUsesUniqueLegacyName() {
+        let chrm = device(
+            sourceID: "usb-fs:hardware-shared",
+            displayName: "DJ VIC CHRM"
+        )
+        let previousGray = device(
+            sourceID: "usb-fs:5abc7360-045c-3a24-98a2-0723c3cb10fb",
+            displayName: "DJ VIC GRAY"
+        )
+        let mountedGray = MountedUSBIdentity(
+            sourceID: chrm.sourceID,
+            displayName: "DJ VIC GRAY"
+        )
+
+        #expect(
+            USBSourceIdentityResolver.selectedSourceID(
+                for: mountedGray,
+                devices: [chrm, previousGray]
+            ) == previousGray.sourceID
+        )
+    }
+
     private func device(sourceID: String, displayName: String) -> RekordboxDeviceState {
         RekordboxDeviceState(
             sourceID: sourceID,

@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.5.0-dev-18 - 2026-08-23
+
+### Fixed
+
+- Persists `Do Not Sync to Lumi` for the exact reviewed USB revision and only
+  asks again after that source changes.
+- Keeps CHRM and GRAY attached to their own trusted source when equal-model USB
+  disks report the same unreliable hardware serial.
+- Shows GRAY's green/orange component comparison after every completed scan.
+- Keeps review details and controls stationary while the larger playlist result
+  loads below them, preventing scan-completion layout jumps.
+- Shows saving progress and any failure beside the review action that caused it.
+
+### Verification
+
+- Adds regression coverage for revision-safe persistent review choices and
+  colliding equal-model USB identities.
+- Verifies the complete macOS Library workspace test suite with Swift warnings
+  treated as errors.
+
 ## 0.5.0-dev-17 - 2026-08-23
 
 ### Fixed

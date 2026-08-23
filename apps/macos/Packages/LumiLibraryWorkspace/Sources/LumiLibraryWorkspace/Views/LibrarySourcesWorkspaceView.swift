@@ -51,8 +51,8 @@ public struct LibrarySourcesWorkspaceView: View {
     private let onSyncPreview: @Sendable (RekordboxXMLSyncPreviewRequest) -> Void
     private let onSyncApply: @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void
     private let onAnalysisImport: @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void
-    private let onDeviceInspect: @Sendable (String) -> Void
-    private let onDeviceSync: @Sendable (String, [UInt32]) -> Void
+    private let onDeviceInspect: @Sendable (String, String?) -> Void
+    private let onDeviceSync: @Sendable (String, String?, [UInt32]) -> Void
     private let onDeviceConflictResolution: @Sendable (USBConflictResolutionRequest) -> Void
 
     @AppStorage(LumiPreferenceKey.rekordboxXMLFolder)
@@ -87,6 +87,8 @@ public struct LibrarySourcesWorkspaceView: View {
     @State private var usbSelectionFeedback: String?
     @State private var ignoredUSBReviews: Set<String> = []
     @State private var pendingUSBVersionRequest: USBConflictResolutionRequest?
+    @State private var resolvingUSBReviewKey: String?
+    @State private var failedUSBReviewKey: String?
 
     public init(
         library: LibraryWorkspaceState,
@@ -100,8 +102,8 @@ public struct LibrarySourcesWorkspaceView: View {
         onSyncPreview: @escaping @Sendable (RekordboxXMLSyncPreviewRequest) -> Void = { _ in },
         onSyncApply: @escaping @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void = { _, _ in },
         onAnalysisImport: @escaping @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void = { _, _ in },
-        onDeviceInspect: @escaping @Sendable (String) -> Void = { _ in },
-        onDeviceSync: @escaping @Sendable (String, [UInt32]) -> Void = { _, _ in },
+        onDeviceInspect: @escaping @Sendable (String, String?) -> Void = { _, _ in },
+        onDeviceSync: @escaping @Sendable (String, String?, [UInt32]) -> Void = { _, _, _ in },
         onDeviceConflictResolution: @escaping @Sendable (USBConflictResolutionRequest) -> Void = { _ in }
     ) {
         self.library = library
@@ -187,6 +189,16 @@ public struct LibrarySourcesWorkspaceView: View {
             expandedUSBPlaylistIDs.removeAll()
             expandedUSBPlaylistFolderPaths.removeAll()
             restoreDevicePlaylistSelection()
+        }
+        .onChange(of: usbOperation.phase) { _, phase in
+            if phase == .failed {
+                failedUSBReviewKey = resolvingUSBReviewKey
+            } else if phase == .completed {
+                failedUSBReviewKey = nil
+            }
+            if phase == .completed || phase == .failed || phase == .idle {
+                resolvingUSBReviewKey = nil
+            }
         }
         .onAppear {
             guard !didInitializeSource else { return }
@@ -295,7 +307,7 @@ public struct LibrarySourcesWorkspaceView: View {
             } else {
                 selectedUSBSourceID = device.sourceID
                 if let root = mountedURL(for: device)?.path {
-                    onDeviceInspect(root)
+                    onDeviceInspect(root, device.sourceID)
                 }
             }
         } label: {
@@ -393,7 +405,7 @@ public struct LibrarySourcesWorkspaceView: View {
                         Spacer()
                         if let root = mountedURL(for: device)?.path {
                             Button(activeDeviceInspection == nil ? "Choose Playlists…" : "Refresh Playlists") {
-                                onDeviceInspect(root)
+                                onDeviceInspect(root, device.sourceID)
                             }
                             .buttonStyle(.bordered)
                             .disabled(usbOperation.isActive || !rendersInteractiveControls)
@@ -405,13 +417,6 @@ public struct LibrarySourcesWorkspaceView: View {
                         } else {
                             compactStatus("CONNECT USB TO SYNC", .empty)
                         }
-                    }
-                    if let inspection = activeDeviceInspection {
-                        Divider()
-                        devicePlaylistSelection(inspection)
-                    } else {
-                        Divider()
-                        storedDevicePlaylists(device)
                     }
                     Divider()
                     HStack(spacing: LumiSpacing.xLarge) {
@@ -445,6 +450,12 @@ public struct LibrarySourcesWorkspaceView: View {
                     HStack(spacing: LumiSpacing.large) {
                         sourceSettingRow(title: "Database revision", detail: shortRevision(device.databaseRevision), systemImage: "cylinder")
                         sourceSettingRow(title: "Version policy", detail: "Newer promotes · older/unknown holds", systemImage: "arrow.up.arrow.down")
+                    }
+                    Divider()
+                    if let inspection = activeDeviceInspection {
+                        devicePlaylistSelection(inspection)
+                    } else {
+                        storedDevicePlaylists(device)
                     }
                 }
             }
@@ -647,44 +658,7 @@ public struct LibrarySourcesWorkspaceView: View {
                                 .font(LumiTypography.caption)
                                 .foregroundStyle(LumiColor.textSecondary)
                         }
-                        HStack(spacing: LumiSpacing.small) {
-                            Button("Ignore This Time") {
-                                ignoredUSBReviews.insert(reviewKey(device, track))
-                            }
-                            .buttonStyle(.bordered)
-                            .help("Hide this item until you reopen this screen. Nothing is saved or synchronized.")
-                            if let root = mountedURL(for: device)?.path,
-                               let activeRevision = track.activeAnalysisRevision {
-                                Button("Do Not Sync to Lumi") {
-                                    onDeviceConflictResolution(
-                                        conflictRequest(
-                                            root: root,
-                                            device: device,
-                                            track: track,
-                                            activeRevision: activeRevision,
-                                            choice: .keepLumi
-                                        )
-                                    )
-                                }
-                                .buttonStyle(.bordered)
-                                .help("Do not import this exact USB analysis revision. A later USB revision will be reviewed again.")
-                                Button("Sync to Lumi & Overwrite") {
-                                    pendingUSBVersionRequest = conflictRequest(
-                                        root: root,
-                                        device: device,
-                                        track: track,
-                                        activeRevision: activeRevision,
-                                        choice: .useUSB
-                                    )
-                                }
-                                .buttonStyle(.borderedProminent)
-                                .help("Replace the imported Rekordbox projection after a final revision check. Lumi phrases and AutoLoops stay intact.")
-                            } else {
-                                Text("Connect and refresh this USB to apply a saved choice.")
-                                    .font(LumiTypography.technical)
-                                    .foregroundStyle(LumiColor.textSecondary)
-                            }
-                        }
+                        reviewActions(device: device, track: track)
                     }
                     .padding(LumiSpacing.medium)
                     .background(LumiColor.surfaceElevated)
@@ -700,6 +674,77 @@ public struct LibrarySourcesWorkspaceView: View {
         }
         .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
         .accessibilityIdentifier("lumi.library.sources.usb.reviewTracks")
+    }
+
+    @ViewBuilder
+    private func reviewActions(
+        device: RekordboxDeviceState,
+        track: RekordboxDeviceReviewTrackState
+    ) -> some View {
+        let key = reviewKey(device, track)
+        if resolvingUSBReviewKey == key {
+            HStack(spacing: LumiSpacing.small) {
+                ProgressView().controlSize(.small)
+                Text("Saving this review choice…")
+                    .font(LumiTypography.technical)
+                    .foregroundStyle(LumiColor.accent)
+            }
+            .frame(minHeight: 30, alignment: .leading)
+            .accessibilityIdentifier("lumi.library.sources.usb.reviewSaving")
+        } else {
+            VStack(alignment: .leading, spacing: LumiSpacing.small) {
+                HStack(spacing: LumiSpacing.small) {
+                    Button("Ignore This Time") {
+                        failedUSBReviewKey = nil
+                        ignoredUSBReviews.insert(key)
+                    }
+                    .buttonStyle(.bordered)
+                    .help("Hide this item until you reopen this screen. Nothing is saved or synchronized.")
+                    if let root = mountedURL(for: device)?.path,
+                       let activeRevision = track.activeAnalysisRevision {
+                        Button("Do Not Sync to Lumi") {
+                            failedUSBReviewKey = nil
+                            resolvingUSBReviewKey = key
+                            onDeviceConflictResolution(
+                                conflictRequest(
+                                    root: root,
+                                    device: device,
+                                    track: track,
+                                    activeRevision: activeRevision,
+                                    choice: .keepLumi
+                                )
+                            )
+                        }
+                        .buttonStyle(.bordered)
+                        .disabled(usbOperation.isActive || !rendersInteractiveControls)
+                        .help("Permanently keep Lumi for this exact USB analysis revision. A later USB change will be reviewed again.")
+                        Button("Sync to Lumi & Overwrite") {
+                            failedUSBReviewKey = nil
+                            pendingUSBVersionRequest = conflictRequest(
+                                root: root,
+                                device: device,
+                                track: track,
+                                activeRevision: activeRevision,
+                                choice: .useUSB
+                            )
+                        }
+                        .buttonStyle(.borderedProminent)
+                        .disabled(usbOperation.isActive || !rendersInteractiveControls)
+                        .help("Replace the imported Rekordbox projection after a final revision check. Lumi phrases and AutoLoops stay intact.")
+                    } else {
+                        Text("Connect and refresh this USB to apply a saved choice.")
+                            .font(LumiTypography.technical)
+                            .foregroundStyle(LumiColor.textSecondary)
+                    }
+                }
+                if failedUSBReviewKey == key {
+                    Label(usbOperation.detail, systemImage: "exclamationmark.triangle.fill")
+                        .font(LumiTypography.technical)
+                        .foregroundStyle(LumiColor.warning)
+                        .accessibilityIdentifier("lumi.library.sources.usb.reviewFailure")
+                }
+            }
+        }
     }
 
     private func reviewKey(
@@ -1116,7 +1161,7 @@ public struct LibrarySourcesWorkspaceView: View {
                         .disabled(!rendersInteractiveControls)
                         .accessibilityIdentifier("lumi.library.sources.device.choose")
                         Button("Sync Device") {
-                            onDeviceInspect(rekordboxDeviceRoot)
+                            onDeviceInspect(rekordboxDeviceRoot, selectedUSBSourceID)
                         }
                         .buttonStyle(.borderedProminent)
                         .disabled(rekordboxDeviceRoot.isEmpty || !rendersInteractiveControls)
@@ -1757,7 +1802,7 @@ public struct LibrarySourcesWorkspaceView: View {
     private func syncSelectedDevicePlaylists(root: String) {
         guard !selectedUSBPlaylistIDs.isEmpty else { return }
         persistDevicePlaylistSelection()
-        onDeviceSync(root, selectedUSBPlaylistIDs.sorted())
+        onDeviceSync(root, selectedUSBSourceID, selectedUSBPlaylistIDs.sorted())
     }
 
     private var mountedTrustedSources: [RekordboxDeviceState] {
@@ -1780,7 +1825,7 @@ public struct LibrarySourcesWorkspaceView: View {
         // lane or moves the page underneath the user.
         guard selectedUSBSourceID == device.sourceID else { return }
         rekordboxDeviceRoot = url.path
-        onDeviceInspect(url.path)
+        onDeviceInspect(url.path, device.sourceID)
     }
 
     private var overallUSBState: LumiComponentState {
@@ -1794,7 +1839,11 @@ public struct LibrarySourcesWorkspaceView: View {
             includingResourceValuesForKeys: [.volumeNameKey],
             options: [.skipHiddenVolumes]
         )?.first { url in
-            return USBSourceIdentityResolver.volume(mountedIdentity(url), matches: device)
+            let sourceID = USBSourceIdentityResolver.selectedSourceID(
+                for: mountedIdentity(url),
+                devices: visibleUSBDevices
+            )
+            return sourceID == device.sourceID
                 && FileManager.default.fileExists(
                     atPath: url.appendingPathComponent("PIONEER/rekordbox/exportLibrary.db").path
                 )
@@ -2014,7 +2063,7 @@ public struct LibrarySourcesWorkspaceView: View {
         )
         selectedUSBPlaylistIDs = []
         usbPlaylistSearch = ""
-        onDeviceInspect(url.path)
+        onDeviceInspect(url.path, selectedUSBSourceID)
     }
 
     private func mountedRekordboxUSBs() -> [URL] {

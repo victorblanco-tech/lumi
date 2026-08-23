@@ -85,13 +85,24 @@ enum USBSourceIdentityResolver {
         for volume: MountedUSBIdentity,
         devices: [RekordboxDeviceState]
     ) -> String? {
-        if let sourceID = volume.sourceID,
-           devices.contains(where: { $0.sourceID == sourceID }) {
-            return sourceID
+        let exact = volume.sourceID.flatMap { sourceID in
+            devices.first(where: { $0.sourceID == sourceID })
         }
         let migrationCandidates = devices.filter {
             (isLegacy($0.sourceID) || isUUIDOnlyFilesystemIdentity($0.sourceID))
                 && namesMatch($0.displayName, volume.displayName)
+        }
+        if let exact {
+            if namesMatch(exact.displayName, volume.displayName) {
+                return exact.sourceID
+            }
+            // Some equal-model USB media publish the same unreliable hardware
+            // serial. Prefer the unique legacy/name identity in that collision
+            // case; otherwise preserve the stable identity across a real rename.
+            if migrationCandidates.count == 1 {
+                return migrationCandidates[0].sourceID
+            }
+            return exact.sourceID
         }
         if migrationCandidates.count == 1 {
             return migrationCandidates[0].sourceID

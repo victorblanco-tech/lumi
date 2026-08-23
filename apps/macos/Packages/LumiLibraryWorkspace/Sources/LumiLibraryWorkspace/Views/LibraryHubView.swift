@@ -28,8 +28,8 @@ public struct LibraryHubView: View {
     private let onRekordboxSyncPreview: @Sendable (RekordboxXMLSyncPreviewRequest) -> Void
     private let onRekordboxSyncApply: @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void
     private let onRekordboxAnalysisImport: @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void
-    private let onRekordboxDeviceInspect: @Sendable (String) -> Void
-    private let onRekordboxDeviceSync: @Sendable (String, [UInt32]) -> Void
+    private let onRekordboxDeviceInspect: @Sendable (String, String?) -> Void
+    private let onRekordboxDeviceSync: @Sendable (String, String?, [UInt32]) -> Void
     private let onRekordboxDeviceConflictResolution: @Sendable (USBConflictResolutionRequest) -> Void
 
     @Binding private var section: LibraryHubSection
@@ -55,8 +55,8 @@ public struct LibraryHubView: View {
         onRekordboxSyncPreview: @escaping @Sendable (RekordboxXMLSyncPreviewRequest) -> Void = { _ in },
         onRekordboxSyncApply: @escaping @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void = { _, _ in },
         onRekordboxAnalysisImport: @escaping @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void = { _, _ in },
-        onRekordboxDeviceInspect: @escaping @Sendable (String) -> Void = { _ in },
-        onRekordboxDeviceSync: @escaping @Sendable (String, [UInt32]) -> Void = { _, _ in },
+        onRekordboxDeviceInspect: @escaping @Sendable (String, String?) -> Void = { _, _ in },
+        onRekordboxDeviceSync: @escaping @Sendable (String, String?, [UInt32]) -> Void = { _, _, _ in },
         onRekordboxDeviceConflictResolution: @escaping @Sendable (USBConflictResolutionRequest) -> Void = { _ in }
     ) {
         self.state = state

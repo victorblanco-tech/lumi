@@ -1310,7 +1310,7 @@ impl SqliteLibraryRepository {
                     a.analysis_revision, a.metadata_revision, a.file_size,
                     COALESCE(active_source.display_name, 'Lumi library'),
                     provenance.analyzed_at,
-                    COALESCE(provenance.analysis_revision, canonical.analysis_revision)
+                    canonical.analysis_revision
                FROM device_library_track_aliases a
                LEFT JOIN tracks canonical
                  ON canonical.id = a.canonical_track_id
@@ -5878,6 +5878,55 @@ mod fault_tests {
         assert_eq!(promoted.raw_phrases(), reviewed_phrases);
         assert!(repository.device_review_tracks()?.is_empty());
         assert_eq!(repository.device_source_summaries()?[0].promoted_tracks, 1);
+
+        let mut second_source = vec![DeviceAliasUpsert {
+            device_track_id: 9,
+            simulator_signature: 0,
+            canonical_track_id: Some(track_id),
+            match_kind: "metadata-exact".to_owned(),
+            title: source_track.title().to_owned(),
+            artist: source_track.artist().to_owned(),
+            bpm_milli: source_track.bpm_milli(),
+            duration_millis: source_track.duration_millis(),
+            file_size: 123,
+            audio_uri: "file://localhost/Volumes/Second/Track.mp3".to_owned(),
+            metadata_revision: "metadata-second".to_owned(),
+            color_rgb: source_track.color().map(TrackColor::rgb_u32),
+            master_database_id: 2,
+            master_content_id: 9,
+            information_update_count: 1,
+            analysis_revision: "analysis-second".to_owned(),
+            audio_signature: "audio:test:9".to_owned(),
+            analyzed_at: "2026-08-23".to_owned(),
+            sync_disposition: "held-conflict".to_owned(),
+        }];
+        repository.sync_device_aliases(
+            "usb-fs:second",
+            "Second USB",
+            "database-second",
+            &mut second_source,
+            &[],
+            &[],
+            &[],
+            &[],
+        )?;
+        let reviews = repository.device_review_tracks()?;
+        let review = &reviews["usb-fs:second"][0];
+        assert_eq!(
+            review.active_analysis_revision.as_deref(),
+            Some("device:review:analysis-review"),
+            "the UI action must carry the active canonical projection revision"
+        );
+        repository.keep_active_device_analysis(
+            "usb-fs:second",
+            9,
+            "analysis-second",
+            review
+                .active_analysis_revision
+                .as_deref()
+                .ok_or("active review revision missing")?,
+        )?;
+        assert!(repository.device_review_tracks()?.is_empty());
         Ok(())
     }
 

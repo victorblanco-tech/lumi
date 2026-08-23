@@ -1142,7 +1142,7 @@ final class EngineStatusModel: ObservableObject {
         }
     }
 
-    func inspectRekordboxDevice(root: String) async {
+    func inspectRekordboxDevice(root: String, sourceID: String? = nil) async {
         sourceImportFeedback = "Reading USB playlists without changing the Lumi library…"
         sourceImportFeedbackIsError = false
         usbSourceOperation = USBSourceOperationState(
@@ -1166,7 +1166,10 @@ final class EngineStatusModel: ObservableObject {
         defer { isExchangingCommand = false }
         do {
             let envelope = try await supervisor.send(
-                .inspectRekordboxDevice(root: root, sourceID: trustedUSBSourceID(root: root))
+                .inspectRekordboxDevice(
+                    root: root,
+                    sourceID: sourceID ?? trustedUSBSourceID(root: root)
+                )
             )
             if let failure = EngineCommandFailure(envelope) {
                 sourceImportFeedback = failure.message
@@ -1211,7 +1214,11 @@ final class EngineStatusModel: ObservableObject {
         }
     }
 
-    func syncRekordboxDevice(root: String, playlistIDs: [UInt32]) async {
+    func syncRekordboxDevice(
+        root: String,
+        sourceID: String? = nil,
+        playlistIDs: [UInt32]
+    ) async {
         sourceImportFeedback = "Synchronizing \(playlistIDs.count) selected USB playlist\(playlistIDs.count == 1 ? "" : "s") and comparing analysis revisions…"
         sourceImportFeedbackIsError = false
         usbSourceOperation = USBSourceOperationState(
@@ -1237,7 +1244,7 @@ final class EngineStatusModel: ObservableObject {
             let envelope = try await supervisor.send(
                 .syncRekordboxDevice(
                     root: root,
-                    sourceID: trustedUSBSourceID(root: root),
+                    sourceID: sourceID ?? trustedUSBSourceID(root: root),
                     playlistIDs: playlistIDs
                 )
             )

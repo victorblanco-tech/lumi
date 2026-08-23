@@ -1,1 +1,1 @@
-{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":1,"observedAtNanos":1000000,"type":"hello","payload":{"bridgeVersion":"0.5.0-dev-17","beatLinkVersion":"8.0.0","readOnly":true}}
+{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":1,"observedAtNanos":1000000,"type":"hello","payload":{"bridgeVersion":"0.5.0-dev-18","beatLinkVersion":"8.0.0","readOnly":true}}
