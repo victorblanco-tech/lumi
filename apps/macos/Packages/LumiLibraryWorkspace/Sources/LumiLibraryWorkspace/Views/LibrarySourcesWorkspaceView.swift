@@ -228,10 +228,10 @@ public struct LibrarySourcesWorkspaceView: View {
                     sourceIcon("externaldrive.fill.badge.checkmark", state: overallUSBState)
                     VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
                         Text("USB Sources").font(LumiTypography.cardTitle)
-                        Text("\(visibleUSBDevices.count) trusted · \(mountedTrustedSources.count) connected · read only")
+                        Text("\(visibleUSBDevices.count) trusted · \(mountedTrustedSources.count) connected · Rekordbox data read only")
                             .font(LumiTypography.technical)
                             .foregroundStyle(LumiColor.textSecondary)
-                        Text("Trusted media identifies live Pro DJ Link tracks. Older or incomparable backup analysis is registered but never replaces newer active Lumi data.")
+                        Text("Trusted media identifies live Pro DJ Link tracks. Lumi may add one tiny identity marker; Rekordbox data is never changed.")
                             .font(LumiTypography.caption)
                             .foregroundStyle(LumiColor.textSecondary)
                     }
@@ -313,9 +313,6 @@ public struct LibrarySourcesWorkspaceView: View {
                 selectedUSBSourceID = nil
             } else {
                 selectedUSBSourceID = device.sourceID
-                if let root = mountedURL(for: device)?.path {
-                    onDeviceInspect(root, device.sourceID)
-                }
             }
         } label: {
             HStack(spacing: LumiSpacing.large) {
@@ -412,7 +409,7 @@ public struct LibrarySourcesWorkspaceView: View {
                         Spacer()
                         if let root = mountedURL(for: device)?.path {
                             Button(activeDeviceInspection == nil ? "Choose Playlists…" : "Refresh Playlists") {
-                                onDeviceInspect(root, device.sourceID)
+                                inspectTrustedDevice(device, root: root)
                             }
                             .buttonStyle(.bordered)
                             .disabled(usbOperation.isActive || !rendersInteractiveControls)
@@ -1809,7 +1806,13 @@ public struct LibrarySourcesWorkspaceView: View {
     private func syncSelectedDevicePlaylists(root: String) {
         guard !selectedUSBPlaylistIDs.isEmpty else { return }
         persistDevicePlaylistSelection()
-        onDeviceSync(root, selectedUSBSourceID, selectedUSBPlaylistIDs.sorted())
+        let url = URL(fileURLWithPath: root, isDirectory: true)
+        let sourceID = stableSourceID(
+            for: url,
+            preferredSourceID: selectedUSBSourceID
+        )
+        selectedUSBSourceID = sourceID
+        onDeviceSync(root, sourceID, selectedUSBPlaylistIDs.sorted())
     }
 
     private var mountedTrustedSources: [RekordboxDeviceState] {
@@ -1858,6 +1861,7 @@ public struct LibrarySourcesWorkspaceView: View {
     }
 
     private func volumeSourceID(_ url: URL) -> String? {
+        if let marker = USBSourceMarkerStore.sourceID(for: url) { return marker }
         let stable = try? url.resourceValues(forKeys: [.volumeUUIDStringKey]).volumeUUIDString
         return USBStableSourceIdentity.sourceID(
             fileSystemUUID: stable,
@@ -2064,13 +2068,51 @@ public struct LibrarySourcesWorkspaceView: View {
     private func inspectRekordboxDevice(at url: URL) {
         usbSelectionFeedback = nil
         rekordboxDeviceRoot = url.path
-        selectedUSBSourceID = USBSourceIdentityResolver.selectedSourceID(
+        let selected = USBSourceIdentityResolver.selectedSourceID(
             for: mountedIdentity(url),
             devices: visibleUSBDevices
         )
+        selectedUSBSourceID = stableSourceID(for: url, preferredSourceID: selected)
         selectedUSBPlaylistIDs = []
         usbPlaylistSearch = ""
         onDeviceInspect(url.path, selectedUSBSourceID)
+    }
+
+    private func inspectTrustedDevice(_ device: RekordboxDeviceState, root: String) {
+        let url = URL(fileURLWithPath: root, isDirectory: true)
+        selectedUSBSourceID = stableSourceID(
+            for: url,
+            preferredSourceID: device.sourceID
+        )
+        onDeviceInspect(root, selectedUSBSourceID)
+    }
+
+    private func stableSourceID(for url: URL, preferredSourceID: String?) -> String? {
+        if let marker = USBSourceMarkerStore.sourceID(for: url) {
+            return marker
+        }
+        let displayName = volumeDisplayName(url)
+        let collisionSafePreferredID = preferredSourceID.flatMap { sourceID in
+            guard let existing = visibleUSBDevices.first(where: { $0.sourceID == sourceID }) else {
+                return sourceID
+            }
+            // Before a marker exists, an equal-model FAT disk can publish the
+            // same UUID/serial as a different trusted disk. Reuse an existing
+            // identity only when its source label also matches. Once written,
+            // the marker remains authoritative across later volume renames.
+            return existing.displayName.caseInsensitiveCompare(displayName) == .orderedSame
+                ? sourceID
+                : nil
+        }
+        do {
+            return try USBSourceMarkerStore.ensureSourceID(
+                for: url,
+                preferredSourceID: collisionSafePreferredID
+            )
+        } catch {
+            usbSelectionFeedback = "Lumi could not create the optional USB identity marker. This disk remains usable, but identical FAT media may be harder to distinguish."
+            return collisionSafePreferredID ?? volumeSourceID(url)
+        }
     }
 
     private func mountedRekordboxUSBs() -> [URL] {

@@ -29,10 +29,10 @@ swift test -Xswiftc -warnings-as-errors --package-path apps/macos/Packages/LumiD
 swift test -Xswiftc -warnings-as-errors --package-path apps/macos/Packages/LumiLiveWorkspace
 swift test -Xswiftc -warnings-as-errors --package-path apps/macos/Packages/LumiLibraryWorkspace
 LUMI_ENGINE_TEST_EXECUTABLE="$repository_root/target/release/lumi-engine" \
-  LUMI_PROLINK_JAVA="$repository_root/build/package-toolchains/temurin-21-macos-aarch64/Contents/Home/bin/java" \
+LUMI_PROLINK_JAVA="$repository_root/build/package-toolchains/temurin-21-macos-aarch64/Contents/Home/bin/java" \
   LUMI_PROLINK_BRIDGE_JAR="$repository_root/bridges/prolink/target/lumi-prolink-bridge.jar" \
   LUMI_CARABINER_EXECUTABLE="$repository_root/build/carabiner-runtime/Carabiner" \
-  swift test -Xswiftc -warnings-as-errors --package-path apps/macos/Packages/LumiEngineClient
+  swift test --no-parallel -Xswiftc -warnings-as-errors --package-path apps/macos/Packages/LumiEngineClient
 
 xcodebuild \
   -project apps/macos/Lumi.xcodeproj \

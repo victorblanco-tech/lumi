@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.5.0-dev-20 - 2026-08-23
+## 0.5.0-dev-21 - 2026-08-23
 
 ### Added
 
@@ -9,13 +9,17 @@
   pages, with native macOS sort indicators.
 - Adds `Reuse Lumi Phrases` for copying an exact-beat-compatible authored
   timeline from an older edit or mashup into a new target revision.
+- Registers equal-model USB disks independently with one hidden, opaque
+  `.lumi-source.json` marker while leaving every Rekordbox file untouched.
 
 ### Improved
 
 - Keeps Import & Sources status geometry stable and source-scoped while USB
   scanning, synchronization and review actions complete.
+- Runs USB parsing in a bounded, short-lived worker so a stalled removable
+  volume can never block Pro DJ Link, Ableton Link or MIDI output.
 - Documents the short pre-show beatgrid refresh workflow and confirms that
-  trusted USB media remains read-only.
+  Rekordbox library, analysis and media data remains read-only.
 - Ranks likely `v003` → `v004` successors without silently merging track
   identities or guessing across a changed arrangement.
 
@@ -26,6 +30,8 @@
   timeline reuse.
 - Re-runs the USB identity, inspection, selection-impact, source-review and
   bounded Library UI suites.
+- Serializes native engine-client tests so every process test exclusively owns
+  its fixed CoreMIDI endpoints.
 
 ## 0.5.0-dev-19 - 2026-08-23
 

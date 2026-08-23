@@ -11,6 +11,8 @@ mod phrase_role_defaults;
 mod service;
 mod session;
 mod startup;
+mod usb_worker;
 
 pub use session::{EngineError, run};
 pub use startup::StartupReady;
+pub use usb_worker::{UsbWorkerError, run_usb_worker};

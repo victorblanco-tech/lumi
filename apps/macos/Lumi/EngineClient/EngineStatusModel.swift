@@ -1,5 +1,6 @@
 import AVFoundation
 import Combine
+import Darwin
 import Foundation
 import LumiEngineClient
 import LumiLibraryWorkspace
@@ -1164,8 +1165,6 @@ final class EngineStatusModel: ObservableObject {
             detail: "Indexing OneLibrary playlists and track update state. If macOS asks, allow Lumi to read removable volumes. The disk remains read-only."
         )
         guard lifecycle == .ready,
-              let endpointDescription,
-              let protocolVersion,
               await acquireInteractiveExchange() else {
             sourceImportFeedback = "USB inspection could not start because the engine is not ready."
             sourceImportFeedbackIsError = true
@@ -1178,31 +1177,17 @@ final class EngineStatusModel: ObservableObject {
         }
         defer { isExchangingCommand = false }
         do {
-            let envelope = try await supervisor.send(
-                .inspectRekordboxDevice(
-                    root: root,
-                    sourceID: sourceID ?? trustedUSBSourceID(root: root)
-                )
+            let envelope = try await runIsolatedUSBWorker(
+                payload: [
+                    "kind": .string("inspect"),
+                    "root": .string(root),
+                    "sourceId": (sourceID ?? trustedUSBSourceID(root: root))
+                        .map(JSONValue.string) ?? .null,
+                ]
             )
-            if let failure = EngineCommandFailure(envelope) {
-                sourceImportFeedback = failure.message
-                sourceImportFeedbackIsError = true
-                usbSourceOperation = USBSourceOperationState(
-                    phase: .failed,
-                    title: "USB scan failed",
-                    detail: failure.message
-                )
-                return
-            }
-            let (snapshot, snapshotEnvelope) = try await decodeSnapshotWithRecovery(
-                envelope,
-                endpointDescription: endpointDescription,
-                protocolVersion: protocolVersion,
-                context: "USB playlist inspection"
+            libraryState = try libraryDecoder.decode(envelope).preservingDeviceInspection(
+                libraryState.rekordboxDeviceInspection
             )
-            latestSnapshot = snapshot
-            workspaceState = LiveWorkspacePresenter.ready(snapshot)
-            libraryState = try decodeLibraryState(snapshotEnvelope)
             if let inspection = libraryState.rekordboxDeviceInspection {
                 sourceImportFeedback = "USB indexed read-only: \(inspection.playlistCount) playlists and \(inspection.trackCount) tracks available. Choose playlists before Sync."
                 usbSourceOperation = USBSourceOperationState(
@@ -1240,8 +1225,6 @@ final class EngineStatusModel: ObservableObject {
             detail: "Reading the USB read-only, importing new Lumi tracks and safely comparing existing analysis revisions."
         )
         guard lifecycle == .ready,
-              let endpointDescription,
-              let protocolVersion,
               await acquireInteractiveExchange() else {
             sourceImportFeedback = "Device Library Sync could not start because the engine is not ready."
             sourceImportFeedbackIsError = true
@@ -1254,36 +1237,23 @@ final class EngineStatusModel: ObservableObject {
         }
         defer { isExchangingCommand = false }
         do {
-            let envelope = try await supervisor.send(
-                .syncRekordboxDevice(
-                    root: root,
-                    sourceID: sourceID ?? trustedUSBSourceID(root: root),
-                    playlistIDs: playlistIDs
-                )
+            let resolvedSourceID = sourceID ?? trustedUSBSourceID(root: root)
+            let envelope = try await runIsolatedUSBWorker(
+                payload: [
+                    "kind": .string("sync"),
+                    "root": .string(root),
+                    "sourceId": resolvedSourceID.map(JSONValue.string) ?? .null,
+                    "playlistIds": .array(
+                        playlistIDs.map { .number(Double($0)) }
+                    ),
+                ]
             )
-            if let failure = EngineCommandFailure(envelope) {
-                sourceImportFeedback = failure.message
-                sourceImportFeedbackIsError = true
-                usbSourceOperation = USBSourceOperationState(
-                    phase: .failed,
-                    title: "USB sync failed",
-                    detail: failure.message
-                )
-                return
+            libraryState = try libraryDecoder.decode(envelope).preservingDeviceInspection(
+                libraryState.rekordboxDeviceInspection
+            )
+            let device = resolvedSourceID.flatMap { sourceID in
+                libraryState.rekordboxDevices.first(where: { $0.sourceID == sourceID })
             }
-            let (snapshot, snapshotEnvelope) = try await decodeSnapshotWithRecovery(
-                envelope,
-                endpointDescription: endpointDescription,
-                protocolVersion: protocolVersion,
-                context: "USB source sync"
-            )
-            latestSnapshot = snapshot
-            workspaceState = LiveWorkspacePresenter.ready(snapshot)
-            libraryState = try decodeLibraryState(snapshotEnvelope)
-            let selectedName = URL(fileURLWithPath: root).lastPathComponent
-            let device = libraryState.rekordboxDevices.first(where: {
-                $0.displayName == selectedName
-            }) ?? libraryState.rekordboxDevices.first
             if let device {
                 sourceImportFeedback = "USB read completed safely: \(device.matchedTracks)/\(device.activeTracks) selected tracks are now available in Lumi; \(device.protectedTracks) older versions protected; \(device.conflictTracks) incomparable changes held for review."
                 usbSourceOperation = USBSourceOperationState(
@@ -1322,8 +1292,6 @@ final class EngineStatusModel: ObservableObject {
             detail: "Revalidating both revisions before changing the Lumi library."
         )
         guard lifecycle == .ready,
-              let endpointDescription,
-              let protocolVersion,
               await acquireInteractiveExchange() else {
             sourceImportFeedback = "The review choice could not be applied because the engine is not ready."
             sourceImportFeedbackIsError = true
@@ -1336,35 +1304,20 @@ final class EngineStatusModel: ObservableObject {
         }
         defer { isExchangingCommand = false }
         do {
-            let envelope = try await supervisor.send(
-                .resolveRekordboxDeviceConflict(
-                    root: request.root,
-                    sourceID: request.sourceID,
-                    deviceTrackID: request.deviceTrackID,
-                    expectedIncomingRevision: request.expectedIncomingRevision,
-                    expectedActiveRevision: request.expectedActiveRevision,
-                    choice: request.choice.rawValue
-                )
+            let envelope = try await runIsolatedUSBWorker(
+                payload: [
+                    "kind": .string("resolveConflict"),
+                    "root": .string(request.root),
+                    "sourceId": .string(request.sourceID),
+                    "deviceTrackId": .number(Double(request.deviceTrackID)),
+                    "expectedIncomingRevision": .string(request.expectedIncomingRevision),
+                    "expectedActiveRevision": .string(request.expectedActiveRevision),
+                    "choice": .string(request.choice.rawValue),
+                ]
             )
-            if let failure = EngineCommandFailure(envelope) {
-                sourceImportFeedback = failure.message
-                sourceImportFeedbackIsError = true
-                usbSourceOperation = USBSourceOperationState(
-                    phase: .failed,
-                    title: "Review choice failed",
-                    detail: failure.message
-                )
-                return
-            }
-            let (snapshot, snapshotEnvelope) = try await decodeSnapshotWithRecovery(
-                envelope,
-                endpointDescription: endpointDescription,
-                protocolVersion: protocolVersion,
-                context: "USB conflict resolution"
+            libraryState = try libraryDecoder.decode(envelope).preservingDeviceInspection(
+                libraryState.rekordboxDeviceInspection
             )
-            latestSnapshot = snapshot
-            workspaceState = LiveWorkspacePresenter.ready(snapshot)
-            libraryState = try decodeLibraryState(snapshotEnvelope)
             let usedUSB = request.choice == .useUSB
             sourceImportFeedback = usedUSB
                 ? "USB version applied. Lumi phrases and AutoLoop choices were preserved."
@@ -1394,6 +1347,117 @@ final class EngineStatusModel: ObservableObject {
             displayName: values?.volumeName ?? url.lastPathComponent,
             hardwareSerial: USBStableSourceIdentity.hardwareSerial(for: url)
         )
+    }
+
+    /// Runs removable-media I/O outside the channel-persistent realtime
+    /// engine. A wedged FAT/USB open is forcefully contained without stopping
+    /// Pro DJ Link, Ableton Link or MIDI output.
+    private func runIsolatedUSBWorker(
+        payload: [String: JSONValue]
+    ) async throws -> MessageEnvelope {
+        let executable = try engineExecutable()
+        let database = try libraryDatabaseURL()
+        let protocolVersion = protocolVersion ?? 1
+        return try await Task.detached(priority: .utility) {
+            let manager = FileManager.default
+            let directory = manager.temporaryDirectory.appendingPathComponent(
+                "lumi-usb-worker-\(UUID().uuidString)",
+                isDirectory: true
+            )
+            try manager.createDirectory(at: directory, withIntermediateDirectories: true)
+            defer { try? manager.removeItem(at: directory) }
+
+            let request = directory.appendingPathComponent("request.json")
+            let response = directory.appendingPathComponent("response.json")
+            let errorLog = directory.appendingPathComponent("stderr.log")
+            try JSONEncoder().encode(payload).write(to: request, options: .atomic)
+            guard manager.createFile(atPath: errorLog.path, contents: nil),
+                  let standardError = FileHandle(forWritingAtPath: errorLog.path),
+                  let nullOutput = FileHandle(forWritingAtPath: "/dev/null") else {
+                throw IsolatedUSBWorkerError.temporaryFileUnavailable
+            }
+            defer {
+                try? standardError.close()
+                try? nullOutput.close()
+            }
+
+            let process = Process()
+            process.executableURL = executable
+            process.arguments = ["--usb-worker", request.path, response.path]
+            var environment = ProcessInfo.processInfo.environment
+            environment["LUMI_LIBRARY_DATABASE_PATH"] = database.path
+            environment["LUMI_AUTO_PUBLISH_MIDI"] = "0"
+            environment["LUMI_EXIT_AFTER_CLIENT_DISCONNECT"] = "1"
+            process.environment = environment
+            process.standardOutput = nullOutput
+            process.standardError = standardError
+            try process.run()
+            defer {
+                if process.isRunning {
+                    _ = Darwin.kill(process.processIdentifier, SIGKILL)
+                    process.waitUntilExit()
+                }
+            }
+
+            let deadline = Date().addingTimeInterval(75)
+            while process.isRunning, Date() < deadline {
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            if process.isRunning {
+                _ = Darwin.kill(process.processIdentifier, SIGTERM)
+                try await Task.sleep(for: .milliseconds(250))
+                if process.isRunning {
+                    _ = Darwin.kill(process.processIdentifier, SIGKILL)
+                }
+                process.waitUntilExit()
+                throw IsolatedUSBWorkerError.timedOut
+            }
+            process.waitUntilExit()
+            try? standardError.synchronize()
+            guard process.terminationStatus == 0 else {
+                let detail = (try? String(contentsOf: errorLog, encoding: .utf8))?
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                throw IsolatedUSBWorkerError.failed(detail)
+            }
+            guard manager.fileExists(atPath: response.path) else {
+                throw IsolatedUSBWorkerError.missingResponse
+            }
+            let responsePayload = try JSONDecoder().decode(
+                [String: JSONValue].self,
+                from: Data(contentsOf: response)
+            )
+            return MessageEnvelope(
+                protocolVersion: protocolVersion,
+                messageType: .snapshot,
+                messageId: "usb-worker-\(UUID().uuidString)",
+                sequence: 0,
+                correlationId: "usb-worker",
+                sentAt: Date().ISO8601Format(),
+                payload: responsePayload
+            )
+        }.value
+    }
+
+    private enum IsolatedUSBWorkerError: LocalizedError {
+        case temporaryFileUnavailable
+        case timedOut
+        case failed(String?)
+        case missingResponse
+
+        var errorDescription: String? {
+            switch self {
+            case .temporaryFileUnavailable:
+                "Lumi could not create a protected temporary USB workspace."
+            case .timedOut:
+                "The USB stopped responding. Lumi ended the isolated scan after 75 seconds; the realtime engine was not affected. Reconnect the disk and try again."
+            case let .failed(detail):
+                detail?.isEmpty == false
+                    ? detail
+                    : "The isolated USB reader rejected this source."
+            case .missingResponse:
+                "The isolated USB reader ended without a complete result."
+            }
+        }
     }
 
     func mutatePhraseRoles(_ request: PhraseRoleMutationRequest) async {

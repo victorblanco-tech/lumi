@@ -21,4 +21,19 @@ if [[ "$pgrep_status" -ne 1 ]]; then
   exit 1
 fi
 
+# SMAppService launch agents deliberately use a short argv[0], so pgrep may
+# only see `Contents/Helpers/lumi-engine` and miss the installed bundle path.
+# Check the registered channel labels as the authoritative second guard.
+running_services="$(launchctl list | awk '
+  $1 ~ /^[0-9]+$/ && $3 ~ /^co\.victorblan\.tech\.lumi(\.dev|\.rc)?\.engine$/ {
+    print $1 " " $3
+  }
+')"
+if [[ -n "$running_services" ]]; then
+  echo "ERROR: stop every installed Lumi Dev, RC and Prod service before Apple verification." >&2
+  echo "Active launch services own the CoreMIDI endpoints used by LumiEngineClient tests:" >&2
+  echo "$running_services" >&2
+  exit 1
+fi
+
 echo "Apple integration test ownership is available."

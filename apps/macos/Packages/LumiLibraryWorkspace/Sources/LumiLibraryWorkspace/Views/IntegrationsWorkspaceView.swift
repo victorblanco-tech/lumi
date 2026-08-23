@@ -232,7 +232,7 @@ public struct IntegrationsWorkspaceView: View {
                         Text("Provider Boundaries").font(LumiTypography.cardTitle)
                         Label("Deck state enters Lumi through a provider-neutral DeckSource adapter.", systemImage: "rectangle.and.arrow.down")
                         Label("Lighting commands leave Lumi through a provider-neutral MIDI output profile.", systemImage: "rectangle.and.arrow.up")
-                        Label("Trusted USB sources remain read-only; Lumi owns edited phrases and planning data.", systemImage: "lock.shield")
+                        Label("Rekordbox data on trusted USB sources remains read-only; Lumi owns its identity marker, edited phrases and planning data.", systemImage: "lock.shield")
                     }
                     .font(LumiTypography.caption)
                 }

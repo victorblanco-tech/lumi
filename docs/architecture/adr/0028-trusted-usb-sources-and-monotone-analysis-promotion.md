@@ -109,12 +109,20 @@ missing analysis file or invalid first phrase boundary rolls the complete sync
 back. Playlist rows are replaced only for the selected source and never leak
 between two equal-model USB devices.
 
-USB media remains read-only. Lumi uses the macOS filesystem UUID, supplemented
-by the physical hardware serial when duplicate FAT identities require it. A
-Lumi marker file is deliberately not written: it would weaken safe eject and
-read-only guarantees and is unnecessary while these stable identities are
-available. If a platform later cannot supply either identity, an explicit,
-opt-in media registration ADR is required before any USB write is introduced.
+Rekordbox library, analysis and media data remains read-only. In practice,
+separately managed equal-model FAT media can expose the same filesystem UUID
+and an unreliable or duplicated hardware serial. After an explicit Add,
+Refresh or Sync, Lumi therefore atomically creates one root-level
+`.lumi-source.json` sidecar containing only its opaque trusted-source ID and a
+format timestamp. Existing trusted IDs are preserved during this registration.
+The marker is authoritative on later mounts, is never stored inside PIONEER or
+Rekordbox directories and never contains track or playlist data.
+
+Removable-media parsing runs in a short-lived `lumi-engine --usb-worker`
+process with a hard deadline. The persistent realtime engine never opens the
+USB database and therefore cannot lose Pro DJ Link, Ableton Link or MIDI output
+when a removable volume stalls. A worker either publishes a complete snapshot
+or is terminated without changing the active application state.
 
 The integration is named **Pro DJ Link** in all product UI. Beat Link Trigger
 is a legacy development fallback; the production path is Lumi's supervised

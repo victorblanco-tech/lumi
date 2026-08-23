@@ -3,6 +3,58 @@ import DiskArbitration
 import Foundation
 import IOKit
 
+private struct LumiUSBSourceMarker: Codable {
+    let formatVersion: Int
+    let sourceID: String
+    let createdAt: String
+}
+
+/// A tiny identity marker is the final collision guard for separately managed
+/// FAT media that report the same filesystem UUID and unreliable USB serial.
+/// Rekordbox content remains read-only; Lumi only creates this root-level file
+/// after an explicit Add, Refresh or Sync action.
+enum USBSourceMarkerStore {
+    static let fileName = ".lumi-source.json"
+
+    static func sourceID(for volumeURL: URL) -> String? {
+        let url = volumeURL.appendingPathComponent(fileName, isDirectory: false)
+        guard let data = try? Data(contentsOf: url),
+              let marker = try? JSONDecoder().decode(LumiUSBSourceMarker.self, from: data),
+              marker.formatVersion == 1,
+              isValid(marker.sourceID) else { return nil }
+        return marker.sourceID
+    }
+
+    @discardableResult
+    static func ensureSourceID(
+        for volumeURL: URL,
+        preferredSourceID: String?
+    ) throws -> String {
+        if let existing = sourceID(for: volumeURL) { return existing }
+        let sourceID = preferredSourceID.flatMap { isValid($0) ? $0 : nil }
+            ?? "usb-marker:\(UUID().uuidString.lowercased())"
+        let marker = LumiUSBSourceMarker(
+            formatVersion: 1,
+            sourceID: sourceID,
+            createdAt: Date().ISO8601Format()
+        )
+        let data = try JSONEncoder().encode(marker)
+        try data.write(
+            to: volumeURL.appendingPathComponent(fileName, isDirectory: false),
+            options: .atomic
+        )
+        return sourceID
+    }
+
+    private static func isValid(_ sourceID: String) -> Bool {
+        let value = sourceID.trimmingCharacters(in: .whitespacesAndNewlines)
+        return (8...200).contains(value.count)
+            && value.hasPrefix("usb-")
+            && !value.contains("/")
+            && !value.contains("\\")
+    }
+}
+
 /// Builds an identity that remains stable across mounts while keeping
 /// independent removable media separate. FAT32 volumes can expose the same
 /// filesystem UUID, so the physical USB serial is the primary collision guard.
@@ -143,7 +195,7 @@ enum USBSourceIdentityResolver {
     }
 
     static func isStable(_ sourceID: String) -> Bool {
-        sourceID.hasPrefix("usb-fs:")
+        sourceID.hasPrefix("usb-fs:") || sourceID.hasPrefix("usb-marker:")
     }
 
     static func isLegacy(_ sourceID: String) -> Bool {
