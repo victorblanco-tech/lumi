@@ -237,7 +237,8 @@ private final class TrackTitleCellView: NSTableCellView {
         super.init(frame: frameRect)
 
         swatch.wantsLayer = true
-        swatch.layer?.cornerRadius = 2
+        swatch.layer?.cornerRadius = 6
+        swatch.layer?.borderWidth = 1
         swatch.translatesAutoresizingMaskIntoConstraints = false
 
         label.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
@@ -250,8 +251,8 @@ private final class TrackTitleCellView: NSTableCellView {
         NSLayoutConstraint.activate([
             swatch.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 4),
             swatch.centerYAnchor.constraint(equalTo: centerYAnchor),
-            swatch.widthAnchor.constraint(equalToConstant: 6),
-            swatch.heightAnchor.constraint(equalToConstant: 18),
+            swatch.widthAnchor.constraint(equalToConstant: 12),
+            swatch.heightAnchor.constraint(equalToConstant: 12),
             label.leadingAnchor.constraint(equalTo: swatch.trailingAnchor, constant: 8),
             label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
             label.centerYAnchor.constraint(equalTo: centerYAnchor)
@@ -266,14 +267,20 @@ private final class TrackTitleCellView: NSTableCellView {
     func configure(_ track: LibraryTrack) {
         label.stringValue = track.title
         if let rgb = track.colorRGB {
-            swatch.layer?.backgroundColor = NSColor(
+            let color = NSColor(
                 srgbRed: CGFloat((rgb >> 16) & 0xFF) / 255,
                 green: CGFloat((rgb >> 8) & 0xFF) / 255,
                 blue: CGFloat(rgb & 0xFF) / 255,
                 alpha: 1
-            ).cgColor
+            )
+            swatch.layer?.backgroundColor = color.cgColor
+            swatch.layer?.borderColor = NSColor.white.withAlphaComponent(0.38).cgColor
         } else {
-            swatch.layer?.backgroundColor = NSColor.darkGray.cgColor
+            swatch.layer?.backgroundColor = NSColor.clear.cgColor
+            swatch.layer?.borderColor = NSColor.secondaryLabelColor.withAlphaComponent(0.65).cgColor
         }
+        swatch.setAccessibilityElement(true)
+        swatch.setAccessibilityLabel(LumiTrackColorPalette.accessibilityLabel(for: track.colorRGB))
+        swatch.toolTip = LumiTrackColorPalette.accessibilityLabel(for: track.colorRGB)
     }
 }

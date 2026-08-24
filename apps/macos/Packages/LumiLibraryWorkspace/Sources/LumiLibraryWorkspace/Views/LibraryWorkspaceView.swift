@@ -404,7 +404,8 @@ public struct LibraryWorkspaceView: View {
             TableColumn(localized("library.trackTitle"), value: \.title) { track in
                 editorLoadingCell(track) {
                     HStack(spacing: LumiSpacing.small) {
-                        colorSwatch(track.colorRGB, height: 18)
+                        LumiTrackColorSwatch(colorRGB: track.colorRGB, diameter: 12)
+                            .help(LumiTrackColorPalette.accessibilityLabel(for: track.colorRGB))
                         Text(track.title)
                             .font(LumiTypography.body.weight(.semibold))
                             .foregroundStyle(LumiColor.textPrimary)
@@ -592,20 +593,6 @@ public struct LibraryWorkspaceView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .accessibilityIdentifier("lumi.library.placeholder.\(condition.rawValue)")
-    }
-
-    private func colorSwatch(_ rgb: UInt32?, height: CGFloat = 32) -> some View {
-        let color = rgb.map {
-            Color(
-                red: Double(($0 >> 16) & 0xff) / 255,
-                green: Double(($0 >> 8) & 0xff) / 255,
-                blue: Double($0 & 0xff) / 255
-            )
-        } ?? LumiColor.surfaceElevated
-        return RoundedRectangle(cornerRadius: LumiRadius.compact)
-            .fill(color)
-            .frame(width: 12, height: height)
-            .overlay { RoundedRectangle(cornerRadius: LumiRadius.compact).stroke(LumiColor.border) }
     }
 
     private var selectedTrack: LibraryTrack? {

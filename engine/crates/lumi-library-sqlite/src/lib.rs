@@ -820,9 +820,11 @@ impl SqliteLibraryRepository {
             let track_id = to_i64(canonical_track_id.value())?;
             let active = transaction
                 .query_row(
-                    "SELECT metadata_revision, analyzed_at, master_database_id,
-                            master_content_id, information_update_count
-                       FROM track_metadata_provenance WHERE track_id = ?1",
+                    "SELECT p.metadata_revision, p.analyzed_at, p.master_database_id,
+                            p.master_content_id, p.information_update_count, t.color_rgb
+                       FROM track_metadata_provenance p
+                       JOIN tracks t ON t.id = p.track_id
+                      WHERE p.track_id = ?1",
                     [track_id],
                     |row| {
                         Ok((
@@ -831,24 +833,33 @@ impl SqliteLibraryRepository {
                             row.get::<_, i64>(2)?,
                             row.get::<_, i64>(3)?,
                             row.get::<_, i64>(4)?,
+                            row.get::<_, Option<i64>>(5)?,
                         ))
                     },
                 )
                 .optional()?;
             let promotes = match active.as_ref() {
                 None => true,
-                Some((revision, _, _, _, _)) if revision == &alias.metadata_revision => false,
-                Some((_, _, master_database_id, master_content_id, information_update_count))
-                    if alias.master_database_id != 0
-                        && alias.master_content_id != 0
-                        && i64::from(alias.master_database_id) == *master_database_id
-                        && i64::from(alias.master_content_id) == *master_content_id
-                        && i64::from(alias.information_update_count)
-                            != *information_update_count =>
+                // Backfill colors that older Lumi builds lost by interpreting
+                // user-renamable Rekordbox labels as fixed palette names.
+                Some((_, _, _, _, _, None)) if alias.color_rgb.is_some() => true,
+                Some((revision, _, _, _, _, _)) if revision == &alias.metadata_revision => false,
+                Some((
+                    _,
+                    _,
+                    master_database_id,
+                    master_content_id,
+                    information_update_count,
+                    _,
+                )) if alias.master_database_id != 0
+                    && alias.master_content_id != 0
+                    && i64::from(alias.master_database_id) == *master_database_id
+                    && i64::from(alias.master_content_id) == *master_content_id
+                    && i64::from(alias.information_update_count) != *information_update_count =>
                 {
                     i64::from(alias.information_update_count) > *information_update_count
                 }
-                Some((_, analyzed_at, _, _, _)) => matches!(
+                Some((_, analyzed_at, _, _, _, _)) => matches!(
                     compare_rekordbox_dates(&alias.analyzed_at, analyzed_at),
                     Some(std::cmp::Ordering::Greater)
                 ),
@@ -5851,6 +5862,79 @@ mod fault_tests {
                 "2026-08-13",
             )?,
             DeviceAnalysisDecision::Current
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn device_sync_backfills_a_missing_color_for_the_same_metadata_revision()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let baseline = DemoLibrarySourceProvider::curated().load_baseline()?;
+        let source_track = &baseline.tracks()[0];
+        let mut repository = SqliteLibraryRepository::in_memory()?;
+        repository.import_baseline(&baseline)?;
+        let track_id = repository
+            .page_tracks(TrackPageRequest::try_new(0, 25)?)?
+            .tracks()[0]
+            .id();
+        let mut aliases = vec![DeviceAliasUpsert {
+            device_track_id: 1_256,
+            simulator_signature: 0,
+            canonical_track_id: Some(track_id),
+            match_kind: "metadata+file-size".to_owned(),
+            title: source_track.title().to_owned(),
+            artist: source_track.artist().to_owned(),
+            bpm_milli: source_track.bpm_milli(),
+            duration_millis: source_track.duration_millis(),
+            file_size: 123,
+            audio_uri: "file://localhost/Volumes/Test/Track.mp3".to_owned(),
+            metadata_revision: "metadata-v1".to_owned(),
+            color_rgb: None,
+            master_database_id: 1,
+            master_content_id: 1_256,
+            information_update_count: 1,
+            analysis_revision: "analysis-v1".to_owned(),
+            audio_signature: "audio:test:1256".to_owned(),
+            analyzed_at: "2026-08-24".to_owned(),
+            sync_disposition: "current".to_owned(),
+        }];
+        repository.sync_device_aliases(
+            "usb-fs:gray",
+            "DJ VIC GRAY",
+            "database-v1",
+            &mut aliases,
+            &[],
+            &[],
+            &[],
+            &[],
+        )?;
+        assert_eq!(
+            repository
+                .track(track_id)?
+                .and_then(|track| track.summary().color()),
+            None
+        );
+
+        // The authoritative metadata counter and revision are unchanged. The
+        // only difference is that the current reader can finally resolve the
+        // custom-labelled Rekordbox palette entry to its fixed RGB value.
+        aliases[0].color_rgb = Some(0x32_80_ff);
+        repository.sync_device_aliases(
+            "usb-fs:gray",
+            "DJ VIC GRAY",
+            "database-v1",
+            &mut aliases,
+            &[],
+            &[],
+            &[],
+            &[],
+        )?;
+        assert_eq!(
+            repository
+                .track(track_id)?
+                .and_then(|track| track.summary().color())
+                .map(TrackColor::rgb_u32),
+            Some(0x32_80_ff)
         );
         Ok(())
     }

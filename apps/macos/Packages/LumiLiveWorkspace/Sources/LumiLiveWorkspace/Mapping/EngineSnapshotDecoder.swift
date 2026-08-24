@@ -797,14 +797,14 @@ public struct EngineSnapshotDecoder: Sendable {
             bpmMilli = value
         }
 
-        let colorRGB: UInt64?
+        let colorRGB: UInt32?
         if track["colorRgb"] == nil || track["colorRgb"] == .null {
             colorRGB = nil
         } else {
             guard let value = unsignedInteger(track["colorRgb"]), value <= 0x00FF_FFFF else {
                 throw EngineSnapshotDecodingError.invalidSnapshot
             }
-            colorRGB = value
+            colorRGB = UInt32(value)
         }
         guard case let .string(planEligibilityValue) = deck["planEligibility"],
               let planEligibility = DeckPlanEligibility(rawValue: planEligibilityValue) else {

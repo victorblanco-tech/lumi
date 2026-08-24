@@ -475,7 +475,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
     public let title: String
     public let artist: String
     public let bpmMilli: UInt64
-    public let colorRGB: UInt64?
+    public let colorRGB: UInt32?
     public let pitchClass: String
     public let keyMode: String
     public let keyKnown: Bool
@@ -500,7 +500,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
         title: String,
         artist: String,
         bpmMilli: UInt64,
-        colorRGB: UInt64? = nil,
+        colorRGB: UInt32? = nil,
         pitchClass: String,
         keyMode: String,
         keyKnown: Bool = true,

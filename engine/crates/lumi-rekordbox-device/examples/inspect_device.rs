@@ -48,10 +48,11 @@ fn main() -> ExitCode {
     });
     if let Some(track) = selected {
         println!(
-            "id={} title={:?} artist={:?} bpm_milli={} duration_millis={} file_size={} simulator_signature={} audio={} analysis={} metadata_revision={} analysis_revision={}",
+            "id={} title={:?} artist={:?} color_rgb={:?} bpm_milli={} duration_millis={} file_size={} simulator_signature={} audio={} analysis={} metadata_revision={} analysis_revision={}",
             track.device_track_id,
             track.title,
             track.artist,
+            track.color_rgb,
             track.bpm_milli,
             track.duration_millis,
             track.file_size,

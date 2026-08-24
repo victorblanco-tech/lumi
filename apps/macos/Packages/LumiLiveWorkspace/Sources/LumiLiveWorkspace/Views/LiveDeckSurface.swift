@@ -182,10 +182,15 @@ struct LiveDeckSurface<Details: View>: View {
                 .clipShape(RoundedRectangle(cornerRadius: LumiRadius.compact))
 
             VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-                Text(verbatim: deck.title)
-                    .font(LumiTypography.cardTitle)
-                    .foregroundStyle(Color.white)
-                    .lineLimit(1)
+                HStack(spacing: LumiSpacing.small) {
+                    LumiTrackColorSwatch(colorRGB: deck.colorRGB, diameter: 14)
+                        .help(LumiTrackColorPalette.accessibilityLabel(for: deck.colorRGB))
+                        .accessibilityIdentifier("lumi.live.deck.\(deck.deckID).trackColor")
+                    Text(verbatim: deck.title)
+                        .font(LumiTypography.cardTitle)
+                        .foregroundStyle(Color.white)
+                        .lineLimit(1)
+                }
                 Text(verbatim: deck.artist)
                     .font(LumiTypography.metadata)
                     .foregroundStyle(Color.white.opacity(0.62))

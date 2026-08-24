@@ -119,7 +119,7 @@ pub fn read_device_library(root: impl AsRef<Path>) -> Result<DeviceLibrarySnapsh
     let mut statement = database
         .prepare(
             "SELECT c.content_id, COALESCE(c.title, ''), COALESCE(a.name, ''),
-                    COALESCE(k.name, ''), COALESCE(color.name, ''),
+                    COALESCE(k.name, ''), CAST(COALESCE(c.color_id, 0) AS INTEGER),
                     CAST(COALESCE(c.bpmx100, 0) AS INTEGER),
                     CAST(COALESCE(c.length, 0) AS INTEGER),
                     CAST(COALESCE(c.fileSize, 0) AS INTEGER),
@@ -132,7 +132,6 @@ pub fn read_device_library(root: impl AsRef<Path>) -> Result<DeviceLibrarySnapsh
                FROM content c
                LEFT JOIN artist a ON c.artist_id_artist = a.artist_id
                LEFT JOIN key k ON c.key_id = k.key_id
-               LEFT JOIN color ON c.color_id = color.color_id
               ORDER BY c.content_id",
         )
         .map_err(database_error)?;
@@ -143,7 +142,7 @@ pub fn read_device_library(root: impl AsRef<Path>) -> Result<DeviceLibrarySnapsh
                 title: row.get(1)?,
                 artist: row.get(2)?,
                 musical_key: row.get(3)?,
-                color_name: row.get(4)?,
+                color_id: checked_u32(row.get::<_, i64>(4)?, 4)?,
                 bpm_centi: checked_u32(row.get::<_, i64>(5)?, 5)?,
                 duration: checked_u32(row.get::<_, i64>(6)?, 6)?,
                 file_size: checked_u32(row.get::<_, i64>(7)?, 7)?,
@@ -174,7 +173,7 @@ pub fn read_device_library(root: impl AsRef<Path>) -> Result<DeviceLibrarySnapsh
             id: track.id,
             title: &track.title,
             artist: &track.artist,
-            color: &track.color_name,
+            color: &track.color_id.to_string(),
             tempo: track.bpm_centi,
             duration: track.duration,
             file_size: track.file_size,
@@ -195,7 +194,7 @@ pub fn read_device_library(root: impl AsRef<Path>) -> Result<DeviceLibrarySnapsh
             title: track.title.clone(),
             artist: track.artist.clone(),
             musical_key: track.musical_key,
-            color_rgb: rekordbox_track_color_rgb(&track.color_name),
+            color_rgb: rekordbox_track_color_rgb_by_id(track.color_id),
             bpm_milli: track.bpm_centi.saturating_mul(10),
             duration_millis: onelibrary_duration_millis(track.duration),
             file_size: track.file_size,
@@ -422,7 +421,7 @@ struct OneLibraryTrackRow {
     title: String,
     artist: String,
     musical_key: String,
-    color_name: String,
+    color_id: u32,
     bpm_centi: u32,
     duration: u32,
     file_size: u32,
@@ -565,6 +564,24 @@ pub fn rekordbox_track_color_rgb(name: &str) -> Option<u32> {
         .iter()
         .find(|(catalog_name, _)| catalog_name.eq_ignore_ascii_case(name.trim()))
         .map(|(_, rgb)| *rgb)
+}
+
+/// Resolves the fixed Rekordbox color palette by its authoritative OneLibrary
+/// identifier. Users can rename the palette labels, so `color.name` is display
+/// metadata and must never be used to derive the actual track color.
+#[must_use]
+pub const fn rekordbox_track_color_rgb_by_id(color_id: u32) -> Option<u32> {
+    match color_id {
+        1 => Some(0xff_33_cc),
+        2 => Some(0xff_33_33),
+        3 => Some(0xff_8c_1a),
+        4 => Some(0xff_d6_00),
+        5 => Some(0x32_d7_4b),
+        6 => Some(0x32_d7_d5),
+        7 => Some(0x32_80_ff),
+        8 => Some(0xaf_52_de),
+        _ => None,
+    }
 }
 
 #[must_use]
@@ -737,7 +754,7 @@ mod tests {
                  CREATE TABLE key(key_id INTEGER PRIMARY KEY, name TEXT);
                  INSERT INTO key VALUES (3, '8A');
                  CREATE TABLE color(color_id INTEGER PRIMARY KEY, name TEXT);
-                 INSERT INTO color VALUES (7, 'Blue');
+                 INSERT INTO color VALUES (7, 'Zweef');
                  CREATE TABLE content(
                     content_id INTEGER PRIMARY KEY, title TEXT, artist_id_artist INTEGER,
                     key_id INTEGER, color_id INTEGER, bpmx100 INTEGER, length INTEGER, fileSize INTEGER,
@@ -815,5 +832,10 @@ mod tests {
             assert_eq!(rekordbox_track_color_name(rgb), Some(name));
         }
         assert_eq!(rekordbox_track_color_rgb(""), None);
+        assert_eq!(rekordbox_track_color_rgb_by_id(0), None);
+        for (color_id, (_, rgb)) in (1_u32..).zip(expected) {
+            assert_eq!(rekordbox_track_color_rgb_by_id(color_id), Some(rgb));
+        }
+        assert_eq!(rekordbox_track_color_rgb_by_id(9), None);
     }
 }

@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.5.0-dev-25 - 2026-08-24
+
+### Fixed
+
+- Resolves Rekordbox track colors from the fixed OneLibrary palette ID instead
+  of its user-renamable label, so custom labels such as `Zweef` retain their
+  authoritative blue RGB value.
+- Backfills colors that earlier Lumi builds stored as empty on the next normal
+  USB playlist synchronization without replacing newer analysis data.
+
+### Improved
+
+- Presents one consistent track-color swatch in Tracks, Local Playback and
+  both Live Decks, including an explicit hollow state for uncolored tracks.
+
+### Verification
+
+- Covers fixed palette IDs, custom Rekordbox labels, missing-color backfill and
+  the shared macOS presentation model.
+- Confirms the reader against the connected GRAY OneLibrary USB source.
+
 ## 0.5.0-dev-24 - 2026-08-24
 
 ### Added
