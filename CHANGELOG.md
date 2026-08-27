@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.5.0-dev-26 - 2026-08-27
+
+### Fixed
+
+- Keeps Live Decks selected when a library-matched CDJ track exposes only a
+  subset of configured output Themes.
+- Falls back to the track's first executable Theme when every available Theme
+  is excluded by a non-matching `Color only` rule, instead of terminating and
+  restarting the engine in Local Playback.
+
+### Verification
+
+- Reproduces the exact one-bank, non-matching `Color only` configuration in
+  both planner-level and engine-level regression tests.
+- Exercises the installed development build against live Pro DJ Link input and
+  verifies that the engine remains connected without a launch-service restart.
+
 ## 0.5.0-dev-25 - 2026-08-24
 
 ### Fixed

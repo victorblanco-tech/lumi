@@ -838,6 +838,19 @@ impl<C: ChoiceSource> DeterministicPlanner<C> {
                 .max(1),
             })
             .collect::<Vec<_>>();
+        if weighted.is_empty() {
+            // The complete Light Plans policy can be valid while a specific
+            // track only exposes a smaller executable Theme subset. For
+            // example, the sole mapped Theme can be configured as Color Only
+            // for a different track color. Creative policy must never make a
+            // playable track fatal: the subset-aware default is guaranteed to
+            // reference an available Theme by `with_themes`.
+            return self.decision(
+                self.configuration.default_theme_id,
+                ThemeSelectionReason::DefaultTheme,
+                None,
+            );
+        }
         let matching_prefer = eligible.iter().any(|rule| {
             rule.color_behavior == ThemeRuleColorBehavior::Prefer && matches_color(rule)
         });
@@ -860,9 +873,6 @@ impl<C: ChoiceSource> DeterministicPlanner<C> {
         } else {
             &without_recent
         };
-        if candidates.is_empty() {
-            return Err(PlannerError::InvalidThemeRule);
-        }
         let reason = if uses_color_only {
             ThemeSelectionReason::ColorForce
         } else if matching_prefer {

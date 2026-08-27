@@ -5429,6 +5429,60 @@ mod tests {
     }
 
     #[test]
+    fn executable_theme_subset_survives_non_matching_color_only_policy() {
+        let policy = LightPlanningPolicy {
+            default_theme_id: Some(3),
+            theme_rules: vec![
+                lumi_light_plans::ThemeRule {
+                    theme_id: 1,
+                    enabled: true,
+                    selection_weight: 1,
+                    color_behavior: ColorBehavior::Only,
+                    color_rgb: vec![0xff00a0],
+                },
+                lumi_light_plans::ThemeRule {
+                    theme_id: 3,
+                    enabled: true,
+                    selection_weight: 1,
+                    color_behavior: ColorBehavior::Neutral,
+                    color_rgb: Vec::new(),
+                },
+            ],
+            ..LightPlanningPolicy::default()
+        };
+        let planner =
+            planner_for_themes(13, vec![(ThemeId::new(1), "BLUE PINK".to_owned())], &policy)
+                .unwrap_or_else(|error| panic!("the executable subset must build: {error}"));
+        let input = PlanningInput {
+            deck_id: lumi_domain::DeckId::new(1),
+            track_load_id: TrackLoadId::new(42),
+            track: PlannerTrack::with_analysis_and_color(
+                lumi_domain::TrackId::new(90),
+                128,
+                TrackColor::new(0, 120, 255),
+                vec![
+                    lumi_domain::TrackPhrase::new(0, 0, 32, PhraseKind::Intro),
+                    lumi_domain::TrackPhrase::new(1, 32, 64, PhraseKind::Breakdown),
+                    lumi_domain::TrackPhrase::new(2, 64, 96, PhraseKind::Build),
+                    lumi_domain::TrackPhrase::new(3, 96, 128, PhraseKind::Drop),
+                ],
+            ),
+        };
+
+        let plan = planner
+            .generate_with_context(&input, &ThemeSelectionContext::default())
+            .unwrap_or_else(|error| panic!("the executable subset must plan safely: {error}"));
+        let Some(decision) = plan.theme_decision() else {
+            panic!("the plan must retain its only executable Theme");
+        };
+        assert_eq!(decision.theme_id(), ThemeId::new(1));
+        assert_eq!(
+            decision.reason(),
+            lumi_domain::ThemeSelectionReason::DefaultTheme
+        );
+    }
+
+    #[test]
     fn static_look_transition_is_sparse_and_never_reasserts_the_same_toggle() {
         let first = StaticLookTarget {
             modifier_id: "first".to_owned(),

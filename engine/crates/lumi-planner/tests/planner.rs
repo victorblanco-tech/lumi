@@ -405,6 +405,40 @@ fn theme_strategy_keeps_color_only_themes_out_of_unmatched_tracks() {
 }
 
 #[test]
+fn color_only_theme_is_a_safe_fallback_when_it_is_the_only_executable_theme() {
+    let pink = TrackColor::new(255, 0, 160);
+    let planner = DeterministicPlanner::new(
+        PlanningConfiguration::epic_one()
+            .with_themes(
+                PlanConfigurationRevision::new(186),
+                vec![ThemeOption {
+                    id: ThemeId::new(1),
+                    name: "Only Mapped Bank".to_owned(),
+                }],
+            )
+            .with_default_theme(ThemeId::new(1))
+            .with_color_rules(Vec::new())
+            .with_theme_selection_rules(vec![ThemeSelectionRule {
+                theme_id: ThemeId::new(1),
+                enabled: true,
+                weight: 1,
+                color_behavior: ThemeRuleColorBehavior::Only,
+                colors: vec![pink],
+            }]),
+        StableFirstChoice,
+    );
+
+    let plan = generate(&planner, &colored_input(TrackColor::new(0, 120, 255)));
+    let Some(decision) = plan.theme_decision() else {
+        panic!("the sole executable Theme must remain safely selectable");
+    };
+    assert_eq!(decision.theme_id(), ThemeId::new(1));
+    assert_eq!(decision.theme_name(), "Only Mapped Bank");
+    assert_eq!(decision.reason(), ThemeSelectionReason::DefaultTheme);
+    assert_eq!(decision.matched_color(), None);
+}
+
+#[test]
 fn theme_strategy_applies_the_complete_configured_cooldown_window() {
     let rules = (1_u64..=4)
         .map(|id| ThemeSelectionRule {
