@@ -34,6 +34,7 @@ enum RecordedCueReason {
         category: &'static str,
     },
     MissingPhraseAnalysis,
+    MissingAutoloopMapping,
 }
 
 #[derive(Serialize)]
@@ -108,6 +109,7 @@ const fn record_reason(reason: CueReason) -> RecordedCueReason {
             category: category_name(category),
         },
         CueReason::MissingPhraseAnalysis => RecordedCueReason::MissingPhraseAnalysis,
+        CueReason::MissingAutoloopMapping => RecordedCueReason::MissingAutoloopMapping,
     }
 }
 

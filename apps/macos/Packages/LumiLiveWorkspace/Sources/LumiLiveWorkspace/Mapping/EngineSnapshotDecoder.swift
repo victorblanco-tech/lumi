@@ -472,7 +472,10 @@ public struct EngineSnapshotDecoder: Sendable {
                 throw EngineSnapshotDecodingError.invalidSnapshot
             }
         }
-        guard libraryTrack == nil || cues.allSatisfy({ $0.libraryResolution != nil }) else {
+        guard libraryTrack == nil || cues.allSatisfy({ cue in
+            cue.libraryResolution != nil
+                || (cue.reason == .missingAutoloopMapping && cue.action == .holdCurrentLook)
+        }) else {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
 
@@ -689,6 +692,8 @@ public struct EngineSnapshotDecoder: Sendable {
             return .phraseCategoryMatched(phraseKind: phraseKind, category: category)
         case "missingPhraseAnalysis":
             return .missingPhraseAnalysis
+        case "missingAutoloopMapping":
+            return .missingAutoloopMapping
         default:
             throw EngineSnapshotDecodingError.invalidSnapshot
         }

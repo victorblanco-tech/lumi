@@ -188,6 +188,7 @@ pub enum CueReason {
         category: SceneCategory,
     },
     MissingPhraseAnalysis,
+    MissingAutoloopMapping,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -276,6 +277,24 @@ impl LightingCue {
             origin,
             reason: self.reason,
             locked,
+        }
+    }
+
+    /// Preserves the exact phrase range while deliberately turning an
+    /// unmapped Phrase Role into a provider no-op. The active AutoLoop keeps
+    /// running until the next mapped cue; Lumi neither substitutes a role nor
+    /// crosses to another Theme.
+    #[must_use]
+    pub fn hold_for_missing_autoloop_mapping(&self) -> Self {
+        Self {
+            id: self.id,
+            phrase_index: self.phrase_index,
+            start_beat: self.start_beat,
+            end_beat: self.end_beat,
+            action: SemanticLightingAction::HoldCurrentLook,
+            origin: CueOrigin::Automatic,
+            reason: CueReason::MissingAutoloopMapping,
+            locked: false,
         }
     }
 }

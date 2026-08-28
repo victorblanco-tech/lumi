@@ -406,9 +406,10 @@ pub fn compile(
             })
             .collect::<Vec<_>>();
         if eligible.is_empty() {
-            return Err(LightPlanError::MissingCandidate {
-                role_id: phrase.role_id.clone(),
-            });
+            // Track templates are allowed to contain a Phrase Role that this
+            // Theme does not map. That phrase becomes a provider no-op; the
+            // existing AutoLoop continues until the next mapped phrase.
+            continue;
         }
         let requested = match &phrase.selection {
             PhraseSelection::Automatic => None,
@@ -442,9 +443,7 @@ pub fn compile(
                     .is_none_or(|rule| rule.enabled)
             });
             if eligible.is_empty() {
-                return Err(LightPlanError::MissingCandidate {
-                    role_id: phrase.role_id.clone(),
-                });
+                continue;
             }
             let matching_only = eligible
                 .iter()
@@ -469,9 +468,9 @@ pub fn compile(
                 });
             }
             if eligible.is_empty() {
-                return Err(LightPlanError::MissingColorCandidate {
-                    role_id: phrase.role_id.clone(),
-                });
+                // Track Color is optional. Candidate-level `Only` stays hard,
+                // but an absent color never forces a forbidden variant.
+                continue;
             }
             let history_recent = history
                 .recent_variants(&phrase.role_id, usize::from(policy.autoloop_cooldown_uses));
@@ -995,6 +994,60 @@ mod tests {
         )?;
         assert_eq!(result.choices[0].variant_id, "pink");
         assert_eq!(result.choices[0].evidence.reason, "track color only");
+        Ok(())
+    }
+
+    #[test]
+    fn missing_optional_role_keeps_the_rest_of_the_track_plan() -> Result<(), LightPlanError> {
+        let requests = [
+            phrase(0),
+            PhraseRequest {
+                phrase_index: 1,
+                role_id: "pre-drop".to_owned(),
+                selection: PhraseSelection::Automatic,
+            },
+            phrase(2),
+        ];
+        let result = compile(
+            &LightPlanningPolicy::default(),
+            1,
+            None,
+            17,
+            &requests,
+            &[candidate("drop-a", 1), candidate("drop-b", 2)],
+            &VariationHistory::default(),
+        )?;
+
+        assert_eq!(result.choices.len(), 2);
+        assert_eq!(result.choices[0].phrase_index, 0);
+        assert_eq!(result.choices[1].phrase_index, 2);
+        assert!(result.choices.iter().all(|choice| choice.role_id == "drop"));
+        Ok(())
+    }
+
+    #[test]
+    fn absent_track_color_never_forces_an_only_variant() -> Result<(), LightPlanError> {
+        let mut policy = LightPlanningPolicy::default();
+        policy.rules.push(AutoloopRule {
+            theme_id: 1,
+            role_id: "drop".to_owned(),
+            variant_id: "pink".to_owned(),
+            enabled: true,
+            selection_weight: 2,
+            color_behavior: ColorBehavior::Only,
+            color_rgb: vec![0xff00ff],
+        });
+        let result = compile(
+            &policy,
+            1,
+            None,
+            18,
+            &[phrase(0)],
+            &[candidate("pink", 1)],
+            &VariationHistory::default(),
+        )?;
+
+        assert!(result.choices.is_empty());
         Ok(())
     }
 

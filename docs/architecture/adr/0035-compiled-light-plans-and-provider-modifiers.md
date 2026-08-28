@@ -115,11 +115,17 @@ rule takes precedence. Subsequent plans use deterministic weighted rotation afte
 excluding the configured number of committed and reserved recent Themes. Policy
 evaluation remains outside all realtime lanes.
 
-`Only` is a hard eligibility boundary, including when it leaves no eligible
-fully mapped Theme for one track. Lumi then exposes `AUTO HELD` with exact
-coverage evidence and emits no guessed lighting output. It never violates an
-`Only` rule, changes Phrase Role, or crosses Themes automatically merely to make
-a partial mapping executable.
+`Only` is a hard eligibility boundary, but Track Color itself is optional. With
+no Track Color, non-`Only` Themes remain eligible. Lumi chooses among the
+eligible Themes with the best exact phrase coverage; the opening Phrase Role
+must be mapped so a track can start deterministically.
+
+A later Phrase Role without a mapping does not invalidate the whole track plan.
+That phrase compiles to a provider no-op: Lumi sends no AutoLoop selection and
+the current SoundSwitch AutoLoop continues until the next mapped phrase. The UI
+shows this as a held plan segment. Lumi still never violates an `Only` rule,
+substitutes another Phrase Role, or crosses Themes automatically to hide a
+mapping gap.
 
 USB metadata inspection treats a changed metadata revision independently from
 an unchanged kept-active analysis revision. This allows a Rekordbox Track Color

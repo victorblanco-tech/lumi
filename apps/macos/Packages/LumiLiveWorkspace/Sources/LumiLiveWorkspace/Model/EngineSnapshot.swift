@@ -831,6 +831,7 @@ public struct PlanAutoloopChoiceSnapshot: Equatable, Identifiable, Sendable {
 public enum PlanReasonSnapshot: Equatable, Sendable {
     case phraseCategoryMatched(phraseKind: String, category: String)
     case missingPhraseAnalysis
+    case missingAutoloopMapping
 }
 
 public enum PlanActionSnapshot: Equatable, Sendable {

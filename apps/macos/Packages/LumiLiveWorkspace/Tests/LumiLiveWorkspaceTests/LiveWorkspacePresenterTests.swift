@@ -1449,6 +1449,73 @@ struct LiveWorkspacePresenterTests {
         ))
     }
 
+    @Test("Decoder accepts a safe hold for an optional missing AutoLoop mapping")
+    func decoderAcceptsMissingAutoloopMappingHold() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case var .object(plan) = payload["nextPlan"],
+              case var .array(cues) = plan["cues"],
+              cues.count > 1,
+              case var .object(cue) = cues[1] else {
+            Issue.record("Recorded fixture has no later plan cue")
+            return
+        }
+        cue["reason"] = .object(["kind": .string("missingAutoloopMapping")])
+        cue["action"] = .object(["kind": .string("holdCurrentLook")])
+        cue["libraryResolution"] = .null
+        cues[1] = .object(cue)
+        plan["cues"] = .array(cues)
+        plan["libraryTrack"] = .object([
+            "matchStatus": .string("exact"),
+            "providerKind": .string("rekordbox7"),
+            "sourceId": .string("rekordbox7-local"),
+            "sourceName": .string("Rekordbox 7"),
+            "sourceTrackId": .string("track-with-gap"),
+            "analysisRevision": .string("analysis-1"),
+            "timelineRevision": .number(1),
+        ])
+        for index in cues.indices where index != 1 {
+            guard case var .object(mappedCue) = cues[index] else { continue }
+            mappedCue["libraryResolution"] = .object([
+                "roleId": .string("intro-outro"),
+                "roleName": .string("INTRO"),
+                "strategy": .string("auto"),
+                "variantId": .string("mapping-1"),
+                "catalogRevision": .number(1),
+                "resolutionReason": .string("auto"),
+                "dryRunEntry": .object([
+                    "id": .string("theme-1--mapping-1"),
+                    "name": .string("INTRO 1"),
+                ]),
+                "bankNumber": .number(1),
+                "autoloopNumber": .number(1),
+                "choices": .array([]),
+                "modifierChoices": .array([]),
+            ])
+            cues[index] = .object(mappedCue)
+        }
+        plan["cues"] = .array(cues)
+        payload["nextPlan"] = .object(plan)
+        let revised = MessageEnvelope(
+            protocolVersion: recorded.protocolVersion,
+            messageType: recorded.messageType,
+            messageId: recorded.messageId,
+            sequence: recorded.sequence,
+            correlationId: recorded.correlationId,
+            sentAt: recorded.sentAt,
+            payload: payload
+        )
+
+        let snapshot = try EngineSnapshotDecoder().decode(
+            revised,
+            endpointDescription: "127.0.0.1:52841",
+            protocolVersion: 1
+        )
+        #expect(snapshot.nextPlan?.cues[1].reason == .missingAutoloopMapping)
+        #expect(snapshot.nextPlan?.cues[1].action == .holdCurrentLook)
+        #expect(snapshot.nextPlan?.cues[1].libraryResolution == nil)
+    }
+
     private func recordedEnvelope() throws -> MessageEnvelope {
         var repositoryRoot = URL(fileURLWithPath: #filePath)
         for _ in 0..<7 {

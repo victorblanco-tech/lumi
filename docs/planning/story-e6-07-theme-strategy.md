@@ -19,9 +19,13 @@ rotates Themes across consecutive current and next-track plans.
   `Prefer` or `Only` using the actual Rekordbox OneLibrary color catalog.
 - `Prefer` increases a matching Theme's effective weight while retaining a safe
   fallback; matching `Only` Themes form the exclusive eligible set.
-- A non-matching `Only` Theme is never used as a last-resort fallback. If no
-  eligible fully mapped Theme remains, Live shows `AUTO HELD` plus the missing
-  Phrase Roles or Track Color condition and sends no automatic cue.
+- A non-matching `Only` Theme is never used as a last-resort fallback, while an
+  absent Track Color still allows Neutral and Prefer Themes to participate.
+- Automatic planning prefers the eligible Themes with the best exact Phrase
+  Role coverage and requires an exact opening mapping.
+- A later unmapped Phrase Role becomes a visible provider no-op: Lumi sends no
+  replacement command and the active AutoLoop continues. It never substitutes
+  another Phrase Role or crosses Themes.
 - Theme cooldown includes committed and reserved next-track plans. If every
   otherwise valid Theme is recent, the restriction is relaxed deterministically.
 - Automatic Plan Preview uses the same Theme Strategy as runtime and exposes the

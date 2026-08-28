@@ -1008,6 +1008,7 @@ fn cue_category(cue: &LightingCue) -> Result<SceneCategory, PlanMutationError> {
     match cue.reason() {
         CueReason::PhraseCategoryMatched { category, .. } => Ok(category),
         CueReason::MissingPhraseAnalysis => Err(PlanMutationError::FallbackPlanNotEditable),
+        CueReason::MissingAutoloopMapping => Err(PlanMutationError::FallbackPlanNotEditable),
     }
 }
 

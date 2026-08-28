@@ -241,14 +241,67 @@ impl LibraryPlanContext {
         self.catalog.revision()
     }
 
+    /// Returns every Theme that can safely start the track. Policy filtering
+    /// happens before coverage ranking so an ineligible complete Theme cannot
+    /// hide an eligible Theme with one optional mapping gap.
     #[must_use]
-    pub fn executable_themes(&self) -> Vec<(ThemeId, String)> {
+    pub fn startable_themes(&self) -> Vec<(ThemeId, String)> {
         self.catalog
             .themes()
             .iter()
-            .filter(|theme| self.resolve(theme.id()).is_ok())
-            .map(|theme| (theme.id(), theme.display_name().to_owned()))
+            .filter_map(|theme| {
+                let can_start = self
+                    .phrases
+                    .first()
+                    .is_some_and(|phrase| self.resolve_phrase(theme.id(), phrase).is_ok());
+                if !can_start {
+                    return None;
+                }
+                Some((theme.id(), theme.display_name().to_owned()))
+            })
             .collect()
+    }
+
+    /// Keeps only the supplied Themes with the best exact phrase coverage.
+    /// Complete mappings win; when every eligible Theme has an optional gap,
+    /// the most complete eligible Theme remains plannable.
+    #[must_use]
+    pub fn best_covered_themes(&self, themes: Vec<(ThemeId, String)>) -> Vec<(ThemeId, String)> {
+        let coverage = themes
+            .into_iter()
+            .map(|(theme_id, name)| {
+                let mapped = self
+                    .phrases
+                    .iter()
+                    .filter(|phrase| self.resolve_phrase(theme_id, phrase).is_ok())
+                    .count();
+                (theme_id, name, mapped)
+            })
+            .collect::<Vec<_>>();
+        let Some(maximum) = coverage.iter().map(|(_, _, mapped)| *mapped).max() else {
+            return Vec::new();
+        };
+        coverage
+            .into_iter()
+            .filter(|(_, _, mapped)| *mapped == maximum)
+            .map(|(id, name, _)| (id, name))
+            .collect()
+    }
+
+    /// Applies hard Theme eligibility first and coverage ranking second. Keep
+    /// this order centralized: an excluded complete Theme must never mask a
+    /// slightly less complete but safe Theme.
+    #[must_use]
+    pub fn eligible_best_covered_themes(
+        &self,
+        policy: &LightPlanningPolicy,
+    ) -> Vec<(ThemeId, String)> {
+        let eligible = crate::session::policy_eligible_executable_themes(
+            self.startable_themes(),
+            self.track_color_rgb(),
+            policy,
+        );
+        self.best_covered_themes(eligible)
     }
 
     #[must_use]
@@ -266,12 +319,7 @@ impl LibraryPlanContext {
             if missing.contains(&phrase.role_name) {
                 continue;
             }
-            let has_candidate = self
-                .catalog
-                .cells()
-                .iter()
-                .any(|cell| cell.theme_id() == theme_id && cell.role_id() == &phrase.role_id);
-            if !has_candidate {
+            if self.resolve_phrase(theme_id, phrase).is_err() {
                 missing.push(phrase.role_name.clone());
             }
         }
@@ -467,21 +515,7 @@ impl LibraryPlanContext {
             .iter()
             .map(|phrase| {
                 let override_variant = self.autoloop_overrides.get(&phrase.phrase_index);
-                let resolution = if let Some(variant_id) = override_variant {
-                    self.catalog.resolve(
-                        theme_id,
-                        &phrase.role_id,
-                        Some(variant_id),
-                        self.catalog.revision(),
-                    )?
-                } else {
-                    self.catalog.resolve_loop_strategy(
-                        theme_id,
-                        &phrase.role_id,
-                        &phrase.strategy,
-                        self.catalog.revision(),
-                    )?
-                };
+                let resolution = self.resolve_phrase(theme_id, phrase)?;
                 Ok(ResolvedLibraryCue {
                     phrase_index: phrase.phrase_index,
                     role_id: phrase.role_id.as_str().to_owned(),
@@ -505,6 +539,28 @@ impl LibraryPlanContext {
                 })
             })
             .collect()
+    }
+
+    fn resolve_phrase(
+        &self,
+        theme_id: ThemeId,
+        phrase: &LibraryPhrasePlanContext,
+    ) -> Result<lumi_library::AutoloopResolution, AutoloopCatalogError> {
+        if let Some(variant_id) = self.autoloop_overrides.get(&phrase.phrase_index) {
+            self.catalog.resolve(
+                theme_id,
+                &phrase.role_id,
+                Some(variant_id),
+                self.catalog.revision(),
+            )
+        } else {
+            self.catalog.resolve_loop_strategy(
+                theme_id,
+                &phrase.role_id,
+                &phrase.strategy,
+                self.catalog.revision(),
+            )
+        }
     }
 
     /// Compiles all automatic variation before playback. The returned values are
@@ -791,11 +847,7 @@ impl LibraryWorker {
         let (theme_id, theme_reason) = if let Some(theme_id) = theme_id {
             (theme_id, "manualPreviewOverride")
         } else {
-            let themes = crate::session::policy_eligible_executable_themes(
-                context.executable_themes(),
-                context.track_color_rgb(),
-                policy,
-            );
+            let themes = context.eligible_best_covered_themes(policy);
             let planner = crate::session::planner_for_executable_themes(
                 context.catalog_revision(),
                 themes,

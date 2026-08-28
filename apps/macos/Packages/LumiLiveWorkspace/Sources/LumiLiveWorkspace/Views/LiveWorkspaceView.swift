@@ -976,6 +976,7 @@ public struct LiveWorkspaceView: View {
         return switch cue.reason {
         case let .phraseCategoryMatched(phraseKind, _): copy.phrase(phraseKind)
         case .missingPhraseAnalysis: copy.fallback
+        case .missingAutoloopMapping: copy.hold
         }
     }
 
@@ -1258,7 +1259,7 @@ private struct PlanSelectionControl: View {
 #Preview("Ready · Dark") {
     LiveWorkspaceView(
         state: LiveWorkspaceFixtures.ready,
-        productVersion: "0.5.0-dev-28",
+        productVersion: "0.5.0-dev-29",
         appearance: .constant(.dark),
         keyNotation: .constant(.camelot)
     )
@@ -1269,7 +1270,7 @@ private struct PlanSelectionControl: View {
 #Preview("Fallback · Light") {
     LiveWorkspaceView(
         state: LiveWorkspaceFixtures.fallback,
-        productVersion: "0.5.0-dev-28",
+        productVersion: "0.5.0-dev-29",
         appearance: .constant(.light),
         keyNotation: .constant(.classic)
     )

@@ -1019,9 +1019,9 @@ impl PlanningWorker {
                 let SemanticLightingAction::ApplyLook(look) = cue.action() else {
                     return Ok(cue.clone());
                 };
-                let resolution = resolved
-                    .get(&cue.phrase_index())
-                    .ok_or(EngineError::MissingLibraryAutoloopResolution)?;
+                let Some(resolution) = resolved.get(&cue.phrase_index()) else {
+                    return Ok(cue.hold_for_missing_autoloop_mapping());
+                };
                 let autoloop_number = resolution.0;
                 let materialized = LightingLook::try_new(
                     look.theme_id(),
@@ -1189,22 +1189,19 @@ impl PlanningWorker {
             let context = ThemeSelectionContext::new(unavailable_themes);
             let generated = if let Some(library_context) = self.library_context(input.track_load_id)
             {
-                let themes = policy_eligible_executable_themes(
-                    library_context.executable_themes(),
-                    library_context.track_color_rgb(),
-                    &self.light_policy,
-                );
+                let themes = library_context.eligible_best_covered_themes(&self.light_policy);
                 let Some(planner) = planner_for_executable_themes(
                     library_context.catalog_revision(),
                     themes,
                     &self.light_policy,
                 )?
                 else {
-                    // A partially configured Light Plan must never take the
+                    // A configuration with no safe starting Theme must never take the
                     // realtime deck lane down. Keep the hydrated deck and its
                     // authoritative transport alive, but deliberately emit no
-                    // plan until at least one enabled Theme can resolve every
-                    // phrase on this track. This is the same fail-closed
+                    // plan until at least one enabled Theme can resolve the
+                    // opening phrase. A later optional mapping gap is a no-op
+                    // that keeps the active AutoLoop running. This is the same fail-closed
                     // behaviour as an unknown Library track: visible and
                     // playable, without guessing a lighting output.
                     self.compiled_light_plans.remove(&input.track_load_id);
@@ -1397,14 +1394,12 @@ pub(crate) fn library_plan_hold_reason(
     context: &LibraryPlanContext,
     policy: &LightPlanningPolicy,
 ) -> String {
-    let executable = context.executable_themes();
-    let eligible =
-        policy_eligible_executable_themes(executable.clone(), context.track_color_rgb(), policy);
-    if !eligible.is_empty() {
+    let startable = context.startable_themes();
+    if !context.eligible_best_covered_themes(policy).is_empty() {
         return "Automatic planning is waiting for a new plan generation event.".to_owned();
     }
-    if !executable.is_empty() {
-        let names = executable
+    if !startable.is_empty() {
+        let names = startable
             .iter()
             .map(|(_, name)| name.as_str())
             .collect::<Vec<_>>()
@@ -1431,10 +1426,10 @@ pub(crate) fn library_plan_hold_reason(
         .collect::<Vec<_>>()
         .join(" · ");
     if details.is_empty() {
-        "No enabled Theme has an executable AutoLoop candidate for every phrase.".to_owned()
+        "No enabled Theme can safely start this track with an exact AutoLoop mapping.".to_owned()
     } else {
         format!(
-            "No Theme covers every Phrase Role. Map the missing roles in Lighting Outputs — {details}."
+            "No Theme can safely start this track. Map the opening Phrase Role in Lighting Outputs — {details}."
         )
     }
 }
@@ -5265,6 +5260,9 @@ fn cue_reason_json(reason: CueReason) -> Value {
         CueReason::MissingPhraseAnalysis => json!({
             "kind": "missingPhraseAnalysis",
         }),
+        CueReason::MissingAutoloopMapping => json!({
+            "kind": "missingAutoloopMapping",
+        }),
     }
 }
 
@@ -5591,6 +5589,20 @@ mod tests {
             &policy,
         );
         assert_eq!(matching, vec![(ThemeId::new(1), "BLUE PINK".to_owned())]);
+
+        let absent = policy_eligible_executable_themes(
+            vec![
+                (ThemeId::new(1), "BLUE PINK".to_owned()),
+                (ThemeId::new(3), "BLUE RED GREEN".to_owned()),
+            ],
+            None,
+            &policy,
+        );
+        assert_eq!(
+            absent,
+            vec![(ThemeId::new(3), "BLUE RED GREEN".to_owned())],
+            "an absent Track Color must exclude Only without blocking a neutral Theme"
+        );
     }
 
     #[test]

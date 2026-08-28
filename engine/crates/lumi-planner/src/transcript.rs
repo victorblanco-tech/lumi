@@ -59,6 +59,7 @@ enum CanonicalReason {
         category: &'static str,
     },
     MissingPhraseAnalysis,
+    MissingAutoloopMapping,
 }
 
 #[derive(Serialize)]
@@ -140,6 +141,7 @@ const fn canonical_reason(reason: CueReason) -> CanonicalReason {
             category: category_name(category),
         },
         CueReason::MissingPhraseAnalysis => CanonicalReason::MissingPhraseAnalysis,
+        CueReason::MissingAutoloopMapping => CanonicalReason::MissingAutoloopMapping,
     }
 }
 

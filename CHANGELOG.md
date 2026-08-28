@@ -1,5 +1,31 @@
 # Changelog
 
+## 0.5.0-dev-29 - 2026-08-28
+
+### Fixed
+
+- Made Rekordbox Track Color an optional planning influence again: an absent
+  color no longer blocks an otherwise usable automatic Light Plan.
+- Kept Theme and AutoLoop `Only` rules hard without falling back to an
+  excluded Theme or variant.
+- Changed partial Theme coverage from a whole-track failure to an exact,
+  provider-safe phrase hold. Lumi sends no command for the unmapped Phrase
+  Role and the existing SoundSwitch AutoLoop continues until the next mapped
+  cue.
+- Limited automatic Theme rotation to the enabled, color-eligible Themes with
+  the best exact phrase coverage and a mapped opening phrase, preventing a
+  sparsely configured Bank from winning merely because it is eligible.
+
+### Verification
+
+- Added regressions for no-color `Only` exclusion and partial Phrase Role
+  coverage.
+- Reproduced the original failure with the real Player 1 loop and the Dev
+  Library before implementing the fix.
+- Verified the installed macOS build through Live Decks: `90s Bitch` remains
+  ready without Track Color, selects BLUE RED GREEN, and arms on the first
+  user action.
+
 ## 0.5.0-dev-28 - 2026-08-28
 
 ### Fixed
