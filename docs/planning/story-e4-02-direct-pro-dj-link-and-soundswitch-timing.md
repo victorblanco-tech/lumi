@@ -353,6 +353,9 @@ then drive the managed helper and reconnect it when needed.
 ## Acceptance criteria
 
 - Lumi starts and stops the bridge automatically with the engine.
+- If tracks are already loaded and paused/cued before Lumi starts Live Decks,
+  both exact tracks, phrases and Light Plans are ready before the first Play;
+  the first Play can therefore trigger the opening AutoLoop immediately.
 - A bridge crash cannot stop local playback or corrupt a lighting plan.
 - Two fixed Lumi deck identities follow two physical player identities.
 - Pitch changes update effective BPM without double application.
@@ -377,6 +380,17 @@ then drive the managed helper and reconnect it when needed.
   minutes.
 - The opt-in `prolink_network_acceptance` test runs only against the dedicated
   LAN simulator and remains ignored in deterministic offline verification.
+
+### Physical cold-start acceptance — implemented in dev-30
+
+- Started the bridge after both CDJ-1500X players already held loaded tracks
+  in Pause/Cue.
+- Confirmed the extended player packets resolved exact Rekordbox IDs 1256
+  (`90s Bitch`) and 1237 (`My Favourite Regrets`) before either deck played.
+- Confirmed both identities match the current isolated Dev USB library and
+  exact-position packets remain accepted while transport is stopped.
+- The compatibility decoder is restricted to the observed CDJ-1500X 512-byte
+  layout and fails closed for zero identity, other lengths and other models.
 
 ## Out of scope
 

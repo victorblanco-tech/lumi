@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.5.0-dev-30 - 2026-08-28
+
+### Fixed
+
+- Recognizes a track that was already loaded and paused/cued on a physical
+  CDJ-1500X before Lumi Live Decks starts. Lumi now hydrates its exact trusted
+  USB track, phrases and Light Plan before the first Play press.
+- Decodes the Rekordbox track ID from the observed 512-byte CDJ-1500X extended
+  status layout when Beat Link 8.0 exposes only its legacy `NO_TRACK` fields.
+- Drops precise-position callbacks safely while their matching deck status is
+  not yet cached instead of allowing a Beat Link null-status exception.
+
+### Verification
+
+- Added isolated regressions for the CDJ-1500X extended loaded-track ID, true
+  unloaded state, unsupported packet lengths and other player models.
+- Verified read-only against two physical paused/cued CDJ-1500X players: IDs
+  1256 and 1237 were published immediately and matched the Dev USB library.
+- Verified exact position continues for both paused decks without null-status
+  callback failures.
+
 ## 0.5.0-dev-29 - 2026-08-28
 
 ### Fixed

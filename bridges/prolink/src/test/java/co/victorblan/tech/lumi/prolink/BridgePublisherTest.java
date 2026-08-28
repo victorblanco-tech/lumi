@@ -30,6 +30,48 @@ final class BridgePublisherTest {
     }
 
     @Test
+    void decodesLoadedPausedTrackIdentityFromCdj1500xExtendedStatus() {
+        byte[] playerOneStatus = new byte[512];
+        playerOneStatus[0x194] = 0x00;
+        playerOneStatus[0x195] = 0x00;
+        playerOneStatus[0x196] = 0x04;
+        playerOneStatus[0x197] = (byte)0xe8;
+
+        BeatLinkRuntime.ResolvedTrackIdentity identity =
+                BeatLinkRuntime.resolveCdj1500xExtendedTrackIdentity("CDJ-1500X", 1, playerOneStatus);
+
+        assertEquals(1, identity.sourcePlayer());
+        assertEquals("USB_SLOT", identity.sourceSlot());
+        assertEquals("REKORDBOX", identity.trackType());
+        assertEquals(1256, identity.rekordboxId());
+    }
+
+    @Test
+    void cdj1500xExtendedStatusKeepsTrueNoTrackAndUnknownLayoutsEmpty() {
+        byte[] noTrackStatus = new byte[512];
+        assertEquals(
+                BeatLinkRuntime.ResolvedTrackIdentity.noTrack(),
+                BeatLinkRuntime.resolveCdj1500xExtendedTrackIdentity("CDJ-1500X", 2, noTrackStatus)
+        );
+
+        byte[] knownIdAtUnsupportedLength = new byte[513];
+        knownIdAtUnsupportedLength[0x196] = 0x04;
+        knownIdAtUnsupportedLength[0x197] = (byte)0xd5;
+        assertEquals(
+                BeatLinkRuntime.ResolvedTrackIdentity.noTrack(),
+                BeatLinkRuntime.resolveCdj1500xExtendedTrackIdentity(
+                        "CDJ-1500X",
+                        2,
+                        knownIdAtUnsupportedLength
+                )
+        );
+        assertEquals(
+                BeatLinkRuntime.ResolvedTrackIdentity.noTrack(),
+                BeatLinkRuntime.resolveCdj1500xExtendedTrackIdentity("CDJ-3000", 2, noTrackStatus)
+        );
+    }
+
+    @Test
     void publishesVersionedMonotoneNdjsonWithoutDroppedEvents() throws Exception {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         BridgePublisher publisher = new BridgePublisher(output, mapper);

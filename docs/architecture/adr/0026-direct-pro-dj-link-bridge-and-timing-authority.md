@@ -88,6 +88,26 @@ vendor copy. If an upstream patch becomes necessary, VB Tech may create a
 minimal fork, document the delta and offer the change upstream. Product code
 must not depend on fork-only behavior without an explicit follow-up ADR.
 
+### Narrow hardware compatibility decoding
+
+The adapter may decode a narrowly identified extension from Beat Link's public
+raw packet bytes when a supported physical player publishes a newer status
+layout that the pinned library does not yet interpret. Such a decoder must:
+
+- match an exact device model and packet length;
+- extract only fields proven against trusted local USB identities;
+- preserve Beat Link's interpretation whenever it already supplies identity;
+- return a true unloaded state for zero or unsupported values;
+- have byte-level regressions and physical read-only acceptance evidence;
+- never infer track identity from title, BPM, duration or transport position.
+
+For the CDJ-1500X 1.10 status layout observed on 2026-08-28, the 512-byte CDJ
+status packet retains a big-endian Rekordbox track ID at bytes `0x194..0x197`
+while Beat Link 8.0's legacy identity fields remain zero. Lumi decodes only
+that ID, treats the reporting player as its source and continues to hydrate all
+content from the trusted USB mirror. This permits cold-start pre-arming while a
+loaded track is paused/cued without copying or forking Beat Link.
+
 ## Operational safety
 
 - The direct bridge is not launched during application startup or Local

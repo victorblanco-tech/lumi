@@ -72,7 +72,12 @@ final class BeatLinkRuntime implements AutoCloseable {
         // packet contains only the beat within the bar and cannot distinguish
         // normal playback from a hotcue jump before the next CdjStatus frame.
         BeatFinder.getInstance().addPrecisePositionListener(position -> {
-            if (!hasRealtimeTempo(position.getEffectiveTempo(), position.getBeatWithinBar())) {
+            DeviceUpdate latestStatus = VirtualCdj.getInstance().getLatestStatusFor(position);
+            if (latestStatus == null) {
+                return;
+            }
+            int beatWithinBar = latestStatus.getBeatWithinBar();
+            if (!hasRealtimeTempo(position.getEffectiveTempo(), beatWithinBar)) {
                 return;
             }
             publisher.publishLatest(
@@ -84,7 +89,7 @@ final class BeatLinkRuntime implements AutoCloseable {
                             position.getDeviceName(),
                             position.getPlaybackPosition(),
                             position.getEffectiveTempo(),
-                            position.getBeatWithinBar(),
+                            beatWithinBar,
                             position.isTempoMaster()
                     )
             );
@@ -151,12 +156,13 @@ final class BeatLinkRuntime implements AutoCloseable {
         if (!(update instanceof CdjStatus status)) {
             return;
         }
+        ResolvedTrackIdentity trackIdentity = resolveTrackIdentity(status);
         // A player that has only just joined the network briefly reports the
         // Beat Link sentinel values (no BPM/beat yet). Those frames describe
         // normal device warm-up, not a bridge protocol failure. Wait for one
         // coherent loaded-track status before publishing it, while still
         // allowing a real unloaded status to clear an existing deck.
-        if (status.getRekordboxId() != 0 && !hasCoherentLoadedTrack(status)) {
+        if (trackIdentity.rekordboxId() != 0 && !hasCoherentLoadedTrack(status, trackIdentity)) {
             return;
         }
         BridgePayloads.DeckStatus payload = new BridgePayloads.DeckStatus(
@@ -167,10 +173,10 @@ final class BeatLinkRuntime implements AutoCloseable {
                 status.isCued(),
                 status.isTempoMaster(),
                 status.isOnAir(),
-                status.getTrackSourcePlayer(),
-                status.getTrackSourceSlot().name(),
-                status.getTrackType().name(),
-                status.getRekordboxId(),
+                trackIdentity.sourcePlayer(),
+                trackIdentity.sourceSlot(),
+                trackIdentity.trackType(),
+                trackIdentity.rekordboxId(),
                 status.getBpm() / 100.0,
                 status.getEffectiveTempo(),
                 status.getBeatNumber(),
@@ -206,11 +212,60 @@ final class BeatLinkRuntime implements AutoCloseable {
         }
     }
 
-    private static boolean hasCoherentLoadedTrack(CdjStatus status) {
-        return status.getTrackSourcePlayer() != 0
+    private static boolean hasCoherentLoadedTrack(CdjStatus status, ResolvedTrackIdentity identity) {
+        return identity.sourcePlayer() != 0
+                && identity.rekordboxId() != 0
                 && status.getBeatNumber() >= 0
                 && hasRealtimeTempo(status.getBpm() / 100.0, status.getBeatWithinBar())
                 && hasRealtimeTempo(status.getEffectiveTempo(), status.getBeatWithinBar());
+    }
+
+    /**
+     * The CDJ-1500X status packet currently has a 512-byte extended layout.
+     * Beat Link 8.0 understands its transport fields but reads the legacy
+     * track-identity offsets, which remain zero while a loaded paused/cued
+     * track is reported at the extended Rekordbox ID offset. Decode only this
+     * exact, observed layout and otherwise retain Beat Link's interpretation.
+     */
+    static ResolvedTrackIdentity resolveTrackIdentity(CdjStatus status) {
+        ResolvedTrackIdentity beatLinkIdentity = new ResolvedTrackIdentity(
+                status.getTrackSourcePlayer(),
+                status.getTrackSourceSlot().name(),
+                status.getTrackType().name(),
+                status.getRekordboxId()
+        );
+        if (beatLinkIdentity.rekordboxId() != 0) {
+            return beatLinkIdentity;
+        }
+        return resolveCdj1500xExtendedTrackIdentity(
+                status.getDeviceName(),
+                status.getDeviceNumber(),
+                status.getPacketBytes()
+        );
+    }
+
+    static ResolvedTrackIdentity resolveCdj1500xExtendedTrackIdentity(
+            String deviceName,
+            int deviceNumber,
+            byte[] packetBytes
+    ) {
+        if (!"CDJ-1500X".equals(deviceName) || packetBytes.length != 512) {
+            return ResolvedTrackIdentity.noTrack();
+        }
+        int rekordboxId = ((packetBytes[0x194] & 0xff) << 24)
+                | ((packetBytes[0x195] & 0xff) << 16)
+                | ((packetBytes[0x196] & 0xff) << 8)
+                | (packetBytes[0x197] & 0xff);
+        if (rekordboxId == 0 || deviceNumber <= 0 || deviceNumber > 15) {
+            return ResolvedTrackIdentity.noTrack();
+        }
+        return new ResolvedTrackIdentity(deviceNumber, "USB_SLOT", "REKORDBOX", rekordboxId);
+    }
+
+    record ResolvedTrackIdentity(int sourcePlayer, String sourceSlot, String trackType, int rekordboxId) {
+        static ResolvedTrackIdentity noTrack() {
+            return new ResolvedTrackIdentity(0, "NO_TRACK", "NO_TRACK", 0);
+        }
     }
 
     static boolean hasRealtimeTempo(double effectiveTempo, int beatWithinBar) {
