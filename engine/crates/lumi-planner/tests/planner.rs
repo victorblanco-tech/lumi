@@ -6,9 +6,9 @@ use lumi_domain::{
     TrackLoadId, TrackPhrase,
 };
 use lumi_planner::{
-    ChoiceSource, DeterministicPlanner, PlannerTrack, PlanningConfiguration, PlanningInput,
-    ThemeColorRule, ThemeColorRuleMode, ThemeOption, ThemeRuleColorBehavior, ThemeSelectionContext,
-    ThemeSelectionRule, WeightedThemeCandidate, canonical_plan,
+    ChoiceSource, DeterministicPlanner, PlannerError, PlannerTrack, PlanningConfiguration,
+    PlanningInput, ThemeColorRule, ThemeColorRuleMode, ThemeOption, ThemeRuleColorBehavior,
+    ThemeSelectionContext, ThemeSelectionRule, WeightedThemeCandidate, canonical_plan,
 };
 
 #[test]
@@ -405,7 +405,7 @@ fn theme_strategy_keeps_color_only_themes_out_of_unmatched_tracks() {
 }
 
 #[test]
-fn color_only_theme_is_a_safe_fallback_when_it_is_the_only_executable_theme() {
+fn color_only_theme_never_falls_back_for_a_non_matching_track() {
     let pink = TrackColor::new(255, 0, 160);
     let planner = DeterministicPlanner::new(
         PlanningConfiguration::epic_one()
@@ -428,14 +428,8 @@ fn color_only_theme_is_a_safe_fallback_when_it_is_the_only_executable_theme() {
         StableFirstChoice,
     );
 
-    let plan = generate(&planner, &colored_input(TrackColor::new(0, 120, 255)));
-    let Some(decision) = plan.theme_decision() else {
-        panic!("the sole executable Theme must remain safely selectable");
-    };
-    assert_eq!(decision.theme_id(), ThemeId::new(1));
-    assert_eq!(decision.theme_name(), "Only Mapped Bank");
-    assert_eq!(decision.reason(), ThemeSelectionReason::DefaultTheme);
-    assert_eq!(decision.matched_color(), None);
+    let result = planner.generate(&colored_input(TrackColor::new(0, 120, 255)));
+    assert_eq!(result, Err(PlannerError::NoEligibleTheme));
 }
 
 #[test]

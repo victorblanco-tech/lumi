@@ -830,7 +830,8 @@ public struct LiveWorkspaceView: View {
                 Text(verbatim: deck.planEligibility == .autoHeld ? "AUTO HELD" : copy.waitingPlan)
                     .font(LumiTypography.metadata.weight(.semibold))
                     .foregroundStyle(Color.white)
-                Text(verbatim: "No complete mapped Lumi phrase timeline is available. The current look is held; manual MIDI remains available.")
+                Text(verbatim: deck.planHoldReason
+                    ?? "No complete mapped Lumi phrase timeline is available. The current look is held; manual MIDI remains available.")
                     .font(LumiTypography.technical)
                     .foregroundStyle(Color.white.opacity(0.54))
             }
@@ -1257,7 +1258,7 @@ private struct PlanSelectionControl: View {
 #Preview("Ready · Dark") {
     LiveWorkspaceView(
         state: LiveWorkspaceFixtures.ready,
-        productVersion: "0.5.0-dev-27",
+        productVersion: "0.5.0-dev-28",
         appearance: .constant(.dark),
         keyNotation: .constant(.camelot)
     )
@@ -1268,7 +1269,7 @@ private struct PlanSelectionControl: View {
 #Preview("Fallback · Light") {
     LiveWorkspaceView(
         state: LiveWorkspaceFixtures.fallback,
-        productVersion: "0.5.0-dev-27",
+        productVersion: "0.5.0-dev-28",
         appearance: .constant(.light),
         keyNotation: .constant(.classic)
     )

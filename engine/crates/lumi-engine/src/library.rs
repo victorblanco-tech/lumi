@@ -252,6 +252,48 @@ impl LibraryPlanContext {
     }
 
     #[must_use]
+    pub const fn track_color_rgb(&self) -> Option<u32> {
+        match self.track_color {
+            Some(color) => Some(color.rgb_u32()),
+            None => None,
+        }
+    }
+
+    #[must_use]
+    pub fn missing_role_names(&self, theme_id: ThemeId) -> Vec<String> {
+        let mut missing = Vec::new();
+        for phrase in &self.phrases {
+            if missing.contains(&phrase.role_name) {
+                continue;
+            }
+            let has_candidate = self
+                .catalog
+                .cells()
+                .iter()
+                .any(|cell| cell.theme_id() == theme_id && cell.role_id() == &phrase.role_id);
+            if !has_candidate {
+                missing.push(phrase.role_name.clone());
+            }
+        }
+        missing
+    }
+
+    #[must_use]
+    pub fn theme_coverage(&self) -> Vec<(ThemeId, String, Vec<String>)> {
+        self.catalog
+            .themes()
+            .iter()
+            .map(|theme| {
+                (
+                    theme.id(),
+                    theme.display_name().to_owned(),
+                    self.missing_role_names(theme.id()),
+                )
+            })
+            .collect()
+    }
+
+    #[must_use]
     pub fn identity_json(&self) -> Value {
         json!({
             "matchStatus": "exact",
@@ -749,12 +791,22 @@ impl LibraryWorker {
         let (theme_id, theme_reason) = if let Some(theme_id) = theme_id {
             (theme_id, "manualPreviewOverride")
         } else {
-            let planner = crate::session::planner_for_themes(
-                context.catalog_revision(),
+            let themes = crate::session::policy_eligible_executable_themes(
                 context.executable_themes(),
+                context.track_color_rgb(),
+                policy,
+            );
+            let planner = crate::session::planner_for_executable_themes(
+                context.catalog_revision(),
+                themes,
                 policy,
             )
-            .map_err(|error| LibraryWorkerError::Configuration(error.to_string()))?;
+            .map_err(|error| LibraryWorkerError::Configuration(error.to_string()))?
+            .ok_or_else(|| {
+                LibraryWorkerError::Configuration(crate::session::library_plan_hold_reason(
+                    &context, policy,
+                ))
+            })?;
             let planning_input = PlanningInput {
                 deck_id: DeckId::new(1),
                 track_load_id: TrackLoadId::new(track_id),
@@ -1761,10 +1813,12 @@ impl LibraryWorker {
                         detail: "This USB track was not matched to a Lumi track during the previous sync."
                             .to_owned(),
                     }
-                } else if is_kept_active_revision(
+                } else if kept_active_track_is_current(
                     &previous.sync_disposition,
                     &previous.analysis_revision,
                     &track.analysis_revision,
+                    &previous.metadata_revision,
+                    &track.metadata_revision,
                 ) {
                     DeviceInspectionTrack {
                         status: "current",
@@ -4105,6 +4159,20 @@ fn is_kept_active_revision(
     disposition == "kept-active" && stored_analysis_revision == incoming_analysis_revision
 }
 
+fn kept_active_track_is_current(
+    disposition: &str,
+    stored_analysis_revision: &str,
+    incoming_analysis_revision: &str,
+    stored_metadata_revision: &str,
+    incoming_metadata_revision: &str,
+) -> bool {
+    is_kept_active_revision(
+        disposition,
+        stored_analysis_revision,
+        incoming_analysis_revision,
+    ) && stored_metadata_revision == incoming_metadata_revision
+}
+
 fn device_status_counts<'a>(tracks: impl Iterator<Item = &'a DeviceInspectionTrack>) -> Value {
     let mut current = 0_u64;
     let mut usb_newer = 0_u64;
@@ -4782,6 +4850,7 @@ mod tests {
         LibraryWorkerError, PhraseRoleCatalogMutation, canonical_beat_grid, canonical_phrases,
         deck_waveform_preview_points, device_audio_uri, device_metadata_matches,
         device_track_matches, first_available_audio_uri, is_kept_active_revision,
+        kept_active_track_is_current,
     };
 
     #[test]
@@ -4800,6 +4869,20 @@ mod tests {
             "held-conflict",
             "analysis-gray-1",
             "analysis-gray-1"
+        ));
+        assert!(kept_active_track_is_current(
+            "kept-active",
+            "analysis-gray-1",
+            "analysis-gray-1",
+            "metadata-gray-1",
+            "metadata-gray-1"
+        ));
+        assert!(!kept_active_track_is_current(
+            "kept-active",
+            "analysis-gray-1",
+            "analysis-gray-1",
+            "metadata-gray-1",
+            "metadata-color-update"
         ));
     }
 

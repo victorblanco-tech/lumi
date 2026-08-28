@@ -115,6 +115,17 @@ rule takes precedence. Subsequent plans use deterministic weighted rotation afte
 excluding the configured number of committed and reserved recent Themes. Policy
 evaluation remains outside all realtime lanes.
 
+`Only` is a hard eligibility boundary, including when it leaves no eligible
+fully mapped Theme for one track. Lumi then exposes `AUTO HELD` with exact
+coverage evidence and emits no guessed lighting output. It never violates an
+`Only` rule, changes Phrase Role, or crosses Themes automatically merely to make
+a partial mapping executable.
+
+USB metadata inspection treats a changed metadata revision independently from
+an unchanged kept-active analysis revision. This allows a Rekordbox Track Color
+change to enter the normal review/sync path without replacing the beatgrid,
+waveform, cues or Lumi-owned phrase timeline.
+
 Stored policies from before Theme Strategy retain their exact former selection
 behavior until the user saves the explicit strategy. Saving materializes one rule
 per existing Bank without changing its ID, name, MIDI mapping or AutoLoops.

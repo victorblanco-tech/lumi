@@ -1,5 +1,34 @@
 # Changelog
 
+## 0.5.0-dev-28 - 2026-08-28
+
+### Fixed
+
+- Treats Theme Strategy `Only` as a hard eligibility rule. A track without the
+  required Rekordbox Track Color can no longer fall through to that Theme just
+  because it is the only fully mapped Bank.
+- Detects metadata-only USB changes after a previous `Keep Lumi` review, so a
+  later Rekordbox Track Color update becomes synchronizable even when beatgrid,
+  cues and analysis are unchanged.
+- Marks a Library deck as `AUTO HELD` when no plan exists instead of presenting
+  its recognized track as plan-ready.
+
+### Improved
+
+- Explains exactly why a recognized track has no plan, including the missing
+  Phrase Roles per Theme or the Track Color rule that excludes an otherwise
+  complete Theme.
+- Keeps every failure fail-closed: Lumi holds the current look and never uses a
+  different Phrase Role or silently violates Theme Strategy.
+
+### Verification
+
+- Covers hard `Only` eligibility, matching-color eligibility and metadata-only
+  changes with an unchanged kept-active analysis revision.
+- Verifies the current Dev library diagnosis: `My Favourite Regrets` needs
+  `BD CHORUS 2` in BLUE PINK or both Pre-Drop roles in GREEN PINK / BLUE RED
+  GREEN before any one coherent Theme can cover its complete timeline.
+
 ## 0.5.0-dev-27 - 2026-08-28
 
 ### Fixed

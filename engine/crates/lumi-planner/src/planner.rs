@@ -839,17 +839,7 @@ impl<C: ChoiceSource> DeterministicPlanner<C> {
             })
             .collect::<Vec<_>>();
         if weighted.is_empty() {
-            // The complete Light Plans policy can be valid while a specific
-            // track only exposes a smaller executable Theme subset. For
-            // example, the sole mapped Theme can be configured as Color Only
-            // for a different track color. Creative policy must never make a
-            // playable track fatal: the subset-aware default is guaranteed to
-            // reference an available Theme by `with_themes`.
-            return self.decision(
-                self.configuration.default_theme_id,
-                ThemeSelectionReason::DefaultTheme,
-                None,
-            );
+            return Err(PlannerError::NoEligibleTheme);
         }
         let matching_prefer = eligible.iter().any(|rule| {
             rule.color_behavior == ThemeRuleColorBehavior::Prefer && matches_color(rule)
@@ -1080,6 +1070,7 @@ pub enum PlannerError {
     EmptyTrackDuration,
     EmptyThemeCatalog,
     InvalidThemeRule,
+    NoEligibleTheme,
     UnknownConfiguredTheme(ThemeId),
     MissingSceneCategory(SceneCategory),
     InvalidPlan(PlanValidationError),
@@ -1093,6 +1084,8 @@ impl fmt::Display for PlannerError {
             Self::InvalidThemeRule => {
                 formatter.write_str("a Theme rule has no positive weighted candidate")
             }
+            Self::NoEligibleTheme => formatter
+                .write_str("no enabled Theme is eligible for this track's Track Color rules"),
             Self::UnknownConfiguredTheme(theme_id) => write!(
                 formatter,
                 "Theme {} is referenced by configuration but not defined",

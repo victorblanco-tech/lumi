@@ -1189,7 +1189,11 @@ impl PlanningWorker {
             let context = ThemeSelectionContext::new(unavailable_themes);
             let generated = if let Some(library_context) = self.library_context(input.track_load_id)
             {
-                let themes = library_context.executable_themes();
+                let themes = policy_eligible_executable_themes(
+                    library_context.executable_themes(),
+                    library_context.track_color_rgb(),
+                    &self.light_policy,
+                );
                 let Some(planner) = planner_for_executable_themes(
                     library_context.catalog_revision(),
                     themes,
@@ -1329,7 +1333,7 @@ pub(crate) fn planner_for_themes(
     )
 }
 
-fn planner_for_executable_themes(
+pub(crate) fn planner_for_executable_themes(
     catalog_revision: u64,
     themes: Vec<(lumi_domain::ThemeId, String)>,
     policy: &LightPlanningPolicy,
@@ -1343,6 +1347,95 @@ fn planner_for_executable_themes(
         // That is a valid fail-closed configuration, not an engine failure.
         Err(EngineError::NoExecutableLibraryTheme) => Ok(None),
         Err(error) => Err(error),
+    }
+}
+
+pub(crate) fn policy_eligible_executable_themes(
+    themes: Vec<(lumi_domain::ThemeId, String)>,
+    track_color_rgb: Option<u32>,
+    policy: &LightPlanningPolicy,
+) -> Vec<(lumi_domain::ThemeId, String)> {
+    if policy.theme_rules.is_empty() {
+        return themes;
+    }
+    let matching_only = themes
+        .iter()
+        .filter(|(theme_id, _)| {
+            policy
+                .theme_rules
+                .iter()
+                .find(|rule| rule.theme_id == theme_id.value())
+                .is_some_and(|rule| {
+                    rule.enabled
+                        && rule.color_behavior == ColorBehavior::Only
+                        && track_color_rgb.is_some_and(|color| rule.color_rgb.contains(&color))
+                })
+        })
+        .map(|(theme_id, _)| *theme_id)
+        .collect::<Vec<_>>();
+    themes
+        .into_iter()
+        .filter(|(theme_id, _)| {
+            let Some(rule) = policy
+                .theme_rules
+                .iter()
+                .find(|rule| rule.theme_id == theme_id.value())
+            else {
+                return false;
+            };
+            rule.enabled
+                && if matching_only.is_empty() {
+                    rule.color_behavior != ColorBehavior::Only
+                } else {
+                    matching_only.contains(theme_id)
+                }
+        })
+        .collect()
+}
+
+pub(crate) fn library_plan_hold_reason(
+    context: &LibraryPlanContext,
+    policy: &LightPlanningPolicy,
+) -> String {
+    let executable = context.executable_themes();
+    let eligible =
+        policy_eligible_executable_themes(executable.clone(), context.track_color_rgb(), policy);
+    if !eligible.is_empty() {
+        return "Automatic planning is waiting for a new plan generation event.".to_owned();
+    }
+    if !executable.is_empty() {
+        let names = executable
+            .iter()
+            .map(|(_, name)| name.as_str())
+            .collect::<Vec<_>>()
+            .join(", ");
+        return match context.track_color_rgb() {
+            Some(_) => format!(
+                "Mapped Theme {names} is excluded by this track's Track Color rules. Adjust Theme Strategy or the Rekordbox Track Color."
+            ),
+            None => format!(
+                "Mapped Theme {names} requires a Track Color match. Add and sync the Rekordbox Track Color or adjust Theme Strategy."
+            ),
+        };
+    }
+    let details = context
+        .theme_coverage()
+        .into_iter()
+        .filter_map(|(_, theme_name, missing)| {
+            (!missing.is_empty()).then(|| {
+                let role_list = missing.into_iter().take(3).collect::<Vec<_>>().join(", ");
+                format!("{theme_name}: {role_list}")
+            })
+        })
+        .take(3)
+        .collect::<Vec<_>>()
+        .join(" · ");
+    if details.is_empty() {
+        "No enabled Theme has an executable AutoLoop candidate for every phrase.".to_owned()
+    } else {
+        format!(
+            "No Theme covers every Phrase Role. Map the missing roles in Lighting Outputs — {details}."
+        )
     }
 }
 
@@ -4745,7 +4838,8 @@ fn snapshot_envelope_internal(
                     .map(|transport| transport.discontinuity_revision)
             })
             .flatten();
-            let plan_eligibility = if library_context.is_some() {
+            let has_plan = state.plan(deck_id).is_some();
+            let plan_eligibility = if library_context.is_some() && has_plan {
                 "readyExact"
             } else if state
                 .plan(deck_id)
@@ -4755,6 +4849,9 @@ fn snapshot_envelope_internal(
             } else {
                 "autoHeld"
             };
+            let plan_hold_reason = library_context.filter(|_| !has_plan).map(|context| {
+                library_plan_hold_reason(context, &runtime.planning_worker.light_policy)
+            });
             json!({
                 "deckId": deck_id.value(),
                 "trackLoadId": deck.track_load_id().value(),
@@ -4765,6 +4862,7 @@ fn snapshot_envelope_internal(
                 "transportRevision": connected_transport_revision,
                 "phraseIndex": deck.phrase_index(),
                 "planEligibility": plan_eligibility,
+                "planHoldReason": plan_hold_reason,
                 "localPlayback": local_playback,
                 "track": {
                     "id": metadata.id().value(),
@@ -5459,7 +5557,7 @@ mod tests {
     }
 
     #[test]
-    fn executable_theme_subset_survives_non_matching_color_only_policy() {
+    fn non_matching_color_only_theme_is_not_executable_for_the_track() {
         let policy = LightPlanningPolicy {
             default_theme_id: Some(3),
             theme_rules: vec![
@@ -5480,36 +5578,19 @@ mod tests {
             ],
             ..LightPlanningPolicy::default()
         };
-        let planner =
-            planner_for_themes(13, vec![(ThemeId::new(1), "BLUE PINK".to_owned())], &policy)
-                .unwrap_or_else(|error| panic!("the executable subset must build: {error}"));
-        let input = PlanningInput {
-            deck_id: lumi_domain::DeckId::new(1),
-            track_load_id: TrackLoadId::new(42),
-            track: PlannerTrack::with_analysis_and_color(
-                lumi_domain::TrackId::new(90),
-                128,
-                TrackColor::new(0, 120, 255),
-                vec![
-                    lumi_domain::TrackPhrase::new(0, 0, 32, PhraseKind::Intro),
-                    lumi_domain::TrackPhrase::new(1, 32, 64, PhraseKind::Breakdown),
-                    lumi_domain::TrackPhrase::new(2, 64, 96, PhraseKind::Build),
-                    lumi_domain::TrackPhrase::new(3, 96, 128, PhraseKind::Drop),
-                ],
-            ),
-        };
-
-        let plan = planner
-            .generate_with_context(&input, &ThemeSelectionContext::default())
-            .unwrap_or_else(|error| panic!("the executable subset must plan safely: {error}"));
-        let Some(decision) = plan.theme_decision() else {
-            panic!("the plan must retain its only executable Theme");
-        };
-        assert_eq!(decision.theme_id(), ThemeId::new(1));
-        assert_eq!(
-            decision.reason(),
-            lumi_domain::ThemeSelectionReason::DefaultTheme
+        let eligible = policy_eligible_executable_themes(
+            vec![(ThemeId::new(1), "BLUE PINK".to_owned())],
+            Some(0x0078ff),
+            &policy,
         );
+        assert!(eligible.is_empty());
+
+        let matching = policy_eligible_executable_themes(
+            vec![(ThemeId::new(1), "BLUE PINK".to_owned())],
+            Some(0xff00a0),
+            &policy,
+        );
+        assert_eq!(matching, vec![(ThemeId::new(1), "BLUE PINK".to_owned())]);
     }
 
     #[test]

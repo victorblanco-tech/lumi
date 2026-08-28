@@ -490,6 +490,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
     public let waveformPreview: DeckWaveformPreviewSnapshot?
     public let hotCues: [DeckHotCueSnapshot]
     public let planEligibility: DeckPlanEligibility
+    public let planHoldReason: String?
     public let localPlayback: LocalPlaybackTrackSnapshot?
 
     public var id: UInt64 { deckID }
@@ -515,6 +516,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
         waveformPreview: DeckWaveformPreviewSnapshot? = nil,
         hotCues: [DeckHotCueSnapshot] = [],
         planEligibility: DeckPlanEligibility = .autoHeld,
+        planHoldReason: String? = nil,
         localPlayback: LocalPlaybackTrackSnapshot? = nil
     ) {
         self.deckID = deckID
@@ -537,6 +539,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
         self.waveformPreview = waveformPreview
         self.hotCues = hotCues
         self.planEligibility = planEligibility
+        self.planHoldReason = planHoldReason
         self.localPlayback = localPlayback
     }
 }

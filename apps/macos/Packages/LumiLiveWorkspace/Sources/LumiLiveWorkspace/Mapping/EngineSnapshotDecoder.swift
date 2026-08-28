@@ -810,6 +810,17 @@ public struct EngineSnapshotDecoder: Sendable {
               let planEligibility = DeckPlanEligibility(rawValue: planEligibilityValue) else {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
+        let planHoldReason: String?
+        if deck["planHoldReason"] == nil || deck["planHoldReason"] == .null {
+            planHoldReason = nil
+        } else {
+            guard case let .string(value) = deck["planHoldReason"],
+                  !value.isEmpty,
+                  value.count <= 1_024 else {
+                throw EngineSnapshotDecodingError.invalidSnapshot
+            }
+            planHoldReason = value
+        }
         let localPlayback: LocalPlaybackTrackSnapshot?
         if deck["localPlayback"] == nil || deck["localPlayback"] == .null {
             localPlayback = nil
@@ -920,6 +931,7 @@ public struct EngineSnapshotDecoder: Sendable {
             waveformPreview: waveformPreview,
             hotCues: hotCues,
             planEligibility: planEligibility,
+            planHoldReason: planHoldReason,
             localPlayback: localPlayback
         )
     }
