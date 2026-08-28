@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.5.0-dev-27 - 2026-08-28
+
+### Fixed
+
+- Keeps the Pro DJ Link, deck-state and Ableton Link lanes alive when a
+  recognized Library track has no enabled Theme that can resolve every phrase.
+- Treats an incomplete or deliberately disabled track-specific Light Plan as
+  a safe no-output condition instead of terminating the engine and falling
+  back to Local Playback.
+
+### Verification
+
+- Adds regressions for both an empty executable Theme set and a physically
+  executable Theme disabled by the active Light Plans policy.
+- Reproduces the cold-start failure with the current Dev database, then keeps
+  both connected decks ready while processing thousands of Pro DJ Link frames.
+
 ## 0.5.0-dev-26 - 2026-08-27
 
 ### Fixed

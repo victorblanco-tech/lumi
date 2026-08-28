@@ -1190,11 +1190,24 @@ impl PlanningWorker {
             let generated = if let Some(library_context) = self.library_context(input.track_load_id)
             {
                 let themes = library_context.executable_themes();
-                let planner = planner_for_themes(
+                let Some(planner) = planner_for_executable_themes(
                     library_context.catalog_revision(),
                     themes,
                     &self.light_policy,
-                )?;
+                )?
+                else {
+                    // A partially configured Light Plan must never take the
+                    // realtime deck lane down. Keep the hydrated deck and its
+                    // authoritative transport alive, but deliberately emit no
+                    // plan until at least one enabled Theme can resolve every
+                    // phrase on this track. This is the same fail-closed
+                    // behaviour as an unknown Library track: visible and
+                    // playable, without guessing a lighting output.
+                    self.compiled_light_plans.remove(&input.track_load_id);
+                    self.reserved_theme_ids.remove(&input.track_load_id);
+                    output_worker.remove_static_look_plan(input.track_load_id);
+                    return Ok(());
+                };
                 planner.generate_with_context(&input, &context)?
             } else {
                 self.planner.generate_with_context(&input, &context)?
@@ -1314,6 +1327,23 @@ pub(crate) fn planner_for_themes(
             .collect(),
         policy,
     )
+}
+
+fn planner_for_executable_themes(
+    catalog_revision: u64,
+    themes: Vec<(lumi_domain::ThemeId, String)>,
+    policy: &LightPlanningPolicy,
+) -> Result<Option<DeterministicPlanner<StableChoiceSource>>, EngineError> {
+    if themes.is_empty() {
+        return Ok(None);
+    }
+    match planner_for_themes(catalog_revision, themes, policy) {
+        Ok(planner) => Ok(Some(planner)),
+        // All physically executable Themes can still be disabled by policy.
+        // That is a valid fail-closed configuration, not an engine failure.
+        Err(EngineError::NoExecutableLibraryTheme) => Ok(None),
+        Err(error) => Err(error),
+    }
 }
 
 fn planner_for_theme_options(
@@ -5480,6 +5510,37 @@ mod tests {
             decision.reason(),
             lumi_domain::ThemeSelectionReason::DefaultTheme
         );
+    }
+
+    #[test]
+    fn missing_executable_theme_is_a_safe_no_plan_result() {
+        let planner =
+            planner_for_executable_themes(14, Vec::new(), &LightPlanningPolicy::default())
+                .unwrap_or_else(|error| {
+                    panic!("an incomplete mapping must not fail the engine: {error}")
+                });
+        assert!(planner.is_none());
+    }
+
+    #[test]
+    fn policy_with_only_disabled_executable_themes_is_a_safe_no_plan_result() {
+        let policy = LightPlanningPolicy {
+            theme_rules: vec![lumi_light_plans::ThemeRule {
+                theme_id: 1,
+                enabled: false,
+                selection_weight: 1,
+                color_behavior: ColorBehavior::Neutral,
+                color_rgb: Vec::new(),
+            }],
+            ..LightPlanningPolicy::default()
+        };
+        let planner = planner_for_executable_themes(
+            15,
+            vec![(ThemeId::new(1), "BLUE PINK".to_owned())],
+            &policy,
+        )
+        .unwrap_or_else(|error| panic!("a disabled Theme must fail closed safely: {error}"));
+        assert!(planner.is_none());
     }
 
     #[test]
