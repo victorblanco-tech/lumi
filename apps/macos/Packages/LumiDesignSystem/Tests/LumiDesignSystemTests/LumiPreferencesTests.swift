@@ -15,6 +15,19 @@ func defaultsAreStable() throws {
     #expect(preferences.lightingTimingOffsetMillis == 0)
 }
 
+@Test("Live Decks is the default and an explicit Local Playback choice persists")
+func preferredDeckSourceModePersists() throws {
+    let suiteName = "LumiPreferencesTests.deckSource.\(UUID().uuidString)"
+    let defaults = try #require(UserDefaults(suiteName: suiteName))
+    defer { defaults.removePersistentDomain(forName: suiteName) }
+
+    #expect(DeckSourceModePreference.load(from: defaults) == .connectedDecks)
+    DeckSourceModePreference.localPlayback.persist(in: defaults)
+    #expect(DeckSourceModePreference.load(from: defaults) == .localPlayback)
+    DeckSourceModePreference.connectedDecks.persist(in: defaults)
+    #expect(DeckSourceModePreference.load(from: defaults) == .connectedDecks)
+}
+
 @MainActor
 @Test("Appearance, key notation, and signed lighting timing persist globally")
 func preferencesPersist() throws {

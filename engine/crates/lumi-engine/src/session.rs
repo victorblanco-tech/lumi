@@ -3056,9 +3056,13 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
                 // monotone across a child-process restart. Replacing the
                 // provider here reused source ID 31 from sequence 1, causing
                 // the reducer to reject every recovered deck load as stale.
-                runtime
+                if let Err(error) = runtime
                     .direct_deck_source
-                    .begin_bridge_recovery(runtime.clock.now())?;
+                    .begin_bridge_recovery(runtime.clock.now())
+                {
+                    fail_direct_prolink_bridge(runtime, error.to_string());
+                    return Ok(());
+                }
                 runtime.prolink_recovery_pending = false;
                 runtime.prolink_restart_count = runtime.prolink_restart_count.saturating_add(1);
             }
@@ -3071,7 +3075,7 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
     let messages = match bridge.drain_messages() {
         Ok(messages) => messages,
         Err(error) => {
-            fail_direct_prolink_bridge(runtime, error.to_string())?;
+            fail_direct_prolink_bridge(runtime, error.to_string());
             return Ok(());
         }
     };
@@ -3081,7 +3085,7 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
     let bridge_diagnostics = match bridge.diagnostics() {
         Ok(diagnostics) => diagnostics,
         Err(error) => {
-            fail_direct_prolink_bridge(runtime, error.to_string())?;
+            fail_direct_prolink_bridge(runtime, error.to_string());
             return Ok(());
         }
     };
@@ -3090,7 +3094,7 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
             || "Pro DJ Link bridge stopped unexpectedly".to_owned(),
             |line| format!("Pro DJ Link bridge stopped unexpectedly: {line}"),
         );
-        fail_direct_prolink_bridge(runtime, stderr_detail)?;
+        fail_direct_prolink_bridge(runtime, stderr_detail);
         return Ok(());
     }
 
@@ -3101,7 +3105,7 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
     let at = runtime.clock.now();
     for message in messages {
         if let Err(error) = runtime.direct_deck_source.ingest(message, at) {
-            fail_direct_prolink_bridge(runtime, error.to_string())?;
+            fail_direct_prolink_bridge(runtime, error.to_string());
             return Ok(());
         }
     }
@@ -3112,12 +3116,15 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
     // traffic. Library hydration and lighting-plan reduction can touch SQLite
     // and may be comparatively expensive; neither is allowed to add latency
     // to the independent Ableton Link lane.
-    forward_direct_prolink_clock(runtime)?;
+    forward_direct_prolink_clock(runtime);
     // Load/status events must hydrate the exact local beat grid before a
     // PrecisePosition packet is mapped. A CDJ beat packet carries only its
     // position within the bar; it is deliberately not allowed to authorize a
     // phrase or AutoLoop decision.
-    process_pending_source_events(runtime)?;
+    if let Err(error) = process_pending_source_events(runtime) {
+        fail_direct_prolink_bridge(runtime, error.to_string());
+        return Ok(());
+    }
     let precise_positions = runtime
         .direct_deck_source
         .drain_precise_position_observations();
@@ -3131,13 +3138,19 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
         };
         let absolute_beat = context.beat_at_millis(position.playback_position_millis);
         let known_hot_cue_target = context.is_hot_cue_beat(absolute_beat);
-        let Some(authoritative) = runtime.direct_deck_source.apply_authoritative_position(
+        let authoritative = match runtime.direct_deck_source.apply_authoritative_position(
             position,
             absolute_beat,
             known_hot_cue_target,
             runtime.clock.now(),
-        )?
-        else {
+        ) {
+            Ok(value) => value,
+            Err(error) => {
+                fail_direct_prolink_bridge(runtime, error.to_string());
+                return Ok(());
+            }
+        };
+        let Some(authoritative) = authoritative else {
             continue;
         };
         if authoritative.discontinuity {
@@ -3146,53 +3159,59 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
             // never touches the sparse SoundSwitch command lane.
             runtime.output_worker.invalidate_autoloop_deadline();
         }
-        process_pending_source_events(runtime)?;
+        if let Err(error) = process_pending_source_events(runtime) {
+            fail_direct_prolink_bridge(runtime, error.to_string());
+            return Ok(());
+        }
     }
     // Authoritative position processing can create a first-acquisition or
     // confirmed-discontinuity clock observation. Drain again without
     // duplicating the already-forwarded status/tempo observations.
-    forward_direct_prolink_clock(runtime)?;
+    forward_direct_prolink_clock(runtime);
     let source_status = runtime.direct_deck_source.diagnostics().source_status;
-    runtime
-        .link_relay
-        .reconcile_prolink_freshness(
-            matches!(source_status, DeckSourceStatus::Ready),
-            deck_source_status_name(source_status),
-        )
-        .map_err(EngineError::Timing)?;
-    Ok(())
-}
-
-#[cfg(not(test))]
-fn forward_direct_prolink_clock(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
-    for observation in runtime.direct_deck_source.drain_timing_observations() {
-        runtime
-            .link_relay
-            .synchronize(prolink_link_clock(observation))
-            .map_err(EngineError::Timing)?;
+    if let Err(error) = runtime.link_relay.reconcile_prolink_freshness(
+        matches!(source_status, DeckSourceStatus::Ready),
+        deck_source_status_name(source_status),
+    ) {
+        // Ableton Link is an independent timing output. A helper failure must
+        // degrade that lane only; it must never restart Pro DJ Link or the
+        // sparse SoundSwitch AutoLoop command path.
+        eprintln!("Ableton Link freshness reconciliation failed: {error}");
     }
     Ok(())
 }
 
 #[cfg(not(test))]
-fn fail_direct_prolink_bridge(
-    runtime: &mut EngineRuntime,
-    message: String,
-) -> Result<(), EngineError> {
+fn forward_direct_prolink_clock(runtime: &mut EngineRuntime) {
+    for observation in runtime.direct_deck_source.drain_timing_observations() {
+        if let Err(error) = runtime
+            .link_relay
+            .synchronize(prolink_link_clock(observation))
+        {
+            eprintln!("Ableton Link clock relay failed: {error}");
+            let _ = runtime
+                .link_relay
+                .fail_closed(format!("Ableton Link clock relay failed: {error}"));
+        }
+    }
+}
+
+#[cfg(not(test))]
+fn fail_direct_prolink_bridge(runtime: &mut EngineRuntime, message: String) {
     let actionable = format!("{message}; Lumi will retry the Pro DJ Link bridge automatically");
     eprintln!("Direct Pro DJ Link failure: {actionable}");
     runtime.prolink_start_error = Some(actionable.clone());
-    runtime
-        .link_relay
-        .fail_closed(actionable.clone())
-        .map_err(EngineError::Timing)?;
+    let _ = runtime.link_relay.fail_closed(actionable.clone());
     let at = runtime.clock.now();
-    runtime.direct_deck_source.mark_degraded(actionable, at)?;
-    runtime.direct_deck_source.clear(at)?;
+    if let Err(error) = runtime.direct_deck_source.mark_degraded(actionable, at) {
+        eprintln!("Unable to mark Pro DJ Link degraded: {error}");
+    }
+    if let Err(error) = runtime.direct_deck_source.clear(at) {
+        eprintln!("Unable to clear Pro DJ Link state during recovery: {error}");
+    }
     runtime.prolink_bridge.take();
     runtime.prolink_recovery_pending = true;
     runtime.last_prolink_restart_attempt = Some(Instant::now());
-    Ok(())
 }
 
 fn apply_command(
@@ -4935,7 +4954,7 @@ fn snapshot_envelope_internal(
             state
                 .output_effects()
                 .map(|effect| output_effect_json(effect, &runtime.planning_worker))
-                .collect::<Result<Vec<_>, _>>()?,
+                .collect::<Vec<_>>(),
         ),
     );
     payload.insert(
@@ -5011,27 +5030,30 @@ fn simulator_waveform_preview(track_id: u64) -> Value {
     })
 }
 
-fn output_effect_json(
-    result: &OutputEffectResult,
-    planning_worker: &PlanningWorker,
-) -> Result<Value, LibraryWorkerError> {
+fn output_effect_json(result: &OutputEffectResult, planning_worker: &PlanningWorker) -> Value {
     let request = result.request();
     let library_resolution = action_theme_id(request.action())
         .and_then(|theme_id| {
             planning_worker
                 .library_context(request.track_load_id())
-                .map(|context| {
-                    context.resolve(theme_id).map(|cues| {
-                        cues.into_iter()
-                            .find(|cue| cue.phrase_index == request.phrase_index())
-                            .map(|cue| library_resolution_json(&cue))
-                            .unwrap_or(Value::Null)
-                    })
+                .and_then(|context| {
+                    context
+                        .autoloop_choices(theme_id, request.phrase_index())
+                        .into_iter()
+                        .find(|cue| {
+                            cue.autoloop_number
+                                == match request.action() {
+                                    SemanticLightingAction::ApplyLook(look) => {
+                                        u16::try_from(look.scene_id().value()).ok()
+                                    }
+                                    _ => None,
+                                }
+                        })
+                        .map(|cue| library_resolution_json(&cue))
                 })
         })
-        .transpose()?
         .unwrap_or(Value::Null);
-    Ok(json!({
+    json!({
         "commandId": request.command_id().value(),
         "planId": request.plan_id().value().to_string(),
         "planRevision": request.plan_revision().value(),
@@ -5046,7 +5068,7 @@ fn output_effect_json(
         "cueReason": cue_reason_json(request.cue_reason()),
         "action": action_json(request.action()),
         "libraryResolution": library_resolution,
-    }))
+    })
 }
 
 fn plan_json(
@@ -5613,6 +5635,109 @@ mod tests {
                     panic!("an incomplete mapping must not fail the engine: {error}")
                 });
         assert!(planner.is_none());
+    }
+
+    #[test]
+    fn first_live_output_with_a_later_mapping_gap_keeps_snapshot_and_engine_alive() {
+        let mut runtime =
+            initialized_runtime_for_mode(ManualClock::new(0), DeckSourceMode::LocalPlayback)
+                .unwrap_or_else(|error| panic!("local product runtime must initialize: {error}"));
+
+        // The demo track opens with Intro and ends with Drop. Keep Intro mapped
+        // on Theme 1, but remove every Theme-1 Drop address. This reproduces a
+        // real sparse SoundSwitch bank: first Play is executable while a later
+        // Phrase Role deliberately has no AutoLoop mapping.
+        for (expected_revision, button_number) in [(1, 4), (2, 12), (3, 24), (4, 30)] {
+            apply_session_command(
+                &mut runtime,
+                SessionCommand::MutateAutoloopCatalog {
+                    expected_revision,
+                    mutation: crate::library::AutoloopCatalogMutation::ClearButton {
+                        theme_id: ThemeId::new(1),
+                        button_number,
+                    },
+                },
+            );
+        }
+        let catalog = runtime
+            .library_worker
+            .autoloop_catalog()
+            .unwrap_or_else(|error| panic!("sparse catalog must reload: {error}"));
+        runtime.planning_worker.synchronize_themes(&catalog);
+        runtime
+            .planning_worker
+            .synchronize_light_policy(LightPlanningPolicy {
+                default_theme_id: Some(1),
+                theme_rules: vec![lumi_light_plans::ThemeRule {
+                    theme_id: 1,
+                    enabled: true,
+                    selection_weight: 1,
+                    color_behavior: ColorBehavior::Neutral,
+                    color_rgb: Vec::new(),
+                }],
+                rules: vec![lumi_light_plans::AutoloopRule {
+                    theme_id: 1,
+                    role_id: "intro-outro".to_owned(),
+                    variant_id: "mapping-1".to_owned(),
+                    enabled: true,
+                    selection_weight: 1,
+                    color_behavior: ColorBehavior::Neutral,
+                    color_rgb: Vec::new(),
+                }],
+                ..LightPlanningPolicy::default()
+            });
+
+        apply_current_session_command(&mut runtime, |expected_state_revision| {
+            SessionCommand::LoadLibraryTrackOnLocalDeck {
+                track_id: 1,
+                deck_id: lumi_domain::DeckId::new(1),
+                expected_timeline_revision: 1,
+                expected_state_revision,
+            }
+        });
+        let track_load_id = runtime
+            .state
+            .state()
+            .deck(lumi_domain::DeckId::new(1))
+            .map(lumi_domain::DeckState::track_load_id)
+            .unwrap_or_else(|| panic!("local deck must be loaded"));
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::SetOperationState {
+                expected_revision,
+                command: OperationCommand::Arm,
+            }
+        });
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::SetOperationState {
+                expected_revision,
+                command: OperationCommand::Start,
+            }
+        });
+        apply_session_command(
+            &mut runtime,
+            SessionCommand::UpdateLocalPlaybackTransport {
+                deck_id: lumi_domain::DeckId::new(1),
+                track_load_id,
+                position_millis: 0,
+                playing: true,
+            },
+        );
+        assert_eq!(runtime.state.state().operation(), OperationState::Live);
+        assert_eq!(runtime.output_worker.provider.records().count(), 1);
+
+        let snapshot =
+            snapshot_envelope(&runtime, 1, "first-play-sparse-theme").unwrap_or_else(|error| {
+                panic!("diagnostic enrichment must never terminate Live output: {error}")
+            });
+        assert_eq!(snapshot.payload["operationState"], "live");
+        assert_eq!(
+            snapshot.payload["outputEffects"].as_array().map(Vec::len),
+            Some(1)
+        );
+        assert!(
+            snapshot.payload["outputEffects"][0]["libraryResolution"]["dryRunEntry"]["id"]
+                .is_string()
+        );
     }
 
     #[test]

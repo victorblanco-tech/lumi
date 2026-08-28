@@ -174,12 +174,36 @@ final class EngineStatusModel: ObservableObject {
             lifecycle = .connecting
             workspaceState = LiveWorkspacePresenter.connecting(to: endpointDescription)
 
-            let envelope = try await supervisor.connect(to: endpoint)
-            let snapshot = try snapshotDecoder.decode(
+            var envelope = try await supervisor.connect(to: endpoint)
+            var snapshot = try snapshotDecoder.decode(
                 envelope,
                 endpointDescription: endpointDescription,
                 protocolVersion: endpoint.protocolVersion
             )
+            let preferredMode = DeckSourceModePreference.load().rawValue
+            if snapshot.deckSource.mode != preferredMode {
+                let restored = try await supervisor.send(
+                    .selectDeckSourceMode(
+                        preferredMode,
+                        expectedStateRevision: snapshot.stateRevision
+                    )
+                )
+                if let failure = EngineCommandFailure(restored) {
+                    Self.logger.error(
+                        "Unable to restore preferred deck source before Ready: \(failure.message, privacy: .private(mask: .hash))"
+                    )
+                } else {
+                    envelope = restored
+                    snapshot = try snapshotDecoder.decode(
+                        restored,
+                        endpointDescription: endpointDescription,
+                        protocolVersion: endpoint.protocolVersion
+                    )
+                    Self.logger.info(
+                        "Restored preferred deck source \(preferredMode, privacy: .public) before Ready"
+                    )
+                }
+            }
             libraryState = try decodeLibraryState(envelope)
             lastLibraryRevision = libraryRevision(in: envelope)
             lifecycle = .ready
@@ -2135,6 +2159,9 @@ final class EngineStatusModel: ObservableObject {
     }
 
     func runSessionCommand(_ request: SessionCommandRequest) async {
+        if case let .selectDeckSourceMode(mode, _) = request {
+            persistPreferredDeckSourceMode(mode)
+        }
         guard lifecycle == .ready,
               let endpointDescription,
               let protocolVersion,
@@ -2278,6 +2305,10 @@ final class EngineStatusModel: ObservableObject {
         case let .selectDeckSourceMode(mode, _):
             mode == "localPlayback" ? "Local Playback selected." : "Live Decks selected."
         }
+    }
+
+    private func persistPreferredDeckSourceMode(_ mode: String) {
+        DeckSourceModePreference(rawValue: mode)?.persist()
     }
 
     func runLocalPlayback(_ request: LocalPlaybackRequest) {

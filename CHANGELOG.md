@@ -1,5 +1,52 @@
 # Changelog
 
+## 0.5.0-dev-32 - 2026-08-28
+
+### Fixed
+
+- Prevents the first successful physical AutoLoop trigger from terminating the
+  engine when the selected Theme has an unmapped Phrase Role later in the
+  track.
+- Makes output-history enrichment strictly observational: it resolves only
+  the executed phrase/address and returns an empty optional diagnostic when
+  that metadata is unavailable.
+- Adds an exact regression with a mapped Intro, an unmapped later Drop,
+  Arm, Start and first Play; the opening output is emitted and the subsequent
+  Live snapshot remains valid.
+
+### Verification
+
+- Reproduced the physical failure and captured the durable fatal cause:
+  `the selected Theme has no entry for this Phrase Role`.
+- Confirmed the engine exit occurred while serializing UI output diagnostics,
+  after the realtime MIDI action, rather than in Pro DJ Link or SoundSwitch.
+- Repeated the installed-app test on physical CDJ-1500X hardware: Arm, Start
+  and first Play remained Live through two observed Bank 3 AutoLoop commands,
+  with an unchanged engine PID and zero reported late outputs.
+
+## 0.5.0-dev-31 - 2026-08-28
+
+### Fixed
+
+- Restores the user's saved Live Decks selection before the recovered engine
+  becomes Ready, so a launchd restart cannot visibly or functionally fall back
+  to Local Playback during Arm/Start.
+- Defaults a new performance installation to Live Decks; Local Playback only
+  becomes sticky after the user explicitly selects it.
+- Isolates Ableton Link helper failures from Pro DJ Link ingestion and the
+  sparse SoundSwitch AutoLoop command lane. Link can degrade without
+  terminating the engine or discarding prepared deck plans.
+- Converts direct Pro DJ Link adapter/reducer failures into a bounded adapter
+  restart instead of terminating the complete engine service.
+- Persists the fatal cause beside the Dev database if the launchd engine ever
+  does terminate, so service recovery no longer erases the diagnosis.
+
+### Verification
+
+- Reproduced the reported fallback and identified a macOS launch-constraint
+  termination against a stale Dev service registration.
+- Added deterministic source-mode recovery and integration-isolation checks.
+
 ## 0.5.0-dev-30 - 2026-08-28
 
 ### Fixed

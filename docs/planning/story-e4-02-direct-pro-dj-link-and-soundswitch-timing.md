@@ -392,6 +392,25 @@ then drive the managed helper and reconnect it when needed.
 - The compatibility decoder is restricted to the observed CDJ-1500X 512-byte
   layout and fails closed for zero identity, other lengths and other models.
 
+### Arm/Start service-recovery regression — implemented in dev-32
+
+- Keep the selected Live Decks mode in app-channel preferences and restore it
+  before the engine is exposed as Ready after a launchd handover or restart.
+- Never reuse the engine's safe Local Playback bootstrap snapshot as the user's
+  requested performance mode after recovery.
+- Treat Ableton Link as a parallel best-effort timing output: helper errors are
+  diagnostic and fail-closed but cannot terminate Pro DJ Link or AutoLoop MIDI.
+- Treat direct-adapter processing failures as adapter recovery, preserving the
+  long-lived engine and UI session.
+- Persist an engine fatal log in the channel data directory for any remaining
+  unrecoverable exit.
+- Keep snapshot/UI enrichment outside the realtime failure domain. A sparse
+  Theme mapping may produce no optional `libraryResolution`, but must never
+  turn a successful first-Play output into an engine error.
+- Acceptance requires the installed app, physical paused/cued decks, actual
+  Arm and Start controls, then first physical Play with one correct opening
+  AutoLoop command and no Local Playback fallback.
+
 ## Out of scope
 
 - Sending load, play, sync or master commands to physical players.

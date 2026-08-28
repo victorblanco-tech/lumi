@@ -90,6 +90,8 @@ public enum LumiPreferenceKey {
         "co.victorblan.tech.lumi.preference.ableton-link-auto-start"
     public static let navigationAutoHide =
         "co.victorblan.tech.lumi.navigation.auto-hide"
+    public static let preferredDeckSourceMode =
+        "co.victorblan.tech.lumi.live.preferred-deck-source-mode"
     public static let rekordboxXMLFolder =
         "co.victorblan.tech.lumi.rekordboxXML.folder"
     public static let rekordboxXMLIncludeFutureChildren =
@@ -108,6 +110,22 @@ public enum LumiPreferenceKey {
         "co.victorblan.tech.lumi.waveform.reverse-horizontal-scroll"
     public static let libraryTableColumns =
         "co.victorblan.tech.lumi.library.table-columns"
+}
+
+public enum DeckSourceModePreference: String, CaseIterable, Sendable {
+    case connectedDecks
+    case localPlayback
+
+    /// Live Decks is the performance-safe default. Preparation mode becomes
+    /// sticky only after the user explicitly selects Local Playback.
+    public static func load(from userDefaults: UserDefaults = .standard) -> Self {
+        userDefaults.string(forKey: LumiPreferenceKey.preferredDeckSourceMode)
+            .flatMap(Self.init(rawValue:)) ?? .connectedDecks
+    }
+
+    public func persist(in userDefaults: UserDefaults = .standard) {
+        userDefaults.set(rawValue, forKey: LumiPreferenceKey.preferredDeckSourceMode)
+    }
 }
 
 private extension Comparable {

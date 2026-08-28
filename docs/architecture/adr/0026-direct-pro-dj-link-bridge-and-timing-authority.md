@@ -110,9 +110,10 @@ loaded track is paused/cued without copying or forking Beat Link.
 
 ## Operational safety
 
-- The direct bridge is not launched during application startup or Local
-  Playback. It starts only after the user explicitly selects Live Decks and is
-  stopped when that mode is left.
+- The direct bridge is not launched while Local Playback is selected. Live
+  Decks is the performance default and the user's explicit source selection is
+  persisted; after an engine/service restart Lumi restores that selection
+  before publishing a Ready UI snapshot.
 - Before process launch, Lumi fails closed when fixed Pro DJ Link UDP ports
   50000, 50001 or 50002 are already owned or cannot be reserved. This prevents
   same-host Rekordbox Export Mode or another DJ Link application from being
@@ -127,6 +128,15 @@ loaded track is paused/cued without copying or forking Beat Link.
 - A malformed or unsupported bridge message cannot mutate runtime state.
 - UI rendering and metadata hydration never execute on the phrase-boundary
   lighting lane.
+- Snapshot serialization and UI-only output-history enrichment are
+  observational. Missing catalog coverage or metadata is represented as an
+  unresolved optional field and can never terminate the engine after a
+  realtime AutoLoop command has been emitted.
+- An Ableton Link provider failure degrades and holds only that timing-output
+  lane. It cannot terminate the engine, restart Pro DJ Link or discard the
+  prepared sparse AutoLoop command schedule.
+- A recoverable direct-adapter/reducer failure restarts that adapter in place;
+  it does not replace the engine process or select Local Playback.
 - The first release is read-only on the Pro DJ Link network; player remote
   control is outside scope.
 - Development-simulator controls are a separate authenticated HTTP test surface
