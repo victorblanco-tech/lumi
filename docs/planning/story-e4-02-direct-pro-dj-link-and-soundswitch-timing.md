@@ -411,6 +411,21 @@ then drive the managed helper and reconnect it when needed.
   Arm and Start controls, then first physical Play with one correct opening
   AutoLoop command and no Local Playback fallback.
 
+### Live future-Theme regression — implemented in dev-33
+
+- A Theme change on an editable future phrase preserves every earlier phrase
+  and applies the selected Theme to that phrase and all successors.
+- Each changed cue is compiled and resolved against its own Theme/Bank; an
+  AutoLoop address from the opening Theme may never leak into the new Theme.
+- The plan revision is accepted atomically only after materialization succeeds.
+- A sparse selected Theme produces an explicit held segment for an unmapped
+  Phrase Role and keeps the active SoundSwitch AutoLoop running.
+- The command response and every subsequent monitor snapshot remain decodable;
+  a live edit can never disconnect the app from the long-lived engine.
+- Regression coverage uses intentionally different physical button numbers
+  between Themes and requires action Theme, bank and AutoLoop resolution to
+  agree exactly.
+
 ## Out of scope
 
 - Sending load, play, sync or master commands to physical players.

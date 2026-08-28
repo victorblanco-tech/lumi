@@ -127,6 +127,25 @@ shows this as a held plan segment. Lumi still never violates an `Only` rule,
 substitutes another Phrase Role, or crosses Themes automatically to hide a
 mapping gap.
 
+### 4.2 Atomic live Theme changes
+
+A deliberate plan-instance edit may change the Theme from one future phrase
+onward. This produces a mixed-Theme plan by design: earlier phrases retain their
+already reviewed Theme and physical AutoLoop address, while the selected phrase
+and every successor are compiled against their own new Theme/Bank.
+
+The plan-level Theme decision continues to describe the opening Theme. Every cue
+is authoritative for its own Theme, bank and AutoLoop address. Snapshot
+serialization must therefore resolve and validate each cue independently; it may
+never reuse an AutoLoop address selected for another Theme. The revised plan is
+accepted atomically only after all mapped future cues have been materialized.
+An unmapped future cue becomes a safe hold and cannot terminate the engine,
+disconnect the UI, or affect the currently executing phrase.
+
+Live edits stay outside the realtime lane. Once accepted, the executor still
+receives only immutable physical addresses and triggers them exactly once at an
+authoritative phrase boundary.
+
 USB metadata inspection treats a changed metadata revision independently from
 an unchanged kept-active analysis revision. This allows a Rekordbox Track Color
 change to enter the normal review/sync path without replacing the beatgrid,

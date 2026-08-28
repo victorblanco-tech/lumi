@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.5.0-dev-33 - 2026-08-28
+
+### Fixed
+
+- Keeps a live future-phrase Theme change inside the existing engine session;
+  the app no longer loses its snapshot connection after accepting the edit.
+- Materializes every changed phrase against its own selected Theme/Bank instead
+  of reusing the original track Theme's AutoLoop address.
+- Preserves all earlier phrase selections atomically and recompiles only the
+  selected phrase and its successors.
+- Treats a missing mapping in a deliberately sparse Theme as a safe hold, while
+  retaining exact bank, AutoLoop and planning evidence for mapped phrases.
+
+### Verification
+
+- Adds an exact regression where a future phrase moves to another Theme whose
+  only valid mapping is AutoLoop 32; action and `libraryResolution` must both
+  report the selected bank and button 32.
+- Replays future-Theme, first-Play, sparse-mapping and live-output regressions.
+
 ## 0.5.0-dev-32 - 2026-08-28
 
 ### Fixed

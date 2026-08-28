@@ -15,13 +15,13 @@ use lumi_domain::{
     OutputEffectReason, OutputEffectResult, OutputEffectStatus, OutputExecutionRequest, PhraseKind,
     PitchClass, PlanConfigurationRevision, PlanRevision, PlanStatus, PlanValidationError,
     RuntimeHealth, SceneCategory, SceneId, SemanticLightingAction, SerializedRuntime,
-    SerializedRuntimeError, TimelineResult, TimelineSource, TrackColor, TrackLoadId, TrackMetadata,
-    UserCommandEnvelope, WorkerId,
+    SerializedRuntimeError, ThemeId, TimelineResult, TimelineSource, TrackColor, TrackLoadId,
+    TrackMetadata, UserCommandEnvelope, WorkerId,
 };
 use lumi_library::AutoloopCatalog;
 use lumi_light_plans::{
-    ColorBehavior, CompiledLightPlan, CompiledModifierChoice, LightPlanningPolicy, ModifierKind,
-    VariationHistory,
+    ColorBehavior, CompiledAutoloopChoice, CompiledLightPlan, CompiledModifierChoice,
+    LightPlanningPolicy, ModifierKind, SelectionEvidence, VariationHistory,
 };
 use lumi_lighting_output::LightingOutputProvider as _;
 use lumi_local_playback::{LocalPlaybackDeckSourceProvider, LocalPlaybackError};
@@ -889,6 +889,25 @@ struct PlanningWorker {
     compiled_light_plans: BTreeMap<TrackLoadId, CompiledLightPlan>,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PlanMaterializationScope {
+    All,
+    FromPhrase(u16),
+    Phrase(u16),
+    None,
+}
+
+impl PlanMaterializationScope {
+    const fn reselects(self, phrase_index: u16) -> bool {
+        match self {
+            Self::All => true,
+            Self::FromPhrase(first) => phrase_index >= first,
+            Self::Phrase(selected) => phrase_index == selected,
+            Self::None => false,
+        }
+    }
+}
+
 fn planner_track(metadata: &TrackMetadata) -> PlannerTrack {
     if metadata.phrases().is_empty() {
         PlannerTrack::without_analysis(metadata.id(), metadata.duration_beats())
@@ -963,10 +982,18 @@ impl PlanningWorker {
         &mut self,
         plan: LightingPlan,
     ) -> Result<LightingPlan, EngineError> {
+        self.materialize_library_plan_with_scope(plan, PlanMaterializationScope::All)
+    }
+
+    fn materialize_library_plan_with_scope(
+        &mut self,
+        plan: LightingPlan,
+        scope: PlanMaterializationScope,
+    ) -> Result<LightingPlan, EngineError> {
         let Some(context) = self.library_context(plan.track_load_id()) else {
             return Ok(plan);
         };
-        let theme_id = plan
+        let initial_theme_id = plan
             .theme_decision()
             .map(lumi_domain::ThemeDecision::theme_id)
             .or_else(|| {
@@ -975,42 +1002,134 @@ impl PlanningWorker {
                     .find_map(|cue| action_theme_id(cue.action()))
             })
             .ok_or(EngineError::MissingLibraryAutoloopResolution)?;
+        let variation_seed = self.effect_sequence ^ plan.track_load_id().value();
         // An upgraded installation keeps the exact pre-0.5 behavior until the
         // user creates at least one planning rule. This avoids silently changing
         // an established show after a schema migration.
+        let mut compiled_by_theme = BTreeMap::<ThemeId, CompiledLightPlan>::new();
+        if !self.light_policy.rules.is_empty() {
+            // The opening Theme owns whole-track modifier compilation. AutoLoop
+            // choices for later manual Theme segments are compiled only for the
+            // phrases that use that Theme, so sparse banks remain safe.
+            compiled_by_theme.insert(
+                initial_theme_id,
+                context.compile_light_plan(
+                    initial_theme_id,
+                    &self.light_policy,
+                    variation_seed,
+                    &self.variation_history,
+                )?,
+            );
+            let mut phrase_indices_by_theme = BTreeMap::<ThemeId, Vec<u16>>::new();
+            for cue in plan.cues() {
+                let Some(theme_id) = action_theme_id(cue.action()) else {
+                    continue;
+                };
+                if theme_id != initial_theme_id {
+                    phrase_indices_by_theme
+                        .entry(theme_id)
+                        .or_default()
+                        .push(cue.phrase_index());
+                }
+            }
+            for (theme_id, phrase_indices) in phrase_indices_by_theme {
+                compiled_by_theme.insert(
+                    theme_id,
+                    context.compile_light_plan_for_phrases(
+                        theme_id,
+                        &phrase_indices,
+                        &self.light_policy,
+                        variation_seed,
+                        &self.variation_history,
+                    )?,
+                );
+            }
+        }
+
+        let mut resolved = BTreeMap::<u16, (u16, String)>::new();
+        let mut final_compiled_choices = Vec::<CompiledAutoloopChoice>::new();
+        let mut composite_signature = 0xcbf2_9ce4_8422_2325_u64;
+        for cue in plan.cues() {
+            let SemanticLightingAction::ApplyLook(look) = cue.action() else {
+                continue;
+            };
+            let theme_id = look.theme_id();
+            let compiled_choice = compiled_by_theme
+                .get(&theme_id)
+                .and_then(|compiled| {
+                    compiled
+                        .choices
+                        .iter()
+                        .find(|choice| choice.phrase_index == cue.phrase_index())
+                })
+                .cloned();
+            let preserved = (!scope.reselects(cue.phrase_index()))
+                .then(|| {
+                    let current_number = u16::try_from(look.scene_id().value()).ok()?;
+                    context
+                        .autoloop_choices(theme_id, cue.phrase_index())
+                        .into_iter()
+                        .find(|choice| choice.autoloop_number == Some(current_number))
+                })
+                .flatten();
+
+            let (number, name, compiled_choice) = if let Some(preserved) = preserved {
+                let Some(number) = preserved.autoloop_number else {
+                    continue;
+                };
+                let compiled_choice = compiled_choice
+                    .filter(|choice| choice.autoloop_number == number)
+                    .unwrap_or_else(|| compiled_choice_from_resolution(&preserved));
+                (number, preserved.entry_name, Some(compiled_choice))
+            } else if let Some(compiled_choice) = compiled_choice {
+                (
+                    compiled_choice.autoloop_number,
+                    compiled_choice.display_name.clone(),
+                    Some(compiled_choice),
+                )
+            } else if self.light_policy.rules.is_empty() {
+                let Some(choice) = context.resolved_autoloop(theme_id, cue.phrase_index()) else {
+                    continue;
+                };
+                let Some(number) = choice.autoloop_number else {
+                    continue;
+                };
+                (number, choice.entry_name, None)
+            } else {
+                // A deliberately sparse Theme is a provider no-op for this
+                // phrase. SoundSwitch keeps its current AutoLoop running.
+                continue;
+            };
+            resolved.insert(cue.phrase_index(), (number, name));
+            if let Some(choice) = compiled_choice {
+                composite_signature =
+                    mix_compiled_selection(composite_signature, theme_id, &choice.variant_id);
+                final_compiled_choices.push(choice);
+            }
+        }
+
         let compiled = if self.light_policy.rules.is_empty() {
             None
         } else {
-            Some(context.compile_light_plan(
-                theme_id,
-                &self.light_policy,
-                self.effect_sequence ^ plan.track_load_id().value(),
-                &self.variation_history,
-            )?)
-        };
-        let resolved = if let Some(compiled) = &compiled {
-            compiled
-                .choices
-                .iter()
-                .map(|choice| {
-                    (
-                        choice.phrase_index,
-                        (choice.autoloop_number, choice.display_name.clone()),
-                    )
-                })
-                .collect::<BTreeMap<_, _>>()
-        } else {
-            context
-                .resolve(theme_id)
-                .map_err(LibraryWorkerError::from)?
-                .into_iter()
-                .map(|choice| {
-                    choice
-                        .autoloop_number
-                        .map(|number| (choice.phrase_index, (number, choice.entry_name)))
-                        .ok_or(EngineError::MissingLibraryAutoloopAddress)
-                })
-                .collect::<Result<BTreeMap<_, _>, _>>()?
+            let modifier_choices = compiled_by_theme
+                .get(&initial_theme_id)
+                .map(|compiled| compiled.modifier_choices.clone())
+                .unwrap_or_default();
+            for modifier in &modifier_choices {
+                composite_signature = mix_compiled_selection(
+                    composite_signature,
+                    initial_theme_id,
+                    &modifier.modifier_id,
+                );
+            }
+            Some(CompiledLightPlan {
+                policy_revision: self.light_policy.revision,
+                variation_seed,
+                theme_id: initial_theme_id.value(),
+                choices: final_compiled_choices,
+                modifier_choices,
+                signature: composite_signature,
+            })
         };
         let cues = plan
             .cues()
@@ -1262,6 +1381,35 @@ impl PlanningWorker {
         )?;
         Ok(())
     }
+}
+
+fn compiled_choice_from_resolution(choice: &ResolvedLibraryCue) -> CompiledAutoloopChoice {
+    CompiledAutoloopChoice {
+        phrase_index: choice.phrase_index,
+        role_id: choice.role_id.clone(),
+        variant_id: choice.variant_id.clone(),
+        entry_id: choice.entry_id.clone(),
+        display_name: choice.entry_name.clone(),
+        autoloop_number: choice.autoloop_number.unwrap_or_default(),
+        evidence: SelectionEvidence {
+            reason: "preserved accepted live choice".to_owned(),
+            effective_weight: 0,
+            color_influence: "not re-evaluated".to_owned(),
+            repeat_protection: "existing phrase choice preserved".to_owned(),
+        },
+    }
+}
+
+fn mix_compiled_selection(mut hash: u64, theme_id: ThemeId, value: &str) -> u64 {
+    // Stable FNV-1a is sufficient here: this signature protects against
+    // repeating an observable mixed plan and is not a security boundary.
+    hash ^= theme_id.value();
+    hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    for byte in value.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    hash
 }
 
 fn transport_epoch_cause(
@@ -3871,7 +4019,7 @@ fn apply_command(
         )
     };
 
-    let revised = match command {
+    let (revised, materialization_scope, revise_materialized_cues) = match command {
         SessionCommand::GetSnapshot { .. }
         | SessionCommand::QueryLibrary { .. }
         | SessionCommand::OpenLibraryTrackEditor { .. }
@@ -3919,21 +4067,29 @@ fn apply_command(
         | SessionCommand::AdvanceSimulation { .. }
         | SessionCommand::AdvanceToNextTrack { .. }
         | SessionCommand::ResetDemoSession { .. } => return Ok(()),
-        SessionCommand::SelectTheme { theme_id, .. } => runtime
-            .planning_worker
-            .planner
-            .select_theme(&current, theme_id)?,
+        SessionCommand::SelectTheme { theme_id, .. } => (
+            runtime
+                .planning_worker
+                .planner
+                .select_theme(&current, theme_id)?,
+            PlanMaterializationScope::All,
+            false,
+        ),
         SessionCommand::SelectThemeFromPhrase {
             phrase_index,
             theme_id,
             ..
         } => {
             reject_started_live_phrase(runtime.state.state(), current.deck_id(), phrase_index)?;
-            runtime.planning_worker.planner.select_theme_from_phrase(
-                &current,
-                phrase_index,
-                theme_id,
-            )?
+            (
+                runtime.planning_worker.planner.select_theme_from_phrase(
+                    &current,
+                    phrase_index,
+                    theme_id,
+                )?,
+                PlanMaterializationScope::FromPhrase(phrase_index),
+                false,
+            )
         }
         SessionCommand::SelectScene {
             phrase_index,
@@ -3960,21 +4116,21 @@ fn apply_command(
                     .ok_or(CommandApplicationError::PlanUnavailable)?
                     .set_autoloop_override(theme_id, phrase_index, autoloop_number)
                     .map_err(LibraryWorkerError::from)?;
-                let materialized = runtime
-                    .planning_worker
-                    .materialize_library_plan(current.clone())
-                    .map_err(CommandApplicationError::Engine)?;
-                if materialized.cues() == current.cues() {
-                    return Err(PlanMutationError::NoChange.into());
-                }
-                current
-                    .revised(materialized.cues().to_vec())
-                    .map_err(PlanMutationError::InvalidPlan)?
+                (
+                    current.clone(),
+                    PlanMaterializationScope::Phrase(phrase_index),
+                    true,
+                )
             } else {
-                runtime
-                    .planning_worker
-                    .planner
-                    .select_scene(&current, phrase_index, scene_id)?
+                (
+                    runtime.planning_worker.planner.select_scene(
+                        &current,
+                        phrase_index,
+                        scene_id,
+                    )?,
+                    PlanMaterializationScope::Phrase(phrase_index),
+                    false,
+                )
             }
         }
         SessionCommand::SetCueLock {
@@ -3983,20 +4139,38 @@ fn apply_command(
             ..
         } => {
             reject_started_live_phrase(runtime.state.state(), current.deck_id(), phrase_index)?;
+            (
+                runtime
+                    .planning_worker
+                    .planner
+                    .set_cue_lock(&current, phrase_index, locked)?,
+                PlanMaterializationScope::None,
+                false,
+            )
+        }
+        SessionCommand::RegeneratePlan { .. } => (
             runtime
                 .planning_worker
                 .planner
-                .set_cue_lock(&current, phrase_index, locked)?
-        }
-        SessionCommand::RegeneratePlan { .. } => runtime
-            .planning_worker
-            .planner
-            .regenerate(&current, &input)?,
+                .regenerate(&current, &input)?,
+            PlanMaterializationScope::All,
+            false,
+        ),
     };
-    let revised = runtime
+    let materialized = runtime
         .planning_worker
-        .materialize_library_plan(revised)
+        .materialize_library_plan_with_scope(revised, materialization_scope)
         .map_err(CommandApplicationError::Engine)?;
+    let revised = if revise_materialized_cues {
+        if materialized.cues() == current.cues() {
+            return Err(PlanMutationError::NoChange.into());
+        }
+        current
+            .revised(materialized.cues().to_vec())
+            .map_err(PlanMutationError::InvalidPlan)?
+    } else {
+        materialized
+    };
     runtime.output_worker.synchronize_static_look_plan(
         revised.track_load_id(),
         runtime
@@ -6478,6 +6652,80 @@ mod tests {
         assert_eq!(revised.revision(), PlanRevision::new(2));
         assert_eq!(revised.cues()[0], active.cues()[0]);
         assert_ne!(revised.cues()[1], active.cues()[1]);
+    }
+
+    #[test]
+    fn future_live_theme_change_materializes_the_selected_bank_per_phrase() {
+        let mut runtime =
+            initialized_runtime_for_mode(ManualClock::new(0), DeckSourceMode::LocalPlayback)
+                .unwrap_or_else(|error| panic!("test engine must initialize: {error}"));
+        apply_current_session_command(&mut runtime, |expected_state_revision| {
+            SessionCommand::LoadLibraryTrackOnLocalDeck {
+                track_id: 1,
+                deck_id: lumi_domain::DeckId::new(1),
+                expected_timeline_revision: 1,
+                expected_state_revision,
+            }
+        });
+        let active = runtime
+            .state
+            .state()
+            .active_plan()
+            .cloned()
+            .unwrap_or_else(|| panic!("initial leader must have an active plan"));
+        assert!(active.cues().len() > 1, "fixture needs a future phrase");
+        let current_theme = active
+            .theme_decision()
+            .map(|decision| decision.theme_id())
+            .unwrap_or_else(|| panic!("ready plan must have a Theme"));
+        let selected_theme = if current_theme == ThemeId::new(4) {
+            ThemeId::new(3)
+        } else {
+            ThemeId::new(4)
+        };
+        runtime
+            .planning_worker
+            .library_contexts
+            .get_mut(&active.track_load_id())
+            .unwrap_or_else(|| panic!("active Library track must expose its context"))
+            .remap_phrase_for_test(selected_theme, 1, 32)
+            .unwrap_or_else(|error| panic!("test mapping must be replaceable: {error}"));
+
+        apply_session_command(
+            &mut runtime,
+            SessionCommand::SelectThemeFromPhrase {
+                context: PlanCommandContext {
+                    plan_id: active.id(),
+                    track_load_id: active.track_load_id(),
+                    expected_revision: active.revision(),
+                },
+                phrase_index: 1,
+                theme_id: selected_theme,
+            },
+        );
+
+        let revised = runtime
+            .state
+            .state()
+            .active_plan()
+            .unwrap_or_else(|| panic!("accepted edit must remain active"));
+        assert_eq!(revised.cues()[0], active.cues()[0]);
+        let SemanticLightingAction::ApplyLook(look) = revised.cues()[1].action() else {
+            panic!("mapped future phrase must apply a concrete look");
+        };
+        assert_eq!(look.theme_id(), selected_theme);
+        assert_eq!(look.scene_id(), SceneId::new(32));
+
+        let snapshot = snapshot_envelope(&runtime, 7, "future-theme-regression")
+            .unwrap_or_else(|error| panic!("revised snapshot must serialize: {error}"));
+        let future = &snapshot.payload["livePlan"]["cues"][1];
+        assert_eq!(future["action"]["themeId"], json!(selected_theme.value()));
+        assert_eq!(future["action"]["sceneId"], json!(32));
+        assert_eq!(
+            future["libraryResolution"]["bankNumber"],
+            json!(selected_theme.value())
+        );
+        assert_eq!(future["libraryResolution"]["autoloopNumber"], json!(32));
     }
 
     #[test]

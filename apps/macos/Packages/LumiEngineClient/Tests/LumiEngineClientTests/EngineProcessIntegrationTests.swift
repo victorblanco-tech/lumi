@@ -930,6 +930,14 @@ func editsFutureLivePhraseAndTracksPlaybackState() async throws {
         #expect(
             cueThemeID(plan(revised, field: "livePlan"), phraseIndex: 1) == futureThemeID
         )
+        #expect(
+            planActionMatchesResolution(
+                revised,
+                field: "livePlan",
+                phraseIndex: 1,
+                expectedThemeID: futureThemeID
+            )
+        )
 
         let startedContext = EnginePlanCommandContext(
             planID: planID,
@@ -1029,6 +1037,26 @@ private func nextPlanActionMatchesResolution(
               case let .object(action) = cue["action"],
               case let .object(resolution) = cue["libraryResolution"] else { return false }
         return action["sceneId"] == resolution["autoloopNumber"]
+    }
+}
+
+private func planActionMatchesResolution(
+    _ envelope: MessageEnvelope,
+    field: String,
+    phraseIndex: UInt64,
+    expectedThemeID: UInt64
+) -> Bool {
+    guard let plan = plan(envelope, field: field), case let .array(cues) = plan["cues"] else {
+        return false
+    }
+    return cues.contains { value in
+        guard case let .object(cue) = value,
+              cue["phraseIndex"] == .number(Double(phraseIndex)),
+              case let .object(action) = cue["action"],
+              case let .object(resolution) = cue["libraryResolution"] else { return false }
+        return action["themeId"] == .number(Double(expectedThemeID))
+            && resolution["bankNumber"] == .number(Double(expectedThemeID))
+            && action["sceneId"] == resolution["autoloopNumber"]
     }
 }
 

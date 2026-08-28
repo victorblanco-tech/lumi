@@ -507,6 +507,7 @@ impl LibraryPlanContext {
             })
     }
 
+    #[cfg(test)]
     pub fn resolve(
         &self,
         theme_id: ThemeId,
@@ -573,9 +574,26 @@ impl LibraryPlanContext {
         variation_seed: u64,
         history: &VariationHistory,
     ) -> Result<CompiledLightPlan, LightPlanError> {
+        self.compile_light_plan_for_phrases(theme_id, &[], policy, variation_seed, history)
+    }
+
+    /// Compiles only the phrases that actually use `theme_id` in a mixed live
+    /// plan. An empty selection means the complete track and preserves the
+    /// original pre-playback compilation contract.
+    pub fn compile_light_plan_for_phrases(
+        &self,
+        theme_id: ThemeId,
+        phrase_indices: &[u16],
+        policy: &LightPlanningPolicy,
+        variation_seed: u64,
+        history: &VariationHistory,
+    ) -> Result<CompiledLightPlan, LightPlanError> {
         let phrases = self
             .phrases
             .iter()
+            .filter(|phrase| {
+                phrase_indices.is_empty() || phrase_indices.contains(&phrase.phrase_index)
+            })
             .map(|phrase| {
                 let selection =
                     if let Some(variant) = self.autoloop_overrides.get(&phrase.phrase_index) {
@@ -627,6 +645,40 @@ impl LibraryPlanContext {
             &candidates,
             history,
         )
+    }
+
+    /// Resolves the configured selection for one phrase only. Missing coverage
+    /// is represented as `None` so a sparse Theme safely keeps the current
+    /// SoundSwitch AutoLoop running instead of invalidating the whole plan.
+    #[must_use]
+    pub fn resolved_autoloop(
+        &self,
+        theme_id: ThemeId,
+        phrase_index: u16,
+    ) -> Option<ResolvedLibraryCue> {
+        let phrase = self
+            .phrases
+            .iter()
+            .find(|phrase| phrase.phrase_index == phrase_index)?;
+        let override_variant = self.autoloop_overrides.get(&phrase_index);
+        let resolution = self.resolve_phrase(theme_id, phrase).ok()?;
+        Some(ResolvedLibraryCue {
+            phrase_index,
+            role_id: phrase.role_id.as_str().to_owned(),
+            role_name: phrase.role_name.clone(),
+            strategy: if override_variant.is_some() {
+                "planOverride"
+            } else {
+                loop_strategy_name(&phrase.strategy)
+            },
+            variant_id: resolution.variant_id().as_str().to_owned(),
+            entry_id: resolution.entry_id().as_str().to_owned(),
+            entry_name: resolution.display_name().to_owned(),
+            bank_number: theme_id.value(),
+            autoloop_number: mapping_number(resolution.variant_id()),
+            catalog_revision: resolution.catalog_revision(),
+            resolution_reason: autoloop_resolution_reason_name(resolution.reason()),
+        })
     }
 
     pub fn autoloop_choices(
@@ -701,6 +753,41 @@ impl LibraryPlanContext {
             .map(|cell| cell.variant_id().clone())
             .ok_or(AutoloopCatalogError::MissingExactCell)?;
         self.autoloop_overrides.insert(phrase_index, variant_id);
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub(crate) fn remap_phrase_for_test(
+        &mut self,
+        theme_id: ThemeId,
+        phrase_index: u16,
+        button_number: u16,
+    ) -> Result<(), AutoloopCatalogError> {
+        let role_id = self
+            .phrases
+            .iter()
+            .find(|phrase| phrase.phrase_index == phrase_index)
+            .map(|phrase| phrase.role_id.clone())
+            .ok_or(AutoloopCatalogError::UnknownPhraseRole)?;
+        let mappings = self
+            .catalog
+            .cells()
+            .iter()
+            .filter(|cell| cell.theme_id() == theme_id && cell.role_id() == &role_id)
+            .map(|cell| cell.variant_id().clone())
+            .collect::<Vec<_>>();
+        let mut catalog = self.catalog.clone();
+        for mapping in mappings {
+            catalog = catalog.clear_mapping(theme_id, &mapping)?;
+        }
+        catalog = catalog.set_mapping(
+            theme_id,
+            VariantId::try_new(format!("mapping-{button_number}"))
+                .map_err(|_| AutoloopCatalogError::IdentifierOverflow)?,
+            role_id,
+            Some(format!("Regression AutoLoop {button_number}")),
+        )?;
+        self.catalog = catalog;
         Ok(())
     }
 }
