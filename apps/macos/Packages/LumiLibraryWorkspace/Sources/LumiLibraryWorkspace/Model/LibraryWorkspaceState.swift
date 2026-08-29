@@ -48,6 +48,7 @@ public enum TrackPreparationStatus: String, CaseIterable, Identifiable, Equatabl
 
 public enum TrackWorkflowFilter: String, CaseIterable, Identifiable, Equatable, Sendable {
     case changedAfterUSBSync
+    case versionCandidates
     case notStarted
     case inProgress
     case readyForShow
@@ -73,12 +74,14 @@ public struct TrackWorkflowAttention: Equatable, Sendable {
 
 public struct TrackWorkflowState: Equatable, Sendable {
     public let preparationStatus: TrackPreparationStatus
+    public let stepID: String
     public let statusRevision: UInt64
     public let effectiveReady: Bool
     public let attention: TrackWorkflowAttention?
 
     public static let notStarted = Self(
         preparationStatus: .notStarted,
+        stepID: "not-started",
         statusRevision: 0,
         effectiveReady: false,
         attention: nil
@@ -87,16 +90,57 @@ public struct TrackWorkflowState: Equatable, Sendable {
 
 public struct TrackWorkflowSummary: Equatable, Sendable {
     public let changedAfterUSBSync: UInt64
+    public let versionCandidates: UInt64
     public let notStarted: UInt64
     public let inProgress: UInt64
     public let readyForShow: UInt64
+    public let catalogRevision: UInt64
+    public let stepCounts: [String: UInt64]
 
     public static let empty = Self(
         changedAfterUSBSync: 0,
+        versionCandidates: 0,
         notStarted: 0,
         inProgress: 0,
-        readyForShow: 0
+        readyForShow: 0,
+        catalogRevision: 0,
+        stepCounts: [:]
     )
+}
+
+public enum WorkflowRuleField: String, CaseIterable, Identifiable, Equatable, Sendable {
+    case preparationStatus, technicalReady, unresolvedUsbChange, authoredTimeline
+    case audioAvailable, versionCandidate
+    public var id: String { rawValue }
+}
+
+public enum WorkflowRuleOperator: String, CaseIterable, Identifiable, Equatable, Sendable {
+    case isEqual = "is"
+    case isNot
+    public var id: String { rawValue }
+}
+
+public struct WorkflowRule: Identifiable, Equatable, Sendable {
+    public var id: String { "\(field.rawValue):\(self.operator.rawValue):\(value)" }
+    public let field: WorkflowRuleField
+    public let `operator`: WorkflowRuleOperator
+    public let value: String
+}
+
+public struct WorkflowStepDefinition: Identifiable, Equatable, Sendable {
+    public let id: String
+    public let displayName: String
+    public let icon: String
+    public let colorRGB: UInt32
+    public let sortOrder: UInt16
+    public let archived: Bool
+    public let rules: [WorkflowRule]
+}
+
+public struct TrackWorkflowCatalog: Equatable, Sendable {
+    public let revision: UInt64
+    public let steps: [WorkflowStepDefinition]
+    public static let defaults = Self(revision: 0, steps: [])
 }
 
 public struct LibrarySource: Equatable, Sendable {
@@ -252,6 +296,7 @@ public struct LibraryQuery: Equatable, Sendable {
     public let sortBy: LibraryTrackSortField
     public let sortDirection: LibraryTrackSortDirection
     public let workflowFilter: TrackWorkflowFilter?
+    public let workflowStepID: String?
 
     public init(
         search: String,
@@ -260,7 +305,8 @@ public struct LibraryQuery: Equatable, Sendable {
         limit: UInt16,
         sortBy: LibraryTrackSortField = .playlist,
         sortDirection: LibraryTrackSortDirection = .ascending,
-        workflowFilter: TrackWorkflowFilter? = nil
+        workflowFilter: TrackWorkflowFilter? = nil,
+        workflowStepID: String? = nil
     ) {
         self.search = search
         self.playlistID = playlistID
@@ -269,6 +315,7 @@ public struct LibraryQuery: Equatable, Sendable {
         self.sortBy = sortBy
         self.sortDirection = sortDirection
         self.workflowFilter = workflowFilter
+        self.workflowStepID = workflowStepID
     }
 }
 
@@ -517,6 +564,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
     public let query: LibraryQuery
     public let page: LibraryPage
     public let workflow: TrackWorkflowSummary
+    public let workflowCatalog: TrackWorkflowCatalog
     public let editor: TrackEditorAnalysis?
     public let phraseRoleSettings: PhraseRoleSettingsState?
     public let autoloopCatalog: AutoloopCatalogState?
@@ -541,6 +589,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
         query: LibraryQuery,
         page: LibraryPage,
         workflow: TrackWorkflowSummary = .empty,
+        workflowCatalog: TrackWorkflowCatalog = .defaults,
         editor: TrackEditorAnalysis? = nil,
         phraseRoleSettings: PhraseRoleSettingsState? = nil,
         autoloopCatalog: AutoloopCatalogState? = nil,
@@ -564,6 +613,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
         self.query = query
         self.page = page
         self.workflow = workflow
+        self.workflowCatalog = workflowCatalog
         self.editor = editor
         self.phraseRoleSettings = phraseRoleSettings
         self.autoloopCatalog = autoloopCatalog
@@ -597,6 +647,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
             query: query,
             page: page,
             workflow: workflow,
+            workflowCatalog: workflowCatalog,
             editor: editor,
             phraseRoleSettings: phraseRoleSettings,
             autoloopCatalog: autoloopCatalog,

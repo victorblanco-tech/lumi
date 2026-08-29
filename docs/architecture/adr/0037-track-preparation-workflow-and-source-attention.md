@@ -25,9 +25,16 @@ Lumi stores a manual preparation status independently from technical readiness:
 - `In Progress`;
 - `Ready for Show`.
 
-The first release uses these fixed steps. A later phase makes the step catalog
-and its query criteria configurable without changing the stable per-track status
-identity.
+The three identities remain mandatory migration anchors, while Settings exposes
+a revisioned catalog of up to twelve ordered steps. Every step has a stable ID,
+label, SF Symbol, color and a bounded conjunction of typed rules. Arbitrary SQL,
+scripts and live-state predicates are prohibited. Manual assignment and smart
+eligibility are separate: assignment identifies the track's bucket; rules can
+add durable Library-only quality gates.
+
+Catalog replacement is optimistic, validates required IDs, order, field values,
+unreachable rules and overlap against the current collection. Removed custom
+steps migrate safely to `In Progress` rather than orphaning tracks.
 
 ### Durable source-change attention
 
@@ -62,6 +69,22 @@ The first fixed queues are:
 - In Progress;
 - Ready for Show.
 
+`Changed after USB sync` and `New track versions` remain fixed system queues.
+They cannot be renamed or hidden by user workflow rules because they represent
+data safety, not personal process.
+
+### Version succession and creative-work reuse
+
+Lumi detects a likely successor from normalized version-family title plus exact
+artist identity. Typical suffixes such as `v004` are ignored for family matching.
+The editor shows source revision, beat count, BPM delta and duration delta.
+
+Phrase and AutoLoop choices may be copied only when total beat counts match
+exactly. Lumi creates a new target timeline revision; it never edits the source
+or stretches boundaries. `Reuse Phrases` and `Keep Separate` are durable review
+resolutions with an append-only audit record. Resolved pairs leave the system
+queue until either track changes again.
+
 ### Revision-safe mutations
 
 Status changes and attention resolution use optimistic revisions. Stale UI
@@ -77,5 +100,5 @@ of overwriting newer state.
   updates.
 - Live performance remains isolated because workflow state is only read and
   written by Library commands and snapshots.
-- Configurable steps and version-replacement assistance can be added without
-  changing the realtime architecture.
+- Configurable steps and version-replacement assistance stay entirely within
+  the Library worker and cannot enter the realtime architecture.

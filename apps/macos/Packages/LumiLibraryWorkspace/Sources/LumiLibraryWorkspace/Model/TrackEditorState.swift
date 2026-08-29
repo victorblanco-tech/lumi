@@ -411,6 +411,11 @@ public struct CreativeTimelineCandidate: Identifiable, Equatable, Sendable {
     public let totalBeats: UInt32
     public let exactBeatCompatibility: Bool
     public let likelyVersion: Bool
+    public let timelineRevision: UInt64
+    public let bpmMilli: UInt32
+    public let durationMillis: UInt64
+    public let bpmDeltaMilli: Int64
+    public let durationDeltaMillis: Int64
 }
 
 public struct CreativeTimelineReuseRequest: Equatable, Sendable {

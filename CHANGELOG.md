@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.5.0-dev-35 - 2026-08-29
+
+### Added
+
+- Completes the configurable Track Preparation Workflow with ordered custom
+  steps, visual identity and automatic quality gates.
+- Adds fixed `Changed After USB Sync` and `New Track Versions` safety queues,
+  including live counts in the Library.
+- Adds guided successor review: reuse Lumi phrases only when the predecessor
+  and successor have an exact compatible beat timeline, or keep both versions
+  separate.
+
+### Safety and verification
+
+- Keeps all workflow evaluation and version review inside the Library worker,
+  isolated from Pro DJ Link, Ableton Link and lighting output lanes.
+- Adds schema 17 migrations, optimistic revisions and revision-scoped review
+  decisions so later USB changes cannot inherit stale choices.
+- Covers the Rust domain, SQLite repository, engine protocol, Swift decoder and
+  real macOS app. Desktop acceptance found and fixed a lightweight-refresh
+  regression that could temporarily hide the workflow catalog.
+
 ## 0.5.0-dev-34 - 2026-08-29
 
 ### Added

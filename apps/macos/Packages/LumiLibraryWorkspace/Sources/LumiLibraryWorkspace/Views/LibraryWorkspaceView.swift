@@ -10,6 +10,7 @@ public struct LibraryQueryRequest: Equatable, Sendable {
     public let sortBy: LibraryTrackSortField
     public let sortDirection: LibraryTrackSortDirection
     public let workflowFilter: TrackWorkflowFilter?
+    public let workflowStepID: String?
 
     public init(
         search: String,
@@ -18,7 +19,8 @@ public struct LibraryQueryRequest: Equatable, Sendable {
         limit: UInt16 = 50,
         sortBy: LibraryTrackSortField = .playlist,
         sortDirection: LibraryTrackSortDirection = .ascending,
-        workflowFilter: TrackWorkflowFilter? = nil
+        workflowFilter: TrackWorkflowFilter? = nil,
+        workflowStepID: String? = nil
     ) {
         self.search = search
         self.playlistID = playlistID
@@ -27,6 +29,7 @@ public struct LibraryQueryRequest: Equatable, Sendable {
         self.sortBy = sortBy
         self.sortDirection = sortDirection
         self.workflowFilter = workflowFilter
+        self.workflowStepID = workflowStepID
     }
 }
 
@@ -37,6 +40,9 @@ public enum TrackWorkflowMutationRequest: Equatable, Sendable {
         status: TrackPreparationStatus
     )
     case resolveAttention(trackID: UInt64, expectedRevision: UInt64)
+    case assignStep(trackID: UInt64, expectedRevision: UInt64, stepID: String)
+    case replaceCatalog(expectedRevision: UInt64, steps: [WorkflowStepDefinition])
+    case keepVersionSeparate(sourceTrackID: UInt64, targetTrackID: UInt64, expectedTargetRevision: UInt64)
 }
 
 private enum LibraryBrowserMode: String, CaseIterable, Identifiable {
@@ -80,6 +86,7 @@ public struct LibraryWorkspaceView: View {
     @State private var readinessFilter: LibraryReadinessFilter = .all
     @State private var browserMode: LibraryBrowserMode
     @State private var selectedWorkflowFilter: TrackWorkflowFilter?
+    @State private var selectedWorkflowStepID: String?
     @State private var sortBy: LibraryTrackSortField
     @State private var sortDirection: LibraryTrackSortDirection
     @State private var tableSortOrder: [KeyPathComparator<LibraryTrack>] = []
@@ -124,8 +131,12 @@ public struct LibraryWorkspaceView: View {
         _search = State(initialValue: state.query.search)
         _selectedTrackID = State(initialValue: state.page.tracks.first?.id)
         _selectedPlaylistID = State(initialValue: state.query.playlistID)
-        _browserMode = State(initialValue: state.query.workflowFilter == nil ? .playlists : .workflow)
+        _browserMode = State(
+            initialValue: state.query.workflowFilter == nil && state.query.workflowStepID == nil
+                ? .playlists : .workflow
+        )
         _selectedWorkflowFilter = State(initialValue: state.query.workflowFilter)
+        _selectedWorkflowStepID = State(initialValue: state.query.workflowStepID)
         _sortBy = State(initialValue: state.query.sortBy)
         _sortDirection = State(initialValue: state.query.sortDirection)
         _editorAnalysis = State(initialValue: state.editor)
@@ -140,6 +151,7 @@ public struct LibraryWorkspaceView: View {
                             analysis: analysis,
                             autoloopCatalog: state.autoloopCatalog,
                             phraseColorPalette: state.phraseRoleSettings?.colorPalette ?? .defaults,
+                            workflowCatalog: state.workflowCatalog,
                             keyNotation: keyNotation,
                             feedback: timelineFeedback,
                             isEmbedded: true,
@@ -177,6 +189,10 @@ public struct LibraryWorkspaceView: View {
         .onChange(of: state.query.playlistID) { _, value in selectedPlaylistID = value }
         .onChange(of: state.query.workflowFilter) { _, value in
             selectedWorkflowFilter = value
+            if value != nil { browserMode = .workflow }
+        }
+        .onChange(of: state.query.workflowStepID) { _, value in
+            selectedWorkflowStepID = value
             if value != nil { browserMode = .workflow }
         }
         .onChange(of: state.query.sortBy) { _, value in sortBy = value }
@@ -273,6 +289,8 @@ public struct LibraryWorkspaceView: View {
             guard rendersInteractiveControls else { return }
             if mode == .playlists {
                 selectPlaylist(nil)
+            } else if let stepID = selectedWorkflowStepID {
+                selectWorkflowStep(stepID)
             } else {
                 selectWorkflow(selectedWorkflowFilter ?? .changedAfterUSBSync)
             }
@@ -333,38 +351,45 @@ public struct LibraryWorkspaceView: View {
                 systemImage: "externaldrive.badge.exclamationmark",
                 color: LumiColor.warning
             )
+            workflowButton(
+                .versionCandidates,
+                title: "New track versions",
+                count: state.workflow.versionCandidates,
+                systemImage: "arrow.triangle.2.circlepath.circle",
+                color: LumiColor.accent
+            )
             Text("PREPARATION")
                 .font(LumiTypography.technical)
                 .foregroundStyle(LumiColor.textSecondary)
                 .padding(.top, LumiSpacing.medium)
-            workflowButton(
-                .notStarted,
-                title: "Not Started",
-                count: state.workflow.notStarted,
-                systemImage: "circle",
-                color: LumiColor.textSecondary
-            )
-            workflowButton(
-                .inProgress,
-                title: "In Progress",
-                count: state.workflow.inProgress,
-                systemImage: "circle.lefthalf.filled",
-                color: LumiColor.warning
-            )
-            workflowButton(
-                .readyForShow,
-                title: "Ready for Show",
-                count: state.workflow.readyForShow,
-                systemImage: "checkmark.circle.fill",
-                color: LumiColor.success
-            )
+            ForEach(state.workflowCatalog.steps.filter { !$0.archived }) { step in
+                workflowStepButton(step)
+            }
             Spacer()
-            Text("Workflow steps become configurable in phase 2.")
-                .font(LumiTypography.caption)
-                .foregroundStyle(LumiColor.textSecondary)
-                .fixedSize(horizontal: false, vertical: true)
         }
         .accessibilityIdentifier("lumi.library.workflow")
+    }
+
+    private func workflowStepButton(_ step: WorkflowStepDefinition) -> some View {
+        Button { selectWorkflowStep(step.id) } label: {
+            HStack(spacing: LumiSpacing.small) {
+                Image(systemName: step.icon)
+                    .foregroundStyle(workflowColor(step.colorRGB))
+                Text(step.displayName).lineLimit(2)
+                Spacer()
+                Text("\(state.workflow.stepCounts[step.id, default: 0])")
+                    .font(LumiTypography.technical)
+                    .foregroundStyle(LumiColor.textSecondary)
+            }
+            .foregroundStyle(selectedWorkflowStepID == step.id ? LumiColor.accent : LumiColor.textPrimary)
+            .padding(.horizontal, LumiSpacing.small)
+            .frame(minHeight: LumiControlMetric.standardHeight)
+            .contentShape(Rectangle())
+            .background(selectedWorkflowStepID == step.id ? LumiColor.accent.opacity(0.14) : Color.clear)
+            .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("lumi.library.workflow.step.\(step.id)")
     }
 
     private func workflowButton(
@@ -655,8 +680,8 @@ public struct LibraryWorkspaceView: View {
     private func workflowCell(_ track: LibraryTrack) -> some View {
         VStack(alignment: .leading, spacing: 1) {
             Label(
-                preparationStatusName(track.workflow.preparationStatus),
-                systemImage: preparationStatusIcon(track.workflow.preparationStatus)
+                workflowStep(for: track).displayName,
+                systemImage: workflowStep(for: track).icon
             )
             if let attention = track.workflow.attention {
                 Text(attentionSummary(attention))
@@ -667,6 +692,19 @@ public struct LibraryWorkspaceView: View {
         .font(LumiTypography.caption)
         .foregroundStyle(preparationStatusColor(track.workflow))
         .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func workflowStep(for track: LibraryTrack) -> WorkflowStepDefinition {
+        state.workflowCatalog.steps.first { $0.id == track.workflow.stepID }
+            ?? WorkflowStepDefinition(
+                id: track.workflow.stepID,
+                displayName: preparationStatusName(track.workflow.preparationStatus),
+                icon: preparationStatusIcon(track.workflow.preparationStatus),
+                colorRGB: 0x8A949F,
+                sortOrder: 1,
+                archived: false,
+                rules: []
+            )
     }
 
     private func localDeckToolbarButton(_ track: LibraryTrack, deckID: UInt64) -> some View {
@@ -751,6 +789,7 @@ public struct LibraryWorkspaceView: View {
     private func selectPlaylist(_ id: UInt64?) {
         selectedPlaylistID = id
         selectedWorkflowFilter = nil
+        selectedWorkflowStepID = nil
         let playlistSort = id == nil && sortBy == .playlist ? LibraryTrackSortField.title : sortBy
         sortBy = playlistSort
         onQuery(
@@ -767,6 +806,7 @@ public struct LibraryWorkspaceView: View {
 
     private func selectWorkflow(_ filter: TrackWorkflowFilter) {
         selectedWorkflowFilter = filter
+        selectedWorkflowStepID = nil
         selectedPlaylistID = nil
         onQuery(
             LibraryQueryRequest(
@@ -780,6 +820,23 @@ public struct LibraryWorkspaceView: View {
         )
     }
 
+    private func selectWorkflowStep(_ stepID: String) {
+        selectedWorkflowFilter = nil
+        selectedWorkflowStepID = stepID
+        selectedPlaylistID = nil
+        onQuery(
+            LibraryQueryRequest(
+                search: search,
+                playlistID: nil,
+                offset: 0,
+                sortBy: sortBy == .playlist ? .title : sortBy,
+                sortDirection: sortDirection,
+                workflowFilter: nil,
+                workflowStepID: stepID
+            )
+        )
+    }
+
     private func submitQuery(search querySearch: String? = nil, offset: UInt32) {
         onQuery(
             LibraryQueryRequest(
@@ -789,7 +846,8 @@ public struct LibraryWorkspaceView: View {
                 limit: state.query.limit,
                 sortBy: sortBy,
                 sortDirection: sortDirection,
-                workflowFilter: state.query.workflowFilter
+                workflowFilter: state.query.workflowFilter,
+                workflowStepID: state.query.workflowStepID
             )
         )
     }
@@ -827,7 +885,8 @@ public struct LibraryWorkspaceView: View {
                 limit: state.query.limit,
                 sortBy: field,
                 sortDirection: direction,
-                workflowFilter: state.query.workflowFilter
+                workflowFilter: state.query.workflowFilter,
+                workflowStepID: state.query.workflowStepID
             )
         )
     }
@@ -847,6 +906,14 @@ public struct LibraryWorkspaceView: View {
         requestedEditorTrackID = trackID
         onOpenEditor(trackID)
     }
+}
+
+private func workflowColor(_ rgb: UInt32) -> Color {
+    Color(
+        red: Double((rgb >> 16) & 0xFF) / 255,
+        green: Double((rgb >> 8) & 0xFF) / 255,
+        blue: Double(rgb & 0xFF) / 255
+    )
 }
 
 private func formatBPM(_ value: UInt64) -> String {

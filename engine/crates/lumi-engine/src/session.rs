@@ -3372,13 +3372,22 @@ fn apply_command(
             search,
             playlist_id,
             workflow_filter,
+            workflow_step_id,
             offset,
             limit,
             sort,
         } => {
             runtime
                 .library_worker
-                .query(search, playlist_id, workflow_filter, offset, limit, sort);
+                .query(crate::library::LibraryQueryUpdate {
+                    search,
+                    playlist_id,
+                    workflow_filter,
+                    workflow_step_id,
+                    offset,
+                    limit,
+                    sort,
+                });
             return Ok(());
         }
         SessionCommand::OpenLibraryTrackEditor { track_id } => {
@@ -3402,6 +3411,27 @@ fn apply_command(
             )?;
             return Ok(());
         }
+        SessionCommand::AssignTrackWorkflowStep {
+            track_id,
+            expected_revision,
+            step_id,
+        } => {
+            runtime.library_worker.assign_track_workflow_step(
+                track_id,
+                expected_revision,
+                &step_id,
+            )?;
+            return Ok(());
+        }
+        SessionCommand::ReplaceTrackWorkflowCatalog {
+            expected_revision,
+            steps,
+        } => {
+            runtime
+                .library_worker
+                .replace_track_workflow_catalog(expected_revision, steps)?;
+            return Ok(());
+        }
         SessionCommand::ResolveTrackWorkflowAttention {
             track_id,
             expected_revision,
@@ -3417,6 +3447,18 @@ fn apply_command(
             expected_target_revision,
         } => {
             runtime.library_worker.reuse_creative_timeline(
+                source_track_id,
+                target_track_id,
+                expected_target_revision,
+            )?;
+            return Ok(());
+        }
+        SessionCommand::KeepTrackVersionSeparate {
+            source_track_id,
+            target_track_id,
+            expected_target_revision,
+        } => {
+            runtime.library_worker.keep_track_version_separate(
                 source_track_id,
                 target_track_id,
                 expected_target_revision,
@@ -4048,6 +4090,8 @@ fn apply_command(
         | SessionCommand::GetLibraryTrackWaveform { .. }
         | SessionCommand::CloseLibraryTrackEditor
         | SessionCommand::SetTrackPreparationStatus { .. }
+        | SessionCommand::AssignTrackWorkflowStep { .. }
+        | SessionCommand::ReplaceTrackWorkflowCatalog { .. }
         | SessionCommand::ResolveTrackWorkflowAttention { .. }
         | SessionCommand::PreviewDemoSourceRefresh
         | SessionCommand::PreviewRekordboxXmlSync { .. }
@@ -4067,6 +4111,7 @@ fn apply_command(
         | SessionCommand::RedoLibraryTimeline { .. }
         | SessionCommand::RestoreLibraryTimelineRevision { .. }
         | SessionCommand::ReuseLibraryTimeline { .. }
+        | SessionCommand::KeepTrackVersionSeparate { .. }
         | SessionCommand::MutatePhraseRoleCatalog { .. }
         | SessionCommand::MutateAutoloopCatalog { .. }
         | SessionCommand::ReplaceLightPlanningPolicy { .. }

@@ -6,6 +6,7 @@ import SwiftUI
 public enum PhraseRoleSettingsSection: String, CaseIterable, Identifiable, Sendable {
     case general
     case phraseModel
+    case trackWorkflow
     case planningDefaults
     case dataBackups
 
@@ -18,12 +19,15 @@ public struct PhraseRoleSettingsView: View {
     @Binding private var keyNotation: KeyNotationPreference
     @Binding private var lightingTimingOffsetMillis: Int
     private let feedback: String?
+    private let workflowCatalog: TrackWorkflowCatalog
+    private let workflowFeedback: String?
     private let dataManagement: DataManagementState
     private let dataOperation: DataManagementOperationState
     private let backups: [LibraryBackupRecord]
     private let canManageData: Bool
     private let rendersInteractiveControls: Bool
     private let onMutation: @Sendable (PhraseRoleMutationRequest) -> Void
+    private let onWorkflowMutation: @Sendable (TrackWorkflowMutationRequest) -> Void
     private let onCreateBackup: @Sendable () -> Void
     private let onPrepareReset: @Sendable ([UInt64]) -> Void
     private let onApplyReset: @Sendable () -> Void
@@ -43,12 +47,15 @@ public struct PhraseRoleSettingsView: View {
         lightingTimingOffsetMillis: Binding<Int> = .constant(0),
         initialSection: PhraseRoleSettingsSection = .phraseModel,
         feedback: String? = nil,
+        workflowCatalog: TrackWorkflowCatalog = .defaults,
+        workflowFeedback: String? = nil,
         dataManagement: DataManagementState = .empty,
         dataOperation: DataManagementOperationState = .idle,
         backups: [LibraryBackupRecord] = [],
         canManageData: Bool = false,
         rendersInteractiveControls: Bool = true,
         onMutation: @escaping @Sendable (PhraseRoleMutationRequest) -> Void = { _ in },
+        onWorkflowMutation: @escaping @Sendable (TrackWorkflowMutationRequest) -> Void = { _ in },
         onCreateBackup: @escaping @Sendable () -> Void = {},
         onPrepareReset: @escaping @Sendable ([UInt64]) -> Void = { _ in },
         onApplyReset: @escaping @Sendable () -> Void = {},
@@ -59,12 +66,15 @@ public struct PhraseRoleSettingsView: View {
         _keyNotation = keyNotation
         _lightingTimingOffsetMillis = lightingTimingOffsetMillis
         self.feedback = feedback
+        self.workflowCatalog = workflowCatalog
+        self.workflowFeedback = workflowFeedback
         self.dataManagement = dataManagement
         self.dataOperation = dataOperation
         self.backups = backups
         self.canManageData = canManageData
         self.rendersInteractiveControls = rendersInteractiveControls
         self.onMutation = onMutation
+        self.onWorkflowMutation = onWorkflowMutation
         self.onCreateBackup = onCreateBackup
         self.onPrepareReset = onPrepareReset
         self.onApplyReset = onApplyReset
@@ -151,6 +161,7 @@ public struct PhraseRoleSettingsView: View {
         switch value {
         case .general: copy("settings.general")
         case .phraseModel: "Phrase Model"
+        case .trackWorkflow: "Track Workflow"
         case .planningDefaults: "Planning Defaults"
         case .dataBackups: "Data & Backups"
         }
@@ -160,6 +171,7 @@ public struct PhraseRoleSettingsView: View {
         switch value {
         case .general: "slider.horizontal.3"
         case .phraseModel: "text.badge.checkmark"
+        case .trackWorkflow: "checklist"
         case .planningDefaults: "point.3.connected.trianglepath.dotted"
         case .dataBackups: "externaldrive.badge.timemachine"
         }
@@ -193,6 +205,15 @@ public struct PhraseRoleSettingsView: View {
             generalSettings
         case .phraseModel:
             phraseRoleSettings
+        case .trackWorkflow:
+            TrackWorkflowSettingsView(
+                catalog: workflowCatalog,
+                feedback: workflowFeedback,
+                rendersInteractiveControls: rendersInteractiveControls,
+                onSave: { steps in
+                    onWorkflowMutation(.replaceCatalog(expectedRevision: workflowCatalog.revision, steps: steps))
+                }
+            )
         case .planningDefaults:
             planningDefaults
         case .dataBackups:

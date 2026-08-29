@@ -54,6 +54,7 @@ pub use timeline::{
     TimelineValidationError,
 };
 pub use workflow::{
-    TrackAttentionReason, TrackPreparationStatus, TrackWorkflowAttention, TrackWorkflowFilter,
-    TrackWorkflowState, TrackWorkflowSummary, TrackWorkflowValueError,
+    TrackAttentionReason, TrackPreparationStatus, TrackWorkflowAttention, TrackWorkflowCatalog,
+    TrackWorkflowFilter, TrackWorkflowState, TrackWorkflowSummary, TrackWorkflowValueError,
+    WorkflowRule, WorkflowRuleField, WorkflowRuleOperator, WorkflowStepDefinition,
 };

@@ -13,7 +13,8 @@ struct EngineCommandTests {
             limit: 50,
             sortBy: "preparationStatus",
             sortDirection: "ascending",
-            workflowFilter: "changedAfterUsbSync"
+            workflowFilter: "changedAfterUsbSync",
+            workflowStepID: nil
         ).payload()
         #expect(query["workflowFilter"] == .string("changedAfterUsbSync"))
 
@@ -33,6 +34,29 @@ struct EngineCommandTests {
         ).payload()
         #expect(reviewed["kind"] == .string("resolveTrackWorkflowAttention"))
         #expect(reviewed["expectedRevision"] == .number(4))
+
+        let assignment = EngineCommand.assignTrackWorkflowStep(
+            trackID: 90, expectedRevision: 3, stepID: "quality-check"
+        ).payload()
+        #expect(assignment["stepId"] == .string("quality-check"))
+
+        let catalog = EngineCommand.replaceTrackWorkflowCatalog(
+            expectedRevision: 2,
+            steps: [EngineWorkflowStep(
+                id: "not-started", displayName: "Not Started", icon: "circle",
+                colorRGB: 0x8A949F, sortOrder: 1, archived: false,
+                rules: [EngineWorkflowRule(
+                    field: "preparationStatus", operatorName: "is", value: "not-started"
+                )]
+            )]
+        ).payload()
+        #expect(catalog["kind"] == .string("replaceTrackWorkflowCatalog"))
+        #expect(catalog["expectedRevision"] == .number(2))
+
+        let separate = EngineCommand.keepTrackVersionSeparate(
+            sourceTrackID: 84, targetTrackID: 90, expectedTargetRevision: 7
+        ).payload()
+        #expect(separate["kind"] == .string("keepTrackVersionSeparate"))
     }
 
     @Test("Ableton Link enablement has an explicit boolean command")

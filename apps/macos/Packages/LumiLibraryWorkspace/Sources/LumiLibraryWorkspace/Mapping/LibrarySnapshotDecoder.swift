@@ -21,6 +21,7 @@ public struct LibrarySnapshotDecoder: Sendable {
             query: state.query,
             page: state.page,
             workflow: state.workflow,
+            workflowCatalog: state.workflowCatalog,
             editor: state.editor,
             phraseRoleSettings: state.phraseRoleSettings,
             autoloopCatalog: state.autoloopCatalog,
@@ -75,7 +76,8 @@ public struct LibrarySnapshotDecoder: Sendable {
             ).required(.invalidQuerySort),
             workflowFilter: try optionalString(queryObject, "workflowFilter").map { rawValue in
                 try TrackWorkflowFilter(rawValue: rawValue).required(.invalidWorkflow)
-            }
+            },
+            workflowStepID: optionalString(queryObject, "workflowStepId")
         )
         guard (1...200).contains(query.limit) else {
             throw LibrarySnapshotError.unboundedPage
@@ -107,6 +109,7 @@ public struct LibrarySnapshotDecoder: Sendable {
                 tracks: try trackValues.map(decodeTrack)
             ),
             workflow: try decodeWorkflowSummary(library["workflow"]),
+            workflowCatalog: try decodeWorkflowCatalog(library["workflowCatalog"]),
             editor: try decodeEditor(library["editor"]),
             phraseRoleSettings: try decodePhraseRoleSettings(library["phraseRoleSettings"]),
             autoloopCatalog: try decodeAutoloopCatalog(library["autoloopCatalog"]),
@@ -139,10 +142,53 @@ public struct LibrarySnapshotDecoder: Sendable {
         }
         return TrackWorkflowSummary(
             changedAfterUSBSync: try unsigned(workflow, "changedAfterUsbSync"),
+            versionCandidates: optionalUnsigned(workflow, "versionCandidates") ?? 0,
             notStarted: try unsigned(workflow, "notStarted"),
             inProgress: try unsigned(workflow, "inProgress"),
-            readyForShow: try unsigned(workflow, "readyForShow")
+            readyForShow: try unsigned(workflow, "readyForShow"),
+            catalogRevision: optionalUnsigned(workflow, "catalogRevision") ?? 0,
+            stepCounts: try decodeStringUnsignedMap(workflow["stepCounts"])
         )
+    }
+
+    private func decodeWorkflowCatalog(_ value: JSONValue?) throws -> TrackWorkflowCatalog {
+        guard let value, value != .null else { return .defaults }
+        guard case let .object(catalog) = value else { throw LibrarySnapshotError.invalidObject }
+        let steps = try array(catalog, "steps").map { value -> WorkflowStepDefinition in
+            guard case let .object(step) = value else { throw LibrarySnapshotError.invalidObject }
+            let rules = try array(step, "rules").map { value -> WorkflowRule in
+                guard case let .object(rule) = value else { throw LibrarySnapshotError.invalidObject }
+                return WorkflowRule(
+                    field: try WorkflowRuleField(rawValue: string(rule, "field"))
+                        .required(.invalidWorkflow),
+                    operator: try WorkflowRuleOperator(rawValue: string(rule, "operator"))
+                        .required(.invalidWorkflow),
+                    value: try string(rule, "value")
+                )
+            }
+            return WorkflowStepDefinition(
+                id: try string(step, "id"),
+                displayName: try string(step, "displayName"),
+                icon: try string(step, "icon"),
+                colorRGB: try UInt32(exactly: unsigned(step, "colorRgb"))
+                    .required(.invalidNumber("colorRgb")),
+                sortOrder: try UInt16(exactly: unsigned(step, "sortOrder"))
+                    .required(.invalidNumber("sortOrder")),
+                archived: try boolean(step, "archived"),
+                rules: rules
+            )
+        }
+        return TrackWorkflowCatalog(revision: try unsigned(catalog, "revision"), steps: steps)
+    }
+
+    private func decodeStringUnsignedMap(_ value: JSONValue?) throws -> [String: UInt64] {
+        guard let value, value != .null else { return [:] }
+        guard case let .object(object) = value else { throw LibrarySnapshotError.invalidObject }
+        return try object.reduce(into: [:]) { result, element in
+            guard case let .number(number) = element.value,
+                  let value = UInt64(exactly: number) else { throw LibrarySnapshotError.invalidWorkflow }
+            result[element.key] = value
+        }
     }
 
     private func decodeDataManagement(_ value: JSONValue?) throws -> DataManagementState {
@@ -1187,7 +1233,13 @@ public struct LibrarySnapshotDecoder: Sendable {
                     totalBeats: try UInt32(exactly: unsigned(candidate, "totalBeats"))
                         .required(.invalidNumber("creativeReuse.totalBeats")),
                     exactBeatCompatibility: try boolean(candidate, "exactBeatCompatibility"),
-                    likelyVersion: try boolean(candidate, "likelyVersion")
+                    likelyVersion: try boolean(candidate, "likelyVersion"),
+                    timelineRevision: optionalUnsigned(candidate, "timelineRevision") ?? 1,
+                    bpmMilli: try UInt32(exactly: optionalUnsigned(candidate, "bpmMilli") ?? 0)
+                        .required(.invalidNumber("candidate.bpmMilli")),
+                    durationMillis: optionalUnsigned(candidate, "durationMillis") ?? 0,
+                    bpmDeltaMilli: Int64(try strictOptionalSigned(candidate, "bpmDeltaMilli") ?? 0),
+                    durationDeltaMillis: Int64(try strictOptionalSigned(candidate, "durationDeltaMillis") ?? 0)
                 )
             }
         )
@@ -1416,6 +1468,7 @@ public struct LibrarySnapshotDecoder: Sendable {
         }
         return TrackWorkflowState(
             preparationStatus: status,
+            stepID: optionalString(workflow, "stepId") ?? status.rawValue,
             statusRevision: try unsigned(workflow, "statusRevision"),
             effectiveReady: effectiveReady,
             attention: attention

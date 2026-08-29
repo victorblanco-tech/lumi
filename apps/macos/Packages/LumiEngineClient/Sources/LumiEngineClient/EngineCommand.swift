@@ -276,6 +276,51 @@ public enum EngineAutoloopCatalogMutation: Equatable, Sendable {
     }
 }
 
+public struct EngineWorkflowRule: Equatable, Sendable {
+    public let field: String
+    public let operatorName: String
+    public let value: String
+
+    public init(field: String, operatorName: String, value: String) {
+        self.field = field
+        self.operatorName = operatorName
+        self.value = value
+    }
+
+    fileprivate var jsonValue: JSONValue {
+        .object(["field": .string(field), "operator": .string(operatorName), "value": .string(value)])
+    }
+}
+
+public struct EngineWorkflowStep: Equatable, Sendable {
+    public let id: String
+    public let displayName: String
+    public let icon: String
+    public let colorRGB: UInt32
+    public let sortOrder: UInt16
+    public let archived: Bool
+    public let rules: [EngineWorkflowRule]
+
+    public init(id: String, displayName: String, icon: String, colorRGB: UInt32,
+                sortOrder: UInt16, archived: Bool, rules: [EngineWorkflowRule]) {
+        self.id = id
+        self.displayName = displayName
+        self.icon = icon
+        self.colorRGB = colorRGB
+        self.sortOrder = sortOrder
+        self.archived = archived
+        self.rules = rules
+    }
+
+    fileprivate var jsonValue: JSONValue {
+        .object([
+            "id": .string(id), "displayName": .string(displayName), "icon": .string(icon),
+            "colorRgb": .number(Double(colorRGB)), "sortOrder": .number(Double(sortOrder)),
+            "archived": .boolean(archived), "rules": .array(rules.map(\.jsonValue))
+        ])
+    }
+}
+
 public enum EngineCommand: Equatable, Sendable {
     case queryLibrary(
         search: String,
@@ -284,7 +329,8 @@ public enum EngineCommand: Equatable, Sendable {
         limit: UInt16,
         sortBy: String,
         sortDirection: String,
-        workflowFilter: String?
+        workflowFilter: String?,
+        workflowStepID: String?
     )
     case openLibraryTrackEditor(trackID: UInt64)
     case closeLibraryTrackEditor
@@ -294,7 +340,14 @@ public enum EngineCommand: Equatable, Sendable {
         status: String
     )
     case resolveTrackWorkflowAttention(trackID: UInt64, expectedRevision: UInt64)
+    case assignTrackWorkflowStep(trackID: UInt64, expectedRevision: UInt64, stepID: String)
+    case replaceTrackWorkflowCatalog(expectedRevision: UInt64, steps: [EngineWorkflowStep])
     case reuseLibraryTimeline(
+        sourceTrackID: UInt64,
+        targetTrackID: UInt64,
+        expectedTargetRevision: UInt64
+    )
+    case keepTrackVersionSeparate(
         sourceTrackID: UInt64,
         targetTrackID: UInt64,
         expectedTargetRevision: UInt64
@@ -437,7 +490,8 @@ public enum EngineCommand: Equatable, Sendable {
             limit,
             sortBy,
             sortDirection,
-            workflowFilter
+            workflowFilter,
+            workflowStepID
         ):
             var payload: [String: JSONValue] = [
                 "kind": .string("queryLibrary"),
@@ -449,6 +503,7 @@ public enum EngineCommand: Equatable, Sendable {
             ]
             payload["playlistId"] = playlistID.map { .number(Double($0)) } ?? .null
             payload["workflowFilter"] = workflowFilter.map(JSONValue.string) ?? .null
+            payload["workflowStepId"] = workflowStepID.map(JSONValue.string) ?? .null
             return payload
         case let .openLibraryTrackEditor(trackID):
             return [
@@ -470,9 +525,29 @@ public enum EngineCommand: Equatable, Sendable {
                 "trackId": .number(Double(trackID)),
                 "expectedRevision": .number(Double(expectedRevision))
             ]
+        case let .assignTrackWorkflowStep(trackID, expectedRevision, stepID):
+            return [
+                "kind": .string("assignTrackWorkflowStep"),
+                "trackId": .number(Double(trackID)),
+                "expectedRevision": .number(Double(expectedRevision)),
+                "stepId": .string(stepID)
+            ]
+        case let .replaceTrackWorkflowCatalog(expectedRevision, steps):
+            return [
+                "kind": .string("replaceTrackWorkflowCatalog"),
+                "expectedRevision": .number(Double(expectedRevision)),
+                "steps": .array(steps.map(\.jsonValue))
+            ]
         case let .reuseLibraryTimeline(sourceTrackID, targetTrackID, expectedTargetRevision):
             return [
                 "kind": .string("reuseLibraryTimeline"),
+                "sourceTrackId": .number(Double(sourceTrackID)),
+                "targetTrackId": .number(Double(targetTrackID)),
+                "expectedTargetRevision": .number(Double(expectedTargetRevision))
+            ]
+        case let .keepTrackVersionSeparate(sourceTrackID, targetTrackID, expectedTargetRevision):
+            return [
+                "kind": .string("keepTrackVersionSeparate"),
                 "sourceTrackId": .number(Double(sourceTrackID)),
                 "targetTrackId": .number(Double(targetTrackID)),
                 "expectedTargetRevision": .number(Double(expectedTargetRevision))

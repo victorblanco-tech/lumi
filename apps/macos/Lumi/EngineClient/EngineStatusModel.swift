@@ -739,7 +739,8 @@ final class EngineStatusModel: ObservableObject {
                     limit: request.limit,
                     sortBy: request.sortBy.rawValue,
                     sortDirection: request.sortDirection.rawValue,
-                    workflowFilter: request.workflowFilter?.rawValue
+                    workflowFilter: request.workflowFilter?.rawValue,
+                    workflowStepID: request.workflowStepID
                 )
             )
             if let failure = EngineCommandFailure(envelope) {
@@ -814,6 +815,39 @@ final class EngineStatusModel: ObservableObject {
             command = .resolveTrackWorkflowAttention(
                 trackID: trackID,
                 expectedRevision: expectedRevision
+            )
+        case let .assignStep(trackID, expectedRevision, stepID):
+            command = .assignTrackWorkflowStep(
+                trackID: trackID,
+                expectedRevision: expectedRevision,
+                stepID: stepID
+            )
+        case let .replaceCatalog(expectedRevision, steps):
+            command = .replaceTrackWorkflowCatalog(
+                expectedRevision: expectedRevision,
+                steps: steps.map { step in
+                    EngineWorkflowStep(
+                        id: step.id,
+                        displayName: step.displayName,
+                        icon: step.icon,
+                        colorRGB: step.colorRGB,
+                        sortOrder: step.sortOrder,
+                        archived: step.archived,
+                        rules: step.rules.map {
+                            EngineWorkflowRule(
+                                field: $0.field.rawValue,
+                                operatorName: $0.operator.rawValue,
+                                value: $0.value
+                            )
+                        }
+                    )
+                }
+            )
+        case let .keepVersionSeparate(sourceTrackID, targetTrackID, expectedTargetRevision):
+            command = .keepTrackVersionSeparate(
+                sourceTrackID: sourceTrackID,
+                targetTrackID: targetTrackID,
+                expectedTargetRevision: expectedTargetRevision
             )
         }
         let succeeded = await exchangeLibraryCommand(

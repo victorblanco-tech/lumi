@@ -79,7 +79,7 @@ struct LibraryWorkspaceTests {
     @Test("Task-oriented navigation keeps provider configuration out of Settings")
     func taskOrientedNavigationBoundaries() {
         #expect(PhraseRoleSettingsSection.allCases.map(\.rawValue) == [
-            "general", "phraseModel", "planningDefaults", "dataBackups"
+            "general", "phraseModel", "trackWorkflow", "planningDefaults", "dataBackups"
         ])
         #expect(LibraryHubSection.allCases.map(\.rawValue) == ["tracks", "sources"])
         #expect(IntegrationsWorkspaceSection.allCases.map(\.rawValue) == [
@@ -607,7 +607,9 @@ struct LibraryWorkspaceTests {
     @Test("Lightweight snapshots refresh integration telemetry without replacing library state")
     func refreshesRuntimeIntegrationsWithoutReplacingLibrary() throws {
         let decoder = LibrarySnapshotDecoder()
-        let original = try decoder.decode(envelope(trackValues: [trackValue()]))
+        let original = try decoder.decode(
+            envelope(trackValues: [trackValue()], workflowCatalog: workflowCatalogValue())
+        )
         let runtime = envelope(
             trackValues: [],
             abletonLinkIntegration: .object([
@@ -646,6 +648,8 @@ struct LibraryWorkspaceTests {
         #expect(refreshed.page == original.page)
         #expect(refreshed.playlists == original.playlists)
         #expect(refreshed.collectionTotal == original.collectionTotal)
+        #expect(refreshed.workflowCatalog == original.workflowCatalog)
+        #expect(refreshed.workflowCatalog.steps.map(\.id) == ["not-started", "in-progress"])
         #expect(refreshed.abletonLinkIntegration?.bpmMilli == 155_000)
         #expect(refreshed.abletonLinkIntegration?.receivedAnchorCount == 5_700)
     }
@@ -1450,6 +1454,7 @@ private func envelope(
     rekordboxDeviceInspection: JSONValue = .null,
     dataManagement: JSONValue = .null,
     workflow: JSONValue = .null,
+    workflowCatalog: JSONValue = .null,
     sortBy: String = "playlist",
     sortDirection: String = "ascending"
 ) -> MessageEnvelope {
@@ -1484,6 +1489,7 @@ private func envelope(
                 ]),
                 "collectionTotal": .number(10_000),
                 "workflow": workflow,
+                "workflowCatalog": workflowCatalog,
                 "query": .object([
                     "search": .string(""),
                     "playlistId": .null,
@@ -1515,6 +1521,52 @@ private func envelope(
             ])
         ]
     )
+}
+
+private func workflowCatalogValue() -> JSONValue {
+    .object([
+        "revision": .number(3),
+        "steps": .array([
+            workflowStepValue(
+                id: "not-started",
+                name: "Not Started",
+                icon: "circle",
+                colorRGB: 0x8A949F,
+                sortOrder: 1
+            ),
+            workflowStepValue(
+                id: "in-progress",
+                name: "In Progress",
+                icon: "pencil.and.outline",
+                colorRGB: 0xFF9F00,
+                sortOrder: 2
+            )
+        ])
+    ])
+}
+
+private func workflowStepValue(
+    id: String,
+    name: String,
+    icon: String,
+    colorRGB: Double,
+    sortOrder: Double
+) -> JSONValue {
+    .object([
+        "id": .string(id),
+        "displayName": .string(name),
+        "icon": .string(icon),
+        "colorRgb": .number(colorRGB),
+        "sortOrder": .number(sortOrder),
+        "archived": .boolean(false),
+        "rules": .array([
+            .object([
+                "field": .string("preparationStatus"),
+                "operator": .string("is"),
+                "value": .string(id)
+            ])
+        ])
+    ])
 }
 
 private func autoloopCatalogValue() -> JSONValue {

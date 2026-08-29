@@ -74,6 +74,7 @@ pub struct LibraryTrackQuery {
     page: TrackPageRequest,
     sort: LibraryTrackSort,
     workflow_filter: Option<TrackWorkflowFilter>,
+    workflow_step_id: Option<String>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -140,6 +141,7 @@ impl LibraryTrackQuery {
             page,
             sort: LibraryTrackSort::default(),
             workflow_filter: None,
+            workflow_step_id: None,
         })
     }
 
@@ -182,6 +184,17 @@ impl LibraryTrackQuery {
     #[must_use]
     pub const fn with_workflow_filter(mut self, filter: Option<TrackWorkflowFilter>) -> Self {
         self.workflow_filter = filter;
+        self
+    }
+
+    #[must_use]
+    pub fn workflow_step_id(&self) -> Option<&str> {
+        self.workflow_step_id.as_deref()
+    }
+
+    #[must_use]
+    pub fn with_workflow_step_id(mut self, step_id: Option<String>) -> Self {
+        self.workflow_step_id = step_id;
         self
     }
 }

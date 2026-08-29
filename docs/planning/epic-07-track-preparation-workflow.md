@@ -1,6 +1,6 @@
 # Epic 7 – Track preparation workflow
 
-Status: **In progress** | Priority: **P0**
+Status: **Done in 0.5.0-dev-35** | Priority: **P0**
 
 ## Outcome
 
@@ -31,6 +31,8 @@ Status: **Done in 0.5.0-dev-34**
 
 ### Phase 2 — Configurable workflow
 
+Status: **Done in 0.5.0-dev-35**
+
 - Settings catalog for user-defined preparation steps;
 - rule builder over durable track facts, without arbitrary executable queries;
 - order, label, icon and color per step;
@@ -39,11 +41,17 @@ Status: **Done in 0.5.0-dev-34**
 
 ### Phase 3 — Version and replacement workflow
 
+Status: **Done in 0.5.0-dev-35**
+
 - detect likely new edit/mashup versions as an explicit review item;
 - compare beat compatibility and source provenance;
 - offer safe Lumi phrase reuse from the archived/older version;
 - never delete creative work automatically;
 - preserve a recoverable audit trail for relink/replacement choices.
+
+The first implementation deliberately permits automatic phrase reuse only for
+an exact total-beat match. BPM and duration deltas are evidence for the DJ, not
+permission to stretch or guess phrase boundaries.
 
 ## Epic acceptance
 

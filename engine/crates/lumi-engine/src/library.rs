@@ -19,7 +19,7 @@ use lumi_library::{
     SourcePlaylistId, SourceRevision, SourceTrackDiff, TimelineEditCommand, TimelineEditError,
     TimelineRevision, TimelineRevisionOrigin, TimelineRevisionReason, TimelineRevisionSummary,
     TrackColor, TrackPageRequest, TrackPreparationStatus, TrackSummary, TrackWorkflowFilter,
-    TrackWorkflowState, VariantId, WaveformPoint, reconcile_timeline,
+    TrackWorkflowState, VariantId, WaveformPoint, WorkflowStepDefinition, reconcile_timeline,
 };
 use lumi_library_demo::{DemoLibraryError, DemoLibraryRevision, DemoLibrarySourceProvider};
 use lumi_library_source::MusicLibrarySourceProvider as _;
@@ -100,6 +100,7 @@ pub struct LibraryWorker {
     search: String,
     playlist_id: Option<PlaylistId>,
     workflow_filter: Option<TrackWorkflowFilter>,
+    workflow_step_id: Option<String>,
     offset: u32,
     limit: u16,
     sort: LibraryTrackSort,
@@ -112,6 +113,16 @@ pub struct LibraryWorker {
     device_review_comparisons_by_source: BTreeMap<String, BTreeMap<u32, DeviceReviewComparison>>,
     pending_library_reset: Option<LibraryResetPreviewState>,
     pending_light_plan_preview: Option<Value>,
+}
+
+pub(crate) struct LibraryQueryUpdate {
+    pub search: String,
+    pub playlist_id: Option<u64>,
+    pub workflow_filter: Option<TrackWorkflowFilter>,
+    pub workflow_step_id: Option<String>,
+    pub offset: u32,
+    pub limit: u16,
+    pub sort: LibraryTrackSort,
 }
 
 #[derive(Clone, Debug)]
@@ -1088,6 +1099,7 @@ impl LibraryWorker {
             search: String::new(),
             playlist_id: None,
             workflow_filter: None,
+            workflow_step_id: None,
             offset: 0,
             limit: DEFAULT_PAGE_LIMIT,
             sort: LibraryTrackSort::default(),
@@ -1171,21 +1183,38 @@ impl LibraryWorker {
         Ok(())
     }
 
-    pub fn query(
+    pub fn query(&mut self, update: LibraryQueryUpdate) {
+        self.search = update.search;
+        self.playlist_id = update.playlist_id.map(PlaylistId::new);
+        self.workflow_filter = update.workflow_filter;
+        self.workflow_step_id = update.workflow_step_id;
+        self.offset = update.offset;
+        self.limit = update.limit;
+        self.sort = update.sort;
+    }
+
+    pub fn assign_track_workflow_step(
         &mut self,
-        search: String,
-        playlist_id: Option<u64>,
-        workflow_filter: Option<TrackWorkflowFilter>,
-        offset: u32,
-        limit: u16,
-        sort: LibraryTrackSort,
-    ) {
-        self.search = search;
-        self.playlist_id = playlist_id.map(PlaylistId::new);
-        self.workflow_filter = workflow_filter;
-        self.offset = offset;
-        self.limit = limit;
-        self.sort = sort;
+        track_id: u64,
+        expected_revision: u64,
+        step_id: &str,
+    ) -> Result<(), LibraryWorkerError> {
+        self.repository.assign_track_workflow_step(
+            TrackId::new(track_id),
+            expected_revision,
+            step_id,
+        )?;
+        Ok(())
+    }
+
+    pub fn replace_track_workflow_catalog(
+        &mut self,
+        expected_revision: u64,
+        steps: Vec<WorkflowStepDefinition>,
+    ) -> Result<(), LibraryWorkerError> {
+        self.repository
+            .replace_track_workflow_catalog(expected_revision, steps)?;
+        Ok(())
     }
 
     pub fn set_track_preparation_status(
@@ -2537,6 +2566,41 @@ impl LibraryWorker {
         )?;
         self.repository
             .append_timeline_revision(&copied, Some(target.revision()))?;
+        self.repository.resolve_track_version_candidate(
+            target_track_id,
+            source_track_id,
+            expected_target_revision,
+            "reused",
+            Some(copied.revision().value()),
+        )?;
+        Ok(())
+    }
+
+    pub fn keep_track_version_separate(
+        &mut self,
+        source_track_id: u64,
+        target_track_id: u64,
+        expected_target_revision: u64,
+    ) -> Result<(), LibraryWorkerError> {
+        let target_track_id = TrackId::new(target_track_id);
+        self.require_open_track(target_track_id)?;
+        let _ = self.require_expected_head(target_track_id, expected_target_revision)?;
+        let source_track_id = TrackId::new(source_track_id);
+        let eligible = self
+            .repository
+            .creative_timeline_candidates(target_track_id)?
+            .iter()
+            .any(|candidate| candidate.track_id == source_track_id && candidate.likely_version);
+        if !eligible {
+            return Err(LibraryWorkerError::CreativeTimelineSourceUnavailable);
+        }
+        self.repository.resolve_track_version_candidate(
+            target_track_id,
+            source_track_id,
+            expected_target_revision,
+            "kept-separate",
+            None,
+        )?;
         Ok(())
     }
 
@@ -3065,7 +3129,8 @@ impl LibraryWorker {
             request,
             self.sort,
         )?
-        .with_workflow_filter(self.workflow_filter);
+        .with_workflow_filter(self.workflow_filter)
+        .with_workflow_step_id(self.workflow_step_id.clone());
         let page = self.repository.query_tracks(&query)?;
         let workflow_states = self.repository.track_workflow_states(
             &page
@@ -3075,6 +3140,7 @@ impl LibraryWorker {
                 .collect::<Vec<_>>(),
         )?;
         let workflow_summary = self.repository.track_workflow_summary()?;
+        let workflow_catalog = self.repository.track_workflow_catalog()?;
         let device_source_relations = self.repository.device_track_source_relations(
             &page
                 .tracks()
@@ -3263,9 +3329,28 @@ impl LibraryWorker {
             "collectionTotal": collection_total,
             "workflow": {
                 "changedAfterUsbSync": workflow_summary.changed_after_usb_sync,
+                "versionCandidates": workflow_summary.version_candidates,
                 "notStarted": workflow_summary.not_started,
                 "inProgress": workflow_summary.in_progress,
                 "readyForShow": workflow_summary.ready_for_show,
+                "catalogRevision": workflow_summary.catalog_revision,
+                "stepCounts": workflow_summary.step_counts,
+            },
+            "workflowCatalog": {
+                "revision": workflow_catalog.revision(),
+                "steps": workflow_catalog.steps().iter().map(|step| json!({
+                    "id": step.id(),
+                    "displayName": step.display_name(),
+                    "icon": step.icon(),
+                    "colorRgb": step.color_rgb(),
+                    "sortOrder": step.sort_order(),
+                    "archived": step.archived(),
+                    "rules": step.rules().iter().map(|rule| json!({
+                        "field": rule.field().as_str(),
+                        "operator": rule.operator().as_str(),
+                        "value": rule.value(),
+                    })).collect::<Vec<_>>(),
+                })).collect::<Vec<_>>(),
             },
             "query": {
                 "search": self.search,
@@ -3275,6 +3360,7 @@ impl LibraryWorker {
                 "sortBy": library_sort_field_name(self.sort.field()),
                 "sortDirection": library_sort_direction_name(self.sort.direction()),
                 "workflowFilter": self.workflow_filter.map(TrackWorkflowFilter::as_str),
+                "workflowStepId": self.workflow_step_id,
             },
             "playlists": playlist_page.playlists().iter().map(|playlist| json!({
                 "id": playlist.id().value(),
@@ -3638,6 +3724,11 @@ impl LibraryWorker {
                 "totalBeats": candidate.total_beats,
                 "exactBeatCompatibility": candidate.exact_beat_compatibility,
                 "likelyVersion": candidate.likely_version,
+                "timelineRevision": candidate.timeline_revision,
+                "bpmMilli": candidate.bpm_milli,
+                "durationMillis": candidate.duration_millis,
+                "bpmDeltaMilli": candidate.bpm_delta_milli,
+                "durationDeltaMillis": candidate.duration_delta_millis,
             })).collect::<Vec<_>>(),
         }))
     }
@@ -4003,6 +4094,7 @@ fn track_json_with_device_sources(
 fn workflow_json(workflow: &TrackWorkflowState) -> Value {
     json!({
         "preparationStatus": workflow.preparation_status().as_str(),
+        "stepId": workflow.step_id(),
         "statusRevision": workflow.status_revision(),
         "effectiveReady": workflow.is_effectively_ready(),
         "attention": workflow.attention().map(|attention| json!({
@@ -5052,9 +5144,9 @@ mod tests {
     use serde_json::json;
 
     use super::{
-        AutoloopCatalogMutation, DeviceInspection, DeviceReviewComparison, LibraryWorker,
-        LibraryWorkerError, PhraseRoleCatalogMutation, canonical_beat_grid, canonical_phrases,
-        deck_waveform_preview_points, device_audio_uri, device_metadata_matches,
+        AutoloopCatalogMutation, DeviceInspection, DeviceReviewComparison, LibraryQueryUpdate,
+        LibraryWorker, LibraryWorkerError, PhraseRoleCatalogMutation, canonical_beat_grid,
+        canonical_phrases, deck_waveform_preview_points, device_audio_uri, device_metadata_matches,
         device_track_matches, first_available_audio_uri, is_kept_active_revision,
         kept_active_track_is_current,
     };
@@ -5317,14 +5409,15 @@ mod tests {
     fn collection_total_is_independent_from_the_active_playlist()
     -> Result<(), Box<dyn std::error::Error>> {
         let mut worker = LibraryWorker::demo()?;
-        worker.query(
-            String::new(),
-            Some(2),
-            None,
-            0,
-            50,
-            LibraryTrackSort::default(),
-        );
+        worker.query(LibraryQueryUpdate {
+            search: String::new(),
+            playlist_id: Some(2),
+            workflow_filter: None,
+            workflow_step_id: None,
+            offset: 0,
+            limit: 50,
+            sort: LibraryTrackSort::default(),
+        });
 
         let snapshot = worker.snapshot_json()?;
 
@@ -6056,14 +6149,15 @@ mod tests {
             let afterglow_id = track_id("afterglow-drive")?;
             let northern_id = track_id("northern-pulse")?;
 
-            worker.query(
-                "Horizon Lines".to_owned(),
-                None,
-                None,
-                0,
-                50,
-                LibraryTrackSort::default(),
-            );
+            worker.query(LibraryQueryUpdate {
+                search: "Horizon Lines".to_owned(),
+                playlist_id: None,
+                workflow_filter: None,
+                workflow_step_id: None,
+                offset: 0,
+                limit: 50,
+                sort: LibraryTrackSort::default(),
+            });
             let browsed = worker.snapshot_json()?;
             assert_eq!(browsed["page"]["total"], 1);
             assert_eq!(browsed["page"]["tracks"][0]["id"], horizon_id);

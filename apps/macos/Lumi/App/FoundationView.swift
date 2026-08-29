@@ -260,12 +260,17 @@ struct FoundationView: View {
                         keyNotation: $preferences.keyNotation,
                         lightingTimingOffsetMillis: $preferences.lightingTimingOffsetMillis,
                         feedback: engineStatus.phraseRoleFeedback,
+                        workflowCatalog: engineStatus.libraryState.workflowCatalog,
+                        workflowFeedback: engineStatus.trackWorkflowFeedback,
                         dataManagement: engineStatus.libraryState.dataManagement,
                         dataOperation: engineStatus.dataManagementOperation,
                         backups: engineStatus.backupRecords,
                         canManageData: engineStatus.canManageData,
                         onMutation: { request in
                             Task { await engineStatus.mutatePhraseRoles(request) }
+                        },
+                        onWorkflowMutation: { request in
+                            Task { await engineStatus.mutateTrackWorkflow(request) }
                         },
                         onCreateBackup: {
                             Task { await engineStatus.createFullBackup() }

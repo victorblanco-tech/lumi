@@ -8,7 +8,8 @@ use lumi_library::{
     AutoloopVariantMove, LibraryTrackSort, LibraryTrackSortDirection, LibraryTrackSortField,
     PhraseAbsorption, PhraseConflictChoice, PhraseLoopStrategy, PhraseRoleId, PhraseRoleMove,
     ReconcileSide, ReconcileStrategy, ThemeSpecificVariant, TimelineEditCommand,
-    TrackPreparationStatus, TrackWorkflowFilter, VariantId,
+    TrackPreparationStatus, TrackWorkflowFilter, VariantId, WorkflowRule, WorkflowRuleField,
+    WorkflowRuleOperator, WorkflowStepDefinition,
 };
 use lumi_light_plans::LightPlanningPolicy;
 use lumi_midi_output::MidiAddress;
@@ -40,6 +41,7 @@ pub enum SessionCommand {
         search: String,
         playlist_id: Option<u64>,
         workflow_filter: Option<TrackWorkflowFilter>,
+        workflow_step_id: Option<String>,
         offset: u32,
         limit: u16,
         sort: LibraryTrackSort,
@@ -55,6 +57,15 @@ pub enum SessionCommand {
         track_id: u64,
         expected_revision: u64,
         status: TrackPreparationStatus,
+    },
+    AssignTrackWorkflowStep {
+        track_id: u64,
+        expected_revision: u64,
+        step_id: String,
+    },
+    ReplaceTrackWorkflowCatalog {
+        expected_revision: u64,
+        steps: Vec<WorkflowStepDefinition>,
     },
     ResolveTrackWorkflowAttention {
         track_id: u64,
@@ -140,6 +151,11 @@ pub enum SessionCommand {
         target_revision: u64,
     },
     ReuseLibraryTimeline {
+        source_track_id: u64,
+        target_track_id: u64,
+        expected_target_revision: u64,
+    },
+    KeepTrackVersionSeparate {
         source_track_id: u64,
         target_track_id: u64,
         expected_target_revision: u64,
@@ -272,6 +288,8 @@ impl SessionCommand {
             | Self::GetLibraryTrackWaveform { .. }
             | Self::CloseLibraryTrackEditor
             | Self::SetTrackPreparationStatus { .. }
+            | Self::AssignTrackWorkflowStep { .. }
+            | Self::ReplaceTrackWorkflowCatalog { .. }
             | Self::ResolveTrackWorkflowAttention { .. }
             | Self::PreviewDemoSourceRefresh
             | Self::PreviewRekordboxXmlSync { .. }
@@ -291,6 +309,7 @@ impl SessionCommand {
             | Self::RedoLibraryTimeline { .. }
             | Self::RestoreLibraryTimelineRevision { .. }
             | Self::ReuseLibraryTimeline { .. }
+            | Self::KeepTrackVersionSeparate { .. }
             | Self::MutatePhraseRoleCatalog { .. }
             | Self::MutateAutoloopCatalog { .. }
             | Self::ReplaceLightPlanningPolicy { .. }
@@ -331,6 +350,8 @@ impl SessionCommand {
                 | Self::SyncRekordboxDevice { .. }
                 | Self::ResolveRekordboxDeviceConflict { .. }
                 | Self::SetTrackPreparationStatus { .. }
+                | Self::AssignTrackWorkflowStep { .. }
+                | Self::ReplaceTrackWorkflowCatalog { .. }
                 | Self::ResolveTrackWorkflowAttention { .. }
                 | Self::ApplyLibraryReset { .. }
                 | Self::RestoreLibraryBackup { .. }
@@ -341,6 +362,7 @@ impl SessionCommand {
                 | Self::RedoLibraryTimeline { .. }
                 | Self::RestoreLibraryTimelineRevision { .. }
                 | Self::ReuseLibraryTimeline { .. }
+                | Self::KeepTrackVersionSeparate { .. }
                 | Self::MutatePhraseRoleCatalog { .. }
                 | Self::MutateAutoloopCatalog { .. }
                 | Self::ReplaceLightPlanningPolicy { .. }
@@ -364,6 +386,8 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
                 .map(TrackWorkflowFilter::try_from_str)
                 .transpose()
                 .map_err(|_| CommandDecodeError::InvalidField("workflowFilter"))?,
+            workflow_step_id: optional_string(&envelope.payload, "workflowStepId")
+                .map(str::to_owned),
             offset: u32::try_from(optional_unsigned(&envelope.payload, "offset")?.unwrap_or(0))
                 .map_err(|_| CommandDecodeError::InvalidField("offset"))?,
             limit: library_limit(optional_unsigned(&envelope.payload, "limit")?.unwrap_or(50))?,
@@ -378,11 +402,28 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
             status: TrackPreparationStatus::try_from_str(string(&envelope.payload, "status")?)
                 .map_err(|_| CommandDecodeError::InvalidField("status"))?,
         }),
+        "assignTrackWorkflowStep" => Ok(SessionCommand::AssignTrackWorkflowStep {
+            track_id: positive_unsigned(&envelope.payload, "trackId")?,
+            expected_revision: unsigned(&envelope.payload, "expectedRevision")?,
+            step_id: string(&envelope.payload, "stepId")?.to_owned(),
+        }),
+        "replaceTrackWorkflowCatalog" => Ok(SessionCommand::ReplaceTrackWorkflowCatalog {
+            expected_revision: unsigned(&envelope.payload, "expectedRevision")?,
+            steps: workflow_steps(&envelope.payload)?,
+        }),
         "resolveTrackWorkflowAttention" => Ok(SessionCommand::ResolveTrackWorkflowAttention {
             track_id: positive_unsigned(&envelope.payload, "trackId")?,
             expected_revision: positive_unsigned(&envelope.payload, "expectedRevision")?,
         }),
         "reuseLibraryTimeline" => Ok(SessionCommand::ReuseLibraryTimeline {
+            source_track_id: positive_unsigned(&envelope.payload, "sourceTrackId")?,
+            target_track_id: positive_unsigned(&envelope.payload, "targetTrackId")?,
+            expected_target_revision: positive_unsigned(
+                &envelope.payload,
+                "expectedTargetRevision",
+            )?,
+        }),
+        "keepTrackVersionSeparate" => Ok(SessionCommand::KeepTrackVersionSeparate {
             source_track_id: positive_unsigned(&envelope.payload, "sourceTrackId")?,
             target_track_id: positive_unsigned(&envelope.payload, "targetTrackId")?,
             expected_target_revision: positive_unsigned(
@@ -1052,6 +1093,56 @@ fn optional_boolean(
         .transpose()
 }
 
+fn workflow_steps(
+    payload: &serde_json::Map<String, Value>,
+) -> Result<Vec<WorkflowStepDefinition>, CommandDecodeError> {
+    let values = payload
+        .get("steps")
+        .and_then(Value::as_array)
+        .filter(|values| (3..=12).contains(&values.len()))
+        .ok_or(CommandDecodeError::InvalidField("steps"))?;
+    values
+        .iter()
+        .map(|value| {
+            let step = value
+                .as_object()
+                .ok_or(CommandDecodeError::InvalidField("steps"))?;
+            let rules = step
+                .get("rules")
+                .and_then(Value::as_array)
+                .filter(|rules| (1..=8).contains(&rules.len()))
+                .ok_or(CommandDecodeError::InvalidField("rules"))?
+                .iter()
+                .map(|value| {
+                    let rule = value
+                        .as_object()
+                        .ok_or(CommandDecodeError::InvalidField("rules"))?;
+                    WorkflowRule::try_new(
+                        WorkflowRuleField::try_from_str(string(rule, "field")?)
+                            .map_err(|_| CommandDecodeError::InvalidField("field"))?,
+                        WorkflowRuleOperator::try_from_str(string(rule, "operator")?)
+                            .map_err(|_| CommandDecodeError::InvalidField("operator"))?,
+                        string(rule, "value")?,
+                    )
+                    .map_err(|_| CommandDecodeError::InvalidField("rules"))
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            WorkflowStepDefinition::try_new(
+                string(step, "id")?,
+                string(step, "displayName")?,
+                string(step, "icon")?,
+                u32::try_from(unsigned(step, "colorRgb")?)
+                    .map_err(|_| CommandDecodeError::InvalidField("colorRgb"))?,
+                u16::try_from(positive_unsigned(step, "sortOrder")?)
+                    .map_err(|_| CommandDecodeError::InvalidField("sortOrder"))?,
+                boolean(step, "archived")?,
+                rules,
+            )
+            .map_err(|_| CommandDecodeError::InvalidField("steps"))
+        })
+        .collect()
+}
+
 fn string_array(
     payload: &serde_json::Map<String, Value>,
     field: &'static str,
@@ -1244,6 +1335,7 @@ mod tests {
                 search: String::new(),
                 playlist_id: None,
                 workflow_filter: Some(TrackWorkflowFilter::ChangedAfterUsbSync),
+                workflow_step_id: None,
                 offset: 0,
                 limit: 50,
                 sort: LibraryTrackSort::new(
@@ -1280,6 +1372,36 @@ mod tests {
                 expected_revision: 4,
             })
         );
+
+        let assignment = command_envelope(serde_json::json!({
+            "kind": "assignTrackWorkflowStep",
+            "trackId": 90,
+            "expectedRevision": 3,
+            "stepId": "quality-check",
+        }));
+        assert_eq!(
+            decode_command(&assignment),
+            Ok(SessionCommand::AssignTrackWorkflowStep {
+                track_id: 90,
+                expected_revision: 3,
+                step_id: "quality-check".to_owned(),
+            })
+        );
+
+        let catalog = command_envelope(serde_json::json!({
+            "kind": "replaceTrackWorkflowCatalog",
+            "expectedRevision": 1,
+            "steps": [
+                {"id":"not-started","displayName":"Not Started","icon":"circle","colorRgb":8953773,"sortOrder":1,"archived":false,"rules":[{"field":"preparationStatus","operator":"is","value":"not-started"}]},
+                {"id":"in-progress","displayName":"In Progress","icon":"pencil","colorRgb":16753920,"sortOrder":2,"archived":false,"rules":[{"field":"preparationStatus","operator":"is","value":"in-progress"}]},
+                {"id":"ready-for-show","displayName":"Ready for Show","icon":"checkmark","colorRgb":3145817,"sortOrder":3,"archived":false,"rules":[{"field":"preparationStatus","operator":"is","value":"ready-for-show"}]}
+            ]
+        }));
+        assert!(matches!(
+            decode_command(&catalog),
+            Ok(SessionCommand::ReplaceTrackWorkflowCatalog { expected_revision: 1, steps })
+                if steps.len() == 3
+        ));
     }
 
     #[test]

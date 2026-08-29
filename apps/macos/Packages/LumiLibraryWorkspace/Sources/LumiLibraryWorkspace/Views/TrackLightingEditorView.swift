@@ -6,6 +6,7 @@ public struct TrackLightingEditorView: View {
     private let analysis: TrackEditorAnalysis
     private let autoloopCatalog: AutoloopCatalogState?
     private let phraseColorPalette: LumiPhraseColorPalette
+    private let workflowCatalog: TrackWorkflowCatalog
     private let keyNotation: KeyNotationPreference
     private let feedback: String?
     private let rendersInteractiveControls: Bool
@@ -45,6 +46,7 @@ public struct TrackLightingEditorView: View {
         analysis: TrackEditorAnalysis,
         autoloopCatalog: AutoloopCatalogState? = nil,
         phraseColorPalette: LumiPhraseColorPalette = .defaults,
+        workflowCatalog: TrackWorkflowCatalog = .defaults,
         keyNotation: KeyNotationPreference,
         feedback: String? = nil,
         rendersInteractiveControls: Bool = true,
@@ -59,6 +61,7 @@ public struct TrackLightingEditorView: View {
         self.analysis = analysis
         self.autoloopCatalog = autoloopCatalog
         self.phraseColorPalette = phraseColorPalette
+        self.workflowCatalog = workflowCatalog
         self.keyNotation = keyNotation
         self.feedback = feedback
         self.rendersInteractiveControls = rendersInteractiveControls
@@ -98,6 +101,7 @@ public struct TrackLightingEditorView: View {
             transport
             editToolbar
             workflowAttentionPanel
+            versionSuccessorPanel
             sourceReconciliationPanel
             HStack(spacing: 12) {
                 VStack(spacing: 10) {
@@ -197,32 +201,32 @@ public struct TrackLightingEditorView: View {
             metric("BAR · BEAT", barBeatLabel)
             if rendersInteractiveControls {
                 Menu {
-                    ForEach(TrackPreparationStatus.allCases) { status in
+                    ForEach(availableWorkflowSteps) { step in
                         Button {
-                            guard status != analysis.track.workflow.preparationStatus else { return }
+                            guard step.id != analysis.track.workflow.stepID else { return }
                             onTrackWorkflowMutation(
-                                .setPreparationStatus(
+                                .assignStep(
                                     trackID: analysis.track.id,
                                     expectedRevision: analysis.track.workflow.statusRevision,
-                                    status: status
+                                    stepID: step.id
                                 )
                             )
                         } label: {
                             Label {
-                                Text(workflowStatusName(status))
+                                Text(step.displayName)
                             } icon: {
                                 Image(
-                                    systemName: status == analysis.track.workflow.preparationStatus
+                                    systemName: step.id == analysis.track.workflow.stepID
                                         ? "checkmark.circle.fill"
-                                        : workflowStatusIcon(status)
+                                        : step.icon
                                 )
                             }
                         }
                     }
                 } label: {
                     Label(
-                        workflowStatusName(analysis.track.workflow.preparationStatus),
-                        systemImage: workflowStatusIcon(analysis.track.workflow.preparationStatus)
+                        selectedWorkflowStep.displayName,
+                        systemImage: selectedWorkflowStep.icon
                     )
                     .foregroundStyle(workflowStatusColor)
                 }
@@ -276,6 +280,24 @@ public struct TrackLightingEditorView: View {
         .background(panel)
     }
 
+    private var availableWorkflowSteps: [WorkflowStepDefinition] {
+        let steps = workflowCatalog.steps.filter { !$0.archived }
+        return steps.isEmpty ? fallbackWorkflowSteps : steps
+    }
+
+    private var selectedWorkflowStep: WorkflowStepDefinition {
+        availableWorkflowSteps.first { $0.id == analysis.track.workflow.stepID }
+            ?? availableWorkflowSteps[0]
+    }
+
+    private var fallbackWorkflowSteps: [WorkflowStepDefinition] {
+        [
+            WorkflowStepDefinition(id: "not-started", displayName: "Not Started", icon: "circle", colorRGB: 0x8A949F, sortOrder: 1, archived: false, rules: []),
+            WorkflowStepDefinition(id: "in-progress", displayName: "In Progress", icon: "circle.lefthalf.filled", colorRGB: 0xFF9F0A, sortOrder: 2, archived: false, rules: []),
+            WorkflowStepDefinition(id: "ready-for-show", displayName: "Ready for Show", icon: "checkmark.circle.fill", colorRGB: 0x30D158, sortOrder: 3, archived: false, rules: []),
+        ]
+    }
+
     @ViewBuilder
     private var workflowAttentionPanel: some View {
         if let attention = analysis.track.workflow.attention {
@@ -318,6 +340,53 @@ public struct TrackLightingEditorView: View {
             .background(LumiColor.warning.opacity(0.10))
             .accessibilityIdentifier("lumi.trackEditor.workflowAttention")
         }
+    }
+
+    @ViewBuilder
+    private var versionSuccessorPanel: some View {
+        if let candidate = analysis.creativeReuseCandidates.first(where: \.likelyVersion) {
+            HStack(alignment: .center, spacing: LumiSpacing.medium) {
+                Image(systemName: "arrow.triangle.2.circlepath.circle.fill")
+                    .foregroundStyle(LumiColor.accent)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Likely newer track version")
+                        .font(LumiTypography.metadata.weight(.semibold))
+                    Text("\(candidate.title) · R\(candidate.timelineRevision) · \(candidate.totalBeats) beats")
+                        .font(LumiTypography.caption)
+                    Text(versionComparison(candidate))
+                        .font(LumiTypography.technical)
+                        .foregroundStyle(candidate.exactBeatCompatibility ? LumiColor.success : LumiColor.warning)
+                }
+                Spacer()
+                Button("Keep Separate") {
+                    onTrackWorkflowMutation(
+                        .keepVersionSeparate(
+                            sourceTrackID: candidate.trackID,
+                            targetTrackID: analysis.track.id,
+                            expectedTargetRevision: analysis.timeline.revision
+                        )
+                    )
+                }
+                .buttonStyle(.bordered)
+                Button("Reuse Phrases") { pendingCreativeReuse = candidate }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(!candidate.exactBeatCompatibility)
+                    .help(candidate.exactBeatCompatibility
+                          ? "Copy the exact beat-compatible Lumi phrases and loop choices as a new revision."
+                          : "Automatic reuse is blocked because the total beat count differs.")
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 10)
+            .background(LumiColor.surfaceElevated)
+            .accessibilityIdentifier("lumi.trackEditor.versionSuccessor")
+        }
+    }
+
+    private func versionComparison(_ candidate: CreativeTimelineCandidate) -> String {
+        let beat = candidate.exactBeatCompatibility ? "Exact beat match" : "Beat count differs"
+        let bpm = String(format: "%+.3f BPM", Double(candidate.bpmDeltaMilli) / 1_000)
+        let duration = String(format: "%+.2f s", Double(candidate.durationDeltaMillis) / 1_000)
+        return "\(beat) · \(bpm) · \(duration)"
     }
 
     private var workflowStatusColor: Color {

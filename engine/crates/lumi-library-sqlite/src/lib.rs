@@ -19,17 +19,20 @@ use lumi_library::{
     SourceRevision, SourceTrackId, StoredTrack, TextIdentifierError, ThemeSpecificVariant,
     TimelineRevision, TimelineRevisionOrigin, TimelineRevisionPage, TimelineRevisionReason,
     TimelineRevisionSummary, TrackAttentionReason, TrackColor, TrackPage, TrackPageRequest,
-    TrackPreparationStatus, TrackSummary, TrackWorkflowAttention, TrackWorkflowFilter,
-    TrackWorkflowState, TrackWorkflowSummary, VariantId, WaveformPoint, normalize_source_label,
+    TrackPreparationStatus, TrackSummary, TrackWorkflowAttention, TrackWorkflowCatalog,
+    TrackWorkflowFilter, TrackWorkflowState, TrackWorkflowSummary, VariantId, WaveformPoint,
+    WorkflowRule, WorkflowRuleField, WorkflowRuleOperator, WorkflowStepDefinition,
+    normalize_source_label,
 };
 use lumi_light_plans::LightPlanningPolicy;
 use rusqlite::backup::Backup;
+use rusqlite::functions::FunctionFlags;
 use rusqlite::{
     Connection, OpenFlags, OptionalExtension, Row, Transaction, params, params_from_iter,
 };
 use thiserror::Error;
 
-const SCHEMA_VERSION: u32 = 16;
+const SCHEMA_VERSION: u32 = 17;
 const DEFAULTS_VERSION_KEY: &str = "phrase-role-defaults-version";
 const CATALOG_REVISION_KEY: &str = "phrase-role-catalog-revision";
 const AUTOLOOP_DEFAULTS_VERSION_KEY: &str = "autoloop-catalog-defaults-version";
@@ -256,6 +259,11 @@ pub struct CreativeTimelineCandidate {
     pub total_beats: u32,
     pub exact_beat_compatibility: bool,
     pub likely_version: bool,
+    pub timeline_revision: u64,
+    pub bpm_milli: u32,
+    pub duration_millis: u64,
+    pub bpm_delta_milli: i64,
+    pub duration_delta_millis: i64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -468,7 +476,7 @@ impl SqliteLibraryRepository {
             .map(|track_id| to_i64(track_id.value()))
             .collect::<Result<Vec<_>, _>>()?;
         let status_sql = format!(
-            "SELECT track_id, status, revision FROM track_workflow_status
+            "SELECT track_id, step_id, revision FROM track_workflow_assignments
               WHERE track_id IN ({placeholders})"
         );
         let mut statement = self.connection.prepare(&status_sql)?;
@@ -481,12 +489,17 @@ impl SqliteLibraryRepository {
         })?;
         let mut persisted = BTreeMap::new();
         for row in status_rows {
-            let (track_id, status, revision) = row?;
+            let (track_id, step_id, revision) = row?;
+            let legacy_status = match step_id.as_str() {
+                "not-started" => TrackPreparationStatus::NotStarted,
+                "ready-for-show" => TrackPreparationStatus::ReadyForShow,
+                _ => TrackPreparationStatus::InProgress,
+            };
             persisted.insert(
                 TrackId::new(from_positive_i64(track_id, "workflow track id")?),
                 (
-                    TrackPreparationStatus::try_from_str(&status)
-                        .map_err(|error| SqliteLibraryError::CorruptData(error.to_string()))?,
+                    legacy_status,
+                    step_id,
                     from_positive_i64(revision, "workflow status revision")?,
                 ),
             );
@@ -558,11 +571,18 @@ impl SqliteLibraryRepository {
             );
         }
         for (track_id, state) in &mut states {
-            let (status, revision) = persisted
-                .remove(track_id)
-                .unwrap_or((TrackPreparationStatus::NotStarted, 0));
-            *state =
-                TrackWorkflowState::new(*track_id, status, revision, attentions.remove(track_id));
+            let (status, step_id, revision) = persisted.remove(track_id).unwrap_or((
+                TrackPreparationStatus::NotStarted,
+                "not-started".to_owned(),
+                0,
+            ));
+            *state = TrackWorkflowState::new(
+                *track_id,
+                status,
+                step_id,
+                revision,
+                attentions.remove(track_id),
+            );
         }
         Ok(states)
     }
@@ -571,22 +591,240 @@ impl SqliteLibraryRepository {
         let values = self.connection.query_row(
             "SELECT
                 (SELECT COUNT(*) FROM track_workflow_attention WHERE resolved_at IS NULL),
-                COALESCE(SUM(CASE WHEN COALESCE(s.status, 'not-started') = 'not-started' THEN 1 ELSE 0 END), 0),
-                COALESCE(SUM(CASE WHEN s.status = 'in-progress' THEN 1 ELSE 0 END), 0),
-                COALESCE(SUM(CASE WHEN s.status = 'ready-for-show' AND NOT EXISTS (
+                COALESCE(SUM(CASE WHEN COALESCE(s.step_id, 'not-started') = 'not-started' THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN s.step_id = 'in-progress' THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN s.step_id = 'ready-for-show' AND NOT EXISTS (
                     SELECT 1 FROM track_workflow_attention a
                      WHERE a.track_id = t.id AND a.resolved_at IS NULL
                 ) THEN 1 ELSE 0 END), 0)
-             FROM tracks t LEFT JOIN track_workflow_status s ON s.track_id = t.id",
+             FROM tracks t LEFT JOIN track_workflow_assignments s ON s.track_id = t.id",
             [],
             |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?, row.get::<_, i64>(3)?)),
         )?;
+        let catalog = self.track_workflow_catalog()?;
+        let mut step_counts = BTreeMap::new();
+        for step in catalog.steps().iter().filter(|step| !step.archived()) {
+            step_counts.insert(step.id().to_owned(), self.workflow_step_count(step)?);
+        }
         Ok(TrackWorkflowSummary {
             changed_after_usb_sync: from_nonnegative_i64(values.0, "changed workflow count")?,
+            version_candidates: self.pending_version_candidate_count()?,
             not_started: from_nonnegative_i64(values.1, "not-started workflow count")?,
             in_progress: from_nonnegative_i64(values.2, "in-progress workflow count")?,
             ready_for_show: from_nonnegative_i64(values.3, "ready workflow count")?,
+            catalog_revision: catalog.revision(),
+            step_counts,
         })
+    }
+
+    pub fn track_workflow_catalog(&self) -> Result<TrackWorkflowCatalog, SqliteLibraryError> {
+        let revision = self.connection.query_row(
+            "SELECT revision FROM workflow_catalog WHERE singleton_id = 1",
+            [],
+            |row| row.get::<_, i64>(0),
+        )?;
+        let mut rules_by_step = BTreeMap::<String, Vec<WorkflowRule>>::new();
+        let mut rule_statement = self.connection.prepare(
+            "SELECT step_id, field, operator, value
+               FROM workflow_step_rules ORDER BY step_id, rule_index",
+        )?;
+        let rule_rows = rule_statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?;
+        for row in rule_rows {
+            let (step_id, field, operator, value) = row?;
+            rules_by_step.entry(step_id).or_default().push(
+                WorkflowRule::try_new(
+                    WorkflowRuleField::try_from_str(&field)
+                        .map_err(|error| SqliteLibraryError::CorruptData(error.to_string()))?,
+                    WorkflowRuleOperator::try_from_str(&operator)
+                        .map_err(|error| SqliteLibraryError::CorruptData(error.to_string()))?,
+                    value,
+                )
+                .map_err(|error| SqliteLibraryError::CorruptData(error.to_string()))?,
+            );
+        }
+        drop(rule_statement);
+        let mut statement = self.connection.prepare(
+            "SELECT step_id, display_name, icon, color_rgb, sort_order, archived
+               FROM workflow_steps ORDER BY sort_order, step_id",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, i64>(3)?,
+                row.get::<_, i64>(4)?,
+                row.get::<_, bool>(5)?,
+            ))
+        })?;
+        let mut steps = Vec::new();
+        for row in rows {
+            let (id, name, icon, color, order, archived) = row?;
+            let rules = rules_by_step.remove(&id).unwrap_or_default();
+            steps.push(
+                WorkflowStepDefinition::try_new(
+                    id,
+                    name,
+                    icon,
+                    i64_to_u32(color, "workflow step color")?,
+                    u16::try_from(order).map_err(|_| SqliteLibraryError::ArithmeticOverflow)?,
+                    archived,
+                    rules,
+                )
+                .map_err(|error| SqliteLibraryError::CorruptData(error.to_string()))?,
+            );
+        }
+        TrackWorkflowCatalog::try_new(
+            from_positive_i64(revision, "workflow catalog revision")?,
+            steps,
+        )
+        .map_err(|error| SqliteLibraryError::CorruptData(error.to_string()))
+    }
+
+    pub fn replace_track_workflow_catalog(
+        &mut self,
+        expected_revision: u64,
+        steps: Vec<WorkflowStepDefinition>,
+    ) -> Result<TrackWorkflowCatalog, SqliteLibraryError> {
+        let next_revision = expected_revision
+            .checked_add(1)
+            .ok_or(SqliteLibraryError::ArithmeticOverflow)?;
+        let catalog = TrackWorkflowCatalog::try_new(next_revision, steps)
+            .map_err(|error| SqliteLibraryError::InvalidWorkflowCatalog(error.to_string()))?;
+        self.validate_workflow_catalog_overlap(&catalog)?;
+        let transaction = self.connection.transaction()?;
+        let actual = transaction.query_row(
+            "SELECT revision FROM workflow_catalog WHERE singleton_id = 1",
+            [],
+            |row| row.get::<_, i64>(0),
+        )?;
+        let actual = from_positive_i64(actual, "workflow catalog revision")?;
+        if actual != expected_revision {
+            return Err(SqliteLibraryError::WorkflowCatalogRevisionConflict {
+                expected: expected_revision,
+                actual,
+            });
+        }
+        let retained = catalog
+            .steps()
+            .iter()
+            .map(WorkflowStepDefinition::id)
+            .collect::<BTreeSet<_>>();
+        let mut existing_statement = transaction.prepare("SELECT step_id FROM workflow_steps")?;
+        let existing_rows = existing_statement.query_map([], |row| row.get::<_, String>(0))?;
+        let mut removed = Vec::new();
+        for row in existing_rows {
+            let id = row?;
+            if !retained.contains(id.as_str()) {
+                removed.push(id);
+            }
+        }
+        drop(existing_statement);
+        for id in removed {
+            transaction.execute(
+                "UPDATE track_workflow_assignments SET step_id = 'in-progress', revision = revision + 1,
+                        updated_at = CURRENT_TIMESTAMP WHERE step_id = ?1",
+                [&id],
+            )?;
+            transaction.execute("DELETE FROM workflow_steps WHERE step_id = ?1", [&id])?;
+        }
+        for step in catalog.steps() {
+            transaction.execute(
+                "INSERT INTO workflow_steps(step_id, display_name, icon, color_rgb, sort_order, archived)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                 ON CONFLICT(step_id) DO UPDATE SET display_name=excluded.display_name,
+                   icon=excluded.icon, color_rgb=excluded.color_rgb,
+                   sort_order=excluded.sort_order, archived=excluded.archived",
+                params![step.id(), step.display_name(), step.icon(), i64::from(step.color_rgb()),
+                    i64::from(step.sort_order()), step.archived()],
+            )?;
+            transaction.execute(
+                "DELETE FROM workflow_step_rules WHERE step_id = ?1",
+                [step.id()],
+            )?;
+            for (index, rule) in step.rules().iter().enumerate() {
+                transaction.execute(
+                    "INSERT INTO workflow_step_rules(step_id, rule_index, field, operator, value)
+                     VALUES (?1, ?2, ?3, ?4, ?5)",
+                    params![
+                        step.id(),
+                        usize_to_i64(index)?,
+                        rule.field().as_str(),
+                        rule.operator().as_str(),
+                        rule.value()
+                    ],
+                )?;
+            }
+        }
+        transaction.execute(
+            "UPDATE workflow_catalog SET revision = ?1, updated_at = CURRENT_TIMESTAMP
+              WHERE singleton_id = 1",
+            [to_i64(next_revision)?],
+        )?;
+        transaction.commit()?;
+        self.track_workflow_catalog()
+    }
+
+    fn validate_workflow_catalog_overlap(
+        &self,
+        catalog: &TrackWorkflowCatalog,
+    ) -> Result<(), SqliteLibraryError> {
+        let active = catalog
+            .steps()
+            .iter()
+            .filter(|step| !step.archived())
+            .collect::<Vec<_>>();
+        for (index, left) in active.iter().enumerate() {
+            let left_sql = workflow_step_predicate_sql(left);
+            for right in active.iter().skip(index + 1) {
+                let right_sql = workflow_step_predicate_sql(right);
+                let sql =
+                    format!("SELECT COUNT(*) FROM tracks t WHERE ({left_sql}) AND ({right_sql})");
+                let overlap = self
+                    .connection
+                    .query_row(&sql, [], |row| row.get::<_, i64>(0))?;
+                if overlap > 0 {
+                    return Err(SqliteLibraryError::OverlappingWorkflowSteps {
+                        first: left.id().to_owned(),
+                        second: right.id().to_owned(),
+                        track_count: from_nonnegative_i64(overlap, "workflow overlap")?,
+                    });
+                }
+            }
+        }
+        Ok(())
+    }
+
+    fn workflow_step_count(
+        &self,
+        step: &WorkflowStepDefinition,
+    ) -> Result<u64, SqliteLibraryError> {
+        let predicate = workflow_step_predicate_sql(step);
+        let count = self.connection.query_row(
+            &format!("SELECT COUNT(*) FROM tracks t WHERE {predicate}"),
+            [],
+            |row| row.get::<_, i64>(0),
+        )?;
+        from_nonnegative_i64(count, "workflow step count")
+    }
+
+    fn pending_version_candidate_count(&self) -> Result<u64, SqliteLibraryError> {
+        let count = self.connection.query_row(
+            &format!(
+                "SELECT COUNT(*) FROM tracks t WHERE {}",
+                version_candidate_predicate_sql()
+            ),
+            [],
+            |row| row.get::<_, i64>(0),
+        )?;
+        from_nonnegative_i64(count, "version candidate count")
     }
 
     pub fn set_track_preparation_status(
@@ -594,6 +832,15 @@ impl SqliteLibraryRepository {
         track_id: TrackId,
         expected_revision: u64,
         status: TrackPreparationStatus,
+    ) -> Result<TrackWorkflowState, SqliteLibraryError> {
+        self.assign_track_workflow_step(track_id, expected_revision, status.as_str())
+    }
+
+    pub fn assign_track_workflow_step(
+        &mut self,
+        track_id: TrackId,
+        expected_revision: u64,
+        step_id: &str,
     ) -> Result<TrackWorkflowState, SqliteLibraryError> {
         let transaction = self.connection.transaction()?;
         let track_id_value = to_i64(track_id.value())?;
@@ -607,7 +854,7 @@ impl SqliteLibraryRepository {
         }
         let actual = transaction
             .query_row(
-                "SELECT revision FROM track_workflow_status WHERE track_id = ?1",
+                "SELECT revision FROM track_workflow_assignments WHERE track_id = ?1",
                 [track_id_value],
                 |row| row.get::<_, i64>(0),
             )
@@ -621,17 +868,25 @@ impl SqliteLibraryRepository {
                 actual,
             });
         }
+        let step_exists = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM workflow_steps WHERE step_id = ?1 AND archived = 0)",
+            [step_id],
+            |row| row.get::<_, bool>(0),
+        )?;
+        if !step_exists {
+            return Err(SqliteLibraryError::UnknownWorkflowStep(step_id.to_owned()));
+        }
         let revision = expected_revision
             .checked_add(1)
             .ok_or(SqliteLibraryError::ArithmeticOverflow)?;
         transaction.execute(
-            "INSERT INTO track_workflow_status(track_id, status, revision)
+            "INSERT INTO track_workflow_assignments(track_id, step_id, revision)
              VALUES (?1, ?2, ?3)
              ON CONFLICT(track_id) DO UPDATE SET
-               status = excluded.status,
+               step_id = excluded.step_id,
                revision = excluded.revision,
                updated_at = CURRENT_TIMESTAMP",
-            params![track_id_value, status.as_str(), to_i64(revision)?],
+            params![track_id_value, step_id, to_i64(revision)?],
         )?;
         transaction.commit()?;
         self.track_workflow_states(&[track_id])?
@@ -1948,8 +2203,15 @@ impl SqliteLibraryRepository {
         &self,
         target_track_id: TrackId,
     ) -> Result<Vec<CreativeTimelineCandidate>, SqliteLibraryError> {
-        let (target_title, target_artist, target_total_beats) = self.connection.query_row(
-            "SELECT t.title, t.artist, r.total_beats
+        let (
+            target_title,
+            target_artist,
+            target_total_beats,
+            target_bpm,
+            target_duration,
+            target_revision,
+        ) = self.connection.query_row(
+            "SELECT t.title, t.artist, r.total_beats, t.bpm_milli, t.duration_millis, h.revision
                FROM tracks t
                JOIN timeline_heads h ON h.track_id = t.id
                JOIN timeline_revisions r
@@ -1961,13 +2223,17 @@ impl SqliteLibraryRepository {
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, i64>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
                 ))
             },
         )?;
         let target_family = creative_version_family(&target_title);
         let target_artist = target_artist.trim().to_lowercase();
         let mut statement = self.connection.prepare(
-            "SELECT t.id, t.title, t.artist, COUNT(p.phrase_index), r.total_beats
+            "SELECT t.id, t.title, t.artist, COUNT(p.phrase_index), r.total_beats,
+                    h.revision, t.bpm_milli, t.duration_millis
                FROM tracks t
                JOIN timeline_heads h ON h.track_id = t.id
                JOIN timeline_revisions r
@@ -1976,21 +2242,43 @@ impl SqliteLibraryRepository {
                  ON p.track_id = h.track_id AND p.revision = h.revision
               WHERE t.id <> ?1
                 AND r.origin IN ('user-edit', 'revision-restore')
-              GROUP BY t.id, t.title, t.artist, r.total_beats
+                AND NOT EXISTS (
+                    SELECT 1 FROM track_version_reviews vr
+                     WHERE vr.target_track_id = ?1 AND vr.source_track_id = t.id
+                       AND vr.state IN ('kept-separate', 'reused')
+                       AND vr.source_timeline_revision = h.revision
+                       AND vr.target_timeline_revision = ?2
+                )
+              GROUP BY t.id, t.title, t.artist, r.total_beats, h.revision, t.bpm_milli, t.duration_millis
               ORDER BY t.title COLLATE NOCASE, t.artist COLLATE NOCASE, t.id",
         )?;
-        let rows = statement.query_map([to_i64(target_track_id.value())?], |row| {
-            Ok((
-                row.get::<_, i64>(0)?,
-                row.get::<_, String>(1)?,
-                row.get::<_, String>(2)?,
-                row.get::<_, i64>(3)?,
-                row.get::<_, i64>(4)?,
-            ))
-        })?;
+        let rows = statement.query_map(
+            params![to_i64(target_track_id.value())?, target_revision],
+            |row| {
+                Ok((
+                    row.get::<_, i64>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                    row.get::<_, i64>(3)?,
+                    row.get::<_, i64>(4)?,
+                    row.get::<_, i64>(5)?,
+                    row.get::<_, i64>(6)?,
+                    row.get::<_, i64>(7)?,
+                ))
+            },
+        )?;
         let mut candidates = Vec::new();
         for row in rows {
-            let (track_id, title, artist, phrase_count, total_beats) = row?;
+            let (
+                track_id,
+                title,
+                artist,
+                phrase_count,
+                total_beats,
+                timeline_revision,
+                bpm,
+                duration,
+            ) = row?;
             let likely_version = creative_version_family(&title) == target_family
                 && artist.trim().to_lowercase() == target_artist;
             candidates.push(CreativeTimelineCandidate {
@@ -2001,11 +2289,95 @@ impl SqliteLibraryRepository {
                 total_beats: i64_to_u32(total_beats, "timeline total beats")?,
                 exact_beat_compatibility: total_beats == target_total_beats,
                 likely_version,
+                timeline_revision: from_positive_i64(timeline_revision, "timeline revision")?,
+                bpm_milli: i64_to_u32(bpm, "candidate BPM")?,
+                duration_millis: from_nonnegative_i64(duration, "candidate duration")?,
+                bpm_delta_milli: bpm.saturating_sub(target_bpm),
+                duration_delta_millis: duration.saturating_sub(target_duration),
             });
         }
         candidates.sort_by_key(|candidate| !candidate.likely_version);
         candidates.truncate(100);
         Ok(candidates)
+    }
+
+    pub fn resolve_track_version_candidate(
+        &mut self,
+        target_track_id: TrackId,
+        source_track_id: TrackId,
+        expected_target_revision: u64,
+        resolution: &str,
+        target_revision_after: Option<u64>,
+    ) -> Result<(), SqliteLibraryError> {
+        if !matches!(resolution, "kept-separate" | "reused") {
+            return Err(SqliteLibraryError::InvalidVersionResolution);
+        }
+        let target_revision: i64 = self.connection.query_row(
+            "SELECT revision FROM timeline_heads WHERE track_id=?1",
+            [to_i64(target_track_id.value())?],
+            |row| row.get(0),
+        )?;
+        let compare_revision = target_revision_after.unwrap_or(expected_target_revision);
+        if u64::try_from(target_revision).ok() != Some(compare_revision) {
+            return Err(SqliteLibraryError::RevisionConflict {
+                expected: TimelineRevision::try_new(expected_target_revision).ok(),
+                actual: u64::try_from(target_revision)
+                    .ok()
+                    .and_then(|value| TimelineRevision::try_new(value).ok()),
+            });
+        }
+        let source_revision: i64 = self.connection.query_row(
+            "SELECT revision FROM timeline_heads WHERE track_id=?1",
+            [to_i64(source_track_id.value())?],
+            |row| row.get(0),
+        )?;
+        let target_title: String = self.connection.query_row(
+            "SELECT title FROM tracks WHERE id=?1",
+            [to_i64(target_track_id.value())?],
+            |row| row.get(0),
+        )?;
+        let source_title: String = self.connection.query_row(
+            "SELECT title FROM tracks WHERE id=?1",
+            [to_i64(source_track_id.value())?],
+            |row| row.get(0),
+        )?;
+        let transaction = self.connection.transaction()?;
+        transaction.execute(
+            "INSERT INTO track_version_reviews(
+                target_track_id, source_track_id, revision, state,
+                source_timeline_revision, target_timeline_revision, resolved_at
+             ) VALUES (?1, ?2, 1, ?3, ?4, ?5, CURRENT_TIMESTAMP)
+             ON CONFLICT(target_track_id, source_track_id) DO UPDATE SET
+                revision=track_version_reviews.revision+1,
+                state=excluded.state,
+                source_timeline_revision=excluded.source_timeline_revision,
+                target_timeline_revision=excluded.target_timeline_revision,
+                resolved_at=CURRENT_TIMESTAMP",
+            params![
+                to_i64(target_track_id.value())?,
+                to_i64(source_track_id.value())?,
+                resolution,
+                source_revision,
+                target_revision,
+            ],
+        )?;
+        transaction.execute(
+            "INSERT INTO track_version_audit(
+                target_track_id, source_track_id, target_title, source_title, resolution,
+                target_revision_before, target_revision_after
+             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                to_i64(target_track_id.value())?,
+                to_i64(source_track_id.value())?,
+                target_title,
+                source_title,
+                resolution,
+                to_i64(expected_target_revision)?,
+                target_revision_after.map(to_i64).transpose()?,
+            ],
+        )?;
+        transaction.commit()?;
+        Ok(())
     }
 
     pub fn preview_library_reset(
@@ -2280,6 +2652,15 @@ impl SqliteLibraryRepository {
 
     fn from_connection(connection: Connection) -> Result<Self, SqliteLibraryError> {
         connection.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
+        connection.create_scalar_function(
+            "lumi_version_family",
+            1,
+            FunctionFlags::SQLITE_UTF8 | FunctionFlags::SQLITE_DETERMINISTIC,
+            |context| {
+                let title = context.get::<String>(0)?;
+                Ok(creative_version_family(&title))
+            },
+        )?;
         let mut repository = Self { connection };
         repository.migrate()?;
         Ok(repository)
@@ -3045,6 +3426,89 @@ impl SqliteLibraryRepository {
                 COMMIT;
                 ",
             )?;
+            current = 16;
+        }
+        if current == 16 {
+            let can_create_track_workflow =
+                self.table_exists("tracks")? && self.table_exists("track_workflow_status")?;
+            self.connection
+                .execute_batch(if can_create_track_workflow {
+                    "
+                BEGIN IMMEDIATE;
+                CREATE TABLE workflow_catalog (
+                    singleton_id INTEGER PRIMARY KEY CHECK(singleton_id = 1),
+                    revision INTEGER NOT NULL CHECK(revision > 0),
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                INSERT INTO workflow_catalog(singleton_id, revision) VALUES (1, 1);
+                CREATE TABLE workflow_steps (
+                    step_id TEXT PRIMARY KEY,
+                    display_name TEXT NOT NULL,
+                    icon TEXT NOT NULL,
+                    color_rgb INTEGER NOT NULL CHECK(color_rgb BETWEEN 0 AND 16777215),
+                    sort_order INTEGER NOT NULL UNIQUE CHECK(sort_order > 0),
+                    archived INTEGER NOT NULL DEFAULT 0 CHECK(archived IN (0, 1))
+                );
+                CREATE TABLE workflow_step_rules (
+                    step_id TEXT NOT NULL REFERENCES workflow_steps(step_id) ON DELETE CASCADE,
+                    rule_index INTEGER NOT NULL CHECK(rule_index >= 0),
+                    field TEXT NOT NULL,
+                    operator TEXT NOT NULL,
+                    value TEXT NOT NULL,
+                    PRIMARY KEY(step_id, rule_index)
+                );
+                INSERT INTO workflow_steps(step_id, display_name, icon, color_rgb, sort_order, archived)
+                VALUES ('not-started', 'Not Started', 'circle', 8953773, 1, 0),
+                       ('in-progress', 'In Progress', 'pencil.and.outline', 16753920, 2, 0),
+                       ('ready-for-show', 'Ready for Show', 'checkmark.seal.fill', 3145817, 3, 0);
+                INSERT INTO workflow_step_rules(step_id, rule_index, field, operator, value)
+                VALUES ('not-started', 0, 'preparationStatus', 'is', 'not-started'),
+                       ('in-progress', 0, 'preparationStatus', 'is', 'in-progress'),
+                       ('ready-for-show', 0, 'preparationStatus', 'is', 'ready-for-show'),
+                       ('ready-for-show', 1, 'unresolvedUsbChange', 'is', 'false');
+                CREATE TABLE track_workflow_assignments (
+                    track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+                    step_id TEXT NOT NULL REFERENCES workflow_steps(step_id),
+                    revision INTEGER NOT NULL CHECK(revision > 0),
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                INSERT INTO track_workflow_assignments(track_id, step_id, revision, updated_at)
+                SELECT track_id, status, revision, updated_at FROM track_workflow_status;
+                CREATE INDEX track_workflow_assignments_step
+                    ON track_workflow_assignments(step_id, track_id);
+                CREATE TABLE track_version_reviews (
+                    target_track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+                    source_track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+                    revision INTEGER NOT NULL DEFAULT 1 CHECK(revision > 0),
+                    state TEXT NOT NULL DEFAULT 'pending',
+                    source_timeline_revision INTEGER NOT NULL,
+                    target_timeline_revision INTEGER NOT NULL,
+                    detected_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    resolved_at TEXT,
+                    PRIMARY KEY(target_track_id, source_track_id)
+                );
+                CREATE INDEX track_version_reviews_pending
+                    ON track_version_reviews(state, target_track_id);
+                CREATE TABLE track_version_audit (
+                    audit_id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    target_track_id INTEGER NOT NULL,
+                    source_track_id INTEGER NOT NULL,
+                    target_title TEXT NOT NULL,
+                    source_title TEXT NOT NULL,
+                    resolution TEXT NOT NULL,
+                    target_revision_before INTEGER NOT NULL,
+                    target_revision_after INTEGER,
+                    created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                PRAGMA user_version = 17;
+                COMMIT;
+                "
+                } else {
+                    // Deliberately minimal legacy fixtures contain only timeline
+                    // history. They still need to reach the current schema version,
+                    // while workflow storage is meaningful only for a full library.
+                    "PRAGMA user_version = 17;"
+                })?;
         }
         Ok(())
     }
@@ -3827,7 +4291,17 @@ impl LibraryRepository for SqliteLibraryRepository {
         let pattern = search_pattern(query.search());
         let page = query.page();
         let order_by = track_query_order_by(query);
-        let workflow = track_workflow_predicate(query.workflow_filter());
+        let workflow = if let Some(step_id) = query.workflow_step_id() {
+            let catalog = self.track_workflow_catalog()?;
+            let step = catalog
+                .steps()
+                .iter()
+                .find(|step| step.id() == step_id && !step.archived())
+                .ok_or_else(|| SqliteLibraryError::UnknownWorkflowStep(step_id.to_owned()))?;
+            workflow_step_predicate_sql(step)
+        } else {
+            track_workflow_predicate(query.workflow_filter())
+        };
         match query.playlist_id() {
             Some(playlist_id) => {
                 let count_sql = format!(
@@ -5669,6 +6143,20 @@ pub enum SqliteLibraryError {
     UnsupportedSchema(u32),
     #[error("Light Planning Policy changed; expected revision {expected}, actual {actual}")]
     LightPlanningRevisionConflict { expected: u64, actual: u64 },
+    #[error("workflow catalog changed; expected revision {expected}, actual {actual}")]
+    WorkflowCatalogRevisionConflict { expected: u64, actual: u64 },
+    #[error("unknown workflow step: {0}")]
+    UnknownWorkflowStep(String),
+    #[error("invalid workflow catalog: {0}")]
+    InvalidWorkflowCatalog(String),
+    #[error("workflow steps {first} and {second} overlap for {track_count} current tracks")]
+    OverlappingWorkflowSteps {
+        first: String,
+        second: String,
+        track_count: u64,
+    },
+    #[error("invalid track-version resolution")]
+    InvalidVersionResolution,
     #[error("invalid library identifier: {0}")]
     InvalidIdentifier(#[from] TextIdentifierError),
     #[error("invalid persisted beat grid: {0}")]
@@ -6087,7 +6575,7 @@ fn track_query_order_by(query: &LibraryTrackQuery) -> String {
         LibraryTrackSortField::TimelineRevision => "COALESCE(h.revision, 0)",
         LibraryTrackSortField::Readiness => "CASE WHEN h.revision IS NULL THEN 1 ELSE 0 END",
         LibraryTrackSortField::PreparationStatus => {
-            "COALESCE((SELECT s.status FROM track_workflow_status s WHERE s.track_id = t.id), 'not-started')"
+            "COALESCE((SELECT s.step_id FROM track_workflow_assignments s WHERE s.track_id = t.id), 'not-started')"
         }
         LibraryTrackSortField::Attention => {
             "CASE WHEN EXISTS (SELECT 1 FROM track_workflow_attention a WHERE a.track_id = t.id AND a.resolved_at IS NULL) THEN 0 ELSE 1 END"
@@ -6100,28 +6588,104 @@ fn track_query_order_by(query: &LibraryTrackQuery) -> String {
     )
 }
 
-fn track_workflow_predicate(filter: Option<TrackWorkflowFilter>) -> &'static str {
+fn track_workflow_predicate(filter: Option<TrackWorkflowFilter>) -> String {
     match filter {
-        None => "1 = 1",
+        None => "1 = 1".to_owned(),
         Some(TrackWorkflowFilter::ChangedAfterUsbSync) => {
             "EXISTS (SELECT 1 FROM track_workflow_attention a
                       WHERE a.track_id = t.id AND a.resolved_at IS NULL)"
+                .to_owned()
         }
+        Some(TrackWorkflowFilter::VersionCandidates) => version_candidate_predicate_sql(),
         Some(TrackWorkflowFilter::NotStarted) => {
-            "COALESCE((SELECT s.status FROM track_workflow_status s WHERE s.track_id = t.id),
+            "COALESCE((SELECT s.step_id FROM track_workflow_assignments s WHERE s.track_id = t.id),
                       'not-started') = 'not-started'"
+                .to_owned()
         }
         Some(TrackWorkflowFilter::InProgress) => {
-            "EXISTS (SELECT 1 FROM track_workflow_status s
-                      WHERE s.track_id = t.id AND s.status = 'in-progress')"
+            "EXISTS (SELECT 1 FROM track_workflow_assignments s
+                      WHERE s.track_id = t.id AND s.step_id = 'in-progress')"
+                .to_owned()
         }
         Some(TrackWorkflowFilter::ReadyForShow) => {
-            "EXISTS (SELECT 1 FROM track_workflow_status s
-                      WHERE s.track_id = t.id AND s.status = 'ready-for-show')
+            "EXISTS (SELECT 1 FROM track_workflow_assignments s
+                      WHERE s.track_id = t.id AND s.step_id = 'ready-for-show')
              AND NOT EXISTS (SELECT 1 FROM track_workflow_attention a
                               WHERE a.track_id = t.id AND a.resolved_at IS NULL)"
+                .to_owned()
         }
     }
+}
+
+fn workflow_step_predicate_sql(step: &WorkflowStepDefinition) -> String {
+    step.rules()
+        .iter()
+        .map(workflow_rule_predicate_sql)
+        .map(|predicate| format!("({predicate})"))
+        .collect::<Vec<_>>()
+        .join(" AND ")
+}
+
+fn workflow_rule_predicate_sql(rule: &WorkflowRule) -> String {
+    let base = match rule.field() {
+        WorkflowRuleField::PreparationStatus => format!(
+            "COALESCE((SELECT s.step_id FROM track_workflow_assignments s WHERE s.track_id = t.id), 'not-started') = '{}'",
+            rule.value(),
+        ),
+        WorkflowRuleField::TechnicalReady => format!(
+            "(EXISTS (SELECT 1 FROM timeline_heads h WHERE h.track_id = t.id) AND EXISTS (SELECT 1 FROM beat_markers b WHERE b.track_id = t.id)) = {}",
+            bool_sql(rule.value()),
+        ),
+        WorkflowRuleField::UnresolvedUsbChange => format!(
+            "EXISTS (SELECT 1 FROM track_workflow_attention a WHERE a.track_id = t.id AND a.resolved_at IS NULL) = {}",
+            bool_sql(rule.value()),
+        ),
+        WorkflowRuleField::AuthoredTimeline => format!(
+            "EXISTS (SELECT 1 FROM timeline_heads h JOIN timeline_revisions r ON r.track_id=h.track_id AND r.revision=h.revision WHERE h.track_id=t.id AND r.origin IN ('user-edit','revision-restore')) = {}",
+            bool_sql(rule.value()),
+        ),
+        WorkflowRuleField::AudioAvailable => {
+            format!("(TRIM(t.audio_uri) <> '') = {}", bool_sql(rule.value()),)
+        }
+        WorkflowRuleField::VersionCandidate => format!(
+            "({}) = {}",
+            version_candidate_predicate_sql(),
+            bool_sql(rule.value()),
+        ),
+    };
+    match rule.operator() {
+        WorkflowRuleOperator::Is => base,
+        WorkflowRuleOperator::IsNot => format!("NOT ({base})"),
+    }
+}
+
+fn bool_sql(value: &str) -> &'static str {
+    if value == "true" { "1" } else { "0" }
+}
+
+fn version_candidate_predicate_sql() -> String {
+    "NOT EXISTS (
+        SELECT 1 FROM timeline_heads th
+        JOIN timeline_revisions tr ON tr.track_id=th.track_id AND tr.revision=th.revision
+        WHERE th.track_id=t.id AND tr.origin IN ('user-edit','revision-restore')
+     ) AND EXISTS (
+        SELECT 1 FROM tracks source
+        JOIN timeline_heads sh ON sh.track_id=source.id
+        JOIN timeline_heads target_head ON target_head.track_id=t.id
+        JOIN timeline_revisions sr ON sr.track_id=sh.track_id AND sr.revision=sh.revision
+        WHERE source.id <> t.id
+          AND sr.origin IN ('user-edit','revision-restore')
+          AND LOWER(TRIM(source.artist)) = LOWER(TRIM(t.artist))
+          AND lumi_version_family(source.title) = lumi_version_family(t.title)
+          AND NOT EXISTS (
+              SELECT 1 FROM track_version_reviews vr
+              WHERE vr.target_track_id=t.id AND vr.source_track_id=source.id
+                AND vr.state IN ('kept-separate','reused')
+                AND vr.source_timeline_revision=sh.revision
+                AND vr.target_timeline_revision=target_head.revision
+          )
+     )"
+    .to_owned()
 }
 
 #[cfg(test)]
@@ -6132,7 +6696,8 @@ mod fault_tests {
     use lumi_library::{
         HotCue, ImportedLibraryBaseline, ImportedTrackAnalysis, LibraryRepository,
         LibraryTrackQuery, RawPhraseObservation, SourceRevision, TrackAttentionReason, TrackColor,
-        TrackPageRequest, TrackPreparationStatus, TrackWorkflowFilter,
+        TrackPageRequest, TrackPreparationStatus, TrackWorkflowFilter, WorkflowRule,
+        WorkflowRuleField, WorkflowRuleOperator, WorkflowStepDefinition,
     };
     use lumi_library_demo::DemoLibrarySourceProvider;
     use lumi_library_source::MusicLibrarySourceProvider;
@@ -6229,6 +6794,51 @@ mod fault_tests {
             0
         );
         assert_eq!(repository.track_workflow_summary()?.ready_for_show, 1);
+        Ok(())
+    }
+
+    #[test]
+    fn configurable_workflow_steps_are_revisioned_assignable_and_queryable()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let baseline = DemoLibrarySourceProvider::curated().load_baseline()?;
+        let mut repository = SqliteLibraryRepository::in_memory()?;
+        repository.import_baseline(&baseline)?;
+        let mut steps = repository.track_workflow_catalog()?.steps().to_vec();
+        steps.push(WorkflowStepDefinition::try_new(
+            "quality-check",
+            "Quality Check",
+            "checklist",
+            0x32_B8_F5,
+            4,
+            false,
+            vec![WorkflowRule::try_new(
+                WorkflowRuleField::PreparationStatus,
+                WorkflowRuleOperator::Is,
+                "quality-check",
+            )?],
+        )?);
+        let catalog = repository.replace_track_workflow_catalog(1, steps)?;
+        assert_eq!(catalog.revision(), 2);
+
+        let track_id = repository
+            .page_tracks(TrackPageRequest::try_new(0, 1)?)?
+            .tracks()[0]
+            .id();
+        let state = repository.assign_track_workflow_step(track_id, 0, "quality-check")?;
+        assert_eq!(state.step_id(), "quality-check");
+        let page = repository.query_tracks(
+            &LibraryTrackQuery::try_new("", None, TrackPageRequest::try_new(0, 25)?)?
+                .with_workflow_step_id(Some("quality-check".to_owned())),
+        )?;
+        assert_eq!(page.total(), 1);
+        assert_eq!(page.tracks()[0].id(), track_id);
+        assert_eq!(
+            repository
+                .track_workflow_summary()?
+                .step_counts
+                .get("quality-check"),
+            Some(&1),
+        );
         Ok(())
     }
 
@@ -7555,7 +8165,7 @@ mod fault_tests {
         let schema: u32 = repository
             .connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))?;
-        assert_eq!(schema, 16);
+        assert_eq!(schema, 17);
         Ok(())
     }
 }
