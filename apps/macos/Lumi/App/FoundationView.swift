@@ -11,6 +11,16 @@ private enum AppDestination: String, CaseIterable, Identifiable {
     case settings
 
     var id: String { rawValue }
+
+    var keyboardKey: KeyEquivalent {
+        switch self {
+        case .live: return "1"
+        case .library: return "2"
+        case .plans: return "3"
+        case .integrations: return "4"
+        case .settings: return ","
+        }
+    }
 }
 
 struct FoundationView: View {
@@ -84,6 +94,7 @@ struct FoundationView: View {
                         section: $librarySection,
                         phraseRoleFeedback: engineStatus.phraseRoleFeedback,
                         timelineFeedback: engineStatus.timelineEditFeedback,
+                        trackWorkflowFeedback: engineStatus.trackWorkflowFeedback,
                         localPlaybackFeedback: engineStatus.localPlaybackFeedback,
                         localPlaybackFeedbackIsError: engineStatus.localPlaybackFeedbackIsError,
                         sourceImportFeedback: engineStatus.sourceImportFeedback,
@@ -106,6 +117,9 @@ struct FoundationView: View {
                         },
                         onReuseTimeline: { request in
                             Task { await engineStatus.reuseLibraryTimeline(request) }
+                        },
+                        onTrackWorkflowMutation: { request in
+                            Task { await engineStatus.mutateTrackWorkflow(request) }
                         },
                         onLoadOnLocalDeck: { request in
                             Task { await engineStatus.loadLibraryTrackOnLocalDeck(request) }
@@ -397,6 +411,7 @@ struct FoundationView: View {
                 .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
         }
         .buttonStyle(.plain)
+        .keyboardShortcut(value.keyboardKey, modifiers: .command)
         .help(title)
         .accessibilityLabel(title)
         .accessibilityIdentifier("lumi.navigation.compact.\(value.rawValue)")
@@ -420,6 +435,7 @@ struct FoundationView: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .keyboardShortcut(value.keyboardKey, modifiers: .command)
         .accessibilityIdentifier("lumi.navigation.\(value.rawValue)")
     }
 

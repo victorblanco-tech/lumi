@@ -283,10 +283,17 @@ public enum EngineCommand: Equatable, Sendable {
         offset: UInt32,
         limit: UInt16,
         sortBy: String,
-        sortDirection: String
+        sortDirection: String,
+        workflowFilter: String?
     )
     case openLibraryTrackEditor(trackID: UInt64)
     case closeLibraryTrackEditor
+    case setTrackPreparationStatus(
+        trackID: UInt64,
+        expectedRevision: UInt64,
+        status: String
+    )
+    case resolveTrackWorkflowAttention(trackID: UInt64, expectedRevision: UInt64)
     case reuseLibraryTimeline(
         sourceTrackID: UInt64,
         targetTrackID: UInt64,
@@ -423,7 +430,15 @@ public enum EngineCommand: Equatable, Sendable {
 
     func payload() -> [String: JSONValue] {
         switch self {
-        case let .queryLibrary(search, playlistID, offset, limit, sortBy, sortDirection):
+        case let .queryLibrary(
+            search,
+            playlistID,
+            offset,
+            limit,
+            sortBy,
+            sortDirection,
+            workflowFilter
+        ):
             var payload: [String: JSONValue] = [
                 "kind": .string("queryLibrary"),
                 "search": .string(search),
@@ -433,6 +448,7 @@ public enum EngineCommand: Equatable, Sendable {
                 "sortDirection": .string(sortDirection)
             ]
             payload["playlistId"] = playlistID.map { .number(Double($0)) } ?? .null
+            payload["workflowFilter"] = workflowFilter.map(JSONValue.string) ?? .null
             return payload
         case let .openLibraryTrackEditor(trackID):
             return [
@@ -441,6 +457,19 @@ public enum EngineCommand: Equatable, Sendable {
             ]
         case .closeLibraryTrackEditor:
             return ["kind": .string("closeLibraryTrackEditor")]
+        case let .setTrackPreparationStatus(trackID, expectedRevision, status):
+            return [
+                "kind": .string("setTrackPreparationStatus"),
+                "trackId": .number(Double(trackID)),
+                "expectedRevision": .number(Double(expectedRevision)),
+                "status": .string(status)
+            ]
+        case let .resolveTrackWorkflowAttention(trackID, expectedRevision):
+            return [
+                "kind": .string("resolveTrackWorkflowAttention"),
+                "trackId": .number(Double(trackID)),
+                "expectedRevision": .number(Double(expectedRevision))
+            ]
         case let .reuseLibraryTimeline(sourceTrackID, targetTrackID, expectedTargetRevision):
             return [
                 "kind": .string("reuseLibraryTimeline"),

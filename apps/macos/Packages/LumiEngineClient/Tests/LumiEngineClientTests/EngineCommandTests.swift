@@ -4,6 +4,37 @@ import Testing
 
 @Suite("Engine command encoding")
 struct EngineCommandTests {
+    @Test("Track workflow commands are revision-bound and queryable")
+    func trackWorkflowPayloads() {
+        let query = EngineCommand.queryLibrary(
+            search: "",
+            playlistID: nil,
+            offset: 0,
+            limit: 50,
+            sortBy: "preparationStatus",
+            sortDirection: "ascending",
+            workflowFilter: "changedAfterUsbSync"
+        ).payload()
+        #expect(query["workflowFilter"] == .string("changedAfterUsbSync"))
+
+        let status = EngineCommand.setTrackPreparationStatus(
+            trackID: 90,
+            expectedRevision: 3,
+            status: "ready-for-show"
+        ).payload()
+        #expect(status["kind"] == .string("setTrackPreparationStatus"))
+        #expect(status["trackId"] == .number(90))
+        #expect(status["expectedRevision"] == .number(3))
+        #expect(status["status"] == .string("ready-for-show"))
+
+        let reviewed = EngineCommand.resolveTrackWorkflowAttention(
+            trackID: 90,
+            expectedRevision: 4
+        ).payload()
+        #expect(reviewed["kind"] == .string("resolveTrackWorkflowAttention"))
+        #expect(reviewed["expectedRevision"] == .number(4))
+    }
+
     @Test("Ableton Link enablement has an explicit boolean command")
     func abletonLinkEnablementPayload() {
         let payload = EngineCommand.setAbletonLinkEnabled(true).payload()

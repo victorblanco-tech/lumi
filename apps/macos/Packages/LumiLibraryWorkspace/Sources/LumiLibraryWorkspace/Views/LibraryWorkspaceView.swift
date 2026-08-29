@@ -9,6 +9,7 @@ public struct LibraryQueryRequest: Equatable, Sendable {
     public let limit: UInt16
     public let sortBy: LibraryTrackSortField
     public let sortDirection: LibraryTrackSortDirection
+    public let workflowFilter: TrackWorkflowFilter?
 
     public init(
         search: String,
@@ -16,7 +17,8 @@ public struct LibraryQueryRequest: Equatable, Sendable {
         offset: UInt32,
         limit: UInt16 = 50,
         sortBy: LibraryTrackSortField = .playlist,
-        sortDirection: LibraryTrackSortDirection = .ascending
+        sortDirection: LibraryTrackSortDirection = .ascending,
+        workflowFilter: TrackWorkflowFilter? = nil
     ) {
         self.search = search
         self.playlistID = playlistID
@@ -24,7 +26,24 @@ public struct LibraryQueryRequest: Equatable, Sendable {
         self.limit = limit
         self.sortBy = sortBy
         self.sortDirection = sortDirection
+        self.workflowFilter = workflowFilter
     }
+}
+
+public enum TrackWorkflowMutationRequest: Equatable, Sendable {
+    case setPreparationStatus(
+        trackID: UInt64,
+        expectedRevision: UInt64,
+        status: TrackPreparationStatus
+    )
+    case resolveAttention(trackID: UInt64, expectedRevision: UInt64)
+}
+
+private enum LibraryBrowserMode: String, CaseIterable, Identifiable {
+    case playlists = "Playlists"
+    case workflow = "Workflow"
+
+    var id: String { rawValue }
 }
 
 public struct LibraryDeckLoadRequest: Equatable, Sendable {
@@ -47,8 +66,10 @@ public struct LibraryWorkspaceView: View {
     private let onTimelineHistory: @MainActor (TrackTimelineHistoryRequest) -> Void
     private let onSourceReconcile: @MainActor (TrackSourceReconcileRequest) -> Void
     private let onReuseTimeline: @MainActor (CreativeTimelineReuseRequest) -> Void
+    private let onTrackWorkflowMutation: @MainActor (TrackWorkflowMutationRequest) -> Void
     private let onLoadOnLocalDeck: @MainActor (LibraryDeckLoadRequest) -> Void
     private let timelineFeedback: String?
+    private let trackWorkflowFeedback: String?
     private let localPlaybackFeedback: String?
     private let localPlaybackFeedbackIsError: Bool
     private let rendersInteractiveControls: Bool
@@ -57,6 +78,8 @@ public struct LibraryWorkspaceView: View {
     @State private var selectedTrackID: UInt64?
     @State private var selectedPlaylistID: UInt64?
     @State private var readinessFilter: LibraryReadinessFilter = .all
+    @State private var browserMode: LibraryBrowserMode
+    @State private var selectedWorkflowFilter: TrackWorkflowFilter?
     @State private var sortBy: LibraryTrackSortField
     @State private var sortDirection: LibraryTrackSortDirection
     @State private var tableSortOrder: [KeyPathComparator<LibraryTrack>] = []
@@ -76,8 +99,10 @@ public struct LibraryWorkspaceView: View {
         onTimelineHistory: @escaping @MainActor (TrackTimelineHistoryRequest) -> Void = { _ in },
         onSourceReconcile: @escaping @MainActor (TrackSourceReconcileRequest) -> Void = { _ in },
         onReuseTimeline: @escaping @MainActor (CreativeTimelineReuseRequest) -> Void = { _ in },
+        onTrackWorkflowMutation: @escaping @MainActor (TrackWorkflowMutationRequest) -> Void = { _ in },
         onLoadOnLocalDeck: @escaping @MainActor (LibraryDeckLoadRequest) -> Void = { _ in },
         timelineFeedback: String? = nil,
+        trackWorkflowFeedback: String? = nil,
         localPlaybackFeedback: String? = nil,
         localPlaybackFeedbackIsError: Bool = false
     ) {
@@ -88,8 +113,10 @@ public struct LibraryWorkspaceView: View {
         self.onTimelineHistory = onTimelineHistory
         self.onSourceReconcile = onSourceReconcile
         self.onReuseTimeline = onReuseTimeline
+        self.onTrackWorkflowMutation = onTrackWorkflowMutation
         self.onLoadOnLocalDeck = onLoadOnLocalDeck
         self.timelineFeedback = timelineFeedback
+        self.trackWorkflowFeedback = trackWorkflowFeedback
         self.localPlaybackFeedback = localPlaybackFeedback
         self.localPlaybackFeedbackIsError = localPlaybackFeedbackIsError
         self.rendersInteractiveControls = rendersInteractiveControls
@@ -97,6 +124,8 @@ public struct LibraryWorkspaceView: View {
         _search = State(initialValue: state.query.search)
         _selectedTrackID = State(initialValue: state.page.tracks.first?.id)
         _selectedPlaylistID = State(initialValue: state.query.playlistID)
+        _browserMode = State(initialValue: state.query.workflowFilter == nil ? .playlists : .workflow)
+        _selectedWorkflowFilter = State(initialValue: state.query.workflowFilter)
         _sortBy = State(initialValue: state.query.sortBy)
         _sortDirection = State(initialValue: state.query.sortDirection)
         _editorAnalysis = State(initialValue: state.editor)
@@ -117,7 +146,9 @@ public struct LibraryWorkspaceView: View {
                             onTimelineEdit: onTimelineEdit,
                             onTimelineHistory: onTimelineHistory,
                             onSourceReconcile: onSourceReconcile,
-                            onReuseTimeline: onReuseTimeline
+                            onReuseTimeline: onReuseTimeline,
+                            onTrackWorkflowMutation: onTrackWorkflowMutation,
+                            workflowFeedback: trackWorkflowFeedback
                         )
                         .id(analysis.track.id)
                     } else {
@@ -144,6 +175,10 @@ public struct LibraryWorkspaceView: View {
             submitQuery(search: value, offset: 0)
         }
         .onChange(of: state.query.playlistID) { _, value in selectedPlaylistID = value }
+        .onChange(of: state.query.workflowFilter) { _, value in
+            selectedWorkflowFilter = value
+            if value != nil { browserMode = .workflow }
+        }
         .onChange(of: state.query.sortBy) { _, value in sortBy = value }
         .onChange(of: state.query.sortDirection) { _, value in sortDirection = value }
         .onChange(of: tableSortOrder) { _, value in applyTableSort(value) }
@@ -215,16 +250,45 @@ public struct LibraryWorkspaceView: View {
 
     private var collectionNavigation: some View {
         VStack(alignment: .leading, spacing: LumiSpacing.medium) {
+            Picker("Browser", selection: $browserMode) {
+                ForEach(LibraryBrowserMode.allCases) { mode in
+                    Text(mode.rawValue).tag(mode)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .focusable()
+            .accessibilityIdentifier("lumi.library.browserMode")
+
+            if browserMode == .playlists {
+                playlistNavigation
+            } else {
+                workflowNavigation
+            }
+
+        }
+        .padding(LumiSpacing.large)
+        .background(LumiColor.surface)
+        .onChange(of: browserMode) { _, mode in
+            guard rendersInteractiveControls else { return }
+            if mode == .playlists {
+                selectPlaylist(nil)
+            } else {
+                selectWorkflow(selectedWorkflowFilter ?? .changedAfterUSBSync)
+            }
+        }
+    }
+
+    private var playlistNavigation: some View {
+        Group {
             Text(localized("library.sources"))
                 .font(LumiTypography.sectionTitle)
-            Button {
-                selectPlaylist(nil)
-            } label: {
+            Button { selectPlaylist(nil) } label: {
                 navigationLabel(
                     localized("library.collection"),
                     count: state.collectionTotal,
                     systemImage: "music.note.list",
-                    selected: selectedPlaylistID == nil
+                    selected: selectedPlaylistID == nil && state.query.workflowFilter == nil
                 )
             }
             .buttonStyle(.plain)
@@ -236,14 +300,13 @@ public struct LibraryWorkspaceView: View {
             ScrollView(.vertical) {
                 LazyVStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
                     ForEach(state.playlists) { playlist in
-                        Button {
-                            selectPlaylist(playlist.id)
-                        } label: {
+                        Button { selectPlaylist(playlist.id) } label: {
                             navigationLabel(
                                 playlist.name,
                                 count: playlist.trackCount,
                                 systemImage: "music.note",
-                                selected: selectedPlaylistID == playlist.id,
+                                selected: selectedPlaylistID == playlist.id
+                                    && state.query.workflowFilter == nil,
                                 subtitle: playlistSourceLabel(playlist)
                             )
                         }
@@ -255,10 +318,84 @@ public struct LibraryWorkspaceView: View {
             .scrollIndicators(.automatic)
             .frame(maxHeight: .infinity)
             .accessibilityIdentifier("lumi.library.playlists")
-
         }
-        .padding(LumiSpacing.large)
-        .background(LumiColor.surface)
+    }
+
+    private var workflowNavigation: some View {
+        VStack(alignment: .leading, spacing: LumiSpacing.small) {
+            Text("SYSTEM")
+                .font(LumiTypography.technical)
+                .foregroundStyle(LumiColor.textSecondary)
+            workflowButton(
+                .changedAfterUSBSync,
+                title: "Changed after USB sync",
+                count: state.workflow.changedAfterUSBSync,
+                systemImage: "externaldrive.badge.exclamationmark",
+                color: LumiColor.warning
+            )
+            Text("PREPARATION")
+                .font(LumiTypography.technical)
+                .foregroundStyle(LumiColor.textSecondary)
+                .padding(.top, LumiSpacing.medium)
+            workflowButton(
+                .notStarted,
+                title: "Not Started",
+                count: state.workflow.notStarted,
+                systemImage: "circle",
+                color: LumiColor.textSecondary
+            )
+            workflowButton(
+                .inProgress,
+                title: "In Progress",
+                count: state.workflow.inProgress,
+                systemImage: "circle.lefthalf.filled",
+                color: LumiColor.warning
+            )
+            workflowButton(
+                .readyForShow,
+                title: "Ready for Show",
+                count: state.workflow.readyForShow,
+                systemImage: "checkmark.circle.fill",
+                color: LumiColor.success
+            )
+            Spacer()
+            Text("Workflow steps become configurable in phase 2.")
+                .font(LumiTypography.caption)
+                .foregroundStyle(LumiColor.textSecondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityIdentifier("lumi.library.workflow")
+    }
+
+    private func workflowButton(
+        _ filter: TrackWorkflowFilter,
+        title: String,
+        count: UInt64,
+        systemImage: String,
+        color: Color
+    ) -> some View {
+        Button { selectWorkflow(filter) } label: {
+            HStack(spacing: LumiSpacing.small) {
+                Image(systemName: systemImage).foregroundStyle(color)
+                Text(title).lineLimit(2)
+                Spacer()
+                Text("\(count)")
+                    .font(LumiTypography.technical)
+                    .foregroundStyle(LumiColor.textSecondary)
+            }
+            .foregroundStyle(
+                selectedWorkflowFilter == filter ? LumiColor.accent : LumiColor.textPrimary
+            )
+            .padding(.horizontal, LumiSpacing.small)
+            .frame(minHeight: LumiControlMetric.standardHeight)
+            .contentShape(Rectangle())
+            .background(
+                selectedWorkflowFilter == filter ? LumiColor.accent.opacity(0.14) : Color.clear
+            )
+            .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
+        }
+        .buttonStyle(.plain)
+        .accessibilityIdentifier("lumi.library.workflow.\(filter.rawValue)")
     }
 
     private func navigationLabel(
@@ -365,14 +502,16 @@ public struct LibraryWorkspaceView: View {
                     .frame(minWidth: 180, idealWidth: 260, maxWidth: 320)
                     .onSubmit { submitQuery(offset: 0) }
                     .accessibilityIdentifier("lumi.library.search")
-                Picker(localized("library.filter"), selection: $readinessFilter) {
-                    ForEach(LibraryReadinessFilter.allCases) { filter in
-                        Text(readinessName(filter)).tag(filter)
+                if browserMode == .playlists {
+                    Picker(localized("library.filter"), selection: $readinessFilter) {
+                        ForEach(LibraryReadinessFilter.allCases) { filter in
+                            Text(readinessName(filter)).tag(filter)
+                        }
                     }
+                    .labelsHidden()
+                    .frame(width: 150)
+                    .accessibilityIdentifier("lumi.library.readinessFilter")
                 }
-                .labelsHidden()
-                .frame(width: 150)
-                .accessibilityIdentifier("lumi.library.readinessFilter")
             }
             if let selectedTrack {
                 if let localPlaybackFeedback {
@@ -467,7 +606,7 @@ public struct LibraryWorkspaceView: View {
 
             TableColumn(localized("library.timelineRevision"), value: \.sortTimelineRevision) { track in
                 editorLoadingCell(track) {
-                    Text(track.timelineRevision.map { "R\($0)" } ?? "—")
+                    Text(track.timelineRevisionLabel)
                         .font(LumiTypography.technical)
                 }
             }
@@ -484,23 +623,12 @@ public struct LibraryWorkspaceView: View {
             .width(min: 88, ideal: 112, max: 180)
             .customizationID("readiness")
 
-            TableColumn(localized("library.sourceTrackID"), value: \.sourceTrackID) { track in
-                editorLoadingCell(track) {
-                    Text(track.sourceTrackID).font(LumiTypography.technical).lineLimit(1)
-                }
+            TableColumn("Workflow", value: \.sortPreparationStatus) { track in
+                workflowCell(track)
             }
-            .width(min: 110, ideal: 170, max: 360)
-            .defaultVisibility(.hidden)
-            .customizationID("sourceTrackID")
+            .width(min: 110, ideal: 150, max: 240)
+            .customizationID("workflowStatus")
 
-            TableColumn(localized("library.analysisRevision"), value: \.analysisRevision) { track in
-                editorLoadingCell(track) {
-                    Text(track.analysisRevision).font(LumiTypography.technical).lineLimit(1)
-                }
-            }
-            .width(min: 110, ideal: 170, max: 360)
-            .defaultVisibility(.hidden)
-            .customizationID("analysisRevision")
         }
         .tableStyle(.inset(alternatesRowBackgrounds: true))
         .scrollContentBackground(.hidden)
@@ -522,6 +650,23 @@ public struct LibraryWorkspaceView: View {
         content()
             .frame(maxWidth: .infinity, alignment: .leading)
             .contentShape(Rectangle())
+    }
+
+    private func workflowCell(_ track: LibraryTrack) -> some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Label(
+                preparationStatusName(track.workflow.preparationStatus),
+                systemImage: preparationStatusIcon(track.workflow.preparationStatus)
+            )
+            if let attention = track.workflow.attention {
+                Text(attentionSummary(attention))
+                    .foregroundStyle(LumiColor.warning)
+                    .help(attention.reasons.map(attentionReasonName).joined(separator: ", "))
+            }
+        }
+        .font(LumiTypography.caption)
+        .foregroundStyle(preparationStatusColor(track.workflow))
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     private func localDeckToolbarButton(_ track: LibraryTrack, deckID: UInt64) -> some View {
@@ -605,6 +750,7 @@ public struct LibraryWorkspaceView: View {
 
     private func selectPlaylist(_ id: UInt64?) {
         selectedPlaylistID = id
+        selectedWorkflowFilter = nil
         let playlistSort = id == nil && sortBy == .playlist ? LibraryTrackSortField.title : sortBy
         sortBy = playlistSort
         onQuery(
@@ -613,7 +759,23 @@ public struct LibraryWorkspaceView: View {
                 playlistID: id,
                 offset: 0,
                 sortBy: playlistSort,
-                sortDirection: sortDirection
+                sortDirection: sortDirection,
+                workflowFilter: nil
+            )
+        )
+    }
+
+    private func selectWorkflow(_ filter: TrackWorkflowFilter) {
+        selectedWorkflowFilter = filter
+        selectedPlaylistID = nil
+        onQuery(
+            LibraryQueryRequest(
+                search: search,
+                playlistID: nil,
+                offset: 0,
+                sortBy: sortBy == .playlist ? .title : sortBy,
+                sortDirection: sortDirection,
+                workflowFilter: filter
             )
         )
     }
@@ -626,7 +788,8 @@ public struct LibraryWorkspaceView: View {
                 offset: offset,
                 limit: state.query.limit,
                 sortBy: sortBy,
-                sortDirection: sortDirection
+                sortDirection: sortDirection,
+                workflowFilter: state.query.workflowFilter
             )
         )
     }
@@ -644,6 +807,8 @@ public struct LibraryWorkspaceView: View {
         case \LibraryTrack.sortUSBSources: field = .usbSources
         case \LibraryTrack.sortTimelineRevision: field = .timelineRevision
         case \LibraryTrack.sortReadiness: field = .readiness
+        case \LibraryTrack.sortPreparationStatus: field = .preparationStatus
+        case \LibraryTrack.sortAttention: field = .attention
         case \LibraryTrack.sourceTrackID: field = .sourceTrackID
         case \LibraryTrack.analysisRevision: field = .analysisRevision
         default: return
@@ -661,7 +826,8 @@ public struct LibraryWorkspaceView: View {
                 offset: 0,
                 limit: state.query.limit,
                 sortBy: field,
-                sortDirection: direction
+                sortDirection: direction,
+                workflowFilter: state.query.workflowFilter
             )
         )
     }
@@ -715,6 +881,49 @@ private func readinessName(_ value: LibraryReadiness) -> String {
 
 private func readinessName(_ value: LibraryReadinessFilter) -> String {
     localized("filter.\(value.rawValue)")
+}
+
+private func preparationStatusName(_ value: TrackPreparationStatus) -> String {
+    switch value {
+    case .notStarted: "Not Started"
+    case .inProgress: "In Progress"
+    case .readyForShow: "Ready for Show"
+    }
+}
+
+private func preparationStatusIcon(_ value: TrackPreparationStatus) -> String {
+    switch value {
+    case .notStarted: "circle"
+    case .inProgress: "circle.lefthalf.filled"
+    case .readyForShow: "checkmark.circle.fill"
+    }
+}
+
+private func preparationStatusColor(_ workflow: TrackWorkflowState) -> Color {
+    if workflow.attention != nil { return LumiColor.warning }
+    switch workflow.preparationStatus {
+    case .notStarted: return LumiColor.textSecondary
+    case .inProgress: return LumiColor.warning
+    case .readyForShow: return LumiColor.success
+    }
+}
+
+private func attentionReasonName(_ value: TrackAttentionReason) -> String {
+    switch value {
+    case .metadataChanged: "Metadata"
+    case .waveformChanged: "Waveform"
+    case .beatGridChanged: "Beatgrid"
+    case .hotCuesChanged: "Hot cues"
+    case .sourcePhrasesChanged: "Source phrases"
+    }
+}
+
+private func attentionSummary(_ attention: TrackWorkflowAttention) -> String {
+    guard let first = attention.reasons.first else { return "USB change" }
+    let remaining = attention.reasons.count - 1
+    return remaining == 0
+        ? attentionReasonName(first)
+        : "\(attentionReasonName(first)) +\(remaining)"
 }
 
 private func conditionTitle(_ value: LibraryCondition) -> String {

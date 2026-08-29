@@ -13,6 +13,7 @@ public struct LibraryHubView: View {
     @Binding private var keyNotation: KeyNotationPreference
     private let phraseRoleFeedback: String?
     private let timelineFeedback: String?
+    private let trackWorkflowFeedback: String?
     private let localPlaybackFeedback: String?
     private let localPlaybackFeedbackIsError: Bool
     private let sourceImportFeedback: String?
@@ -24,6 +25,7 @@ public struct LibraryHubView: View {
     private let onTimelineHistory: @MainActor (TrackTimelineHistoryRequest) -> Void
     private let onSourceReconcile: @MainActor (TrackSourceReconcileRequest) -> Void
     private let onReuseTimeline: @MainActor (CreativeTimelineReuseRequest) -> Void
+    private let onTrackWorkflowMutation: @MainActor (TrackWorkflowMutationRequest) -> Void
     private let onLoadOnLocalDeck: @MainActor (LibraryDeckLoadRequest) -> Void
     private let onPhraseRoleMutation: @Sendable (PhraseRoleMutationRequest) -> Void
     private let onRekordboxSyncPreview: @Sendable (RekordboxXMLSyncPreviewRequest) -> Void
@@ -41,6 +43,7 @@ public struct LibraryHubView: View {
         section: Binding<LibraryHubSection> = .constant(.tracks),
         phraseRoleFeedback: String? = nil,
         timelineFeedback: String? = nil,
+        trackWorkflowFeedback: String? = nil,
         localPlaybackFeedback: String? = nil,
         localPlaybackFeedbackIsError: Bool = false,
         sourceImportFeedback: String? = nil,
@@ -52,6 +55,7 @@ public struct LibraryHubView: View {
         onTimelineHistory: @escaping @MainActor (TrackTimelineHistoryRequest) -> Void = { _ in },
         onSourceReconcile: @escaping @MainActor (TrackSourceReconcileRequest) -> Void = { _ in },
         onReuseTimeline: @escaping @MainActor (CreativeTimelineReuseRequest) -> Void = { _ in },
+        onTrackWorkflowMutation: @escaping @MainActor (TrackWorkflowMutationRequest) -> Void = { _ in },
         onLoadOnLocalDeck: @escaping @MainActor (LibraryDeckLoadRequest) -> Void = { _ in },
         onPhraseRoleMutation: @escaping @Sendable (PhraseRoleMutationRequest) -> Void = { _ in },
         onRekordboxSyncPreview: @escaping @Sendable (RekordboxXMLSyncPreviewRequest) -> Void = { _ in },
@@ -66,6 +70,7 @@ public struct LibraryHubView: View {
         _section = section
         self.phraseRoleFeedback = phraseRoleFeedback
         self.timelineFeedback = timelineFeedback
+        self.trackWorkflowFeedback = trackWorkflowFeedback
         self.localPlaybackFeedback = localPlaybackFeedback
         self.localPlaybackFeedbackIsError = localPlaybackFeedbackIsError
         self.sourceImportFeedback = sourceImportFeedback
@@ -77,6 +82,7 @@ public struct LibraryHubView: View {
         self.onTimelineHistory = onTimelineHistory
         self.onSourceReconcile = onSourceReconcile
         self.onReuseTimeline = onReuseTimeline
+        self.onTrackWorkflowMutation = onTrackWorkflowMutation
         self.onLoadOnLocalDeck = onLoadOnLocalDeck
         self.onPhraseRoleMutation = onPhraseRoleMutation
         self.onRekordboxSyncPreview = onRekordboxSyncPreview
@@ -103,8 +109,10 @@ public struct LibraryHubView: View {
                         onTimelineHistory: onTimelineHistory,
                         onSourceReconcile: onSourceReconcile,
                         onReuseTimeline: onReuseTimeline,
+                        onTrackWorkflowMutation: onTrackWorkflowMutation,
                         onLoadOnLocalDeck: onLoadOnLocalDeck,
                         timelineFeedback: timelineFeedback,
+                        trackWorkflowFeedback: trackWorkflowFeedback,
                         localPlaybackFeedback: localPlaybackFeedback,
                         localPlaybackFeedbackIsError: localPlaybackFeedbackIsError
                     )

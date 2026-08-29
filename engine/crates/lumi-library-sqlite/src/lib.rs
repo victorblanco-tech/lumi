@@ -18,15 +18,18 @@ use lumi_library::{
     SourceMirrorSnapshot, SourceMirrorSummary, SourcePhraseMapping, SourcePlaylistId,
     SourceRevision, SourceTrackId, StoredTrack, TextIdentifierError, ThemeSpecificVariant,
     TimelineRevision, TimelineRevisionOrigin, TimelineRevisionPage, TimelineRevisionReason,
-    TimelineRevisionSummary, TrackColor, TrackPage, TrackPageRequest, TrackSummary, VariantId,
-    WaveformPoint, normalize_source_label,
+    TimelineRevisionSummary, TrackAttentionReason, TrackColor, TrackPage, TrackPageRequest,
+    TrackPreparationStatus, TrackSummary, TrackWorkflowAttention, TrackWorkflowFilter,
+    TrackWorkflowState, TrackWorkflowSummary, VariantId, WaveformPoint, normalize_source_label,
 };
 use lumi_light_plans::LightPlanningPolicy;
 use rusqlite::backup::Backup;
-use rusqlite::{Connection, OpenFlags, OptionalExtension, Row, Transaction, params};
+use rusqlite::{
+    Connection, OpenFlags, OptionalExtension, Row, Transaction, params, params_from_iter,
+};
 use thiserror::Error;
 
-const SCHEMA_VERSION: u32 = 15;
+const SCHEMA_VERSION: u32 = 16;
 const DEFAULTS_VERSION_KEY: &str = "phrase-role-defaults-version";
 const CATALOG_REVISION_KEY: &str = "phrase-role-catalog-revision";
 const AUTOLOOP_DEFAULTS_VERSION_KEY: &str = "autoloop-catalog-defaults-version";
@@ -442,6 +445,232 @@ impl SqliteLibraryRepository {
             track_ids.push(TrackId::new(from_positive_i64(row?, "track id")?));
         }
         Ok(track_ids)
+    }
+
+    pub fn track_workflow_states(
+        &self,
+        track_ids: &[TrackId],
+    ) -> Result<BTreeMap<TrackId, TrackWorkflowState>, SqliteLibraryError> {
+        let mut states = track_ids
+            .iter()
+            .copied()
+            .map(|track_id| (track_id, TrackWorkflowState::default_for(track_id)))
+            .collect::<BTreeMap<_, _>>();
+        if track_ids.is_empty() {
+            return Ok(states);
+        }
+        let placeholders = (1..=track_ids.len())
+            .map(|index| format!("?{index}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let values = track_ids
+            .iter()
+            .map(|track_id| to_i64(track_id.value()))
+            .collect::<Result<Vec<_>, _>>()?;
+        let status_sql = format!(
+            "SELECT track_id, status, revision FROM track_workflow_status
+              WHERE track_id IN ({placeholders})"
+        );
+        let mut statement = self.connection.prepare(&status_sql)?;
+        let status_rows = statement.query_map(params_from_iter(values.iter()), |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })?;
+        let mut persisted = BTreeMap::new();
+        for row in status_rows {
+            let (track_id, status, revision) = row?;
+            persisted.insert(
+                TrackId::new(from_positive_i64(track_id, "workflow track id")?),
+                (
+                    TrackPreparationStatus::try_from_str(&status)
+                        .map_err(|error| SqliteLibraryError::CorruptData(error.to_string()))?,
+                    from_positive_i64(revision, "workflow status revision")?,
+                ),
+            );
+        }
+        drop(statement);
+
+        let attention_sql = format!(
+            "SELECT track_id, revision, source_id, source_revision, detected_at,
+                    metadata_changed, waveform_changed, beat_grid_changed,
+                    hot_cues_changed, source_phrases_changed
+               FROM track_workflow_attention
+              WHERE resolved_at IS NULL AND track_id IN ({placeholders})"
+        );
+        let mut statement = self.connection.prepare(&attention_sql)?;
+        let attention_rows = statement.query_map(params_from_iter(values.iter()), |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, i64>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+                row.get::<_, String>(4)?,
+                row.get::<_, bool>(5)?,
+                row.get::<_, bool>(6)?,
+                row.get::<_, bool>(7)?,
+                row.get::<_, bool>(8)?,
+                row.get::<_, bool>(9)?,
+            ))
+        })?;
+        let mut attentions = BTreeMap::new();
+        for row in attention_rows {
+            let (
+                track_id,
+                revision,
+                source_id,
+                source_revision,
+                detected_at,
+                metadata,
+                waveform,
+                beat_grid,
+                hot_cues,
+                source_phrases,
+            ) = row?;
+            let mut reasons = BTreeSet::new();
+            if metadata {
+                reasons.insert(TrackAttentionReason::MetadataChanged);
+            }
+            if waveform {
+                reasons.insert(TrackAttentionReason::WaveformChanged);
+            }
+            if beat_grid {
+                reasons.insert(TrackAttentionReason::BeatGridChanged);
+            }
+            if hot_cues {
+                reasons.insert(TrackAttentionReason::HotCuesChanged);
+            }
+            if source_phrases {
+                reasons.insert(TrackAttentionReason::SourcePhrasesChanged);
+            }
+            let track_id = TrackId::new(from_positive_i64(track_id, "attention track id")?);
+            attentions.insert(
+                track_id,
+                TrackWorkflowAttention::new(
+                    from_positive_i64(revision, "attention revision")?,
+                    source_id,
+                    source_revision,
+                    detected_at,
+                    reasons,
+                ),
+            );
+        }
+        for (track_id, state) in &mut states {
+            let (status, revision) = persisted
+                .remove(track_id)
+                .unwrap_or((TrackPreparationStatus::NotStarted, 0));
+            *state =
+                TrackWorkflowState::new(*track_id, status, revision, attentions.remove(track_id));
+        }
+        Ok(states)
+    }
+
+    pub fn track_workflow_summary(&self) -> Result<TrackWorkflowSummary, SqliteLibraryError> {
+        let values = self.connection.query_row(
+            "SELECT
+                (SELECT COUNT(*) FROM track_workflow_attention WHERE resolved_at IS NULL),
+                COALESCE(SUM(CASE WHEN COALESCE(s.status, 'not-started') = 'not-started' THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN s.status = 'in-progress' THEN 1 ELSE 0 END), 0),
+                COALESCE(SUM(CASE WHEN s.status = 'ready-for-show' AND NOT EXISTS (
+                    SELECT 1 FROM track_workflow_attention a
+                     WHERE a.track_id = t.id AND a.resolved_at IS NULL
+                ) THEN 1 ELSE 0 END), 0)
+             FROM tracks t LEFT JOIN track_workflow_status s ON s.track_id = t.id",
+            [],
+            |row| Ok((row.get::<_, i64>(0)?, row.get::<_, i64>(1)?, row.get::<_, i64>(2)?, row.get::<_, i64>(3)?)),
+        )?;
+        Ok(TrackWorkflowSummary {
+            changed_after_usb_sync: from_nonnegative_i64(values.0, "changed workflow count")?,
+            not_started: from_nonnegative_i64(values.1, "not-started workflow count")?,
+            in_progress: from_nonnegative_i64(values.2, "in-progress workflow count")?,
+            ready_for_show: from_nonnegative_i64(values.3, "ready workflow count")?,
+        })
+    }
+
+    pub fn set_track_preparation_status(
+        &mut self,
+        track_id: TrackId,
+        expected_revision: u64,
+        status: TrackPreparationStatus,
+    ) -> Result<TrackWorkflowState, SqliteLibraryError> {
+        let transaction = self.connection.transaction()?;
+        let track_id_value = to_i64(track_id.value())?;
+        let exists = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tracks WHERE id = ?1)",
+            [track_id_value],
+            |row| row.get::<_, bool>(0),
+        )?;
+        if !exists {
+            return Err(SqliteLibraryError::MissingTrack);
+        }
+        let actual = transaction
+            .query_row(
+                "SELECT revision FROM track_workflow_status WHERE track_id = ?1",
+                [track_id_value],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?
+            .map(|value| from_positive_i64(value, "workflow status revision"))
+            .transpose()?
+            .unwrap_or(0);
+        if actual != expected_revision {
+            return Err(SqliteLibraryError::TrackWorkflowRevisionConflict {
+                expected: expected_revision,
+                actual,
+            });
+        }
+        let revision = expected_revision
+            .checked_add(1)
+            .ok_or(SqliteLibraryError::ArithmeticOverflow)?;
+        transaction.execute(
+            "INSERT INTO track_workflow_status(track_id, status, revision)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(track_id) DO UPDATE SET
+               status = excluded.status,
+               revision = excluded.revision,
+               updated_at = CURRENT_TIMESTAMP",
+            params![track_id_value, status.as_str(), to_i64(revision)?],
+        )?;
+        transaction.commit()?;
+        self.track_workflow_states(&[track_id])?
+            .remove(&track_id)
+            .ok_or(SqliteLibraryError::MissingTrack)
+    }
+
+    pub fn resolve_track_workflow_attention(
+        &mut self,
+        track_id: TrackId,
+        expected_revision: u64,
+    ) -> Result<TrackWorkflowState, SqliteLibraryError> {
+        let transaction = self.connection.transaction()?;
+        let track_id_value = to_i64(track_id.value())?;
+        let actual = transaction
+            .query_row(
+                "SELECT revision FROM track_workflow_attention
+              WHERE track_id = ?1 AND resolved_at IS NULL",
+                [track_id_value],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()?
+            .map(|value| from_positive_i64(value, "attention revision"))
+            .transpose()?;
+        if actual != Some(expected_revision) {
+            return Err(SqliteLibraryError::TrackAttentionRevisionConflict {
+                expected: expected_revision,
+                actual,
+            });
+        }
+        transaction.execute(
+            "UPDATE track_workflow_attention SET resolved_at = CURRENT_TIMESTAMP
+              WHERE track_id = ?1 AND revision = ?2 AND resolved_at IS NULL",
+            params![track_id_value, to_i64(expected_revision)?],
+        )?;
+        transaction.commit()?;
+        self.track_workflow_states(&[track_id])?
+            .remove(&track_id)
+            .ok_or(SqliteLibraryError::MissingTrack)
     }
 
     pub fn device_match_candidates(&self) -> Result<Vec<DeviceMatchCandidate>, SqliteLibraryError> {
@@ -864,6 +1093,9 @@ impl SqliteLibraryRepository {
                     Some(std::cmp::Ordering::Greater)
                 ),
             };
+            let metadata_changed = active.as_ref().is_some_and(|(_, _, _, _, _, color)| {
+                color.and_then(|value| u32::try_from(value).ok()) != alias.color_rgb
+            });
             if promotes {
                 transaction.execute(
                     "UPDATE tracks SET color_rgb = ?1 WHERE id = ?2",
@@ -894,6 +1126,15 @@ impl SqliteLibraryRepository {
                         i64::from(alias.information_update_count),
                     ],
                 )?;
+                if metadata_changed {
+                    record_workflow_attention(
+                        &transaction,
+                        track_id,
+                        source_id,
+                        &alias.metadata_revision,
+                        &BTreeSet::from([TrackAttentionReason::MetadataChanged]),
+                    )?;
+                }
             }
         }
         transaction.execute(
@@ -1084,6 +1325,8 @@ impl SqliteLibraryRepository {
             )?;
         }
         for update in hot_cue_updates {
+            let hot_cues_changed =
+                stored_hot_cues(&transaction, update.track_id)? != update.hot_cues;
             replace_hot_cues_in_transaction(&transaction, update.track_id, &update.hot_cues)?;
             transaction.execute(
                 "INSERT INTO track_hot_cue_provenance
@@ -1103,6 +1346,15 @@ impl SqliteLibraryRepository {
                     update.analyzed_at,
                 ],
             )?;
+            if hot_cues_changed {
+                record_workflow_attention(
+                    &transaction,
+                    to_i64(update.track_id.value())?,
+                    &update.source_id,
+                    &update.source_analysis_revision,
+                    &BTreeSet::from([TrackAttentionReason::HotCuesChanged]),
+                )?;
+            }
         }
         // A previous USB sync could have imported a second canonical row when
         // the same track already existed under a provider source. Once the
@@ -2762,6 +3014,37 @@ impl SqliteLibraryRepository {
                     // weakening the production schema created for a full library.
                     "PRAGMA user_version = 15;"
                 })?;
+            current = 15;
+        }
+        if current == 15 {
+            self.connection.execute_batch(
+                "
+                BEGIN IMMEDIATE;
+                CREATE TABLE track_workflow_status (
+                    track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+                    status TEXT NOT NULL CHECK(status IN ('not-started', 'in-progress', 'ready-for-show')),
+                    revision INTEGER NOT NULL CHECK(revision > 0),
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                CREATE TABLE track_workflow_attention (
+                    track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+                    revision INTEGER NOT NULL CHECK(revision > 0),
+                    source_id TEXT NOT NULL,
+                    source_revision TEXT NOT NULL,
+                    metadata_changed INTEGER NOT NULL DEFAULT 0 CHECK(metadata_changed IN (0, 1)),
+                    waveform_changed INTEGER NOT NULL DEFAULT 0 CHECK(waveform_changed IN (0, 1)),
+                    beat_grid_changed INTEGER NOT NULL DEFAULT 0 CHECK(beat_grid_changed IN (0, 1)),
+                    hot_cues_changed INTEGER NOT NULL DEFAULT 0 CHECK(hot_cues_changed IN (0, 1)),
+                    source_phrases_changed INTEGER NOT NULL DEFAULT 0 CHECK(source_phrases_changed IN (0, 1)),
+                    detected_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                    resolved_at TEXT
+                );
+                CREATE INDEX track_workflow_attention_active
+                    ON track_workflow_attention(resolved_at, track_id);
+                PRAGMA user_version = 16;
+                COMMIT;
+                ",
+            )?;
         }
         Ok(())
     }
@@ -3544,16 +3827,20 @@ impl LibraryRepository for SqliteLibraryRepository {
         let pattern = search_pattern(query.search());
         let page = query.page();
         let order_by = track_query_order_by(query);
+        let workflow = track_workflow_predicate(query.workflow_filter());
         match query.playlist_id() {
             Some(playlist_id) => {
-                let total = self.connection.query_row(
+                let count_sql = format!(
                     "SELECT COUNT(*)
                      FROM playlist_tracks pt JOIN tracks t ON t.id = pt.track_id
                      WHERE pt.playlist_id = ?1 AND (
                        LOWER(t.title) LIKE LOWER(?2) ESCAPE '\\' OR
                        LOWER(t.artist) LIKE LOWER(?2) ESCAPE '\\' OR
                        LOWER(t.source_track_id) LIKE LOWER(?2) ESCAPE '\\'
-                     )",
+                     ) AND {workflow}"
+                );
+                let total = self.connection.query_row(
+                    &count_sql,
                     params![to_i64(playlist_id.value())?, pattern],
                     |row| row.get::<_, i64>(0),
                 )?;
@@ -3568,7 +3855,7 @@ impl LibraryRepository for SqliteLibraryRepository {
                        LOWER(t.title) LIKE LOWER(?2) ESCAPE '\\' OR
                        LOWER(t.artist) LIKE LOWER(?2) ESCAPE '\\' OR
                        LOWER(t.source_track_id) LIKE LOWER(?2) ESCAPE '\\'
-                     )
+                     ) AND {workflow}
                      ORDER BY {order_by}
                      LIMIT ?3 OFFSET ?4"
                 );
@@ -3590,22 +3877,25 @@ impl LibraryRepository for SqliteLibraryRepository {
                 ))
             }
             None => {
-                let total = self.connection.query_row(
-                    "SELECT COUNT(*) FROM tracks t WHERE
+                let count_sql = format!(
+                    "SELECT COUNT(*) FROM tracks t WHERE (
                        LOWER(t.title) LIKE LOWER(?1) ESCAPE '\\' OR
                        LOWER(t.artist) LIKE LOWER(?1) ESCAPE '\\' OR
-                       LOWER(t.source_track_id) LIKE LOWER(?1) ESCAPE '\\'",
-                    [&pattern],
-                    |row| row.get::<_, i64>(0),
-                )?;
+                       LOWER(t.source_track_id) LIKE LOWER(?1) ESCAPE '\\'
+                     ) AND {workflow}"
+                );
+                let total = self
+                    .connection
+                    .query_row(&count_sql, [&pattern], |row| row.get::<_, i64>(0))?;
                 let sql = format!(
                     "SELECT t.id, t.source_track_id, t.title, t.artist, t.bpm_milli,
                             t.key_pitch, t.key_mode, t.duration_millis, t.color_rgb,
                             t.analysis_revision, h.revision
                      FROM tracks t LEFT JOIN timeline_heads h ON h.track_id = t.id
-                     WHERE LOWER(t.title) LIKE LOWER(?1) ESCAPE '\\' OR
+                     WHERE (LOWER(t.title) LIKE LOWER(?1) ESCAPE '\\' OR
                            LOWER(t.artist) LIKE LOWER(?1) ESCAPE '\\' OR
-                           LOWER(t.source_track_id) LIKE LOWER(?1) ESCAPE '\\'
+                           LOWER(t.source_track_id) LIKE LOWER(?1) ESCAPE '\\')
+                       AND {workflow}
                      ORDER BY {order_by}
                      LIMIT ?2 OFFSET ?3"
                 );
@@ -4587,6 +4877,7 @@ fn replace_track_analysis_in_transaction(
     analysis: &DeviceAnalysisUpsert,
 ) -> Result<(), SqliteLibraryError> {
     let track_id = to_i64(analysis.track_id.value())?;
+    let attention_reasons = analysis_refresh_attention_reasons(transaction, analysis)?;
     let reconciled_timeline = timeline_for_analysis_refresh(
         transaction,
         track_id,
@@ -4684,6 +4975,208 @@ fn replace_track_analysis_in_transaction(
     if let Some(timeline) = reconciled_timeline {
         insert_timeline_revision_in_transaction(transaction, &timeline)?;
     }
+    record_workflow_attention(
+        transaction,
+        track_id,
+        &analysis.source_id,
+        &analysis.source_analysis_revision,
+        &attention_reasons,
+    )?;
+    Ok(())
+}
+
+fn analysis_refresh_attention_reasons(
+    transaction: &Transaction<'_>,
+    analysis: &DeviceAnalysisUpsert,
+) -> Result<BTreeSet<TrackAttentionReason>, SqliteLibraryError> {
+    let track_id = to_i64(analysis.track_id.value())?;
+    let mut reasons = BTreeSet::new();
+    let current_duration = transaction.query_row(
+        "SELECT duration_millis FROM tracks WHERE id = ?1",
+        [track_id],
+        |row| row.get::<_, i64>(0),
+    )?;
+    if from_nonnegative_i64(current_duration, "track duration")? != analysis.duration_millis {
+        reasons.insert(TrackAttentionReason::MetadataChanged);
+    }
+    if stored_beat_grid(transaction, analysis.track_id)? != analysis.beat_grid {
+        reasons.insert(TrackAttentionReason::BeatGridChanged);
+    }
+    if stored_waveform(transaction, analysis.track_id)? != analysis.waveform {
+        reasons.insert(TrackAttentionReason::WaveformChanged);
+    }
+    if stored_raw_phrases(transaction, analysis.track_id)? != analysis.raw_phrases {
+        reasons.insert(TrackAttentionReason::SourcePhrasesChanged);
+    }
+    if stored_hot_cues(transaction, analysis.track_id)? != analysis.hot_cues {
+        reasons.insert(TrackAttentionReason::HotCuesChanged);
+    }
+    Ok(reasons)
+}
+
+fn stored_beat_grid(
+    transaction: &Transaction<'_>,
+    track_id: TrackId,
+) -> Result<BeatGrid, SqliteLibraryError> {
+    let track_id = to_i64(track_id.value())?;
+    let beats_per_bar = transaction.query_row(
+        "SELECT beats_per_bar FROM beat_grids WHERE track_id = ?1",
+        [track_id],
+        |row| row.get::<_, i64>(0),
+    )?;
+    let mut statement = transaction.prepare(
+        "SELECT beat_index, time_millis, bar_index, beat_in_bar
+           FROM beat_markers WHERE track_id = ?1 ORDER BY beat_index",
+    )?;
+    let rows = statement.query_map([track_id], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, i64>(2)?,
+            row.get::<_, i64>(3)?,
+        ))
+    })?;
+    let mut markers = Vec::new();
+    for row in rows {
+        let (index, time, bar, beat) = row?;
+        markers.push(BeatMarker::new(
+            to_u32(index, "beat index")?,
+            from_nonnegative_i64(time, "beat time")?,
+            to_u32(bar, "bar index")?,
+            to_u8(beat, "beat in bar")?,
+        ));
+    }
+    Ok(BeatGrid::try_new(
+        to_u8(beats_per_bar, "beats per bar")?,
+        markers,
+    )?)
+}
+
+fn stored_waveform(
+    transaction: &Transaction<'_>,
+    track_id: TrackId,
+) -> Result<Vec<WaveformPoint>, SqliteLibraryError> {
+    let mut statement = transaction.prepare(
+        "SELECT low, mid, high FROM waveform_points
+          WHERE track_id = ?1 ORDER BY point_index",
+    )?;
+    let rows = statement.query_map([to_i64(track_id.value())?], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, i64>(2)?,
+        ))
+    })?;
+    let mut waveform = Vec::new();
+    for row in rows {
+        let (low, mid, high) = row?;
+        waveform.push(WaveformPoint::new(
+            to_u8(low, "waveform low")?,
+            to_u8(mid, "waveform mid")?,
+            to_u8(high, "waveform high")?,
+        ));
+    }
+    Ok(waveform)
+}
+
+fn stored_raw_phrases(
+    transaction: &Transaction<'_>,
+    track_id: TrackId,
+) -> Result<Vec<RawPhraseObservation>, SqliteLibraryError> {
+    let mut statement = transaction.prepare(
+        "SELECT start_beat, end_beat, source_label FROM raw_phrases
+          WHERE track_id = ?1 ORDER BY phrase_index",
+    )?;
+    let rows = statement.query_map([to_i64(track_id.value())?], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, String>(2)?,
+        ))
+    })?;
+    let mut phrases = Vec::new();
+    for row in rows {
+        let (start, end, label) = row?;
+        phrases.push(RawPhraseObservation::try_new(
+            to_u32(start, "raw phrase start")?,
+            to_u32(end, "raw phrase end")?,
+            label,
+        )?);
+    }
+    Ok(phrases)
+}
+
+fn stored_hot_cues(
+    transaction: &Transaction<'_>,
+    track_id: TrackId,
+) -> Result<Vec<HotCue>, SqliteLibraryError> {
+    let mut statement = transaction.prepare(
+        "SELECT cue_index, time_millis, loop_end_millis, name, color_rgb
+           FROM hot_cues WHERE track_id = ?1 ORDER BY cue_index",
+    )?;
+    let rows = statement.query_map([to_i64(track_id.value())?], |row| {
+        Ok((
+            row.get::<_, i64>(0)?,
+            row.get::<_, i64>(1)?,
+            row.get::<_, Option<i64>>(2)?,
+            row.get::<_, String>(3)?,
+            row.get::<_, i64>(4)?,
+        ))
+    })?;
+    let mut cues = Vec::new();
+    for row in rows {
+        let (index, time, loop_end, name, color) = row?;
+        cues.push(HotCue::try_new(
+            to_u8(index, "hot cue index")?,
+            from_nonnegative_i64(time, "hot cue time")?,
+            loop_end
+                .map(|value| from_nonnegative_i64(value, "hot cue loop end"))
+                .transpose()?,
+            name,
+            to_u32(color, "hot cue color")?,
+        )?);
+    }
+    Ok(cues)
+}
+
+fn record_workflow_attention(
+    transaction: &Transaction<'_>,
+    track_id: i64,
+    source_id: &str,
+    source_revision: &str,
+    reasons: &BTreeSet<TrackAttentionReason>,
+) -> Result<(), SqliteLibraryError> {
+    if reasons.is_empty() {
+        return Ok(());
+    }
+    let has = |reason| i64::from(reasons.contains(&reason));
+    transaction.execute(
+        "INSERT INTO track_workflow_attention
+         (track_id, revision, source_id, source_revision, metadata_changed,
+          waveform_changed, beat_grid_changed, hot_cues_changed, source_phrases_changed)
+         VALUES (?1, 1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+         ON CONFLICT(track_id) DO UPDATE SET
+           revision = track_workflow_attention.revision + 1,
+           source_id = excluded.source_id,
+           source_revision = excluded.source_revision,
+           metadata_changed = MAX(track_workflow_attention.metadata_changed, excluded.metadata_changed),
+           waveform_changed = MAX(track_workflow_attention.waveform_changed, excluded.waveform_changed),
+           beat_grid_changed = MAX(track_workflow_attention.beat_grid_changed, excluded.beat_grid_changed),
+           hot_cues_changed = MAX(track_workflow_attention.hot_cues_changed, excluded.hot_cues_changed),
+           source_phrases_changed = MAX(track_workflow_attention.source_phrases_changed, excluded.source_phrases_changed),
+           detected_at = CURRENT_TIMESTAMP,
+           resolved_at = NULL",
+        params![
+            track_id,
+            source_id,
+            source_revision,
+            has(TrackAttentionReason::MetadataChanged),
+            has(TrackAttentionReason::WaveformChanged),
+            has(TrackAttentionReason::BeatGridChanged),
+            has(TrackAttentionReason::HotCuesChanged),
+            has(TrackAttentionReason::SourcePhrasesChanged),
+        ],
+    )?;
     Ok(())
 }
 
@@ -5222,6 +5715,10 @@ pub enum SqliteLibraryError {
     PhraseRoleCatalogRevisionConflict { expected: u64, actual: u64 },
     #[error("Autoloop catalog changed; expected revision {expected}, actual {actual}")]
     AutoloopCatalogRevisionConflict { expected: u64, actual: u64 },
+    #[error("track workflow status changed; expected revision {expected}, actual {actual}")]
+    TrackWorkflowRevisionConflict { expected: u64, actual: u64 },
+    #[error("track source-review signal changed; expected revision {expected}, actual {actual:?}")]
+    TrackAttentionRevisionConflict { expected: u64, actual: Option<u64> },
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -5589,6 +6086,12 @@ fn track_query_order_by(query: &LibraryTrackQuery) -> String {
         }
         LibraryTrackSortField::TimelineRevision => "COALESCE(h.revision, 0)",
         LibraryTrackSortField::Readiness => "CASE WHEN h.revision IS NULL THEN 1 ELSE 0 END",
+        LibraryTrackSortField::PreparationStatus => {
+            "COALESCE((SELECT s.status FROM track_workflow_status s WHERE s.track_id = t.id), 'not-started')"
+        }
+        LibraryTrackSortField::Attention => {
+            "CASE WHEN EXISTS (SELECT 1 FROM track_workflow_attention a WHERE a.track_id = t.id AND a.resolved_at IS NULL) THEN 0 ELSE 1 END"
+        }
         LibraryTrackSortField::SourceTrackId => "t.source_track_id COLLATE NOCASE",
         LibraryTrackSortField::AnalysisRevision => "t.analysis_revision COLLATE NOCASE",
     };
@@ -5597,12 +6100,39 @@ fn track_query_order_by(query: &LibraryTrackQuery) -> String {
     )
 }
 
+fn track_workflow_predicate(filter: Option<TrackWorkflowFilter>) -> &'static str {
+    match filter {
+        None => "1 = 1",
+        Some(TrackWorkflowFilter::ChangedAfterUsbSync) => {
+            "EXISTS (SELECT 1 FROM track_workflow_attention a
+                      WHERE a.track_id = t.id AND a.resolved_at IS NULL)"
+        }
+        Some(TrackWorkflowFilter::NotStarted) => {
+            "COALESCE((SELECT s.status FROM track_workflow_status s WHERE s.track_id = t.id),
+                      'not-started') = 'not-started'"
+        }
+        Some(TrackWorkflowFilter::InProgress) => {
+            "EXISTS (SELECT 1 FROM track_workflow_status s
+                      WHERE s.track_id = t.id AND s.status = 'in-progress')"
+        }
+        Some(TrackWorkflowFilter::ReadyForShow) => {
+            "EXISTS (SELECT 1 FROM track_workflow_status s
+                      WHERE s.track_id = t.id AND s.status = 'ready-for-show')
+             AND NOT EXISTS (SELECT 1 FROM track_workflow_attention a
+                              WHERE a.track_id = t.id AND a.resolved_at IS NULL)"
+        }
+    }
+}
+
 #[cfg(test)]
 mod fault_tests {
+    use std::collections::BTreeSet;
+
     use lumi_domain::TrackId;
     use lumi_library::{
         HotCue, ImportedLibraryBaseline, ImportedTrackAnalysis, LibraryRepository,
-        RawPhraseObservation, SourceRevision, TrackColor, TrackPageRequest,
+        LibraryTrackQuery, RawPhraseObservation, SourceRevision, TrackAttentionReason, TrackColor,
+        TrackPageRequest, TrackPreparationStatus, TrackWorkflowFilter,
     };
     use lumi_library_demo::DemoLibrarySourceProvider;
     use lumi_library_source::MusicLibrarySourceProvider;
@@ -5611,8 +6141,96 @@ mod fault_tests {
     use super::{
         DeviceAliasUpsert, DeviceAnalysisDecision, DeviceAnalysisUpsert, DeviceHotCueUpsert,
         DevicePlaylistUpsert, DeviceTrackImport, SqliteLibraryError, SqliteLibraryRepository,
-        legacy_partial_bar_phrase_projection, repair_legacy_partial_bar_timeline_points,
+        legacy_partial_bar_phrase_projection, record_workflow_attention,
+        repair_legacy_partial_bar_timeline_points, to_i64,
     };
+
+    #[test]
+    fn workflow_status_and_usb_attention_are_revisioned_filterable_and_persistent()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let baseline = DemoLibrarySourceProvider::curated().load_baseline()?;
+        let mut repository = SqliteLibraryRepository::in_memory()?;
+        repository.import_baseline(&baseline)?;
+        let track_id = repository
+            .page_tracks(TrackPageRequest::try_new(0, 1)?)?
+            .tracks()[0]
+            .id();
+
+        let updated = repository.set_track_preparation_status(
+            track_id,
+            0,
+            TrackPreparationStatus::ReadyForShow,
+        )?;
+        assert_eq!(updated.status_revision(), 1);
+        assert!(updated.is_effectively_ready());
+        assert!(matches!(
+            repository.set_track_preparation_status(
+                track_id,
+                0,
+                TrackPreparationStatus::InProgress,
+            ),
+            Err(SqliteLibraryError::TrackWorkflowRevisionConflict {
+                expected: 0,
+                actual: 1,
+            })
+        ));
+
+        let transaction = repository.connection.transaction()?;
+        record_workflow_attention(
+            &transaction,
+            to_i64(track_id.value())?,
+            "usb:gray",
+            "analysis-v2",
+            &BTreeSet::from([
+                TrackAttentionReason::BeatGridChanged,
+                TrackAttentionReason::HotCuesChanged,
+            ]),
+        )?;
+        transaction.commit()?;
+
+        let workflow = repository
+            .track_workflow_states(&[track_id])?
+            .remove(&track_id)
+            .ok_or("workflow state missing")?;
+        assert_eq!(
+            workflow.preparation_status(),
+            TrackPreparationStatus::ReadyForShow
+        );
+        assert!(!workflow.is_effectively_ready());
+        let attention = workflow.attention().ok_or("USB attention missing")?;
+        assert!(
+            attention
+                .reasons()
+                .contains(&TrackAttentionReason::BeatGridChanged)
+        );
+        assert!(
+            attention
+                .reasons()
+                .contains(&TrackAttentionReason::HotCuesChanged)
+        );
+
+        let changed = repository.query_tracks(
+            &LibraryTrackQuery::try_new("", None, TrackPageRequest::try_new(0, 25)?)?
+                .with_workflow_filter(Some(TrackWorkflowFilter::ChangedAfterUsbSync)),
+        )?;
+        assert_eq!(changed.total(), 1);
+        assert_eq!(changed.tracks()[0].id(), track_id);
+        let ready = repository.query_tracks(
+            &LibraryTrackQuery::try_new("", None, TrackPageRequest::try_new(0, 25)?)?
+                .with_workflow_filter(Some(TrackWorkflowFilter::ReadyForShow)),
+        )?;
+        assert_eq!(ready.total(), 0);
+
+        let resolved =
+            repository.resolve_track_workflow_attention(track_id, attention.revision())?;
+        assert!(resolved.is_effectively_ready());
+        assert_eq!(
+            repository.track_workflow_summary()?.changed_after_usb_sync,
+            0
+        );
+        assert_eq!(repository.track_workflow_summary()?.ready_for_show, 1);
+        Ok(())
+    }
 
     #[test]
     fn detects_only_the_legacy_partial_bar_phrase_projection()
@@ -6086,6 +6704,19 @@ mod fault_tests {
             "device:review:analysis-review"
         );
         assert_eq!(promoted.raw_phrases(), reviewed_phrases);
+        let promoted_workflow = repository
+            .track_workflow_states(&[track_id])?
+            .remove(&track_id)
+            .ok_or("promoted workflow state missing")?;
+        let promoted_attention = promoted_workflow
+            .attention()
+            .ok_or("promoted USB analysis must require a workflow review")?;
+        assert_eq!(promoted_attention.source_id(), "usb-fs:review");
+        assert!(
+            promoted_attention
+                .reasons()
+                .contains(&TrackAttentionReason::SourcePhrasesChanged)
+        );
         assert!(repository.device_review_tracks()?.is_empty());
         assert_eq!(repository.device_source_summaries()?[0].promoted_tracks, 1);
 
@@ -6390,6 +7021,11 @@ mod fault_tests {
         );
         assert_eq!(aliases[0].match_kind, "imported-device");
         assert_eq!(aliases[0].sync_disposition, "promoted-initial");
+        assert_eq!(
+            repository.track_workflow_summary()?.changed_after_usb_sync,
+            0,
+            "an initial USB import is preparation work, not a source-change review"
+        );
         assert_eq!(
             repository
                 .page_tracks(TrackPageRequest::try_new(0, 100)?)?
@@ -6919,7 +7555,7 @@ mod fault_tests {
         let schema: u32 = repository
             .connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))?;
-        assert_eq!(schema, 15);
+        assert_eq!(schema, 16);
         Ok(())
     }
 }

@@ -3371,13 +3371,14 @@ fn apply_command(
         SessionCommand::QueryLibrary {
             search,
             playlist_id,
+            workflow_filter,
             offset,
             limit,
             sort,
         } => {
             runtime
                 .library_worker
-                .query(search, playlist_id, offset, limit, sort);
+                .query(search, playlist_id, workflow_filter, offset, limit, sort);
             return Ok(());
         }
         SessionCommand::OpenLibraryTrackEditor { track_id } => {
@@ -3387,6 +3388,27 @@ fn apply_command(
         SessionCommand::GetLibraryTrackWaveform { .. } => return Ok(()),
         SessionCommand::CloseLibraryTrackEditor => {
             runtime.library_worker.close_editor();
+            return Ok(());
+        }
+        SessionCommand::SetTrackPreparationStatus {
+            track_id,
+            expected_revision,
+            status,
+        } => {
+            runtime.library_worker.set_track_preparation_status(
+                track_id,
+                expected_revision,
+                status,
+            )?;
+            return Ok(());
+        }
+        SessionCommand::ResolveTrackWorkflowAttention {
+            track_id,
+            expected_revision,
+        } => {
+            runtime
+                .library_worker
+                .resolve_track_workflow_attention(track_id, expected_revision)?;
             return Ok(());
         }
         SessionCommand::ReuseLibraryTimeline {
@@ -4025,6 +4047,8 @@ fn apply_command(
         | SessionCommand::OpenLibraryTrackEditor { .. }
         | SessionCommand::GetLibraryTrackWaveform { .. }
         | SessionCommand::CloseLibraryTrackEditor
+        | SessionCommand::SetTrackPreparationStatus { .. }
+        | SessionCommand::ResolveTrackWorkflowAttention { .. }
         | SessionCommand::PreviewDemoSourceRefresh
         | SessionCommand::PreviewRekordboxXmlSync { .. }
         | SessionCommand::ApplyRekordboxXmlSync { .. }

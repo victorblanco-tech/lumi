@@ -38,6 +38,67 @@ public enum LibraryReadinessFilter: String, CaseIterable, Identifiable, Sendable
     public var id: String { rawValue }
 }
 
+public enum TrackPreparationStatus: String, CaseIterable, Identifiable, Equatable, Sendable {
+    case notStarted = "not-started"
+    case inProgress = "in-progress"
+    case readyForShow = "ready-for-show"
+
+    public var id: String { rawValue }
+}
+
+public enum TrackWorkflowFilter: String, CaseIterable, Identifiable, Equatable, Sendable {
+    case changedAfterUSBSync
+    case notStarted
+    case inProgress
+    case readyForShow
+
+    public var id: String { rawValue }
+}
+
+public enum TrackAttentionReason: String, CaseIterable, Equatable, Sendable {
+    case metadataChanged
+    case waveformChanged
+    case beatGridChanged
+    case hotCuesChanged
+    case sourcePhrasesChanged
+}
+
+public struct TrackWorkflowAttention: Equatable, Sendable {
+    public let revision: UInt64
+    public let sourceID: String
+    public let sourceRevision: String
+    public let detectedAt: String
+    public let reasons: [TrackAttentionReason]
+}
+
+public struct TrackWorkflowState: Equatable, Sendable {
+    public let preparationStatus: TrackPreparationStatus
+    public let statusRevision: UInt64
+    public let effectiveReady: Bool
+    public let attention: TrackWorkflowAttention?
+
+    public static let notStarted = Self(
+        preparationStatus: .notStarted,
+        statusRevision: 0,
+        effectiveReady: false,
+        attention: nil
+    )
+}
+
+public struct TrackWorkflowSummary: Equatable, Sendable {
+    public let changedAfterUSBSync: UInt64
+    public let notStarted: UInt64
+    public let inProgress: UInt64
+    public let readyForShow: UInt64
+
+    public static let empty = Self(
+        changedAfterUSBSync: 0,
+        notStarted: 0,
+        inProgress: 0,
+        readyForShow: 0
+    )
+}
+
 public struct LibrarySource: Equatable, Sendable {
     public let id: String
     public let name: String
@@ -117,6 +178,7 @@ public struct LibraryTrack: Identifiable, Equatable, Sendable {
     public let missingCapabilities: [String]
     public let warnings: [String]
     public let usbSources: [LibraryTrackUSBSource]
+    public let workflow: TrackWorkflowState
 
     public init(
         id: UInt64,
@@ -132,7 +194,8 @@ public struct LibraryTrack: Identifiable, Equatable, Sendable {
         readiness: LibraryReadiness,
         missingCapabilities: [String],
         warnings: [String],
-        usbSources: [LibraryTrackUSBSource] = []
+        usbSources: [LibraryTrackUSBSource] = [],
+        workflow: TrackWorkflowState = .notStarted
     ) {
         self.id = id
         self.sourceTrackID = sourceTrackID
@@ -148,6 +211,7 @@ public struct LibraryTrack: Identifiable, Equatable, Sendable {
         self.missingCapabilities = missingCapabilities
         self.warnings = warnings
         self.usbSources = usbSources
+        self.workflow = workflow
     }
 }
 
@@ -158,7 +222,13 @@ public extension LibraryTrack {
     }
     var sortUSBSources: String { usbSources.map(\.displayName).joined(separator: "\u{001F}") }
     var sortTimelineRevision: UInt64 { timelineRevision ?? 0 }
+    var timelineRevisionLabel: String {
+        guard let timelineRevision else { return "—" }
+        return "R\(timelineRevision)"
+    }
     var sortReadiness: String { readiness.rawValue }
+    var sortPreparationStatus: String { workflow.preparationStatus.rawValue }
+    var sortAttention: String { workflow.attention?.reasons.first?.rawValue ?? "" }
 }
 
 public struct LibraryTrackUSBSource: Identifiable, Equatable, Sendable {
@@ -181,6 +251,7 @@ public struct LibraryQuery: Equatable, Sendable {
     public let limit: UInt16
     public let sortBy: LibraryTrackSortField
     public let sortDirection: LibraryTrackSortDirection
+    public let workflowFilter: TrackWorkflowFilter?
 
     public init(
         search: String,
@@ -188,7 +259,8 @@ public struct LibraryQuery: Equatable, Sendable {
         offset: UInt32,
         limit: UInt16,
         sortBy: LibraryTrackSortField = .playlist,
-        sortDirection: LibraryTrackSortDirection = .ascending
+        sortDirection: LibraryTrackSortDirection = .ascending,
+        workflowFilter: TrackWorkflowFilter? = nil
     ) {
         self.search = search
         self.playlistID = playlistID
@@ -196,6 +268,7 @@ public struct LibraryQuery: Equatable, Sendable {
         self.limit = limit
         self.sortBy = sortBy
         self.sortDirection = sortDirection
+        self.workflowFilter = workflowFilter
     }
 }
 
@@ -209,6 +282,8 @@ public enum LibraryTrackSortField: String, CaseIterable, Equatable, Sendable {
     case usbSources
     case timelineRevision
     case readiness
+    case preparationStatus
+    case attention
     case sourceTrackID
     case analysisRevision
 }
@@ -441,6 +516,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
     public let playlists: [LibraryPlaylist]
     public let query: LibraryQuery
     public let page: LibraryPage
+    public let workflow: TrackWorkflowSummary
     public let editor: TrackEditorAnalysis?
     public let phraseRoleSettings: PhraseRoleSettingsState?
     public let autoloopCatalog: AutoloopCatalogState?
@@ -464,6 +540,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
         playlists: [LibraryPlaylist],
         query: LibraryQuery,
         page: LibraryPage,
+        workflow: TrackWorkflowSummary = .empty,
         editor: TrackEditorAnalysis? = nil,
         phraseRoleSettings: PhraseRoleSettingsState? = nil,
         autoloopCatalog: AutoloopCatalogState? = nil,
@@ -486,6 +563,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
         self.playlists = playlists
         self.query = query
         self.page = page
+        self.workflow = workflow
         self.editor = editor
         self.phraseRoleSettings = phraseRoleSettings
         self.autoloopCatalog = autoloopCatalog
@@ -518,6 +596,7 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
             playlists: playlists,
             query: query,
             page: page,
+            workflow: workflow,
             editor: editor,
             phraseRoleSettings: phraseRoleSettings,
             autoloopCatalog: autoloopCatalog,

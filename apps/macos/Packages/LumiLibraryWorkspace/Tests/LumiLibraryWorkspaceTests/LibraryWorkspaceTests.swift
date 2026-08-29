@@ -101,6 +101,46 @@ struct LibraryWorkspaceTests {
         #expect(state.page.tracks.first?.usbSources.first?.displayName == "DJ USB")
     }
 
+    @Test("Track workflow and USB attention decode without changing technical readiness")
+    func decodesTrackWorkflow() throws {
+        var value = trackValue()
+        guard case var .object(track) = value else {
+            Issue.record("Track fixture must be an object")
+            return
+        }
+        track["workflow"] = .object([
+            "preparationStatus": .string("ready-for-show"),
+            "statusRevision": .number(3),
+            "effectiveReady": .boolean(false),
+            "attention": .object([
+                "revision": .number(4),
+                "sourceId": .string("usb:gray"),
+                "sourceRevision": .string("analysis-v2"),
+                "detectedAt": .string("2026-08-29T08:00:00Z"),
+                "reasons": .array([.string("beatGridChanged"), .string("hotCuesChanged")])
+            ])
+        ])
+        value = .object(track)
+        let state = try LibrarySnapshotDecoder().decode(
+            envelope(
+                trackValues: [value],
+                workflow: .object([
+                    "changedAfterUsbSync": .number(1),
+                    "notStarted": .number(9_999),
+                    "inProgress": .number(0),
+                    "readyForShow": .number(0)
+                ])
+            )
+        )
+
+        let decoded = try #require(state.page.tracks.first)
+        #expect(decoded.readiness == .ready)
+        #expect(decoded.workflow.preparationStatus == .readyForShow)
+        #expect(!decoded.workflow.effectiveReady)
+        #expect(decoded.workflow.attention?.reasons == [.beatGridChanged, .hotCuesChanged])
+        #expect(state.workflow.changedAfterUSBSync == 1)
+    }
+
     @Test("Track sorting and creative phrase reuse remain explicit wire contracts")
     func decodesTrackSortAndCreativeReuse() throws {
         let state = try LibrarySnapshotDecoder().decode(
@@ -1409,6 +1449,7 @@ private func envelope(
     rekordboxDevices: JSONValue = .null,
     rekordboxDeviceInspection: JSONValue = .null,
     dataManagement: JSONValue = .null,
+    workflow: JSONValue = .null,
     sortBy: String = "playlist",
     sortDirection: String = "ascending"
 ) -> MessageEnvelope {
@@ -1442,6 +1483,7 @@ private func envelope(
                     "localAudio": .boolean(true)
                 ]),
                 "collectionTotal": .number(10_000),
+                "workflow": workflow,
                 "query": .object([
                     "search": .string(""),
                     "playlistId": .null,

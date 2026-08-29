@@ -20,6 +20,7 @@ public struct LibrarySnapshotDecoder: Sendable {
             playlists: state.playlists,
             query: state.query,
             page: state.page,
+            workflow: state.workflow,
             editor: state.editor,
             phraseRoleSettings: state.phraseRoleSettings,
             autoloopCatalog: state.autoloopCatalog,
@@ -71,7 +72,10 @@ public struct LibrarySnapshotDecoder: Sendable {
                 .required(.invalidQuerySort),
             sortDirection: try LibraryTrackSortDirection(
                 rawValue: optionalString(queryObject, "sortDirection") ?? "ascending"
-            ).required(.invalidQuerySort)
+            ).required(.invalidQuerySort),
+            workflowFilter: try optionalString(queryObject, "workflowFilter").map { rawValue in
+                try TrackWorkflowFilter(rawValue: rawValue).required(.invalidWorkflow)
+            }
         )
         guard (1...200).contains(query.limit) else {
             throw LibrarySnapshotError.unboundedPage
@@ -102,6 +106,7 @@ public struct LibrarySnapshotDecoder: Sendable {
                     .required(.invalidNumber("page.offset")),
                 tracks: try trackValues.map(decodeTrack)
             ),
+            workflow: try decodeWorkflowSummary(library["workflow"]),
             editor: try decodeEditor(library["editor"]),
             phraseRoleSettings: try decodePhraseRoleSettings(library["phraseRoleSettings"]),
             autoloopCatalog: try decodeAutoloopCatalog(library["autoloopCatalog"]),
@@ -124,6 +129,19 @@ public struct LibrarySnapshotDecoder: Sendable {
                 library["rekordboxDeviceInspection"]
             ),
             dataManagement: try decodeDataManagement(library["dataManagement"])
+        )
+    }
+
+    private func decodeWorkflowSummary(_ value: JSONValue?) throws -> TrackWorkflowSummary {
+        guard let value, value != .null else { return .empty }
+        guard case let .object(workflow) = value else {
+            throw LibrarySnapshotError.invalidObject
+        }
+        return TrackWorkflowSummary(
+            changedAfterUSBSync: try unsigned(workflow, "changedAfterUsbSync"),
+            notStarted: try unsigned(workflow, "notStarted"),
+            inProgress: try unsigned(workflow, "inProgress"),
+            readyForShow: try unsigned(workflow, "readyForShow")
         )
     }
 
@@ -1335,6 +1353,7 @@ public struct LibrarySnapshotDecoder: Sendable {
         guard case let .object(object) = value else { throw LibrarySnapshotError.invalidObject }
         let key = try self.object(object, "key")
         let readiness = try self.object(object, "readiness")
+        let workflow = try decodeTrackWorkflow(object["workflow"])
         return LibraryTrack(
             id: try unsigned(object, "id"),
             sourceTrackID: try string(object, "sourceTrackId"),
@@ -1364,7 +1383,42 @@ public struct LibrarySnapshotDecoder: Sendable {
                     displayName: try string(source, "displayName"),
                     syncDisposition: try string(source, "syncDisposition")
                 )
-            }
+            },
+            workflow: workflow
+        )
+    }
+
+    private func decodeTrackWorkflow(_ value: JSONValue?) throws -> TrackWorkflowState {
+        guard let value, value != .null else { return .notStarted }
+        guard case let .object(workflow) = value else {
+            throw LibrarySnapshotError.invalidObject
+        }
+        let attention: TrackWorkflowAttention?
+        if case let .object(payload)? = workflow["attention"] {
+            attention = TrackWorkflowAttention(
+                revision: try unsigned(payload, "revision"),
+                sourceID: try string(payload, "sourceId"),
+                sourceRevision: try string(payload, "sourceRevision"),
+                detectedAt: try string(payload, "detectedAt"),
+                reasons: try strings(payload, "reasons").map { reason in
+                    try TrackAttentionReason(rawValue: reason).required(.invalidWorkflow)
+                }
+            )
+        } else {
+            attention = nil
+        }
+        let status = try TrackPreparationStatus(
+            rawValue: string(workflow, "preparationStatus")
+        ).required(.invalidWorkflow)
+        let effectiveReady = try boolean(workflow, "effectiveReady")
+        guard effectiveReady == (status == .readyForShow && attention == nil) else {
+            throw LibrarySnapshotError.invalidWorkflow
+        }
+        return TrackWorkflowState(
+            preparationStatus: status,
+            statusRevision: try unsigned(workflow, "statusRevision"),
+            effectiveReady: effectiveReady,
+            attention: attention
         )
     }
 
@@ -1516,6 +1570,7 @@ public enum LibrarySnapshotError: Error, Equatable {
     case invalidMusicalKey
     case invalidReadiness
     case invalidQuerySort
+    case invalidWorkflow
     case invalidNumber(String)
     case unboundedPage
     case unboundedEditor

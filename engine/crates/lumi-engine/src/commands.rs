@@ -7,7 +7,8 @@ use lumi_domain::{
 use lumi_library::{
     AutoloopVariantMove, LibraryTrackSort, LibraryTrackSortDirection, LibraryTrackSortField,
     PhraseAbsorption, PhraseConflictChoice, PhraseLoopStrategy, PhraseRoleId, PhraseRoleMove,
-    ReconcileSide, ReconcileStrategy, ThemeSpecificVariant, TimelineEditCommand, VariantId,
+    ReconcileSide, ReconcileStrategy, ThemeSpecificVariant, TimelineEditCommand,
+    TrackPreparationStatus, TrackWorkflowFilter, VariantId,
 };
 use lumi_light_plans::LightPlanningPolicy;
 use lumi_midi_output::MidiAddress;
@@ -38,6 +39,7 @@ pub enum SessionCommand {
     QueryLibrary {
         search: String,
         playlist_id: Option<u64>,
+        workflow_filter: Option<TrackWorkflowFilter>,
         offset: u32,
         limit: u16,
         sort: LibraryTrackSort,
@@ -49,6 +51,15 @@ pub enum SessionCommand {
         track_id: u64,
     },
     CloseLibraryTrackEditor,
+    SetTrackPreparationStatus {
+        track_id: u64,
+        expected_revision: u64,
+        status: TrackPreparationStatus,
+    },
+    ResolveTrackWorkflowAttention {
+        track_id: u64,
+        expected_revision: u64,
+    },
     PreviewDemoSourceRefresh,
     PreviewRekordboxXmlSync {
         folder: String,
@@ -260,6 +271,8 @@ impl SessionCommand {
             | Self::OpenLibraryTrackEditor { .. }
             | Self::GetLibraryTrackWaveform { .. }
             | Self::CloseLibraryTrackEditor
+            | Self::SetTrackPreparationStatus { .. }
+            | Self::ResolveTrackWorkflowAttention { .. }
             | Self::PreviewDemoSourceRefresh
             | Self::PreviewRekordboxXmlSync { .. }
             | Self::ApplyRekordboxXmlSync { .. }
@@ -317,6 +330,8 @@ impl SessionCommand {
                 | Self::ImportRekordboxAnalysis { .. }
                 | Self::SyncRekordboxDevice { .. }
                 | Self::ResolveRekordboxDeviceConflict { .. }
+                | Self::SetTrackPreparationStatus { .. }
+                | Self::ResolveTrackWorkflowAttention { .. }
                 | Self::ApplyLibraryReset { .. }
                 | Self::RestoreLibraryBackup { .. }
                 | Self::ReconcileLibrarySource { .. }
@@ -345,6 +360,10 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
         "queryLibrary" => Ok(SessionCommand::QueryLibrary {
             search: library_search(&envelope.payload)?,
             playlist_id: optional_unsigned(&envelope.payload, "playlistId")?,
+            workflow_filter: optional_string(&envelope.payload, "workflowFilter")
+                .map(TrackWorkflowFilter::try_from_str)
+                .transpose()
+                .map_err(|_| CommandDecodeError::InvalidField("workflowFilter"))?,
             offset: u32::try_from(optional_unsigned(&envelope.payload, "offset")?.unwrap_or(0))
                 .map_err(|_| CommandDecodeError::InvalidField("offset"))?,
             limit: library_limit(optional_unsigned(&envelope.payload, "limit")?.unwrap_or(50))?,
@@ -352,6 +371,16 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
         }),
         "openLibraryTrackEditor" => Ok(SessionCommand::OpenLibraryTrackEditor {
             track_id: positive_unsigned(&envelope.payload, "trackId")?,
+        }),
+        "setTrackPreparationStatus" => Ok(SessionCommand::SetTrackPreparationStatus {
+            track_id: positive_unsigned(&envelope.payload, "trackId")?,
+            expected_revision: unsigned(&envelope.payload, "expectedRevision")?,
+            status: TrackPreparationStatus::try_from_str(string(&envelope.payload, "status")?)
+                .map_err(|_| CommandDecodeError::InvalidField("status"))?,
+        }),
+        "resolveTrackWorkflowAttention" => Ok(SessionCommand::ResolveTrackWorkflowAttention {
+            track_id: positive_unsigned(&envelope.payload, "trackId")?,
+            expected_revision: positive_unsigned(&envelope.payload, "expectedRevision")?,
         }),
         "reuseLibraryTimeline" => Ok(SessionCommand::ReuseLibraryTimeline {
             source_track_id: positive_unsigned(&envelope.payload, "sourceTrackId")?,
@@ -1158,6 +1187,8 @@ fn library_sort(
         "usbSources" => LibraryTrackSortField::UsbSources,
         "timelineRevision" => LibraryTrackSortField::TimelineRevision,
         "readiness" => LibraryTrackSortField::Readiness,
+        "preparationStatus" => LibraryTrackSortField::PreparationStatus,
+        "attention" => LibraryTrackSortField::Attention,
         "sourceTrackID" => LibraryTrackSortField::SourceTrackId,
         "analysisRevision" => LibraryTrackSortField::AnalysisRevision,
         _ => return Err(CommandDecodeError::InvalidField("sortBy")),
@@ -1194,6 +1225,62 @@ impl Error for CommandDecodeError {}
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn track_workflow_commands_are_typed_and_revision_bound() {
+        let query = command_envelope(serde_json::json!({
+            "kind": "queryLibrary",
+            "search": "",
+            "playlistId": null,
+            "workflowFilter": "changedAfterUsbSync",
+            "offset": 0,
+            "limit": 50,
+            "sortBy": "preparationStatus",
+            "sortDirection": "ascending",
+        }));
+        assert_eq!(
+            decode_command(&query),
+            Ok(SessionCommand::QueryLibrary {
+                search: String::new(),
+                playlist_id: None,
+                workflow_filter: Some(TrackWorkflowFilter::ChangedAfterUsbSync),
+                offset: 0,
+                limit: 50,
+                sort: LibraryTrackSort::new(
+                    LibraryTrackSortField::PreparationStatus,
+                    LibraryTrackSortDirection::Ascending,
+                ),
+            })
+        );
+
+        let status = command_envelope(serde_json::json!({
+            "kind": "setTrackPreparationStatus",
+            "trackId": 90,
+            "expectedRevision": 3,
+            "status": "ready-for-show",
+        }));
+        assert_eq!(
+            decode_command(&status),
+            Ok(SessionCommand::SetTrackPreparationStatus {
+                track_id: 90,
+                expected_revision: 3,
+                status: TrackPreparationStatus::ReadyForShow,
+            })
+        );
+
+        let resolve = command_envelope(serde_json::json!({
+            "kind": "resolveTrackWorkflowAttention",
+            "trackId": 90,
+            "expectedRevision": 4,
+        }));
+        assert_eq!(
+            decode_command(&resolve),
+            Ok(SessionCommand::ResolveTrackWorkflowAttention {
+                track_id: 90,
+                expected_revision: 4,
+            })
+        );
+    }
 
     #[test]
     fn snapshot_defaults_to_full_but_accepts_an_explicit_live_projection() {

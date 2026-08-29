@@ -88,6 +88,7 @@ final class EngineStatusModel: ObservableObject {
     @Published private(set) var lightPlanningState = LightPlanningState.loading
     @Published private(set) var lightPlanningFeedback: String?
     @Published private(set) var timelineEditFeedback: String?
+    @Published private(set) var trackWorkflowFeedback: String?
     @Published private(set) var phraseRoleFeedback: String?
     @Published private(set) var autoloopCatalogFeedback: String?
     @Published private(set) var midiIntegrationFeedback: String?
@@ -152,6 +153,7 @@ final class EngineStatusModel: ObservableObject {
         lightPlanningState = .loading
         lightPlanningFeedback = nil
         timelineEditFeedback = nil
+        trackWorkflowFeedback = nil
         phraseRoleFeedback = nil
         autoloopCatalogFeedback = nil
         midiIntegrationFeedback = nil
@@ -736,7 +738,8 @@ final class EngineStatusModel: ObservableObject {
                     offset: request.offset,
                     limit: request.limit,
                     sortBy: request.sortBy.rawValue,
-                    sortDirection: request.sortDirection.rawValue
+                    sortDirection: request.sortDirection.rawValue,
+                    workflowFilter: request.workflowFilter?.rawValue
                 )
             )
             if let failure = EngineCommandFailure(envelope) {
@@ -795,6 +798,31 @@ final class EngineStatusModel: ObservableObject {
         if closed {
             timelineEditFeedback = nil
         }
+    }
+
+    func mutateTrackWorkflow(_ request: TrackWorkflowMutationRequest) async {
+        trackWorkflowFeedback = nil
+        let command: EngineCommand
+        switch request {
+        case let .setPreparationStatus(trackID, expectedRevision, status):
+            command = .setTrackPreparationStatus(
+                trackID: trackID,
+                expectedRevision: expectedRevision,
+                status: status.rawValue
+            )
+        case let .resolveAttention(trackID, expectedRevision):
+            command = .resolveTrackWorkflowAttention(
+                trackID: trackID,
+                expectedRevision: expectedRevision
+            )
+        }
+        let succeeded = await exchangeLibraryCommand(
+            command,
+            failurePresentation: .timeline
+        )
+        trackWorkflowFeedback = succeeded
+            ? "Track workflow updated."
+            : (timelineEditFeedback ?? "The track workflow could not be updated.")
     }
 
     func loadLibraryTrackOnLocalDeck(_ request: LibraryDeckLoadRequest) async {

@@ -6,7 +6,7 @@ use crate::{
     AutoloopCatalog, BeatGrid, ImportedLibraryBaseline, LibrarySourceId, LumiPhraseTimeline,
     PhraseRoleCatalog, PhraseRoleUsage, PlaylistId, RawPhraseObservation, SourceMirrorDiff,
     SourceMirrorSnapshot, SourceMirrorSummary, SourcePlaylistId, SourceRevision, SourceTrackId,
-    TimelineRevision, TimelineRevisionOrigin, TrackColor, WaveformPoint,
+    TimelineRevision, TimelineRevisionOrigin, TrackColor, TrackWorkflowFilter, WaveformPoint,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -73,6 +73,7 @@ pub struct LibraryTrackQuery {
     playlist_id: Option<PlaylistId>,
     page: TrackPageRequest,
     sort: LibraryTrackSort,
+    workflow_filter: Option<TrackWorkflowFilter>,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -87,6 +88,8 @@ pub enum LibraryTrackSortField {
     UsbSources,
     TimelineRevision,
     Readiness,
+    PreparationStatus,
+    Attention,
     SourceTrackId,
     AnalysisRevision,
 }
@@ -136,6 +139,7 @@ impl LibraryTrackQuery {
             playlist_id,
             page,
             sort: LibraryTrackSort::default(),
+            workflow_filter: None,
         })
     }
 
@@ -168,6 +172,17 @@ impl LibraryTrackQuery {
     #[must_use]
     pub const fn sort(&self) -> LibraryTrackSort {
         self.sort
+    }
+
+    #[must_use]
+    pub const fn workflow_filter(&self) -> Option<TrackWorkflowFilter> {
+        self.workflow_filter
+    }
+
+    #[must_use]
+    pub const fn with_workflow_filter(mut self, filter: Option<TrackWorkflowFilter>) -> Self {
+        self.workflow_filter = filter;
+        self
     }
 }
 

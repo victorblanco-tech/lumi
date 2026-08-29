@@ -133,7 +133,7 @@ func syncsMountedUSBHotCuesWhenProvided() async throws {
         let search = try await supervisor.send(
             .queryLibrary(
                 search: "90s Bitch", playlistID: nil, offset: 0, limit: 25,
-                sortBy: "title", sortDirection: "ascending"
+                sortBy: "title", sortDirection: "ascending", workflowFilter: nil
             ),
             messageID: "swift-search-hot-cue-track"
         )
@@ -300,7 +300,7 @@ func launchesRealEngine() async throws {
         let searchedLibrary = try await supervisor.send(
             .queryLibrary(
                 search: "Northern", playlistID: nil, offset: 0, limit: 50,
-                sortBy: "title", sortDirection: "ascending"
+                sortBy: "title", sortDirection: "ascending", workflowFilter: nil
             ),
             messageID: "swift-library-search"
         )

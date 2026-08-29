@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.5.0-dev-34 - 2026-08-29
+
+### Added
+
+- Adds the first Track Preparation Workflow with `Not Started`, `In Progress`
+  and `Ready for Show` statuses.
+- Adds a paged `Changed after USB sync` inbox with exact metadata, waveform,
+  beatgrid, hot-cue and source-phrase reasons.
+- Adds workflow navigation, counts, a Library table status and editor controls
+  to complete source-change reviews explicitly.
+
+### Safety and verification
+
+- Keeps workflow state separate from technical readiness and all Pro DJ Link,
+  Ableton Link, planning and MIDI realtime lanes.
+- Preserves Lumi-authored phrase points on their existing beat indices after a
+  trusted USB analysis update.
+- Adds schema 16 migration, optimistic revision conflicts, USB-promotion,
+  filtering, engine protocol and Swift snapshot regressions.
+
 ## 0.5.0-dev-33 - 2026-08-28
 
 ### Fixed

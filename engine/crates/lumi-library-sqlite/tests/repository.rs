@@ -12,8 +12,8 @@ use lumi_library::{
     PhraseLoopStrategy, PhraseRole, PhraseRoleCatalog, PhraseRoleId, PhraseRoleMove, PlaylistId,
     ReconcileStrategy, SourceMirrorPlaylist, SourceMirrorSnapshot, SourceMirrorTrack,
     SourcePhraseMapping, SourceRevision, SourceTrackId, TimelineEditCommand, TimelineRevision,
-    TimelineRevisionOrigin, TimelineRevisionReason, TrackPageRequest, VariantId,
-    reconcile_timeline,
+    TimelineRevisionOrigin, TimelineRevisionReason, TrackPageRequest, TrackWorkflowFilter,
+    VariantId, reconcile_timeline,
 };
 use lumi_library_demo::{DemoLibraryRevision, DemoLibrarySourceProvider};
 use lumi_library_source::MusicLibrarySourceProvider;
@@ -23,7 +23,7 @@ use rusqlite::Connection;
 #[test]
 fn migrates_an_empty_database() -> Result<(), Box<dyn Error>> {
     let repository = SqliteLibraryRepository::in_memory()?;
-    assert_eq!(repository.schema_version()?, 15);
+    assert_eq!(repository.schema_version()?, 16);
     assert_eq!(
         repository
             .page_tracks(TrackPageRequest::try_new(0, 25)?)?
@@ -40,14 +40,17 @@ fn migrates_version_thirteen_device_audio_locations_atomically() -> Result<(), B
     {
         let connection = Connection::open(&path)?;
         connection.execute_batch(
-            "DROP INDEX device_audio_by_canonical_track;
+            "DROP INDEX track_workflow_attention_active;
+             DROP TABLE track_workflow_attention;
+             DROP TABLE track_workflow_status;
+             DROP INDEX device_audio_by_canonical_track;
              DROP TABLE device_track_audio_locations;
              ALTER TABLE phrase_roles DROP COLUMN color_rgb;
              PRAGMA user_version = 13;",
         )?;
     }
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 15);
+    assert_eq!(repository.schema_version()?, 16);
     drop(repository);
     let connection = Connection::open(&path)?;
     let table_exists: bool = connection.query_row(
@@ -205,7 +208,7 @@ fn migrates_version_one_timeline_history_without_losing_rows() -> Result<(), Box
     }
 
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 15);
+    assert_eq!(repository.schema_version()?, 16);
     drop(repository);
     let connection = Connection::open(&path)?;
     let reason: String = connection.query_row(
@@ -262,7 +265,7 @@ fn migrates_version_two_phrase_roles_into_an_unseeded_catalog() -> Result<(), Bo
     }
 
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 15);
+    assert_eq!(repository.schema_version()?, 16);
     let catalog = repository.phrase_role_catalog()?;
     assert_eq!(catalog.revision(), 0);
     assert_eq!(catalog.defaults_version(), 0);
@@ -305,7 +308,7 @@ fn migrates_version_three_into_an_unseeded_autoloop_catalog() -> Result<(), Box<
     }
 
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 15);
+    assert_eq!(repository.schema_version()?, 16);
     let catalog = repository.autoloop_catalog()?;
     assert_eq!(catalog.revision(), 0);
     assert_eq!(catalog.defaults_version(), 0);
@@ -1120,6 +1123,7 @@ fn ten_thousand_track_fixture_meets_epic_two_a_budgets() -> Result<(), Box<dyn E
     const IMPORT_BUDGET: Duration = Duration::from_secs(5);
     const PAGE_BUDGET: Duration = Duration::from_millis(100);
     const SEARCH_BUDGET: Duration = Duration::from_millis(250);
+    const WORKFLOW_BUDGET: Duration = Duration::from_millis(150);
 
     let fixture_started = Instant::now();
     let baseline = DemoLibrarySourceProvider::scaled(10_000)?.load_baseline()?;
@@ -1176,8 +1180,23 @@ fn ten_thousand_track_fixture_meets_epic_two_a_budgets() -> Result<(), Box<dyn E
         TrackPageRequest::try_new(0, 50)?,
     )?)?;
     assert_eq!(literal_wildcard.total(), 0);
+
+    let workflow_started = Instant::now();
+    let workflow = repository.query_tracks(
+        &LibraryTrackQuery::try_new("", None, TrackPageRequest::try_new(0, 50)?)?
+            .with_workflow_filter(Some(TrackWorkflowFilter::NotStarted)),
+    )?;
+    let workflow_summary = repository.track_workflow_summary()?;
+    let workflow_elapsed = workflow_started.elapsed();
+    assert_eq!(workflow.total(), 10_000);
+    assert_eq!(workflow.tracks().len(), 50);
+    assert_eq!(workflow_summary.not_started, 10_000);
+    assert!(
+        workflow_elapsed <= WORKFLOW_BUDGET,
+        "10,000-track workflow query took {workflow_elapsed:?}, budget {WORKFLOW_BUDGET:?}"
+    );
     eprintln!(
-        "Epic 2A 10k benchmark: fixture={fixture_elapsed:?}, import={import_elapsed:?}, pages={page_elapsed:?}, search={search_elapsed:?}"
+        "Epic 2A 10k benchmark: fixture={fixture_elapsed:?}, import={import_elapsed:?}, pages={page_elapsed:?}, search={search_elapsed:?}, workflow={workflow_elapsed:?}"
     );
     Ok(())
 }
@@ -1227,6 +1246,8 @@ fn track_sorting_is_stable_across_server_pages() -> Result<(), Box<dyn Error>> {
         LibraryTrackSortField::UsbSources,
         LibraryTrackSortField::TimelineRevision,
         LibraryTrackSortField::Readiness,
+        LibraryTrackSortField::PreparationStatus,
+        LibraryTrackSortField::Attention,
         LibraryTrackSortField::SourceTrackId,
         LibraryTrackSortField::AnalysisRevision,
     ];

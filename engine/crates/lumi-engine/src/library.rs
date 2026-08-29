@@ -18,7 +18,8 @@ use lumi_library::{
     SourceMirrorPlaylist, SourceMirrorSnapshot, SourceMirrorTrack, SourcePhraseMapping,
     SourcePlaylistId, SourceRevision, SourceTrackDiff, TimelineEditCommand, TimelineEditError,
     TimelineRevision, TimelineRevisionOrigin, TimelineRevisionReason, TimelineRevisionSummary,
-    TrackColor, TrackPageRequest, TrackSummary, VariantId, WaveformPoint, reconcile_timeline,
+    TrackColor, TrackPageRequest, TrackPreparationStatus, TrackSummary, TrackWorkflowFilter,
+    TrackWorkflowState, VariantId, WaveformPoint, reconcile_timeline,
 };
 use lumi_library_demo::{DemoLibraryError, DemoLibraryRevision, DemoLibrarySourceProvider};
 use lumi_library_source::MusicLibrarySourceProvider as _;
@@ -75,6 +76,8 @@ pub(crate) fn library_sort_field_name(field: LibraryTrackSortField) -> &'static 
         LibraryTrackSortField::UsbSources => "usbSources",
         LibraryTrackSortField::TimelineRevision => "timelineRevision",
         LibraryTrackSortField::Readiness => "readiness",
+        LibraryTrackSortField::PreparationStatus => "preparationStatus",
+        LibraryTrackSortField::Attention => "attention",
         LibraryTrackSortField::SourceTrackId => "sourceTrackID",
         LibraryTrackSortField::AnalysisRevision => "analysisRevision",
     }
@@ -96,6 +99,7 @@ pub struct LibraryWorker {
     source_revision: String,
     search: String,
     playlist_id: Option<PlaylistId>,
+    workflow_filter: Option<TrackWorkflowFilter>,
     offset: u32,
     limit: u16,
     sort: LibraryTrackSort,
@@ -1083,6 +1087,7 @@ impl LibraryWorker {
             source_revision: persisted_source.revision().as_str().to_owned(),
             search: String::new(),
             playlist_id: None,
+            workflow_filter: None,
             offset: 0,
             limit: DEFAULT_PAGE_LIMIT,
             sort: LibraryTrackSort::default(),
@@ -1170,15 +1175,41 @@ impl LibraryWorker {
         &mut self,
         search: String,
         playlist_id: Option<u64>,
+        workflow_filter: Option<TrackWorkflowFilter>,
         offset: u32,
         limit: u16,
         sort: LibraryTrackSort,
     ) {
         self.search = search;
         self.playlist_id = playlist_id.map(PlaylistId::new);
+        self.workflow_filter = workflow_filter;
         self.offset = offset;
         self.limit = limit;
         self.sort = sort;
+    }
+
+    pub fn set_track_preparation_status(
+        &mut self,
+        track_id: u64,
+        expected_revision: u64,
+        status: TrackPreparationStatus,
+    ) -> Result<(), LibraryWorkerError> {
+        self.repository.set_track_preparation_status(
+            TrackId::new(track_id),
+            expected_revision,
+            status,
+        )?;
+        Ok(())
+    }
+
+    pub fn resolve_track_workflow_attention(
+        &mut self,
+        track_id: u64,
+        expected_revision: u64,
+    ) -> Result<(), LibraryWorkerError> {
+        self.repository
+            .resolve_track_workflow_attention(TrackId::new(track_id), expected_revision)?;
+        Ok(())
     }
 
     pub fn preview_library_reset(
@@ -3033,8 +3064,17 @@ impl LibraryWorker {
             self.playlist_id,
             request,
             self.sort,
-        )?;
+        )?
+        .with_workflow_filter(self.workflow_filter);
         let page = self.repository.query_tracks(&query)?;
+        let workflow_states = self.repository.track_workflow_states(
+            &page
+                .tracks()
+                .iter()
+                .map(TrackSummary::id)
+                .collect::<Vec<_>>(),
+        )?;
+        let workflow_summary = self.repository.track_workflow_summary()?;
         let device_source_relations = self.repository.device_track_source_relations(
             &page
                 .tracks()
@@ -3074,7 +3114,7 @@ impl LibraryWorker {
             None => Value::Null,
         };
         Ok(json!({
-            "condition": if page.total() == 0 && self.search.is_empty() && self.playlist_id.is_none() {
+            "condition": if collection_total == 0 {
                 "empty"
             } else {
                 "ready"
@@ -3221,6 +3261,12 @@ impl LibraryWorker {
                 })),
             },
             "collectionTotal": collection_total,
+            "workflow": {
+                "changedAfterUsbSync": workflow_summary.changed_after_usb_sync,
+                "notStarted": workflow_summary.not_started,
+                "inProgress": workflow_summary.in_progress,
+                "readyForShow": workflow_summary.ready_for_show,
+            },
             "query": {
                 "search": self.search,
                 "playlistId": self.playlist_id.map(|id| id.value()),
@@ -3228,6 +3274,7 @@ impl LibraryWorker {
                 "limit": self.limit,
                 "sortBy": library_sort_field_name(self.sort.field()),
                 "sortDirection": library_sort_direction_name(self.sort.direction()),
+                "workflowFilter": self.workflow_filter.map(TrackWorkflowFilter::as_str),
             },
             "playlists": playlist_page.playlists().iter().map(|playlist| json!({
                 "id": playlist.id().value(),
@@ -3242,6 +3289,7 @@ impl LibraryWorker {
                     track_json_with_device_sources(
                         track,
                         device_source_relations.get(&track.id()).map(Vec::as_slice).unwrap_or(&[]),
+                        workflow_states.get(&track.id()),
                     )
                 }).collect::<Vec<_>>(),
             },
@@ -3519,7 +3567,11 @@ impl LibraryWorker {
         let audio_uri = self.resolved_audio_uri(&track)?;
         let creative_reuse_candidates = self.repository.creative_timeline_candidates(track_id)?;
         Ok(json!({
-            "track": track_json(track.summary()),
+            "track": track_json_with_device_sources(
+                track.summary(),
+                &[],
+                self.repository.track_workflow_states(&[track_id])?.get(&track_id),
+            ),
             "audioUri": audio_uri,
             "beatGrid": {
                 "beatsPerBar": track.beat_grid().beats_per_bar(),
@@ -3913,14 +3965,13 @@ fn loop_strategy_json(catalog: &lumi_library::AutoloopCatalog, phrase: &PhraseIn
     })
 }
 
-fn track_json(track: &TrackSummary) -> Value {
-    track_json_with_device_sources(track, &[])
-}
-
 fn track_json_with_device_sources(
     track: &TrackSummary,
     device_sources: &[lumi_library_sqlite::DeviceTrackSourceRelation],
+    workflow: Option<&TrackWorkflowState>,
 ) -> Value {
+    let default_workflow = TrackWorkflowState::default_for(track.id());
+    let workflow = workflow.unwrap_or(&default_workflow);
     json!({
         "id": track.id().value(),
         "sourceTrackId": track.source_track_id().as_str(),
@@ -3945,6 +3996,22 @@ fn track_json_with_device_sources(
             "missingCapabilities": [],
             "warnings": [],
         },
+        "workflow": workflow_json(workflow),
+    })
+}
+
+fn workflow_json(workflow: &TrackWorkflowState) -> Value {
+    json!({
+        "preparationStatus": workflow.preparation_status().as_str(),
+        "statusRevision": workflow.status_revision(),
+        "effectiveReady": workflow.is_effectively_ready(),
+        "attention": workflow.attention().map(|attention| json!({
+            "revision": attention.revision(),
+            "sourceId": attention.source_id(),
+            "sourceRevision": attention.source_revision(),
+            "detectedAt": attention.detected_at(),
+            "reasons": attention.reasons().iter().map(|reason| reason.as_str()).collect::<Vec<_>>(),
+        })),
     })
 }
 
@@ -5250,7 +5317,14 @@ mod tests {
     fn collection_total_is_independent_from_the_active_playlist()
     -> Result<(), Box<dyn std::error::Error>> {
         let mut worker = LibraryWorker::demo()?;
-        worker.query(String::new(), Some(2), 0, 50, LibraryTrackSort::default());
+        worker.query(
+            String::new(),
+            Some(2),
+            None,
+            0,
+            50,
+            LibraryTrackSort::default(),
+        );
 
         let snapshot = worker.snapshot_json()?;
 
@@ -5984,6 +6058,7 @@ mod tests {
 
             worker.query(
                 "Horizon Lines".to_owned(),
+                None,
                 None,
                 0,
                 50,

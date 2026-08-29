@@ -13,6 +13,7 @@ mod phrase_roles;
 mod reconciliation;
 mod repository;
 mod timeline;
+mod workflow;
 
 pub use autoloop_catalog::{
     AUTOLOOP_CATALOG_DEFAULTS_VERSION, AutoloopCatalog, AutoloopCatalogError, AutoloopMatrixCell,
@@ -51,4 +52,8 @@ pub use timeline::{
     LumiPhraseTimeline, PhraseAbsorption, PhraseInstance, PhraseLoopStrategy, ThemeSpecificVariant,
     TimelineEditCommand, TimelineEditError, TimelineRevisionOrigin, TimelineRevisionReason,
     TimelineValidationError,
+};
+pub use workflow::{
+    TrackAttentionReason, TrackPreparationStatus, TrackWorkflowAttention, TrackWorkflowFilter,
+    TrackWorkflowState, TrackWorkflowSummary, TrackWorkflowValueError,
 };

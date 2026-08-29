@@ -14,6 +14,8 @@ public struct TrackLightingEditorView: View {
     private let onTimelineHistory: @MainActor (TrackTimelineHistoryRequest) -> Void
     private let onSourceReconcile: @MainActor (TrackSourceReconcileRequest) -> Void
     private let onReuseTimeline: @MainActor (CreativeTimelineReuseRequest) -> Void
+    private let onTrackWorkflowMutation: @MainActor (TrackWorkflowMutationRequest) -> Void
+    private let workflowFeedback: String?
     @StateObject private var audio: TrackAudioPreviewController
     @State private var viewport: TrackEditorViewport
     @State private var selectedPhraseID: UInt64?
@@ -50,7 +52,9 @@ public struct TrackLightingEditorView: View {
         onTimelineEdit: @escaping @MainActor (TrackTimelineEditRequest) -> Void = { _ in },
         onTimelineHistory: @escaping @MainActor (TrackTimelineHistoryRequest) -> Void = { _ in },
         onSourceReconcile: @escaping @MainActor (TrackSourceReconcileRequest) -> Void = { _ in },
-        onReuseTimeline: @escaping @MainActor (CreativeTimelineReuseRequest) -> Void = { _ in }
+        onReuseTimeline: @escaping @MainActor (CreativeTimelineReuseRequest) -> Void = { _ in },
+        onTrackWorkflowMutation: @escaping @MainActor (TrackWorkflowMutationRequest) -> Void = { _ in },
+        workflowFeedback: String? = nil
     ) {
         self.analysis = analysis
         self.autoloopCatalog = autoloopCatalog
@@ -63,6 +67,8 @@ public struct TrackLightingEditorView: View {
         self.onTimelineHistory = onTimelineHistory
         self.onSourceReconcile = onSourceReconcile
         self.onReuseTimeline = onReuseTimeline
+        self.onTrackWorkflowMutation = onTrackWorkflowMutation
+        self.workflowFeedback = workflowFeedback
         _audio = StateObject(wrappedValue: TrackAudioPreviewController(analysis: analysis))
         _viewport = State(
             initialValue: TrackEditorViewport(
@@ -91,6 +97,7 @@ public struct TrackLightingEditorView: View {
             Divider().overlay(Color.white.opacity(0.12))
             transport
             editToolbar
+            workflowAttentionPanel
             sourceReconciliationPanel
             HStack(spacing: 12) {
                 VStack(spacing: 10) {
@@ -188,6 +195,42 @@ public struct TrackLightingEditorView: View {
             metric("BPM", formatEditorBPM(analysis.track.bpmMilli))
             metric("REMAIN", formatEditorTime(remainingMillis))
             metric("BAR · BEAT", barBeatLabel)
+            if rendersInteractiveControls {
+                Menu {
+                    ForEach(TrackPreparationStatus.allCases) { status in
+                        Button {
+                            guard status != analysis.track.workflow.preparationStatus else { return }
+                            onTrackWorkflowMutation(
+                                .setPreparationStatus(
+                                    trackID: analysis.track.id,
+                                    expectedRevision: analysis.track.workflow.statusRevision,
+                                    status: status
+                                )
+                            )
+                        } label: {
+                            Label {
+                                Text(workflowStatusName(status))
+                            } icon: {
+                                Image(
+                                    systemName: status == analysis.track.workflow.preparationStatus
+                                        ? "checkmark.circle.fill"
+                                        : workflowStatusIcon(status)
+                                )
+                            }
+                        }
+                    }
+                } label: {
+                    Label(
+                        workflowStatusName(analysis.track.workflow.preparationStatus),
+                        systemImage: workflowStatusIcon(analysis.track.workflow.preparationStatus)
+                    )
+                    .foregroundStyle(workflowStatusColor)
+                }
+                .menuStyle(.borderlessButton)
+                .focusable()
+                .help("Track preparation status. Ready for Show remains blocked while a USB change needs review.")
+                .accessibilityIdentifier("lumi.trackEditor.workflowStatus")
+            }
             if rendersInteractiveControls, !analysis.creativeReuseCandidates.isEmpty {
                 Menu {
                     ForEach(analysis.creativeReuseCandidates) { candidate in
@@ -231,6 +274,85 @@ public struct TrackLightingEditorView: View {
         .padding(.vertical, 15)
         .frame(minHeight: 68)
         .background(panel)
+    }
+
+    @ViewBuilder
+    private var workflowAttentionPanel: some View {
+        if let attention = analysis.track.workflow.attention {
+            HStack(alignment: .center, spacing: 10) {
+                Image(systemName: "externaldrive.badge.exclamationmark")
+                    .foregroundStyle(LumiColor.warning)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text("Review USB changes")
+                        .font(LumiTypography.metadata.weight(.semibold))
+                    Text(attention.reasons.map(workflowAttentionName).joined(separator: " · "))
+                        .font(LumiTypography.caption)
+                        .foregroundStyle(secondary)
+                    Text("Lumi phrases stay on their authored beats. Check their alignment before clearing this review.")
+                        .font(LumiTypography.caption)
+                        .foregroundStyle(secondary)
+                }
+                Spacer()
+                if let workflowFeedback {
+                    Text(workflowFeedback)
+                        .font(LumiTypography.caption)
+                        .foregroundStyle(secondary)
+                        .lineLimit(1)
+                }
+                if rendersInteractiveControls {
+                    Button("Mark Reviewed") {
+                        onTrackWorkflowMutation(
+                            .resolveAttention(
+                                trackID: analysis.track.id,
+                                expectedRevision: attention.revision
+                            )
+                        )
+                    }
+                    .buttonStyle(.borderedProminent)
+                    .controlSize(.small)
+                    .accessibilityIdentifier("lumi.trackEditor.markReviewed")
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.vertical, 9)
+            .background(LumiColor.warning.opacity(0.10))
+            .accessibilityIdentifier("lumi.trackEditor.workflowAttention")
+        }
+    }
+
+    private var workflowStatusColor: Color {
+        if analysis.track.workflow.attention != nil { return LumiColor.warning }
+        switch analysis.track.workflow.preparationStatus {
+        case .notStarted: return secondary
+        case .inProgress: return LumiColor.warning
+        case .readyForShow: return LumiColor.success
+        }
+    }
+
+    private func workflowStatusName(_ status: TrackPreparationStatus) -> String {
+        switch status {
+        case .notStarted: "Not Started"
+        case .inProgress: "In Progress"
+        case .readyForShow: "Ready for Show"
+        }
+    }
+
+    private func workflowStatusIcon(_ status: TrackPreparationStatus) -> String {
+        switch status {
+        case .notStarted: "circle"
+        case .inProgress: "circle.lefthalf.filled"
+        case .readyForShow: "checkmark.circle.fill"
+        }
+    }
+
+    private func workflowAttentionName(_ reason: TrackAttentionReason) -> String {
+        switch reason {
+        case .metadataChanged: "Metadata changed"
+        case .waveformChanged: "Waveform changed"
+        case .beatGridChanged: "Beatgrid changed"
+        case .hotCuesChanged: "Hot cues changed"
+        case .sourcePhrasesChanged: "Source phrases changed"
+        }
     }
 
     @ViewBuilder
