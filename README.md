@@ -43,6 +43,22 @@ normal controller.
   connection.
 - Supports Local Playback for preparation and dry runs without DJ hardware.
 
+## Inside Lumi
+
+### One configurable phrase model
+
+Phrase Roles and colors are managed once and used consistently in Track Editor,
+Live, Light Plans and MIDI mappings.
+
+![Lumi Phrase Model settings](docs/assets/screenshots/phrase-model.png)
+
+### SoundSwitch Banks and AutoLoops
+
+Lumi mirrors the familiar four-bank, 32-AutoLoop layout and lets every mapped
+button be verified before a show.
+
+![SoundSwitch Bank and AutoLoop mapping in Lumi](docs/assets/screenshots/soundswitch-autoloops.png)
+
 ## The signal path
 
 ```text

@@ -55,6 +55,14 @@ consistently in Track Editor, Live, Light Plans and output mappings.
 
 ![Lumi Phrase Model settings](assets/screenshots/phrase-model.png)
 
+## Familiar SoundSwitch mapping
+
+The Lighting Output workspace mirrors four SoundSwitch Banks with 32 AutoLoop
+slots each. Names, Phrase Roles and MIDI mappings remain visible and testable in
+one place.
+
+![SoundSwitch Bank and AutoLoop mapping in Lumi](assets/screenshots/soundswitch-autoloops.png)
+
 ## System requirements
 
 - Apple Silicon Mac running macOS 15 or newer
