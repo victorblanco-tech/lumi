@@ -8,6 +8,7 @@ import SwiftUI
 struct LumiLibraryVisualEvidenceCommand {
     private static let width: CGFloat = 1_180
     private static let height: CGFloat = 820
+    private static let renderScale: CGFloat = 2
 
     private struct Variant {
         let name: String
@@ -180,12 +181,12 @@ struct LumiLibraryVisualEvidenceCommand {
     ) throws {
         let renderer = ImageRenderer(content: view)
         renderer.proposedSize = ProposedViewSize(width: width, height: height)
-        renderer.scale = 1
+        renderer.scale = renderScale
         guard let image = renderer.nsImage,
               let tiffData = image.tiffRepresentation,
               let representation = NSBitmapImageRep(data: tiffData),
-              representation.pixelsWide == Int(width),
-              representation.pixelsHigh == Int(height),
+              representation.pixelsWide == Int(width * renderScale),
+              representation.pixelsHigh == Int(height * renderScale),
               let pngData = representation.representation(using: .png, properties: [:]),
               pngData.count > 10_000 else {
             throw VisualEvidenceError.renderFailed(name)

@@ -64,8 +64,6 @@ data. Lumi-owned phrases remain separate from source phrases.
 
 Open **Library → Tracks** and select a track to load it in Track Editor.
 
-![Track Editor showing the RGB waveform, beatgrid, Hot Cues and Lumi phrases](../assets/screenshots/track-editor.png)
-
 The detailed waveform is the editing surface. Zoom and scroll to a beat, place a
 phrase point and choose its Phrase Role. A phrase continues until the next point
 or the end of the track. Boundaries quantize to whole beats.
@@ -81,6 +79,8 @@ Use the preparation workflow beside Playlists to keep work organized:
 
 Workflow steps and Phrase Role colors can be adjusted in **Settings**. The same
 phrase colors are used throughout Library, Live, Light Plans and mappings.
+
+![Lumi Phrase Model settings](../assets/screenshots/phrase-model.png)
 
 ## 4. Configure SoundSwitch output
 

@@ -20,7 +20,7 @@ your own SoundSwitch AutoLoops without taking over fixture or DMX control.
 [Read the user guide](user-guide/) ·
 [Report an issue](https://github.com/victorblanco-tech/lumi/issues)
 
-![Lumi Track Editor](assets/screenshots/track-editor.png)
+![The complete Lumi workflow from trusted USB source to SoundSwitch DMX](assets/lumi-workflow.svg)
 
 ## Prepare once, adjust when needed
 
@@ -43,12 +43,17 @@ your own SoundSwitch AutoLoops without taking over fixture or DMX control.
 
 ## Clear integration boundaries
 
-![Lumi Integrations overview](assets/screenshots/integrations-overview.png)
-
 - **Pro DJ Link** supplies read-only player and mixer state.
 - **Ableton Link** relays only the master BPM to SoundSwitch.
 - **MIDI output** selects mapped Banks, AutoLoops and verified Static Looks.
 - **SoundSwitch** remains responsible for fixtures, effects and DMX output.
+
+## One phrase language throughout Lumi
+
+Phrase Roles and their colors are yours to configure. The same model is used
+consistently in Track Editor, Live, Light Plans and output mappings.
+
+![Lumi Phrase Model settings](assets/screenshots/phrase-model.png)
 
 ## System requirements
 

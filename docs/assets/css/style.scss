@@ -1,0 +1,33 @@
+---
+---
+
+@import "{{ site.theme }}";
+
+.wrapper {
+  width: min(1380px, calc(100% - 56px));
+}
+
+section {
+  width: calc(100% - 320px);
+}
+
+section img {
+  height: auto;
+  max-width: 100%;
+}
+
+@media print, screen and (max-width: 960px) {
+  .wrapper {
+    width: min(920px, calc(100% - 40px));
+  }
+
+  section {
+    width: auto;
+  }
+}
+
+@media print, screen and (max-width: 480px) {
+  .wrapper {
+    width: calc(100% - 28px);
+  }
+}

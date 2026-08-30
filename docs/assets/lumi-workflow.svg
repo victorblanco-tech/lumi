@@ -1,0 +1,65 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1600" height="720" viewBox="0 0 1600 720" role="img" aria-labelledby="title desc">
+  <title id="title">The Lumi workflow</title>
+  <desc id="desc">Prepare tracks from trusted USB media, compile phrase-aware Light Plans and perform through Pro DJ Link, MIDI, Ableton Link and SoundSwitch.</desc>
+  <defs>
+    <linearGradient id="canvas" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#070a0f"/>
+      <stop offset="1" stop-color="#0d1520"/>
+    </linearGradient>
+    <linearGradient id="accent" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#16a9ee"/>
+      <stop offset="1" stop-color="#48c5ff"/>
+    </linearGradient>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="14" stdDeviation="20" flood-color="#000" flood-opacity=".38"/>
+    </filter>
+  </defs>
+  <rect width="1600" height="720" rx="34" fill="url(#canvas)"/>
+  <text x="80" y="92" fill="#f4f7fb" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="36" font-weight="700">A complete local lighting workflow</text>
+  <text x="80" y="135" fill="#8fa3bb" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="21">Prepare the next track before it becomes master. SoundSwitch remains in control of DMX.</text>
+
+  <g filter="url(#shadow)">
+    <rect x="80" y="205" width="405" height="390" rx="24" fill="#0d121a" stroke="#273442" stroke-width="2"/>
+    <rect x="598" y="205" width="405" height="390" rx="24" fill="#0d121a" stroke="#273442" stroke-width="2"/>
+    <rect x="1115" y="205" width="405" height="390" rx="24" fill="#0d121a" stroke="#273442" stroke-width="2"/>
+  </g>
+
+  <circle cx="130" cy="258" r="26" fill="#122f40"/>
+  <text x="130" y="267" text-anchor="middle" fill="#48c5ff" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="24" font-weight="700">1</text>
+  <text x="175" y="267" fill="#f4f7fb" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="28" font-weight="700">Prepare</text>
+  <text x="120" y="331" fill="#48c5ff" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="18" font-weight="700">TRUSTED USB SOURCE</text>
+  <text x="120" y="370" fill="#dbe6f1" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="22">Selected playlists</text>
+  <text x="120" y="407" fill="#dbe6f1" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="22">Waveform · beatgrid · Hot Cues</text>
+  <text x="120" y="444" fill="#dbe6f1" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="22">Lumi-owned phrases</text>
+  <rect x="120" y="490" width="325" height="54" rx="12" fill="#111c28" stroke="#20425a"/>
+  <text x="282" y="525" text-anchor="middle" fill="#6fdb91" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="20" font-weight="650">Ready for Show ✓</text>
+
+  <circle cx="648" cy="258" r="26" fill="#122f40"/>
+  <text x="648" y="267" text-anchor="middle" fill="#48c5ff" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="24" font-weight="700">2</text>
+  <text x="693" y="267" fill="#f4f7fb" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="28" font-weight="700">Plan</text>
+  <text x="638" y="331" fill="#48c5ff" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="18" font-weight="700">COMPILED BEFORE PLAYBACK</text>
+  <text x="638" y="370" fill="#dbe6f1" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="22">One Theme per track</text>
+  <text x="638" y="407" fill="#dbe6f1" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="22">Phrase → AutoLoop choices</text>
+  <text x="638" y="444" fill="#dbe6f1" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="22">Track Color · repeat protection</text>
+  <g transform="translate(638 489)">
+    <rect width="76" height="54" rx="10" fill="#3684d9"/><rect x="82" width="76" height="54" rx="10" fill="#7947c4"/>
+    <rect x="164" width="76" height="54" rx="10" fill="#e3a21c"/><rect x="246" width="76" height="54" rx="10" fill="#d72f48"/>
+  </g>
+
+  <circle cx="1165" cy="258" r="26" fill="#122f40"/>
+  <text x="1165" y="267" text-anchor="middle" fill="#48c5ff" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="24" font-weight="700">3</text>
+  <text x="1210" y="267" fill="#f4f7fb" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="28" font-weight="700">Perform</text>
+  <text x="1155" y="331" fill="#48c5ff" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="18" font-weight="700">ISOLATED LIVE CONNECTIONS</text>
+  <text x="1155" y="370" fill="#dbe6f1" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="22">Pro DJ Link → deck state</text>
+  <text x="1155" y="407" fill="#dbe6f1" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="22">MIDI → AutoLoop selection</text>
+  <text x="1155" y="444" fill="#dbe6f1" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="22">Ableton Link → master BPM</text>
+  <rect x="1155" y="490" width="325" height="54" rx="12" fill="#111c28" stroke="#20425a"/>
+  <text x="1318" y="525" text-anchor="middle" fill="#f4f7fb" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="20" font-weight="650">SoundSwitch → DMX</text>
+
+  <path d="M505 400H568" stroke="url(#accent)" stroke-width="6" stroke-linecap="round"/>
+  <path d="M555 385L575 400 555 415" fill="none" stroke="#48c5ff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M1023 400H1085" stroke="url(#accent)" stroke-width="6" stroke-linecap="round"/>
+  <path d="M1072 385L1092 400 1072 415" fill="none" stroke="#48c5ff" stroke-width="6" stroke-linecap="round" stroke-linejoin="round"/>
+
+  <text x="800" y="660" text-anchor="middle" fill="#6f8093" font-family="-apple-system,BlinkMacSystemFont,Segoe UI,sans-serif" font-size="18">Runs on your Mac · no runtime internet dependency</text>
+</svg>
