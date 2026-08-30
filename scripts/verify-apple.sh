@@ -41,6 +41,7 @@ xcodebuild \
   -configuration Dev \
   -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath build/DerivedData \
+  LUMI_PACKAGING_JAVA_HOME="$packaging_java_home" \
   CODE_SIGNING_ALLOWED=NO \
   GCC_TREAT_WARNINGS_AS_ERRORS=YES \
   -quiet \
