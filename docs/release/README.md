@@ -1,7 +1,11 @@
-# Release- en deploymentmanagement
+# Release and deployment
+
+Start with the [production release checklist](release-checklist.md). It covers
+the current GitHub-distributed, unsigned Apple Silicon release path as well as
+the public-repository and GitHub Pages gates.
 
 - [Release- en deploymentplan](release-and-deployment-plan.md)
-- [Releasechecklist](release-checklist.md)
+- [Production release checklist](release-checklist.md)
 - [0.1.0 app demo and known limitations](0.1.0-demo-and-limitations.md)
 - [Epic 1 – 0.1.0 release evidence](0.1.0-epic-1-evidence.md)
 - [0.2.0 development demo and known limitations](0.2.0-demo-and-limitations.md)
