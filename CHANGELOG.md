@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.5.1 - 2026-08-30
+
+### Changed
+
+- Labels the GitHub-distributed build explicitly as Public Beta and adds a
+  concise field-testing guide plus a structured hardware feedback form.
+- Completes the public distribution package with installed legal notices,
+  complete corresponding source for Carabiner/Ableton Link and the pinned Java
+  bridge dependencies, and an expanded SPDX SBOM.
+- Corrects the third-party inventory for the production Pro DJ Link runtime.
+
+### Compatibility
+
+- Functionally identical to 0.5.0; existing Production data remains compatible.
+- Apple Silicon and macOS 15 or newer.
+- Ad-hoc signed and not notarized; macOS may require `Open Anyway` on first
+  launch.
+
 ## 0.5.0 - 2026-08-30
 
 ### Added
