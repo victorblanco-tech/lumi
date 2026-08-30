@@ -19,9 +19,11 @@ publishing a binary as a public-beta release.
 - [x] Production artifacts contain no user database, music, USB database,
       SoundSwitch project or personalized mapping.
 - [x] Historical local filesystem examples are replaced with portable commands.
-- [ ] The repository default branch is changed from `dev` to `main` before the
+- [x] The repository default branch is changed from `dev` to `main` before the
       visibility switch.
-- [ ] `main` protection and private vulnerability reporting are enabled.
+- [x] `main` protection prevents direct pushes, force-pushes and deletion.
+- [ ] Private vulnerability reporting and dependency alerts are enabled after
+      the repository becomes public; GitHub returns `404` while it is private.
 
 ## Licensing and redistribution
 
