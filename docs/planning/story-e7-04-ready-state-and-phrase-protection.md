@@ -1,6 +1,6 @@
 # E7-04 – Ready-state clarity and phrase protection
 
-Status: **Done in 0.5.0-dev-36** | Priority: **P0** | Effort: **5**
+Status: **Done; hardened in 0.5.0-dev-37** | Priority: **P0** | Effort: **5**
 
 ## User value
 
@@ -21,10 +21,13 @@ blocking later USB beatgrid improvements.
   creates the existing source-attention review signal.
 - Protection persists across restarts, is included in Library snapshots and is
   covered by migration, persistence, command and UI tests.
+- Workflow selection and its result page are published atomically; a concurrent
+  protection mutation cannot expose rows from another workflow step.
+- Protection state is communicated in the fixed-size editor control without
+  inserting or removing layout rows above the waveform.
 
 ## Architecture
 
 ADR-0038 owns the separation between protected Lumi creative data and mutable,
 reviewable source analysis. No workflow/protection code participates in live or
 lighting timing lanes.
-

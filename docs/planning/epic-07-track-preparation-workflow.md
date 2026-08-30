@@ -1,6 +1,6 @@
 # Epic 7 – Track preparation workflow
 
-Status: **Done in 0.5.0-dev-36** | Priority: **P0**
+Status: **Done; hardened in 0.5.0-dev-37** | Priority: **P0**
 
 ## Outcome
 
@@ -55,13 +55,16 @@ permission to stretch or guess phrase boundaries.
 
 ### Phase 4 — Ready-state clarity and creative protection
 
-Status: **Done in 0.5.0-dev-36**
+Status: **Done; hardened in 0.5.0-dev-37**
 
 - `Ready for Show` uses a green check by default;
 - empty queues are calm, actionable empty states rather than global errors;
 - per-track phrase protection is revisioned and enforced in the engine;
 - USB beatgrid, waveform and cue updates remain allowed and require review;
 - live/output timing lanes remain completely untouched.
+- workflow navigation and its bounded result page remain one authoritative UI
+  state across concurrent monitoring and track mutations;
+- phrase protection never changes the vertical Track Editor geometry.
 
 ## Epic acceptance
 

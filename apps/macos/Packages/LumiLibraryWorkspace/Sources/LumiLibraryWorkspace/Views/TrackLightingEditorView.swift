@@ -100,7 +100,6 @@ public struct TrackLightingEditorView: View {
             Divider().overlay(Color.white.opacity(0.12))
             transport
             editToolbar
-            phraseProtectionPanel
             workflowAttentionPanel
             versionSuccessorPanel
             sourceReconciliationPanel
@@ -214,12 +213,13 @@ public struct TrackLightingEditorView: View {
                     )
                 } label: {
                     Label(
-                        analysis.track.phraseProtection.locked ? "Protected" : "Protect Phrases",
+                        "Protect Phrases",
                         systemImage: analysis.track.phraseProtection.locked ? "lock.fill" : "lock.open"
                     )
                     .foregroundStyle(
                         analysis.track.phraseProtection.locked ? LumiColor.success : secondary
                     )
+                    .frame(width: 132, alignment: .leading)
                 }
                 .buttonStyle(.borderless)
                 .help(
@@ -227,6 +227,7 @@ public struct TrackLightingEditorView: View {
                         ? "Unlock deliberate Lumi phrase edits. USB beatgrid and source updates remain allowed and still require review."
                         : "Protect Lumi phrase points, roles and Autoloop choices against accidental editing or replacement. USB beatgrid updates still synchronize and appear for review."
                 )
+                .accessibilityValue(analysis.track.phraseProtection.locked ? "On" : "Off")
                 .accessibilityIdentifier("lumi.trackEditor.phraseProtection")
 
                 Menu {
@@ -330,27 +331,6 @@ public struct TrackLightingEditorView: View {
 
     private var phrasesAreEditable: Bool {
         rendersInteractiveControls && !analysis.track.phraseProtection.locked
-    }
-
-    @ViewBuilder
-    private var phraseProtectionPanel: some View {
-        if analysis.track.phraseProtection.locked {
-            HStack(spacing: 10) {
-                Image(systemName: "lock.fill")
-                    .foregroundStyle(LumiColor.success)
-                Text("Lumi phrases are protected")
-                    .font(LumiTypography.metadata.weight(.semibold))
-                Text("Phrase points, roles and Autoloop choices are read-only. USB beatgrid changes still synchronize and appear in review.")
-                    .font(LumiTypography.caption)
-                    .foregroundStyle(secondary)
-                    .lineLimit(1)
-                Spacer()
-            }
-            .padding(.horizontal, 20)
-            .frame(height: 34)
-            .background(LumiColor.success.opacity(0.08))
-            .accessibilityIdentifier("lumi.trackEditor.phraseProtectionNotice")
-        }
     }
 
     @ViewBuilder

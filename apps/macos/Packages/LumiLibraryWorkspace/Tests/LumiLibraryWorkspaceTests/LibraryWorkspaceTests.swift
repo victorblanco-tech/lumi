@@ -7,6 +7,15 @@ import Testing
 
 @Suite("Library workspace")
 struct LibraryWorkspaceTests {
+    @Test("Workflow filters keep their exact engine wire identities")
+    func workflowFilterWireIdentities() {
+        #expect(TrackWorkflowFilter.changedAfterUSBSync.rawValue == "changedAfterUsbSync")
+        #expect(TrackWorkflowFilter.versionCandidates.rawValue == "versionCandidates")
+        #expect(TrackWorkflowFilter.notStarted.rawValue == "notStarted")
+        #expect(TrackWorkflowFilter.inProgress.rawValue == "inProgress")
+        #expect(TrackWorkflowFilter.readyForShow.rawValue == "readyForShow")
+    }
+
     @Test("Mounted USB engine snapshot decodes in the macOS workspace")
     func mountedUSBSnapshotDecodesWhenProvided() throws {
         guard let snapshotPath = ProcessInfo.processInfo.environment[

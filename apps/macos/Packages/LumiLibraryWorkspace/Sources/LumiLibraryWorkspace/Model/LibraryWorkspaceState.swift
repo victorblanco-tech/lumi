@@ -47,7 +47,10 @@ public enum TrackPreparationStatus: String, CaseIterable, Identifiable, Equatabl
 }
 
 public enum TrackWorkflowFilter: String, CaseIterable, Identifiable, Equatable, Sendable {
-    case changedAfterUSBSync
+    // Keep the user-facing acronym in the Swift case while spelling the wire
+    // value exactly like the Rust protocol. Swift's synthesized raw value would
+    // otherwise send `changedAfterUSBSync`, which the engine correctly rejects.
+    case changedAfterUSBSync = "changedAfterUsbSync"
     case versionCandidates
     case notStarted
     case inProgress

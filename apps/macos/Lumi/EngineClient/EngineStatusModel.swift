@@ -726,10 +726,7 @@ final class EngineStatusModel: ObservableObject {
               await acquireInteractiveExchange() else {
             return
         }
-        var exchangeHeld = true
-        defer {
-            if exchangeHeld { isExchangingCommand = false }
-        }
+        defer { isExchangingCommand = false }
         do {
             let envelope = try await supervisor.send(
                 .queryLibrary(
@@ -749,8 +746,6 @@ final class EngineStatusModel: ObservableObject {
                 }
                 return
             }
-            isExchangingCommand = false
-            exchangeHeld = false
             let snapshotDecoder = snapshotDecoder
             let libraryDecoder = libraryDecoder
             let decoded = try await Task.detached(priority: .userInitiated) {
@@ -765,11 +760,16 @@ final class EngineStatusModel: ObservableObject {
             }.value
             let snapshot = decoded.0
             guard generation == libraryQueryGeneration else { return }
-            guard snapshot.snapshotSequence >= (latestSnapshot?.snapshotSequence ?? 0) else {
-                return
+            // Keep the interactive exchange until the query response is decoded
+            // and published. Releasing it before this point allowed a monitor or
+            // workflow mutation snapshot to overtake the response: the sidebar
+            // would then show the newly selected workflow while the table still
+            // contained the previous query. Library queries are small, bounded
+            // pages and do not run on any realtime lighting lane.
+            if snapshot.snapshotSequence >= (latestSnapshot?.snapshotSequence ?? 0) {
+                latestSnapshot = snapshot
+                workspaceState = LiveWorkspacePresenter.ready(snapshot)
             }
-            latestSnapshot = snapshot
-            workspaceState = LiveWorkspacePresenter.ready(snapshot)
             libraryState = decoded.1.preservingDeviceInspection(
                 libraryState.rekordboxDeviceInspection
             )

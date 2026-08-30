@@ -6124,6 +6124,36 @@ mod tests {
     }
 
     #[test]
+    fn phrase_protection_keeps_the_active_workflow_query_and_page_atomic()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut worker = LibraryWorker::demo()?;
+        let track_id = worker.snapshot_json()?["page"]["tracks"][0]["id"]
+            .as_u64()
+            .ok_or("track id")?;
+        worker.open_editor(track_id)?;
+        worker.query(LibraryQueryUpdate {
+            search: String::new(),
+            playlist_id: None,
+            workflow_filter: Some(lumi_library::TrackWorkflowFilter::ChangedAfterUsbSync),
+            workflow_step_id: None,
+            offset: 0,
+            limit: 50,
+            sort: LibraryTrackSort::default(),
+        });
+
+        let before = worker.snapshot_json()?;
+        assert_eq!(before["query"]["workflowFilter"], "changedAfterUsbSync");
+        assert_eq!(before["page"]["total"], 0);
+
+        worker.set_track_phrase_protection(track_id, 0, true)?;
+        let after = worker.snapshot_json()?;
+        assert_eq!(after["query"]["workflowFilter"], "changedAfterUsbSync");
+        assert_eq!(after["page"]["total"], 0);
+        assert_eq!(after["editor"]["track"]["phraseProtection"]["locked"], true);
+        Ok(())
+    }
+
+    #[test]
     fn timeline_and_undo_redo_cursor_survive_worker_restart()
     -> Result<(), Box<dyn std::error::Error>> {
         let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();

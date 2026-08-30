@@ -277,6 +277,7 @@ public struct LibraryWorkspaceView: View {
             .pickerStyle(.segmented)
             .labelsHidden()
             .focusable()
+            .fixedSize(horizontal: false, vertical: true)
             .accessibilityIdentifier("lumi.library.browserMode")
 
             if browserMode == .playlists {
@@ -343,33 +344,36 @@ public struct LibraryWorkspaceView: View {
     }
 
     private var workflowNavigation: some View {
-        VStack(alignment: .leading, spacing: LumiSpacing.small) {
-            Text("SYSTEM")
-                .font(LumiTypography.technical)
-                .foregroundStyle(LumiColor.textSecondary)
-            workflowButton(
-                .changedAfterUSBSync,
-                title: "Changed after USB sync",
-                count: state.workflow.changedAfterUSBSync,
-                systemImage: "externaldrive.badge.exclamationmark",
-                color: LumiColor.warning
-            )
-            workflowButton(
-                .versionCandidates,
-                title: "New track versions",
-                count: state.workflow.versionCandidates,
-                systemImage: "arrow.triangle.2.circlepath.circle",
-                color: LumiColor.accent
-            )
-            Text("PREPARATION")
-                .font(LumiTypography.technical)
-                .foregroundStyle(LumiColor.textSecondary)
-                .padding(.top, LumiSpacing.medium)
-            ForEach(state.workflowCatalog.steps.filter { !$0.archived }) { step in
-                workflowStepButton(step)
+        ScrollView(.vertical) {
+            LazyVStack(alignment: .leading, spacing: LumiSpacing.small) {
+                Text("SYSTEM")
+                    .font(LumiTypography.technical)
+                    .foregroundStyle(LumiColor.textSecondary)
+                workflowButton(
+                    .changedAfterUSBSync,
+                    title: "Changed after USB sync",
+                    count: state.workflow.changedAfterUSBSync,
+                    systemImage: "externaldrive.badge.exclamationmark",
+                    color: LumiColor.warning
+                )
+                workflowButton(
+                    .versionCandidates,
+                    title: "New track versions",
+                    count: state.workflow.versionCandidates,
+                    systemImage: "arrow.triangle.2.circlepath.circle",
+                    color: LumiColor.accent
+                )
+                Text("PREPARATION")
+                    .font(LumiTypography.technical)
+                    .foregroundStyle(LumiColor.textSecondary)
+                    .padding(.top, LumiSpacing.medium)
+                ForEach(state.workflowCatalog.steps.filter { !$0.archived }) { step in
+                    workflowStepButton(step)
+                }
             }
-            Spacer()
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
+        .scrollIndicators(.automatic)
         .accessibilityIdentifier("lumi.library.workflow")
     }
 
@@ -384,11 +388,15 @@ public struct LibraryWorkspaceView: View {
                     .font(LumiTypography.technical)
                     .foregroundStyle(LumiColor.textSecondary)
             }
-            .foregroundStyle(selectedWorkflowStepID == step.id ? LumiColor.accent : LumiColor.textPrimary)
+            .foregroundStyle(
+                state.query.workflowStepID == step.id ? LumiColor.accent : LumiColor.textPrimary
+            )
             .padding(.horizontal, LumiSpacing.small)
             .frame(minHeight: LumiControlMetric.standardHeight)
             .contentShape(Rectangle())
-            .background(selectedWorkflowStepID == step.id ? LumiColor.accent.opacity(0.14) : Color.clear)
+            .background(
+                state.query.workflowStepID == step.id ? LumiColor.accent.opacity(0.14) : Color.clear
+            )
             .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
         }
         .buttonStyle(.plain)
@@ -412,13 +420,13 @@ public struct LibraryWorkspaceView: View {
                     .foregroundStyle(LumiColor.textSecondary)
             }
             .foregroundStyle(
-                selectedWorkflowFilter == filter ? LumiColor.accent : LumiColor.textPrimary
+                state.query.workflowFilter == filter ? LumiColor.accent : LumiColor.textPrimary
             )
             .padding(.horizontal, LumiSpacing.small)
             .frame(minHeight: LumiControlMetric.standardHeight)
             .contentShape(Rectangle())
             .background(
-                selectedWorkflowFilter == filter ? LumiColor.accent.opacity(0.14) : Color.clear
+                state.query.workflowFilter == filter ? LumiColor.accent.opacity(0.14) : Color.clear
             )
             .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
         }
@@ -786,18 +794,18 @@ public struct LibraryWorkspaceView: View {
     }
 
     private var emptyStateTitle: String {
-        if selectedWorkflowFilter != nil || selectedWorkflowStepID != nil {
+        if state.query.workflowFilter != nil || state.query.workflowStepID != nil {
             return "Nothing to review"
         }
         return conditionTitle(.empty)
     }
 
     private var emptyStateDetail: String {
-        if let stepID = selectedWorkflowStepID,
+        if let stepID = state.query.workflowStepID,
            let step = state.workflowCatalog.steps.first(where: { $0.id == stepID }) {
             return "No tracks currently match \(step.displayName). This is a normal empty workflow step, not a Library error."
         }
-        if selectedWorkflowFilter != nil {
+        if state.query.workflowFilter != nil {
             return "No tracks currently need attention in this queue. This is a normal empty result."
         }
         return state.diagnostic ?? conditionDescription(.empty)

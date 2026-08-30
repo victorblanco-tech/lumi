@@ -1,5 +1,30 @@
 # Changelog
 
+## 0.5.0-dev-37 - 2026-08-30
+
+### Fixed
+
+- Keeps the selected workflow queue and its track page atomic while rapid
+  Library queries, engine monitoring and track mutations overlap.
+- Uses the authoritative engine query for workflow highlighting, so a zero-count
+  queue can never visually claim rows from `Not Started`.
+- Keeps `Protect Phrases` at one fixed size and removes its conditional banner;
+  toggling protection no longer shifts the waveform or Track Editor layout.
+- Keeps the browser mode control fixed and puts workflow queues in their own
+  bounded scroll area, so the split divider can no longer cover or compress the
+  first `Changed after USB sync` action.
+- Corrects the `Changed after USB sync` wire identifier (`Usb`, not synthesized
+  `USB`), so the engine accepts that queue instead of retaining the prior page.
+
+### Verification
+
+- Adds a regression proving that toggling phrase protection preserves an active
+  empty `Changed after USB sync` query and page.
+- Pins every Swift workflow-filter raw value to its exact Rust protocol value.
+- Replays the exact desktop sequence: select the empty queue, protect the open
+  track, switch between workflow steps, and verify count, highlight and rows
+  remain consistent.
+
 ## 0.5.0-dev-36 - 2026-08-30
 
 ### Added
