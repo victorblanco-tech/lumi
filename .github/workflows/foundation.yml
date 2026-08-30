@@ -54,7 +54,6 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
-          cache: maven
 
       - name: Restore Apple build cache
         uses: actions/cache@v5
