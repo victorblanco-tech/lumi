@@ -3,7 +3,7 @@
 </p>
 
 <p align="center">
-  Prepare every track. See what is coming. Let Lumi run the lights.
+  Focus on DJ-ing... Let Lumi run the lights.
 </p>
 
 <p align="center">
