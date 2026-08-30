@@ -20,6 +20,10 @@ your own SoundSwitch AutoLoops without taking over fixture or DMX control.
 [Read the user guide](user-guide/) ·
 [Report an issue](https://github.com/victorblanco-tech/lumi/issues)
 
+> **Public Beta:** Lumi is ready for structured field testing across different
+> compatible DJ and lighting setups. Read the [beta test guidance](public-beta/)
+> and complete a dry run before relying on it during a show.
+
 ![Lumi Local Playback running a prepared two-track show](assets/screenshots/local-playback.png)
 
 ![The complete Lumi workflow from trusted USB source to SoundSwitch DMX](assets/lumi-workflow.svg)
