@@ -56,7 +56,10 @@ fn occupied_udp_ports(
     mut bind: impl FnMut(u16) -> std::io::Result<UdpSocket>,
 ) -> (Vec<u16>, Vec<String>) {
     let mut occupied_ports = Vec::new();
+    #[cfg(target_os = "macos")]
     let mut owners = Vec::new();
+    #[cfg(not(target_os = "macos"))]
+    let owners = Vec::new();
 
     #[cfg(target_os = "macos")]
     for &port in ports {

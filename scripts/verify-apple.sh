@@ -5,6 +5,7 @@ set -euo pipefail
 script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 repository_root="$(dirname "$script_dir")"
 cargo_bin_directory="${CARGO_HOME:-${HOME}/.cargo}/bin"
+packaging_java_home="${LUMI_PACKAGING_JAVA_HOME:-${JAVA_HOME:-$repository_root/build/package-toolchains/temurin-21-macos-aarch64/Contents/Home}}"
 
 if [[ -d "$cargo_bin_directory" ]]; then
   export PATH="$cargo_bin_directory:$PATH"
@@ -29,7 +30,7 @@ swift test -Xswiftc -warnings-as-errors --package-path apps/macos/Packages/LumiD
 swift test -Xswiftc -warnings-as-errors --package-path apps/macos/Packages/LumiLiveWorkspace
 swift test -Xswiftc -warnings-as-errors --package-path apps/macos/Packages/LumiLibraryWorkspace
 LUMI_ENGINE_TEST_EXECUTABLE="$repository_root/target/release/lumi-engine" \
-LUMI_PROLINK_JAVA="$repository_root/build/package-toolchains/temurin-21-macos-aarch64/Contents/Home/bin/java" \
+LUMI_PROLINK_JAVA="$packaging_java_home/bin/java" \
   LUMI_PROLINK_BRIDGE_JAR="$repository_root/bridges/prolink/target/lumi-prolink-bridge.jar" \
   LUMI_CARABINER_EXECUTABLE="$repository_root/build/carabiner-runtime/Carabiner" \
   swift test --no-parallel -Xswiftc -warnings-as-errors --package-path apps/macos/Packages/LumiEngineClient
@@ -40,6 +41,7 @@ xcodebuild \
   -configuration Dev \
   -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath build/DerivedData \
+  LUMI_PACKAGING_JAVA_HOME="$packaging_java_home" \
   CODE_SIGNING_ALLOWED=NO \
   GCC_TREAT_WARNINGS_AS_ERRORS=YES \
   -quiet \

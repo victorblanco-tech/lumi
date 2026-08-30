@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.6.0-dev-1 - 2026-08-30
+
+### Changed
+
+- Starts the next isolated development cycle after the 0.5.0 production
+  release. No production data or configuration is migrated automatically.
+- Positions Lumi explicitly as a Public Beta and adds structured field-test
+  guidance and a GitHub issue form for different hardware combinations.
+- Corrects the production third-party inventory and makes future DMGs include
+  installed legal notices, complete Carabiner/Ableton Link source with nested
+  submodules and all pinned Java runtime source artifacts.
+- Expands the SPDX SBOM beyond Cargo to cover the Java bridge, OpenJDK,
+  SQLCipher/OpenSSL and the separately executed Ableton Link helper.
+
 ## 0.5.1 - 2026-08-30
 
 ### Changed

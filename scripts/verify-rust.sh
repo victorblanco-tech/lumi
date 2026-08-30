@@ -32,7 +32,7 @@ cargo test --locked --workspace --all-features
 cargo test --locked --release -p lumi-planner \
   two_hundred_phrase_plan_completes_within_epic_one_budget
 cargo test --locked --release -p lumi-library-sqlite --test repository \
-  ten_thousand_track_fixture_meets_epic_two_a_budgets -- --exact --nocapture
+  ten_thousand_track_fixture_meets_epic_two_a_budgets -- --exact --ignored --nocapture
 cargo build --locked --workspace --all-features
 
 echo "Portable Rust verification passed."

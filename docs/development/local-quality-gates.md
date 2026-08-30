@@ -22,6 +22,11 @@ the LAN simulator or physical show hardware.
 No gate silently turns a missing prerequisite into a pass. Ignored tests stay
 ignored in ordinary gates and are selected explicitly by `lab`.
 
+The same portable and Apple verification runs on GitHub for pushes and pull
+requests targeting `dev` or `main`. Public CI is an independent confirmation;
+the hardware-aware local and lab evidence remains mandatory for show-critical
+changes.
+
 ## Everyday workflow
 
 Before or during a story:

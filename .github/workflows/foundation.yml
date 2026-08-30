@@ -2,8 +2,13 @@ name: Foundation
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches:
+      - dev
+      - main
   push:
     branches:
+      - dev
       - main
 
 permissions:
@@ -44,6 +49,12 @@ jobs:
       - name: Check out repository
         uses: actions/checkout@v6
 
+      - name: Set up Java 21 for the Pro DJ Link bridge
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
       - name: Restore Apple build cache
         uses: actions/cache@v5
         with:
@@ -57,10 +68,21 @@ jobs:
             apps/macos/Packages/LumiLiveWorkspace/.build
             apps/macos/Packages/LumiLibraryWorkspace/.build
             apps/macos/Packages/LumiEngineClient/.build
+            bridges/prolink/target
+            build/carabiner-runtime
             build/DerivedData
+            build/engine-service-target
+            build/maven-repository
+            build/prolink-bridge-runtime
           key: apple-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'apps/macos/Lumi.xcodeproj/project.pbxproj', 'apps/macos/Packages/**/Package.swift') }}
           restore-keys: |
             apple-v1-${{ runner.os }}-${{ runner.arch }}-
+
+      - name: Prepare pinned Ableton Link runtime
+        run: |
+          if [[ ! -x build/carabiner-runtime/Carabiner ]]; then
+            ./scripts/prepare-carabiner-runtime.sh
+          fi
 
       - name: Verify Swift, Xcode, arm64 bundle, and visual evidence
         run: ./scripts/verify-apple.sh
