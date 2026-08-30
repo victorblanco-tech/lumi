@@ -10,7 +10,7 @@ publishing a binary as a public-beta release.
       are documented.
 - [x] The reference hardware setup is described as evidence, not as a universal
       compatibility claim.
-- [ ] GitHub release title and notes identify the binary as Public Beta.
+- [x] GitHub release title and notes identify the binary as Public Beta.
 
 ## Source and repository hygiene
 
