@@ -1,5 +1,35 @@
 # Changelog
 
+## 0.5.0 - 2026-08-30
+
+### Added
+
+- Adds a complete USB-first preparation workflow for Rekordbox OneLibrary
+  media, including trusted-source identity, selected-playlist synchronization,
+  change review, beatgrid/waveform/hot-cue import and creative phrase relink.
+- Adds configurable Track Preparation queues, phrase protection and a
+  CDJ-style RGB Track Editor with local audio playback.
+- Adds isolated Pro DJ Link, Ableton Link and SoundSwitch output lanes with
+  Live Decks, Local Playback, exactly-once AutoLoop changes and Static Looks.
+- Adds configurable Light Plans with Track Color rules, Theme eligibility and
+  repeat protection.
+
+### Changed
+
+- Production and RC installations now start with an empty, isolated library.
+  Demo tracks remain a Dev-only aid; no personal tracks, USB identities,
+  mappings, Themes or Light Plan configuration ship in the production app.
+- Delivers the user-facing GitHub guide, Retina product screenshots and the
+  approved Lumi branding throughout the app and distribution.
+
+### Compatibility
+
+- Apple Silicon and macOS 15 or newer.
+- The first public DMG is ad-hoc signed and not notarized; macOS may require
+  `Open Anyway` on first launch.
+- Existing Dev data remains isolated and is not migrated into Production
+  automatically.
+
 ## 0.5.0-dev-40 - 2026-08-30
 
 ### Changed

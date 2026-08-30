@@ -64,6 +64,11 @@ const REKORDBOX_CANONICAL_SOURCE_KIND: &str = "rekordbox7";
 const MAX_IMPORTED_WAVEFORM_POINTS: usize = 16_384;
 const MAX_DECK_WAVEFORM_PREVIEW_POINTS: usize = 1_024;
 const MAX_DECK_WAVEFORM_DETAIL_POINTS: usize = 16_384;
+const DEMO_LIBRARY_SEED_ENVIRONMENT_KEY: &str = "LUMI_SEED_DEMO_LIBRARY";
+
+fn demo_library_seed_enabled() -> bool {
+    std::env::var(DEMO_LIBRARY_SEED_ENVIRONMENT_KEY).as_deref() != Ok("0")
+}
 
 pub(crate) fn library_sort_field_name(field: LibraryTrackSortField) -> &'static str {
     match field {
@@ -913,7 +918,7 @@ impl LibraryWorker {
             Some(path) => SqliteLibraryRepository::open(path)?,
             None => SqliteLibraryRepository::in_memory()?,
         };
-        Self::demo_with_repository(repository, database_path)
+        Self::initialize_with_repository(repository, database_path, demo_library_seed_enabled())
     }
 
     pub fn autoloop_catalog(&self) -> Result<AutoloopCatalog, LibraryWorkerError> {
@@ -1040,15 +1045,17 @@ impl LibraryWorker {
 
     #[cfg(test)]
     fn demo_at(path: &std::path::Path) -> Result<Self, LibraryWorkerError> {
-        Self::demo_with_repository(
+        Self::initialize_with_repository(
             SqliteLibraryRepository::open(path)?,
             Some(path.to_path_buf()),
+            true,
         )
     }
 
-    fn demo_with_repository(
+    fn initialize_with_repository(
         mut repository: SqliteLibraryRepository,
         database_path: Option<std::path::PathBuf>,
+        seed_demo_library: bool,
     ) -> Result<Self, LibraryWorkerError> {
         let provider = DemoLibrarySourceProvider::curated();
         let baseline = provider.load_baseline()?;
@@ -1059,6 +1066,13 @@ impl LibraryWorker {
             && !repository.suppress_demo_seed()?
         {
             repository.import_baseline(&baseline)?;
+            // A distributable Lumi installation needs the canonical source
+            // scaffold but must never inherit sample tracks or configuration.
+            // Initializing and immediately resetting keeps the existing source
+            // invariants intact while leaving the user-facing library empty.
+            if !seed_demo_library {
+                repository.reset_library_content(&[])?;
+            }
         }
         let persisted_source = match repository.library_source(
             &lumi_library::LibrarySourceId::try_new(REKORDBOX_CANONICAL_SOURCE_ID)?,
@@ -5201,6 +5215,39 @@ mod tests {
         device_track_matches, first_available_audio_uri, is_kept_active_revision,
         kept_active_track_is_current,
     };
+
+    #[test]
+    fn fresh_release_initialization_contains_no_demo_or_personal_data()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let path = std::env::temp_dir().join(format!("lumi-engine-clean-release-{unique}.sqlite"));
+        {
+            let worker = LibraryWorker::initialize_with_repository(
+                lumi_library_sqlite::SqliteLibraryRepository::open(&path)?,
+                Some(path.clone()),
+                false,
+            )?;
+            let snapshot = worker.snapshot_json()?;
+            assert_eq!(snapshot["condition"], "empty");
+            assert_eq!(snapshot["collectionTotal"], 0);
+            assert_eq!(snapshot["dataManagement"]["trackCount"], 0);
+            assert_eq!(snapshot["dataManagement"]["playlistCount"], 0);
+            assert_eq!(snapshot["rekordboxDevices"], json!([]));
+            assert_eq!(snapshot["playlists"], json!([]));
+            assert_eq!(snapshot["page"]["tracks"], json!([]));
+
+            let catalog = snapshot["autoloopCatalog"]["themes"]
+                .as_array()
+                .ok_or("generic output banks are missing")?;
+            assert_eq!(catalog.len(), 4);
+            let serialized = serde_json::to_string(&snapshot)?;
+            for personal_marker in ["90s Bitch", "Favourite Regrets", "DJ VIC", "BLUE PINK"] {
+                assert!(!serialized.contains(personal_marker));
+            }
+        }
+        std::fs::remove_file(path)?;
+        Ok(())
+    }
 
     #[test]
     fn kept_active_is_exact_revision_scoped_for_analysis_and_hot_cues() {

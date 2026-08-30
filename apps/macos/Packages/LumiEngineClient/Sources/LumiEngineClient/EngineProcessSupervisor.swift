@@ -128,6 +128,9 @@ public actor EngineProcessSupervisor {
         var environment = ProcessInfo.processInfo.environment
         environment["LUMI_SESSION_TOKEN"] = token
         environment["LUMI_AUTO_PUBLISH_MIDI"] = automaticallyPublishesMidi ? "1" : "0"
+        environment["LUMI_SEED_DEMO_LIBRARY"] = Bundle.main.object(
+            forInfoDictionaryKey: "LumiSeedDemoLibrary"
+        ) as? String ?? "1"
         // Keep the channel engine alive across sequential UI sessions. The
         // engine itself fail-safes to Off and leaves Link whenever its
         // authenticated client disconnects, while retaining stable CoreMIDI

@@ -34,6 +34,8 @@
 	<string>$(LUMI_PRODUCT_VERSION)</string>
 	<key>LumiReleaseChannel</key>
 	<string>$(LUMI_RELEASE_CHANNEL)</string>
+	<key>LumiSeedDemoLibrary</key>
+	<string>$(LUMI_SEED_DEMO_LIBRARY)</string>
 	<key>LumiDataDirectoryName</key>
 	<string>$(LUMI_DATA_DIRECTORY_NAME)</string>
 	<key>LumiEngineLaunchAgentPlistName</key>

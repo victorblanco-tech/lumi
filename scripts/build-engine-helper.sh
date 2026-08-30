@@ -23,7 +23,7 @@ fi
 # plist directly from the containing app bundle; no installer, root helper or
 # writes to ~/Library/LaunchAgents are required. Keep every release channel
 # isolated through its bundle identifier and Application Support directory.
-for required_variable in PRODUCT_BUNDLE_IDENTIFIER LUMI_DATA_DIRECTORY_NAME LUMI_PRODUCT_VERSION CURRENT_PROJECT_VERSION; do
+for required_variable in PRODUCT_BUNDLE_IDENTIFIER LUMI_DATA_DIRECTORY_NAME LUMI_PRODUCT_VERSION LUMI_SEED_DEMO_LIBRARY CURRENT_PROJECT_VERSION; do
   if [[ -z "${!required_variable:-}" ]]; then
     echo "ERROR: $required_variable is required to package the Lumi engine LaunchAgent." >&2
     exit 1
@@ -88,6 +88,7 @@ plutil -create xml1 "$launch_agent_plist"
 /usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:LUMI_DATA_DIRECTORY_NAME string $LUMI_DATA_DIRECTORY_NAME" "$launch_agent_plist"
 /usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:LUMI_PRODUCT_VERSION string $LUMI_PRODUCT_VERSION" "$launch_agent_plist"
 /usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:LUMI_BUILD_NUMBER string $CURRENT_PROJECT_VERSION" "$launch_agent_plist"
+/usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:LUMI_SEED_DEMO_LIBRARY string $LUMI_SEED_DEMO_LIBRARY" "$launch_agent_plist"
 /usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:LUMI_AUTO_PUBLISH_MIDI string 1" "$launch_agent_plist"
 /usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:LUMI_EXIT_AFTER_CLIENT_DISCONNECT string 0" "$launch_agent_plist"
 plutil -lint "$launch_agent_plist" >/dev/null

@@ -1647,6 +1647,9 @@ final class EngineStatusModel: ObservableObject {
             environment["LUMI_LIBRARY_DATABASE_PATH"] = database.path
             environment["LUMI_AUTO_PUBLISH_MIDI"] = "0"
             environment["LUMI_EXIT_AFTER_CLIENT_DISCONNECT"] = "1"
+            environment["LUMI_SEED_DEMO_LIBRARY"] = Bundle.main.object(
+                forInfoDictionaryKey: "LumiSeedDemoLibrary"
+            ) as? String ?? "1"
             process.environment = environment
             process.standardOutput = nullOutput
             process.standardError = standardError

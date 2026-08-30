@@ -16,6 +16,7 @@ case "$channel" in
     expected_display_name="Lumi Dev"
     expected_bundle_identifier="co.victorblan.tech.lumi.dev"
     expected_data_directory="Lumi Dev"
+    expected_demo_seed="1"
     expected_version_pattern='^[0-9]+\.[0-9]+\.[0-9]+-dev-[1-9][0-9]*$'
     install_directory="/Applications/Lumi/Dev"
     install_shortcut_name="Applications - Lumi - Dev"
@@ -26,6 +27,7 @@ case "$channel" in
     expected_display_name="Lumi RC"
     expected_bundle_identifier="co.victorblan.tech.lumi.rc"
     expected_data_directory="Lumi RC"
+    expected_demo_seed="0"
     expected_version_pattern='^[0-9]+\.[0-9]+\.[0-9]+-rc-[1-9][0-9]*$'
     install_directory="/Applications/Lumi/RC"
     install_shortcut_name="Applications - Lumi - RC"
@@ -36,6 +38,7 @@ case "$channel" in
     expected_display_name="Lumi"
     expected_bundle_identifier="co.victorblan.tech.lumi"
     expected_data_directory="Lumi"
+    expected_demo_seed="0"
     expected_version_pattern='^[0-9]+\.[0-9]+\.[0-9]+$'
     install_directory="/Applications/Lumi"
     install_shortcut_name="Applications - Lumi"
@@ -158,7 +161,8 @@ if [[ ! -f "$packaged_launch_agent" ]]; then
 fi
 if [[ "$(/usr/libexec/PlistBuddy -c 'Print :Label' "$packaged_launch_agent")" != "$expected_bundle_identifier.engine" ]] \
   || [[ "$(/usr/libexec/PlistBuddy -c 'Print :BundleProgram' "$packaged_launch_agent")" != "Contents/Helpers/lumi-engine" ]] \
-  || [[ "$(/usr/libexec/PlistBuddy -c 'Print :EnvironmentVariables:LUMI_DATA_DIRECTORY_NAME' "$packaged_launch_agent")" != "$expected_data_directory" ]]; then
+  || [[ "$(/usr/libexec/PlistBuddy -c 'Print :EnvironmentVariables:LUMI_DATA_DIRECTORY_NAME' "$packaged_launch_agent")" != "$expected_data_directory" ]] \
+  || [[ "$(/usr/libexec/PlistBuddy -c 'Print :EnvironmentVariables:LUMI_SEED_DEMO_LIBRARY' "$packaged_launch_agent")" != "$expected_demo_seed" ]]; then
   echo "ERROR: packaged SMAppService LaunchAgent identity is invalid." >&2
   exit 1
 fi
@@ -228,6 +232,7 @@ packaged_bundle_identifier="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentif
 packaged_display_name="$(/usr/libexec/PlistBuddy -c 'Print :CFBundleDisplayName' "$packaged_info_plist")"
 packaged_channel="$(/usr/libexec/PlistBuddy -c 'Print :LumiReleaseChannel' "$packaged_info_plist")"
 packaged_data_directory="$(/usr/libexec/PlistBuddy -c 'Print :LumiDataDirectoryName' "$packaged_info_plist")"
+packaged_demo_seed="$(/usr/libexec/PlistBuddy -c 'Print :LumiSeedDemoLibrary' "$packaged_info_plist")"
 expected_marketing_version="${canonical_version%%-*}"
 
 if [[ "$packaged_version" != "$canonical_version" ]]; then
@@ -244,6 +249,10 @@ if [[ "$packaged_build_number" != "$build_number" ]]; then
 fi
 if [[ "$packaged_bundle_identifier" != "$expected_bundle_identifier" ]]; then
   echo "ERROR: packaged bundle '$packaged_bundle_identifier' differs from '$expected_bundle_identifier'." >&2
+  exit 1
+fi
+if [[ "$packaged_demo_seed" != "$expected_demo_seed" ]]; then
+  echo "ERROR: packaged demo-library policy '$packaged_demo_seed' differs from '$expected_demo_seed'." >&2
   exit 1
 fi
 if [[ "$packaged_display_name" != "$expected_display_name" ]]; then
