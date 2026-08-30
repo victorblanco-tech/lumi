@@ -28,17 +28,12 @@ struct FoundationView: View {
     @Bindable var preferences: LumiPreferences
     @State private var destination: AppDestination = .live
     @State private var librarySection: LibraryHubSection = .tracks
-    @State private var navigationHovered = false
-    @AppStorage(LumiPreferenceKey.navigationAutoHide)
-    private var navigationAutoHides = false
+    @AppStorage(LumiPreferenceKey.navigationHidden)
+    private var navigationIsHidden = false
 
     private var productVersion: String {
         Bundle.main.object(forInfoDictionaryKey: "LumiProductVersion") as? String
             ?? "unknown"
-    }
-
-    private var navigationIsCollapsed: Bool {
-        navigationAutoHides && !navigationHovered
     }
 
     var body: some View {
@@ -301,20 +296,19 @@ struct FoundationView: View {
     private var navigationShell: some View {
         ZStack(alignment: .leading) {
             appNavigation
-                .opacity(navigationIsCollapsed ? 0 : 1)
-                .offset(x: navigationIsCollapsed ? -8 : 0)
-                .allowsHitTesting(!navigationIsCollapsed)
-                .accessibilityHidden(navigationIsCollapsed)
+                .opacity(navigationIsHidden ? 0 : 1)
+                .offset(x: navigationIsHidden ? -8 : 0)
+                .allowsHitTesting(!navigationIsHidden)
+                .accessibilityHidden(navigationIsHidden)
             collapsedNavigation
-                .opacity(navigationIsCollapsed ? 1 : 0)
-                .offset(x: navigationIsCollapsed ? 0 : 6)
-                .allowsHitTesting(navigationIsCollapsed)
-                .accessibilityHidden(!navigationIsCollapsed)
+                .opacity(navigationIsHidden ? 1 : 0)
+                .offset(x: navigationIsHidden ? 0 : 6)
+                .allowsHitTesting(navigationIsHidden)
+                .accessibilityHidden(!navigationIsHidden)
         }
-        .frame(width: navigationIsCollapsed ? 52 : 196, alignment: .leading)
+        .frame(width: navigationIsHidden ? 52 : 196, alignment: .leading)
         .clipped()
-        .onHover { navigationHovered = $0 }
-        .animation(.easeInOut(duration: 0.24), value: navigationIsCollapsed)
+        .animation(.easeInOut(duration: 0.24), value: navigationIsHidden)
     }
 
     private var appNavigation: some View {
@@ -330,18 +324,16 @@ struct FoundationView: View {
                         .accessibilityIdentifier("lumi.navigation.brandWordmark")
                     Spacer(minLength: 0)
                     Button {
-                        navigationAutoHides.toggle()
+                        navigationIsHidden = true
                     } label: {
                         Image(systemName: "sidebar.left")
                             .frame(width: 28, height: 28)
                     }
                     .buttonStyle(.plain)
-                    .foregroundStyle(navigationAutoHides ? LumiColor.accent : LumiColor.textSecondary)
-                    .help(navigationAutoHides ? "Keep navigation visible" : "Auto-hide navigation")
-                    .accessibilityLabel(
-                        navigationAutoHides ? "Keep navigation visible" : "Auto-hide navigation"
-                    )
-                    .accessibilityIdentifier("lumi.navigation.autoHide")
+                    .foregroundStyle(LumiColor.textSecondary)
+                    .help("Hide navigation")
+                    .accessibilityLabel("Hide navigation")
+                    .accessibilityIdentifier("lumi.navigation.hide")
                 }
                 Text(productVersion)
                     .font(LumiTypography.technical)
@@ -368,7 +360,7 @@ struct FoundationView: View {
     private var collapsedNavigation: some View {
         VStack(spacing: LumiSpacing.medium) {
             Button {
-                navigationAutoHides = false
+                navigationIsHidden = false
             } label: {
                 Image("LumiMark")
                     .resizable()

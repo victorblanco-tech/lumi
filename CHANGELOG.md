@@ -1,5 +1,25 @@
 # Changelog
 
+## 0.5.0-dev-38 - 2026-08-30
+
+### Changed
+
+- Replaces hover-driven navigation auto-hide with two explicit, stable states:
+  the full navigation and a fixed compact icon rail.
+- Keeps every compact destination directly clickable without expanding or
+  resizing the navigation, so moving the pointer across it never shifts the
+  active workspace.
+- Renames the visible action to `Hide navigation` while preserving the existing
+  saved preference and its compact/full state across upgrades.
+
+### Verification
+
+- Builds the complete macOS app with Swift concurrency warnings treated as
+  errors.
+- Verifies on the desktop that hiding the navigation, selecting destinations
+  from the compact rail, and leaving the pointer over those controls never
+  expands the rail or moves the workspace.
+
 ## 0.5.0-dev-37 - 2026-08-30
 
 ### Fixed

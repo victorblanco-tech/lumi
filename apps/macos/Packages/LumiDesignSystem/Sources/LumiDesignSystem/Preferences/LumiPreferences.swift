@@ -88,7 +88,9 @@ public enum LumiPreferenceKey {
         "co.victorblan.tech.lumi.preference.lighting-timing-offset-convention-version"
     public static let abletonLinkAutoStart =
         "co.victorblan.tech.lumi.preference.ableton-link-auto-start"
-    public static let navigationAutoHide =
+    /// Whether the app uses its fixed compact icon rail. The persisted key is
+    /// intentionally unchanged so existing users retain their preference.
+    public static let navigationHidden =
         "co.victorblan.tech.lumi.navigation.auto-hide"
     public static let preferredDeckSourceMode =
         "co.victorblan.tech.lumi.live.preferred-deck-source-mode"
