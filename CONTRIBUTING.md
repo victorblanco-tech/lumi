@@ -1,65 +1,48 @@
-# Bijdragen aan Lumi
+# Contributing to Lumi
 
-## Branches
+Thank you for helping improve Lumi. User-facing fixes, hardware observations,
+documentation and focused code changes are all welcome.
 
-- `main` bevat uitsluitend productie-/releasewaardige versies;
-- `dev` is de integratiebranch en de standaardbranch voor dagelijks werk;
-- `feature/<korte-naam>` vertakt vanaf `dev` voor functionaliteit;
-- `fix/<korte-naam>` vertakt vanaf `dev` voor normale fixes;
-- `release/vX.Y.Z` vertakt vanaf `dev` voor releasevoorbereiding;
-- `hotfix/vX.Y.Z` vertakt vanaf `main` voor urgente productiefixes.
+## Before opening a change
 
-Nieuwe wijzigingen gaan normaal via een pull request naar `dev`. Feature- en
-fix-PR's worden gesquasht, zodat iedere gemergede PR één begrijpelijke commit op
-`dev` vormt.
+- Use [GitHub Issues](https://github.com/victorblanco-tech/lumi/issues) for a
+  reproducible bug or a concrete feature proposal.
+- Do not include music files, rekordbox databases, USB exports, SoundSwitch
+  projects, private network addresses or access tokens.
+- Keep show-critical behavior deterministic. UI, library and planning work must
+  not enter the Pro DJ Link, Ableton Link or realtime MIDI execution lanes.
 
-Een productieversie gaat via een release-PR van `dev` naar `main`. Deze PR wordt
-met een normale merge commit gemergd, zodat de relatie tussen de twee branches
-behouden blijft. Na een release wordt `main` teruggesynchroniseerd naar `dev`.
+## Branches and pull requests
 
-## Commitberichten
+- `main` contains production releases.
+- `dev` contains the next integrated development version.
+- Open normal contributions against `dev`.
+- Keep a pull request focused on one logical change.
+- Describe user impact, risks and how the change was tested.
+- Never push directly to `main`.
 
-Gebruik Conventional Commits:
+Maintainers may work directly on `dev` during active development. Production
+releases are merged from `dev` to `main` and tagged separately.
+
+## Commit messages
+
+Use a short Conventional Commit message, for example:
 
 ```text
-feat: voeg next-trackplan toe
-fix: voorkom dubbele trigger op phrasegrens
-docs: verduidelijk Ableton Link timingpad
-test: voeg deterministic planning scenario toe
-refactor: splits planner en execution engine
-build: configureer macOS signing
-ci: voeg releasevalidatie toe
-chore: onderhoud dependencies
+feat: add next-track theme override
+fix: preserve output after live workspace navigation
+docs: clarify SoundSwitch setup
+test: cover hot-cue transport discontinuity
 ```
 
-## Lokale verificatie
+## Local verification
 
-Voer voor iedere pull request de volledige foundationcheck uit:
+Run the repository verification command before opening a pull request:
 
 ```bash
 ./scripts/verify.sh
 ```
 
-Deze controleert de toolchains en versieconsistentie, formatteert niets
-stilzwijgend en bouwt/test zowel de Rust-workspace als de unsigned native
-macOS-app. Meer informatie staat in
-[`docs/development/README.md`](docs/development/README.md).
-
-Breaking changes krijgen `!` of een `BREAKING CHANGE:`-footer:
-
-```text
-feat(protocol)!: wijzig LightingPlan wire format
-```
-
-## Pull requests
-
-- Houd een PR op één logisch onderwerp gericht.
-- Voeg tests toe voor gewijzigde domeinlogica.
-- Beschrijf gebruikersimpact, risico en verificatie.
-- Gebruik `dev` als base, behalve voor release- en hotfixflows.
-- Push nooit rechtstreeks naar `main`.
-
-## Releases
-
-De volledige procedure staat in
-[`docs/release/release-and-deployment-plan.md`](docs/release/release-and-deployment-plan.md).
+More detail is available in the [development guide](docs/development/README.md).
+The release workflow is documented in
+[docs/release](docs/release/release-and-deployment-plan.md).

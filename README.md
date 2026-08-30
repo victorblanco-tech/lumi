@@ -1,45 +1,112 @@
-# Lumi
+<p align="center">
+  <img src="docs/assets/brand/lumi-mark.png" alt="Lumi" width="112">
+</p>
 
-Lumi is een lokale lichtautomatiseringslaag voor DJ-sets. De applicatie leest
-track-, beat- en phrase-informatie, plant vooraf een lichtshow voor geladen
-tracks en voert dat plan via MIDI uit in SoundSwitch.
+<h1 align="center">Lumi</h1>
 
-De architectuur en vastgelegde besluiten staan in
-[`docs/architecture`](docs/architecture/README.md).
+<p align="center">
+  Phrase-aware lighting automation for DJ sets.
+</p>
 
-De drie functionele architectuurplaten staan in
-[`docs/architecture/visual-overview.md`](docs/architecture/visual-overview.md).
+<p align="center">
+  <a href="https://github.com/victorblanco-tech/lumi/releases">Download</a>
+  ·
+  <a href="docs/user-guide/README.md">User guide</a>
+  ·
+  <a href="https://github.com/victorblanco-tech/lumi/issues">Report an issue</a>
+</p>
 
-De GitHub-, versie- en distributiestrategie staat in
-[`docs/release`](docs/release/README.md).
+Lumi prepares the lighting for the track that is playing and the track that is
+coming next. It combines your own phrase structure with the beatgrid and deck
+state from the rekordbox ecosystem, then triggers the right SoundSwitch
+AutoLoop at the right moment.
 
-Het bouwfase- en werktrackingbeleid, inclusief de rolverdeling tussen Buzz en
-GitHub, staat in
-[`docs/planning/build-and-tracking-plan.md`](docs/planning/build-and-tracking-plan.md).
+The complete show runs locally on your Mac. SoundSwitch remains responsible for
+fixtures and DMX output; Lumi acts like a virtual lighting operator beside your
+normal controller.
 
-Het bouwplan voor de eerste verticale productmilestone staat in
-[`docs/planning/epic-01-first-visible-lighting-plan.md`](docs/planning/epic-01-first-visible-lighting-plan.md).
+![Lumi Track Editor with RGB waveform, beatgrid, Hot Cues and phrases](docs/assets/screenshots/track-editor.png)
 
-Het gerefineerde ontwerp en storyplan voor de volgende verticale milestone staat
-in [`docs/planning/epic-02a-library-track-lighting-editor.md`](docs/planning/epic-02a-library-track-lighting-editor.md).
+## What Lumi does
 
-> Status: `0.5.0-dev-8` is de actieve ontwikkellijn. `0.4.0` is de actuele
-> productieversie met trusted Rekordbox USB sources, directe read-only Pro DJ
-> Link-integratie, geïsoleerde Ableton Link BPM-sync, show-grade AutoLoop-output
-> naar SoundSwitch en de native Track Lighting Editor en Live Decks.
+- Imports selected playlists, beatgrids, waveforms, Hot Cues and track metadata
+  from trusted rekordbox OneLibrary USB media.
+- Lets you create and protect Lumi-owned phrases such as Intro, Breakdown,
+  Synth, Build-up, Pre-drop and Drop.
+- Builds a full-track Light Plan before playback, with coherent SoundSwitch
+  Themes, Track Color preferences and repeat protection.
+- Watches both players through read-only Pro DJ Link and keeps the current and
+  next track visible side by side.
+- Sends exactly one mapped MIDI action when an AutoLoop or verified Static Look
+  needs to change.
+- Relays the live master BPM to SoundSwitch through an isolated Ableton Link
+  connection.
+- Supports Local Playback for preparation and dry runs without DJ hardware.
 
-## Development
+## The signal path
 
-Epic 1 contains a working native macOS demo backed by the local Rust engine,
-deterministic simulator, editable next-track plan, operational output gate, and
-dry-run event timeline. The no-terminal demo and known limitations are in
-[`docs/release/0.1.0-demo-and-limitations.md`](docs/release/0.1.0-demo-and-limitations.md).
-Environment setup and the single local verification command are documented in
-[`docs/development/README.md`](docs/development/README.md).
+```text
+rekordbox OneLibrary USB ──> Lumi Library + phrases + Light Plans
+                                      │
+CDJ / DJM ── Pro DJ Link ─────────────┤
+                                      ├── MIDI ──> SoundSwitch ──> DMX
+                                      └── Ableton Link ──> SoundSwitch tempo
+```
 
-## License
+Lumi never writes to rekordbox media during normal import or synchronization.
+Your SoundSwitch project, fixtures and DMX interface stay under SoundSwitch's
+control. A physical Control One can continue to run alongside Lumi.
 
-Copyright © 2026 Victor Blanco. Lumi is available under the
-[Eclipse Public License 2.0](LICENSE). Names and branding are covered separately
-by [the project branding notice](TRADEMARKS.md); optional external integrations
-are listed in [third-party notices](THIRD_PARTY_NOTICES.md).
+## Requirements
+
+- Apple Silicon Mac
+- macOS 15 or newer
+- rekordbox OneLibrary USB media for library synchronization
+- SoundSwitch with a MIDI input for lighting output
+- Pro DJ Link-compatible players for Live Decks
+
+Only the Mac is needed for Library work, Track Editor, Light Plan preview and
+Local Playback. Internet access is not required while using Lumi.
+
+## Start here
+
+1. Download the DMG and checksum from [GitHub Releases](https://github.com/victorblanco-tech/lumi/releases).
+2. Install Lumi and complete the one-time macOS **Open Anyway** step if needed.
+3. Add a trusted USB source and synchronize the playlists you want in Lumi.
+4. Review the beatgrid and phrases, then mark prepared tracks **Ready for Show**.
+5. Map your SoundSwitch Banks, AutoLoops and optional Static Looks.
+6. Configure and preview the Theme Strategy in **Light Plans**.
+7. Open **Live**, choose **Live Decks** or **Local Playback**, then use
+   **Arm** and **Start** when you are ready.
+
+The [user guide](docs/user-guide/README.md) explains the complete workflow,
+operation states, timing offset, backups and troubleshooting.
+
+## Project status
+
+Lumi is in active development and the first broader production release is being
+prepared. The current reference setup uses two CDJ-1500X players, a DJM-V5,
+SoundSwitch, Control One and a DMX lighting rig. Back up your Lumi data before
+upgrading and test a new release with your own show setup before relying on it
+live.
+
+## For contributors
+
+Product and user documentation starts at [docs/index.md](docs/index.md).
+Architecture, decisions, development setup and release procedures remain in:
+
+- [Architecture](docs/architecture/README.md)
+- [Development guide](docs/development/README.md)
+- [Planning and delivery history](docs/planning)
+- [Release process](docs/release/README.md)
+- [Contribution guide](CONTRIBUTING.md)
+
+## License and trademarks
+
+Copyright © 2026 Victor Blanco. Source code is available under the
+[Eclipse Public License 2.0](LICENSE). Lumi names and branding are covered by
+[the trademark notice](TRADEMARKS.md). Third-party components and licenses are
+listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+Lumi is an independent project and is not affiliated with AlphaTheta,
+rekordbox, inMusic or SoundSwitch.
