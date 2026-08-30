@@ -24,7 +24,7 @@
         <maven.compiler.release>21</maven.compiler.release>
         <beat-link.version>8.0.0</beat-link.version>
         <jackson.version>2.18.9</jackson.version>
-        <junit.version>5.11.4</junit.version>
+        <junit.version>6.1.3</junit.version>
     </properties>
 
     <dependencies>
