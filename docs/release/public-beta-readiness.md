@@ -19,9 +19,11 @@ publishing a binary as a public-beta release.
 - [x] Production artifacts contain no user database, music, USB database,
       SoundSwitch project or personalized mapping.
 - [x] Historical local filesystem examples are replaced with portable commands.
-- [ ] The repository default branch is changed from `dev` to `main` before the
+- [x] The repository default branch is changed from `dev` to `main` before the
       visibility switch.
-- [ ] `main` protection and private vulnerability reporting are enabled.
+- [x] `main` protection prevents direct pushes, force-pushes and deletion.
+- [ ] Private vulnerability reporting and dependency alerts are enabled after
+      the repository becomes public; GitHub returns `404` while it is private.
 
 ## Licensing and redistribution
 
@@ -36,14 +38,13 @@ publishing a binary as a public-beta release.
       artifacts for every Java bridge runtime dependency.
 - [x] The SPDX release inventory covers Rust, Java, the Java runtime,
       SQLCipher/OpenSSL and the Carabiner/Ableton Link helper.
-- [ ] A clean public-beta DMG built after these changes passes the release gate.
+- [x] A clean public-beta DMG built after these changes passes the release gate.
 
-A disposable `0.6.0-dev-1` DMG passed the complete packaging and mounted-image
-verification after these gates were implemented. A new production artifact
-must still be built and published; the existing private `0.5.0` DMG predates
-the complete source packaging.
+A clean `0.5.1` Production DMG passed the complete packaging, signing,
+mounted-image, corresponding-source and SBOM verification after these gates
+were implemented. This replacement supersedes the private `0.5.0` artifact,
+which predates the complete source packaging.
 
-The unchecked licensing items are public-distribution blockers. The existing
-private 0.5.0 artifact may be used for the owner's local testing, but repository
-visibility must remain private until a compliant replacement artifact is ready.
-This checklist is an engineering compliance record, not formal legal advice.
+The remaining unchecked repository settings must be completed before the
+visibility switch. This checklist is an engineering compliance record, not
+formal legal advice.
