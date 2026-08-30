@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="1280" height="640" viewBox="0 0 1280 640" role="img"
+     aria-labelledby="title description">
+  <title id="title">Lumi</title>
+  <desc id="description">Phrase-aware lighting automation for DJ sets.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#050609"/>
+      <stop offset="0.48" stop-color="#090d13"/>
+      <stop offset="1" stop-color="#040507"/>
+    </linearGradient>
+    <radialGradient id="cyanGlow" cx="50%" cy="46%" r="62%">
+      <stop offset="0" stop-color="#26c4ff" stop-opacity="0.17"/>
+      <stop offset="0.58" stop-color="#1478a8" stop-opacity="0.05"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="spectrum" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff233d"/>
+      <stop offset="0.22" stop-color="#ff8d24"/>
+      <stop offset="0.39" stop-color="#ffd324"/>
+      <stop offset="0.58" stop-color="#27d974"/>
+      <stop offset="0.78" stop-color="#25bfff"/>
+      <stop offset="1" stop-color="#2385ff"/>
+    </linearGradient>
+    <linearGradient id="waveFade" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#050609" stop-opacity="1"/>
+      <stop offset="0.12" stop-color="#050609" stop-opacity="0"/>
+      <stop offset="0.88" stop-color="#050609" stop-opacity="0"/>
+      <stop offset="1" stop-color="#050609" stop-opacity="1"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1280" height="640" fill="url(#background)"/>
+  <rect width="1280" height="640" fill="url(#cyanGlow)"/>
+
+  <g opacity="0.12" stroke="#7f96a9" stroke-width="1">
+    <path d="M0 128H1280 M0 256H1280 M0 384H1280 M0 512H1280"/>
+    <path d="M160 0V640 M320 0V640 M480 0V640 M640 0V640 M800 0V640 M960 0V640 M1120 0V640"/>
+  </g>
+
+  <path d="M0 386 L32 386 L54 372 L78 410 L102 340 L126 422 L150 356 L174 398
+           L198 374 L222 406 L246 352 L270 394 L294 368 L318 402 L342 360 L366 390
+           L390 378 L414 406 L438 350 L462 396 L486 370 L510 400 L534 364 L558 390
+           L582 376 L606 400 L630 366 L654 392 L678 374 L702 398 L726 360 L750 394
+           L774 370 L798 402 L822 354 L846 396 L870 372 L894 408 L918 350 L942 392
+           L966 366 L990 400 L1014 358 L1038 396 L1062 372 L1086 406 L1110 346
+           L1134 398 L1158 368 L1182 410 L1206 352 L1230 398 L1254 372 L1280 386"
+        fill="none" stroke="url(#spectrum)" stroke-width="4" opacity="0.32"/>
+  <rect x="0" y="320" width="1280" height="132" fill="url(#waveFade)"/>
+
+  <image x="270" y="148" width="740" height="208"
+         xlink:href="lumi-wordmark.png" href="lumi-wordmark.png"
+         preserveAspectRatio="xMidYMid meet"/>
+
+  <rect x="450" y="443" width="380" height="2" fill="#40c9ff" opacity="0.48"/>
+  <text x="640" y="492" text-anchor="middle" fill="#b8c5d2"
+        font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+        font-size="24" font-weight="650" letter-spacing="5">
+    PHRASE-AWARE LIGHTING AUTOMATION
+  </text>
+  <text x="640" y="548" text-anchor="middle" fill="#6f879b"
+        font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+        font-size="18" font-weight="600" letter-spacing="3">
+    PRO DJ LINK · SOUNDSWITCH · ABLETON LINK
+  </text>
+</svg>
