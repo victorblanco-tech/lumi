@@ -31,8 +31,8 @@
     </linearGradient>
   </defs>
 
-  <rect width="1800" height="460" rx="34" fill="url(#background)"/>
-  <rect width="1800" height="460" rx="34" fill="url(#cyanGlow)"/>
+  <rect width="1800" height="460" fill="url(#background)"/>
+  <rect width="1800" height="460" fill="url(#cyanGlow)"/>
   <g opacity="0.13" stroke="#7f96a9" stroke-width="1">
     <path d="M0 115H1800 M0 230H1800 M0 345H1800"/>
     <path d="M225 0V460 M450 0V460 M675 0V460 M900 0V460 M1125 0V460 M1350 0V460 M1575 0V460"/>
