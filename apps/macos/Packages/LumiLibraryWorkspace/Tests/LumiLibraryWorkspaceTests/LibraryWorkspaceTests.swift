@@ -1069,7 +1069,7 @@ struct LibraryWorkspaceTests {
         let projectedBanks = SoundSwitchOutputProfileProjection.banks(catalog: catalog)
         #expect(projectedBanks.map(\.number) == [1, 2, 3, 4])
         #expect(projectedBanks.allSatisfy { $0.organization == .theme })
-        #expect(projectedBanks.first?.groupName == "Blue Pink")
+        #expect(projectedBanks.first?.groupName == "Theme 1")
         let banks = catalog.themes.map { bank in
             SoundSwitchOutputProfileProjection.slots(for: bank.id, catalog: catalog)
         }
@@ -1106,9 +1106,9 @@ struct LibraryWorkspaceTests {
         let bankOneButtonSix = try #require(bankOne.first { $0.number == 6 })
         let bankTwoButtonSix = try #require(bankTwo.first { $0.number == 6 })
         #expect(bankOneButtonSix.roleID == "breakdown-2")
-        #expect(bankOneButtonSix.entryName == "BREAKDOWN 2 BLUE PINK")
+        #expect(bankOneButtonSix.entryName == "BREAKDOWN 2 THEME 1")
         #expect(bankTwoButtonSix.roleID == "bridge")
-        #expect(bankTwoButtonSix.entryName == "BRIDGE GREEN PINK")
+        #expect(bankTwoButtonSix.entryName == "BRIDGE THEME 2")
     }
 
     @Test("Autoloop catalog rejects any projection that conflates Theme targets with a variable count")

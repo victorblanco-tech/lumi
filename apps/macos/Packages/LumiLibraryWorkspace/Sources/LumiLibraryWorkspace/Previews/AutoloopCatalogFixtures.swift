@@ -7,34 +7,34 @@ public enum AutoloopCatalogFixtures {
 
     private static let baseBanks: [[Mapping]] = [
         [
-            mapping("intro-outro", "Intro / Outro", "INTRO BLUE PINK"),
-            mapping("breakdown-1", "Breakdown 1", "BREAKDOWN BLUE PINK"),
-            mapping("buildup-1", "Buildup 1", "BUILDUP BLUE PINK"),
-            mapping("drop", "Drop", "DROP BLUE PINK - NEW 1"),
-            mapping("synth", "Synth", "SYNTH BLUE PINK"),
-            mapping("breakdown-2", "Breakdown 2", "BREAKDOWN 2 BLUE PINK"),
-            mapping("buildup-3", "Buildup 3", "BUILDUP 3 BLUE PINK"),
-            mapping("pre-drop", "Pre-Drop", "PRE DROP BLUE PINK")
+            mapping("intro-outro", "Intro / Outro", "INTRO THEME 1"),
+            mapping("breakdown-1", "Breakdown 1", "BREAKDOWN THEME 1"),
+            mapping("buildup-1", "Buildup 1", "BUILDUP THEME 1"),
+            mapping("drop", "Drop", "DROP THEME 1"),
+            mapping("synth", "Synth", "SYNTH THEME 1"),
+            mapping("breakdown-2", "Breakdown 2", "BREAKDOWN 2 THEME 1"),
+            mapping("buildup-3", "Buildup 3", "BUILDUP 3 THEME 1"),
+            mapping("pre-drop", "Pre-Drop", "PRE DROP THEME 1")
         ],
         [
-            mapping("intro-outro", "Intro / Outro", "INTRO GREEN PINK"),
-            mapping("breakdown-1", "Breakdown 1", "BREAKDOWN GREEN PINK"),
-            mapping("buildup-1", "Buildup 1", "BUILDUP GREEN PINK"),
-            mapping("drop", "Drop", "DROP GREEN PINK"),
-            mapping("synth", "Synth", "SYNTH GREEN PINK"),
-            mapping("bridge", "Bridge", "BRIDGE GREEN PINK"),
-            mapping("pre-drop", "Pre-Drop", "PRE DROP GREEN PINK"),
-            mapping("breakdown-2", "Breakdown 2", "BREAKDOWN 2 GREEN PINK")
+            mapping("intro-outro", "Intro / Outro", "INTRO THEME 2"),
+            mapping("breakdown-1", "Breakdown 1", "BREAKDOWN THEME 2"),
+            mapping("buildup-1", "Buildup 1", "BUILDUP THEME 2"),
+            mapping("drop", "Drop", "DROP THEME 2"),
+            mapping("synth", "Synth", "SYNTH THEME 2"),
+            mapping("bridge", "Bridge", "BRIDGE THEME 2"),
+            mapping("pre-drop", "Pre-Drop", "PRE DROP THEME 2"),
+            mapping("breakdown-2", "Breakdown 2", "BREAKDOWN 2 THEME 2")
         ],
         [
-            mapping("intro-outro", "Intro / Outro", "INTRO BLUE RED GREEN"),
-            mapping("breakdown-1", "Breakdown 1", "BREAKDOWN BLUE RED GREEN"),
-            mapping("buildup-1", "Buildup 1", "BUILDUP BLUE RED GREEN"),
-            mapping("drop", "Drop", "DROP BLUE RED GREEN"),
-            mapping("synth", "Synth", "SYNTH BLUE RED GREEN"),
-            mapping("bridge", "Bridge", "BRIDGE BLUE RED GREEN"),
-            mapping("breakdown-3", "Breakdown 3", "BREAKDOWN 3 BLUE RED GREEN"),
-            mapping("buildup-3", "Buildup 3", "BUILDUP 3 BLUE RED GREEN")
+            mapping("intro-outro", "Intro / Outro", "INTRO THEME 3"),
+            mapping("breakdown-1", "Breakdown 1", "BREAKDOWN THEME 3"),
+            mapping("buildup-1", "Buildup 1", "BUILDUP THEME 3"),
+            mapping("drop", "Drop", "DROP THEME 3"),
+            mapping("synth", "Synth", "SYNTH THEME 3"),
+            mapping("bridge", "Bridge", "BRIDGE THEME 3"),
+            mapping("breakdown-3", "Breakdown 3", "BREAKDOWN 3 THEME 3"),
+            mapping("buildup-3", "Buildup 3", "BUILDUP 3 THEME 3")
         ],
         [
             mapping("intro-outro", "Intro / Outro", "INTRO THEME 4"),
@@ -86,10 +86,10 @@ public enum AutoloopCatalogFixtures {
         revision: 4,
         defaultsVersion: 3,
         themes: [
-            AutoloopThemeState(id: 1, name: "Blue Pink", sortOrder: 1),
-            AutoloopThemeState(id: 2, name: "Green Pink", sortOrder: 2),
-            AutoloopThemeState(id: 3, name: "Blue Red Green", sortOrder: 3),
-            AutoloopThemeState(id: 4, name: "To Do", sortOrder: 4)
+            AutoloopThemeState(id: 1, name: "Theme 1", sortOrder: 1),
+            AutoloopThemeState(id: 2, name: "Theme 2", sortOrder: 2),
+            AutoloopThemeState(id: 3, name: "Theme 3", sortOrder: 3),
+            AutoloopThemeState(id: 4, name: "Theme 4", sortOrder: 4)
         ],
         roles: roleStates(),
         preflight: AutoloopPreflightState(
