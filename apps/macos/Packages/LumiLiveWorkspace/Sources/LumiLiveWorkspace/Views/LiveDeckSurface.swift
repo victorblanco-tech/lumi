@@ -972,13 +972,16 @@ private struct RGBDeckWaveform: View {
             let low = mix(first.low, second.low)
             let mid = mix(first.mid, second.mid)
             let high = mix(first.high, second.high)
-            let peak = max(low, max(mid, high))
-            guard peak > 0.000_1 else { continue }
-            let amplitude = pow(peak, 0.58) * maximumAmplitude
+            guard let sample = LumiRGBWaveformSample(
+                low: low,
+                mid: mid,
+                high: high
+            ) else { continue }
+            let amplitude = sample.amplitude * maximumAmplitude
             context.setStrokeColor(
-                red: pow(high / peak, 0.72),
-                green: pow(mid / peak, 0.72),
-                blue: pow(low / peak, 0.72),
+                red: sample.red,
+                green: sample.green,
+                blue: sample.blue,
                 alpha: 0.98
             )
             let x = Double(pixel) + 0.5

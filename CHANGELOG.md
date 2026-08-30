@@ -1,5 +1,22 @@
 # Changelog
 
+## 0.5.0-dev-39 - 2026-08-30
+
+### Fixed
+
+- Restores the accepted vivid red, pink, cyan and blue RGB waveform palette in
+  Track Editor, Local Playback and Live Decks without changing waveform shape,
+  resolution or timing.
+- Centralizes the Rekordbox PWV5 display-channel mapping so every waveform view
+  uses the same color interpretation.
+
+### Verification
+
+- Adds Design System regression coverage for RGB channel order, amplitude and
+  silent samples.
+- Compares the real macOS Track Editor and Local Playback render against the
+  previously accepted waveform appearance before packaging the Dev app.
+
 ## 0.5.0-dev-38 - 2026-08-30
 
 ### Changed

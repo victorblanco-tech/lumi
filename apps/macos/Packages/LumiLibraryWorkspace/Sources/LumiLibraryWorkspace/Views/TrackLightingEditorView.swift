@@ -1757,22 +1757,22 @@ public struct TrackLightingEditorView: View {
         maximumAmplitude: Double,
         point: (low: Double, mid: Double, high: Double)
     ) {
-        let peak = max(point.low, max(point.mid, point.high))
-        guard peak > 0.000_1 else { return }
-        let amplitude = pow(peak, 0.58) * maximumAmplitude
+        guard let sample = LumiRGBWaveformSample(
+            low: point.low,
+            mid: point.mid,
+            high: point.high
+        ) else { return }
+        let amplitude = sample.amplitude * maximumAmplitude
         // Rekordbox PWV5 packs hue and height into the same channels. Height
         // controls geometry; normalizing the hue prevents quiet samples from
         // being dimmed a second time while preserving their RGB character.
-        let red = pow(point.high / peak, 0.72)
-        let green = pow(point.mid / peak, 0.72)
-        let blue = pow(point.low / peak, 0.72)
         var line = Path()
         line.move(to: CGPoint(x: x, y: center - amplitude))
         line.addLine(to: CGPoint(x: x, y: center + amplitude))
         context.stroke(
             line,
             with: .color(
-                Color(red: red, green: green, blue: blue).opacity(0.98)
+                Color(red: sample.red, green: sample.green, blue: sample.blue).opacity(0.98)
             ),
             lineWidth: 1
         )
