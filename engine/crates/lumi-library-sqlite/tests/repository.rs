@@ -1195,6 +1195,7 @@ fn creative_relink_holds_an_incompatible_beat_structure_for_review() -> Result<(
 }
 
 #[test]
+#[ignore = "release-only performance budget; verify-rust runs this explicitly"]
 fn ten_thousand_track_fixture_meets_epic_two_a_budgets() -> Result<(), Box<dyn Error>> {
     const FIXTURE_BUDGET: Duration = Duration::from_secs(1);
     const IMPORT_BUDGET: Duration = Duration::from_secs(5);
