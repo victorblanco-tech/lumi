@@ -71,8 +71,8 @@ This story is delivered in visible, independently testable increments:
 - **Implemented and app-bundled:** the bridge JAR plus a jdeps-derived Java 21
   runtime ship inside Dev, RC and release app bundles; no host Java install is
   required.
-- **Verified on two hosts:** Lumi discovered `LUMI-SIM` player 1 at
-  `192.168.1.61`, received a loaded live track and reached `ready` without BLT
+- **Verified on two hosts:** Lumi discovered `LUMI-SIM` player 1 on the test
+  LAN, received a loaded live track and reached `ready` without BLT
   or a manually started bridge.
 - Local build and verification scripts remain the development path; no paid
   GitHub Actions minutes are consumed.

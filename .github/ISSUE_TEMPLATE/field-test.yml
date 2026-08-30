@@ -1,0 +1,72 @@
+name: Public Beta field report
+description: Report a successful or failed test on a specific DJ and lighting setup.
+title: "[Field test]: "
+labels:
+  - field-test
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thank you for testing Lumi. Do not upload music, USB databases, SoundSwitch projects, credentials, remote-control URLs or other private data.
+  - type: dropdown
+    id: outcome
+    attributes:
+      label: Outcome
+      options:
+        - Passed
+        - Passed with observations
+        - Failed or blocked
+    validations:
+      required: true
+  - type: input
+    id: lumi-version
+    attributes:
+      label: Lumi version
+      placeholder: 0.5.0
+    validations:
+      required: true
+  - type: input
+    id: mac
+    attributes:
+      label: Mac and macOS
+      placeholder: MacBook Pro M4, macOS 15.6
+    validations:
+      required: true
+  - type: textarea
+    id: dj-hardware
+    attributes:
+      label: Players, mixer and firmware
+      description: Include model, device number and firmware for every connected Pro DJ Link device.
+    validations:
+      required: true
+  - type: textarea
+    id: lighting
+    attributes:
+      label: SoundSwitch and lighting path
+      description: Include SoundSwitch version, MIDI path, controller or DMX interface and whether Ableton Link was enabled.
+    validations:
+      required: true
+  - type: textarea
+    id: usb
+    attributes:
+      label: USB setup
+      description: Describe filesystem, number of trusted sources and relevant sync workflow without attaching the database.
+  - type: textarea
+    id: scenario
+    attributes:
+      label: Scenario and result
+      description: Describe the exact steps, expected behavior and observed behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics
+      description: Paste a redacted Diagnostics summary or attach the safe export when available.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: I removed music, databases, projects, credentials, tokens, private addresses and other personal data.
+          required: true

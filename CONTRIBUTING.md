@@ -3,10 +3,17 @@
 Thank you for helping improve Lumi. User-facing fixes, hardware observations,
 documentation and focused code changes are all welcome.
 
+During the Public Beta, successful field reports are as valuable as bug
+reports: they establish which exact hardware, firmware and SoundSwitch
+combinations have been exercised outside the reference setup. Follow the
+[Public Beta guide](docs/public-beta.md) before testing show-critical behavior.
+
 ## Before opening a change
 
 - Use [GitHub Issues](https://github.com/victorblanco-tech/lumi/issues) for a
   reproducible bug or a concrete feature proposal.
+- Use the Public Beta field-report template for hardware compatibility and
+  complete signal-chain results, including successful tests.
 - Do not include music files, rekordbox databases, USB exports, SoundSwitch
   projects, private network addresses or access tokens.
 - Keep show-critical behavior deterministic. UI, library and planning work must

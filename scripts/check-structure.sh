@@ -84,6 +84,7 @@ required_paths=(
   "scripts/check-apple-test-exclusivity.sh"
   "scripts/package-macos-local.sh"
   "scripts/prepare-carabiner-runtime.sh"
+  "scripts/prepare-java-runtime-sources.sh"
   "scripts/backup-macos-user-data.sh"
   "scripts/clone-macos-channel-data.sh"
   "docs/planning/story-e3-03-resume-and-timing-confirmation.md"

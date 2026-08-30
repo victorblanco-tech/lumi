@@ -160,7 +160,7 @@ ditto "$runtime_cache" "$resources_directory/prolink-runtime"
 # Bundle the separately licensed Ableton Link helper. Acquisition is explicit
 # and checksum-pinned so normal local builds never depend on network access.
 carabiner_cache="$repository_root/build/carabiner-runtime"
-if [[ ! -x "$carabiner_cache/Carabiner" ]]; then
+if [[ ! -x "$carabiner_cache/Carabiner" || ! -f "$carabiner_cache/LICENSE.md" ]]; then
   echo "ERROR: managed Ableton Link runtime is missing." >&2
   echo "Run ./scripts/prepare-carabiner-runtime.sh once." >&2
   exit 1
@@ -169,3 +169,29 @@ rm -rf "$resources_directory/link"
 install -d "$resources_directory/link"
 install -m 755 "$carabiner_cache/Carabiner" "$resources_directory/link/Carabiner"
 install -m 644 "$carabiner_cache/PROVENANCE.txt" "$resources_directory/link/PROVENANCE.txt"
+
+# Keep the application's own terms and the copyleft runtime notices available
+# inside every installed app, not only at the DMG root.
+legal_directory="$resources_directory/legal"
+rm -rf "$legal_directory"
+install -d "$legal_directory"
+install -m 644 "$repository_root/LICENSE" "$legal_directory/Lumi-EPL-2.0.txt"
+install -m 644 "$repository_root/TRADEMARKS.md" "$legal_directory/TRADEMARKS.md"
+install -m 644 "$repository_root/THIRD_PARTY_NOTICES.md" \
+  "$legal_directory/THIRD-PARTY-NOTICES.md"
+install -m 644 "$carabiner_cache/LICENSE.md" \
+  "$legal_directory/Carabiner-GPL-2.0-or-later.md"
+
+remote_tea_jar="$repository_root/build/maven-repository/org/acplt/remotetea/remotetea-oncrpc/1.1.4/remotetea-oncrpc-1.1.4.jar"
+if [[ ! -f "$remote_tea_jar" ]]; then
+  echo "ERROR: Remote Tea runtime dependency is missing from the pinned Maven repository." >&2
+  exit 1
+fi
+license_staging="$(mktemp -d "$repository_root/build/.remote-tea-license.XXXXXX")"
+(
+  cd "$license_staging"
+  "$toolchain_home/bin/jar" xf "$remote_tea_jar" META-INF/LICENSE.txt
+)
+install -m 644 "$license_staging/META-INF/LICENSE.txt" \
+  "$legal_directory/Remote-Tea-LGPL-2.0.txt"
+rm -rf "$license_staging"

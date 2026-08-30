@@ -63,7 +63,7 @@ the editor remains fixed-dark in both. The canonical hands-on build is launched
 only through:
 
 ```bash
-open -n "/Users/victor/Engineering/Repo/Lumi/build/DerivedData/Build/Products/Debug/Lumi Dev.app"
+open -n "$PWD/build/DerivedData/Build/Products/Debug/Lumi Dev.app"
 ```
 
 ## E2A-13 RGB Phrase Point implementation

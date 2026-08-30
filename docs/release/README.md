@@ -6,6 +6,7 @@ the public-repository and GitHub Pages gates.
 
 - [Release- en deploymentplan](release-and-deployment-plan.md)
 - [Production release checklist](release-checklist.md)
+- [Public Beta readiness](public-beta-readiness.md)
 - [0.1.0 app demo and known limitations](0.1.0-demo-and-limitations.md)
 - [Epic 1 – 0.1.0 release evidence](0.1.0-epic-1-evidence.md)
 - [0.2.0 development demo and known limitations](0.2.0-demo-and-limitations.md)
@@ -18,6 +19,8 @@ the public-repository and GitHub Pages gates.
 - [0.4.0 release readiness](0.4.0-release-readiness.md)
 - [0.5.0 release notes](0.5.0-release-notes.md)
 - [0.5.0 release readiness](0.5.0-release-readiness.md)
+- [0.5.1 Public Beta release notes](0.5.1-release-notes.md)
+- [0.5.1 release readiness](0.5.1-release-readiness.md)
 - [0.4.0-dev-50 isolated Ableton Link Relay](0.4.0-dev-50-isolated-link-relay.md)
 - [0.4.0-dev-51 exactly-once AutoLoop output](0.4.0-dev-51-exactly-once-autoloop-output.md)
 - [0.4.0-dev-52 SoundSwitch MIDI 1.0 compatibility](0.4.0-dev-52-soundswitch-midi-compatibility.md)
