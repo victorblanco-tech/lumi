@@ -74,8 +74,10 @@ Lumi uses layered local gates:
 5. show/lab: simulator, real helper, soak and physical hardware evidence.
 
 A gate must fail when its prerequisite is absent. It may not silently skip and
-claim evidence. GitHub Actions remains a secondary release confirmation and is
-not required for every Dev iteration.
+claim evidence. After public release, GitHub Actions runs the portable and
+Apple gates for `dev` and `main` pushes and pull requests as a secondary,
+independent confirmation. Hardware-aware local and lab evidence remains the
+release authority for show-critical behavior.
 
 ## Performance decision
 
@@ -105,8 +107,9 @@ and scoped credentials.
   high-frequency update mechanism;
 - service migration and backup are safer but require lifecycle integration
   tests;
-- regression gates take local time, but avoid consuming normal GitHub Actions
-  minutes and make evidence reproducible before a commit is promoted;
+- regression gates remain reproducible locally before promotion, while the
+  public repository repeats portable and Apple checks on standard hosted
+  runners without private-repository minute pressure;
 - existing large files are split incrementally behind characterization tests,
   avoiding a risky rewrite.
 
