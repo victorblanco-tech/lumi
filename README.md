@@ -7,6 +7,10 @@
 </p>
 
 <p align="center">
+  <strong>Public Beta</strong> · Field testing on different DJ and lighting setups is welcome
+</p>
+
+<p align="center">
   <a href="https://github.com/victorblanco-tech/lumi/releases">Download</a>
   ·
   <a href="docs/user-guide/README.md">User guide</a>
@@ -162,11 +166,19 @@ operation states, timing offset, backups and troubleshooting.
 
 ## Project status
 
-Lumi is in active development and the first broader production release is being
-prepared. The current reference setup uses two CDJ-1500X players, a DJM-V5,
-SoundSwitch, Control One and a DMX lighting rig. Back up your Lumi data before
-upgrading and test a new release with your own show setup before relying on it
-live.
+Lumi is a **public beta**. The complete workflow has been validated on the
+reference setup with two CDJ-1500X players, a DJM-V5, SoundSwitch, Control One
+and a DMX lighting rig. Broader field testing is now needed across different
+Apple Silicon Macs, compatible players, mixers, USB libraries and SoundSwitch
+setups.
+
+Treat every release as show-critical software under evaluation: keep a backup,
+perform a dry run with your own library and lighting project, and retain manual
+control as a fallback. Useful field reports include the Lumi and macOS versions,
+hardware models and firmware, SoundSwitch version, connection path and the
+smallest reproducible sequence. Never attach music, USB databases or private
+show files to a public issue. See the [Public Beta guide](docs/public-beta.md)
+before testing Lumi in the field.
 
 ## For contributors
 

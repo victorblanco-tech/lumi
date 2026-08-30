@@ -51,6 +51,8 @@ Use this checklist for a production release distributed through GitHub.
 - [ ] Complete and verify the documented unsigned-app `Open Anyway` path.
 - [ ] Create and independently compare the SHA-256 checksum.
 - [ ] Generate the software bill of materials and archive the local build log.
+- [ ] Confirm the mounted DMG contains Carabiner/Ableton Link corresponding
+      source, all Java runtime source artifacts and the GPL/LGPL notices.
 
 Paid Developer ID signing and notarization are optional for the first public
 release, but the release notes must clearly state when the build is unsigned and

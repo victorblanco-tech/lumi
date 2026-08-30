@@ -144,6 +144,10 @@ packaged_launch_agent="$packaged_app/Contents/Library/LaunchAgents/$expected_bun
 packaged_prolink_bridge="$packaged_app/Contents/Resources/prolink/lumi-prolink-bridge.jar"
 packaged_prolink_java="$packaged_app/Contents/Resources/prolink-runtime/bin/java"
 packaged_link_helper="$packaged_app/Contents/Resources/link/Carabiner"
+carabiner_source_name="Carabiner-1.2.0-complete-source.tar.gz"
+carabiner_source="$repository_root/build/carabiner-runtime/$carabiner_source_name"
+java_source_name="Lumi-Pro-DJ-Link-Java-dependencies-complete-source.tar.gz"
+java_source="$repository_root/build/java-runtime-sources/$java_source_name"
 mkdir -p "$staging_directory"
 ditto "$source_app" "$packaged_app"
 
@@ -174,6 +178,22 @@ if [[ ! -x "$packaged_link_helper" ]]; then
   echo "ERROR: packaged app does not contain the managed Ableton Link helper." >&2
   exit 1
 fi
+if [[ ! -f "$carabiner_source" || ! -f "$java_source" ]]; then
+  echo "ERROR: complete third-party corresponding source is missing." >&2
+  echo "Run ./scripts/prepare-carabiner-runtime.sh and" >&2
+  echo "./scripts/prepare-java-runtime-sources.sh before packaging." >&2
+  exit 1
+fi
+for legal_file in \
+  "$packaged_app/Contents/Resources/legal/Lumi-EPL-2.0.txt" \
+  "$packaged_app/Contents/Resources/legal/THIRD-PARTY-NOTICES.md" \
+  "$packaged_app/Contents/Resources/legal/Carabiner-GPL-2.0-or-later.md" \
+  "$packaged_app/Contents/Resources/legal/Remote-Tea-LGPL-2.0.txt"; do
+  if [[ ! -f "$legal_file" ]]; then
+    echo "ERROR: packaged app is missing legal resource '$legal_file'." >&2
+    exit 1
+  fi
+done
 
 if ! file "$packaged_app/Contents/MacOS/$app_name" | grep -q 'arm64'; then
   echo "ERROR: packaged $app_name executable is not Apple Silicon arm64." >&2
@@ -275,6 +295,11 @@ cp "$repository_root/LICENSE" "$staging_directory/LICENSE.txt"
 cp "$repository_root/TRADEMARKS.md" "$staging_directory/TRADEMARKS.md"
 cp "$repository_root/THIRD_PARTY_NOTICES.md" \
   "$staging_directory/THIRD-PARTY-NOTICES.md"
+install -d "$staging_directory/Corresponding Source"
+install -m 644 "$carabiner_source" \
+  "$staging_directory/Corresponding Source/$carabiner_source_name"
+install -m 644 "$java_source" \
+  "$staging_directory/Corresponding Source/$java_source_name"
 {
   echo "Lumi source code"
   echo
@@ -323,6 +348,8 @@ codesign --verify --deep --strict --verbose=2 "$mount_directory/$packaged_bundle
 test -x "$mount_directory/$packaged_bundle_name/Contents/Helpers/lumi-engine"
 test -x "$mount_directory/$packaged_bundle_name/Contents/Helpers/lumi-usb-worker"
 test -f "$mount_directory/$packaged_bundle_name/Contents/Library/LaunchAgents/$expected_bundle_identifier.engine.plist"
+test -f "$mount_directory/Corresponding Source/$carabiner_source_name"
+test -f "$mount_directory/Corresponding Source/$java_source_name"
 if [[ "$(readlink "$mount_directory/$install_shortcut_name")" != "$install_directory" ]]; then
   echo "ERROR: packaged install shortcut does not target '$install_directory'." >&2
   exit 1

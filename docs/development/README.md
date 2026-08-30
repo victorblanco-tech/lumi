@@ -65,13 +65,13 @@ cache hit never skips a compiler, test, benchmark, or evidence command.
 After a successful build, launch the exact unsigned development app with:
 
 ```bash
-open -n "/Users/victor/Engineering/Repo/Lumi/build/DerivedData/Build/Products/Debug/Lumi Dev.app"
+open -n "$PWD/build/DerivedData/Build/Products/Debug/Lumi Dev.app"
 ```
 
 Quit any older Lumi runtime first. Debug builds use the isolated Lumi Dev bundle
 identifier and database, while Preview and Stable remain installed separately.
 Only one channel should own the live MIDI/lighting endpoints at a time. The
-absolute `open -n` command above is the canonical hands-on test path for every
+explicit `open -n` command above is the canonical hands-on test path for every
 story.
 
 The status becomes **Local engine ready** only after the app starts the bundled
