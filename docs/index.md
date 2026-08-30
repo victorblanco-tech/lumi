@@ -20,6 +20,8 @@ your own SoundSwitch AutoLoops without taking over fixture or DMX control.
 [Read the user guide](user-guide/) ·
 [Report an issue](https://github.com/victorblanco-tech/lumi/issues)
 
+![Lumi Local Playback running a prepared two-track show](assets/screenshots/local-playback.png)
+
 ![The complete Lumi workflow from trusted USB source to SoundSwitch DMX](assets/lumi-workflow.svg)
 
 ## Prepare once, adjust when needed
@@ -47,6 +49,23 @@ your own SoundSwitch AutoLoops without taking over fixture or DMX control.
 - **Ableton Link** relays only the master BPM to SoundSwitch.
 - **MIDI output** selects mapped Banks, AutoLoops and verified Static Looks.
 - **SoundSwitch** remains responsible for fixtures, effects and DMX output.
+
+## Edit the musical structure you actually use
+
+Track Editor places beat-quantized Lumi phrases directly beneath the imported
+RGB waveform and beatgrid. The overview preserves the whole-track context while
+the detailed waveform can be zoomed for an exact transition.
+
+![Lumi Track Editor with a visible phrase transition](assets/screenshots/track-editor.png)
+
+## Plan variation before playback
+
+Light Plans combine the configured SoundSwitch Themes and AutoLoops with Phrase
+Roles, Track Color preferences and repeat protection. The result is compiled
+before playback, so live output does not depend on UI work or last-second plan
+generation.
+
+![Lumi Light Plans Theme Strategy](assets/screenshots/light-plans.png)
 
 ## One phrase language throughout Lumi
 

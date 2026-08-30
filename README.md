@@ -25,6 +25,8 @@ The complete show runs locally on your Mac. SoundSwitch remains responsible for
 fixtures and DMX output; Lumi acts like a virtual lighting operator beside your
 normal controller.
 
+![Lumi Local Playback running a prepared two-track show](docs/assets/screenshots/local-playback.png)
+
 ![The complete Lumi workflow from trusted USB source to SoundSwitch DMX](docs/assets/lumi-workflow.svg)
 
 ## What Lumi does
@@ -44,6 +46,22 @@ normal controller.
 - Supports Local Playback for preparation and dry runs without DJ hardware.
 
 ## Inside Lumi
+
+### Prepare phrases on the real waveform
+
+Track Editor combines the rekordbox beatgrid and RGB waveform with editable,
+beat-quantized Lumi phrases. The overview timeline keeps the full track visible
+while the detailed view is zoomed in for precise phrase boundaries.
+
+![Lumi Track Editor with a visible phrase transition](docs/assets/screenshots/track-editor.png)
+
+### Compile a coherent Light Plan
+
+Light Plans select one base Theme for a track, choose mapped AutoLoops per
+Phrase Role and apply Track Color preferences and repeat protection before the
+track starts. The live timing path stays isolated from this preparation work.
+
+![Lumi Light Plans Theme Strategy](docs/assets/screenshots/light-plans.png)
 
 ### One configurable phrase model
 

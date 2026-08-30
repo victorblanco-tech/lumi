@@ -64,6 +64,8 @@ data. Lumi-owned phrases remain separate from source phrases.
 
 Open **Library → Tracks** and select a track to load it in Track Editor.
 
+![Lumi Track Editor with a visible phrase transition](../assets/screenshots/track-editor.png)
+
 The detailed waveform is the editing surface. Zoom and scroll to a beat, place a
 phrase point and choose its Phrase Role. A phrase continues until the next point
 or the end of the track. Boundaries quantize to whole beats.
@@ -119,6 +121,8 @@ SoundSwitch workflow.
 
 Open **Light Plans**.
 
+![Lumi Light Plans Theme Strategy](../assets/screenshots/light-plans.png)
+
 The main concept is simple: Lumi chooses one SoundSwitch Bank as the base
 **Theme** for a track, then selects AutoLoops from that Theme for each Phrase
 Role. Automatic phrase changes do not jump between Themes. You can deliberately
@@ -167,6 +171,8 @@ Open **Live** and choose a mode:
 - **Live Decks** follows the players discovered through Pro DJ Link.
 - **Local Playback** loads tracks from the Lumi Library for preparation and dry
   runs.
+
+![Lumi Local Playback running a prepared two-track show](../assets/screenshots/local-playback.png)
 
 The two deck surfaces show the actual waveform, Hot Cues, Lumi phrases and the
 compiled AutoLoop plan. The master moves between Player 1 and Player 2 with the
