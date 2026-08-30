@@ -10,9 +10,9 @@
       <stop offset="0.48" stop-color="#090d13"/>
       <stop offset="1" stop-color="#040507"/>
     </linearGradient>
-    <radialGradient id="cyanGlow" cx="52%" cy="48%" r="60%">
-      <stop offset="0" stop-color="#26c4ff" stop-opacity="0.15"/>
-      <stop offset="0.55" stop-color="#1478a8" stop-opacity="0.045"/>
+    <radialGradient id="cyanGlow" cx="50%" cy="46%" r="62%">
+      <stop offset="0" stop-color="#26c4ff" stop-opacity="0.17"/>
+      <stop offset="0.58" stop-color="#1478a8" stop-opacity="0.05"/>
       <stop offset="1" stop-color="#000000" stop-opacity="0"/>
     </radialGradient>
     <linearGradient id="spectrum" x1="0" y1="0" x2="1" y2="0">
@@ -23,13 +23,11 @@
       <stop offset="0.78" stop-color="#25bfff"/>
       <stop offset="1" stop-color="#2385ff"/>
     </linearGradient>
-    <linearGradient id="fadeLeft" x1="0" y1="0" x2="1" y2="0">
+    <linearGradient id="waveFade" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0" stop-color="#050609" stop-opacity="1"/>
-      <stop offset="1" stop-color="#050609" stop-opacity="0"/>
-    </linearGradient>
-    <linearGradient id="fadeRight" x1="1" y1="0" x2="0" y2="0">
-      <stop offset="0" stop-color="#050609" stop-opacity="1"/>
-      <stop offset="1" stop-color="#050609" stop-opacity="0"/>
+      <stop offset="0.12" stop-color="#050609" stop-opacity="0"/>
+      <stop offset="0.88" stop-color="#050609" stop-opacity="0"/>
+      <stop offset="1" stop-color="#050609" stop-opacity="1"/>
     </linearGradient>
   </defs>
 
@@ -40,27 +38,30 @@
     <path d="M225 0V460 M450 0V460 M675 0V460 M900 0V460 M1125 0V460 M1350 0V460 M1575 0V460"/>
   </g>
 
-  <path d="M0 300 L40 300 L64 287 L88 318 L112 260 L136 334 L160 278 L184 306
-           L208 293 L232 320 L256 274 L280 306 L304 292 L328 313 L352 285 L376 303
-           L400 298 L424 312 L448 283 L472 305 L496 294 L520 306 L544 291 L568 301
-           L592 297 L616 304 L640 294 L664 302 L688 298 L712 301 L736 296 L760 300"
-        fill="none" stroke="url(#spectrum)" stroke-width="3" opacity="0.35"/>
-  <path d="M1800 300 L1760 300 L1736 287 L1712 318 L1688 260 L1664 334 L1640 278 L1616 306
-           L1592 293 L1568 320 L1544 274 L1520 306 L1496 292 L1472 313 L1448 285 L1424 303
-           L1400 298 L1376 312 L1352 283 L1328 305 L1304 294 L1280 306 L1256 291 L1232 301
-           L1208 297 L1184 304 L1160 294 L1136 302 L1112 298 L1088 301 L1064 296 L1040 300"
-        fill="none" stroke="url(#spectrum)" stroke-width="3" opacity="0.35"/>
-  <rect x="0" y="248" width="430" height="105" fill="url(#fadeLeft)"/>
-  <rect x="1370" y="248" width="430" height="105" fill="url(#fadeRight)"/>
+  <path d="M0 278 L42 278 L72 264 L102 306 L132 240 L162 318 L192 252 L222 296
+           L252 270 L282 304 L312 248 L342 292 L372 266 L402 300 L432 256 L462 288
+           L492 274 L522 302 L552 246 L582 294 L612 268 L642 298 L672 260 L702 288
+           L732 272 L762 298 L792 262 L822 290 L852 270 L882 296 L912 256 L942 292
+           L972 266 L1002 300 L1032 250 L1062 294 L1092 268 L1122 304 L1152 246
+           L1182 290 L1212 262 L1242 298 L1272 254 L1302 294 L1332 268 L1362 302
+           L1392 242 L1422 296 L1452 264 L1482 306 L1512 248 L1542 296 L1572 270
+           L1602 302 L1632 252 L1662 292 L1692 266 L1722 306 L1752 254 L1800 278"
+        fill="none" stroke="url(#spectrum)" stroke-width="4" opacity="0.32"/>
+  <rect x="0" y="220" width="1800" height="124" fill="url(#waveFade)"/>
 
-  <image x="473" y="91" width="854" height="240"
+  <image x="450" y="42" width="900" height="253"
          xlink:href="lumi-wordmark.png" href="lumi-wordmark.png"
          preserveAspectRatio="xMidYMid meet"/>
 
-  <rect x="725" y="359" width="350" height="1" fill="#40c9ff" opacity="0.42"/>
-  <text x="900" y="398" text-anchor="middle" fill="#afbdca"
+  <rect x="710" y="328" width="380" height="2" fill="#40c9ff" opacity="0.48"/>
+  <text x="900" y="370" text-anchor="middle" fill="#b8c5d2"
         font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
-        font-size="23" font-weight="600" letter-spacing="5">
+        font-size="23" font-weight="650" letter-spacing="5">
     PHRASE-AWARE LIGHTING AUTOMATION
+  </text>
+  <text x="900" y="417" text-anchor="middle" fill="#6f879b"
+        font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+        font-size="17" font-weight="600" letter-spacing="3">
+    PRO DJ LINK · SOUNDSWITCH · ABLETON LINK
   </text>
 </svg>
