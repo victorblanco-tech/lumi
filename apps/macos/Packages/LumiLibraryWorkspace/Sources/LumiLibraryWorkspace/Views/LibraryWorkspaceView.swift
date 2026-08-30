@@ -1,6 +1,12 @@
+import AppKit
 import Foundation
 import LumiDesignSystem
 import SwiftUI
+
+enum LibraryWorkspaceLayout {
+    static let editorSplitAutosaveName = "co.victorblan.tech.lumi.library.editor-split"
+    static let defaultEditorHeight: CGFloat = 692.5
+}
 
 public struct LibraryQueryRequest: Equatable, Sendable {
     public let search: String
@@ -168,12 +174,21 @@ public struct LibraryWorkspaceView: View {
                         editorPlaceholder
                     }
                 }
-                .frame(minHeight: 620, idealHeight: 680)
+                .frame(
+                    minHeight: 620,
+                    idealHeight: LibraryWorkspaceLayout.defaultEditorHeight
+                )
                 .clipped()
 
                 libraryBrowser
                     .frame(minHeight: 130, idealHeight: 280)
             }
+            .background(
+                PersistentSplitViewConfiguration(
+                    autosaveName: LibraryWorkspaceLayout.editorSplitAutosaveName,
+                    defaultDividerPosition: LibraryWorkspaceLayout.defaultEditorHeight
+                )
+            )
         }
         .background(LumiColor.canvas)
         .accessibilityIdentifier("lumi.library.workspace")
@@ -934,6 +949,136 @@ public struct LibraryWorkspaceView: View {
               requestedEditorTrackID != trackID else { return }
         requestedEditorTrackID = trackID
         onOpenEditor(trackID)
+    }
+}
+
+/// Connects SwiftUI's `VSplitView` to AppKit's native divider persistence.
+///
+/// The zero-sized configurator lives inside the split view hierarchy and finds
+/// its nearest `NSSplitView` once AppKit has installed the hosting views. Giving
+/// that split view a stable autosave name lets macOS restore the user's exact
+/// editor/browser divider position on every subsequent launch.
+private struct PersistentSplitViewConfiguration: NSViewRepresentable {
+    let autosaveName: String
+    let defaultDividerPosition: CGFloat
+
+    func makeNSView(context: Context) -> SplitViewConfigurationView {
+        SplitViewConfigurationView(
+            autosaveName: autosaveName,
+            defaultDividerPosition: defaultDividerPosition
+        )
+    }
+
+    func updateNSView(_ nsView: SplitViewConfigurationView, context: Context) {
+        nsView.autosaveName = autosaveName
+        nsView.defaultDividerPosition = defaultDividerPosition
+        nsView.configureNearestSplitViewIfNeeded()
+    }
+}
+
+@MainActor
+private final class SplitViewConfigurationView: NSView {
+    var autosaveName: String {
+        didSet {
+            guard autosaveName != oldValue else { return }
+            configuredSplitView = nil
+        }
+    }
+    var defaultDividerPosition: CGFloat
+
+    private weak var configuredSplitView: NSSplitView?
+    private var retryIsScheduled = false
+    private var configurationAttemptsRemaining = 40
+
+    init(autosaveName: String, defaultDividerPosition: CGFloat) {
+        self.autosaveName = autosaveName
+        self.defaultDividerPosition = defaultDividerPosition
+        super.init(frame: .zero)
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        fatalError("init(coder:) has not been implemented")
+    }
+
+    override func viewDidMoveToSuperview() {
+        super.viewDidMoveToSuperview()
+        configureNearestSplitViewIfNeeded()
+    }
+
+    override func viewDidMoveToWindow() {
+        super.viewDidMoveToWindow()
+        configurationAttemptsRemaining = 40
+        configureNearestSplitViewIfNeeded()
+    }
+
+    override func layout() {
+        super.layout()
+        configureNearestSplitViewIfNeeded()
+    }
+
+    func configureNearestSplitViewIfNeeded() {
+        guard configuredSplitView == nil else { return }
+        guard let contentView = window?.contentView,
+              let splitView = matchingSplitView(in: contentView) else {
+            scheduleConfigurationRetry()
+            return
+        }
+
+        let autosaveKey = "NSSplitView Subview Frames \(autosaveName)"
+        let hasSavedPosition = UserDefaults.standard.object(forKey: autosaveKey) != nil
+        splitView.autosaveName = autosaveName
+        configuredSplitView = splitView
+
+        guard !hasSavedPosition, splitView.subviews.count >= 2 else { return }
+        // AppKit installs the SwiftUI split hierarchy late in the first layout
+        // pass. Apply the accepted initial position on the next turn so it wins
+        // over SwiftUI's generic ideal-size negotiation, then let NSSplitView
+        // own every subsequent user adjustment.
+        DispatchQueue.main.async { [weak splitView] in
+            splitView?.setPosition(self.defaultDividerPosition, ofDividerAt: 0)
+        }
+    }
+
+    private func scheduleConfigurationRetry() {
+        guard !retryIsScheduled, configurationAttemptsRemaining > 0 else { return }
+        retryIsScheduled = true
+        configurationAttemptsRemaining -= 1
+        // `VSplitView` installs its AppKit `NSSplitView` as a sibling after the
+        // representable has already entered the window. A short bounded retry
+        // finds that late hierarchy without polling after configuration.
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.05) { [weak self] in
+            guard let self else { return }
+            self.retryIsScheduled = false
+            self.configureNearestSplitViewIfNeeded()
+        }
+    }
+
+    private func matchingSplitView(in root: NSView) -> NSSplitView? {
+        let ownFrame = convert(bounds, to: nil)
+        let candidates = splitViews(in: root).filter {
+            // macOS 26 exposes the divider itself as a third private subview;
+            // older AppKit versions expose only the two content panes.
+            !$0.isVertical && $0.subviews.count >= 2
+        }
+        guard !candidates.isEmpty else { return nil }
+
+        return candidates.max { lhs, rhs in
+            overlapArea(of: lhs, with: ownFrame) < overlapArea(of: rhs, with: ownFrame)
+        }
+    }
+
+    private func splitViews(in root: NSView) -> [NSSplitView] {
+        root.subviews.flatMap { subview in
+            let match = (subview as? NSSplitView).map { [$0] } ?? []
+            return match + splitViews(in: subview)
+        }
+    }
+
+    private func overlapArea(of splitView: NSSplitView, with frame: NSRect) -> CGFloat {
+        let candidateFrame = splitView.convert(splitView.bounds, to: nil)
+        let intersection = candidateFrame.intersection(frame)
+        return intersection.isNull ? 0 : intersection.width * intersection.height
     }
 }
 

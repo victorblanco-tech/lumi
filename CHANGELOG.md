@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.5.0-dev-40 - 2026-08-30
+
+### Changed
+
+- Makes the accepted tall Track Editor waveform layout the first-launch
+  default and persists later divider adjustments through AppKit's native split
+  view autosave support.
+- Makes exact Library matches on physical Live Decks load the same detailed
+  8-bit RGB waveform as Track Editor instead of remaining on the bounded
+  realtime preview. The visual fetch stays outside the Pro DJ Link and lighting
+  timing lanes.
+- Replaces the separate README icon and title with one professional widescreen
+  Lumi header built from the approved wordmark.
+- Expands the user-facing integration documentation with Retina screenshots and
+  dedicated explanations for Pro DJ Link, Ableton Link and SoundSwitch.
+
+### Verification
+
+- Adds a Library layout contract for the default editor height and stable
+  autosave identity.
+- Adds a Live snapshot contract for canonical Library track identity and runs
+  the complete 53-test Live Workspace and 62-test Library Workspace suites.
+- Builds the complete macOS Dev configuration with warnings treated as errors.
+- Verifies the saved divider position across a real app restart and captures
+  every documentation image directly from the installed macOS app at
+  3600×2260.
+
 ## 0.5.0-dev-39 - 2026-08-30
 
 ### Fixed

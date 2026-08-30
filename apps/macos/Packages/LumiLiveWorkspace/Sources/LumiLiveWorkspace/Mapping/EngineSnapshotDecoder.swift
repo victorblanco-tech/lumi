@@ -779,6 +779,7 @@ public struct EngineSnapshotDecoder: Sendable {
               let beat = unsignedInteger(deck["beat"]),
               case let .boolean(playing) = deck["playing"],
               case let .object(track) = deck["track"],
+              let trackID = unsignedInteger(track["id"]),
               case let .string(title) = track["title"],
               case let .string(artist) = track["artist"],
               let trackBPMMilli = unsignedInteger(track["bpmMilli"]),
@@ -918,6 +919,7 @@ public struct EngineSnapshotDecoder: Sendable {
         return DeckSnapshot(
             deckID: deckID,
             trackLoadID: trackLoadID,
+            trackID: trackID,
             title: title,
             artist: artist,
             bpmMilli: bpmMilli,

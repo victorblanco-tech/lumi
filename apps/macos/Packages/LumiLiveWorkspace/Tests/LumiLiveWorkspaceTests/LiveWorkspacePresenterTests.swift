@@ -58,8 +58,10 @@ struct LiveWorkspacePresenterTests {
 
         #expect(state.condition == .ready)
         #expect(state.content?.liveDeck?.deckID == 1)
+        #expect(state.content?.liveDeck?.trackID == 101)
         #expect(state.content?.liveDeck?.title == "Aurora Signal")
         #expect(state.content?.nextDeck?.deckID == 2)
+        #expect(state.content?.nextDeck?.trackID == 202)
         #expect(state.content?.nextDeck?.title == "Neon Horizon")
         #expect(state.content?.decks.map(\.deckID) == [1, 2])
         #expect(state.content?.leaderDeckID == 1)

@@ -472,6 +472,11 @@ public struct DeckVisualClockSnapshot: Equatable, Sendable {
 public struct DeckSnapshot: Equatable, Identifiable, Sendable {
     public let deckID: UInt64
     public let trackLoadID: UInt64
+    /// Lumi's canonical Library track identifier when the deck was matched.
+    /// The identifier can also be present on a transient source track, so UI
+    /// callers must combine it with `planEligibility == .readyExact` before
+    /// requesting Library-owned detail data.
+    public let trackID: UInt64?
     public let title: String
     public let artist: String
     public let bpmMilli: UInt64
@@ -498,6 +503,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
     public init(
         deckID: UInt64,
         trackLoadID: UInt64,
+        trackID: UInt64? = nil,
         title: String,
         artist: String,
         bpmMilli: UInt64,
@@ -521,6 +527,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
     ) {
         self.deckID = deckID
         self.trackLoadID = trackLoadID
+        self.trackID = trackID
         self.title = title
         self.artist = artist
         self.bpmMilli = bpmMilli

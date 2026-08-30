@@ -305,7 +305,7 @@ public struct IntegrationsWorkspaceView: View {
                     }
                 }
 
-                if let feedback = abletonLinkFeedback {
+                if let feedback = visibleAbletonLinkFeedback {
                     Text(feedback)
                         .font(LumiTypography.metadata)
                         .foregroundStyle(
@@ -427,8 +427,8 @@ public struct IntegrationsWorkspaceView: View {
                         .font(LumiTypography.caption)
                         .foregroundStyle(LumiColor.textSecondary)
                 }
-                if let abletonLinkFeedback {
-                    Text(abletonLinkFeedback)
+                if let feedback = visibleAbletonLinkFeedback {
+                    Text(feedback)
                         .font(LumiTypography.caption)
                         .foregroundStyle(LumiColor.textSecondary)
                 }
@@ -512,6 +512,19 @@ public struct IntegrationsWorkspaceView: View {
         case "starting": return "Starting"
         default: return link.state.capitalized
         }
+    }
+
+    private var visibleAbletonLinkFeedback: String? {
+        guard let feedback = abletonLinkFeedback else { return nil }
+        // The command acknowledgement is useful while the provider is still
+        // starting. Once authoritative timing is running, retaining the old
+        // "waiting" message contradicts the live status card and makes the
+        // operational screen harder to trust.
+        if library.abletonLinkIntegration?.state == "running",
+           feedback.localizedCaseInsensitiveContains("waiting") {
+            return nil
+        }
+        return feedback
     }
 
     private var abletonLinkDetail: String {

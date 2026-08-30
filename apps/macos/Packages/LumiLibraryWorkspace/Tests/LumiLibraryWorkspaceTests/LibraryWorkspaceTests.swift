@@ -7,6 +7,15 @@ import Testing
 
 @Suite("Library workspace")
 struct LibraryWorkspaceTests {
+    @Test("Track Editor split keeps the accepted tall default and a stable autosave identity")
+    func editorSplitLayoutContract() {
+        #expect(LibraryWorkspaceLayout.defaultEditorHeight == 692.5)
+        #expect(
+            LibraryWorkspaceLayout.editorSplitAutosaveName
+                == "co.victorblan.tech.lumi.library.editor-split"
+        )
+    }
+
     @Test("Workflow filters keep their exact engine wire identities")
     func workflowFilterWireIdentities() {
         #expect(TrackWorkflowFilter.changedAfterUSBSync.rawValue == "changedAfterUsbSync")

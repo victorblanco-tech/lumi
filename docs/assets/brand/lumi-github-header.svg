@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
+     width="1800" height="460" viewBox="0 0 1800 460" role="img"
+     aria-labelledby="title description">
+  <title id="title">Lumi</title>
+  <desc id="description">Phrase-aware lighting automation for DJ sets.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#050609"/>
+      <stop offset="0.48" stop-color="#090d13"/>
+      <stop offset="1" stop-color="#040507"/>
+    </linearGradient>
+    <radialGradient id="cyanGlow" cx="52%" cy="48%" r="60%">
+      <stop offset="0" stop-color="#26c4ff" stop-opacity="0.15"/>
+      <stop offset="0.55" stop-color="#1478a8" stop-opacity="0.045"/>
+      <stop offset="1" stop-color="#000000" stop-opacity="0"/>
+    </radialGradient>
+    <linearGradient id="spectrum" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ff233d"/>
+      <stop offset="0.22" stop-color="#ff8d24"/>
+      <stop offset="0.39" stop-color="#ffd324"/>
+      <stop offset="0.58" stop-color="#27d974"/>
+      <stop offset="0.78" stop-color="#25bfff"/>
+      <stop offset="1" stop-color="#2385ff"/>
+    </linearGradient>
+    <linearGradient id="fadeLeft" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#050609" stop-opacity="1"/>
+      <stop offset="1" stop-color="#050609" stop-opacity="0"/>
+    </linearGradient>
+    <linearGradient id="fadeRight" x1="1" y1="0" x2="0" y2="0">
+      <stop offset="0" stop-color="#050609" stop-opacity="1"/>
+      <stop offset="1" stop-color="#050609" stop-opacity="0"/>
+    </linearGradient>
+  </defs>
+
+  <rect width="1800" height="460" rx="34" fill="url(#background)"/>
+  <rect width="1800" height="460" rx="34" fill="url(#cyanGlow)"/>
+  <rect x="1" y="1" width="1798" height="458" rx="33" fill="none"
+        stroke="#27333f" stroke-opacity="0.8"/>
+
+  <g opacity="0.13" stroke="#7f96a9" stroke-width="1">
+    <path d="M0 115H1800 M0 230H1800 M0 345H1800"/>
+    <path d="M225 0V460 M450 0V460 M675 0V460 M900 0V460 M1125 0V460 M1350 0V460 M1575 0V460"/>
+  </g>
+
+  <path d="M0 300 L40 300 L64 287 L88 318 L112 260 L136 334 L160 278 L184 306
+           L208 293 L232 320 L256 274 L280 306 L304 292 L328 313 L352 285 L376 303
+           L400 298 L424 312 L448 283 L472 305 L496 294 L520 306 L544 291 L568 301
+           L592 297 L616 304 L640 294 L664 302 L688 298 L712 301 L736 296 L760 300"
+        fill="none" stroke="url(#spectrum)" stroke-width="3" opacity="0.35"/>
+  <path d="M1800 300 L1760 300 L1736 287 L1712 318 L1688 260 L1664 334 L1640 278 L1616 306
+           L1592 293 L1568 320 L1544 274 L1520 306 L1496 292 L1472 313 L1448 285 L1424 303
+           L1400 298 L1376 312 L1352 283 L1328 305 L1304 294 L1280 306 L1256 291 L1232 301
+           L1208 297 L1184 304 L1160 294 L1136 302 L1112 298 L1088 301 L1064 296 L1040 300"
+        fill="none" stroke="url(#spectrum)" stroke-width="3" opacity="0.35"/>
+  <rect x="0" y="248" width="430" height="105" fill="url(#fadeLeft)"/>
+  <rect x="1370" y="248" width="430" height="105" fill="url(#fadeRight)"/>
+
+  <image x="473" y="91" width="854" height="240"
+         xlink:href="lumi-wordmark.png" href="lumi-wordmark.png"
+         preserveAspectRatio="xMidYMid meet"/>
+
+  <rect x="725" y="359" width="350" height="1" fill="#40c9ff" opacity="0.42"/>
+  <text x="900" y="398" text-anchor="middle" fill="#afbdca"
+        font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
+        font-size="23" font-weight="600" letter-spacing="5">
+    PHRASE-AWARE LIGHTING AUTOMATION
+  </text>
+</svg>

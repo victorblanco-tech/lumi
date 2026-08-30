@@ -1,11 +1,9 @@
 <p align="center">
-  <img src="docs/assets/brand/lumi-mark.png" alt="Lumi" width="112">
+  <img src="docs/assets/brand/lumi-github-header.png" alt="Lumi — phrase-aware lighting automation" width="100%">
 </p>
 
-<h1 align="center">Lumi</h1>
-
 <p align="center">
-  Phrase-aware lighting automation for DJ sets.
+  Prepare every track. See what is coming. Let Lumi run the lights.
 </p>
 
 <p align="center">
@@ -47,6 +45,15 @@ normal controller.
 
 ## Inside Lumi
 
+### See Live and Next side by side
+
+Live Decks keeps the physical players in a stable two-deck layout: the current
+Master and its active Light Plan on the left, the loaded next track and editable
+future choices on the right. Exact Library matches reuse the same detailed RGB
+waveform, beatgrid, Hot Cues and Lumi phrases as Track Editor.
+
+![Lumi Live Decks with two recognized Pro DJ Link players](docs/assets/screenshots/live-decks.png)
+
 ### Prepare phrases on the real waveform
 
 Track Editor combines the rekordbox beatgrid and RGB waveform with editable,
@@ -76,6 +83,43 @@ Lumi mirrors the familiar four-bank, 32-AutoLoop layout and lets every mapped
 button be verified before a show.
 
 ![SoundSwitch Bank and AutoLoop mapping in Lumi](docs/assets/screenshots/soundswitch-autoloops.png)
+
+## Integrations you can see and trust
+
+The Integrations workspace keeps the complete signal chain in one calm,
+user-facing overview. Each component has its own status page, configuration and
+clear provider boundary; technical details remain available under Diagnostics
+without crowding the Live view.
+
+![Lumi Integrations overview with the complete signal chain](docs/assets/screenshots/integration-overview.png)
+
+### Pro DJ Link — deck input
+
+Lumi discovers compatible players and mixers automatically and uses a
+read-only Pro DJ Link connection for transport, live BPM, master/on-air state,
+beat position and USB track identity. The status page shows detected equipment,
+network traffic and whether exact position authority is available before Lumi
+permits automatic output.
+
+![Pro DJ Link connection, equipment and compatibility status](docs/assets/screenshots/integration-pro-dj-link.png)
+
+### Ableton Link — beat and BPM timing
+
+The isolated Ableton Link lane publishes only the authoritative master BPM,
+beat and bar timing to SoundSwitch. Its status page shows the active timing
+source, tempo, peers and bar quantum, with an optional automatic start setting.
+Stopping Link leaves the shared session cleanly without stopping SoundSwitch.
+
+![Ableton Link timing source and session status](docs/assets/screenshots/integration-ableton-link.png)
+
+### SoundSwitch — lighting output
+
+Lumi sends one-shot MIDI commands through its own virtual MIDI source while
+SoundSwitch continues to own fixtures, AutoLoop playback and DMX output. The
+four-bank, 32-slot layout mirrors SoundSwitch, supports guided mapping and
+per-button verification, and works beside a physical Control One.
+
+![SoundSwitch Banks and AutoLoops configured in Lighting Outputs](docs/assets/screenshots/integration-soundswitch.png)
 
 ## The signal path
 

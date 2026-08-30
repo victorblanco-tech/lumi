@@ -101,6 +101,13 @@ final class EngineStatusModel: ObservableObject {
     @Published private(set) var localPlaybackWaveforms: [
         UInt64: DeckWaveformPreviewSnapshot
     ] = [:]
+    private struct DeckWaveformRequestIdentity: Equatable {
+        let trackID: UInt64
+        let trackLoadID: UInt64
+    }
+    private var connectedDeckWaveformRequests: [
+        UInt64: DeckWaveformRequestIdentity
+    ] = [:]
     @Published private(set) var sourceImportFeedback: String?
     @Published private(set) var sourceImportFeedbackIsError = false
     @Published private(set) var usbSourceOperation = USBSourceOperationState.idle
@@ -874,6 +881,7 @@ final class EngineStatusModel: ObservableObject {
         var waveforms = localPlaybackWaveforms
         waveforms.removeValue(forKey: request.deckID)
         localPlaybackWaveforms = waveforms
+        connectedDeckWaveformRequests.removeValue(forKey: request.deckID)
 
         if snapshot.deckSource.mode != "localPlayback" {
             let switched = await exchangeLibraryCommand(
@@ -951,6 +959,97 @@ final class EngineStatusModel: ObservableObject {
             localPlaybackWaveforms = waveforms
         } catch {
             // The bounded preview remains available if detail retrieval fails.
+        }
+    }
+
+    /// Connected decks carry a bounded waveform in the realtime snapshot so
+    /// the integration lane never waits on visual detail. Once a deck is an
+    /// exact Library match, fetch the same 8-bit RGB detail used by the Track
+    /// Editor exactly once for that load. This request is deliberately owned
+    /// by the app/UI lane and never participates in Pro DJ Link or lighting
+    /// output timing.
+    private func fetchConnectedDeckWaveform(
+        trackID: UInt64,
+        deckID: UInt64,
+        trackLoadID: UInt64
+    ) async {
+        let expected = DeckWaveformRequestIdentity(
+            trackID: trackID,
+            trackLoadID: trackLoadID
+        )
+        for attempt in 0..<4 {
+            guard lifecycle == .ready,
+                  connectedDeckWaveformRequests[deckID] == expected else {
+                return
+            }
+            guard await acquireInteractiveExchange() else {
+                try? await Task.sleep(for: .milliseconds(120 + (attempt * 80)))
+                continue
+            }
+            do {
+                let envelope = try await supervisor.send(
+                    .getLibraryTrackWaveform(trackID: trackID)
+                )
+                isExchangingCommand = false
+                guard EngineCommandFailure(envelope) == nil else { break }
+                let decoder = snapshotDecoder
+                let detail = try await Task.detached(priority: .utility) {
+                    try decoder.decodeWaveformDetail(envelope)
+                }.value
+                guard detail.trackID == trackID,
+                      connectedDeckWaveformRequests[deckID] == expected else {
+                    return
+                }
+                var waveforms = localPlaybackWaveforms
+                waveforms[deckID] = detail.preview
+                localPlaybackWaveforms = waveforms
+                return
+            } catch {
+                isExchangingCommand = false
+                if attempt < 3 {
+                    try? await Task.sleep(for: .milliseconds(120 + (attempt * 80)))
+                }
+            }
+        }
+        if connectedDeckWaveformRequests[deckID] == expected {
+            connectedDeckWaveformRequests.removeValue(forKey: deckID)
+        }
+    }
+
+    private func synchronizeConnectedDeckWaveforms(with snapshot: EngineSnapshot) {
+        let expectedDeckIDs = Set(snapshot.decks.map(\.deckID))
+        var waveforms = localPlaybackWaveforms
+        waveforms = waveforms.filter { expectedDeckIDs.contains($0.key) }
+        connectedDeckWaveformRequests = connectedDeckWaveformRequests.filter {
+            expectedDeckIDs.contains($0.key)
+        }
+
+        for deck in snapshot.decks {
+            guard deck.planEligibility == .readyExact,
+                  let trackID = deck.trackID else {
+                waveforms.removeValue(forKey: deck.deckID)
+                connectedDeckWaveformRequests.removeValue(forKey: deck.deckID)
+                continue
+            }
+            let expected = DeckWaveformRequestIdentity(
+                trackID: trackID,
+                trackLoadID: deck.trackLoadID
+            )
+            guard connectedDeckWaveformRequests[deck.deckID] != expected else {
+                continue
+            }
+            waveforms.removeValue(forKey: deck.deckID)
+            connectedDeckWaveformRequests[deck.deckID] = expected
+            Task { [weak self] in
+                await self?.fetchConnectedDeckWaveform(
+                    trackID: trackID,
+                    deckID: deck.deckID,
+                    trackLoadID: deck.trackLoadID
+                )
+            }
+        }
+        if waveforms != localPlaybackWaveforms {
+            localPlaybackWaveforms = waveforms
         }
     }
 
@@ -2514,19 +2613,19 @@ final class EngineStatusModel: ObservableObject {
         guard snapshot.deckSource.mode == "localPlayback" else {
             localAudioControllers.values.forEach { $0.shutdown() }
             localAudioControllers.removeAll()
-            // `@Published` emits even for an equal assignment. Clearing this
-            // already-empty dictionary on every connected-deck poll forced the
-            // complete Live SwiftUI hierarchy through layout at 4 Hz.
-            if !localPlaybackWaveforms.isEmpty {
-                localPlaybackWaveforms = [:]
-            }
             if snapshot.deckSource.mode == "connectedDecks" {
+                synchronizeConnectedDeckWaveforms(with: snapshot)
                 synchronizeConnectedDeckVisualClocks(with: snapshot)
             } else {
+                connectedDeckWaveformRequests = [:]
+                if !localPlaybackWaveforms.isEmpty {
+                    localPlaybackWaveforms = [:]
+                }
                 deckVisualClocks = [:]
             }
             return
         }
+        connectedDeckWaveformRequests = [:]
         let expectedDecks = Set(snapshot.decks.compactMap { deck in
             deck.localPlayback == nil ? nil : deck.deckID
         })
