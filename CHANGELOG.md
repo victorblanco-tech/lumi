@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.6.0-dev-1 - 2026-08-30
+
+### Changed
+
+- Starts the next isolated development cycle after the 0.5.0 production
+  release. No production data or configuration is migrated automatically.
+
 ## 0.5.0 - 2026-08-30
 
 ### Added
