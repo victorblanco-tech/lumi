@@ -23,7 +23,7 @@ The complete show runs locally on your Mac. SoundSwitch remains responsible for
 fixtures and DMX output; Lumi acts like a virtual lighting operator beside your
 normal controller.
 
-![Lumi Local Playback running a prepared two-track show](docs/assets/screenshots/local-playback.png)
+![Lumi Live Decks with the current and next track side by side](docs/assets/screenshots/live-decks-intro.png)
 
 ![The complete Lumi workflow from trusted USB source to SoundSwitch DMX](docs/assets/lumi-workflow.svg)
 
