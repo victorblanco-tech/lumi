@@ -1,5 +1,23 @@
 # Changelog
 
+## 0.5.0-dev-36 - 2026-08-30
+
+### Added
+
+- Adds per-track `Protect Phrases`, with a persisted lock that covers phrase
+  points, roles, boundaries, history restores and Autoloop choices.
+- Gives `Ready for Show` its expected green check presentation.
+- Presents empty workflow queues as `Nothing to review` instead of a Library
+  failure.
+
+### Safety and verification
+
+- Enforces phrase protection inside the Library engine, independent of the UI.
+- Keeps trusted USB beatgrid, waveform and cue updates active while protected;
+  source changes still create an explicit workflow review.
+- Adds schema 18, optimistic lock revisions and migration/persistence/regression
+  coverage without adding work to any live timing lane.
+
 ## 0.5.0-dev-35 - 2026-08-29
 
 ### Added

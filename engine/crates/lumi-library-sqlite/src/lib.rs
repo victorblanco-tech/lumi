@@ -32,7 +32,7 @@ use rusqlite::{
 };
 use thiserror::Error;
 
-const SCHEMA_VERSION: u32 = 17;
+const SCHEMA_VERSION: u32 = 18;
 const DEFAULTS_VERSION_KEY: &str = "phrase-role-defaults-version";
 const CATALOG_REVISION_KEY: &str = "phrase-role-catalog-revision";
 const AUTOLOOP_DEFAULTS_VERSION_KEY: &str = "autoloop-catalog-defaults-version";
@@ -40,6 +40,12 @@ const AUTOLOOP_CATALOG_REVISION_KEY: &str = "autoloop-catalog-revision";
 
 pub struct SqliteLibraryRepository {
     connection: Connection,
+}
+
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct TrackPhraseProtection {
+    pub locked: bool,
+    pub revision: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -585,6 +591,107 @@ impl SqliteLibraryRepository {
             );
         }
         Ok(states)
+    }
+
+    pub fn track_phrase_protections(
+        &self,
+        track_ids: &[TrackId],
+    ) -> Result<BTreeMap<TrackId, TrackPhraseProtection>, SqliteLibraryError> {
+        let mut protections = track_ids
+            .iter()
+            .copied()
+            .map(|track_id| (track_id, TrackPhraseProtection::default()))
+            .collect::<BTreeMap<_, _>>();
+        if track_ids.is_empty() {
+            return Ok(protections);
+        }
+        let placeholders = (1..=track_ids.len())
+            .map(|index| format!("?{index}"))
+            .collect::<Vec<_>>()
+            .join(",");
+        let values = track_ids
+            .iter()
+            .map(|track_id| to_i64(track_id.value()))
+            .collect::<Result<Vec<_>, _>>()?;
+        let sql = format!(
+            "SELECT track_id, locked, revision FROM track_phrase_protection
+              WHERE track_id IN ({placeholders})"
+        );
+        let mut statement = self.connection.prepare(&sql)?;
+        let rows = statement.query_map(params_from_iter(values.iter()), |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, bool>(1)?,
+                row.get::<_, i64>(2)?,
+            ))
+        })?;
+        for row in rows {
+            let (track_id, locked, revision) = row?;
+            protections.insert(
+                TrackId::new(from_positive_i64(track_id, "phrase protection track id")?),
+                TrackPhraseProtection {
+                    locked,
+                    revision: from_positive_i64(revision, "phrase protection revision")?,
+                },
+            );
+        }
+        Ok(protections)
+    }
+
+    pub fn set_track_phrase_protection(
+        &mut self,
+        track_id: TrackId,
+        expected_revision: u64,
+        locked: bool,
+    ) -> Result<TrackPhraseProtection, SqliteLibraryError> {
+        let transaction = self.connection.transaction()?;
+        let track_id_value = to_i64(track_id.value())?;
+        let exists = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM tracks WHERE id = ?1)",
+            [track_id_value],
+            |row| row.get::<_, bool>(0),
+        )?;
+        if !exists {
+            return Err(SqliteLibraryError::MissingTrack);
+        }
+        let current = transaction
+            .query_row(
+                "SELECT locked, revision FROM track_phrase_protection WHERE track_id = ?1",
+                [track_id_value],
+                |row| Ok((row.get::<_, bool>(0)?, row.get::<_, i64>(1)?)),
+            )
+            .optional()?;
+        let actual_revision = current
+            .map(|(_, revision)| from_positive_i64(revision, "phrase protection revision"))
+            .transpose()?
+            .unwrap_or(0);
+        if actual_revision != expected_revision {
+            return Err(SqliteLibraryError::TrackPhraseProtectionRevisionConflict {
+                expected: expected_revision,
+                actual: actual_revision,
+            });
+        }
+        if current.is_some_and(|(current_locked, _)| current_locked == locked) {
+            transaction.commit()?;
+            return Ok(TrackPhraseProtection {
+                locked,
+                revision: actual_revision,
+            });
+        }
+        let revision = actual_revision
+            .checked_add(1)
+            .ok_or(SqliteLibraryError::ArithmeticOverflow)?;
+        transaction.execute(
+            "INSERT INTO track_phrase_protection(track_id, locked, revision)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(track_id) DO UPDATE SET
+               locked = excluded.locked,
+               revision = excluded.revision,
+               updated_at = CURRENT_TIMESTAMP",
+            params![track_id_value, locked, to_i64(revision)?],
+        )?;
+        transaction.commit()?;
+        Ok(TrackPhraseProtection { locked, revision })
     }
 
     pub fn track_workflow_summary(&self) -> Result<TrackWorkflowSummary, SqliteLibraryError> {
@@ -3460,7 +3567,7 @@ impl SqliteLibraryRepository {
                 INSERT INTO workflow_steps(step_id, display_name, icon, color_rgb, sort_order, archived)
                 VALUES ('not-started', 'Not Started', 'circle', 8953773, 1, 0),
                        ('in-progress', 'In Progress', 'pencil.and.outline', 16753920, 2, 0),
-                       ('ready-for-show', 'Ready for Show', 'checkmark.seal.fill', 3145817, 3, 0);
+                       ('ready-for-show', 'Ready for Show', 'checkmark.circle.fill', 3199320, 3, 0);
                 INSERT INTO workflow_step_rules(step_id, rule_index, field, operator, value)
                 VALUES ('not-started', 0, 'preparationStatus', 'is', 'not-started'),
                        ('in-progress', 0, 'preparationStatus', 'is', 'in-progress'),
@@ -3509,6 +3616,38 @@ impl SqliteLibraryRepository {
                     // while workflow storage is meaningful only for a full library.
                     "PRAGMA user_version = 17;"
                 })?;
+            current = 17;
+        }
+        if current == 17 {
+            let can_create_protection = self.table_exists("tracks")?;
+            self.connection.execute_batch(if can_create_protection {
+                "
+                BEGIN IMMEDIATE;
+                CREATE TABLE track_phrase_protection (
+                    track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+                    locked INTEGER NOT NULL CHECK(locked IN (0, 1)),
+                    revision INTEGER NOT NULL CHECK(revision > 0),
+                    updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                );
+                UPDATE workflow_catalog
+                   SET revision = revision + 1, updated_at = CURRENT_TIMESTAMP
+                 WHERE EXISTS (
+                    SELECT 1 FROM workflow_steps
+                     WHERE step_id = 'ready-for-show'
+                       AND icon = 'checkmark.seal.fill'
+                       AND color_rgb = 3145817
+                 );
+                UPDATE workflow_steps
+                   SET icon = 'checkmark.circle.fill', color_rgb = 3199320
+                 WHERE step_id = 'ready-for-show'
+                   AND icon = 'checkmark.seal.fill'
+                   AND color_rgb = 3145817;
+                PRAGMA user_version = 18;
+                COMMIT;
+                "
+            } else {
+                "PRAGMA user_version = 18;"
+            })?;
         }
         Ok(())
     }
@@ -6205,6 +6344,8 @@ pub enum SqliteLibraryError {
     AutoloopCatalogRevisionConflict { expected: u64, actual: u64 },
     #[error("track workflow status changed; expected revision {expected}, actual {actual}")]
     TrackWorkflowRevisionConflict { expected: u64, actual: u64 },
+    #[error("track phrase protection changed; expected revision {expected}, actual {actual}")]
+    TrackPhraseProtectionRevisionConflict { expected: u64, actual: u64 },
     #[error("track source-review signal changed; expected revision {expected}, actual {actual:?}")]
     TrackAttentionRevisionConflict { expected: u64, actual: Option<u64> },
 }
@@ -8165,7 +8306,7 @@ mod fault_tests {
         let schema: u32 = repository
             .connection
             .query_row("PRAGMA user_version", [], |row| row.get(0))?;
-        assert_eq!(schema, 17);
+        assert_eq!(schema, 18);
         Ok(())
     }
 }

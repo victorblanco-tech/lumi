@@ -23,7 +23,7 @@ use rusqlite::Connection;
 #[test]
 fn migrates_an_empty_database() -> Result<(), Box<dyn Error>> {
     let repository = SqliteLibraryRepository::in_memory()?;
-    assert_eq!(repository.schema_version()?, 17);
+    assert_eq!(repository.schema_version()?, 18);
     assert_eq!(
         repository
             .page_tracks(TrackPageRequest::try_new(0, 25)?)?
@@ -34,13 +34,82 @@ fn migrates_an_empty_database() -> Result<(), Box<dyn Error>> {
 }
 
 #[test]
+fn ready_for_show_defaults_to_a_green_check_and_phrase_protection_is_revisioned()
+-> Result<(), Box<dyn Error>> {
+    let mut repository = SqliteLibraryRepository::in_memory()?;
+    let catalog = repository.track_workflow_catalog()?;
+    let ready = catalog
+        .steps()
+        .iter()
+        .find(|step| step.id() == "ready-for-show")
+        .ok_or("required ready-for-show step")?;
+    assert_eq!(ready.icon(), "checkmark.circle.fill");
+    assert_eq!(ready.color_rgb(), 0x30D158);
+
+    repository.import_baseline(&DemoLibrarySourceProvider::curated().load_baseline()?)?;
+    let track_id = repository
+        .page_tracks(TrackPageRequest::try_new(0, 1)?)?
+        .tracks()[0]
+        .id();
+    let initial = repository.track_phrase_protections(&[track_id])?[&track_id];
+    assert!(!initial.locked);
+    assert_eq!(initial.revision, 0);
+
+    let locked = repository.set_track_phrase_protection(track_id, 0, true)?;
+    assert!(locked.locked);
+    assert_eq!(locked.revision, 1);
+    assert!(matches!(
+        repository.set_track_phrase_protection(track_id, 0, false),
+        Err(SqliteLibraryError::TrackPhraseProtectionRevisionConflict {
+            expected: 0,
+            actual: 1
+        })
+    ));
+    let unlocked = repository.set_track_phrase_protection(track_id, 1, false)?;
+    assert!(!unlocked.locked);
+    assert_eq!(unlocked.revision, 2);
+    Ok(())
+}
+
+#[test]
+fn schema_eighteen_migrates_only_the_legacy_ready_for_show_presentation()
+-> Result<(), Box<dyn Error>> {
+    let path = temporary_database_path()?;
+    drop(SqliteLibraryRepository::open(&path)?);
+    {
+        let connection = Connection::open(&path)?;
+        connection.execute_batch(
+            "DROP TABLE track_phrase_protection;
+             UPDATE workflow_steps
+                SET icon = 'checkmark.seal.fill', color_rgb = 3145817
+              WHERE step_id = 'ready-for-show';
+             PRAGMA user_version = 17;",
+        )?;
+    }
+    let repository = SqliteLibraryRepository::open(&path)?;
+    assert_eq!(repository.schema_version()?, 18);
+    let catalog = repository.track_workflow_catalog()?;
+    let ready = catalog
+        .steps()
+        .iter()
+        .find(|step| step.id() == "ready-for-show")
+        .ok_or("required ready-for-show step")?;
+    assert_eq!(ready.icon(), "checkmark.circle.fill");
+    assert_eq!(ready.color_rgb(), 0x30D158);
+    drop(repository);
+    std::fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
 fn migrates_version_thirteen_device_audio_locations_atomically() -> Result<(), Box<dyn Error>> {
     let path = temporary_database_path()?;
     drop(SqliteLibraryRepository::open(&path)?);
     {
         let connection = Connection::open(&path)?;
         connection.execute_batch(
-            "DROP INDEX track_version_reviews_pending;
+            "DROP TABLE track_phrase_protection;
+             DROP INDEX track_version_reviews_pending;
              DROP TABLE track_version_audit;
              DROP TABLE track_version_reviews;
              DROP INDEX track_workflow_assignments_step;
@@ -58,7 +127,7 @@ fn migrates_version_thirteen_device_audio_locations_atomically() -> Result<(), B
         )?;
     }
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 17);
+    assert_eq!(repository.schema_version()?, 18);
     drop(repository);
     let connection = Connection::open(&path)?;
     let table_exists: bool = connection.query_row(
@@ -216,7 +285,7 @@ fn migrates_version_one_timeline_history_without_losing_rows() -> Result<(), Box
     }
 
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 17);
+    assert_eq!(repository.schema_version()?, 18);
     drop(repository);
     let connection = Connection::open(&path)?;
     let reason: String = connection.query_row(
@@ -273,7 +342,7 @@ fn migrates_version_two_phrase_roles_into_an_unseeded_catalog() -> Result<(), Bo
     }
 
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 17);
+    assert_eq!(repository.schema_version()?, 18);
     let catalog = repository.phrase_role_catalog()?;
     assert_eq!(catalog.revision(), 0);
     assert_eq!(catalog.defaults_version(), 0);
@@ -316,7 +385,7 @@ fn migrates_version_three_into_an_unseeded_autoloop_catalog() -> Result<(), Box<
     }
 
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 17);
+    assert_eq!(repository.schema_version()?, 18);
     let catalog = repository.autoloop_catalog()?;
     assert_eq!(catalog.revision(), 0);
     assert_eq!(catalog.defaults_version(), 0);

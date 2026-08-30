@@ -41,6 +41,7 @@ public enum TrackWorkflowMutationRequest: Equatable, Sendable {
     )
     case resolveAttention(trackID: UInt64, expectedRevision: UInt64)
     case assignStep(trackID: UInt64, expectedRevision: UInt64, stepID: String)
+    case setPhraseProtection(trackID: UInt64, expectedRevision: UInt64, locked: Bool)
     case replaceCatalog(expectedRevision: UInt64, steps: [WorkflowStepDefinition])
     case keepVersionSeparate(sourceTrackID: UInt64, targetTrackID: UInt64, expectedTargetRevision: UInt64)
 }
@@ -233,11 +234,13 @@ public struct LibraryWorkspaceView: View {
             Text(
                 state.condition == .error
                     ? (state.diagnostic ?? "The local Track Editor is unavailable.")
-                    : "Loading the selected track…"
+                    : state.page.tracks.isEmpty
+                        ? "Select a workflow step or playlist containing tracks to begin."
+                        : "Loading the selected track…"
             )
             .font(LumiTypography.metadata)
             .foregroundStyle(LumiColor.textSecondary)
-            if state.condition != .error {
+            if state.condition != .error, !state.page.tracks.isEmpty {
                 ProgressView().controlSize(.small)
             }
         }
@@ -248,7 +251,7 @@ public struct LibraryWorkspaceView: View {
 
     @ViewBuilder
     private var conditionBanner: some View {
-        if state.condition != .ready || state.diagnostic != nil {
+        if (state.condition != .ready && state.condition != .empty) || state.diagnostic != nil {
             HStack(spacing: LumiSpacing.small) {
                 Image(systemName: state.condition.componentState.systemImage)
                     .foregroundStyle(state.condition.componentState.color)
@@ -763,9 +766,9 @@ public struct LibraryWorkspaceView: View {
             Image(systemName: condition.componentState.systemImage)
                 .font(.system(size: 30))
                 .foregroundStyle(condition.componentState.color)
-            Text(conditionTitle(condition))
+            Text(condition == .empty ? emptyStateTitle : conditionTitle(condition))
                 .font(LumiTypography.sectionTitle)
-            Text(state.diagnostic ?? conditionDescription(condition))
+            Text(condition == .empty ? emptyStateDetail : (state.diagnostic ?? conditionDescription(condition)))
                 .font(LumiTypography.metadata)
                 .foregroundStyle(LumiColor.textSecondary)
                 .multilineTextAlignment(.center)
@@ -780,6 +783,24 @@ public struct LibraryWorkspaceView: View {
 
     private var selectedTrack: LibraryTrack? {
         state.page.tracks.first { $0.id == selectedTrackID }
+    }
+
+    private var emptyStateTitle: String {
+        if selectedWorkflowFilter != nil || selectedWorkflowStepID != nil {
+            return "Nothing to review"
+        }
+        return conditionTitle(.empty)
+    }
+
+    private var emptyStateDetail: String {
+        if let stepID = selectedWorkflowStepID,
+           let step = state.workflowCatalog.steps.first(where: { $0.id == stepID }) {
+            return "No tracks currently match \(step.displayName). This is a normal empty workflow step, not a Library error."
+        }
+        if selectedWorkflowFilter != nil {
+            return "No tracks currently need attention in this queue. This is a normal empty result."
+        }
+        return state.diagnostic ?? conditionDescription(.empty)
     }
 
     private var visibleTracks: [LibraryTrack] {

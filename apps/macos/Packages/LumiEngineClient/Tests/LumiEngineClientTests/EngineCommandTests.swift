@@ -40,6 +40,13 @@ struct EngineCommandTests {
         ).payload()
         #expect(assignment["stepId"] == .string("quality-check"))
 
+        let protection = EngineCommand.setTrackPhraseProtection(
+            trackID: 90, expectedRevision: 1, locked: true
+        ).payload()
+        #expect(protection["kind"] == .string("setTrackPhraseProtection"))
+        #expect(protection["expectedRevision"] == .number(1))
+        #expect(protection["locked"] == .boolean(true))
+
         let catalog = EngineCommand.replaceTrackWorkflowCatalog(
             expectedRevision: 2,
             steps: [EngineWorkflowStep(

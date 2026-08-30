@@ -1,6 +1,6 @@
 # Epic 7 – Track preparation workflow
 
-Status: **Done in 0.5.0-dev-35** | Priority: **P0**
+Status: **Done in 0.5.0-dev-36** | Priority: **P0**
 
 ## Outcome
 
@@ -52,6 +52,16 @@ Status: **Done in 0.5.0-dev-35**
 The first implementation deliberately permits automatic phrase reuse only for
 an exact total-beat match. BPM and duration deltas are evidence for the DJ, not
 permission to stretch or guess phrase boundaries.
+
+### Phase 4 — Ready-state clarity and creative protection
+
+Status: **Done in 0.5.0-dev-36**
+
+- `Ready for Show` uses a green check by default;
+- empty queues are calm, actionable empty states rather than global errors;
+- per-track phrase protection is revisioned and enforced in the engine;
+- USB beatgrid, waveform and cue updates remain allowed and require review;
+- live/output timing lanes remain completely untouched.
 
 ## Epic acceptance
 

@@ -744,7 +744,7 @@ final class EngineStatusModel: ObservableObject {
                 )
             )
             if let failure = EngineCommandFailure(envelope) {
-                if generation == libraryQueryGeneration {
+                if generation == libraryQueryGeneration, libraryState.condition == .importing {
                     libraryState = .failed(failure.message)
                 }
                 return
@@ -775,10 +775,12 @@ final class EngineStatusModel: ObservableObject {
             )
         } catch {
             guard generation == libraryQueryGeneration else { return }
-            libraryState = .failed(
-                (error as? LocalizedError)?.errorDescription
-                    ?? "The library query could not be completed."
-            )
+            if libraryState.condition == .importing {
+                libraryState = .failed(
+                    (error as? LocalizedError)?.errorDescription
+                        ?? "The library query could not be completed."
+                )
+            }
         }
     }
 
@@ -821,6 +823,12 @@ final class EngineStatusModel: ObservableObject {
                 trackID: trackID,
                 expectedRevision: expectedRevision,
                 stepID: stepID
+            )
+        case let .setPhraseProtection(trackID, expectedRevision, locked):
+            command = .setTrackPhraseProtection(
+                trackID: trackID,
+                expectedRevision: expectedRevision,
+                locked: locked
             )
         case let .replaceCatalog(expectedRevision, steps):
             command = .replaceTrackWorkflowCatalog(

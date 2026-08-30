@@ -120,6 +120,10 @@ struct LibraryWorkspaceTests {
                 "reasons": .array([.string("beatGridChanged"), .string("hotCuesChanged")])
             ])
         ])
+        track["phraseProtection"] = .object([
+            "locked": .boolean(true),
+            "revision": .number(2)
+        ])
         value = .object(track)
         let state = try LibrarySnapshotDecoder().decode(
             envelope(
@@ -138,6 +142,8 @@ struct LibraryWorkspaceTests {
         #expect(decoded.workflow.preparationStatus == .readyForShow)
         #expect(!decoded.workflow.effectiveReady)
         #expect(decoded.workflow.attention?.reasons == [.beatGridChanged, .hotCuesChanged])
+        #expect(decoded.phraseProtection.locked)
+        #expect(decoded.phraseProtection.revision == 2)
         #expect(state.workflow.changedAfterUSBSync == 1)
     }
 

@@ -88,6 +88,13 @@ public struct TrackWorkflowState: Equatable, Sendable {
     )
 }
 
+public struct TrackPhraseProtectionState: Equatable, Sendable {
+    public let locked: Bool
+    public let revision: UInt64
+
+    public static let unlocked = Self(locked: false, revision: 0)
+}
+
 public struct TrackWorkflowSummary: Equatable, Sendable {
     public let changedAfterUSBSync: UInt64
     public let versionCandidates: UInt64
@@ -223,6 +230,7 @@ public struct LibraryTrack: Identifiable, Equatable, Sendable {
     public let warnings: [String]
     public let usbSources: [LibraryTrackUSBSource]
     public let workflow: TrackWorkflowState
+    public let phraseProtection: TrackPhraseProtectionState
 
     public init(
         id: UInt64,
@@ -239,7 +247,8 @@ public struct LibraryTrack: Identifiable, Equatable, Sendable {
         missingCapabilities: [String],
         warnings: [String],
         usbSources: [LibraryTrackUSBSource] = [],
-        workflow: TrackWorkflowState = .notStarted
+        workflow: TrackWorkflowState = .notStarted,
+        phraseProtection: TrackPhraseProtectionState = .unlocked
     ) {
         self.id = id
         self.sourceTrackID = sourceTrackID
@@ -256,6 +265,7 @@ public struct LibraryTrack: Identifiable, Equatable, Sendable {
         self.warnings = warnings
         self.usbSources = usbSources
         self.workflow = workflow
+        self.phraseProtection = phraseProtection
     }
 }
 

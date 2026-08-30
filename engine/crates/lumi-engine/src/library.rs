@@ -2425,6 +2425,7 @@ impl LibraryWorker {
     ) -> Result<(), LibraryWorkerError> {
         let track_id = TrackId::new(track_id);
         self.require_open_track(track_id)?;
+        self.require_phrases_unlocked(track_id)?;
         if let Some(role_id) = command.assigned_role_id() {
             self.require_active_role(role_id)?;
         }
@@ -2445,6 +2446,7 @@ impl LibraryWorker {
     ) -> Result<(), LibraryWorkerError> {
         let track_id = TrackId::new(track_id);
         self.require_open_track(track_id)?;
+        self.require_phrases_unlocked(track_id)?;
         let head = self.require_expected_head(track_id, expected_timeline_revision)?;
         let phrase = head
             .phrases()
@@ -2491,6 +2493,7 @@ impl LibraryWorker {
     ) -> Result<(), LibraryWorkerError> {
         let track_id = TrackId::new(track_id);
         self.require_open_track(track_id)?;
+        self.require_phrases_unlocked(track_id)?;
         let head = self.require_expected_head(track_id, expected_revision)?;
         let target_revision = TimelineRevision::try_new(target_revision)
             .map_err(|_| LibraryWorkerError::InvalidTimelineRevision(target_revision))?;
@@ -2516,6 +2519,7 @@ impl LibraryWorker {
         let source_track_id = TrackId::new(source_track_id);
         let target_track_id = TrackId::new(target_track_id);
         self.require_open_track(target_track_id)?;
+        self.require_phrases_unlocked(target_track_id)?;
         let target = self.require_expected_head(target_track_id, expected_target_revision)?;
         let source = self
             .repository
@@ -2635,6 +2639,7 @@ impl LibraryWorker {
     ) -> Result<(), LibraryWorkerError> {
         let track_id = TrackId::new(track_id);
         self.require_open_track(track_id)?;
+        self.require_phrases_unlocked(track_id)?;
         let head = self.require_expected_head(track_id, expected_revision)?;
         let stored = self
             .repository
@@ -2839,6 +2844,31 @@ impl LibraryWorker {
         if self.editor_track_id != Some(track_id) {
             return Err(LibraryWorkerError::EditorTrackMismatch);
         }
+        Ok(())
+    }
+
+    fn require_phrases_unlocked(&self, track_id: TrackId) -> Result<(), LibraryWorkerError> {
+        let protection = self
+            .repository
+            .track_phrase_protections(&[track_id])?
+            .remove(&track_id)
+            .unwrap_or_default();
+        if protection.locked {
+            return Err(LibraryWorkerError::TrackPhrasesProtected);
+        }
+        Ok(())
+    }
+
+    pub fn set_track_phrase_protection(
+        &mut self,
+        track_id: u64,
+        expected_revision: u64,
+        locked: bool,
+    ) -> Result<(), LibraryWorkerError> {
+        let track_id = TrackId::new(track_id);
+        self.require_open_track(track_id)?;
+        self.repository
+            .set_track_phrase_protection(track_id, expected_revision, locked)?;
         Ok(())
     }
 
@@ -3063,6 +3093,7 @@ impl LibraryWorker {
     ) -> Result<(), LibraryWorkerError> {
         let track_id = TrackId::new(track_id);
         self.require_open_track(track_id)?;
+        self.require_phrases_unlocked(track_id)?;
         let head = self.require_expected_head(track_id, expected_revision)?;
         let history = self.rebuild_history(track_id)?;
         let target_revision = match action {
@@ -3133,6 +3164,13 @@ impl LibraryWorker {
         .with_workflow_step_id(self.workflow_step_id.clone());
         let page = self.repository.query_tracks(&query)?;
         let workflow_states = self.repository.track_workflow_states(
+            &page
+                .tracks()
+                .iter()
+                .map(TrackSummary::id)
+                .collect::<Vec<_>>(),
+        )?;
+        let phrase_protections = self.repository.track_phrase_protections(
             &page
                 .tracks()
                 .iter()
@@ -3376,6 +3414,7 @@ impl LibraryWorker {
                         track,
                         device_source_relations.get(&track.id()).map(Vec::as_slice).unwrap_or(&[]),
                         workflow_states.get(&track.id()),
+                        phrase_protections.get(&track.id()).copied().unwrap_or_default(),
                     )
                 }).collect::<Vec<_>>(),
             },
@@ -3657,6 +3696,11 @@ impl LibraryWorker {
                 track.summary(),
                 &[],
                 self.repository.track_workflow_states(&[track_id])?.get(&track_id),
+                self.repository
+                    .track_phrase_protections(&[track_id])?
+                    .get(&track_id)
+                    .copied()
+                    .unwrap_or_default(),
             ),
             "audioUri": audio_uri,
             "beatGrid": {
@@ -4060,6 +4104,7 @@ fn track_json_with_device_sources(
     track: &TrackSummary,
     device_sources: &[lumi_library_sqlite::DeviceTrackSourceRelation],
     workflow: Option<&TrackWorkflowState>,
+    phrase_protection: lumi_library_sqlite::TrackPhraseProtection,
 ) -> Value {
     let default_workflow = TrackWorkflowState::default_for(track.id());
     let workflow = workflow.unwrap_or(&default_workflow);
@@ -4088,6 +4133,10 @@ fn track_json_with_device_sources(
             "warnings": [],
         },
         "workflow": workflow_json(workflow),
+        "phraseProtection": {
+            "locked": phrase_protection.locked,
+            "revision": phrase_protection.revision,
+        },
     })
 }
 
@@ -5068,6 +5117,8 @@ pub enum LibraryWorkerError {
     EditorTrackMismatch,
     #[error("the selected track has no Lumi timeline")]
     MissingTimeline,
+    #[error("Lumi phrase editing is protected for this track; unlock it before changing phrases")]
+    TrackPhrasesProtected,
     #[error("source phrases cannot form a complete bar-aligned timeline")]
     InvalidSourceTimeline,
     #[error("source phrase '{raw_label}' has no mapping for provider '{provider_kind}'")]
@@ -6026,6 +6077,49 @@ mod tests {
             restored["editor"]["phrases"].as_array().map(Vec::len),
             Some(4)
         );
+        Ok(())
+    }
+
+    #[test]
+    fn phrase_protection_is_persisted_and_enforced_below_the_ui()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut worker = LibraryWorker::demo()?;
+        let track_id = worker.snapshot_json()?["page"]["tracks"][0]["id"]
+            .as_u64()
+            .ok_or("track id")?;
+        worker.open_editor(track_id)?;
+        worker.set_track_phrase_protection(track_id, 0, true)?;
+        let locked = worker.snapshot_json()?;
+        assert_eq!(
+            locked["editor"]["track"]["phraseProtection"]["locked"],
+            true
+        );
+        assert_eq!(locked["editor"]["track"]["phraseProtection"]["revision"], 1);
+
+        let rejected = worker.edit_timeline(
+            track_id,
+            1,
+            TimelineEditCommand::Split {
+                phrase_index: 0,
+                at_beat: 4,
+            },
+        );
+        assert!(matches!(
+            rejected,
+            Err(super::LibraryWorkerError::TrackPhrasesProtected)
+        ));
+        assert_eq!(worker.snapshot_json()?["editor"]["timeline"]["revision"], 1);
+
+        worker.set_track_phrase_protection(track_id, 1, false)?;
+        worker.edit_timeline(
+            track_id,
+            1,
+            TimelineEditCommand::Split {
+                phrase_index: 0,
+                at_beat: 4,
+            },
+        )?;
+        assert_eq!(worker.snapshot_json()?["editor"]["timeline"]["revision"], 2);
         Ok(())
     }
 

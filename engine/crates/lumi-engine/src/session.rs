@@ -3423,6 +3423,18 @@ fn apply_command(
             )?;
             return Ok(());
         }
+        SessionCommand::SetTrackPhraseProtection {
+            track_id,
+            expected_revision,
+            locked,
+        } => {
+            runtime.library_worker.set_track_phrase_protection(
+                track_id,
+                expected_revision,
+                locked,
+            )?;
+            return Ok(());
+        }
         SessionCommand::ReplaceTrackWorkflowCatalog {
             expected_revision,
             steps,
@@ -4091,6 +4103,7 @@ fn apply_command(
         | SessionCommand::CloseLibraryTrackEditor
         | SessionCommand::SetTrackPreparationStatus { .. }
         | SessionCommand::AssignTrackWorkflowStep { .. }
+        | SessionCommand::SetTrackPhraseProtection { .. }
         | SessionCommand::ReplaceTrackWorkflowCatalog { .. }
         | SessionCommand::ResolveTrackWorkflowAttention { .. }
         | SessionCommand::PreviewDemoSourceRefresh

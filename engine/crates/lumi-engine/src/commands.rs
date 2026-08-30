@@ -63,6 +63,11 @@ pub enum SessionCommand {
         expected_revision: u64,
         step_id: String,
     },
+    SetTrackPhraseProtection {
+        track_id: u64,
+        expected_revision: u64,
+        locked: bool,
+    },
     ReplaceTrackWorkflowCatalog {
         expected_revision: u64,
         steps: Vec<WorkflowStepDefinition>,
@@ -289,6 +294,7 @@ impl SessionCommand {
             | Self::CloseLibraryTrackEditor
             | Self::SetTrackPreparationStatus { .. }
             | Self::AssignTrackWorkflowStep { .. }
+            | Self::SetTrackPhraseProtection { .. }
             | Self::ReplaceTrackWorkflowCatalog { .. }
             | Self::ResolveTrackWorkflowAttention { .. }
             | Self::PreviewDemoSourceRefresh
@@ -351,6 +357,7 @@ impl SessionCommand {
                 | Self::ResolveRekordboxDeviceConflict { .. }
                 | Self::SetTrackPreparationStatus { .. }
                 | Self::AssignTrackWorkflowStep { .. }
+                | Self::SetTrackPhraseProtection { .. }
                 | Self::ReplaceTrackWorkflowCatalog { .. }
                 | Self::ResolveTrackWorkflowAttention { .. }
                 | Self::ApplyLibraryReset { .. }
@@ -406,6 +413,11 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
             track_id: positive_unsigned(&envelope.payload, "trackId")?,
             expected_revision: unsigned(&envelope.payload, "expectedRevision")?,
             step_id: string(&envelope.payload, "stepId")?.to_owned(),
+        }),
+        "setTrackPhraseProtection" => Ok(SessionCommand::SetTrackPhraseProtection {
+            track_id: positive_unsigned(&envelope.payload, "trackId")?,
+            expected_revision: unsigned(&envelope.payload, "expectedRevision")?,
+            locked: boolean(&envelope.payload, "locked")?,
         }),
         "replaceTrackWorkflowCatalog" => Ok(SessionCommand::ReplaceTrackWorkflowCatalog {
             expected_revision: unsigned(&envelope.payload, "expectedRevision")?,

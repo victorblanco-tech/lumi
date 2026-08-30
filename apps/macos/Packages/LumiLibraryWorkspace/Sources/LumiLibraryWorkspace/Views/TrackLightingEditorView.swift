@@ -100,6 +100,7 @@ public struct TrackLightingEditorView: View {
             Divider().overlay(Color.white.opacity(0.12))
             transport
             editToolbar
+            phraseProtectionPanel
             workflowAttentionPanel
             versionSuccessorPanel
             sourceReconciliationPanel
@@ -139,11 +140,14 @@ public struct TrackLightingEditorView: View {
             return .handled
         }
         .onKeyPress("p") {
+            guard phrasesAreEditable else { return .ignored }
             if let roleID = selectedPhrase?.roleID { placePhrasePoint(roleID: roleID) }
             return .handled
         }
         .onKeyPress(.delete) {
-            guard analysis.phrases.count > 1, let index = selectedPhraseIndex else { return .ignored }
+            guard phrasesAreEditable,
+                  analysis.phrases.count > 1,
+                  let index = selectedPhraseIndex else { return .ignored }
             deleteSelected(absorbPrevious: index > 0)
             return .handled
         }
@@ -200,6 +204,31 @@ public struct TrackLightingEditorView: View {
             metric("REMAIN", formatEditorTime(remainingMillis))
             metric("BAR · BEAT", barBeatLabel)
             if rendersInteractiveControls {
+                Button {
+                    onTrackWorkflowMutation(
+                        .setPhraseProtection(
+                            trackID: analysis.track.id,
+                            expectedRevision: analysis.track.phraseProtection.revision,
+                            locked: !analysis.track.phraseProtection.locked
+                        )
+                    )
+                } label: {
+                    Label(
+                        analysis.track.phraseProtection.locked ? "Protected" : "Protect Phrases",
+                        systemImage: analysis.track.phraseProtection.locked ? "lock.fill" : "lock.open"
+                    )
+                    .foregroundStyle(
+                        analysis.track.phraseProtection.locked ? LumiColor.success : secondary
+                    )
+                }
+                .buttonStyle(.borderless)
+                .help(
+                    analysis.track.phraseProtection.locked
+                        ? "Unlock deliberate Lumi phrase edits. USB beatgrid and source updates remain allowed and still require review."
+                        : "Protect Lumi phrase points, roles and Autoloop choices against accidental editing or replacement. USB beatgrid updates still synchronize and appear for review."
+                )
+                .accessibilityIdentifier("lumi.trackEditor.phraseProtection")
+
                 Menu {
                     ForEach(availableWorkflowSteps) { step in
                         Button {
@@ -264,6 +293,7 @@ public struct TrackLightingEditorView: View {
                     "Copy an existing Lumi-authored phrase timeline into this track as a new revision. "
                         + "Only exact beat-compatible versions can be applied automatically."
                 )
+                .disabled(analysis.track.phraseProtection.locked)
                 .accessibilityIdentifier("lumi.trackEditor.reusePhrases")
             }
             if !isEmbedded {
@@ -296,6 +326,31 @@ public struct TrackLightingEditorView: View {
             WorkflowStepDefinition(id: "in-progress", displayName: "In Progress", icon: "circle.lefthalf.filled", colorRGB: 0xFF9F0A, sortOrder: 2, archived: false, rules: []),
             WorkflowStepDefinition(id: "ready-for-show", displayName: "Ready for Show", icon: "checkmark.circle.fill", colorRGB: 0x30D158, sortOrder: 3, archived: false, rules: []),
         ]
+    }
+
+    private var phrasesAreEditable: Bool {
+        rendersInteractiveControls && !analysis.track.phraseProtection.locked
+    }
+
+    @ViewBuilder
+    private var phraseProtectionPanel: some View {
+        if analysis.track.phraseProtection.locked {
+            HStack(spacing: 10) {
+                Image(systemName: "lock.fill")
+                    .foregroundStyle(LumiColor.success)
+                Text("Lumi phrases are protected")
+                    .font(LumiTypography.metadata.weight(.semibold))
+                Text("Phrase points, roles and Autoloop choices are read-only. USB beatgrid changes still synchronize and appear in review.")
+                    .font(LumiTypography.caption)
+                    .foregroundStyle(secondary)
+                    .lineLimit(1)
+                Spacer()
+            }
+            .padding(.horizontal, 20)
+            .frame(height: 34)
+            .background(LumiColor.success.opacity(0.08))
+            .accessibilityIdentifier("lumi.trackEditor.phraseProtectionNotice")
+        }
     }
 
     @ViewBuilder
@@ -445,10 +500,12 @@ public struct TrackLightingEditorView: View {
                     }
                     Spacer()
                     Button(editorCopy("editor.keepLumi")) { onSourceReconcile(.keepLumi) }
+                        .disabled(analysis.track.phraseProtection.locked)
                     Button(editorCopy("editor.rebase")) { onSourceReconcile(.rebase) }
-                        .disabled(refresh.metadataOnly)
+                        .disabled(refresh.metadataOnly || analysis.track.phraseProtection.locked)
                     Button(editorCopy("editor.replaceSource")) { onSourceReconcile(.replaceWithSource) }
                         .tint(Color.orange)
+                        .disabled(analysis.track.phraseProtection.locked)
                 }
                 if !refresh.conflicts.isEmpty {
                     HStack(spacing: 8) {
@@ -493,6 +550,7 @@ public struct TrackLightingEditorView: View {
                         }
                         .buttonStyle(.borderedProminent)
                         .tint(accent)
+                        .disabled(analysis.track.phraseProtection.locked)
                     }
                 }
                 if !refresh.rebaseAmbiguities.isEmpty {
@@ -701,6 +759,7 @@ public struct TrackLightingEditorView: View {
         .padding(.horizontal, 20)
         .frame(height: 44)
         .background(panel.opacity(0.72))
+        .disabled(!phrasesAreEditable)
     }
 
     private var phraseInspector: some View {
@@ -712,6 +771,7 @@ public struct TrackLightingEditorView: View {
                 .stroke(Color.white.opacity(0.12), lineWidth: 1)
         }
         .accessibilityIdentifier("lumi.trackEditor.inspector")
+        .disabled(!phrasesAreEditable)
     }
 
     private var phraseInspectorContent: some View {
@@ -832,7 +892,8 @@ public struct TrackLightingEditorView: View {
             .gesture(
                 DragGesture(minimumDistance: 0)
                     .onChanged { value in
-                        if draggingBoundaryAfterPhraseIndex == nil,
+                        if phrasesAreEditable,
+                           draggingBoundaryAfterPhraseIndex == nil,
                            value.startLocation.y >= phraseLaneTop(height: proxy.size.height),
                            let boundary = boundaryIndex(
                                atX: value.startLocation.x,
@@ -841,7 +902,7 @@ public struct TrackLightingEditorView: View {
                            ) {
                             draggingBoundaryAfterPhraseIndex = boundary
                         }
-                        if let boundary = draggingBoundaryAfterPhraseIndex {
+                        if phrasesAreEditable, let boundary = draggingBoundaryAfterPhraseIndex {
                             updatePendingBoundary(
                                 boundary,
                                 atX: value.location.x,
@@ -854,7 +915,8 @@ public struct TrackLightingEditorView: View {
                         }
                     }
                     .onEnded { value in
-                        if let boundary = draggingBoundaryAfterPhraseIndex,
+                        if phrasesAreEditable,
+                           let boundary = draggingBoundaryAfterPhraseIndex,
                            let beat = pendingBoundaryBeat {
                             onTimelineEdit(
                                 .moveBoundary(afterPhraseIndex: boundary, toBeat: beat)

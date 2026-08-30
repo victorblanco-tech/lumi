@@ -1436,7 +1436,19 @@ public struct LibrarySnapshotDecoder: Sendable {
                     syncDisposition: try string(source, "syncDisposition")
                 )
             },
-            workflow: workflow
+            workflow: workflow,
+            phraseProtection: try decodePhraseProtection(object["phraseProtection"])
+        )
+    }
+
+    private func decodePhraseProtection(_ value: JSONValue?) throws -> TrackPhraseProtectionState {
+        guard let value, value != .null else { return .unlocked }
+        guard case let .object(protection) = value else {
+            throw LibrarySnapshotError.invalidObject
+        }
+        return TrackPhraseProtectionState(
+            locked: try boolean(protection, "locked"),
+            revision: try unsigned(protection, "revision")
         )
     }
 

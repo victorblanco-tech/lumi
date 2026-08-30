@@ -341,6 +341,7 @@ public enum EngineCommand: Equatable, Sendable {
     )
     case resolveTrackWorkflowAttention(trackID: UInt64, expectedRevision: UInt64)
     case assignTrackWorkflowStep(trackID: UInt64, expectedRevision: UInt64, stepID: String)
+    case setTrackPhraseProtection(trackID: UInt64, expectedRevision: UInt64, locked: Bool)
     case replaceTrackWorkflowCatalog(expectedRevision: UInt64, steps: [EngineWorkflowStep])
     case reuseLibraryTimeline(
         sourceTrackID: UInt64,
@@ -531,6 +532,13 @@ public enum EngineCommand: Equatable, Sendable {
                 "trackId": .number(Double(trackID)),
                 "expectedRevision": .number(Double(expectedRevision)),
                 "stepId": .string(stepID)
+            ]
+        case let .setTrackPhraseProtection(trackID, expectedRevision, locked):
+            return [
+                "kind": .string("setTrackPhraseProtection"),
+                "trackId": .number(Double(trackID)),
+                "expectedRevision": .number(Double(expectedRevision)),
+                "locked": .boolean(locked)
             ]
         case let .replaceTrackWorkflowCatalog(expectedRevision, steps):
             return [
