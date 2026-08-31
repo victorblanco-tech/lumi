@@ -41,7 +41,9 @@ SoundSwitch MIDI execution.
 
 Progress: direct Pro DJ Link is the sole Connected Deck provider and the
 authenticated product command surfaces no longer expose XML or direct local
-Rekordbox database ingestion. Mounted OneLibrary USB media remains supported.
+Rekordbox database ingestion. The unreachable macOS XML discovery and mirror
+presentation has also been removed. Mounted OneLibrary USB media remains
+supported.
 
 ### E8-04 – Data-lane isolation and maintainability
 
@@ -53,7 +55,9 @@ Rekordbox database ingestion. Mounted OneLibrary USB media remains supported.
 
 Progress: USB work has one supervised out-of-process route and is rejected by
 the realtime command protocol. SQLite contention and durability policy are
-explicit, bounded and covered by a real two-connection lock-release test.
+explicit, bounded and covered by a real two-connection lock-release test. The
+permanently disabled predictive scheduler has been deleted, leaving one tested
+exactly-once AutoLoop execution implementation.
 
 ### E8-05 – Quality and release evidence
 

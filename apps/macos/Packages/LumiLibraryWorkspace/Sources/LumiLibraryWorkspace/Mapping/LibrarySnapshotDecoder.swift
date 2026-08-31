@@ -35,8 +35,6 @@ public struct LibrarySnapshotDecoder: Sendable {
             deckInputIntegration: try decodeDeckInputIntegration(
                 envelope.payload["deckInputIntegration"]
             ),
-            rekordboxSyncPreview: state.rekordboxSyncPreview,
-            rekordboxMirror: state.rekordboxMirror,
             rekordboxDevices: state.rekordboxDevices,
             rekordboxDeviceInspection: state.rekordboxDeviceInspection,
             dataManagement: state.dataManagement,
@@ -123,10 +121,6 @@ public struct LibrarySnapshotDecoder: Sendable {
             deckInputIntegration: try decodeDeckInputIntegration(
                 envelope.payload["deckInputIntegration"]
             ),
-            rekordboxSyncPreview: try decodeRekordboxSyncPreview(
-                library["rekordboxSyncPreview"]
-            ),
-            rekordboxMirror: try decodeRekordboxMirror(library["rekordboxMirror"]),
             rekordboxDevices: try decodeRekordboxDevices(library["rekordboxDevices"]),
             rekordboxDeviceInspection: try decodeRekordboxDeviceInspection(
                 library["rekordboxDeviceInspection"]
@@ -416,99 +410,6 @@ public struct LibrarySnapshotDecoder: Sendable {
             fileData: component("fileData"),
             rekordboxPhrases: component("rekordboxPhrases"),
             waveform: component("waveform")
-        )
-    }
-
-    private func decodeRekordboxSyncPreview(
-        _ value: JSONValue?
-    ) throws -> RekordboxXMLSyncPreview? {
-        guard let value, value != .null else { return nil }
-        guard case let .object(preview) = value else {
-            throw LibrarySnapshotError.invalidObject
-        }
-        let playlistValues = try array(preview, "playlists")
-        guard !playlistValues.isEmpty, playlistValues.count <= 20_000 else {
-            throw LibrarySnapshotError.unboundedRekordboxSyncPreview
-        }
-        let playlists = try playlistValues.map { value -> RekordboxXMLSyncPlaylist in
-            guard case let .object(playlist) = value else {
-                throw LibrarySnapshotError.invalidObject
-            }
-            return RekordboxXMLSyncPlaylist(
-                path: try string(playlist, "path"),
-                name: try string(playlist, "name"),
-                trackCount: try unsigned(playlist, "trackCount")
-            )
-        }
-        let diagnostics = try object(preview, "diagnostics")
-        let diff = try object(preview, "diff")
-        let followedPlaylistCount = try unsigned(preview, "followedPlaylistCount")
-        let contentSHA256 = try string(preview, "contentSha256")
-        let selectionPaths = try strings(preview, "selectionPaths")
-        let applyState = try string(preview, "applyState")
-        guard followedPlaylistCount == UInt64(playlists.count),
-              Set(playlists.map(\.path)).count == playlists.count,
-              contentSHA256.count == 64,
-              contentSHA256.allSatisfy({ $0.isHexDigit }),
-              !selectionPaths.isEmpty,
-              selectionPaths.count <= 20_000,
-              Set(selectionPaths).count == selectionPaths.count,
-              ["ready", "applied"].contains(applyState) else {
-            throw LibrarySnapshotError.invalidRekordboxSyncPreview
-        }
-        return RekordboxXMLSyncPreview(
-            exportFileName: try string(preview, "exportFileName"),
-            contentSHA256: contentSHA256,
-            productVersion: try string(preview, "productVersion"),
-            collectionTrackCount: try unsigned(preview, "collectionTrackCount"),
-            followedPlaylistCount: followedPlaylistCount,
-            uniqueTrackCount: try unsigned(preview, "uniqueTrackCount"),
-            selectionPaths: selectionPaths,
-            includeFutureChildPlaylists: try boolean(
-                preview,
-                "includeFutureChildPlaylists"
-            ),
-            playlists: playlists,
-            diagnostics: RekordboxXMLSyncDiagnostics(
-                duplicatePlaylistReferences: try unsigned(
-                    diagnostics,
-                    "duplicatePlaylistReferences"
-                ),
-                missingArtist: try unsigned(diagnostics, "missingArtist"),
-                missingBPM: try unsigned(diagnostics, "missingBpm"),
-                missingKey: try unsigned(diagnostics, "missingKey"),
-                missingDuration: try unsigned(diagnostics, "missingDuration"),
-                missingBeatGrid: try unsigned(diagnostics, "missingBeatGrid"),
-                missingColour: try unsigned(diagnostics, "missingColour"),
-                missingWaveform: try unsigned(diagnostics, "missingWaveform"),
-                missingPhrases: try unsigned(diagnostics, "missingPhrases")
-            ),
-            diff: RekordboxXMLSyncDiff(
-                inserted: try unsigned(diff, "inserted"),
-                updated: try unsigned(diff, "updated"),
-                unchanged: try unsigned(diff, "unchanged"),
-                archived: try unsigned(diff, "archived"),
-                restored: try unsigned(diff, "restored")
-            ),
-            applyState: applyState
-        )
-    }
-
-    private func decodeRekordboxMirror(_ value: JSONValue?) throws -> RekordboxMirrorState? {
-        guard let value, value != .null else { return nil }
-        guard case let .object(mirror) = value else {
-            throw LibrarySnapshotError.invalidObject
-        }
-        let analysisState = try string(mirror, "analysisState")
-        guard analysisState == "pending" else {
-            throw LibrarySnapshotError.invalidObject
-        }
-        return RekordboxMirrorState(
-            revision: try string(mirror, "revision"),
-            activeTracks: try unsigned(mirror, "activeTracks"),
-            archivedTracks: try unsigned(mirror, "archivedTracks"),
-            playlists: try unsigned(mirror, "playlists"),
-            analysisState: analysisState
         )
     }
 
@@ -1646,8 +1547,6 @@ public enum LibrarySnapshotError: Error, Equatable {
     case invalidPhraseRoleSettings
     case unboundedAutoloopCatalog
     case invalidAutoloopCatalog
-    case unboundedRekordboxSyncPreview
-    case invalidRekordboxSyncPreview
 }
 
 private extension Optional {

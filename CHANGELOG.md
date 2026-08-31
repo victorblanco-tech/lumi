@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.5.2-dev-5 - 2026-08-31
+
+### Changed
+
+- Removes the unreachable Rekordbox XML discovery, mirror and direct-analysis
+  presentation from the macOS product; trusted OneLibrary USB sources remain
+  the single supported ingestion workflow.
+- Deletes the permanently disabled predictive AutoLoop scheduler so the tested
+  exactly-once execution lane is the only runtime implementation.
+- Moves the large session, library and SQLite fault-test modules into focused
+  source files without weakening their access to private implementation seams.
+- Adds architecture guards against restoring retired UI and timing paths.
+
 ## 0.5.2-dev-4 - 2026-08-31
 
 ### Changed

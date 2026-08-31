@@ -678,60 +678,6 @@ struct LibraryWorkspaceTests {
         #expect(refreshed.abletonLinkIntegration?.receivedAnchorCount == 5_700)
     }
 
-    @Test("Rekordbox sync preview decodes a bounded, hash-bound apply plan")
-    func decodesRekordboxSyncPreview() throws {
-        let state = try LibrarySnapshotDecoder().decode(
-            envelope(
-                trackValues: [trackValue()],
-                rekordboxSyncPreview: .object([
-                    "exportFileName": .string("rekordbox.xml"),
-                    "contentSha256": .string(String(repeating: "a", count: 64)),
-                    "productVersion": .string("7.2.0"),
-                    "collectionTrackCount": .number(2_954),
-                    "followedPlaylistCount": .number(1),
-                    "uniqueTrackCount": .number(42),
-                    "selectionPaths": .array([.string("Sets/Beach Set")]),
-                    "includeFutureChildPlaylists": .boolean(true),
-                    "playlists": .array([
-                        .object([
-                            "path": .string("Sets/Beach Set"),
-                            "folderNames": .array([.string("Sets")]),
-                            "name": .string("Beach Set"),
-                            "trackCount": .number(42)
-                        ])
-                    ]),
-                    "diagnostics": .object([
-                        "duplicatePlaylistReferences": .number(1),
-                        "missingArtist": .number(0),
-                        "missingBpm": .number(0),
-                        "missingKey": .number(1),
-                        "missingDuration": .number(0),
-                        "missingBeatGrid": .number(2),
-                        "missingColour": .number(30),
-                        "missingWaveform": .number(42),
-                        "missingPhrases": .number(42)
-                    ]),
-                    "diff": .object([
-                        "inserted": .number(40),
-                        "updated": .number(1),
-                        "unchanged": .number(1),
-                        "archived": .number(2),
-                        "restored": .number(0)
-                    ]),
-                    "applyState": .string("ready")
-                ])
-            )
-        )
-
-        let preview = try #require(state.rekordboxSyncPreview)
-        #expect(preview.uniqueTrackCount == 42)
-        #expect(preview.playlists.map(\.path) == ["Sets/Beach Set"])
-        #expect(preview.diagnostics.missingWaveform == 42)
-        #expect(preview.diff.inserted == 40)
-        #expect(preview.diff.archived == 2)
-        #expect(preview.applyState == "ready")
-    }
-
     @Test("USB inspection exposes a bounded playlist selection before sync")
     func decodesUSBPlaylistInspection() throws {
         let state = try LibrarySnapshotDecoder().decode(
@@ -1455,7 +1401,6 @@ private func envelope(
     midiClockIntegration: JSONValue = .null,
     abletonLinkIntegration: JSONValue = .null,
     deckInputIntegration: JSONValue = .null,
-    rekordboxSyncPreview: JSONValue = .null,
     rekordboxDevices: JSONValue = .null,
     rekordboxDeviceInspection: JSONValue = .null,
     dataManagement: JSONValue = .null,
@@ -1520,7 +1465,6 @@ private func envelope(
                 "editor": editorValue,
                 "phraseRoleSettings": phraseRoleSettings,
                 "autoloopCatalog": autoloopCatalog,
-                "rekordboxSyncPreview": rekordboxSyncPreview,
                 "rekordboxDevices": rekordboxDevices,
                 "rekordboxDeviceInspection": rekordboxDeviceInspection,
                 "dataManagement": dataManagement

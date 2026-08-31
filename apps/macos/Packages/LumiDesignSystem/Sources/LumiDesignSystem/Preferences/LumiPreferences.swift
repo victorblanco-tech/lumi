@@ -94,12 +94,6 @@ public enum LumiPreferenceKey {
         "co.victorblan.tech.lumi.navigation.auto-hide"
     public static let preferredDeckSourceMode =
         "co.victorblan.tech.lumi.live.preferred-deck-source-mode"
-    public static let rekordboxXMLFolder =
-        "co.victorblan.tech.lumi.rekordboxXML.folder"
-    public static let rekordboxXMLIncludeFutureChildren =
-        "co.victorblan.tech.lumi.rekordboxXML.includeFutureChildren"
-    public static let rekordboxXMLFollowedPaths =
-        "co.victorblan.tech.lumi.rekordboxXML.followedPaths"
     public static let rekordboxDeviceRoot =
         "co.victorblan.tech.lumi.rekordboxDevice.root"
     public static let rekordboxDevicePlaylistSelections =

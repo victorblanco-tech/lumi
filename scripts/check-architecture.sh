@@ -113,6 +113,18 @@ if find "$repository_root/apps/macos" -type f -name '*.swift' -print0 \
   exit 1
 fi
 
+if find "$repository_root/apps/macos" -type f -name '*.swift' -print0 \
+  | xargs -0 grep -Eq 'RekordboxXML(SourceState|DiscoveryService|SyncPreview)|rekordboxSyncPreview|rekordboxMirror'; then
+  echo "ERROR: the macOS product must not restore the retired Rekordbox XML/mirror UI." >&2
+  exit 1
+fi
+
+if grep -Eq '#\[cfg\(any\(\)\)\]' \
+  "$repository_root/engine/crates/lumi-engine/src/session.rs"; then
+  echo "ERROR: disabled timing implementations must be deleted, not hidden behind cfg(any())." >&2
+  exit 1
+fi
+
 if sed -n '1,/^#\[cfg(test)\]/p' \
   "$repository_root/engine/crates/lumi-engine/src/commands.rs" \
   | grep -Eq 'previewRekordboxXmlSync|applyRekordboxXmlSync|importRekordboxAnalysis|inspectRekordboxDevice|syncRekordboxDevice|resolveRekordboxDeviceConflict'; then
