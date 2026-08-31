@@ -77,23 +77,6 @@ pub enum SessionCommand {
         expected_revision: u64,
     },
     PreviewDemoSourceRefresh,
-    PreviewRekordboxXmlSync {
-        folder: String,
-        followed_paths: Vec<String>,
-        include_future_child_playlists: bool,
-    },
-    ApplyRekordboxXmlSync {
-        folder: String,
-        followed_paths: Vec<String>,
-        include_future_child_playlists: bool,
-        expected_content_sha256: String,
-    },
-    ImportRekordboxAnalysis {
-        folder: String,
-        followed_paths: Vec<String>,
-        include_future_child_playlists: bool,
-        expected_content_sha256: String,
-    },
     InspectRekordboxDevice {
         root: String,
         source_id: Option<String>,
@@ -298,9 +281,6 @@ impl SessionCommand {
             | Self::ReplaceTrackWorkflowCatalog { .. }
             | Self::ResolveTrackWorkflowAttention { .. }
             | Self::PreviewDemoSourceRefresh
-            | Self::PreviewRekordboxXmlSync { .. }
-            | Self::ApplyRekordboxXmlSync { .. }
-            | Self::ImportRekordboxAnalysis { .. }
             | Self::InspectRekordboxDevice { .. }
             | Self::SyncRekordboxDevice { .. }
             | Self::ResolveRekordboxDeviceConflict { .. }
@@ -351,9 +331,7 @@ impl SessionCommand {
     pub const fn changes_library_revision(&self) -> bool {
         matches!(
             self,
-            Self::ApplyRekordboxXmlSync { .. }
-                | Self::ImportRekordboxAnalysis { .. }
-                | Self::SyncRekordboxDevice { .. }
+            Self::SyncRekordboxDevice { .. }
                 | Self::ResolveRekordboxDeviceConflict { .. }
                 | Self::SetTrackPreparationStatus { .. }
                 | Self::AssignTrackWorkflowStep { .. }
@@ -448,32 +426,6 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
         }),
         "closeLibraryTrackEditor" => Ok(SessionCommand::CloseLibraryTrackEditor),
         "previewDemoSourceRefresh" => Ok(SessionCommand::PreviewDemoSourceRefresh),
-        "previewRekordboxXmlSync" => Ok(SessionCommand::PreviewRekordboxXmlSync {
-            folder: string(&envelope.payload, "folder")?.to_owned(),
-            followed_paths: string_array(&envelope.payload, "followedPaths")?,
-            include_future_child_playlists: boolean(
-                &envelope.payload,
-                "includeFutureChildPlaylists",
-            )?,
-        }),
-        "applyRekordboxXmlSync" => Ok(SessionCommand::ApplyRekordboxXmlSync {
-            folder: string(&envelope.payload, "folder")?.to_owned(),
-            followed_paths: string_array(&envelope.payload, "followedPaths")?,
-            include_future_child_playlists: boolean(
-                &envelope.payload,
-                "includeFutureChildPlaylists",
-            )?,
-            expected_content_sha256: string(&envelope.payload, "expectedContentSha256")?.to_owned(),
-        }),
-        "importRekordboxAnalysis" => Ok(SessionCommand::ImportRekordboxAnalysis {
-            folder: string(&envelope.payload, "folder")?.to_owned(),
-            followed_paths: string_array(&envelope.payload, "followedPaths")?,
-            include_future_child_playlists: boolean(
-                &envelope.payload,
-                "includeFutureChildPlaylists",
-            )?,
-            expected_content_sha256: string(&envelope.payload, "expectedContentSha256")?.to_owned(),
-        }),
         "inspectRekordboxDevice" => Ok(SessionCommand::InspectRekordboxDevice {
             root: string(&envelope.payload, "root")?.to_owned(),
             source_id: optional_string(&envelope.payload, "sourceId").map(str::to_owned),
@@ -1155,29 +1107,6 @@ fn workflow_steps(
         .collect()
 }
 
-fn string_array(
-    payload: &serde_json::Map<String, Value>,
-    field: &'static str,
-) -> Result<Vec<String>, CommandDecodeError> {
-    let values = payload
-        .get(field)
-        .and_then(Value::as_array)
-        .ok_or(CommandDecodeError::InvalidField(field))?;
-    if values.is_empty() || values.len() > 20_000 {
-        return Err(CommandDecodeError::InvalidField(field));
-    }
-    values
-        .iter()
-        .map(|value| {
-            value
-                .as_str()
-                .filter(|text| !text.is_empty() && text.len() <= 2_048)
-                .map(str::to_owned)
-                .ok_or(CommandDecodeError::InvalidField(field))
-        })
-        .collect()
-}
-
 fn u32_array(
     payload: &serde_json::Map<String, Value>,
     field: &'static str,
@@ -1666,57 +1595,17 @@ mod tests {
     }
 
     #[test]
-    fn rekordbox_preview_decodes_exact_bounded_selection() {
+    fn retired_rekordbox_xml_commands_are_rejected() {
         let envelope = command_envelope(serde_json::json!({
             "kind": "previewRekordboxXmlSync",
-            "folder": "/Music/Rekordbox XML",
-            "followedPaths": ["Sets/Beach Set", "Genre 5 Stars"],
-            "includeFutureChildPlaylists": true,
-        }));
-
-        assert_eq!(
-            decode_command(&envelope),
-            Ok(SessionCommand::PreviewRekordboxXmlSync {
-                folder: "/Music/Rekordbox XML".to_owned(),
-                followed_paths: vec!["Sets/Beach Set".to_owned(), "Genre 5 Stars".to_owned(),],
-                include_future_child_playlists: true,
-            })
-        );
-    }
-
-    #[test]
-    fn rekordbox_preview_rejects_an_empty_selection() {
-        let envelope = command_envelope(serde_json::json!({
-            "kind": "previewRekordboxXmlSync",
-            "folder": "/Music/Rekordbox XML",
-            "followedPaths": [],
-            "includeFutureChildPlaylists": true,
-        }));
-
-        assert_eq!(
-            decode_command(&envelope),
-            Err(CommandDecodeError::InvalidField("followedPaths"))
-        );
-    }
-
-    #[test]
-    fn rekordbox_analysis_import_is_bound_to_the_expected_export() {
-        let envelope = command_envelope(serde_json::json!({
-            "kind": "importRekordboxAnalysis",
             "folder": "/Music/Rekordbox XML",
             "followedPaths": ["Sets/Beach Set"],
             "includeFutureChildPlaylists": true,
-            "expectedContentSha256": "abc123",
         }));
 
         assert_eq!(
             decode_command(&envelope),
-            Ok(SessionCommand::ImportRekordboxAnalysis {
-                folder: "/Music/Rekordbox XML".to_owned(),
-                followed_paths: vec!["Sets/Beach Set".to_owned()],
-                include_future_child_playlists: true,
-                expected_content_sha256: "abc123".to_owned(),
-            })
+            Err(CommandDecodeError::UnsupportedKind)
         );
     }
 

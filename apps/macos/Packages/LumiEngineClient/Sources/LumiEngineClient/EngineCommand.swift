@@ -354,23 +354,6 @@ public enum EngineCommand: Equatable, Sendable {
         expectedTargetRevision: UInt64
     )
     case previewDemoSourceRefresh
-    case previewRekordboxXMLSync(
-        folder: String,
-        followedPaths: [String],
-        includeFutureChildPlaylists: Bool
-    )
-    case applyRekordboxXMLSync(
-        folder: String,
-        followedPaths: [String],
-        includeFutureChildPlaylists: Bool,
-        expectedContentSHA256: String
-    )
-    case importRekordboxAnalysis(
-        folder: String,
-        followedPaths: [String],
-        includeFutureChildPlaylists: Bool,
-        expectedContentSHA256: String
-    )
     case inspectRekordboxDevice(root: String, sourceID: String? = nil)
     case syncRekordboxDevice(root: String, sourceID: String? = nil, playlistIDs: [UInt32])
     case resolveRekordboxDeviceConflict(
@@ -562,43 +545,6 @@ public enum EngineCommand: Equatable, Sendable {
             ]
         case .previewDemoSourceRefresh:
             return ["kind": .string("previewDemoSourceRefresh")]
-        case let .previewRekordboxXMLSync(
-            folder,
-            followedPaths,
-            includeFutureChildPlaylists
-        ):
-            return [
-                "kind": .string("previewRekordboxXmlSync"),
-                "folder": .string(folder),
-                "followedPaths": .array(followedPaths.map(JSONValue.string)),
-                "includeFutureChildPlaylists": .boolean(includeFutureChildPlaylists)
-            ]
-        case let .applyRekordboxXMLSync(
-            folder,
-            followedPaths,
-            includeFutureChildPlaylists,
-            expectedContentSHA256
-        ):
-            return [
-                "kind": .string("applyRekordboxXmlSync"),
-                "folder": .string(folder),
-                "followedPaths": .array(followedPaths.map(JSONValue.string)),
-                "includeFutureChildPlaylists": .boolean(includeFutureChildPlaylists),
-                "expectedContentSha256": .string(expectedContentSHA256)
-            ]
-        case let .importRekordboxAnalysis(
-            folder,
-            followedPaths,
-            includeFutureChildPlaylists,
-            expectedContentSHA256
-        ):
-            return [
-                "kind": .string("importRekordboxAnalysis"),
-                "folder": .string(folder),
-                "followedPaths": .array(followedPaths.map(JSONValue.string)),
-                "includeFutureChildPlaylists": .boolean(includeFutureChildPlaylists),
-                "expectedContentSha256": .string(expectedContentSHA256)
-            ]
         case let .inspectRekordboxDevice(root, sourceID):
             var payload: [String: JSONValue] = [
                 "kind": .string("inspectRekordboxDevice"),

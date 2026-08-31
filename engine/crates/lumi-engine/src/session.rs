@@ -3361,46 +3361,6 @@ fn apply_command(
             runtime.library_worker.preview_demo_source_refresh()?;
             return Ok(());
         }
-        SessionCommand::PreviewRekordboxXmlSync {
-            folder,
-            followed_paths,
-            include_future_child_playlists,
-        } => {
-            runtime.library_worker.preview_rekordbox_xml_sync(
-                folder,
-                followed_paths,
-                include_future_child_playlists,
-            )?;
-            return Ok(());
-        }
-        SessionCommand::ApplyRekordboxXmlSync {
-            folder,
-            followed_paths,
-            include_future_child_playlists,
-            expected_content_sha256,
-        } => {
-            runtime.library_worker.apply_rekordbox_xml_sync(
-                folder,
-                followed_paths,
-                include_future_child_playlists,
-                &expected_content_sha256,
-            )?;
-            return Ok(());
-        }
-        SessionCommand::ImportRekordboxAnalysis {
-            folder,
-            followed_paths,
-            include_future_child_playlists,
-            expected_content_sha256,
-        } => {
-            runtime.library_worker.import_rekordbox_analysis(
-                folder,
-                followed_paths,
-                include_future_child_playlists,
-                &expected_content_sha256,
-            )?;
-            return Ok(());
-        }
         SessionCommand::InspectRekordboxDevice { root, source_id } => {
             runtime
                 .library_worker
@@ -3983,9 +3943,6 @@ fn apply_command(
         | SessionCommand::ReplaceTrackWorkflowCatalog { .. }
         | SessionCommand::ResolveTrackWorkflowAttention { .. }
         | SessionCommand::PreviewDemoSourceRefresh
-        | SessionCommand::PreviewRekordboxXmlSync { .. }
-        | SessionCommand::ApplyRekordboxXmlSync { .. }
-        | SessionCommand::ImportRekordboxAnalysis { .. }
         | SessionCommand::InspectRekordboxDevice { .. }
         | SessionCommand::SyncRekordboxDevice { .. }
         | SessionCommand::ResolveRekordboxDeviceConflict { .. }
@@ -4389,17 +4346,6 @@ fn application_error_envelope(
                 .insert("actualAutoloopCatalogRevision".to_owned(), json!(actual));
             envelope
         }),
-        CommandApplicationError::Library(library_error @ LibraryWorkerError::RekordboxXml(_)) => {
-            error_envelope(
-                sequence,
-                correlation_id,
-                "validationFailed",
-                "rekordboxXmlPreviewRejected",
-                &library_error.to_string(),
-                false,
-                None,
-            )
-        }
         CommandApplicationError::Library(
             library_error @ (LibraryWorkerError::RekordboxDevice(_)
             | LibraryWorkerError::InvalidRekordboxDeviceRoot),
@@ -4413,19 +4359,13 @@ fn application_error_envelope(
             None,
         ),
         CommandApplicationError::Library(
-            library_error @ (LibraryWorkerError::RekordboxResolver(_)
-            | LibraryWorkerError::RekordboxAnalysis(_)
-            | LibraryWorkerError::RekordboxInstallationUnavailable
-            | LibraryWorkerError::RekordboxPreviewChanged
-            | LibraryWorkerError::IncompleteRekordboxResolution { .. }
-            | LibraryWorkerError::IncompleteRekordboxAnalysis { .. }
+            library_error @ (LibraryWorkerError::RekordboxAnalysis(_)
             | LibraryWorkerError::MissingRekordboxTrackAnalysis(_)
             | LibraryWorkerError::InvalidRekordboxMetadata { .. }
             | LibraryWorkerError::IncompleteRekordboxBeatGrid
             | LibraryWorkerError::IncompleteRekordboxPhrases
             | LibraryWorkerError::InvalidRekordboxBeatGrid(_)
-            | LibraryWorkerError::InvalidRekordboxTrack(_)
-            | LibraryWorkerError::InvalidRekordboxBaseline(_)),
+            | LibraryWorkerError::InvalidRekordboxTrack(_)),
         ) => error_envelope(
             sequence,
             correlation_id,

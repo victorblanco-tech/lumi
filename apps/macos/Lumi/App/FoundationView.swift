@@ -122,25 +122,6 @@ struct FoundationView: View {
                         onPhraseRoleMutation: { request in
                             Task { await engineStatus.mutatePhraseRoles(request) }
                         },
-                        onRekordboxSyncPreview: { request in
-                            Task { await engineStatus.previewRekordboxXMLSync(request) }
-                        },
-                        onRekordboxSyncApply: { request, expectedContentSHA256 in
-                            Task {
-                                await engineStatus.applyRekordboxXMLSync(
-                                    request,
-                                    expectedContentSHA256: expectedContentSHA256
-                                )
-                            }
-                        },
-                        onRekordboxAnalysisImport: { request, expectedContentSHA256 in
-                            Task {
-                                await engineStatus.importRekordboxAnalysis(
-                                    request,
-                                    expectedContentSHA256: expectedContentSHA256
-                                )
-                            }
-                        },
                         onRekordboxDeviceInspect: { root, sourceID in
                             Task {
                                 await engineStatus.inspectRekordboxDevice(

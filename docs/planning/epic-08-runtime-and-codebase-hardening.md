@@ -39,6 +39,10 @@ SoundSwitch MIDI execution.
 - remove Rekordbox XML/direct-database product commands and hidden UI;
 - keep only bounded test tooling where it still provides unique evidence.
 
+Progress: direct Pro DJ Link is the sole Connected Deck provider and the
+authenticated product command surfaces no longer expose XML or direct local
+Rekordbox database ingestion. Mounted OneLibrary USB media remains supported.
+
 ### E8-04 – Data-lane isolation and maintainability
 
 - explicit SQLite busy/durability policy;

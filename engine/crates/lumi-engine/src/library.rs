@@ -10,15 +10,14 @@ use lumi_domain::{
 };
 use lumi_library::{
     AutoloopCatalog, AutoloopCatalogError, AutoloopResolutionReason, AutoloopVariantMove, BeatGrid,
-    BeatMarker, HotCue, ImportedLibraryBaseline, ImportedPlaylist, ImportedTrackAnalysis,
-    LibraryRepository, LibraryTrackQuery, LibraryTrackSort, LibraryTrackSortDirection,
-    LibraryTrackSortField, LumiPhraseTimeline, PhraseInstance, PhraseLoopStrategy, PhraseRole,
-    PhraseRoleCatalogError, PhraseRoleId, PhraseRoleMove, PlaylistId, RawPhraseObservation,
-    ReconcileError, ReconcilePreview, ReconcileStrategy, SourceChangeClass, SourceMirrorDiff,
-    SourceMirrorPlaylist, SourceMirrorSnapshot, SourceMirrorTrack, SourcePhraseMapping,
-    SourcePlaylistId, SourceRevision, SourceTrackDiff, TimelineEditCommand, TimelineEditError,
-    TimelineRevision, TimelineRevisionOrigin, TimelineRevisionReason, TimelineRevisionSummary,
-    TrackColor, TrackPageRequest, TrackPreparationStatus, TrackSummary, TrackWorkflowFilter,
+    BeatMarker, HotCue, ImportedLibraryBaseline, ImportedTrackAnalysis, LibraryRepository,
+    LibraryTrackQuery, LibraryTrackSort, LibraryTrackSortDirection, LibraryTrackSortField,
+    LumiPhraseTimeline, PhraseInstance, PhraseLoopStrategy, PhraseRole, PhraseRoleCatalogError,
+    PhraseRoleId, PhraseRoleMove, PlaylistId, RawPhraseObservation, ReconcileError,
+    ReconcilePreview, ReconcileStrategy, SourceChangeClass, SourcePhraseMapping, SourceRevision,
+    SourceTrackDiff, TimelineEditCommand, TimelineEditError, TimelineRevision,
+    TimelineRevisionOrigin, TimelineRevisionReason, TimelineRevisionSummary, TrackColor,
+    TrackPageRequest, TrackPreparationStatus, TrackSummary, TrackWorkflowFilter,
     TrackWorkflowState, VariantId, WaveformPoint, WorkflowStepDefinition, reconcile_timeline,
 };
 use lumi_library_demo::{DemoLibraryError, DemoLibraryRevision, DemoLibrarySourceProvider};
@@ -42,12 +41,6 @@ use lumi_rekordbox_device::{
     DeviceError, DeviceLibrarySnapshot, DeviceTrack, REKORDBOX_TRACK_COLORS,
     audio_content_signature, read_device_library,
 };
-use lumi_rekordbox_resolver::{
-    DatabaseKey, RequestedTrack, ResolverError, SqlCipherResolver, create_database_snapshot,
-};
-use lumi_rekordbox_xml::{
-    RekordboxXmlError, RekordboxXmlMirrorSnapshot, RekordboxXmlSyncRequest, load_latest_mirror,
-};
 use serde_json::{Value, json};
 use thiserror::Error;
 
@@ -57,10 +50,7 @@ use crate::phrase_role_defaults::{
 };
 
 const DEFAULT_PAGE_LIMIT: u16 = 50;
-const REKORDBOX_XML_SOURCE_ID: &str = "rekordbox-xml-local";
-const REKORDBOX_XML_SOURCE_KIND: &str = "rekordbox-xml";
 const REKORDBOX_CANONICAL_SOURCE_ID: &str = "rekordbox7-local";
-const REKORDBOX_CANONICAL_SOURCE_KIND: &str = "rekordbox7";
 const MAX_IMPORTED_WAVEFORM_POINTS: usize = 16_384;
 const MAX_DECK_WAVEFORM_PREVIEW_POINTS: usize = 1_024;
 const MAX_DECK_WAVEFORM_DETAIL_POINTS: usize = 16_384;
@@ -111,9 +101,6 @@ pub struct LibraryWorker {
     sort: LibraryTrackSort,
     editor_track_id: Option<TrackId>,
     pending_source_refresh: Option<ImportedLibraryBaseline>,
-    pending_rekordbox_preview: Option<RekordboxXmlMirrorSnapshot>,
-    pending_rekordbox_diff: Option<SourceMirrorDiff>,
-    last_rekordbox_apply: Option<SourceMirrorDiff>,
     pending_device_inspection: Option<DeviceInspection>,
     device_review_comparisons_by_source: BTreeMap<String, BTreeMap<u32, DeviceReviewComparison>>,
     pending_library_reset: Option<LibraryResetPreviewState>,
@@ -1119,9 +1106,6 @@ impl LibraryWorker {
             sort: LibraryTrackSort::default(),
             editor_track_id: None,
             pending_source_refresh: None,
-            pending_rekordbox_preview: None,
-            pending_rekordbox_diff: None,
-            last_rekordbox_apply: None,
             pending_device_inspection: None,
             device_review_comparisons_by_source: BTreeMap::new(),
             pending_library_reset: None,
@@ -1153,9 +1137,6 @@ impl LibraryWorker {
         self.repository
             .restore_consistent_backup(source, rollback)?;
         self.pending_source_refresh = None;
-        self.pending_rekordbox_preview = None;
-        self.pending_rekordbox_diff = None;
-        self.last_rekordbox_apply = None;
         self.pending_device_inspection = None;
         self.device_review_comparisons_by_source.clear();
         self.pending_library_reset = None;
@@ -1331,140 +1312,12 @@ impl LibraryWorker {
         self.repository
             .reset_library_content(&preview.preserve_track_ids)?;
         self.pending_library_reset = None;
-        self.pending_rekordbox_preview = None;
-        self.pending_rekordbox_diff = None;
-        self.last_rekordbox_apply = None;
         self.pending_device_inspection = None;
         self.device_review_comparisons_by_source.clear();
         self.editor_track_id = None;
         self.playlist_id = None;
         self.search.clear();
         self.offset = 0;
-        Ok(())
-    }
-
-    pub fn preview_rekordbox_xml_sync(
-        &mut self,
-        folder: String,
-        followed_paths: Vec<String>,
-        include_future_child_playlists: bool,
-    ) -> Result<(), LibraryWorkerError> {
-        let request = RekordboxXmlSyncRequest::try_new(
-            folder,
-            followed_paths,
-            include_future_child_playlists,
-        )?;
-        let preview = load_latest_mirror(&request)?;
-        let mirror = rekordbox_mirror_snapshot(&preview)?;
-        self.pending_rekordbox_diff = Some(self.repository.preview_source_mirror(&mirror)?);
-        self.pending_rekordbox_preview = Some(preview);
-        self.last_rekordbox_apply = None;
-        Ok(())
-    }
-
-    pub fn apply_rekordbox_xml_sync(
-        &mut self,
-        folder: String,
-        followed_paths: Vec<String>,
-        include_future_child_playlists: bool,
-        expected_content_sha256: &str,
-    ) -> Result<(), LibraryWorkerError> {
-        let request = RekordboxXmlSyncRequest::try_new(
-            folder,
-            followed_paths,
-            include_future_child_playlists,
-        )?;
-        let fresh = load_latest_mirror(&request)?;
-        let pending = self
-            .pending_rekordbox_preview
-            .as_ref()
-            .ok_or(LibraryWorkerError::NoPendingRekordboxPreview)?;
-        if fresh.content_sha256() != expected_content_sha256
-            || pending.content_sha256() != expected_content_sha256
-            || pending.selection_paths() != fresh.selection_paths()
-            || pending.include_future_child_playlists() != fresh.include_future_child_playlists()
-        {
-            return Err(LibraryWorkerError::RekordboxPreviewChanged);
-        }
-        let mirror = rekordbox_mirror_snapshot(&fresh)?;
-        let applied = self.repository.apply_source_mirror(&mirror)?;
-        self.pending_rekordbox_diff = Some(self.repository.preview_source_mirror(&mirror)?);
-        self.pending_rekordbox_preview = Some(fresh);
-        self.last_rekordbox_apply = Some(applied);
-        Ok(())
-    }
-
-    pub fn import_rekordbox_analysis(
-        &mut self,
-        folder: String,
-        followed_paths: Vec<String>,
-        include_future_child_playlists: bool,
-        expected_content_sha256: &str,
-    ) -> Result<(), LibraryWorkerError> {
-        let request = RekordboxXmlSyncRequest::try_new(
-            folder,
-            followed_paths,
-            include_future_child_playlists,
-        )?;
-        let snapshot = load_latest_mirror(&request)?;
-        if snapshot.content_sha256() != expected_content_sha256 {
-            return Err(LibraryWorkerError::RekordboxPreviewChanged);
-        }
-        let paths = RekordboxInstallationPaths::discover()?;
-        let temporary = RekordboxImportTemporaryRoot::create()?;
-        let database_snapshot =
-            create_database_snapshot(&paths.database, temporary.path().join("master.snapshot.db"))?;
-        let requested = snapshot
-            .tracks()
-            .iter()
-            .map(|track| RequestedTrack::try_new(track.source_track_id(), track.location()))
-            .collect::<Result<Vec<_>, _>>()?;
-        let resolver = SqlCipherResolver::try_new(paths.sqlcipher)?;
-        let key = DatabaseKey::rekordbox7_bundled()?;
-        let resolved =
-            resolver.resolve(&database_snapshot, &key, &paths.analysis_root, requested)?;
-        if resolved.report.resolved_tracks != snapshot.tracks().len()
-            || resolved.report.missing_database_rows != 0
-            || resolved.report.missing_analysis_paths != 0
-            || resolved.report.audio_path_mismatches != 0
-        {
-            return Err(LibraryWorkerError::IncompleteRekordboxResolution {
-                requested: snapshot.tracks().len(),
-                resolved: resolved.report.resolved_tracks,
-                path_mismatches: resolved.report.audio_path_mismatches,
-            });
-        }
-        let analysis_request = ResolvedAnalysisRequest::try_new(
-            &paths.analysis_root,
-            temporary.path().join("analysis"),
-            resolved
-                .tracks
-                .values()
-                .map(|track| {
-                    ResolvedAnalysisTrack::try_new(track.source_track_id(), track.analysis_file())
-                })
-                .collect::<Result<Vec<_>, _>>()?,
-        )?;
-        let analysis = snapshot_resolved_analysis_data(&analysis_request)?;
-        if analysis.tracks.len() != snapshot.tracks().len() {
-            return Err(LibraryWorkerError::IncompleteRekordboxAnalysis {
-                requested: snapshot.tracks().len(),
-                parsed: analysis.tracks.len(),
-            });
-        }
-        let baseline =
-            rekordbox_canonical_baseline(&snapshot, &analysis.tracks, database_snapshot.sha256())?;
-        self.repository.import_baseline(&baseline)?;
-        self.source_id = baseline.source_id().as_str().to_owned();
-        self.source_kind = baseline.source_kind().to_owned();
-        self.source_name = baseline.display_name().to_owned();
-        self.source_revision = baseline.source_revision().as_str().to_owned();
-        self.search.clear();
-        self.playlist_id = None;
-        self.offset = 0;
-        self.editor_track_id = None;
-        self.pending_source_refresh = None;
-        self.ensure_imported_timelines()?;
         Ok(())
     }
 
@@ -3245,8 +3098,6 @@ impl LibraryWorker {
                 "status": if self.pending_source_refresh.is_some() { "changesAvailable" } else { "current" },
             },
             "sourceRefresh": source_refresh,
-            "rekordboxSyncPreview": self.rekordbox_sync_preview_json(),
-            "rekordboxMirror": self.rekordbox_mirror_json()?,
             "rekordboxDeviceInspection": if include_device_inspection {
                 self.rekordbox_device_inspection_json()
             } else {
@@ -3438,48 +3289,6 @@ impl LibraryWorker {
         }))
     }
 
-    fn rekordbox_sync_preview_json(&self) -> Value {
-        let Some(preview) = &self.pending_rekordbox_preview else {
-            return Value::Null;
-        };
-        let diagnostics = preview.diagnostics();
-        let diff = self.pending_rekordbox_diff.unwrap_or_default();
-        json!({
-            "exportFileName": preview.export_path().file_name().and_then(|name| name.to_str()),
-            "contentSha256": preview.content_sha256(),
-            "productVersion": preview.product_version(),
-            "collectionTrackCount": preview.collection_track_count(),
-            "followedPlaylistCount": preview.playlists().len(),
-            "uniqueTrackCount": preview.tracks().len(),
-            "selectionPaths": preview.selection_paths(),
-            "includeFutureChildPlaylists": preview.include_future_child_playlists(),
-            "playlists": preview.playlists().iter().map(|playlist| json!({
-                "path": playlist.path(),
-                "name": playlist.name(),
-                "trackCount": playlist.track_ids().len(),
-            })).collect::<Vec<_>>(),
-            "diagnostics": {
-                "duplicatePlaylistReferences": diagnostics.duplicate_playlist_references,
-                "missingArtist": diagnostics.missing_artist,
-                "missingBpm": diagnostics.missing_bpm,
-                "missingKey": diagnostics.missing_key,
-                "missingDuration": diagnostics.missing_duration,
-                "missingBeatGrid": diagnostics.missing_beat_grid,
-                "missingColour": diagnostics.missing_colour,
-                "missingWaveform": diagnostics.missing_waveform,
-                "missingPhrases": diagnostics.missing_phrases,
-            },
-            "diff": {
-                "inserted": diff.inserted,
-                "updated": diff.updated,
-                "unchanged": diff.unchanged,
-                "archived": diff.archived,
-                "restored": diff.restored,
-            },
-            "applyState": if self.last_rekordbox_apply.is_some() { "applied" } else { "ready" },
-        })
-    }
-
     fn rekordbox_device_inspection_json(&self) -> Value {
         let Some(inspection) = &self.pending_device_inspection else {
             return Value::Null;
@@ -3519,30 +3328,6 @@ impl LibraryWorker {
                 }).collect::<Vec<_>>(),
             })).collect::<Vec<_>>(),
         })
-    }
-
-    fn rekordbox_mirror_json(&self) -> Result<Value, LibraryWorkerError> {
-        let source_id = lumi_library::LibrarySourceId::try_new(REKORDBOX_XML_SOURCE_ID)?;
-        let Some(summary) = self.repository.source_mirror_summary(&source_id)? else {
-            return Ok(Value::Null);
-        };
-        Ok(json!({
-            "sourceId": summary.source_id().as_str(),
-            "sourceKind": summary.source_kind(),
-            "displayName": summary.display_name(),
-            "revision": summary.source_revision().as_str(),
-            "activeTracks": summary.active_tracks(),
-            "archivedTracks": summary.archived_tracks(),
-            "playlists": summary.playlists(),
-            "analysisState": "pending",
-            "lastApply": self.last_rekordbox_apply.map(|diff| json!({
-                "inserted": diff.inserted,
-                "updated": diff.updated,
-                "unchanged": diff.unchanged,
-                "archived": diff.archived,
-                "restored": diff.restored,
-            })),
-        }))
     }
 
     fn phrase_role_settings_json(&self) -> Result<Value, LibraryWorkerError> {
@@ -4170,90 +3955,6 @@ fn workflow_json(workflow: &TrackWorkflowState) -> Value {
     })
 }
 
-fn rekordbox_mirror_snapshot(
-    snapshot: &RekordboxXmlMirrorSnapshot,
-) -> Result<SourceMirrorSnapshot, LibraryWorkerError> {
-    let tracks = snapshot
-        .tracks()
-        .iter()
-        .map(|track| {
-            let duration_millis = track
-                .total_time_seconds()
-                .map(|seconds| {
-                    seconds
-                        .checked_mul(1_000)
-                        .ok_or(LibraryWorkerError::RekordboxMirrorOverflow)
-                })
-                .transpose()?;
-            Ok(SourceMirrorTrack::try_new(
-                lumi_library::SourceTrackId::try_new(track.source_track_id())?,
-                track.title(),
-                track.artist().map(str::to_owned),
-                track.average_bpm().map(str::to_owned),
-                track.tonality().map(str::to_owned),
-                duration_millis,
-                track.colour().map(str::to_owned),
-                track.location(),
-            )?)
-        })
-        .collect::<Result<Vec<_>, LibraryWorkerError>>()?;
-    let playlists = snapshot
-        .playlists()
-        .iter()
-        .map(|playlist| {
-            let track_ids = playlist
-                .track_ids()
-                .iter()
-                .map(|track_id| lumi_library::SourceTrackId::try_new(track_id.clone()))
-                .collect::<Result<Vec<_>, _>>()?;
-            Ok(SourceMirrorPlaylist::try_new(
-                playlist.path(),
-                playlist.name(),
-                track_ids,
-            )?)
-        })
-        .collect::<Result<Vec<_>, LibraryWorkerError>>()?;
-    Ok(SourceMirrorSnapshot::try_new(
-        lumi_library::LibrarySourceId::try_new(REKORDBOX_XML_SOURCE_ID)?,
-        REKORDBOX_XML_SOURCE_KIND,
-        "Rekordbox XML",
-        SourceRevision::try_new(format!("sha256:{}", snapshot.content_sha256()))?,
-        tracks,
-        playlists,
-    )?)
-}
-
-struct RekordboxInstallationPaths {
-    database: PathBuf,
-    analysis_root: PathBuf,
-    sqlcipher: PathBuf,
-}
-
-impl RekordboxInstallationPaths {
-    fn discover() -> Result<Self, LibraryWorkerError> {
-        let home = std::env::var_os("HOME")
-            .map(PathBuf::from)
-            .ok_or(LibraryWorkerError::RekordboxInstallationUnavailable)?;
-        let database = home.join("Library/Pioneer/rekordbox/master.db");
-        let analysis_root = home.join("Library/Pioneer/rekordbox/share");
-        let sqlcipher = [
-            PathBuf::from("/opt/homebrew/bin/sqlcipher"),
-            PathBuf::from("/usr/local/bin/sqlcipher"),
-        ]
-        .into_iter()
-        .find(|path| path.is_file())
-        .ok_or(LibraryWorkerError::RekordboxInstallationUnavailable)?;
-        if !database.is_file() || !analysis_root.is_dir() {
-            return Err(LibraryWorkerError::RekordboxInstallationUnavailable);
-        }
-        Ok(Self {
-            database,
-            analysis_root,
-            sqlcipher,
-        })
-    }
-}
-
 struct RekordboxImportTemporaryRoot(PathBuf);
 
 impl RekordboxImportTemporaryRoot {
@@ -4279,103 +3980,6 @@ impl Drop for RekordboxImportTemporaryRoot {
     fn drop(&mut self) {
         let _ = fs::remove_dir_all(&self.0);
     }
-}
-
-fn rekordbox_canonical_baseline(
-    snapshot: &RekordboxXmlMirrorSnapshot,
-    analysis: &BTreeMap<String, ResolvedTrackAnalysis>,
-    database_sha256: &str,
-) -> Result<ImportedLibraryBaseline, LibraryWorkerError> {
-    let source_revision = SourceRevision::try_new(format!(
-        "xml:{}-db:{}-anlz2",
-        &snapshot.content_sha256()[..16],
-        &database_sha256[..16]
-    ))?;
-    let tracks = snapshot
-        .tracks()
-        .iter()
-        .map(|track| {
-            let parsed = analysis.get(track.source_track_id()).ok_or_else(|| {
-                LibraryWorkerError::MissingRekordboxTrackAnalysis(
-                    track.source_track_id().to_owned(),
-                )
-            })?;
-            let canonical_grid = canonical_beat_grid(parsed)?;
-            let beat_grid = canonical_grid.beat_grid;
-            let total_beats = u32::try_from(beat_grid.markers().len())
-                .map_err(|_| LibraryWorkerError::RekordboxImportOverflow)?;
-            let bpm_milli = parse_bpm_milli(track.average_bpm())
-                .or_else(|| median_analysis_bpm_milli(parsed))
-                .ok_or_else(|| LibraryWorkerError::InvalidRekordboxMetadata {
-                    track_id: track.source_track_id().to_owned(),
-                    field: "BPM",
-                })?;
-            let musical_key = parse_musical_key(track.tonality()).ok_or_else(|| {
-                LibraryWorkerError::InvalidRekordboxMetadata {
-                    track_id: track.source_track_id().to_owned(),
-                    field: "key",
-                }
-            })?;
-            let duration_millis = waveform_duration_millis(parsed)
-                .or_else(|| {
-                    track
-                        .total_time_seconds()
-                        .and_then(|seconds| seconds.checked_mul(1_000))
-                })
-                .or_else(|| inferred_duration_millis(&beat_grid, bpm_milli))
-                .ok_or(LibraryWorkerError::RekordboxImportOverflow)?;
-            let waveform = downsample_waveform(&parsed.waveform, MAX_IMPORTED_WAVEFORM_POINTS);
-            let phrases =
-                canonical_phrases(parsed, total_beats, canonical_grid.source_beat_offset)?;
-            ImportedTrackAnalysis::try_new(
-                lumi_library::SourceTrackId::try_new(track.source_track_id())?,
-                source_revision.clone(),
-                track.title(),
-                track.artist().unwrap_or("Unknown Artist"),
-                bpm_milli,
-                musical_key,
-                duration_millis,
-                track.colour().and_then(parse_track_color),
-                track.location(),
-                beat_grid,
-                waveform,
-                phrases,
-            )
-            .and_then(|track| track.with_hot_cues(canonical_hot_cues(parsed, duration_millis)?))
-            .map_err(LibraryWorkerError::InvalidRekordboxTrack)
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    let imported_ids = tracks
-        .iter()
-        .map(|track| track.source_track_id().as_str())
-        .collect::<BTreeSet<_>>();
-    let playlists = snapshot
-        .playlists()
-        .iter()
-        .map(|playlist| {
-            let track_ids = playlist
-                .track_ids()
-                .iter()
-                .filter(|track_id| imported_ids.contains(track_id.as_str()))
-                .map(|track_id| lumi_library::SourceTrackId::try_new(track_id.clone()))
-                .collect::<Result<Vec<_>, _>>()?;
-            ImportedPlaylist::try_new(
-                SourcePlaylistId::try_new(playlist.path())?,
-                playlist.name(),
-                track_ids,
-            )
-            .map_err(LibraryWorkerError::InvalidRekordboxBaseline)
-        })
-        .collect::<Result<Vec<_>, LibraryWorkerError>>()?;
-    ImportedLibraryBaseline::try_new(
-        lumi_library::LibrarySourceId::try_new(REKORDBOX_CANONICAL_SOURCE_ID)?,
-        REKORDBOX_CANONICAL_SOURCE_KIND,
-        "Rekordbox 7",
-        source_revision,
-        tracks,
-        playlists,
-    )
-    .map_err(LibraryWorkerError::InvalidRekordboxBaseline)
 }
 
 struct CanonicalBeatGrid {
@@ -4864,14 +4468,6 @@ fn waveform_duration_millis(parsed: &ResolvedTrackAnalysis) -> Option<u64> {
     (!parsed.waveform.is_empty()).then(|| frames.saturating_mul(1_000) / 150)
 }
 
-fn parse_bpm_milli(value: Option<&str>) -> Option<u32> {
-    let bpm = value?.trim().parse::<f64>().ok()?;
-    if !bpm.is_finite() || !(20.0..=300.0).contains(&bpm) {
-        return None;
-    }
-    u32::try_from((bpm * 1_000.0).round() as i64).ok()
-}
-
 fn median_analysis_bpm_milli(parsed: &ResolvedTrackAnalysis) -> Option<u32> {
     let mut values = parsed
         .beat_grid
@@ -4967,20 +4563,6 @@ fn camelot_key(number: u8, mode: char) -> Option<lumi_domain::MusicalKey> {
     ))
 }
 
-fn parse_track_color(value: &str) -> Option<TrackColor> {
-    let hexadecimal = value
-        .trim()
-        .strip_prefix('#')
-        .or_else(|| value.trim().strip_prefix("0x"))
-        .unwrap_or(value.trim());
-    let rgb = u32::from_str_radix(hexadecimal, 16).ok()?;
-    Some(TrackColor::new(
-        u8::try_from((rgb >> 16) & 0xFF).ok()?,
-        u8::try_from((rgb >> 8) & 0xFF).ok()?,
-        u8::try_from(rgb & 0xFF).ok()?,
-    ))
-}
-
 fn pitch_class_name(value: PitchClass) -> &'static str {
     match value {
         PitchClass::C => "c",
@@ -5017,10 +4599,6 @@ pub enum LibraryWorkerError {
     Persistence(#[from] SqliteLibraryError),
     #[error("Light Plan compilation failed: {0}")]
     LightPlan(#[from] LightPlanError),
-    #[error("Rekordbox XML source failed: {0}")]
-    RekordboxXml(#[from] RekordboxXmlError),
-    #[error("Rekordbox identity resolver failed: {0}")]
-    RekordboxResolver(#[from] ResolverError),
     #[error("Rekordbox analysis parser failed: {0}")]
     RekordboxAnalysis(#[from] AnalysisError),
     #[error("Rekordbox Device Library failed: {0}")]
@@ -5042,22 +4620,10 @@ pub enum LibraryWorkerError {
     },
     #[error("the USB review changed; refresh the source before choosing again")]
     DeviceReviewChanged,
-    #[error("Rekordbox is not installed in a supported local location")]
-    RekordboxInstallationUnavailable,
     #[error("the temporary Rekordbox import clock is unavailable")]
     RekordboxImportClock,
     #[error("Rekordbox import arithmetic overflowed")]
     RekordboxImportOverflow,
-    #[error(
-        "Rekordbox resolved {resolved} of {requested} selected tracks ({path_mismatches} path mismatches)"
-    )]
-    IncompleteRekordboxResolution {
-        requested: usize,
-        resolved: usize,
-        path_mismatches: usize,
-    },
-    #[error("Rekordbox parsed {parsed} of {requested} selected tracks")]
-    IncompleteRekordboxAnalysis { requested: usize, parsed: usize },
     #[error("Rekordbox analysis is missing for track {0}")]
     MissingRekordboxTrackAnalysis(String),
     #[error("Rekordbox track {track_id} has invalid {field} metadata")]
@@ -5081,8 +4647,6 @@ pub enum LibraryWorkerError {
     InvalidRekordboxBeatGrid(#[from] lumi_library::BeatGridValidationError),
     #[error("Rekordbox track is invalid: {0}")]
     InvalidRekordboxTrack(#[from] lumi_library::TrackValidationError),
-    #[error("Rekordbox baseline is invalid: {0}")]
-    InvalidRekordboxBaseline(#[from] lumi_library::LibraryBaselineValidationError),
     #[error("library query is invalid: {0}")]
     Query(#[from] lumi_library::TrackPageRequestError),
     #[error("phrase-role defaults failed: {0}")]
@@ -5095,14 +4659,6 @@ pub enum LibraryWorkerError {
     AutoloopCatalog(#[from] AutoloopCatalogError),
     #[error("invalid library identifier: {0}")]
     Identifier(#[from] lumi_library::TextIdentifierError),
-    #[error("source mirror is invalid: {0}")]
-    SourceMirror(#[from] lumi_library::SourceMirrorValidationError),
-    #[error("Rekordbox mirror duration overflowed")]
-    RekordboxMirrorOverflow,
-    #[error("there is no Rekordbox XML preview waiting to be applied")]
-    NoPendingRekordboxPreview,
-    #[error("the Rekordbox XML export or selection changed; preview again before Apply")]
-    RekordboxPreviewChanged,
     #[error("timeline edit was rejected: {0}")]
     TimelineEdit(#[from] TimelineEditError),
     #[error("persisted timeline is invalid: {0}")]

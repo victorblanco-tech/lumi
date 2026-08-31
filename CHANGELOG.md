@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.2-dev-3 - 2026-08-31
+
+### Changed
+
+- Retires the Rekordbox XML and direct local-database commands from the
+  authenticated engine protocol and macOS product command surface.
+- Keeps mounted Rekordbox OneLibrary USB media as the only supported product
+  ingestion path while preserving existing Production library data.
+- Adds an architecture gate that prevents the retired commands from returning.
+
 ## 0.5.2-dev-2 - 2026-08-31
 
 ### Changed

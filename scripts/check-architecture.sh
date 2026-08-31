@@ -67,6 +67,10 @@ reject_product_dependency \
   "engine/crates/lumi-engine/Cargo.toml" \
   'lumi-blt-midi' \
   "the production engine must use direct Pro DJ Link and may not link the retired BLT MIDI adapter."
+reject_product_dependency \
+  "engine/crates/lumi-engine/Cargo.toml" \
+  'lumi-rekordbox-(xml|resolver)' \
+  "the production engine must ingest Rekordbox data through mounted OneLibrary USB media only."
 reject_dependency \
   "engine/crates/lumi-library/Cargo.toml" \
   'lumi-(engine|simulator|planner|protocol|deck-source|lighting-output|output-dry-run|library-source|library-demo|library-sqlite)' \
@@ -106,6 +110,19 @@ reject_dependency \
 if find "$repository_root/apps/macos" -type f -name '*.swift' -print0 \
   | xargs -0 grep -Eq 'BeatLinkTriggerIntegrationView|BLT MIDI Deck Frame'; then
   echo "ERROR: the macOS product must not expose the retired BLT MIDI runtime path." >&2
+  exit 1
+fi
+
+if sed -n '1,/^#\[cfg(test)\]/p' \
+  "$repository_root/engine/crates/lumi-engine/src/commands.rs" \
+  | grep -Eq 'previewRekordboxXmlSync|applyRekordboxXmlSync|importRekordboxAnalysis'; then
+  echo "ERROR: retired Rekordbox XML and direct-database commands must not re-enter the engine protocol." >&2
+  exit 1
+fi
+
+if grep -Eq 'previewRekordboxXMLSync|applyRekordboxXMLSync|importRekordboxAnalysis' \
+  "$repository_root/apps/macos/Packages/LumiEngineClient/Sources/LumiEngineClient/EngineCommand.swift"; then
+  echo "ERROR: the macOS product command surface supports USB/OneLibrary ingestion only." >&2
   exit 1
 fi
 
