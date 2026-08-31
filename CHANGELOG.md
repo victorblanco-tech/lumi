@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.2-dev-6 - 2026-08-31
+
+### Changed
+
+- Adds Engine Client coverage to the fast native `dev` gate.
+- Adds an independent weekly/manual dependency and release-license audit while
+  keeping heavyweight security work away from ordinary pushes and pull
+  requests.
+- Validates the SPDX inventory and notices for the separately packaged Pro DJ
+  Link, Ableton Link and USB database runtimes.
+
 ## 0.5.2-dev-5 - 2026-08-31
 
 ### Changed

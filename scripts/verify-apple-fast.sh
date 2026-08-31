@@ -18,6 +18,7 @@ export SWIFTPM_MODULECACHE_OVERRIDE="$module_cache"
 cd "$repository_root"
 
 swift test -Xswiftc -warnings-as-errors --package-path apps/macos/Packages/LumiProtocol
+swift test -Xswiftc -warnings-as-errors --package-path apps/macos/Packages/LumiEngineClient
 swift test -Xswiftc -warnings-as-errors --package-path apps/macos/Packages/LumiDesignSystem
 swift test -Xswiftc -warnings-as-errors --package-path apps/macos/Packages/LumiLiveWorkspace
 swift test -Xswiftc -warnings-as-errors --package-path apps/macos/Packages/LumiLibraryWorkspace

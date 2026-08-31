@@ -66,6 +66,11 @@ exactly-once AutoLoop execution implementation.
 - full Rust, Apple, security, functional and technical gates;
 - headed macOS smoke test and clean 0.5.2 release artifact.
 
+Progress: the fast native development gate now includes the Engine Client
+package. Vulnerability and SPDX/license inventory checks run as a separate
+weekly or manual Linux workflow and therefore do not consume macOS minutes or
+delay every `dev` push.
+
 ## Acceptance
 
 - no local IPC operation can wait indefinitely;

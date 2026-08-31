@@ -84,6 +84,7 @@ required_paths=(
   "scripts/verify-functional.sh"
   "scripts/verify-technical.sh"
   "scripts/verify-security.sh"
+  "scripts/verify-license-inventory.sh"
   "scripts/verify-show-lab.sh"
   "scripts/verify-live-integration-soak.sh"
   "scripts/check-apple-test-exclusivity.sh"
@@ -162,6 +163,7 @@ fi
 
 foundation_workflow="$repository_root/.github/workflows/foundation.yml"
 development_workflow="$repository_root/.github/workflows/development.yml"
+security_workflow="$repository_root/.github/workflows/security.yml"
 if ! grep -Fq 'workflow_dispatch:' "$foundation_workflow" \
   || ! grep -Fq 'pull_request:' "$foundation_workflow" \
   || ! grep -Fq '      - main' "$foundation_workflow" \
@@ -202,6 +204,17 @@ if ! grep -Fq '      - dev' "$development_workflow" \
   || ! grep -Fq './scripts/verify-apple.sh' "$development_workflow" \
   || ! grep -Fq 'name: Development gate' "$development_workflow"; then
   echo "ERROR: dev pushes must use the classified fast development workflow." >&2
+  exit 1
+fi
+if ! grep -Fq 'workflow_dispatch:' "$security_workflow" \
+  || ! grep -Fq 'schedule:' "$security_workflow" \
+  || ! grep -Fq './scripts/verify-security.sh' "$security_workflow"; then
+  echo "ERROR: dependency and license auditing must be scheduled and manually runnable." >&2
+  exit 1
+fi
+if grep -Fq 'push:' "$security_workflow" \
+  || grep -Fq 'pull_request:' "$security_workflow"; then
+  echo "ERROR: the heavyweight security audit must not tax ordinary pushes or pull requests." >&2
   exit 1
 fi
 if grep -Eq '^[[:space:]]*(swift|xcodebuild)[[:space:]]' \
