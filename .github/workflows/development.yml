@@ -24,7 +24,7 @@ jobs:
       full: ${{ steps.changes.outputs.full }}
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -53,7 +53,7 @@ jobs:
     timeout-minutes: 5
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Verify documentation links and visual assets
         run: ./scripts/verify-docs.sh
 
@@ -65,7 +65,7 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Restore portable Rust build cache
         uses: actions/cache@v5
         with:
@@ -87,7 +87,7 @@ jobs:
     timeout-minutes: 15
     steps:
       - name: Check out repository
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
       - name: Set up Java 21 for a conservative full fallback
         if: needs.classify.outputs.full == '1'
         uses: actions/setup-java@v5
