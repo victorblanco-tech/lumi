@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.6.0-dev-2 - 2026-08-31
+
+### Changed
+
+- Starts the post-0.5.2 development line with a measured physical-master tempo
+  latency baseline as its first priority; the stable 0.5.2 behavior remains the
+  comparison point and Production data is not migrated automatically.
+
 ## 0.5.2 - 2026-08-31
 
 ### Changed

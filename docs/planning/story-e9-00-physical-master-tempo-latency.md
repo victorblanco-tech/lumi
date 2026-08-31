@@ -2,7 +2,7 @@
 
 - Status: **Planned — first delivery item for 0.6.0**
 - Priority: **P0 performance baseline**
-- Target: `0.6.0-dev-1`
+- Target: `0.6.0-dev-2`
 - Components: Pro DJ Link, Engine, Ableton Link, Diagnostics
 
 ## User outcome
@@ -65,4 +65,3 @@ must be measured separately.
 - continuous correction of SoundSwitch AutoLoops;
 - making the future iPhone client part of the realtime path;
 - treating visual waveform smoothness as proof of integration latency.
-
