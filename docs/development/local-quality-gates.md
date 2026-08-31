@@ -33,6 +33,8 @@ back to both full platform gates.
 classification and every affected child gate pass; a skipped irrelevant child
 job can therefore never weaken protection. The Foundation workflow does not run
 again after a merge to `main`, avoiding a duplicate full build.
+A merge-commit synchronization back to `dev` with an identical repository tree
+runs classification and the stable gate only.
 
 Public CI is an independent confirmation; the hardware-aware local and lab
 evidence remains mandatory for show-critical changes.

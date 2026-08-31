@@ -26,6 +26,7 @@ apple_only=$'docs=0\nrust=0\napple=1\nfull=0'
 safe_fallback=$'docs=0\nrust=1\napple=1\nfull=1'
 mixed_docs_apple=$'docs=1\nrust=0\napple=1\nfull=0'
 all_checks=$'docs=1\nrust=1\napple=1\nfull=1'
+no_file_changes=$'docs=0\nrust=0\napple=0\nfull=0'
 
 assert_classification "$docs_only" docs/assets/brand/lumi-github-header.svg
 assert_classification "$docs_only" README.md
@@ -35,5 +36,6 @@ assert_classification "$mixed_docs_apple" README.md apps/macos/Lumi/App/LumiApp.
 assert_classification "$safe_fallback" .github/workflows/foundation.yml
 assert_classification "$safe_fallback" future-platform/new-source.txt
 assert_classification "$all_checks" --all
+assert_classification "$no_file_changes" --from-git HEAD HEAD
 
 echo "CI change classification tests passed."
