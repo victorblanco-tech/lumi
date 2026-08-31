@@ -19,9 +19,9 @@
 </p>
 
 Lumi prepares the lighting for the track that is playing and the track that is
-coming next. It combines your own phrase structure with the beatgrid and deck
-state from the rekordbox ecosystem, then triggers the right SoundSwitch
-AutoLoop at the right moment.
+coming next. It combines your own phrase structure realtime with the beatgrid
+and deck state from the Pioneer DJ / AlphaTheta ecosystem, then triggers the
+right SoundSwitch AutoLoop at the right moment.
 
 The complete show runs locally on your Mac. SoundSwitch remains responsible for
 fixtures and DMX output; Lumi acts like a virtual lighting operator beside your

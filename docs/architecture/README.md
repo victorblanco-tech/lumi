@@ -43,6 +43,7 @@ Decision Records (ADR's) die de belangrijkste besluiten vastleggen.
 - [ADR-0034: Source-side realtime traffic classes](adr/0034-source-side-realtime-traffic-classes.md)
 - [ADR-0035: Compiled Light Plans and provider-specific modifiers](adr/0035-compiled-light-plans-and-provider-modifiers.md)
 - [ADR-0036: Phrase Role-owned visual identity](adr/0036-phrase-role-owned-visual-identity.md)
+- [ADR-0039: Bounded control plane and authoritative local identities](adr/0039-bounded-control-plane-and-authoritative-local-identities.md)
 
 Release- en deploymentmanagement staat in [`docs/release`](../release/README.md).
 

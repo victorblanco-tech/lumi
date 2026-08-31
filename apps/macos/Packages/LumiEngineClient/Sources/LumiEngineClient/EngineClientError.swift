@@ -9,7 +9,9 @@ public enum EngineClientError: Error, Equatable, LocalizedError, Sendable {
     case protocolMismatch(expected: Int, received: Int)
     case secureTokenGenerationFailed
     case connectionFailed
+    case connectionTimedOut
     case authenticationFailed
+    case requestTimedOut
     case connectionClosed
     case invalidInitialSnapshot
     case commandSequenceOverflow
@@ -36,8 +38,12 @@ public enum EngineClientError: Error, Equatable, LocalizedError, Sendable {
             "A secure local session could not be created."
         case .connectionFailed:
             "The app could not connect to the local Lumi engine."
+        case .connectionTimedOut:
+            "The local Lumi engine did not accept the connection in time."
         case .authenticationFailed:
             "The local Lumi engine rejected session authentication."
+        case .requestTimedOut:
+            "The local Lumi engine did not answer in time. Lumi will reconnect safely."
         case .connectionClosed:
             "The local Lumi engine connection closed unexpectedly."
         case .invalidInitialSnapshot:

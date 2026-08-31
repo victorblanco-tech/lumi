@@ -6,7 +6,6 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-lumi-blt-midi = { path = "../lumi-blt-midi" }
 lumi-deck-source = { path = "../lumi-deck-source" }
 lumi-domain = { path = "../lumi-domain" }
 lumi-lighting-output = { path = "../lumi-lighting-output" }
@@ -24,8 +23,6 @@ lumi-protocol = { path = "../lumi-protocol" }
 lumi-prolink-input = { path = "../lumi-prolink-input" }
 lumi-rekordbox-analysis = { path = "../lumi-rekordbox-analysis" }
 lumi-rekordbox-device = { path = "../lumi-rekordbox-device" }
-lumi-rekordbox-resolver = { path = "../lumi-rekordbox-resolver" }
-lumi-rekordbox-xml = { path = "../lumi-rekordbox-xml" }
 lumi-simulator = { path = "../lumi-simulator" }
 lumi-timing-output = { path = "../lumi-timing-output" }
 serde = { version = "1", features = ["derive"] }

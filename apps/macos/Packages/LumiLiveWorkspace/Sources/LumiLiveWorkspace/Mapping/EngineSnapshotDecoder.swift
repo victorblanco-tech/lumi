@@ -340,7 +340,7 @@ public struct EngineSnapshotDecoder: Sendable {
               case let .string(state) = input["state"],
               ["stopped", "ready"].contains(state),
               case let .string(protocolName) = input["protocol"],
-              !protocolName.isEmpty,
+              protocolName == "lumi-prolink-bridge",
               let protocolVersion = unsignedInteger(input["protocolVersion"]),
               protocolVersion > 0,
               let receivedMessageCount = unsignedInteger(input["receivedMessageCount"]),
@@ -358,10 +358,8 @@ public struct EngineSnapshotDecoder: Sendable {
         } else {
             false
         }
-        let isBLTMIDI = protocolName == "BLT MIDI Deck Frame"
         guard destinationName?.isEmpty != true,
-              lastDeckID.map({ (1...4).contains($0) }) ?? true,
-              lastFrameSequence.map({ !isBLTMIDI || $0 <= 127 }) ?? true else {
+              lastDeckID.map({ (1...4).contains($0) }) ?? true else {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
         return DeckInputIntegrationSnapshot(
@@ -792,6 +790,11 @@ public struct EngineSnapshotDecoder: Sendable {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
 
+        let hardwareModel = try optionalString(deck["hardwareModel"])
+        guard hardwareModel.map({ !$0.isEmpty && $0.count <= 64 }) ?? true else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+
         let bpmMilli: UInt64
         if deck["effectiveBpmMilli"] == nil {
             bpmMilli = trackBPMMilli
@@ -918,6 +921,7 @@ public struct EngineSnapshotDecoder: Sendable {
 
         return DeckSnapshot(
             deckID: deckID,
+            hardwareModel: hardwareModel,
             trackLoadID: trackLoadID,
             trackID: trackID,
             title: title,
@@ -1072,14 +1076,18 @@ public struct EngineSnapshotDecoder: Sendable {
               (16...4_096).contains(pointPayloads.count) else {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
+        let channelMaximum: UInt64 = switch source {
+        case "localLibrary", "localLibraryDetail": UInt64(UInt8.max)
+        default: 31
+        }
         let points = try pointPayloads.map { value in
             guard case let .object(point) = value,
                   let low = unsignedInteger(point["low"]),
                   let mid = unsignedInteger(point["mid"]),
                   let high = unsignedInteger(point["high"]),
-                  low <= 31,
-                  mid <= 31,
-                  high <= 31 else {
+                  low <= channelMaximum,
+                  mid <= channelMaximum,
+                  high <= channelMaximum else {
                 throw EngineSnapshotDecodingError.invalidSnapshot
             }
             return DeckWaveformPointSnapshot(

@@ -678,60 +678,6 @@ struct LibraryWorkspaceTests {
         #expect(refreshed.abletonLinkIntegration?.receivedAnchorCount == 5_700)
     }
 
-    @Test("Rekordbox sync preview decodes a bounded, hash-bound apply plan")
-    func decodesRekordboxSyncPreview() throws {
-        let state = try LibrarySnapshotDecoder().decode(
-            envelope(
-                trackValues: [trackValue()],
-                rekordboxSyncPreview: .object([
-                    "exportFileName": .string("rekordbox.xml"),
-                    "contentSha256": .string(String(repeating: "a", count: 64)),
-                    "productVersion": .string("7.2.0"),
-                    "collectionTrackCount": .number(2_954),
-                    "followedPlaylistCount": .number(1),
-                    "uniqueTrackCount": .number(42),
-                    "selectionPaths": .array([.string("Sets/Beach Set")]),
-                    "includeFutureChildPlaylists": .boolean(true),
-                    "playlists": .array([
-                        .object([
-                            "path": .string("Sets/Beach Set"),
-                            "folderNames": .array([.string("Sets")]),
-                            "name": .string("Beach Set"),
-                            "trackCount": .number(42)
-                        ])
-                    ]),
-                    "diagnostics": .object([
-                        "duplicatePlaylistReferences": .number(1),
-                        "missingArtist": .number(0),
-                        "missingBpm": .number(0),
-                        "missingKey": .number(1),
-                        "missingDuration": .number(0),
-                        "missingBeatGrid": .number(2),
-                        "missingColour": .number(30),
-                        "missingWaveform": .number(42),
-                        "missingPhrases": .number(42)
-                    ]),
-                    "diff": .object([
-                        "inserted": .number(40),
-                        "updated": .number(1),
-                        "unchanged": .number(1),
-                        "archived": .number(2),
-                        "restored": .number(0)
-                    ]),
-                    "applyState": .string("ready")
-                ])
-            )
-        )
-
-        let preview = try #require(state.rekordboxSyncPreview)
-        #expect(preview.uniqueTrackCount == 42)
-        #expect(preview.playlists.map(\.path) == ["Sets/Beach Set"])
-        #expect(preview.diagnostics.missingWaveform == 42)
-        #expect(preview.diff.inserted == 40)
-        #expect(preview.diff.archived == 2)
-        #expect(preview.applyState == "ready")
-    }
-
     @Test("USB inspection exposes a bounded playlist selection before sync")
     func decodesUSBPlaylistInspection() throws {
         let state = try LibrarySnapshotDecoder().decode(
@@ -960,16 +906,16 @@ struct LibraryWorkspaceTests {
         #expect(settings.mappingProfiles.first?.mappings.first?.roleID == "intro-outro")
     }
 
-    @Test("BLT MIDI input diagnostics decode independently from SoundSwitch output")
+    @Test("Pro DJ Link diagnostics decode independently from SoundSwitch output")
     func decodesDeckInputIntegration() throws {
         let state = try LibrarySnapshotDecoder().decode(
             envelope(
                 trackValues: [trackValue()],
                 deckInputIntegration: .object([
                     "state": .string("ready"),
-                    "destinationName": .string("Lumi Deck Input"),
-                    "protocol": .string("BLT MIDI Deck Frame"),
-                    "protocolVersion": .number(3),
+                    "destinationName": .null,
+                    "protocol": .string("lumi-prolink-bridge"),
+                    "protocolVersion": .number(1),
                     "receivedMessageCount": .number(48),
                     "invalidWordCount": .number(0),
                     "committedFrameCount": .number(3),
@@ -981,29 +927,11 @@ struct LibraryWorkspaceTests {
             )
         )
         let input = try #require(state.deckInputIntegration)
-        #expect(input.destinationName == "Lumi Deck Input")
+        #expect(input.destinationName == nil)
+        #expect(input.protocolName == "lumi-prolink-bridge")
         #expect(input.isReceiving)
         #expect(input.lastDeckID == 2)
         #expect(state.midiIntegration == nil)
-    }
-
-    @Test("BLT expression corrects the Shallow Playback Simulator without changing real deck tempo")
-    @MainActor
-    func bltExpressionHasSeparateSimulatorAndHardwareTempoPaths() {
-        let expression = BeatLinkTriggerIntegrationView.trackedUpdateExpression
-
-        #expect(expression.contains("simulating? (some? util/*simulating*)"))
-        #expect(expression.contains("(/ (* raw-track-bpm 10.0) pitch-scale)"))
-        #expect(expression.contains("(* raw-track-bpm 10.0)"))
-        #expect(expression.contains("(or effective-tempo 0.0)"))
-        #expect(expression.contains("sim-signature"))
-        #expect(expression.contains("[36 (chunk sim-signature 0)]"))
-        #expect(expression.contains("raw-position (playback-time status)"))
-        #expect(expression.contains("sampled-position (* 100 (quot current-position 100))"))
-        #expect(expression.contains(":lumi-last-frame frame-key"))
-        #expect(expression.contains("(>= (- now-ms last-sent-ms) 1000)"))
-        #expect(expression.contains("[41 (chunk sampled-position 0)]"))
-        #expect(expression.contains("[119 4]"))
     }
 
     @Test("Duplicate stable role IDs are rejected before Settings renders")
@@ -1473,7 +1401,6 @@ private func envelope(
     midiClockIntegration: JSONValue = .null,
     abletonLinkIntegration: JSONValue = .null,
     deckInputIntegration: JSONValue = .null,
-    rekordboxSyncPreview: JSONValue = .null,
     rekordboxDevices: JSONValue = .null,
     rekordboxDeviceInspection: JSONValue = .null,
     dataManagement: JSONValue = .null,
@@ -1538,7 +1465,6 @@ private func envelope(
                 "editor": editorValue,
                 "phraseRoleSettings": phraseRoleSettings,
                 "autoloopCatalog": autoloopCatalog,
-                "rekordboxSyncPreview": rekordboxSyncPreview,
                 "rekordboxDevices": rekordboxDevices,
                 "rekordboxDeviceInspection": rekordboxDeviceInspection,
                 "dataManagement": dataManagement

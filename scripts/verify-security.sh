@@ -81,4 +81,6 @@ if [[ "$finding_count" != "0" ]]; then
   exit 1
 fi
 
-echo "Local dependency security gate passed."
+"$script_dir/verify-license-inventory.sh"
+
+echo "Local dependency security and release-license gates passed."

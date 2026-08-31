@@ -1,0 +1,51 @@
+name: Security
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 5 * * 1"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: security-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dependencies:
+    name: Dependency and license audit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          ref: dev
+
+      - name: Set up Java 21 for Maven dependency resolution
+        uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: "21"
+
+      - name: Restore audit and dependency cache
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.cargo/bin/cargo-audit
+            ~/.cargo/registry
+            ~/.cargo/git
+            build/maven-repository
+          key: security-v1-${{ runner.os }}-${{ hashFiles('Cargo.lock', 'bridges/prolink/pom.xml', 'tools/prolink-simulator/pom.xml') }}
+          restore-keys: |
+            security-v1-${{ runner.os }}-
+
+      - name: Install pinned RustSec client when absent
+        run: |
+          if [[ ! -x "$HOME/.cargo/bin/cargo-audit" ]]; then
+            cargo install cargo-audit --version 0.22.2 --locked
+          fi
+
+      - name: Audit dependencies and release license inventory
+        run: ./scripts/verify-security.sh

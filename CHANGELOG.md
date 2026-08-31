@@ -1,5 +1,136 @@
 # Changelog
 
+## 0.5.2 - 2026-08-31
+
+### Changed
+
+- Bounds local control-plane operations and validates process ownership before
+  lifecycle actions, without moving UI or data work into realtime lanes.
+- Makes direct Pro DJ Link and trusted OneLibrary USB media the only supported
+  production providers; retired BLT, XML and direct Rekordbox-database product
+  paths are no longer exposed silently.
+- Isolates USB synchronization in a supervised worker and makes SQLite
+  durability, contention and recovery behavior explicit and regression-tested.
+- Shows the actual Pro DJ Link Player number and announced hardware model in
+  Live instead of invented Deck A/B labels.
+- Expands local and GitHub quality gates while keeping heavyweight dependency
+  and licence audits away from ordinary development pushes.
+
+### Fixed
+
+- Prevents equal-model trusted USB disks from appearing connected merely
+  because another disk can resolve a retained security bookmark.
+- Prevents the complete Live layout from being invalidated by metadata refresh
+  work several times per second.
+- Uses one full 8-bit RGB contract for bounded and detailed Library waveforms,
+  and rejects cancelled or stale raster results during track and zoom changes.
+
+### Compatibility
+
+- Preserves the existing 0.5.1 Production database and configuration; Dev data
+  remains isolated and is never packaged or copied automatically.
+- Apple Silicon and macOS 15 or newer.
+- Public Beta, ad-hoc signed and not notarized; macOS may require `Open Anyway`
+  on first launch.
+
+## 0.5.2-dev-9 - 2026-08-31
+
+### Fixed
+
+- Derives trusted USB connection state exclusively from the current mounted
+  volume inventory; a retained security bookmark can no longer make an absent
+  equal-model backup disk appear connected.
+- Uses one 8-bit RGB colour contract for bounded and detailed Library
+  waveforms, removing the muted-colour transition during every Live load.
+- Retries Local Playback's visual-only detail request on bounded UI-lane
+  contention and rejects a late result after the deck has loaded another
+  track, so a temporary busy client cannot leave muted fallback colours.
+- Cancels superseded waveform raster jobs and rejects stale results so a
+  previous track or zoom render cannot flash back into the Live surface.
+
+## 0.5.2-dev-8 - 2026-08-31
+
+### Fixed
+
+- Stops the Live metadata strip from invalidating the complete two-Player and
+  Library layout four times per second. Waveform and Light Plan motion remain
+  on their independent Core Animation clocks.
+- Prevents a loaded Local Playback Player from saturating the macOS main thread
+  and blocking a subsequent Player load.
+
+## 0.5.2-dev-7 - 2026-08-31
+
+### Changed
+
+- Replaces Deck A/B labels with the actual Pro DJ Link Player number throughout
+  Live and Local Playback.
+- Shows the exact detected hardware model beneath a connected Player number
+  without allowing presentation metadata to affect timing or planning.
+
+## 0.5.2-dev-6 - 2026-08-31
+
+### Changed
+
+- Adds Engine Client coverage to the fast native `dev` gate.
+- Adds an independent weekly/manual dependency and release-license audit while
+  keeping heavyweight security work away from ordinary pushes and pull
+  requests.
+- Validates the SPDX inventory and notices for the separately packaged Pro DJ
+  Link, Ableton Link and USB database runtimes.
+
+## 0.5.2-dev-5 - 2026-08-31
+
+### Changed
+
+- Removes the unreachable Rekordbox XML discovery, mirror and direct-analysis
+  presentation from the macOS product; trusted OneLibrary USB sources remain
+  the single supported ingestion workflow.
+- Deletes the permanently disabled predictive AutoLoop scheduler so the tested
+  exactly-once execution lane is the only runtime implementation.
+- Moves the large session, library and SQLite fault-test modules into focused
+  source files without weakening their access to private implementation seams.
+- Adds architecture guards against restoring retired UI and timing paths.
+
+## 0.5.2-dev-4 - 2026-08-31
+
+### Changed
+
+- Removes USB inspection, synchronization and conflict resolution from the
+  realtime engine protocol; these operations now have one isolated worker path.
+- Makes SQLite WAL, NORMAL durability, checkpoint cadence and the two-second
+  contention deadline explicit and regression-tested.
+- Ensures ordinary USB commit overlap can recover while a stalled data process
+  remains bounded and cannot occupy Pro DJ Link, Ableton Link or MIDI output.
+
+## 0.5.2-dev-3 - 2026-08-31
+
+### Changed
+
+- Retires the Rekordbox XML and direct local-database commands from the
+  authenticated engine protocol and macOS product command surface.
+- Keeps mounted Rekordbox OneLibrary USB media as the only supported product
+  ingestion path while preserving existing Production library data.
+- Adds an architecture gate that prevents the retired commands from returning.
+
+## 0.5.2-dev-2 - 2026-08-31
+
+### Changed
+
+- Makes direct Pro DJ Link the only production Connected Deck provider.
+- Removes the retired Beat Link Trigger MIDI input, virtual destination,
+  diagnostics UI and silent runtime fallback from the macOS product.
+- Adds an architecture gate that prevents the product engine or Swift UI from
+  reintroducing the BLT runtime path accidentally.
+
+## 0.5.2-dev-1 - 2026-08-31
+
+### Changed
+
+- Starts the 0.5.2 runtime and codebase hardening cycle from the public 0.5.1
+  product baseline. The work is deliberately limited to reliability,
+  maintainability, security and regression protection; it does not add a new
+  show workflow or alter Production data automatically.
+
 ## 0.6.0-dev-1 - 2026-08-30
 
 ### Changed

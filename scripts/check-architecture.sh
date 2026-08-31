@@ -63,6 +63,14 @@ reject_dependency \
   "engine/crates/lumi-prolink-input/Cargo.toml" \
   'lumi-(engine|simulator|planner|protocol|library|lighting-output|midi-output|midi-coremidi|blt-midi)' \
   "the direct Pro DJ Link input boundary may not depend on engine, planning, library, output, MIDI, or BLT adapters."
+reject_product_dependency \
+  "engine/crates/lumi-engine/Cargo.toml" \
+  'lumi-blt-midi' \
+  "the production engine must use direct Pro DJ Link and may not link the retired BLT MIDI adapter."
+reject_product_dependency \
+  "engine/crates/lumi-engine/Cargo.toml" \
+  'lumi-rekordbox-(xml|resolver)' \
+  "the production engine must ingest Rekordbox data through mounted OneLibrary USB media only."
 reject_dependency \
   "engine/crates/lumi-library/Cargo.toml" \
   'lumi-(engine|simulator|planner|protocol|deck-source|lighting-output|output-dry-run|library-source|library-demo|library-sqlite)' \
@@ -98,5 +106,42 @@ reject_dependency \
   "apps/macos/Packages/LumiLibraryWorkspace/Package.swift" \
   'Lumi(EngineClient|LiveWorkspace)' \
   "LumiLibraryWorkspace must remain independent from process ownership and other features."
+
+if find "$repository_root/apps/macos" -type f -name '*.swift' -print0 \
+  | xargs -0 grep -Eq 'BeatLinkTriggerIntegrationView|BLT MIDI Deck Frame'; then
+  echo "ERROR: the macOS product must not expose the retired BLT MIDI runtime path." >&2
+  exit 1
+fi
+
+if find "$repository_root/apps/macos" -type f -name '*.swift' -print0 \
+  | xargs -0 grep -Eq 'RekordboxXML(SourceState|DiscoveryService|SyncPreview)|rekordboxSyncPreview|rekordboxMirror'; then
+  echo "ERROR: the macOS product must not restore the retired Rekordbox XML/mirror UI." >&2
+  exit 1
+fi
+
+if grep -Eq '#\[cfg\(any\(\)\)\]' \
+  "$repository_root/engine/crates/lumi-engine/src/session.rs"; then
+  echo "ERROR: disabled timing implementations must be deleted, not hidden behind cfg(any())." >&2
+  exit 1
+fi
+
+if sed -n '1,/^#\[cfg(test)\]/p' \
+  "$repository_root/engine/crates/lumi-engine/src/commands.rs" \
+  | grep -Eq 'previewRekordboxXmlSync|applyRekordboxXmlSync|importRekordboxAnalysis|inspectRekordboxDevice|syncRekordboxDevice|resolveRekordboxDeviceConflict'; then
+  echo "ERROR: library ingestion must stay outside the realtime engine protocol." >&2
+  exit 1
+fi
+
+if grep -Eq 'previewRekordboxXMLSync|applyRekordboxXMLSync|importRekordboxAnalysis|inspectRekordboxDevice|syncRekordboxDevice|resolveRekordboxDeviceConflict' \
+  "$repository_root/apps/macos/Packages/LumiEngineClient/Sources/LumiEngineClient/EngineCommand.swift"; then
+  echo "ERROR: removable-media work must use the isolated bounded worker." >&2
+  exit 1
+fi
+
+if grep -Eq 'TimelineView[[:space:]]*\(' \
+  "$repository_root/apps/macos/Packages/LumiLiveWorkspace/Sources/LumiLiveWorkspace/Views/LiveDeckSurface.swift"; then
+  echo "ERROR: deck motion must stay on isolated Core Animation clocks; a SwiftUI timeline invalidates the full Live layout." >&2
+  exit 1
+fi
 
 echo "Architecture dependency check passed."

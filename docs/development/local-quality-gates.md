@@ -36,6 +36,12 @@ again after a merge to `main`, avoiding a duplicate full build.
 A merge-commit synchronization back to `dev` with an identical repository tree
 runs classification and the stable gate only.
 
+`LumiEngineClient` is part of the fast native gate because it owns the bounded
+desktop-to-service control plane. Dependency vulnerability and release-license
+auditing run in a separate weekly/manual Linux workflow, never on an ordinary
+`dev` push. Dependabot remains the early-update signal; the audit is the
+independent evidence before a release.
+
 Public CI is an independent confirmation; the hardware-aware local and lab
 evidence remains mandatory for show-critical changes.
 

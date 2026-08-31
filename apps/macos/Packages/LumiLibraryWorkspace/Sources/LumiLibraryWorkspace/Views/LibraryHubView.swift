@@ -28,9 +28,6 @@ public struct LibraryHubView: View {
     private let onTrackWorkflowMutation: @MainActor (TrackWorkflowMutationRequest) -> Void
     private let onLoadOnLocalDeck: @MainActor (LibraryDeckLoadRequest) -> Void
     private let onPhraseRoleMutation: @Sendable (PhraseRoleMutationRequest) -> Void
-    private let onRekordboxSyncPreview: @Sendable (RekordboxXMLSyncPreviewRequest) -> Void
-    private let onRekordboxSyncApply: @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void
-    private let onRekordboxAnalysisImport: @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void
     private let onRekordboxDeviceInspect: @Sendable (String, String?) -> Void
     private let onRekordboxDeviceSync: @Sendable (String, String?, [UInt32]) -> Void
     private let onRekordboxDeviceConflictResolution: @Sendable (USBConflictResolutionRequest) -> Void
@@ -58,9 +55,6 @@ public struct LibraryHubView: View {
         onTrackWorkflowMutation: @escaping @MainActor (TrackWorkflowMutationRequest) -> Void = { _ in },
         onLoadOnLocalDeck: @escaping @MainActor (LibraryDeckLoadRequest) -> Void = { _ in },
         onPhraseRoleMutation: @escaping @Sendable (PhraseRoleMutationRequest) -> Void = { _ in },
-        onRekordboxSyncPreview: @escaping @Sendable (RekordboxXMLSyncPreviewRequest) -> Void = { _ in },
-        onRekordboxSyncApply: @escaping @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void = { _, _ in },
-        onRekordboxAnalysisImport: @escaping @Sendable (RekordboxXMLSyncPreviewRequest, String) -> Void = { _, _ in },
         onRekordboxDeviceInspect: @escaping @Sendable (String, String?) -> Void = { _, _ in },
         onRekordboxDeviceSync: @escaping @Sendable (String, String?, [UInt32]) -> Void = { _, _, _ in },
         onRekordboxDeviceConflictResolution: @escaping @Sendable (USBConflictResolutionRequest) -> Void = { _ in }
@@ -85,9 +79,6 @@ public struct LibraryHubView: View {
         self.onTrackWorkflowMutation = onTrackWorkflowMutation
         self.onLoadOnLocalDeck = onLoadOnLocalDeck
         self.onPhraseRoleMutation = onPhraseRoleMutation
-        self.onRekordboxSyncPreview = onRekordboxSyncPreview
-        self.onRekordboxSyncApply = onRekordboxSyncApply
-        self.onRekordboxAnalysisImport = onRekordboxAnalysisImport
         self.onRekordboxDeviceInspect = onRekordboxDeviceInspect
         self.onRekordboxDeviceSync = onRekordboxDeviceSync
         self.onRekordboxDeviceConflictResolution = onRekordboxDeviceConflictResolution
@@ -125,9 +116,6 @@ public struct LibraryHubView: View {
                         syncFeedbackIsError: sourceImportFeedbackIsError,
                         usbOperation: usbSourceOperation,
                         onMutation: onPhraseRoleMutation,
-                        onSyncPreview: onRekordboxSyncPreview,
-                        onSyncApply: onRekordboxSyncApply,
-                        onAnalysisImport: onRekordboxAnalysisImport,
                         onDeviceInspect: onRekordboxDeviceInspect,
                         onDeviceSync: onRekordboxDeviceSync,
                         onDeviceConflictResolution: onRekordboxDeviceConflictResolution

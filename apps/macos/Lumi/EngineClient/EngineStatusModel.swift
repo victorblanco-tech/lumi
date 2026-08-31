@@ -929,7 +929,7 @@ final class EngineStatusModel: ObservableObject {
             }
         )
         if loaded {
-            localPlaybackFeedback = "Loaded exact Lumi timeline r\(loadedTimelineRevision) on Local Deck \(request.deckID)."
+            localPlaybackFeedback = "Loaded exact Lumi timeline r\(loadedTimelineRevision) on Player \(request.deckID)."
             localPlaybackFeedbackIsError = false
             await fetchLocalPlaybackWaveform(
                 trackID: request.trackID,
@@ -939,27 +939,47 @@ final class EngineStatusModel: ObservableObject {
     }
 
     private func fetchLocalPlaybackWaveform(trackID: UInt64, deckID: UInt64) async {
-        guard lifecycle == .ready,
-              await acquireInteractiveExchange() else {
-            return
+        for attempt in 0..<4 {
+            guard lifecycle == .ready,
+                  latestSnapshot?.deckSource.mode == "localPlayback",
+                  latestSnapshot?.decks.first(where: { $0.deckID == deckID })?.trackID
+                    == trackID else {
+                return
+            }
+            guard await acquireInteractiveExchange() else {
+                try? await Task.sleep(for: .milliseconds(120 + (attempt * 80)))
+                continue
+            }
+            do {
+                let envelope = try await supervisor.send(
+                    .getLibraryTrackWaveform(trackID: trackID)
+                )
+                isExchangingCommand = false
+                guard EngineCommandFailure(envelope) == nil else { break }
+                let decoder = snapshotDecoder
+                let detail = try await Task.detached(priority: .userInitiated) {
+                    try decoder.decodeWaveformDetail(envelope)
+                }.value
+                guard detail.trackID == trackID,
+                      latestSnapshot?.deckSource.mode == "localPlayback",
+                      latestSnapshot?.decks.first(where: { $0.deckID == deckID })?.trackID
+                        == trackID else {
+                    return
+                }
+                var waveforms = localPlaybackWaveforms
+                waveforms[deckID] = detail.preview
+                localPlaybackWaveforms = waveforms
+                return
+            } catch {
+                isExchangingCommand = false
+                if attempt < 3 {
+                    try? await Task.sleep(for: .milliseconds(120 + (attempt * 80)))
+                }
+            }
         }
-        defer { isExchangingCommand = false }
-        do {
-            let envelope = try await supervisor.send(
-                .getLibraryTrackWaveform(trackID: trackID)
-            )
-            guard EngineCommandFailure(envelope) == nil else { return }
-            let decoder = snapshotDecoder
-            let detail = try await Task.detached(priority: .userInitiated) {
-                try decoder.decodeWaveformDetail(envelope)
-            }.value
-            guard detail.trackID == trackID else { return }
-            var waveforms = localPlaybackWaveforms
-            waveforms[deckID] = detail.preview
-            localPlaybackWaveforms = waveforms
-        } catch {
-            // The bounded preview remains available if detail retrieval fails.
-        }
+        // The full-range bounded preview remains available if all four
+        // presentation-lane attempts fail. Realtime deck and lighting lanes
+        // never wait for this visual-only request.
     }
 
     /// Connected decks carry a bounded waveform in the realtime snapshot so
@@ -1262,150 +1282,6 @@ final class EngineStatusModel: ObservableObject {
         )
     }
 
-    func previewRekordboxXMLSync(_ request: RekordboxXMLSyncPreviewRequest) async {
-        sourceImportFeedback = nil
-        sourceImportFeedbackIsError = false
-        guard lifecycle == .ready,
-              let endpointDescription,
-              let protocolVersion,
-              await acquireInteractiveExchange() else {
-            sourceImportFeedback = "The sync preview could not start because the engine is not ready."
-            sourceImportFeedbackIsError = true
-            return
-        }
-        defer { isExchangingCommand = false }
-        do {
-            let envelope = try await supervisor.send(
-                .previewRekordboxXMLSync(
-                    folder: request.folderPath,
-                    followedPaths: request.followedPaths,
-                    includeFutureChildPlaylists: request.includeFutureChildPlaylists
-                )
-            )
-            if let failure = EngineCommandFailure(envelope) {
-                sourceImportFeedback = failure.message
-                sourceImportFeedbackIsError = true
-                return
-            }
-            let (snapshot, snapshotEnvelope) = try await decodeSnapshotWithRecovery(
-                envelope,
-                endpointDescription: endpointDescription,
-                protocolVersion: protocolVersion,
-                context: "Rekordbox sync preview"
-            )
-            latestSnapshot = snapshot
-            workspaceState = LiveWorkspacePresenter.ready(snapshot)
-            libraryState = try decodeLibraryState(snapshotEnvelope)
-            guard let preview = libraryState.rekordboxSyncPreview else {
-                sourceImportFeedback = "The engine returned no Rekordbox sync preview."
-                sourceImportFeedbackIsError = true
-                return
-            }
-            sourceImportFeedback = "Preview ready. No library data was changed. \(preview.uniqueTrackCount) unique tracks in \(preview.followedPlaylistCount) playlists."
-        } catch {
-            sourceImportFeedback = (error as? LocalizedError)?.errorDescription
-                ?? "The Rekordbox sync preview could not be completed."
-            sourceImportFeedbackIsError = true
-        }
-    }
-
-    func applyRekordboxXMLSync(
-        _ request: RekordboxXMLSyncPreviewRequest,
-        expectedContentSHA256: String
-    ) async {
-        sourceImportFeedback = nil
-        sourceImportFeedbackIsError = false
-        guard lifecycle == .ready,
-              let endpointDescription,
-              let protocolVersion,
-              await acquireInteractiveExchange() else {
-            sourceImportFeedback = "Apply Sync could not start because the engine is not ready."
-            sourceImportFeedbackIsError = true
-            return
-        }
-        defer { isExchangingCommand = false }
-        do {
-            let envelope = try await supervisor.send(
-                .applyRekordboxXMLSync(
-                    folder: request.folderPath,
-                    followedPaths: request.followedPaths,
-                    includeFutureChildPlaylists: request.includeFutureChildPlaylists,
-                    expectedContentSHA256: expectedContentSHA256
-                )
-            )
-            if let failure = EngineCommandFailure(envelope) {
-                sourceImportFeedback = failure.message
-                sourceImportFeedbackIsError = true
-                return
-            }
-            let (snapshot, snapshotEnvelope) = try await decodeSnapshotWithRecovery(
-                envelope,
-                endpointDescription: endpointDescription,
-                protocolVersion: protocolVersion,
-                context: "Rekordbox sync"
-            )
-            latestSnapshot = snapshot
-            workspaceState = LiveWorkspacePresenter.ready(snapshot)
-            libraryState = try decodeLibraryState(snapshotEnvelope)
-            guard let mirror = libraryState.rekordboxMirror else {
-                sourceImportFeedback = "The engine applied the sync but returned no mirror status."
-                sourceImportFeedbackIsError = true
-                return
-            }
-            sourceImportFeedback = "Sync applied safely. \(mirror.activeTracks) active tracks in \(mirror.playlists) playlists; \(mirror.archivedTracks) archived tracks retained."
-        } catch {
-            sourceImportFeedback = (error as? LocalizedError)?.errorDescription
-                ?? "The Rekordbox sync could not be applied."
-            sourceImportFeedbackIsError = true
-        }
-    }
-
-    func importRekordboxAnalysis(
-        _ request: RekordboxXMLSyncPreviewRequest,
-        expectedContentSHA256: String
-    ) async {
-        sourceImportFeedback = "Importing beatgrids, RGB waveforms and phrases from the closed Rekordbox library…"
-        sourceImportFeedbackIsError = false
-        guard lifecycle == .ready,
-              let endpointDescription,
-              let protocolVersion,
-              await acquireInteractiveExchange() else {
-            sourceImportFeedback = "Analysis import could not start because the engine is not ready."
-            sourceImportFeedbackIsError = true
-            return
-        }
-        defer { isExchangingCommand = false }
-        do {
-            let envelope = try await supervisor.send(
-                .importRekordboxAnalysis(
-                    folder: request.folderPath,
-                    followedPaths: request.followedPaths,
-                    includeFutureChildPlaylists: request.includeFutureChildPlaylists,
-                    expectedContentSHA256: expectedContentSHA256
-                )
-            )
-            if let failure = EngineCommandFailure(envelope) {
-                sourceImportFeedback = failure.message
-                sourceImportFeedbackIsError = true
-                return
-            }
-            let (snapshot, snapshotEnvelope) = try await decodeSnapshotWithRecovery(
-                envelope,
-                endpointDescription: endpointDescription,
-                protocolVersion: protocolVersion,
-                context: "Rekordbox analysis import"
-            )
-            latestSnapshot = snapshot
-            workspaceState = LiveWorkspacePresenter.ready(snapshot)
-            libraryState = try decodeLibraryState(snapshotEnvelope)
-            sourceImportFeedback = "Rekordbox analysis imported. \(libraryState.collectionTotal) tracks are now available in Tracks."
-        } catch {
-            sourceImportFeedback = (error as? LocalizedError)?.errorDescription
-                ?? "The Rekordbox analysis could not be imported."
-            sourceImportFeedbackIsError = true
-        }
-    }
-
     func inspectRekordboxDevice(root: String, sourceID: String? = nil) async {
         sourceImportFeedback = "Reading USB playlists without changing the Lumi library…"
         sourceImportFeedbackIsError = false
@@ -1611,11 +1487,13 @@ final class EngineStatusModel: ObservableObject {
         var workerPayload = payload
         guard case let .string(root)? = payload["root"],
               case let .string(sourceID)? = payload["sourceId"],
+              let observedSourceID = trustedUSBSourceID(root: root),
               let scopedURL = try securityScopedUSBURL(root: root, sourceID: sourceID),
               scopedURL.startAccessingSecurityScopedResource() else {
             throw IsolatedUSBWorkerError.authorizationRequired
         }
         workerPayload["root"] = .string(scopedURL.path)
+        workerPayload["observedSourceId"] = .string(observedSourceID)
         defer { scopedURL.stopAccessingSecurityScopedResource() }
         return try await Task.detached(priority: .utility) {
             let manager = FileManager.default
@@ -2473,7 +2351,7 @@ final class EngineStatusModel: ObservableObject {
     private func sessionSuccessMessage(_ request: SessionCommandRequest) -> String {
         switch request {
         case let .setOperationState(state, _): "Operation state is now \(state.uppercased())."
-        case let .setLocalPlaybackLeader(deckID, _): "Local Deck \(deckID) is now Live."
+        case let .setLocalPlaybackLeader(deckID, _): "Player \(deckID) is now Live."
         case let .selectDeckSourceMode(mode, _):
             mode == "localPlayback" ? "Local Playback selected." : "Live Decks selected."
         }

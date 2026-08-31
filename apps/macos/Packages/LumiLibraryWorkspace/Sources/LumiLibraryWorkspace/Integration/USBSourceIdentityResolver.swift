@@ -13,27 +13,31 @@ enum USBLocalSourceIdentity {
 }
 
 /// Builds an identity that remains stable across mounts while keeping
-/// independent removable media separate. FAT32 volumes can expose the same
-/// filesystem UUID, so the physical USB serial is the primary collision guard.
-/// The normalized volume name remains the fallback for devices without a serial.
+/// independent removable media separate. Some equal-model USB media expose an
+/// identical or unreliable serial and cloned FAT media can share a filesystem
+/// UUID. Version 2 therefore fingerprints all available evidence. A later
+/// rename intentionally requires explicit re-authorization instead of silently
+/// rebinding an existing trusted source by label.
 public enum USBStableSourceIdentity {
     public static func sourceID(
         fileSystemUUID: String?,
         displayName: String,
         hardwareSerial: String? = nil
     ) -> String? {
-        if let hardwareSerial = hardwareSerial?.trimmingCharacters(in: .whitespacesAndNewlines),
-           !hardwareSerial.isEmpty {
-            return "usb-fs:hardware-\(fingerprint(hardwareSerial.lowercased()))"
-        }
-        guard let fileSystemUUID = fileSystemUUID?.trimmingCharacters(in: .whitespacesAndNewlines),
-              !fileSystemUUID.isEmpty else { return nil }
-        let normalizedUUID = fileSystemUUID.lowercased()
+        let normalizedSerial = hardwareSerial?
+            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let normalizedUUID = fileSystemUUID?
+            .trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         let normalizedName = displayName
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .folding(options: [.caseInsensitive, .diacriticInsensitive], locale: .current)
             .lowercased()
-        return "usb-fs:\(normalizedUUID):name-\(fingerprint(normalizedName))"
+        guard normalizedSerial?.isEmpty == false || normalizedUUID?.isEmpty == false else {
+            return nil
+        }
+        let evidence = [normalizedSerial ?? "", normalizedUUID ?? "", normalizedName]
+            .joined(separator: "|")
+        return "usb-fs:v2-\(fingerprint(evidence))"
     }
 
     /// Resolves the serial published by the physical USB device that owns a
@@ -90,6 +94,19 @@ struct MountedUSBIdentity: Equatable, Sendable {
 }
 
 enum USBSourceIdentityResolver {
+    /// Returns whether an *actively mounted* volume represents this trusted
+    /// source. A security-scoped bookmark is only an authorization grant and
+    /// must never be treated as physical-presence evidence: macOS can resolve
+    /// a bookmark for one equal-model FAT disk to another disk that currently
+    /// occupies the same mount location.
+    static func mountedVolume(
+        _ volume: MountedUSBIdentity,
+        represents device: RekordboxDeviceState,
+        among devices: [RekordboxDeviceState]
+    ) -> Bool {
+        selectedSourceID(for: volume, devices: devices) == device.sourceID
+    }
+
     static func selectedSourceID(
         for volume: MountedUSBIdentity,
         devices: [RekordboxDeviceState]
@@ -98,7 +115,7 @@ enum USBSourceIdentityResolver {
             devices.first(where: { $0.sourceID == sourceID })
         }
         let migrationCandidates = devices.filter {
-            (isLegacy($0.sourceID) || isUUIDOnlyFilesystemIdentity($0.sourceID))
+            isMigratableLegacy($0.sourceID)
                 && namesMatch($0.displayName, volume.displayName)
         }
         if let exact {
@@ -124,7 +141,7 @@ enum USBSourceIdentityResolver {
         matches device: RekordboxDeviceState
     ) -> Bool {
         if volume.sourceID == device.sourceID { return true }
-        if isLegacy(device.sourceID) || isUUIDOnlyFilesystemIdentity(device.sourceID) {
+        if isMigratableLegacy(device.sourceID) {
             return namesMatch(volume.displayName, device.displayName)
         }
         return false
@@ -135,7 +152,7 @@ enum USBSourceIdentityResolver {
         matches device: RekordboxDeviceState
     ) -> Bool {
         if inspection.sourceID == device.sourceID { return true }
-        if isLegacy(device.sourceID) || isUUIDOnlyFilesystemIdentity(device.sourceID) {
+        if isMigratableLegacy(device.sourceID) {
             return namesMatch(inspection.displayName, device.displayName)
         }
         return false
@@ -159,6 +176,12 @@ enum USBSourceIdentityResolver {
         sourceID.hasPrefix("usb-volume:") || sourceID.hasPrefix("rekordbox-device:")
     }
 
+    static func isMigratableLegacy(_ sourceID: String) -> Bool {
+        isLegacy(sourceID)
+            || isUUIDOnlyFilesystemIdentity(sourceID)
+            || sourceID.hasPrefix("usb-fs:hardware-")
+    }
+
     /// Dev builds before hardware-backed USB identity stored only
     /// `usb-fs:<filesystem UUID>`. Treat that exact one-component shape as a
     /// one-time migration candidate, never modern hardware/name identities.
@@ -168,6 +191,7 @@ enum USBSourceIdentityResolver {
         return !identity.isEmpty
             && !identity.contains(":")
             && !identity.hasPrefix("hardware-")
+            && !identity.hasPrefix("v2-")
     }
 
     private static func namesMatch(_ lhs: String, _ rhs: String) -> Bool {

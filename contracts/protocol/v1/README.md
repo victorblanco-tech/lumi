@@ -32,7 +32,9 @@ The `deckSource` object exposes the product mode (`localPlayback` or
 `connectedDecks`), a user-facing display name, provider diagnostics and status.
 `leaderDeckId` and `decks` may be null/empty until a real source loads a track.
 Clients derive Live and Next from `leaderDeckId`; they never branch on a Beat
-Link, Pro DJ Link or future adapter implementation type.
+Link, Pro DJ Link or future adapter implementation type. A deck can include the
+optional `hardwareModel` announced for its exact numbered Pro DJ Link player;
+this is display-only metadata and is absent for Local Playback.
 Track metadata uses integer milli-BPM, canonical pitch class and mode,
 normalized 24-bit sRGB `colorRgb`, and contiguous beat-based phrases so
 snapshots remain deterministic across Rust and Swift. Provider indexes or color

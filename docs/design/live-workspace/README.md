@@ -8,7 +8,8 @@ Status: **Accepted for native implementation**
 ┌────────────────────────────────────────────────────────────────────┐
 │ Lumi Live       Tech status       OFF · ARM · LIVE · PAUSE         │
 ├───────────────────────────────┬────────────────────────────────────┤
-│ DECK A                        │ DECK B                             │
+│ PLAYER 1                      │ PLAYER 2                           │
+│ CDJ-1500X                     │ CDJ-1500X                          │
 │ MASTER · LIVE NOW             │ PLAN READY                         │
 │ metadata                      │ metadata                           │
 │ RGB waveform + beatgrid       │ RGB waveform + beatgrid            │
@@ -17,7 +18,7 @@ Status: **Accepted for native implementation**
 └───────────────────────────────┴────────────────────────────────────┘
 ```
 
-Deck A remains left and Deck B remains right. Only the master role and associated
+Player 1 remains left and Player 2 remains right. Only the master role and associated
 Live styling move. The non-master deck remains a planning surface.
 
 ## Interaction rules
@@ -42,6 +43,6 @@ Live styling move. The non-master deck remains a planning surface.
 ## iPhone composition
 
 - Portrait: master deck first, planned deck below it.
-- Landscape: stable Deck A/B side by side when space permits.
+- Landscape: stable numbered Players side by side when space permits.
 - Phrase bands are always directly below their waveform.
 - The current/future editing rule is identical to macOS.

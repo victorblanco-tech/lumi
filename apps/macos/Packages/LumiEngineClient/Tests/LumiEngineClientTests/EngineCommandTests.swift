@@ -156,53 +156,6 @@ struct EngineCommandTests {
         #expect(payload["staticLookNumber"] == .number(2))
     }
 
-    @Test("Rekordbox preview carries the exact selected playlist paths")
-    func rekordboxPreviewPayload() {
-        let payload = EngineCommand.previewRekordboxXMLSync(
-            folder: "/Music/Rekordbox XML",
-            followedPaths: ["Sets/Beach Set", "Genre 5 Stars"],
-            includeFutureChildPlaylists: true
-        ).payload()
-
-        #expect(payload["kind"] == .string("previewRekordboxXmlSync"))
-        #expect(payload["folder"] == .string("/Music/Rekordbox XML"))
-        #expect(
-            payload["followedPaths"] == .array([
-                .string("Sets/Beach Set"),
-                .string("Genre 5 Stars")
-            ])
-        )
-        #expect(payload["includeFutureChildPlaylists"] == .boolean(true))
-    }
-
-    @Test("Rekordbox analysis import is pinned to the reviewed XML fingerprint")
-    func rekordboxAnalysisImportPayload() {
-        let payload = EngineCommand.importRekordboxAnalysis(
-            folder: "/Music/Rekordbox XML",
-            followedPaths: ["Sets/Beach Set"],
-            includeFutureChildPlaylists: true,
-            expectedContentSHA256: "abc123"
-        ).payload()
-
-        #expect(payload["kind"] == .string("importRekordboxAnalysis"))
-        #expect(payload["expectedContentSha256"] == .string("abc123"))
-        #expect(payload["followedPaths"] == .array([.string("Sets/Beach Set")]))
-    }
-
-    @Test("Rekordbox device sync carries the selected mounted root exactly")
-    func rekordboxDeviceSyncPayload() {
-        let payload = EngineCommand.syncRekordboxDevice(
-            root: "/Volumes/DJ USB",
-            sourceID: "usb-volume:1234",
-            playlistIDs: [17, 23]
-        ).payload()
-
-        #expect(payload["kind"] == .string("syncRekordboxDevice"))
-        #expect(payload["root"] == .string("/Volumes/DJ USB"))
-        #expect(payload["sourceId"] == .string("usb-volume:1234"))
-        #expect(payload["playlistIds"] == .array([.number(17), .number(23)]))
-    }
-
     @Test("Library reset preview carries the exact preservation selection")
     func libraryResetPreviewPayload() {
         let payload = EngineCommand.previewLibraryReset(

@@ -843,7 +843,7 @@ public struct LiveWorkspaceView: View {
 
     private func emptyDeckSurface(deckID: UInt64, sourceMode: String) -> some View {
         VStack(spacing: LumiSpacing.medium) {
-            Text(verbatim: deckID == 1 ? "DECK A" : "DECK B")
+            Text(verbatim: "PLAYER \(deckID)")
                 .font(LumiTypography.technical.weight(.semibold))
                 .foregroundStyle(LumiColor.accent)
             Image(systemName: sourceMode == "localPlayback" ? "music.note.list" : "cable.connector")
@@ -865,7 +865,7 @@ public struct LiveWorkspaceView: View {
             RoundedRectangle(cornerRadius: LumiRadius.panel)
                 .stroke(LumiColor.border, lineWidth: 1)
         }
-        .accessibilityIdentifier(deckID == 1 ? "lumi.deck.a.empty" : "lumi.deck.b.empty")
+        .accessibilityIdentifier("lumi.player.\(deckID).empty")
     }
 
     private func navigationRow(
@@ -1259,7 +1259,7 @@ private struct PlanSelectionControl: View {
 #Preview("Ready · Dark") {
     LiveWorkspaceView(
         state: LiveWorkspaceFixtures.ready,
-        productVersion: "0.6.0-dev-1",
+        productVersion: "0.5.2",
         appearance: .constant(.dark),
         keyNotation: .constant(.camelot)
     )
@@ -1270,7 +1270,7 @@ private struct PlanSelectionControl: View {
 #Preview("Fallback · Light") {
     LiveWorkspaceView(
         state: LiveWorkspaceFixtures.fallback,
-        productVersion: "0.6.0-dev-1",
+        productVersion: "0.5.2",
         appearance: .constant(.light),
         keyNotation: .constant(.classic)
     )

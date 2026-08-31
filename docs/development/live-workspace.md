@@ -28,13 +28,15 @@ workspace sends revisioned commands for load, reset, speed, playback, leader,
 OFF, ARMED, LIVE, and PAUSED. Provider health and the latest bounded engine
 timeline are decoded from snapshots; neither is inferred from button presses.
 
-## Fixed deck surfaces and RGB preview contract
+## Fixed player surfaces and RGB preview contract
 
 E2B-01 keeps normalized physical deck identity separate from the lighting
 leader role:
 
-- snapshot decks are ordered by `deckId`, so Deck A remains left and Deck B
-  remains right;
+- snapshot players are ordered by the Pro DJ Link number in `deckId`, so Player
+  1 remains left and Player 2 remains right;
+- `hardwareModel` is optional presentation metadata copied from the exact
+  numbered Pro DJ Link announcement; it is never used as transport identity;
 - `leaderDeckId` controls only the `MASTER · LIVE NOW` treatment;
 - duration and contiguous track phrases are validated at the Swift mapping
   boundary before presentation;

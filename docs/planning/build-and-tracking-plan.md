@@ -227,6 +227,19 @@ adding work or coupling to the realtime integration lanes.
 
 ### Fase 6 – iPhone Remote Beta (`0.6.0`)
 
+Voor deze functionele fase wordt eerst de compatibele
+[0.5.2 runtime- en codebase-hardening](epic-08-runtime-and-codebase-hardening.md)
+afgerond. Deze patch voegt geen nieuwe workflow toe en bewaart het 0.5.1
+datamodel, maar begrenst de control plane en verwijdert niet-ondersteunde
+productiepaden.
+
+De eerste `0.6.0` story is de fysieke, meetbare
+[master-tempo latency baseline](story-e9-00-physical-master-tempo-latency.md).
+De tijdens `0.5.2-dev-9` waargenomen mogelijk tragere BPM-sliderrespons is geen
+patch-release blocker, maar wordt onderzocht voordat de iPhone-client nieuw
+verkeer aan het systeem toevoegt. Werkelijke Ableton Link-publicatie en
+zichtbare UI-refresh worden daarbij afzonderlijk gemeten.
+
 - lokale discovery en pairing;
 - current/next deck en planpreview;
 - theme-, scene- en loopaanpassingen;

@@ -585,8 +585,6 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
     public let midiClockIntegration: MidiClockIntegrationState?
     public let abletonLinkIntegration: AbletonLinkIntegrationState?
     public let deckInputIntegration: DeckInputIntegrationState?
-    public let rekordboxSyncPreview: RekordboxXMLSyncPreview?
-    public let rekordboxMirror: RekordboxMirrorState?
     public let rekordboxDevices: [RekordboxDeviceState]
     public let rekordboxDeviceInspection: RekordboxDeviceInspectionState?
     public let dataManagement: DataManagementState
@@ -610,8 +608,6 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
         midiClockIntegration: MidiClockIntegrationState? = nil,
         abletonLinkIntegration: AbletonLinkIntegrationState? = nil,
         deckInputIntegration: DeckInputIntegrationState? = nil,
-        rekordboxSyncPreview: RekordboxXMLSyncPreview? = nil,
-        rekordboxMirror: RekordboxMirrorState? = nil,
         rekordboxDevices: [RekordboxDeviceState] = [],
         rekordboxDeviceInspection: RekordboxDeviceInspectionState? = nil,
         dataManagement: DataManagementState = .empty,
@@ -634,8 +630,6 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
         self.midiClockIntegration = midiClockIntegration
         self.abletonLinkIntegration = abletonLinkIntegration
         self.deckInputIntegration = deckInputIntegration
-        self.rekordboxSyncPreview = rekordboxSyncPreview
-        self.rekordboxMirror = rekordboxMirror
         self.rekordboxDevices = rekordboxDevices
         self.rekordboxDeviceInspection = rekordboxDeviceInspection
         self.dataManagement = dataManagement
@@ -668,8 +662,6 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
             midiClockIntegration: midiClockIntegration,
             abletonLinkIntegration: abletonLinkIntegration,
             deckInputIntegration: deckInputIntegration,
-            rekordboxSyncPreview: rekordboxSyncPreview,
-            rekordboxMirror: rekordboxMirror,
             rekordboxDevices: rekordboxDevices,
             rekordboxDeviceInspection: inspection,
             dataManagement: dataManagement,

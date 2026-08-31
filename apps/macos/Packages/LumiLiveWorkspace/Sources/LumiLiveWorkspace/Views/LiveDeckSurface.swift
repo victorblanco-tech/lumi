@@ -173,13 +173,24 @@ struct LiveDeckSurface<Details: View>: View {
 
     private var header: some View {
         HStack(alignment: .top, spacing: LumiSpacing.medium) {
-            Text(verbatim: deckName)
-                .font(LumiTypography.technical.weight(.semibold))
-                .foregroundStyle(LumiColor.accent)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(verbatim: playerName)
+                    .font(LumiTypography.technical.weight(.semibold))
+                    .foregroundStyle(LumiColor.accent)
+                if let hardwareModel = deck.hardwareModel {
+                    Text(verbatim: hardwareModel)
+                        .font(LumiTypography.technical)
+                        .foregroundStyle(Color.white.opacity(0.58))
+                        .lineLimit(1)
+                }
+            }
                 .padding(.horizontal, LumiSpacing.small)
-                .frame(height: LumiControlMetric.compactHeight)
+                .padding(.vertical, LumiSpacing.xSmall)
+                .frame(minHeight: LumiControlMetric.compactHeight, alignment: .leading)
                 .background(LumiColor.accent.opacity(0.14))
                 .clipShape(RoundedRectangle(cornerRadius: LumiRadius.compact))
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("lumi.live.player.\(deck.deckID).identity")
 
             VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
                 HStack(spacing: LumiSpacing.small) {
@@ -303,27 +314,25 @@ struct LiveDeckSurface<Details: View>: View {
     }
 
     private var metadata: some View {
-        // The heavyweight workspace snapshot deliberately does not invalidate
-        // the complete SwiftUI deck tree on every Pro DJ Link beat. Render the
-        // small transport strip from the same monotonic visual clock as the
-        // waveform instead, so Off/Arm/Start transitions can never leave its
-        // beat and phrase labels visibly behind the deck.
-        TimelineView(.periodic(from: .now, by: 0.25)) { context in
-            let playheadBeat = displayedPlayheadBeat(at: context.date)
-            HStack(spacing: 0) {
-                metadataValue("BPM", value: String(
-                    format: "%.1f",
-                    locale: Locale(identifier: "en_US_POSIX"),
-                    Double(deck.bpmMilli) / 1_000
-                ))
-                metadataValue("KEY", value: musicalKey)
-                metadataValue(
-                    "BEAT",
-                    value: "\(UInt64(max(0, playheadBeat).rounded(.down)))"
-                )
-                metadataValue("TRANSPORT", value: playbackIsActive ? "PLAYING" : "PAUSED")
-                metadataValue("PHRASE", value: activePhraseName(at: playheadBeat))
-            }
+        // Transport snapshots and discontinuities refresh this compact strip.
+        // The waveform and plan layers own their independent Core Animation
+        // clocks; a SwiftUI TimelineView here invalidated the complete deck and
+        // Library layout four times per second and could saturate the main
+        // thread after loading a Local Playback track.
+        let playheadBeat = displayedPlayheadBeat(at: Date())
+        return HStack(spacing: 0) {
+            metadataValue("BPM", value: String(
+                format: "%.1f",
+                locale: Locale(identifier: "en_US_POSIX"),
+                Double(deck.bpmMilli) / 1_000
+            ))
+            metadataValue("KEY", value: musicalKey)
+            metadataValue(
+                "BEAT",
+                value: "\(UInt64(max(0, playheadBeat).rounded(.down)))"
+            )
+            metadataValue("TRANSPORT", value: playbackIsActive ? "PLAYING" : "PAUSED")
+            metadataValue("PHRASE", value: activePhraseName(at: playheadBeat))
         }
         .background(Color.white.opacity(0.035))
         .overlay(alignment: .top) { Divider().overlay(Color.white.opacity(0.12)) }
@@ -428,7 +437,7 @@ struct LiveDeckSurface<Details: View>: View {
             if let preview = waveformPreview, !preview.points.isEmpty {
                 RGBDeckWaveform(
                     points: preview.points,
-                    channelMaximum: preview.source == "localLibraryDetail" ? 255 : 31,
+                    channelMaximum: preview.channelMaximum,
                     waveformID: deck.trackLoadID,
                     durationBeats: deck.durationBeats,
                     beatGrid: beatGridTimeline,
@@ -714,12 +723,8 @@ struct LiveDeckSurface<Details: View>: View {
         .accessibilityHint("Click a planned phrase to edit it")
     }
 
-    private var deckName: String {
-        switch deck.deckID {
-        case 1: "DECK A"
-        case 2: "DECK B"
-        default: "DECK \(deck.deckID)"
-        }
+    private var playerName: String {
+        "PLAYER \(deck.deckID)"
     }
 
     private func activePhraseName(at playheadBeat: Double) -> String {
@@ -847,6 +852,7 @@ private struct RGBDeckWaveform: View {
     let visualClock: DeckVisualClockSnapshot?
     let followsLiveViewport: Bool
     @State private var rasterImage: CGImage?
+    @State private var renderedContentKey: WaveformRasterContentKey?
 
     init(
         points: [DeckWaveformPointSnapshot],
@@ -884,13 +890,22 @@ private struct RGBDeckWaveform: View {
             }
         }
         .task(id: rasterKey) {
+            let requestedKey = rasterKey
+            let requestedContentKey = requestedKey.contentKey
+            if let renderedContentKey, renderedContentKey != requestedContentKey {
+                // Never display the previous track while the next raster is
+                // being prepared. Resolution upgrades for the same track keep
+                // the correctly coloured bounded raster visible.
+                rasterImage = nil
+                self.renderedContentKey = nil
+            }
             let samples = points
             let zoomScale = Double(max(1, durationBeats)) / viewport.visibleBeats
             let rasterWidth = max(
                 samples.count,
                 min(65_536, Int(ceil(2_048 * zoomScale)))
             )
-            rasterImage = await Task.detached(priority: .utility) {
+            let renderTask = Task.detached(priority: .utility) {
                 Self.makeRasterImage(
                     points: samples,
                     width: rasterWidth,
@@ -899,7 +914,15 @@ private struct RGBDeckWaveform: View {
                     beatsPerBar: beatGrid?.beatsPerBar ?? viewport.beatsPerBar,
                     beatGrid: beatGrid
                 )
-            }.value
+            }
+            let rendered = await withTaskCancellationHandler {
+                await renderTask.value
+            } onCancel: {
+                renderTask.cancel()
+            }
+            guard !Task.isCancelled, requestedKey == rasterKey else { return }
+            rasterImage = rendered
+            renderedContentKey = requestedContentKey
         }
     }
 
@@ -955,6 +978,7 @@ private struct RGBDeckWaveform: View {
         let maximumAmplitude = Double(height) * 0.43
         context.setLineWidth(1)
         for pixel in 0..<width {
+            if pixel.isMultiple(of: 256), Task.isCancelled { return nil }
             let beat = Double(pixel) / Double(max(1, width - 1))
                 * Double(max(1, durationBeats))
             let trackProgress = beatGrid?.trackProgress(atBeat: beat)
@@ -1650,6 +1674,18 @@ private struct WaveformRasterKey: Hashable {
     let beatGridMarkerCount: Int
     let firstBeatTimeMillis: UInt64?
     let lastBeatTimeMillis: UInt64?
+
+    var contentKey: WaveformRasterContentKey {
+        WaveformRasterContentKey(
+            waveformID: waveformID,
+            channelMaximum: channelMaximum
+        )
+    }
+}
+
+private struct WaveformRasterContentKey: Hashable {
+    let waveformID: UInt64
+    let channelMaximum: Double
 }
 
 private struct RGBWaveformLayerView: NSViewRepresentable {
