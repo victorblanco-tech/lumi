@@ -138,4 +138,10 @@ if grep -Eq 'previewRekordboxXMLSync|applyRekordboxXMLSync|importRekordboxAnalys
   exit 1
 fi
 
+if grep -Eq 'TimelineView[[:space:]]*\(' \
+  "$repository_root/apps/macos/Packages/LumiLiveWorkspace/Sources/LumiLiveWorkspace/Views/LiveDeckSurface.swift"; then
+  echo "ERROR: deck motion must stay on isolated Core Animation clocks; a SwiftUI timeline invalidates the full Live layout." >&2
+  exit 1
+fi
+
 echo "Architecture dependency check passed."

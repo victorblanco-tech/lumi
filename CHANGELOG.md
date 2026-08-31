@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.2-dev-8 - 2026-08-31
+
+### Fixed
+
+- Stops the Live metadata strip from invalidating the complete two-Player and
+  Library layout four times per second. Waveform and Light Plan motion remain
+  on their independent Core Animation clocks.
+- Prevents a loaded Local Playback Player from saturating the macOS main thread
+  and blocking a subsequent Player load.
+
 ## 0.5.2-dev-7 - 2026-08-31
 
 ### Changed

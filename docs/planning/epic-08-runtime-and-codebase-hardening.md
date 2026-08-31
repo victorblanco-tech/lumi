@@ -69,7 +69,9 @@ exactly-once AutoLoop execution implementation.
 Progress: the fast native development gate now includes the Engine Client
 package. Vulnerability and SPDX/license inventory checks run as a separate
 weekly or manual Linux workflow and therefore do not consume macOS minutes or
-delay every `dev` push.
+delay every `dev` push. Headed release-candidate testing also found and removed
+a SwiftUI metadata timer that invalidated the complete two-Player plus Library
+layout; waveform and Light Plan motion remain isolated on Core Animation.
 
 ## Acceptance
 
