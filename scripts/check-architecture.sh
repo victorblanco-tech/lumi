@@ -115,14 +115,14 @@ fi
 
 if sed -n '1,/^#\[cfg(test)\]/p' \
   "$repository_root/engine/crates/lumi-engine/src/commands.rs" \
-  | grep -Eq 'previewRekordboxXmlSync|applyRekordboxXmlSync|importRekordboxAnalysis'; then
-  echo "ERROR: retired Rekordbox XML and direct-database commands must not re-enter the engine protocol." >&2
+  | grep -Eq 'previewRekordboxXmlSync|applyRekordboxXmlSync|importRekordboxAnalysis|inspectRekordboxDevice|syncRekordboxDevice|resolveRekordboxDeviceConflict'; then
+  echo "ERROR: library ingestion must stay outside the realtime engine protocol." >&2
   exit 1
 fi
 
-if grep -Eq 'previewRekordboxXMLSync|applyRekordboxXMLSync|importRekordboxAnalysis' \
+if grep -Eq 'previewRekordboxXMLSync|applyRekordboxXMLSync|importRekordboxAnalysis|inspectRekordboxDevice|syncRekordboxDevice|resolveRekordboxDeviceConflict' \
   "$repository_root/apps/macos/Packages/LumiEngineClient/Sources/LumiEngineClient/EngineCommand.swift"; then
-  echo "ERROR: the macOS product command surface supports USB/OneLibrary ingestion only." >&2
+  echo "ERROR: removable-media work must use the isolated bounded worker." >&2
   exit 1
 fi
 

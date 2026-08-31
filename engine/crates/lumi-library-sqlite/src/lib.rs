@@ -37,6 +37,10 @@ const DEFAULTS_VERSION_KEY: &str = "phrase-role-defaults-version";
 const CATALOG_REVISION_KEY: &str = "phrase-role-catalog-revision";
 const AUTOLOOP_DEFAULTS_VERSION_KEY: &str = "autoloop-catalog-defaults-version";
 const AUTOLOOP_CATALOG_REVISION_KEY: &str = "autoloop-catalog-revision";
+/// USB synchronization runs in a separate process against the same WAL file.
+/// A short, explicit wait absorbs normal commit overlap without ever allowing
+/// a removable-media operation to block indefinitely.
+const SQLITE_BUSY_TIMEOUT: Duration = Duration::from_millis(2_000);
 
 pub struct SqliteLibraryRepository {
     connection: Connection,
@@ -392,6 +396,7 @@ impl SqliteLibraryRepository {
             path,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
+        connection.busy_timeout(SQLITE_BUSY_TIMEOUT)?;
         validate_backup_connection(&connection)
     }
 
@@ -2758,7 +2763,13 @@ impl SqliteLibraryRepository {
     }
 
     fn from_connection(connection: Connection) -> Result<Self, SqliteLibraryError> {
-        connection.execute_batch("PRAGMA foreign_keys = ON; PRAGMA journal_mode = WAL;")?;
+        connection.busy_timeout(SQLITE_BUSY_TIMEOUT)?;
+        connection.execute_batch(
+            "PRAGMA foreign_keys = ON;
+             PRAGMA journal_mode = WAL;
+             PRAGMA synchronous = NORMAL;
+             PRAGMA wal_autocheckpoint = 1000;",
+        )?;
         connection.create_scalar_function(
             "lumi_version_family",
             1,
@@ -6832,6 +6843,10 @@ fn version_candidate_predicate_sql() -> String {
 #[cfg(test)]
 mod fault_tests {
     use std::collections::BTreeSet;
+    use std::fs;
+    use std::sync::mpsc;
+    use std::thread;
+    use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
     use lumi_domain::TrackId;
     use lumi_library::{
@@ -6845,11 +6860,61 @@ mod fault_tests {
     use lumi_light_plans::{BankOrganization, ColorBehavior, ThemeRule};
 
     use super::{
-        DeviceAliasUpsert, DeviceAnalysisDecision, DeviceAnalysisUpsert, DeviceHotCueUpsert,
-        DevicePlaylistUpsert, DeviceTrackImport, SqliteLibraryError, SqliteLibraryRepository,
-        legacy_partial_bar_phrase_projection, record_workflow_attention,
-        repair_legacy_partial_bar_timeline_points, to_i64,
+        Connection, DeviceAliasUpsert, DeviceAnalysisDecision, DeviceAnalysisUpsert,
+        DeviceHotCueUpsert, DevicePlaylistUpsert, DeviceTrackImport, SQLITE_BUSY_TIMEOUT,
+        SqliteLibraryError, SqliteLibraryRepository, legacy_partial_bar_phrase_projection,
+        record_workflow_attention, repair_legacy_partial_bar_timeline_points, to_i64,
     };
+
+    #[test]
+    fn file_repository_has_explicit_wal_durability_and_bounded_lock_waiting()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let directory =
+            std::env::temp_dir().join(format!("lumi-sqlite-policy-{}-{nonce}", std::process::id()));
+        fs::create_dir_all(&directory)?;
+        let database = directory.join("library.sqlite");
+        let repository = SqliteLibraryRepository::open(&database)?;
+
+        let journal_mode: String =
+            repository
+                .connection
+                .query_row("PRAGMA journal_mode", [], |row| row.get(0))?;
+        let synchronous: u32 =
+            repository
+                .connection
+                .query_row("PRAGMA synchronous", [], |row| row.get(0))?;
+        let busy_timeout: i64 =
+            repository
+                .connection
+                .query_row("PRAGMA busy_timeout", [], |row| row.get(0))?;
+        assert_eq!(journal_mode, "wal");
+        assert_eq!(synchronous, 1, "SQLite NORMAL must stay explicit");
+        assert_eq!(busy_timeout, SQLITE_BUSY_TIMEOUT.as_millis() as i64);
+
+        let lock_connection = Connection::open(&database)?;
+        lock_connection.execute_batch("BEGIN IMMEDIATE;")?;
+        let (released_tx, released_rx) = mpsc::channel();
+        let release = thread::spawn(move || -> Result<(), rusqlite::Error> {
+            thread::sleep(Duration::from_millis(75));
+            lock_connection.execute_batch("ROLLBACK;")?;
+            let _ = released_tx.send(());
+            Ok(())
+        });
+        let started = Instant::now();
+        repository.connection.execute(
+            "INSERT INTO library_settings(key, value) VALUES ('busy-policy-test', 'ok')",
+            [],
+        )?;
+        assert!(started.elapsed() >= Duration::from_millis(50));
+        released_rx.recv_timeout(Duration::from_secs(1))?;
+        release
+            .join()
+            .map_err(|_| "SQLite lock-release thread panicked")??;
+        drop(repository);
+        fs::remove_dir_all(directory)?;
+        Ok(())
+    }
 
     #[test]
     fn workflow_status_and_usb_attention_are_revisioned_filterable_and_persistent()

@@ -17,7 +17,7 @@ use lumi_protocol::{MessageEnvelope, MessageType};
 use lumi_simulator::SimulationSpeed;
 use serde_json::Value;
 
-use crate::library::{AutoloopCatalogMutation, DeviceReviewChoice, PhraseRoleCatalogMutation};
+use crate::library::{AutoloopCatalogMutation, PhraseRoleCatalogMutation};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct PlanCommandContext {
@@ -77,23 +77,6 @@ pub enum SessionCommand {
         expected_revision: u64,
     },
     PreviewDemoSourceRefresh,
-    InspectRekordboxDevice {
-        root: String,
-        source_id: Option<String>,
-    },
-    SyncRekordboxDevice {
-        root: String,
-        source_id: Option<String>,
-        playlist_ids: Vec<u32>,
-    },
-    ResolveRekordboxDeviceConflict {
-        root: String,
-        source_id: String,
-        device_track_id: u32,
-        expected_incoming_revision: String,
-        expected_active_revision: String,
-        choice: DeviceReviewChoice,
-    },
     PreviewLibraryReset {
         preserve_track_ids: Vec<u64>,
     },
@@ -281,9 +264,6 @@ impl SessionCommand {
             | Self::ReplaceTrackWorkflowCatalog { .. }
             | Self::ResolveTrackWorkflowAttention { .. }
             | Self::PreviewDemoSourceRefresh
-            | Self::InspectRekordboxDevice { .. }
-            | Self::SyncRekordboxDevice { .. }
-            | Self::ResolveRekordboxDeviceConflict { .. }
             | Self::PreviewLibraryReset { .. }
             | Self::ApplyLibraryReset { .. }
             | Self::CreateLibraryBackup { .. }
@@ -331,9 +311,7 @@ impl SessionCommand {
     pub const fn changes_library_revision(&self) -> bool {
         matches!(
             self,
-            Self::SyncRekordboxDevice { .. }
-                | Self::ResolveRekordboxDeviceConflict { .. }
-                | Self::SetTrackPreparationStatus { .. }
+            Self::SetTrackPreparationStatus { .. }
                 | Self::AssignTrackWorkflowStep { .. }
                 | Self::SetTrackPhraseProtection { .. }
                 | Self::ReplaceTrackWorkflowCatalog { .. }
@@ -426,30 +404,6 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
         }),
         "closeLibraryTrackEditor" => Ok(SessionCommand::CloseLibraryTrackEditor),
         "previewDemoSourceRefresh" => Ok(SessionCommand::PreviewDemoSourceRefresh),
-        "inspectRekordboxDevice" => Ok(SessionCommand::InspectRekordboxDevice {
-            root: string(&envelope.payload, "root")?.to_owned(),
-            source_id: optional_string(&envelope.payload, "sourceId").map(str::to_owned),
-        }),
-        "syncRekordboxDevice" => Ok(SessionCommand::SyncRekordboxDevice {
-            root: string(&envelope.payload, "root")?.to_owned(),
-            source_id: optional_string(&envelope.payload, "sourceId").map(str::to_owned),
-            playlist_ids: u32_array(&envelope.payload, "playlistIds")?,
-        }),
-        "resolveRekordboxDeviceConflict" => Ok(SessionCommand::ResolveRekordboxDeviceConflict {
-            root: string(&envelope.payload, "root")?.to_owned(),
-            source_id: string(&envelope.payload, "sourceId")?.to_owned(),
-            device_track_id: u32::try_from(positive_unsigned(&envelope.payload, "deviceTrackId")?)
-                .map_err(|_| CommandDecodeError::InvalidField("deviceTrackId"))?,
-            expected_incoming_revision: string(&envelope.payload, "expectedIncomingRevision")?
-                .to_owned(),
-            expected_active_revision: string(&envelope.payload, "expectedActiveRevision")?
-                .to_owned(),
-            choice: match string(&envelope.payload, "choice")? {
-                "keep-lumi" => DeviceReviewChoice::KeepLumi,
-                "use-usb" => DeviceReviewChoice::UseUsb,
-                _ => return Err(CommandDecodeError::InvalidField("choice")),
-            },
-        }),
         "previewLibraryReset" => Ok(SessionCommand::PreviewLibraryReset {
             preserve_track_ids: u64_array(&envelope.payload, "preserveTrackIds")?,
         }),
@@ -1107,38 +1061,6 @@ fn workflow_steps(
         .collect()
 }
 
-fn u32_array(
-    payload: &serde_json::Map<String, Value>,
-    field: &'static str,
-) -> Result<Vec<u32>, CommandDecodeError> {
-    let values = payload
-        .get(field)
-        .and_then(Value::as_array)
-        .ok_or(CommandDecodeError::InvalidField(field))?;
-    if values.is_empty() || values.len() > 20_000 {
-        return Err(CommandDecodeError::InvalidField(field));
-    }
-    let converted = values
-        .iter()
-        .map(|value| {
-            value
-                .as_u64()
-                .and_then(|number| u32::try_from(number).ok())
-                .filter(|number| *number > 0)
-                .ok_or(CommandDecodeError::InvalidField(field))
-        })
-        .collect::<Result<Vec<_>, _>>()?;
-    if converted
-        .iter()
-        .collect::<std::collections::BTreeSet<_>>()
-        .len()
-        != converted.len()
-    {
-        return Err(CommandDecodeError::InvalidField(field));
-    }
-    Ok(converted)
-}
-
 fn u64_array(
     payload: &serde_json::Map<String, Value>,
     field: &'static str,
@@ -1379,7 +1301,7 @@ mod tests {
     }
 
     #[test]
-    fn usb_review_choice_is_explicit_and_revision_bound() {
+    fn usb_data_commands_are_rejected_by_the_realtime_protocol() {
         let envelope = command_envelope(serde_json::json!({
             "kind": "resolveRekordboxDeviceConflict",
             "root": "/Volumes/DJ VIC CHRM",
@@ -1391,14 +1313,7 @@ mod tests {
         }));
         assert_eq!(
             decode_command(&envelope),
-            Ok(SessionCommand::ResolveRekordboxDeviceConflict {
-                root: "/Volumes/DJ VIC CHRM".to_owned(),
-                source_id: "usb-fs:chrm".to_owned(),
-                device_track_id: 1031,
-                expected_incoming_revision: "usb-analysis-v2".to_owned(),
-                expected_active_revision: "device:gray:analysis-v1".to_owned(),
-                choice: DeviceReviewChoice::UseUsb,
-            })
+            Err(CommandDecodeError::UnsupportedKind)
         );
     }
 

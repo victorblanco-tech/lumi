@@ -2977,10 +2977,6 @@ fn handle_command(
         SessionCommand::GetLibraryTrackWaveform { track_id } => Some(*track_id),
         _ => None,
     };
-    let includes_device_inspection = matches!(
-        &command,
-        SessionCommand::InspectRekordboxDevice { .. } | SessionCommand::SyncRekordboxDevice { .. }
-    );
     let includes_library = !matches!(
         &command,
         SessionCommand::GetSnapshot {
@@ -2991,15 +2987,7 @@ fn handle_command(
         if is_transport_update {
             return transport_ack_envelope(runtime, response_sequence, &envelope.message_id);
         }
-        return if includes_device_inspection {
-            snapshot_envelope_with_device_inspection(
-                runtime,
-                response_sequence,
-                &envelope.message_id,
-            )
-        } else {
-            snapshot_envelope(runtime, response_sequence, &envelope.message_id)
-        };
+        return snapshot_envelope(runtime, response_sequence, &envelope.message_id);
     }
 
     if let Err(error) = apply_command(runtime, command) {
@@ -3015,9 +3003,7 @@ fn handle_command(
     if is_transport_update {
         return transport_ack_envelope(runtime, response_sequence, &envelope.message_id);
     }
-    let mut response = if includes_device_inspection {
-        snapshot_envelope_with_device_inspection(runtime, response_sequence, &envelope.message_id)?
-    } else if includes_library {
+    let mut response = if includes_library {
         snapshot_envelope(runtime, response_sequence, &envelope.message_id)?
     } else {
         snapshot_envelope_without_library(runtime, response_sequence, &envelope.message_id)?
@@ -3359,42 +3345,6 @@ fn apply_command(
         }
         SessionCommand::PreviewDemoSourceRefresh => {
             runtime.library_worker.preview_demo_source_refresh()?;
-            return Ok(());
-        }
-        SessionCommand::InspectRekordboxDevice { root, source_id } => {
-            runtime
-                .library_worker
-                .inspect_rekordbox_device(root, source_id.as_deref())?;
-            return Ok(());
-        }
-        SessionCommand::SyncRekordboxDevice {
-            root,
-            source_id,
-            playlist_ids,
-        } => {
-            runtime.library_worker.sync_rekordbox_device(
-                root,
-                source_id.as_deref(),
-                &playlist_ids,
-            )?;
-            return Ok(());
-        }
-        SessionCommand::ResolveRekordboxDeviceConflict {
-            root,
-            source_id,
-            device_track_id,
-            expected_incoming_revision,
-            expected_active_revision,
-            choice,
-        } => {
-            runtime.library_worker.resolve_rekordbox_device_conflict(
-                root,
-                &source_id,
-                device_track_id,
-                &expected_incoming_revision,
-                &expected_active_revision,
-                choice,
-            )?;
             return Ok(());
         }
         SessionCommand::PreviewLibraryReset { preserve_track_ids } => {
@@ -3943,9 +3893,6 @@ fn apply_command(
         | SessionCommand::ReplaceTrackWorkflowCatalog { .. }
         | SessionCommand::ResolveTrackWorkflowAttention { .. }
         | SessionCommand::PreviewDemoSourceRefresh
-        | SessionCommand::InspectRekordboxDevice { .. }
-        | SessionCommand::SyncRekordboxDevice { .. }
-        | SessionCommand::ResolveRekordboxDeviceConflict { .. }
         | SessionCommand::PreviewLibraryReset { .. }
         | SessionCommand::ApplyLibraryReset { .. }
         | SessionCommand::CreateLibraryBackup { .. }
@@ -4515,7 +4462,7 @@ fn snapshot_envelope(
     sequence: u64,
     correlation_id: &str,
 ) -> Result<MessageEnvelope, EngineError> {
-    snapshot_envelope_internal(runtime, sequence, correlation_id, false, true)
+    snapshot_envelope_internal(runtime, sequence, correlation_id, true)
 }
 
 fn snapshot_envelope_without_library(
@@ -4523,22 +4470,13 @@ fn snapshot_envelope_without_library(
     sequence: u64,
     correlation_id: &str,
 ) -> Result<MessageEnvelope, EngineError> {
-    snapshot_envelope_internal(runtime, sequence, correlation_id, false, false)
-}
-
-fn snapshot_envelope_with_device_inspection(
-    runtime: &EngineRuntime,
-    sequence: u64,
-    correlation_id: &str,
-) -> Result<MessageEnvelope, EngineError> {
-    snapshot_envelope_internal(runtime, sequence, correlation_id, true, true)
+    snapshot_envelope_internal(runtime, sequence, correlation_id, false)
 }
 
 fn snapshot_envelope_internal(
     runtime: &EngineRuntime,
     sequence: u64,
     correlation_id: &str,
-    include_device_inspection: bool,
     include_library: bool,
 ) -> Result<MessageEnvelope, EngineError> {
     let state = runtime.state.state();
@@ -5017,11 +4955,7 @@ fn snapshot_envelope_internal(
     if include_library {
         payload.insert(
             "library".to_owned(),
-            if include_device_inspection {
-                runtime.library_worker.snapshot_json()?
-            } else {
-                runtime.library_worker.status_snapshot_json()?
-            },
+            runtime.library_worker.status_snapshot_json()?,
         );
     }
 

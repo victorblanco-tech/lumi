@@ -51,6 +51,10 @@ Rekordbox database ingestion. Mounted OneLibrary USB media remains supported.
 - split the largest files only at existing ownership seams, protected by
   characterization tests.
 
+Progress: USB work has one supervised out-of-process route and is rejected by
+the realtime command protocol. SQLite contention and durability policy are
+explicit, bounded and covered by a real two-connection lock-release test.
+
 ### E8-05 – Quality and release evidence
 
 - affected Engine Client changes run its package tests on `dev`;

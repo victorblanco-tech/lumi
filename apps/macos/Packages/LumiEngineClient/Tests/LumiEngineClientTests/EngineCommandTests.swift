@@ -156,20 +156,6 @@ struct EngineCommandTests {
         #expect(payload["staticLookNumber"] == .number(2))
     }
 
-    @Test("Rekordbox device sync carries the selected mounted root exactly")
-    func rekordboxDeviceSyncPayload() {
-        let payload = EngineCommand.syncRekordboxDevice(
-            root: "/Volumes/DJ USB",
-            sourceID: "usb-volume:1234",
-            playlistIDs: [17, 23]
-        ).payload()
-
-        #expect(payload["kind"] == .string("syncRekordboxDevice"))
-        #expect(payload["root"] == .string("/Volumes/DJ USB"))
-        #expect(payload["sourceId"] == .string("usb-volume:1234"))
-        #expect(payload["playlistIds"] == .array([.number(17), .number(23)]))
-    }
-
     @Test("Library reset preview carries the exact preservation selection")
     func libraryResetPreviewPayload() {
         let payload = EngineCommand.previewLibraryReset(

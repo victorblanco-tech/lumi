@@ -354,16 +354,6 @@ public enum EngineCommand: Equatable, Sendable {
         expectedTargetRevision: UInt64
     )
     case previewDemoSourceRefresh
-    case inspectRekordboxDevice(root: String, sourceID: String? = nil)
-    case syncRekordboxDevice(root: String, sourceID: String? = nil, playlistIDs: [UInt32])
-    case resolveRekordboxDeviceConflict(
-        root: String,
-        sourceID: String,
-        deviceTrackID: UInt32,
-        expectedIncomingRevision: String,
-        expectedActiveRevision: String,
-        choice: String
-    )
     case previewLibraryReset(preserveTrackIDs: [UInt64])
     case applyLibraryReset(expectedResetToken: String, backupDatabasePath: String)
     case createLibraryBackup(destination: String)
@@ -545,33 +535,6 @@ public enum EngineCommand: Equatable, Sendable {
             ]
         case .previewDemoSourceRefresh:
             return ["kind": .string("previewDemoSourceRefresh")]
-        case let .inspectRekordboxDevice(root, sourceID):
-            var payload: [String: JSONValue] = [
-                "kind": .string("inspectRekordboxDevice"),
-                "root": .string(root)
-            ]
-            payload["sourceId"] = sourceID.map(JSONValue.string) ?? .null
-            return payload
-        case let .syncRekordboxDevice(root, sourceID, playlistIDs):
-            var payload: [String: JSONValue] = [
-                "kind": .string("syncRekordboxDevice"),
-                "root": .string(root),
-                "playlistIds": .array(playlistIDs.map { .number(Double($0)) })
-            ]
-            payload["sourceId"] = sourceID.map(JSONValue.string) ?? .null
-            return payload
-        case let .resolveRekordboxDeviceConflict(
-            root, sourceID, deviceTrackID, expectedIncomingRevision, expectedActiveRevision, choice
-        ):
-            return [
-                "kind": .string("resolveRekordboxDeviceConflict"),
-                "root": .string(root),
-                "sourceId": .string(sourceID),
-                "deviceTrackId": .number(Double(deviceTrackID)),
-                "expectedIncomingRevision": .string(expectedIncomingRevision),
-                "expectedActiveRevision": .string(expectedActiveRevision),
-                "choice": .string(choice)
-            ]
         case let .previewLibraryReset(preserveTrackIDs):
             return [
                 "kind": .string("previewLibraryReset"),

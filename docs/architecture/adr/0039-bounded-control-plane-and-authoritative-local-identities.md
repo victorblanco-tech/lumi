@@ -35,6 +35,10 @@ surface without representing a supported user workflow.
   isolated from the show runtime.
 - SQLite has an explicit bounded contention policy. Only the data lane may
   retry a transient busy state; a show-critical lane never waits on SQLite.
+  The repository uses WAL with `synchronous=NORMAL`, a 1,000-page automatic
+  checkpoint and a two-second busy deadline. USB inspection, synchronization
+  and review resolution have no authenticated realtime-engine command; the
+  macOS app can reach them only through the supervised 75-second worker.
 
 ## Consequences
 

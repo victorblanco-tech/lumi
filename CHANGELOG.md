@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.2-dev-4 - 2026-08-31
+
+### Changed
+
+- Removes USB inspection, synchronization and conflict resolution from the
+  realtime engine protocol; these operations now have one isolated worker path.
+- Makes SQLite WAL, NORMAL durability, checkpoint cadence and the two-second
+  contention deadline explicit and regression-tested.
+- Ensures ordinary USB commit overlap can recover while a stalled data process
+  remains bounded and cannot occupy Pro DJ Link, Ableton Link or MIDI output.
+
 ## 0.5.2-dev-3 - 2026-08-31
 
 ### Changed
