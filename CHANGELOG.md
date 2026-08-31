@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.5.2 - 2026-08-31
+
+### Changed
+
+- Bounds local control-plane operations and validates process ownership before
+  lifecycle actions, without moving UI or data work into realtime lanes.
+- Makes direct Pro DJ Link and trusted OneLibrary USB media the only supported
+  production providers; retired BLT, XML and direct Rekordbox-database product
+  paths are no longer exposed silently.
+- Isolates USB synchronization in a supervised worker and makes SQLite
+  durability, contention and recovery behavior explicit and regression-tested.
+- Shows the actual Pro DJ Link Player number and announced hardware model in
+  Live instead of invented Deck A/B labels.
+- Expands local and GitHub quality gates while keeping heavyweight dependency
+  and licence audits away from ordinary development pushes.
+
+### Fixed
+
+- Prevents equal-model trusted USB disks from appearing connected merely
+  because another disk can resolve a retained security bookmark.
+- Prevents the complete Live layout from being invalidated by metadata refresh
+  work several times per second.
+- Uses one full 8-bit RGB contract for bounded and detailed Library waveforms,
+  and rejects cancelled or stale raster results during track and zoom changes.
+
+### Compatibility
+
+- Preserves the existing 0.5.1 Production database and configuration; Dev data
+  remains isolated and is never packaged or copied automatically.
+- Apple Silicon and macOS 15 or newer.
+- Public Beta, ad-hoc signed and not notarized; macOS may require `Open Anyway`
+  on first launch.
+
 ## 0.5.2-dev-9 - 2026-08-31
 
 ### Fixed
