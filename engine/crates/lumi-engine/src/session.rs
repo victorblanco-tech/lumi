@@ -4295,6 +4295,11 @@ fn snapshot_envelope_internal(
             });
             json!({
                 "deckId": deck_id.value(),
+                "hardwareModel": if runtime.deck_source_mode == DeckSourceMode::ConnectedDecks {
+                    runtime.direct_deck_source.device_name(deck_id)
+                } else {
+                    None
+                },
                 "trackLoadId": deck.track_load_id().value(),
                 "beat": deck.beat(),
                 "effectiveBpmMilli": deck.effective_bpm_milli(),

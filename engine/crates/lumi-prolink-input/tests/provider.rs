@@ -1,15 +1,34 @@
 use lumi_deck_source::DeckSourceProvider;
 use lumi_domain::{
-    DeckObservation, DeckSourceStatus, DomainEvent, KeyMode, MonotonicTime, MusicalKey, PhraseKind,
-    PitchClass, SerializedRuntime, TrackId, TrackMetadata, TrackPhrase,
+    DeckId, DeckObservation, DeckSourceStatus, DomainEvent, KeyMode, MonotonicTime, MusicalKey,
+    PhraseKind, PitchClass, SerializedRuntime, TrackId, TrackMetadata, TrackPhrase,
 };
 use lumi_prolink_input::{BridgeDecoder, ProLinkDeckSourceProvider};
 
 const HELLO: &str = r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":1,"observedAtNanos":10,"type":"hello","payload":{"bridgeVersion":"0.4.0-dev-20","beatLinkVersion":"8.0.0","readOnly":true}}"#;
 const READY: &str = r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":2,"observedAtNanos":20,"type":"sourceStatus","payload":{"status":"ready","detail":"network ready"}}"#;
+const DEVICE_FOUND: &str = r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":3,"observedAtNanos":25,"type":"deviceFound","payload":{"deviceNumber":1,"deviceName":"CDJ-1500X","address":"192.168.1.41"}}"#;
 const STATUS: &str = r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":3,"observedAtNanos":30,"type":"deckStatus","payload":{"deviceNumber":1,"deviceName":"LUMI-SIM","playing":true,"paused":false,"cued":false,"tempoMaster":true,"onAir":true,"sourcePlayer":1,"sourceSlot":"USB_SLOT","trackType":"REKORDBOX","rekordboxId":1256,"trackBpm":155.0,"effectiveBpm":157.25,"beatNumber":17,"beatWithinBar":1,"rawPitch":1082458112}}"#;
 const BEAT: &str = r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":4,"observedAtNanos":40000000,"type":"beat","payload":{"deviceNumber":1,"deviceName":"LUMI-SIM","effectiveBpm":157.25,"beatWithinBar":2,"tempoMaster":true}}"#;
 const REPLACEMENT_AT_PRE_ROLL: &str = r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":4,"observedAtNanos":40,"type":"deckStatus","payload":{"deviceNumber":1,"deviceName":"LUMI-SIM","playing":false,"paused":true,"cued":false,"tempoMaster":true,"onAir":true,"sourcePlayer":1,"sourceSlot":"USB_SLOT","trackType":"REKORDBOX","rekordboxId":1247,"trackBpm":150.0,"effectiveBpm":150.0,"beatNumber":0,"beatWithinBar":0,"rawPitch":1048576}}"#;
+
+#[test]
+fn announced_hardware_model_is_presentation_metadata_for_the_same_player_number() {
+    let mut decoder = BridgeDecoder::new();
+    let mut provider = ProLinkDeckSourceProvider::new(MonotonicTime::new(0))
+        .unwrap_or_else(|error| panic!("provider should initialize: {error}"));
+    for (line, time) in [(HELLO, 1), (READY, 2), (DEVICE_FOUND, 3)] {
+        let message = decoder
+            .decode_line(line)
+            .unwrap_or_else(|error| panic!("device fixture should decode: {error}"));
+        provider
+            .ingest(message, MonotonicTime::new(time))
+            .unwrap_or_else(|error| panic!("device should be retained: {error}"));
+    }
+
+    assert_eq!(provider.device_name(DeckId::new(1)), Some("CDJ-1500X"));
+    assert_eq!(provider.device_name(DeckId::new(2)), None);
+}
 
 #[test]
 fn translates_direct_status_into_provider_neutral_observations() {

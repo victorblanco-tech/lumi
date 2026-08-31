@@ -173,13 +173,24 @@ struct LiveDeckSurface<Details: View>: View {
 
     private var header: some View {
         HStack(alignment: .top, spacing: LumiSpacing.medium) {
-            Text(verbatim: deckName)
-                .font(LumiTypography.technical.weight(.semibold))
-                .foregroundStyle(LumiColor.accent)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(verbatim: playerName)
+                    .font(LumiTypography.technical.weight(.semibold))
+                    .foregroundStyle(LumiColor.accent)
+                if let hardwareModel = deck.hardwareModel {
+                    Text(verbatim: hardwareModel)
+                        .font(LumiTypography.technical)
+                        .foregroundStyle(Color.white.opacity(0.58))
+                        .lineLimit(1)
+                }
+            }
                 .padding(.horizontal, LumiSpacing.small)
-                .frame(height: LumiControlMetric.compactHeight)
+                .padding(.vertical, LumiSpacing.xSmall)
+                .frame(minHeight: LumiControlMetric.compactHeight, alignment: .leading)
                 .background(LumiColor.accent.opacity(0.14))
                 .clipShape(RoundedRectangle(cornerRadius: LumiRadius.compact))
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("lumi.live.player.\(deck.deckID).identity")
 
             VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
                 HStack(spacing: LumiSpacing.small) {
@@ -714,12 +725,8 @@ struct LiveDeckSurface<Details: View>: View {
         .accessibilityHint("Click a planned phrase to edit it")
     }
 
-    private var deckName: String {
-        switch deck.deckID {
-        case 1: "DECK A"
-        case 2: "DECK B"
-        default: "DECK \(deck.deckID)"
-        }
+    private var playerName: String {
+        "PLAYER \(deck.deckID)"
     }
 
     private func activePhraseName(at playheadBeat: Double) -> String {

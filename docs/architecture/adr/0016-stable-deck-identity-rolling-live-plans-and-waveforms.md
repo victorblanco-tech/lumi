@@ -1,12 +1,12 @@
-# ADR-0016: Stable deck identity, rolling Live plans and waveform sources
+# ADR-0016: Stable player identity, rolling Live plans and waveform sources
 
 - Status: **Accepted**
 - Date: **2026-08-05**
 
 ## Context
 
-The Live workspace must remain recognizable to a DJ. Physical Deck A and Deck B
-must not swap places when the mixer master changes. At the same time, Lumi must
+The Live workspace must remain recognizable to a DJ. Pro DJ Link Player 1 and
+Player 2 must not swap places when the mixer master changes. At the same time, Lumi must
 make the currently authoritative lighting deck unmistakably Live and keep the
 loaded other deck ready for advance planning.
 
@@ -21,10 +21,13 @@ must not couple SwiftUI to any one provider.
 
 ## Decision
 
-### Stable deck positions and moving master role
+### Stable player positions and moving master role
 
-- The desktop Live workspace always presents Deck A left and Deck B right.
-- Deck identity is stable and ordered by the normalized deck identifier.
+- The desktop Live workspace always presents Player 1 left and Player 2 right.
+- Player identity is stable and ordered by the normalized Pro DJ Link player
+  number. Lumi does not invent an A/B alias.
+- Connected surfaces show the exact hardware model announced for that player
+  beneath `PLAYER N`; missing metadata stays blank rather than being guessed.
 - `leaderDeckId` moves the `MASTER · LIVE NOW` role between those fixed deck
   surfaces; the cards themselves never reorder.
 - The master surface uses a strong Live treatment. A loaded non-master surface
@@ -65,7 +68,8 @@ must not couple SwiftUI to any one provider.
 
 ## Consequences
 
-- A user can always associate the left/right surface with physical Deck A/B.
+- A user can always associate the left/right surface with the numbered physical
+  Pro DJ Link player.
 - Master changes are a state transition, not a layout transition.
 - Lumi needs full plan details for both the current and next track, not only a
   summary of the active plan.

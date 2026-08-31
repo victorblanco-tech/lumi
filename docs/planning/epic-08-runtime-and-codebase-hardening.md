@@ -86,3 +86,7 @@ Live Deck presentation will adopt Pro DJ Link terminology without changing the
 transport model: `Player 1`, `Player 2`, and so on, with the detected hardware
 model (for example `CDJ-1500X`) shown beneath the stable player number. Missing
 model metadata stays blank; Lumi never invents a device type.
+
+Progress: implemented after the runtime cleanup. Player number remains the
+stable layout/transport identity and the optional announced model is carried as
+presentation-only snapshot metadata.

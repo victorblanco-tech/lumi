@@ -297,6 +297,16 @@ impl ProLinkDeckSourceProvider {
             .map(|deck| &deck.identity)
     }
 
+    /// Returns the exact device name announced for a physical Pro DJ Link
+    /// player. This is presentation metadata only: it never participates in
+    /// deck identity, transport timing or planning decisions.
+    #[must_use]
+    pub fn device_name(&self, deck_id: DeckId) -> Option<&str> {
+        self.devices
+            .get(&deck_id.value())
+            .map(|device| device.name.as_str())
+    }
+
     #[must_use]
     pub fn transport(&self, track_load_id: TrackLoadId) -> Option<ProLinkTransportSnapshot> {
         self.decks

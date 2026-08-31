@@ -790,6 +790,11 @@ public struct EngineSnapshotDecoder: Sendable {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
 
+        let hardwareModel = try optionalString(deck["hardwareModel"])
+        guard hardwareModel.map({ !$0.isEmpty && $0.count <= 64 }) ?? true else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+
         let bpmMilli: UInt64
         if deck["effectiveBpmMilli"] == nil {
             bpmMilli = trackBPMMilli
@@ -916,6 +921,7 @@ public struct EngineSnapshotDecoder: Sendable {
 
         return DeckSnapshot(
             deckID: deckID,
+            hardwareModel: hardwareModel,
             trackLoadID: trackLoadID,
             trackID: trackID,
             title: title,

@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.2-dev-7 - 2026-08-31
+
+### Changed
+
+- Replaces Deck A/B labels with the actual Pro DJ Link Player number throughout
+  Live and Local Playback.
+- Shows the exact detected hardware model beneath a connected Player number
+  without allowing presentation metadata to affect timing or planning.
+
 ## 0.5.2-dev-6 - 2026-08-31
 
 ### Changed

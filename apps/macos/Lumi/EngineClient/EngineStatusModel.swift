@@ -929,7 +929,7 @@ final class EngineStatusModel: ObservableObject {
             }
         )
         if loaded {
-            localPlaybackFeedback = "Loaded exact Lumi timeline r\(loadedTimelineRevision) on Local Deck \(request.deckID)."
+            localPlaybackFeedback = "Loaded exact Lumi timeline r\(loadedTimelineRevision) on Player \(request.deckID)."
             localPlaybackFeedbackIsError = false
             await fetchLocalPlaybackWaveform(
                 trackID: request.trackID,
@@ -2331,7 +2331,7 @@ final class EngineStatusModel: ObservableObject {
     private func sessionSuccessMessage(_ request: SessionCommandRequest) -> String {
         switch request {
         case let .setOperationState(state, _): "Operation state is now \(state.uppercased())."
-        case let .setLocalPlaybackLeader(deckID, _): "Local Deck \(deckID) is now Live."
+        case let .setLocalPlaybackLeader(deckID, _): "Player \(deckID) is now Live."
         case let .selectDeckSourceMode(mode, _):
             mode == "localPlayback" ? "Local Playback selected." : "Live Decks selected."
         }

@@ -93,6 +93,39 @@ struct LiveWorkspacePresenterTests {
         #expect(state.planner.condition == .ready)
     }
 
+    @Test("Connected players retain their Pro DJ Link number and announced hardware model")
+    func connectedPlayerIdentityDecodes() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case var .array(decks) = payload["decks"],
+              !decks.isEmpty,
+              case var .object(playerOne) = decks[0] else {
+            Issue.record("Recorded fixture must contain Player 1")
+            return
+        }
+        playerOne["hardwareModel"] = .string("CDJ-1500X")
+        decks[0] = .object(playerOne)
+        payload["decks"] = .array(decks)
+
+        let snapshot = try EngineSnapshotDecoder().decode(
+            MessageEnvelope(
+                protocolVersion: recorded.protocolVersion,
+                messageType: recorded.messageType,
+                messageId: recorded.messageId,
+                sequence: recorded.sequence,
+                correlationId: recorded.correlationId,
+                sentAt: recorded.sentAt,
+                payload: payload
+            ),
+            endpointDescription: "127.0.0.1:52841",
+            protocolVersion: 1
+        )
+
+        #expect(snapshot.decks[0].deckID == 1)
+        #expect(snapshot.decks[0].hardwareModel == "CDJ-1500X")
+        #expect(snapshot.decks[1].hardwareModel == nil)
+    }
+
     @Test("Connected decks preserve Rekordbox hot-cue letters, names, loops, and colors")
     func connectedDeckHotCuesDecode() throws {
         let recorded = try recordedEnvelope()
@@ -101,7 +134,7 @@ struct LiveWorkspacePresenterTests {
               !decks.isEmpty,
               case var .object(deck) = decks[0],
               case var .object(track) = deck["track"] else {
-            Issue.record("Recorded fixture must contain Deck A track data")
+            Issue.record("Recorded fixture must contain Player 1 track data")
             return
         }
         track["hotCues"] = .array([
@@ -382,7 +415,7 @@ struct LiveWorkspacePresenterTests {
         #expect(state.lightingMidi.detail == "Another Lumi version is using Light Output · close it and restart this app")
     }
 
-    @Test("Physical Deck A and B ordering remains stable when Deck B becomes master")
+    @Test("Physical Player 1 and 2 ordering remains stable when Player 2 becomes master")
     func stableDeckOrderingSurvivesMasterChange() {
         let snapshot = LiveWorkspaceFixtures.readySnapshot
         let deckBMaster = EngineSnapshot(
@@ -434,7 +467,7 @@ struct LiveWorkspacePresenterTests {
     func liveNoticeCentralizesFeedback() {
         let localNotice = LiveWorkspaceNoticePresenter.notice(
             state: LiveWorkspaceFixtures.ready,
-            localPlaybackFeedback: "Track loaded on Deck B.",
+            localPlaybackFeedback: "Track loaded on Player 2.",
             localPlaybackFeedbackIsError: false
         )
         let commandNotice = LiveWorkspaceNoticePresenter.notice(
@@ -442,20 +475,20 @@ struct LiveWorkspacePresenterTests {
                 LiveWorkspaceFixtures.readySnapshot,
                 sessionInteraction: .submitting
             ),
-            localPlaybackFeedback: "Track loaded on Deck B.",
+            localPlaybackFeedback: "Track loaded on Player 2.",
             localPlaybackFeedbackIsError: false
         )
         let rejectedNotice = LiveWorkspaceNoticePresenter.notice(
             state: LiveWorkspacePresenter.ready(
                 LiveWorkspaceFixtures.readySnapshot,
                 planInteraction: .rejected("AutoLoop could not be saved."),
-                sessionInteraction: .succeeded("Deck B is Live.")
+                sessionInteraction: .succeeded("Player 2 is Live.")
             ),
             localPlaybackFeedback: nil,
             localPlaybackFeedbackIsError: false
         )
 
-        #expect(localNotice == .init(message: "Track loaded on Deck B.", tone: .success))
+        #expect(localNotice == .init(message: "Track loaded on Player 2.", tone: .success))
         #expect(commandNotice == .init(message: "Applying deck command…", tone: .working))
         #expect(rejectedNotice == .init(message: "AutoLoop could not be saved.", tone: .warning))
     }
@@ -1113,7 +1146,7 @@ struct LiveWorkspacePresenterTests {
               !decks.isEmpty,
               case var .object(deck) = decks[0],
               case var .object(track) = deck["track"] else {
-            Issue.record("Recorded fixture must contain Deck A")
+            Issue.record("Recorded fixture must contain Player 1")
             return
         }
         track["phrases"] = .array([])
@@ -1160,7 +1193,7 @@ struct LiveWorkspacePresenterTests {
               case var .object(deck) = decks[0],
               case let .object(track) = deck["track"],
               let trackBPM = track["bpmMilli"] else {
-            Issue.record("Recorded fixture must contain Deck A BPM")
+            Issue.record("Recorded fixture must contain Player 1 BPM")
             return
         }
         deck["effectiveBpmMilli"] = .number(131_300)

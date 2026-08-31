@@ -19,8 +19,8 @@ flowchart TB
 
   subgraph booth["DJ booth – PRO DJ LINK"]
     direction LR
-    DECKA["Deck A<br/>current / live"]
-    DECKB["Deck B<br/>loaded / next"]
+    DECKA["Player 1<br/>number + hardware model"]
+    DECKB["Player 2<br/>number + hardware model"]
     MIXER["DJ mixer<br/>on-air / master-context"]
     LAN[("PRO DJ LINK LAN")]
     PA["Audio / PA"]

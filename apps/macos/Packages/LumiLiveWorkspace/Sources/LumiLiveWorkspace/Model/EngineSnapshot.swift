@@ -471,6 +471,9 @@ public struct DeckVisualClockSnapshot: Equatable, Sendable {
 
 public struct DeckSnapshot: Equatable, Identifiable, Sendable {
     public let deckID: UInt64
+    /// Exact model/name announced by the matching Pro DJ Link player. Local
+    /// Playback and older compatible snapshots intentionally leave this nil.
+    public let hardwareModel: String?
     public let trackLoadID: UInt64
     /// Lumi's canonical Library track identifier when the deck was matched.
     /// The identifier can also be present on a transient source track, so UI
@@ -502,6 +505,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
 
     public init(
         deckID: UInt64,
+        hardwareModel: String? = nil,
         trackLoadID: UInt64,
         trackID: UInt64? = nil,
         title: String,
@@ -526,6 +530,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
         localPlayback: LocalPlaybackTrackSnapshot? = nil
     ) {
         self.deckID = deckID
+        self.hardwareModel = hardwareModel
         self.trackLoadID = trackLoadID
         self.trackID = trackID
         self.title = title

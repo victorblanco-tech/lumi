@@ -71,7 +71,7 @@ public struct LocalPlaybackLibraryBrowserView: View {
         HStack(spacing: LumiSpacing.medium) {
             Label("Local Playback Library", systemImage: "music.note.list")
                 .font(LumiTypography.sectionTitle)
-            Text("Select a track, then load Deck A or Deck B")
+            Text("Select a track, then load Player 1 or Player 2")
                 .font(LumiTypography.metadata)
                 .foregroundStyle(LumiColor.textSecondary)
             Spacer()
@@ -86,8 +86,8 @@ public struct LocalPlaybackLibraryBrowserView: View {
                 .help(feedback)
                 .accessibilityIdentifier("lumi.localPlayback.feedback")
             }
-            loadButton(deckID: 1, name: "Deck A")
-            loadButton(deckID: 2, name: "Deck B")
+            loadButton(deckID: 1, name: "Player 1")
+            loadButton(deckID: 2, name: "Player 2")
         }
         .padding(.horizontal, LumiSpacing.large)
         .frame(height: 48)

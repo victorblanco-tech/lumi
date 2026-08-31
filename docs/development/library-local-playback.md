@@ -8,7 +8,7 @@ will later be driven by Live Decks.
 
 1. Live embeds a compact, independently scrollable Library browser beneath the
    two decks. Collection, imported playlists, search and pagination lead to
-   **Load Deck A** and **Load Deck B** for a track with a Lumi timeline. The
+   **Load Player 1** and **Load Player 2** for a track with a Lumi timeline. The
    full Library screen exposes the same engine-authoritative workflow. The
    embedded browser expands into all remaining window height; a ready row can
    also be dragged onto either empty or loaded deck using an exact typed
@@ -46,7 +46,7 @@ will later be driven by Live Decks.
 
 ## Live behavior
 
-- Deck A stays left and Deck B stays right. Changing master changes status; it
+- Player 1 stays left and Player 2 stays right. Changing master changes status; it
   never reorders the surfaces.
 - Space toggles the Local Playback master deck and the Track Editor preview.
   A focused text field retains the key, so search terms can contain spaces.
