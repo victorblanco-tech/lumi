@@ -1,19 +1,16 @@
-name: Foundation
+name: Development
 
 on:
   workflow_dispatch:
-  pull_request:
-    branches:
-      - main
   push:
-    tags:
-      - "v*"
+    branches:
+      - dev
 
 permissions:
   contents: read
 
 concurrency:
-  group: foundation-${{ github.workflow }}-${{ github.ref }}
+  group: development-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -31,16 +28,16 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Classify affected quality gates
+      - name: Classify affected development gates
         id: changes
         env:
           EVENT_NAME: ${{ github.event_name }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BEFORE_SHA: ${{ github.event.before }}
+          HEAD_SHA: ${{ github.sha }}
         run: |
           export LUMI_CI_OUTPUT_FILE="$GITHUB_OUTPUT"
-          if [[ "$EVENT_NAME" == "pull_request" ]]; then
-            ./scripts/classify-ci-changes.sh --from-git "$BASE_SHA" "$HEAD_SHA"
+          if [[ "$EVENT_NAME" == "push" && "$BEFORE_SHA" != "0000000000000000000000000000000000000000" ]]; then
+            ./scripts/classify-ci-changes.sh --from-git "$BEFORE_SHA" "$HEAD_SHA"
           else
             ./scripts/classify-ci-changes.sh --all
           fi
@@ -57,12 +54,11 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
-
       - name: Verify documentation links and visual assets
         run: ./scripts/verify-docs.sh
 
   rust:
-    name: Rust, contracts, and persistence
+    name: Rust development gate
     needs: classify
     if: needs.classify.outputs.rust == '1'
     runs-on: ubuntu-24.04
@@ -70,7 +66,6 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
-
       - name: Restore portable Rust build cache
         uses: actions/cache@v5
         with:
@@ -81,26 +76,24 @@ jobs:
           key: rust-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', '**/Cargo.toml') }}
           restore-keys: |
             rust-v1-${{ runner.os }}-${{ runner.arch }}-
-
-      - name: Verify Rust, contracts, migrations, and performance
+      - name: Verify portable Rust behavior
         run: ./scripts/verify-rust.sh
 
   apple:
-    name: Apple Silicon application
+    name: Apple development gate
     needs: classify
     if: needs.classify.outputs.apple == '1'
     runs-on: macos-26
-    timeout-minutes: 20
+    timeout-minutes: 15
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
-
-      - name: Set up Java 21 for the Pro DJ Link bridge
+      - name: Set up Java 21 for a conservative full fallback
+        if: needs.classify.outputs.full == '1'
         uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "21"
-
       - name: Restore Apple build cache
         uses: actions/cache@v5
         with:
@@ -123,18 +116,24 @@ jobs:
           key: apple-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'apps/macos/Lumi.xcodeproj/project.pbxproj', 'apps/macos/Packages/**/Package.swift') }}
           restore-keys: |
             apple-v1-${{ runner.os }}-${{ runner.arch }}-
-
-      - name: Prepare pinned Ableton Link runtime
+      - name: Prepare pinned Ableton Link runtime for a full fallback
+        if: needs.classify.outputs.full == '1'
         run: |
           if [[ ! -x build/carabiner-runtime/Carabiner ]]; then
             ./scripts/prepare-carabiner-runtime.sh
           fi
-
-      - name: Verify Swift, Xcode, arm64 bundle, and visual evidence
-        run: ./scripts/verify-apple.sh
+      - name: Verify affected native application scope
+        env:
+          FULL_REQUIRED: ${{ needs.classify.outputs.full }}
+        run: |
+          if [[ "$FULL_REQUIRED" == "1" ]]; then
+            ./scripts/verify-apple.sh
+          else
+            ./scripts/verify-apple-fast.sh
+          fi
 
   gate:
-    name: Foundation gate
+    name: Development gate
     if: always()
     needs:
       - classify
@@ -143,7 +142,7 @@ jobs:
       - apple
     runs-on: ubuntu-24.04
     steps:
-      - name: Require every affected quality gate
+      - name: Require every affected development gate
         env:
           CLASSIFY_RESULT: ${{ needs.classify.result }}
           DOCS_REQUIRED: ${{ needs.classify.outputs.docs }}
@@ -164,4 +163,4 @@ jobs:
           if [[ "$APPLE_REQUIRED" == "1" ]]; then
             [[ "$APPLE_RESULT" == "success" ]]
           fi
-          echo "Every affected Foundation quality gate passed."
+          echo "Every affected development quality gate passed."

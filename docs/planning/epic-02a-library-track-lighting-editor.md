@@ -457,7 +457,7 @@ complete channel-isolated backups, a mandatory backup-and-review reset flow,
 optional immediate preservation of authored tracks and Creative Archive status.
 The SQLite adapter has deterministic tests for both preservation and automatic
 relinking after a clean reimport. See
-[`story-e2a-23-data-backup-library-rebuild-and-creative-relink.md`](story-e2a-09-data-backup-library-rebuild-and-creative-relink.md)
+[`story-e2a-23-data-backup-library-rebuild-and-creative-relink.md`](story-e2a-23-data-backup-library-rebuild-and-creative-relink.md)
 and [ADR-0029](../architecture/adr/0029-atomic-backups-library-rebuild-and-creative-archive.md).
 
 ### E2A-24 – Configure one Phrase Role color across Lumi

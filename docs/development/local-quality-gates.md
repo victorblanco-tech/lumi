@@ -22,10 +22,20 @@ the LAN simulator or physical show hardware.
 No gate silently turns a missing prerequisite into a pass. Ignored tests stay
 ignored in ordinary gates and are selected explicitly by `lab`.
 
-The same portable and Apple verification runs on GitHub for pushes and pull
-requests targeting `dev` or `main`. Public CI is an independent confirmation;
-the hardware-aware local and lab evidence remains mandatory for show-critical
-changes.
+GitHub CI routes work by changed area. A push to `dev` gets documentation
+validation, portable Rust verification, and/or a fast native Swift package gate
+as applicable. A pull request to `main` keeps the complete affected-platform
+verification, including the arm64 app bundle and visual evidence for application
+changes. Release tags run the complete suite. Unknown paths deliberately fall
+back to both full platform gates.
+
+`Foundation gate` is the stable branch-protection result. It succeeds only when
+classification and every affected child gate pass; a skipped irrelevant child
+job can therefore never weaken protection. The Foundation workflow does not run
+again after a merge to `main`, avoiding a duplicate full build.
+
+Public CI is an independent confirmation; the hardware-aware local and lab
+evidence remains mandatory for show-critical changes.
 
 ## Everyday workflow
 
