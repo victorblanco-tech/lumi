@@ -216,6 +216,16 @@ struct USBSourceIdentityResolverTests {
                 devices: [chrm, previousGray]
             ) == previousGray.sourceID
         )
+        #expect(USBSourceIdentityResolver.mountedVolume(
+            mountedGray,
+            represents: previousGray,
+            among: [chrm, previousGray]
+        ))
+        #expect(!USBSourceIdentityResolver.mountedVolume(
+            mountedGray,
+            represents: chrm,
+            among: [chrm, previousGray]
+        ))
     }
 
     @Test("Generated local identities are independent and syntactically stable")

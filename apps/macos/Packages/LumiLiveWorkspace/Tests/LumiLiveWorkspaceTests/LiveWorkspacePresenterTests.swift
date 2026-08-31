@@ -502,6 +502,74 @@ struct LiveWorkspacePresenterTests {
         #expect(previews.allSatisfy { $0.points.count == 192 })
     }
 
+    @Test("Bounded and detailed Library waveforms use the same RGB scale")
+    func localLibraryWaveformScalesDoNotFlash() {
+        let point = DeckWaveformPointSnapshot(low: 40, mid: 120, high: 240)
+        let bounded = DeckWaveformPreviewSnapshot(
+            source: "localLibrary",
+            style: "rgb",
+            points: [point]
+        )
+        let detail = DeckWaveformPreviewSnapshot(
+            source: "localLibraryDetail",
+            style: "rgb",
+            points: [point]
+        )
+        let provider = DeckWaveformPreviewSnapshot(
+            source: "simulator",
+            style: "rgb",
+            points: [point]
+        )
+
+        #expect(bounded.channelMaximum == 255)
+        #expect(detail.channelMaximum == 255)
+        #expect(provider.channelMaximum == 31)
+    }
+
+    @Test("State snapshot accepts full-range bounded Library RGB waveforms")
+    func fullRangeBoundedLibraryWaveformDecodes() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case var .array(decks) = payload["decks"],
+              case var .object(playerOne) = decks[0],
+              case var .object(track) = playerOne["track"] else {
+            Issue.record("Recorded fixture must contain Player 1 track data")
+            return
+        }
+        track["waveformPreview"] = .object([
+            "source": .string("localLibrary"),
+            "style": .string("rgb"),
+            "points": .array(Array(
+                repeating: .object([
+                    "low": .number(48),
+                    "mid": .number(137),
+                    "high": .number(241)
+                ]),
+                count: 192
+            ))
+        ])
+        playerOne["track"] = .object(track)
+        decks[0] = .object(playerOne)
+        payload["decks"] = .array(decks)
+
+        let snapshot = try EngineSnapshotDecoder().decode(
+            MessageEnvelope(
+                protocolVersion: recorded.protocolVersion,
+                messageType: recorded.messageType,
+                messageId: recorded.messageId,
+                sequence: recorded.sequence,
+                correlationId: recorded.correlationId,
+                sentAt: recorded.sentAt,
+                payload: payload
+            ),
+            endpointDescription: "127.0.0.1:52841",
+            protocolVersion: 1
+        )
+
+        #expect(snapshot.decks[0].waveformPreview?.source == "localLibrary")
+        #expect(snapshot.decks[0].waveformPreview?.points.last?.high == 241)
+    }
+
     @Test("Local visual clock advances independently and clamps at track end")
     func localVisualClockAdvancesSmoothly() {
         let playing = DeckVisualClockSnapshot(

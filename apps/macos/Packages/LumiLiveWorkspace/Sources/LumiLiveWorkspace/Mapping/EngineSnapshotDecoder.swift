@@ -1076,14 +1076,18 @@ public struct EngineSnapshotDecoder: Sendable {
               (16...4_096).contains(pointPayloads.count) else {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
+        let channelMaximum: UInt64 = switch source {
+        case "localLibrary", "localLibraryDetail": UInt64(UInt8.max)
+        default: 31
+        }
         let points = try pointPayloads.map { value in
             guard case let .object(point) = value,
                   let low = unsignedInteger(point["low"]),
                   let mid = unsignedInteger(point["mid"]),
                   let high = unsignedInteger(point["high"]),
-                  low <= 31,
-                  mid <= 31,
-                  high <= 31 else {
+                  low <= channelMaximum,
+                  mid <= channelMaximum,
+                  high <= channelMaximum else {
                 throw EngineSnapshotDecodingError.invalidSnapshot
             }
             return DeckWaveformPointSnapshot(

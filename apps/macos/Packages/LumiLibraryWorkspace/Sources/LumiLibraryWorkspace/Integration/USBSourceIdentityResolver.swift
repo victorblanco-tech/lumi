@@ -94,6 +94,19 @@ struct MountedUSBIdentity: Equatable, Sendable {
 }
 
 enum USBSourceIdentityResolver {
+    /// Returns whether an *actively mounted* volume represents this trusted
+    /// source. A security-scoped bookmark is only an authorization grant and
+    /// must never be treated as physical-presence evidence: macOS can resolve
+    /// a bookmark for one equal-model FAT disk to another disk that currently
+    /// occupies the same mount location.
+    static func mountedVolume(
+        _ volume: MountedUSBIdentity,
+        represents device: RekordboxDeviceState,
+        among devices: [RekordboxDeviceState]
+    ) -> Bool {
+        selectedSourceID(for: volume, devices: devices) == device.sourceID
+    }
+
     static func selectedSourceID(
         for volume: MountedUSBIdentity,
         devices: [RekordboxDeviceState]

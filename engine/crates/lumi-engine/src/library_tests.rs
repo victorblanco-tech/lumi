@@ -312,6 +312,37 @@ fn deck_waveform_preview_is_bounded_and_peak_preserving() {
 }
 
 #[test]
+fn local_deck_preview_keeps_the_same_eight_bit_rgb_scale_as_detail()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut worker = LibraryWorker::demo()?;
+    let snapshot = worker.snapshot_json()?;
+    let track = &snapshot["page"]["tracks"][0];
+    let track_id = track["id"].as_u64().ok_or("demo track id is missing")?;
+    let timeline_revision = track["timelineRevision"]
+        .as_u64()
+        .ok_or("demo timeline revision is missing")?;
+    let (_, context) = worker
+        .local_playback_track(track_id, timeline_revision)?
+        .into_parts();
+    let preview = context.waveform_preview_json();
+    let maximum_channel = preview["points"]
+        .as_array()
+        .ok_or("preview points are missing")?
+        .iter()
+        .flat_map(|point| ["low", "mid", "high"].map(|channel| point[channel].as_u64()))
+        .flatten()
+        .max()
+        .ok_or("preview channels are missing")?;
+
+    assert_eq!(preview["source"], "localLibrary");
+    assert!(
+        maximum_channel > 31,
+        "bounded preview must retain 8-bit RGB values"
+    );
+    Ok(())
+}
+
+#[test]
 fn collection_total_is_independent_from_the_active_playlist()
 -> Result<(), Box<dyn std::error::Error>> {
     let mut worker = LibraryWorker::demo()?;

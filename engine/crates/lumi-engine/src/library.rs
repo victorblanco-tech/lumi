@@ -376,9 +376,13 @@ impl LibraryPlanContext {
             "source": "localLibrary",
             "style": "rgb",
             "points": points.iter().map(|point| json!({
-                "low": point[0] / 8,
-                "mid": point[1] / 8,
-                "high": point[2] / 8,
+                // Keep the bounded snapshot at the same 8-bit RGB scale as
+                // Library detail. Quantizing it to five bits made every Live
+                // load briefly render a visibly flatter waveform before the
+                // detail request completed.
+                "low": point[0],
+                "mid": point[1],
+                "high": point[2],
             })).collect::<Vec<_>>(),
         })
     }

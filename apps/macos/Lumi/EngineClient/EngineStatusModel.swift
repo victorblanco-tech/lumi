@@ -939,27 +939,47 @@ final class EngineStatusModel: ObservableObject {
     }
 
     private func fetchLocalPlaybackWaveform(trackID: UInt64, deckID: UInt64) async {
-        guard lifecycle == .ready,
-              await acquireInteractiveExchange() else {
-            return
+        for attempt in 0..<4 {
+            guard lifecycle == .ready,
+                  latestSnapshot?.deckSource.mode == "localPlayback",
+                  latestSnapshot?.decks.first(where: { $0.deckID == deckID })?.trackID
+                    == trackID else {
+                return
+            }
+            guard await acquireInteractiveExchange() else {
+                try? await Task.sleep(for: .milliseconds(120 + (attempt * 80)))
+                continue
+            }
+            do {
+                let envelope = try await supervisor.send(
+                    .getLibraryTrackWaveform(trackID: trackID)
+                )
+                isExchangingCommand = false
+                guard EngineCommandFailure(envelope) == nil else { break }
+                let decoder = snapshotDecoder
+                let detail = try await Task.detached(priority: .userInitiated) {
+                    try decoder.decodeWaveformDetail(envelope)
+                }.value
+                guard detail.trackID == trackID,
+                      latestSnapshot?.deckSource.mode == "localPlayback",
+                      latestSnapshot?.decks.first(where: { $0.deckID == deckID })?.trackID
+                        == trackID else {
+                    return
+                }
+                var waveforms = localPlaybackWaveforms
+                waveforms[deckID] = detail.preview
+                localPlaybackWaveforms = waveforms
+                return
+            } catch {
+                isExchangingCommand = false
+                if attempt < 3 {
+                    try? await Task.sleep(for: .milliseconds(120 + (attempt * 80)))
+                }
+            }
         }
-        defer { isExchangingCommand = false }
-        do {
-            let envelope = try await supervisor.send(
-                .getLibraryTrackWaveform(trackID: trackID)
-            )
-            guard EngineCommandFailure(envelope) == nil else { return }
-            let decoder = snapshotDecoder
-            let detail = try await Task.detached(priority: .userInitiated) {
-                try decoder.decodeWaveformDetail(envelope)
-            }.value
-            guard detail.trackID == trackID else { return }
-            var waveforms = localPlaybackWaveforms
-            waveforms[deckID] = detail.preview
-            localPlaybackWaveforms = waveforms
-        } catch {
-            // The bounded preview remains available if detail retrieval fails.
-        }
+        // The full-range bounded preview remains available if all four
+        // presentation-lane attempts fail. Realtime deck and lighting lanes
+        // never wait for this visual-only request.
     }
 
     /// Connected decks carry a bounded waveform in the realtime snapshot so

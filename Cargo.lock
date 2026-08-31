@@ -263,7 +263,7 @@ dependencies = [
 
 [[package]]
 name = "lumi-blt-midi"
-version = "0.5.2-dev-8"
+version = "0.5.2-dev-9"
 dependencies = [
  "lumi-deck-source",
  "lumi-domain",
@@ -273,18 +273,18 @@ dependencies = [
 
 [[package]]
 name = "lumi-deck-source"
-version = "0.5.2-dev-8"
+version = "0.5.2-dev-9"
 dependencies = [
  "lumi-domain",
 ]
 
 [[package]]
 name = "lumi-domain"
-version = "0.5.2-dev-8"
+version = "0.5.2-dev-9"
 
 [[package]]
 name = "lumi-engine"
-version = "0.5.2-dev-8"
+version = "0.5.2-dev-9"
 dependencies = [
  "lumi-deck-source",
  "lumi-domain",
@@ -316,14 +316,14 @@ dependencies = [
 
 [[package]]
 name = "lumi-library"
-version = "0.5.2-dev-8"
+version = "0.5.2-dev-9"
 dependencies = [
  "lumi-domain",
 ]
 
 [[package]]
 name = "lumi-library-demo"
-version = "0.5.2-dev-8"
+version = "0.5.2-dev-9"
 dependencies = [
  "lumi-domain",
  "lumi-library",
@@ -335,14 +335,14 @@ dependencies = [
 
 [[package]]
 name = "lumi-library-source"
-version = "0.5.2-dev-8"
+version = "0.5.2-dev-9"
 dependencies = [
  "lumi-library",
 ]
 
 [[package]]
 name = "lumi-library-sqlite"
-version = "0.5.2-dev-8"
+version = "0.5.2-dev-9"
 dependencies = [
  "lumi-domain",
  "lumi-library",
@@ -356,7 +356,7 @@ dependencies = [
 
 [[package]]
 name = "lumi-light-plans"
-version = "0.5.2-dev-8"
+version = "0.5.2-dev-9"
 dependencies = [
  "serde",
  "serde_json",
@@ -365,14 +365,14 @@ dependencies = [
 
 [[package]]
 name = "lumi-lighting-output"
-version = "0.5.2-dev-8"
+version = "0.5.2-dev-9"
 dependencies = [
  "lumi-domain",
 ]
 
 [[package]]
 name = "lumi-local-playback"
-version = "0.5.2-dev-8"
+version = "0.5.2-dev-9"
 dependencies = [
  "lumi-deck-source",
  "lumi-domain",
@@ -381,7 +381,7 @@ dependencies = [
 
 [[package]]
 name = "lumi-midi-coremidi"
-version = "0.5.2-dev-8"
+version = "0.5.2-dev-9"
 dependencies = [
  "coremidi-rs",
  "lumi-midi-output",
@@ -390,14 +390,14 @@ dependencies = [
 
 [[package]]
 name = "lumi-midi-output"
-version = "0.5.2-dev-8"
+version = "0.5.2-dev-9"
 dependencies = [
  "thiserror",
 ]
 
 [[package]]
 name = "lumi-output-dry-run"
-version = "0.5.2-dev-8"
+version = "0.5.2-dev-9"
 dependencies = [
  "lumi-domain",
  "lumi-lighting-output",
@@ -407,7 +407,7 @@ dependencies = [
 
 [[package]]
 name = "lumi-planner"
-version = "0.5.2-dev-8"
+version = "0.5.2-dev-9"
 dependencies = [
  "lumi-domain",
  "serde",
@@ -416,7 +416,7 @@ dependencies = [
 
 [[package]]
 name = "lumi-prolink-input"
-version = "0.5.2-dev-8"
+version = "0.5.2-dev-9"
 dependencies = [
  "lumi-deck-source",
  "lumi-domain",
@@ -427,7 +427,7 @@ dependencies = [
 
 [[package]]
 name = "lumi-protocol"
-version = "0.5.2-dev-8"
+version = "0.5.2-dev-9"
 dependencies = [
  "serde",
  "serde_json",
@@ -435,7 +435,7 @@ dependencies = [
 
 [[package]]
 name = "lumi-rekordbox-analysis"
-version = "0.5.2-dev-8"
+version = "0.5.2-dev-9"
 dependencies = [
  "lumi-rekordbox-xml",
  "sha2",
@@ -444,7 +444,7 @@ dependencies = [
 
 [[package]]
 name = "lumi-rekordbox-device"
-version = "0.5.2-dev-8"
+version = "0.5.2-dev-9"
 dependencies = [
  "rusqlite",
  "sha2",
@@ -453,7 +453,7 @@ dependencies = [
 
 [[package]]
 name = "lumi-rekordbox-resolver"
-version = "0.5.2-dev-8"
+version = "0.5.2-dev-9"
 dependencies = [
  "lumi-rekordbox-analysis",
  "lumi-rekordbox-xml",
@@ -464,7 +464,7 @@ dependencies = [
 
 [[package]]
 name = "lumi-rekordbox-xml"
-version = "0.5.2-dev-8"
+version = "0.5.2-dev-9"
 dependencies = [
  "quick-xml",
  "serde",
@@ -474,7 +474,7 @@ dependencies = [
 
 [[package]]
 name = "lumi-simulator"
-version = "0.5.2-dev-8"
+version = "0.5.2-dev-9"
 dependencies = [
  "lumi-deck-source",
  "lumi-domain",
@@ -484,7 +484,7 @@ dependencies = [
 
 [[package]]
 name = "lumi-timing-output"
-version = "0.5.2-dev-8"
+version = "0.5.2-dev-9"
 dependencies = [
  "thiserror",
 ]

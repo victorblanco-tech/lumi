@@ -92,3 +92,14 @@ model metadata stays blank; Lumi never invents a device type.
 Progress: implemented after the runtime cleanup. Player number remains the
 stable layout/transport identity and the optional announced model is carried as
 presentation-only snapshot metadata.
+
+The subsequent hardware acceptance pass found one bookmark/presence boundary
+violation: macOS could resolve an absent equal-model USB bookmark to the one
+currently mounted disk. Connection state now comes only from the live mounted
+volume inventory after source-identity resolution; bookmarks retain
+authorization only. Live's bounded and detailed Library waveforms also share
+one 8-bit RGB contract. Local Playback retries its visual-only detail fetch on
+bounded UI-lane contention and rejects results after a track replacement,
+while cancelled raster jobs can no longer publish stale images. These
+presentation/data fixes do not enter the Pro DJ Link, Ableton Link, planning or
+MIDI realtime lanes.

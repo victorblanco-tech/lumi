@@ -1394,24 +1394,19 @@ public struct LibrarySourcesWorkspaceView: View {
     }
 
     private func mountedURL(for device: RekordboxDeviceState) -> URL? {
-        if let bookmarked = bookmarkedDeviceURL(sourceID: device.sourceID),
-           FileManager.default.fileExists(
-               atPath: bookmarked.appendingPathComponent(
-                   "PIONEER/rekordbox/exportLibrary.db"
-               ).path
-           ) {
-            return bookmarked
-        }
+        // Bookmarks retain read-only authorization, not mount presence. An
+        // equal-model FAT disk can make macOS resolve another disk's bookmark
+        // to the currently occupied /Volumes path. Only the current mounted
+        // volume inventory may therefore drive CONNECTED/DISCONNECTED state.
         return FileManager.default.mountedVolumeURLs(
             includingResourceValuesForKeys: [.volumeNameKey],
             options: [.skipHiddenVolumes]
         )?.first { url in
-            let sourceID = USBSourceIdentityResolver.selectedSourceID(
-                for: mountedIdentity(url),
-                devices: visibleUSBDevices
-            )
-            return sourceID == device.sourceID
-                && FileManager.default.fileExists(
+            USBSourceIdentityResolver.mountedVolume(
+                mountedIdentity(url),
+                represents: device,
+                among: visibleUSBDevices
+            ) && FileManager.default.fileExists(
                     atPath: url.appendingPathComponent("PIONEER/rekordbox/exportLibrary.db").path
                 )
         }
@@ -1617,19 +1612,6 @@ public struct LibrarySourcesWorkspaceView: View {
             return [:]
         }
         return decoded
-    }
-
-    private func bookmarkedDeviceURL(sourceID: String) -> URL? {
-        guard let encodedBookmark = decodedDeviceBookmarks()[sourceID],
-              let bookmark = Data(base64Encoded: encodedBookmark) else { return nil }
-        var stale = false
-        guard let resolved = try? URL(
-            resolvingBookmarkData: bookmark,
-            options: [.withSecurityScope, .withoutUI],
-            relativeTo: nil,
-            bookmarkDataIsStale: &stale
-        ), !stale else { return nil }
-        return resolved
     }
 
     private func stableSourceID(for url: URL, preferredSourceID: String?) -> String? {

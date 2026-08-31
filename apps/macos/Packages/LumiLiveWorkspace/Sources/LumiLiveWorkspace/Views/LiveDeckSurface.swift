@@ -437,7 +437,7 @@ struct LiveDeckSurface<Details: View>: View {
             if let preview = waveformPreview, !preview.points.isEmpty {
                 RGBDeckWaveform(
                     points: preview.points,
-                    channelMaximum: preview.source == "localLibraryDetail" ? 255 : 31,
+                    channelMaximum: preview.channelMaximum,
                     waveformID: deck.trackLoadID,
                     durationBeats: deck.durationBeats,
                     beatGrid: beatGridTimeline,
@@ -852,6 +852,7 @@ private struct RGBDeckWaveform: View {
     let visualClock: DeckVisualClockSnapshot?
     let followsLiveViewport: Bool
     @State private var rasterImage: CGImage?
+    @State private var renderedContentKey: WaveformRasterContentKey?
 
     init(
         points: [DeckWaveformPointSnapshot],
@@ -889,13 +890,22 @@ private struct RGBDeckWaveform: View {
             }
         }
         .task(id: rasterKey) {
+            let requestedKey = rasterKey
+            let requestedContentKey = requestedKey.contentKey
+            if let renderedContentKey, renderedContentKey != requestedContentKey {
+                // Never display the previous track while the next raster is
+                // being prepared. Resolution upgrades for the same track keep
+                // the correctly coloured bounded raster visible.
+                rasterImage = nil
+                self.renderedContentKey = nil
+            }
             let samples = points
             let zoomScale = Double(max(1, durationBeats)) / viewport.visibleBeats
             let rasterWidth = max(
                 samples.count,
                 min(65_536, Int(ceil(2_048 * zoomScale)))
             )
-            rasterImage = await Task.detached(priority: .utility) {
+            let renderTask = Task.detached(priority: .utility) {
                 Self.makeRasterImage(
                     points: samples,
                     width: rasterWidth,
@@ -904,7 +914,15 @@ private struct RGBDeckWaveform: View {
                     beatsPerBar: beatGrid?.beatsPerBar ?? viewport.beatsPerBar,
                     beatGrid: beatGrid
                 )
-            }.value
+            }
+            let rendered = await withTaskCancellationHandler {
+                await renderTask.value
+            } onCancel: {
+                renderTask.cancel()
+            }
+            guard !Task.isCancelled, requestedKey == rasterKey else { return }
+            rasterImage = rendered
+            renderedContentKey = requestedContentKey
         }
     }
 
@@ -960,6 +978,7 @@ private struct RGBDeckWaveform: View {
         let maximumAmplitude = Double(height) * 0.43
         context.setLineWidth(1)
         for pixel in 0..<width {
+            if pixel.isMultiple(of: 256), Task.isCancelled { return nil }
             let beat = Double(pixel) / Double(max(1, width - 1))
                 * Double(max(1, durationBeats))
             let trackProgress = beatGrid?.trackProgress(atBeat: beat)
@@ -1655,6 +1674,18 @@ private struct WaveformRasterKey: Hashable {
     let beatGridMarkerCount: Int
     let firstBeatTimeMillis: UInt64?
     let lastBeatTimeMillis: UInt64?
+
+    var contentKey: WaveformRasterContentKey {
+        WaveformRasterContentKey(
+            waveformID: waveformID,
+            channelMaximum: channelMaximum
+        )
+    }
+}
+
+private struct WaveformRasterContentKey: Hashable {
+    let waveformID: UInt64
+    let channelMaximum: Double
 }
 
 private struct RGBWaveformLayerView: NSViewRepresentable {

@@ -636,6 +636,15 @@ public struct DeckWaveformPreviewSnapshot: Equatable, Sendable {
         self.style = style
         self.points = points
     }
+
+    /// Library snapshot and detail waveforms deliberately share one 8-bit
+    /// colour scale so loading detail changes resolution, never colour.
+    public var channelMaximum: Double {
+        switch source {
+        case "localLibrary", "localLibraryDetail": 255
+        default: 31
+        }
+    }
 }
 
 public struct LibraryWaveformDetailSnapshot: Equatable, Sendable {

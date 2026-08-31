@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.5.2-dev-9 - 2026-08-31
+
+### Fixed
+
+- Derives trusted USB connection state exclusively from the current mounted
+  volume inventory; a retained security bookmark can no longer make an absent
+  equal-model backup disk appear connected.
+- Uses one 8-bit RGB colour contract for bounded and detailed Library
+  waveforms, removing the muted-colour transition during every Live load.
+- Retries Local Playback's visual-only detail request on bounded UI-lane
+  contention and rejects a late result after the deck has loaded another
+  track, so a temporary busy client cannot leave muted fallback colours.
+- Cancels superseded waveform raster jobs and rejects stale results so a
+  previous track or zoom render cannot flash back into the Live surface.
+
 ## 0.5.2-dev-8 - 2026-08-31
 
 ### Fixed
