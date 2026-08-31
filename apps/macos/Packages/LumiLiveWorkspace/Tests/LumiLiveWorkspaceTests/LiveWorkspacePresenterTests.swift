@@ -1227,44 +1227,6 @@ struct LiveWorkspacePresenterTests {
         #expect(snapshot.livePlan == nil)
     }
 
-    @Test("BLT input diagnostics decode as a separate connected-deck integration")
-    func deckInputDiagnosticsDecode() throws {
-        let recorded = try recordedEnvelope()
-        var payload = recorded.payload
-        payload["deckInputIntegration"] = .object([
-            "state": .string("ready"),
-            "destinationName": .string("Lumi Deck Input"),
-            "protocol": .string("BLT MIDI Deck Frame"),
-            "protocolVersion": .number(1),
-            "receivedMessageCount": .number(34),
-            "invalidWordCount": .number(0),
-            "committedFrameCount": .number(2),
-            "ignoredMessageCount": .number(1),
-            "duplicateFrameCount": .number(0),
-            "lastDeckId": .number(2),
-            "lastFrameSequence": .number(9)
-        ])
-        let envelope = MessageEnvelope(
-            protocolVersion: recorded.protocolVersion,
-            messageType: recorded.messageType,
-            messageId: recorded.messageId,
-            sequence: recorded.sequence,
-            correlationId: recorded.correlationId,
-            sentAt: recorded.sentAt,
-            payload: payload
-        )
-
-        let snapshot = try EngineSnapshotDecoder().decode(
-            envelope,
-            endpointDescription: "127.0.0.1:52841",
-            protocolVersion: 1
-        )
-
-        #expect(snapshot.deckInputIntegration?.destinationName == "Lumi Deck Input")
-        #expect(snapshot.deckInputIntegration?.committedFrameCount == 2)
-        #expect(snapshot.deckInputIntegration?.lastDeckID == 2)
-    }
-
     @Test("Direct Pro DJ Link diagnostics accept the bridge sequence and player range")
     func directProLinkDiagnosticsDecode() throws {
         let recorded = try recordedEnvelope()
@@ -1310,14 +1272,14 @@ struct LiveWorkspacePresenterTests {
         #expect(snapshot.deckInputIntegration?.positionDiscontinuityCount == 3)
     }
 
-    @Test("Malformed optional BLT diagnostics fail strict decoding")
+    @Test("Malformed optional Pro DJ Link diagnostics fail strict decoding")
     func malformedDeckInputDiagnosticsFailStrictly() throws {
         let recorded = try recordedEnvelope()
         var payload = recorded.payload
         payload["deckInputIntegration"] = .object([
             "state": .string("ready"),
             "destinationName": .number(4),
-            "protocol": .string("BLT MIDI Deck Frame"),
+            "protocol": .string("lumi-prolink-bridge"),
             "protocolVersion": .number(1),
             "receivedMessageCount": .number(0),
             "invalidWordCount": .number(0),

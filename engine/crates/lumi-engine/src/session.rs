@@ -6,7 +6,6 @@ use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
-use lumi_blt_midi::{BltMidiDeckSourceProvider, BltMidiError};
 use lumi_deck_source::DeckSourceProvider as _;
 use lumi_domain::{
     ClientId, CommandSequence, CueOrigin, CueReason, DecisionReason, DeckObservation,
@@ -25,13 +24,7 @@ use lumi_light_plans::{
 };
 use lumi_lighting_output::LightingOutputProvider as _;
 use lumi_local_playback::{LocalPlaybackDeckSourceProvider, LocalPlaybackError};
-#[cfg(not(test))]
-use lumi_midi_coremidi::DECK_INPUT_DESTINATION_NAME;
-#[cfg(test)]
-use lumi_midi_coremidi::MidiChannelVoiceMessage;
-use lumi_midi_coremidi::{
-    CoreMidiDestinationProvider, CoreMidiSourceProvider, MidiDestinationState,
-};
+use lumi_midi_coremidi::CoreMidiSourceProvider;
 use lumi_midi_output::{
     BANK_SETTLE_DELAY, MidiClockController, MidiClockState, MidiClockSync, MidiSourceState,
     RealtimeMidiActionKind, RealtimeMidiController,
@@ -87,10 +80,6 @@ use crate::link_relay::{
 use crate::service::{ServiceBootstrap, ServiceBootstrapError};
 
 const EXIT_AFTER_CLIENT_DISCONNECT_ENVIRONMENT_KEY: &str = "LUMI_EXIT_AFTER_CLIENT_DISCONNECT";
-#[cfg(not(test))]
-const DECK_INPUT_NAME_ENVIRONMENT_KEY: &str = "LUMI_DECK_INPUT_DESTINATION_NAME";
-#[cfg(not(test))]
-const DECK_INPUT_DISABLED_ENVIRONMENT_KEY: &str = "LUMI_DECK_INPUT_DISABLED";
 #[cfg(not(test))]
 const AUTO_PUBLISH_MIDI_ENVIRONMENT_KEY: &str = "LUMI_AUTO_PUBLISH_MIDI";
 const MAXIMUM_AUTHENTICATION_BYTES: usize = 512;
@@ -359,7 +348,6 @@ struct EngineRuntime {
     clock: ManualClock,
     deck_source: SimulatorDeckSourceProvider<ManualClock>,
     local_deck_source: LocalPlaybackDeckSourceProvider,
-    connected_deck_source: BltMidiDeckSourceProvider,
     direct_deck_source: ProLinkDeckSourceProvider,
     #[cfg(not(test))]
     prolink_bridge: Option<BridgeProcessSupervisor>,
@@ -374,7 +362,6 @@ struct EngineRuntime {
     planning_worker: PlanningWorker,
     output_worker: OutputWorker,
     link_relay: LinkRelay,
-    deck_input: CoreMidiDestinationProvider,
     library_worker: LibraryWorker,
     library_revision: u64,
     operation_sequence: u64,
@@ -434,8 +421,7 @@ enum DeckSourceMode {
 impl EngineRuntime {
     fn deck_source_kind(&self) -> &'static str {
         match self.deck_source_mode {
-            DeckSourceMode::ConnectedDecks if self.uses_direct_prolink() => "directProDjLink",
-            DeckSourceMode::ConnectedDecks => "beatLinkTriggerMidi",
+            DeckSourceMode::ConnectedDecks => "directProDjLink",
             DeckSourceMode::LocalPlayback => "localPlayback",
             DeckSourceMode::Simulator => "simulator",
         }
@@ -443,28 +429,15 @@ impl EngineRuntime {
 
     fn leader_deck_id(&self) -> Option<lumi_domain::DeckId> {
         match self.deck_source_mode {
-            DeckSourceMode::ConnectedDecks if self.uses_direct_prolink() => {
-                self.direct_deck_source.leader_deck_id()
-            }
-            DeckSourceMode::ConnectedDecks => self.connected_deck_source.leader_deck_id(),
+            DeckSourceMode::ConnectedDecks => self.direct_deck_source.leader_deck_id(),
             DeckSourceMode::LocalPlayback => self.local_deck_source.leader_deck_id(),
             DeckSourceMode::Simulator => Some(self.deck_source.leader_deck_id()),
         }
     }
 
+    #[cfg(not(test))]
     fn direct_prolink_active(&self) -> bool {
-        #[cfg(not(test))]
-        {
-            self.prolink_bridge.is_some()
-        }
-        #[cfg(test)]
-        {
-            false
-        }
-    }
-
-    fn uses_direct_prolink(&self) -> bool {
-        self.direct_prolink_active() || self.prolink_recovery_pending()
+        self.prolink_bridge.is_some()
     }
 
     fn prolink_recovery_pending(&self) -> bool {
@@ -516,7 +489,6 @@ fn initialized_runtime_for_mode(
     )?;
     let mut deck_source = SimulatorDeckSourceProvider::demo(clock.clone())?;
     let mut local_deck_source = LocalPlaybackDeckSourceProvider::new(clock.now())?;
-    let mut connected_deck_source = BltMidiDeckSourceProvider::new(clock.now())?;
     let mut direct_deck_source = ProLinkDeckSourceProvider::new(clock.now())?;
     #[cfg(not(test))]
     let (prolink_bridge, prolink_start_error) =
@@ -536,19 +508,6 @@ fn initialized_runtime_for_mode(
     if env::var(AUTO_PUBLISH_MIDI_ENVIRONMENT_KEY).as_deref() != Ok("0") {
         let _ = output_worker.enable_midi_auto_publish();
     }
-    #[cfg(not(test))]
-    let mut deck_input = CoreMidiDestinationProvider::new();
-    #[cfg(test)]
-    let deck_input = CoreMidiDestinationProvider::new();
-    #[cfg(not(test))]
-    if env::var(DECK_INPUT_DISABLED_ENVIRONMENT_KEY).as_deref() != Ok("1") {
-        deck_input
-            .publish(
-                &env::var(DECK_INPUT_NAME_ENVIRONMENT_KEY)
-                    .unwrap_or_else(|_| DECK_INPUT_DESTINATION_NAME.to_owned()),
-            )
-            .map_err(|error| EngineError::Midi(error.to_string()))?;
-    }
     let library_worker = LibraryWorker::demo()?;
     let autoloop_catalog = library_worker.autoloop_catalog()?;
     let light_planning_policy = library_worker.light_planning_policy()?;
@@ -556,28 +515,13 @@ fn initialized_runtime_for_mode(
     planning_worker.synchronize_light_policy(light_planning_policy);
     match deck_source_mode {
         DeckSourceMode::ConnectedDecks => {
-            #[cfg(not(test))]
-            let direct_active = prolink_bridge.is_some();
-            #[cfg(test)]
-            let direct_active = false;
-            if direct_active {
-                for event in direct_deck_source.drain_events()? {
-                    planning_worker.process_source_event(
-                        &mut runtime,
-                        &mut output_worker,
-                        event,
-                        direct_deck_source.leader_deck_id(),
-                    )?;
-                }
-            } else {
-                for event in connected_deck_source.drain_events()? {
-                    planning_worker.process_source_event(
-                        &mut runtime,
-                        &mut output_worker,
-                        event,
-                        connected_deck_source.leader_deck_id(),
-                    )?;
-                }
+            for event in direct_deck_source.drain_events()? {
+                planning_worker.process_source_event(
+                    &mut runtime,
+                    &mut output_worker,
+                    event,
+                    direct_deck_source.leader_deck_id(),
+                )?;
             }
         }
         DeckSourceMode::LocalPlayback => {
@@ -606,7 +550,6 @@ fn initialized_runtime_for_mode(
         clock,
         deck_source,
         local_deck_source,
-        connected_deck_source,
         direct_deck_source,
         #[cfg(not(test))]
         prolink_bridge,
@@ -621,7 +564,6 @@ fn initialized_runtime_for_mode(
         planning_worker,
         output_worker,
         link_relay,
-        deck_input,
         library_worker,
         library_revision: 1,
         operation_sequence: 0,
@@ -758,26 +700,14 @@ fn process_pending_source_events(runtime: &mut EngineRuntime) -> Result<(), Engi
     let leader_deck_id = runtime.leader_deck_id();
     match runtime.deck_source_mode {
         DeckSourceMode::ConnectedDecks => {
-            if runtime.uses_direct_prolink() {
-                for event in runtime.direct_deck_source.drain_events()? {
-                    let event = hydrate_direct_library_event(runtime, event)?;
-                    runtime.planning_worker.process_source_event(
-                        &mut runtime.state,
-                        &mut runtime.output_worker,
-                        event,
-                        leader_deck_id,
-                    )?;
-                }
-            } else {
-                for event in runtime.connected_deck_source.drain_events()? {
-                    let event = hydrate_connected_library_event(runtime, event)?;
-                    runtime.planning_worker.process_source_event(
-                        &mut runtime.state,
-                        &mut runtime.output_worker,
-                        event,
-                        leader_deck_id,
-                    )?;
-                }
+            for event in runtime.direct_deck_source.drain_events()? {
+                let event = hydrate_direct_library_event(runtime, event)?;
+                runtime.planning_worker.process_source_event(
+                    &mut runtime.state,
+                    &mut runtime.output_worker,
+                    event,
+                    leader_deck_id,
+                )?;
             }
         }
         DeckSourceMode::LocalPlayback => {
@@ -832,42 +762,6 @@ fn hydrate_direct_library_event(
     let _ = runtime
         .direct_deck_source
         .hydrate_track_metadata(track_load_id, metadata.clone());
-    runtime
-        .planning_worker
-        .register_library_context(track_load_id, context);
-    envelope.observation = DeckObservation::TrackLoaded {
-        deck_id,
-        metadata,
-        track_load_id,
-    };
-    Ok(DomainEvent::Observation(envelope))
-}
-
-fn hydrate_connected_library_event(
-    runtime: &mut EngineRuntime,
-    event: DomainEvent,
-) -> Result<DomainEvent, EngineError> {
-    let DomainEvent::Observation(mut envelope) = event else {
-        return Ok(event);
-    };
-    let DeckObservation::TrackLoaded {
-        deck_id,
-        track_load_id,
-        ..
-    } = envelope.observation
-    else {
-        return Ok(DomainEvent::Observation(envelope));
-    };
-    let Some(identity) = runtime.connected_deck_source.track_identity(track_load_id) else {
-        return Ok(DomainEvent::Observation(envelope));
-    };
-    let Some(connected) = runtime
-        .library_worker
-        .connected_track(identity.rekordbox_id, identity.simulator_signature)?
-    else {
-        return Ok(DomainEvent::Observation(envelope));
-    };
-    let (metadata, context) = connected.prepared.into_parts();
     runtime
         .planning_worker
         .register_library_context(track_load_id, context);
@@ -3163,30 +3057,13 @@ fn transport_ack_envelope(
 }
 
 fn process_deck_input_messages(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
-    let messages = runtime.deck_input.drain_messages();
     if runtime.deck_source_mode != DeckSourceMode::ConnectedDecks {
         #[cfg(not(test))]
         maintain_direct_prolink_bridge(runtime)?;
         return Ok(());
     }
-    let at = runtime.clock.now();
     #[cfg(not(test))]
     maintain_direct_prolink_bridge(runtime)?;
-    if !runtime.uses_direct_prolink() {
-        #[cfg(not(test))]
-        if runtime.prolink_recovery_pending {
-            process_pending_source_events(runtime)?;
-            return Ok(());
-        }
-        for message in messages {
-            runtime.connected_deck_source.ingest(message, at)?;
-        }
-        runtime.connected_deck_source.expire_stale(
-            Instant::now(),
-            Duration::from_millis(2_500),
-            at,
-        )?;
-    }
     process_pending_source_events(runtime)?;
     Ok(())
 }
@@ -3965,13 +3842,9 @@ fn apply_command(
                         .clock
                         .advance(1)
                         .ok_or(CommandApplicationError::ClockOverflow)?;
-                    if runtime.uses_direct_prolink() {
-                        runtime.direct_deck_source.clear(at).map_err(|error| {
-                            CommandApplicationError::Engine(EngineError::ProLinkProvider(error))
-                        })?;
-                    } else {
-                        runtime.connected_deck_source.clear(at)?;
-                    }
+                    runtime.direct_deck_source.clear(at).map_err(|error| {
+                        CommandApplicationError::Engine(EngineError::ProLinkProvider(error))
+                    })?;
                     process_pending_source_events(runtime)
                         .map_err(CommandApplicationError::Engine)?;
                     #[cfg(not(test))]
@@ -4602,7 +4475,6 @@ fn application_error_envelope(
         | CommandApplicationError::Midi(_)
         | CommandApplicationError::Library(_)
         | CommandApplicationError::LocalPlayback(_)
-        | CommandApplicationError::BltMidi(_)
         | CommandApplicationError::WrongDeckSourceMode
         | CommandApplicationError::Simulator(_) => error_envelope(
             sequence,
@@ -4682,8 +4554,6 @@ enum CommandApplicationError {
     Simulator(#[from] SimulatorError),
     #[error("local playback failed: {0}")]
     LocalPlayback(#[from] LocalPlaybackError),
-    #[error("Beat Link Trigger MIDI input failed: {0}")]
-    BltMidi(#[from] BltMidiError),
     #[error("the command is not valid for the active deck source")]
     WrongDeckSourceMode,
     #[error("Pro DJ Link is unavailable: {0}")]
@@ -4773,13 +4643,7 @@ fn snapshot_envelope_internal(
                 DeckSourceMode::Simulator => "Internal Test Source",
             },
             "status": if runtime.deck_source_mode == DeckSourceMode::ConnectedDecks {
-                if runtime.uses_direct_prolink() {
-                    deck_source_status_name(runtime.direct_deck_source.diagnostics().source_status)
-                } else if runtime.connected_deck_source.diagnostics().committed_frame_count > 0 {
-                    "ready"
-                } else {
-                    "disconnected"
-                }
+                deck_source_status_name(runtime.direct_deck_source.diagnostics().source_status)
             } else {
                 state
                     .source_statuses()
@@ -4974,87 +4838,57 @@ fn snapshot_envelope_internal(
             "lastError": link_timing.last_error,
         }),
     );
-    if runtime.uses_direct_prolink() {
-        let diagnostics = runtime.direct_deck_source.diagnostics();
-        payload.insert(
-            "deckInputIntegration".to_owned(),
-            json!({
-                "state": if diagnostics.source_status == DeckSourceStatus::Ready {
-                    "ready"
-                } else {
-                    "stopped"
-                },
-                "sourceState": deck_source_status_name(diagnostics.source_status),
-                "destinationName": Value::Null,
-                "protocol": lumi_prolink_input::PROTOCOL_NAME,
-                "protocolVersion": lumi_prolink_input::PROTOCOL_VERSION,
-                "receivedMessageCount": diagnostics.received_message_count,
-                "invalidWordCount": 0,
-                "lastMessage": Value::Null,
-                "committedFrameCount": diagnostics.received_message_count,
-                "ignoredMessageCount": diagnostics.ignored_message_count,
-                "duplicateFrameCount": 0,
-                "lastDeckId": runtime.direct_deck_source.leader_deck_id()
-                    .map(lumi_domain::DeckId::value),
-                "lastFrameSequence": diagnostics.last_bridge_sequence,
-                "bridgeVersion": diagnostics.bridge_version,
-                "beatLinkVersion": diagnostics.beat_link_version,
-                "recoveryPending": runtime.prolink_recovery_pending(),
-                "restartCount": runtime.prolink_restart_count(),
-                "ingressQueueCapacity": diagnostics.ingress_queue_capacity,
-                "ingressQueueDepth": diagnostics.ingress_queue_depth,
-                "ingressQueueHighWater": diagnostics.ingress_queue_high_water,
-                "ingressCoalescedMessageCount": diagnostics.ingress_coalesced_message_count,
-                "ingressCriticalSaturationCount": diagnostics.ingress_critical_saturation_count,
-                "ingressSourceAgeSampleCount": diagnostics.ingress_source_age_sample_count,
-                "ingressSourceAgeP50Micros": diagnostics.ingress_source_age_p50_micros,
-                "ingressSourceAgeP95Micros": diagnostics.ingress_source_age_p95_micros,
-                "ingressSourceAgeP99Micros": diagnostics.ingress_source_age_p99_micros,
-                "ingressSourceAgeMaxMicros": diagnostics.ingress_source_age_max_micros,
-                "precisePositionMessageCount": diagnostics.precise_position_message_count,
-                "authoritativePositionCount": diagnostics.authoritative_position_count,
-                "positionDiscontinuityCount": diagnostics.position_discontinuity_count,
-                "positionAuthorityReady": diagnostics.position_authority_ready,
-                "discoveredPlayers": diagnostics.discovered_devices.iter()
-                    .map(|(number, device)| json!({
-                        "playerNumber": number,
-                        "name": device.name,
-                        "address": device.address,
-                    }))
-                    .collect::<Vec<_>>(),
-                "lastError": diagnostics.last_error
-                    .or_else(|| runtime.prolink_start_error.clone()),
-            }),
-        );
-    } else {
-        let deck_input = runtime.deck_input.status();
-        let blt_diagnostics = runtime.connected_deck_source.diagnostics();
-        payload.insert(
-            "deckInputIntegration".to_owned(),
-            json!({
-                "state": match deck_input.state {
-                    MidiDestinationState::Stopped => "stopped",
-                    MidiDestinationState::Ready => "ready",
-                },
-                "destinationName": deck_input.destination_name,
-                "protocol": lumi_blt_midi::PROTOCOL_NAME,
-                "protocolVersion": lumi_blt_midi::PROTOCOL_VERSION,
-                "receivedMessageCount": deck_input.received_message_count,
-                "invalidWordCount": deck_input.invalid_word_count,
-                "lastMessage": deck_input.last_message.map(|message| json!({
-                    "status": message.status,
-                    "channel": message.channel,
-                    "dataOne": message.data_one,
-                    "dataTwo": message.data_two,
-                })),
-                "committedFrameCount": blt_diagnostics.committed_frame_count,
-                "ignoredMessageCount": blt_diagnostics.ignored_message_count,
-                "duplicateFrameCount": blt_diagnostics.duplicate_frame_count,
-                "lastDeckId": blt_diagnostics.last_deck_id.map(lumi_domain::DeckId::value),
-                "lastFrameSequence": blt_diagnostics.last_frame_sequence,
-            }),
-        );
-    }
+    let diagnostics = runtime.direct_deck_source.diagnostics();
+    payload.insert(
+        "deckInputIntegration".to_owned(),
+        json!({
+            "state": if diagnostics.source_status == DeckSourceStatus::Ready {
+                "ready"
+            } else {
+                "stopped"
+            },
+            "sourceState": deck_source_status_name(diagnostics.source_status),
+            "destinationName": Value::Null,
+            "protocol": lumi_prolink_input::PROTOCOL_NAME,
+            "protocolVersion": lumi_prolink_input::PROTOCOL_VERSION,
+            "receivedMessageCount": diagnostics.received_message_count,
+            "invalidWordCount": 0,
+            "lastMessage": Value::Null,
+            "committedFrameCount": diagnostics.received_message_count,
+            "ignoredMessageCount": diagnostics.ignored_message_count,
+            "duplicateFrameCount": 0,
+            "lastDeckId": runtime.direct_deck_source.leader_deck_id()
+                .map(lumi_domain::DeckId::value),
+            "lastFrameSequence": diagnostics.last_bridge_sequence,
+            "bridgeVersion": diagnostics.bridge_version,
+            "beatLinkVersion": diagnostics.beat_link_version,
+            "recoveryPending": runtime.prolink_recovery_pending(),
+            "restartCount": runtime.prolink_restart_count(),
+            "ingressQueueCapacity": diagnostics.ingress_queue_capacity,
+            "ingressQueueDepth": diagnostics.ingress_queue_depth,
+            "ingressQueueHighWater": diagnostics.ingress_queue_high_water,
+            "ingressCoalescedMessageCount": diagnostics.ingress_coalesced_message_count,
+            "ingressCriticalSaturationCount": diagnostics.ingress_critical_saturation_count,
+            "ingressSourceAgeSampleCount": diagnostics.ingress_source_age_sample_count,
+            "ingressSourceAgeP50Micros": diagnostics.ingress_source_age_p50_micros,
+            "ingressSourceAgeP95Micros": diagnostics.ingress_source_age_p95_micros,
+            "ingressSourceAgeP99Micros": diagnostics.ingress_source_age_p99_micros,
+            "ingressSourceAgeMaxMicros": diagnostics.ingress_source_age_max_micros,
+            "precisePositionMessageCount": diagnostics.precise_position_message_count,
+            "authoritativePositionCount": diagnostics.authoritative_position_count,
+            "positionDiscontinuityCount": diagnostics.position_discontinuity_count,
+            "positionAuthorityReady": diagnostics.position_authority_ready,
+            "discoveredPlayers": diagnostics.discovered_devices.iter()
+                .map(|(number, device)| json!({
+                    "playerNumber": number,
+                    "name": device.name,
+                    "address": device.address,
+                }))
+                .collect::<Vec<_>>(),
+            "lastError": diagnostics.last_error
+                .or_else(|| runtime.prolink_start_error.clone()),
+        }),
+    );
     payload.insert(
         "leaderDeckId".to_owned(),
         json!(state.leader_deck().map(|deck_id| deck_id.value())),
@@ -5082,35 +4916,27 @@ fn snapshot_envelope_internal(
             } else {
                 Value::Null
             };
-            let connected_playback_position_millis =
-                if runtime.deck_source_mode == DeckSourceMode::ConnectedDecks {
-                    if runtime.uses_direct_prolink() {
-                        runtime
-                            .direct_deck_source
-                            .transport(deck.track_load_id())
-                            .and_then(|transport| {
-                                library_context
-                                    .and_then(|context| context.millis_at_beat(transport.beat))
-                            })
-                    } else {
-                        runtime
-                            .connected_deck_source
-                            .transport(deck.track_load_id())
-                            .and_then(|transport| transport.position_millis.map(u64::from))
-                    }
-                } else {
-                    None
-                };
-            let connected_transport_revision = (runtime.deck_source_mode
+            let connected_playback_position_millis = if runtime.deck_source_mode
                 == DeckSourceMode::ConnectedDecks
-                && runtime.uses_direct_prolink())
-            .then(|| {
+            {
                 runtime
                     .direct_deck_source
                     .transport(deck.track_load_id())
-                    .map(|transport| transport.discontinuity_revision)
-            })
-            .flatten();
+                    .and_then(|transport| {
+                        library_context.and_then(|context| context.millis_at_beat(transport.beat))
+                    })
+            } else {
+                None
+            };
+            let connected_transport_revision = (runtime.deck_source_mode
+                == DeckSourceMode::ConnectedDecks)
+                .then(|| {
+                    runtime
+                        .direct_deck_source
+                        .transport(deck.track_load_id())
+                        .map(|transport| transport.discontinuity_revision)
+                })
+                .flatten();
             let has_plan = state.plan(deck_id).is_some();
             let plan_eligibility = if library_context.is_some() && has_plan {
                 "readyExact"
@@ -5749,8 +5575,6 @@ pub enum EngineError {
     Simulator(#[from] SimulatorError),
     #[error("local playback initialization failed: {0}")]
     LocalPlayback(#[from] LocalPlaybackError),
-    #[error("Beat Link Trigger MIDI adapter failed: {0}")]
-    BltMidi(#[from] BltMidiError),
     #[error("Direct Pro DJ Link adapter failed: {0}")]
     ProLinkProvider(#[from] ProLinkProviderError),
     #[cfg(not(test))]
@@ -7358,153 +7182,6 @@ mod tests {
         assert_eq!(
             runtime.output_worker.provider.records().count(),
             records_before_fault
-        );
-    }
-
-    #[test]
-    fn committed_blt_midi_frame_enters_the_product_deck_source_port() {
-        let mut runtime =
-            match initialized_runtime_for_mode(ManualClock::new(0), DeckSourceMode::ConnectedDecks)
-            {
-                Ok(runtime) => runtime,
-                Err(error) => panic!("connected test engine must initialize: {error}"),
-            };
-        let fields = [
-            (16, 31),
-            (17, 42),
-            (18, 0),
-            (19, 0),
-            (20, 0),
-            (21, 2),
-            (22, 1),
-            (23, 80),
-            (24, 119),
-            (25, 7),
-            (26, 80),
-            (27, 0),
-            (28, 0),
-            (29, 58),
-            (30, 1),
-            (31, 0),
-            (32, 7),
-            (33, 80),
-            (34, 119),
-            (35, 7),
-            (36, 0),
-            (37, 0),
-            (38, 0),
-            (39, 0),
-            (40, 0),
-            (41, 10),
-            (42, 68),
-            (43, 4),
-            (119, lumi_blt_midi::PROTOCOL_VERSION),
-        ];
-        for (controller, value) in fields {
-            if let Err(error) = runtime.connected_deck_source.ingest(
-                MidiChannelVoiceMessage {
-                    status: 0xb,
-                    channel: 2,
-                    data_one: controller,
-                    data_two: value,
-                },
-                MonotonicTime::new(1),
-            ) {
-                panic!("BLT frame must ingest: {error}");
-            }
-        }
-        if let Err(error) = process_pending_source_events(&mut runtime) {
-            panic!("BLT events must enter the engine: {error}");
-        }
-        assert_eq!(
-            runtime.state.state().leader_deck(),
-            Some(lumi_domain::DeckId::new(2))
-        );
-        let deck = runtime
-            .state
-            .state()
-            .deck(lumi_domain::DeckId::new(2))
-            .unwrap_or_else(|| panic!("BLT Deck 2 must be loaded"));
-        assert_eq!(deck.metadata().title(), "External track 42");
-        assert_eq!(deck.beat(), 80);
-        assert_eq!(deck.effective_bpm_milli(), 130_000);
-        assert!(deck.is_playing());
-        assert!(
-            runtime
-                .state
-                .state()
-                .plan(lumi_domain::DeckId::new(2))
-                .is_none()
-        );
-        assert_eq!(runtime.output_worker.provider.records().count(), 0);
-
-        let tempo_update = [
-            (16, 31),
-            (17, 42),
-            (18, 0),
-            (19, 0),
-            (20, 0),
-            (21, 2),
-            (22, 1),
-            (23, 80),
-            (24, 119),
-            (25, 7),
-            (26, 80),
-            (27, 0),
-            (28, 0),
-            (29, 58),
-            (30, 1),
-            (31, 0),
-            (32, 8),
-            (33, 100),
-            (34, 1),
-            (35, 8),
-            (36, 0),
-            (37, 0),
-            (38, 0),
-            (39, 0),
-            (40, 0),
-            (41, 10),
-            (42, 68),
-            (43, 4),
-            (119, lumi_blt_midi::PROTOCOL_VERSION),
-        ];
-        for (controller, value) in tempo_update {
-            if let Err(error) = runtime.connected_deck_source.ingest(
-                MidiChannelVoiceMessage {
-                    status: 0xb,
-                    channel: 2,
-                    data_one: controller,
-                    data_two: value,
-                },
-                MonotonicTime::new(2),
-            ) {
-                panic!("BLT tempo update must ingest: {error}");
-            }
-        }
-        if let Err(error) = process_pending_source_events(&mut runtime) {
-            panic!("BLT tempo update must enter the engine: {error}");
-        }
-        let deck = runtime
-            .state
-            .state()
-            .deck(lumi_domain::DeckId::new(2))
-            .unwrap_or_else(|| panic!("BLT Deck 2 must remain loaded"));
-        assert_eq!(deck.metadata().bpm_milli(), 130_000);
-        assert_eq!(deck.effective_bpm_milli(), 131_300);
-        assert_eq!(
-            runtime
-                .connected_deck_source
-                .transport(deck.track_load_id())
-                .and_then(|transport| transport.position_millis),
-            Some(74_250)
-        );
-        assert_eq!(
-            runtime
-                .connected_deck_source
-                .diagnostics()
-                .committed_frame_count,
-            2
         );
     }
 

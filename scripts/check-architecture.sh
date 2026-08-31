@@ -63,6 +63,10 @@ reject_dependency \
   "engine/crates/lumi-prolink-input/Cargo.toml" \
   'lumi-(engine|simulator|planner|protocol|library|lighting-output|midi-output|midi-coremidi|blt-midi)' \
   "the direct Pro DJ Link input boundary may not depend on engine, planning, library, output, MIDI, or BLT adapters."
+reject_product_dependency \
+  "engine/crates/lumi-engine/Cargo.toml" \
+  'lumi-blt-midi' \
+  "the production engine must use direct Pro DJ Link and may not link the retired BLT MIDI adapter."
 reject_dependency \
   "engine/crates/lumi-library/Cargo.toml" \
   'lumi-(engine|simulator|planner|protocol|deck-source|lighting-output|output-dry-run|library-source|library-demo|library-sqlite)' \
@@ -98,5 +102,11 @@ reject_dependency \
   "apps/macos/Packages/LumiLibraryWorkspace/Package.swift" \
   'Lumi(EngineClient|LiveWorkspace)' \
   "LumiLibraryWorkspace must remain independent from process ownership and other features."
+
+if find "$repository_root/apps/macos" -type f -name '*.swift' -print0 \
+  | xargs -0 grep -Eq 'BeatLinkTriggerIntegrationView|BLT MIDI Deck Frame'; then
+  echo "ERROR: the macOS product must not expose the retired BLT MIDI runtime path." >&2
+  exit 1
+fi
 
 echo "Architecture dependency check passed."

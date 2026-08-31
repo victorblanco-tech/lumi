@@ -62,3 +62,10 @@ SoundSwitch MIDI execution.
 - a Pro DJ Link bridge failure is visible and never changes provider silently;
 - all existing regression and performance gates pass without timing regression;
 - 0.5.1 Production data opens unchanged in 0.5.2 and Dev data stays isolated.
+
+## Accepted follow-up after the refactor
+
+Live Deck presentation will adopt Pro DJ Link terminology without changing the
+transport model: `Player 1`, `Player 2`, and so on, with the detected hardware
+model (for example `CDJ-1500X`) shown beneath the stable player number. Missing
+model metadata stays blank; Lumi never invents a device type.

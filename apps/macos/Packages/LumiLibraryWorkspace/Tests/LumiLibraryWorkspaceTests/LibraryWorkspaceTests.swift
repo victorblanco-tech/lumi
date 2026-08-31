@@ -960,16 +960,16 @@ struct LibraryWorkspaceTests {
         #expect(settings.mappingProfiles.first?.mappings.first?.roleID == "intro-outro")
     }
 
-    @Test("BLT MIDI input diagnostics decode independently from SoundSwitch output")
+    @Test("Pro DJ Link diagnostics decode independently from SoundSwitch output")
     func decodesDeckInputIntegration() throws {
         let state = try LibrarySnapshotDecoder().decode(
             envelope(
                 trackValues: [trackValue()],
                 deckInputIntegration: .object([
                     "state": .string("ready"),
-                    "destinationName": .string("Lumi Deck Input"),
-                    "protocol": .string("BLT MIDI Deck Frame"),
-                    "protocolVersion": .number(3),
+                    "destinationName": .null,
+                    "protocol": .string("lumi-prolink-bridge"),
+                    "protocolVersion": .number(1),
                     "receivedMessageCount": .number(48),
                     "invalidWordCount": .number(0),
                     "committedFrameCount": .number(3),
@@ -981,29 +981,11 @@ struct LibraryWorkspaceTests {
             )
         )
         let input = try #require(state.deckInputIntegration)
-        #expect(input.destinationName == "Lumi Deck Input")
+        #expect(input.destinationName == nil)
+        #expect(input.protocolName == "lumi-prolink-bridge")
         #expect(input.isReceiving)
         #expect(input.lastDeckID == 2)
         #expect(state.midiIntegration == nil)
-    }
-
-    @Test("BLT expression corrects the Shallow Playback Simulator without changing real deck tempo")
-    @MainActor
-    func bltExpressionHasSeparateSimulatorAndHardwareTempoPaths() {
-        let expression = BeatLinkTriggerIntegrationView.trackedUpdateExpression
-
-        #expect(expression.contains("simulating? (some? util/*simulating*)"))
-        #expect(expression.contains("(/ (* raw-track-bpm 10.0) pitch-scale)"))
-        #expect(expression.contains("(* raw-track-bpm 10.0)"))
-        #expect(expression.contains("(or effective-tempo 0.0)"))
-        #expect(expression.contains("sim-signature"))
-        #expect(expression.contains("[36 (chunk sim-signature 0)]"))
-        #expect(expression.contains("raw-position (playback-time status)"))
-        #expect(expression.contains("sampled-position (* 100 (quot current-position 100))"))
-        #expect(expression.contains(":lumi-last-frame frame-key"))
-        #expect(expression.contains("(>= (- now-ms last-sent-ms) 1000)"))
-        #expect(expression.contains("[41 (chunk sampled-position 0)]"))
-        #expect(expression.contains("[119 4]"))
     }
 
     @Test("Duplicate stable role IDs are rejected before Settings renders")

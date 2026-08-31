@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.5.2-dev-2 - 2026-08-31
+
+### Changed
+
+- Makes direct Pro DJ Link the only production Connected Deck provider.
+- Removes the retired Beat Link Trigger MIDI input, virtual destination,
+  diagnostics UI and silent runtime fallback from the macOS product.
+- Adds an architecture gate that prevents the product engine or Swift UI from
+  reintroducing the BLT runtime path accidentally.
+
 ## 0.5.2-dev-1 - 2026-08-31
 
 ### Changed

@@ -6,7 +6,6 @@ rust-version.workspace = true
 license.workspace = true
 
 [dependencies]
-lumi-blt-midi = { path = "../lumi-blt-midi" }
 lumi-deck-source = { path = "../lumi-deck-source" }
 lumi-domain = { path = "../lumi-domain" }
 lumi-lighting-output = { path = "../lumi-lighting-output" }

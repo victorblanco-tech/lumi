@@ -526,9 +526,8 @@ public struct LibrarySnapshotDecoder: Sendable {
         let lastDeckID = try strictOptionalUnsigned(input, "lastDeckId")
         let lastFrameSequence = try strictOptionalUnsigned(input, "lastFrameSequence")
         let protocolName = try string(input, "protocol")
-        let isBLTMIDI = protocolName == "BLT MIDI Deck Frame"
-        guard lastDeckID.map({ (1...4).contains($0) }) ?? true,
-              lastFrameSequence.map({ !isBLTMIDI || $0 <= 127 }) ?? true else {
+        guard protocolName == "lumi-prolink-bridge",
+              lastDeckID.map({ (1...4).contains($0) }) ?? true else {
             throw LibrarySnapshotError.invalidObject
         }
         let discoveredPlayers: [ProDJLinkDeviceState]

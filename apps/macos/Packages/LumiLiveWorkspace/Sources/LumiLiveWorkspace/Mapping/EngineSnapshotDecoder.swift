@@ -340,7 +340,7 @@ public struct EngineSnapshotDecoder: Sendable {
               case let .string(state) = input["state"],
               ["stopped", "ready"].contains(state),
               case let .string(protocolName) = input["protocol"],
-              !protocolName.isEmpty,
+              protocolName == "lumi-prolink-bridge",
               let protocolVersion = unsignedInteger(input["protocolVersion"]),
               protocolVersion > 0,
               let receivedMessageCount = unsignedInteger(input["receivedMessageCount"]),
@@ -358,10 +358,8 @@ public struct EngineSnapshotDecoder: Sendable {
         } else {
             false
         }
-        let isBLTMIDI = protocolName == "BLT MIDI Deck Frame"
         guard destinationName?.isEmpty != true,
-              lastDeckID.map({ (1...4).contains($0) }) ?? true,
-              lastFrameSequence.map({ !isBLTMIDI || $0 <= 127 }) ?? true else {
+              lastDeckID.map({ (1...4).contains($0) }) ?? true else {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
         return DeckInputIntegrationSnapshot(

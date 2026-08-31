@@ -2,8 +2,8 @@
 
 - Status: **Accepted**
 - Date: **2026-08-09**
-- Supersedes: the production role of ADR-0018; the BLT MIDI adapter remains a
-  temporary fallback and diagnostic reference
+- Supersedes: the production role of ADR-0018. As of 0.5.2-dev-2, the BLT MIDI
+  adapter is no longer linked into or exposed by the product runtime.
 
 ## Context
 
