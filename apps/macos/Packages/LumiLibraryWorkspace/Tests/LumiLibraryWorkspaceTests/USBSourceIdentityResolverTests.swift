@@ -44,33 +44,53 @@ struct USBSourceIdentityResolverTests {
             hardwareSerial: "DD56419884410"
         )
 
-        #expect(chrm == renamedCHRM)
+        #expect(chrm != renamedCHRM)
         #expect(chrm != gray)
-        #expect(chrm?.hasPrefix("usb-fs:hardware-") == true)
+        #expect(chrm?.hasPrefix("usb-fs:v2-") == true)
         #expect(
             chrm == USBStableSourceIdentity.sourceID(
-                fileSystemUUID: nil,
+                fileSystemUUID: "same-fat-uuid",
                 displayName: "DJ VIC CHRM",
                 hardwareSerial: "DD56419884401"
             )
         )
     }
 
+    @Test("A current stable identity never rebinds by matching label")
+    func currentStableIdentityNeverRebindsByLabel() {
+        let trusted = device(
+            sourceID: "usb-fs:v2-trusted",
+            displayName: "DJ USB"
+        )
+        let replacement = MountedUSBIdentity(
+            sourceID: "usb-fs:v2-replacement",
+            displayName: "DJ USB"
+        )
+
+        #expect(
+            USBSourceIdentityResolver.selectedSourceID(
+                for: replacement,
+                devices: [trusted]
+            ) == replacement.sourceID
+        )
+        #expect(!USBSourceIdentityResolver.volume(replacement, matches: trusted))
+    }
+
     @Test("Stable USB sources match only their filesystem identity")
     func stableSourcesDoNotAliasByDisplayName() {
         let gray = device(
-            sourceID: "usb-fs:hardware-gray",
+            sourceID: "usb-fs:v2-gray",
             displayName: "DJ VIC GRAY"
         )
         let clonedName = MountedUSBIdentity(
-            sourceID: "usb-fs:hardware-chrm",
+            sourceID: "usb-fs:v2-chrm",
             displayName: "DJ VIC GRAY"
         )
 
         #expect(!USBSourceIdentityResolver.volume(clonedName, matches: gray))
         #expect(
             USBSourceIdentityResolver.selectedSourceID(for: clonedName, devices: [gray])
-                == "usb-fs:hardware-chrm"
+                == "usb-fs:v2-chrm"
         )
     }
 

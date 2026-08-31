@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.5.2-dev-1 - 2026-08-31
+
+### Changed
+
+- Starts the 0.5.2 runtime and codebase hardening cycle from the public 0.5.1
+  product baseline. The work is deliberately limited to reliability,
+  maintainability, security and regression protection; it does not add a new
+  show workflow or alter Production data automatically.
+
 ## 0.6.0-dev-1 - 2026-08-30
 
 ### Changed

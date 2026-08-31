@@ -1853,7 +1853,15 @@ public struct LibrarySourcesWorkspaceView: View {
     }
 
     private func mountedURL(for device: RekordboxDeviceState) -> URL? {
-        FileManager.default.mountedVolumeURLs(
+        if let bookmarked = bookmarkedDeviceURL(sourceID: device.sourceID),
+           FileManager.default.fileExists(
+               atPath: bookmarked.appendingPathComponent(
+                   "PIONEER/rekordbox/exportLibrary.db"
+               ).path
+           ) {
+            return bookmarked
+        }
+        return FileManager.default.mountedVolumeURLs(
             includingResourceValuesForKeys: [.volumeNameKey],
             options: [.skipHiddenVolumes]
         )?.first { url in
@@ -1878,16 +1886,9 @@ public struct LibrarySourcesWorkspaceView: View {
     }
 
     private func mountedIdentity(_ url: URL) -> MountedUSBIdentity {
-        let displayName = volumeDisplayName(url)
-        let nameMatches = visibleUSBDevices.filter {
-            $0.displayName.caseInsensitiveCompare(displayName) == .orderedSame
-        }
         return MountedUSBIdentity(
-            // The completed worker snapshot is the local source of truth. A
-            // unique trusted label lets us recognize its marker identity on a
-            // later mount without ever opening the USB marker on the UI thread.
-            sourceID: nameMatches.count == 1 ? nameMatches[0].sourceID : volumeSourceID(url),
-            displayName: displayName
+            sourceID: volumeSourceID(url),
+            displayName: volumeDisplayName(url)
         )
     }
 
@@ -2188,6 +2189,19 @@ public struct LibrarySourcesWorkspaceView: View {
             return [:]
         }
         return decoded
+    }
+
+    private func bookmarkedDeviceURL(sourceID: String) -> URL? {
+        guard let encodedBookmark = decodedDeviceBookmarks()[sourceID],
+              let bookmark = Data(base64Encoded: encodedBookmark) else { return nil }
+        var stale = false
+        guard let resolved = try? URL(
+            resolvingBookmarkData: bookmark,
+            options: [.withSecurityScope, .withoutUI],
+            relativeTo: nil,
+            bookmarkDataIsStale: &stale
+        ), !stale else { return nil }
+        return resolved
     }
 
     private func stableSourceID(for url: URL, preferredSourceID: String?) -> String? {

@@ -5,6 +5,27 @@ import Darwin
 import CryptoKit
 import ServiceManagement
 
+enum ProcessExecutableIdentity {
+    static func path(processID: Int32) -> String? {
+        guard processID > 1 else { return nil }
+        // `PROC_PIDPATHINFO_MAXSIZE` is a C macro that Swift cannot import.
+        // Darwin defines it as four times MAXPATHLEN.
+        var pathBuffer = [CChar](repeating: 0, count: Int(MAXPATHLEN) * 4)
+        guard proc_pidpath(processID, &pathBuffer, UInt32(pathBuffer.count)) > 0 else {
+            return nil
+        }
+        let bytes = pathBuffer.prefix { $0 != 0 }.map { UInt8(bitPattern: $0) }
+        return URL(fileURLWithPath: String(decoding: bytes, as: UTF8.self))
+            .resolvingSymlinksInPath().standardizedFileURL.path
+    }
+
+    static func matches(processID: Int32, expectedPath: String) -> Bool {
+        guard let runningPath = path(processID: processID) else { return false }
+        return runningPath == URL(fileURLWithPath: expectedPath)
+            .resolvingSymlinksInPath().standardizedFileURL.path
+    }
+}
+
 public actor EngineProcessSupervisor {
     private static let logger = Logger(
         subsystem: Bundle.main.bundleIdentifier ?? "co.victorblan.tech.lumi",
@@ -57,6 +78,7 @@ public actor EngineProcessSupervisor {
             throw EngineClientError.executableMissing
         }
         let serviceIdentity = try makeServiceIdentity(engineExecutable: engineExecutable)
+        expectedServiceIdentity = serviceIdentity
 
         if let libraryDatabaseURL {
             let serviceRecordName = libraryDatabaseURL.lastPathComponent == "library.sqlite"
@@ -77,7 +99,8 @@ public actor EngineProcessSupervisor {
             if let record = readServiceRecord(at: recordURL),
                record.endpoint.protocolVersion == WireProtocol.version,
                processIsRunning(record.processID),
-               record.serviceIdentity == serviceIdentity {
+               record.serviceIdentity == serviceIdentity,
+               processMatchesServiceIdentity(record.processID, identity: serviceIdentity) {
                 sessionToken = record.sessionToken
                 attachedProcessID = record.processID
                 commandSequence = 0
@@ -86,12 +109,18 @@ public actor EngineProcessSupervisor {
                 )
                 return record.endpoint
             }
-            if let record = readServiceRecord(at: recordURL),
-               processIsRunning(record.processID) {
-                Self.logger.notice(
-                    "Replacing stale Lumi engine service pid \(record.processID) version \(record.productVersion, privacy: .public)"
-                )
-                try await retireServiceProcess(record.processID)
+            if let record = readServiceRecord(at: recordURL), processIsRunning(record.processID) {
+                if let identity = record.serviceIdentity,
+                   processMatchesServiceIdentity(record.processID, identity: identity) {
+                    Self.logger.notice(
+                        "Replacing stale Lumi engine service pid \(record.processID) version \(record.productVersion, privacy: .public)"
+                    )
+                    try await retireServiceProcess(record.processID, identity: identity)
+                } else {
+                    Self.logger.fault(
+                        "Ignoring stale Lumi service pid \(record.processID): executable identity could not be verified"
+                    )
+                }
             }
             try? FileManager.default.removeItem(at: recordURL)
         }
@@ -212,7 +241,8 @@ public actor EngineProcessSupervisor {
            let expectedServiceIdentity,
            let record = readServiceRecord(at: serviceRecordURL),
            record.serviceIdentity == expectedServiceIdentity,
-           processIsRunning(record.processID) {
+           processIsRunning(record.processID),
+           processMatchesServiceIdentity(record.processID, identity: expectedServiceIdentity) {
             attachedProcessID = record.processID
             sessionToken = record.sessionToken
             return true
@@ -246,7 +276,9 @@ public actor EngineProcessSupervisor {
             if !process.isRunning {
                 process.waitUntilExit()
             }
-        } else if let attachedProcessID, processIsRunning(attachedProcessID) {
+        } else if let attachedProcessID,
+                  let expectedServiceIdentity,
+                  processMatchesServiceIdentity(attachedProcessID, identity: expectedServiceIdentity) {
             await terminateProcess(attachedProcessID)
         }
         if let serviceRecordURL {
@@ -282,7 +314,8 @@ public actor EngineProcessSupervisor {
            record.endpoint.protocolVersion == WireProtocol.version,
            record.sessionToken == token,
            record.serviceIdentity == serviceIdentity,
-           processIsRunning(record.processID) {
+           processIsRunning(record.processID),
+           processMatchesServiceIdentity(record.processID, identity: serviceIdentity) {
             attachedProcessID = record.processID
             Self.logger.info(
                 "Attached to launchd-owned Lumi engine pid \(record.processID) version \(record.productVersion, privacy: .public)"
@@ -311,12 +344,16 @@ public actor EngineProcessSupervisor {
             try? FileManager.default.removeItem(at: recordURL)
             try service.register()
         case .notRegistered:
-            if let previousProcessID = readServiceRecord(at: recordURL)?.processID,
-               processIsRunning(previousProcessID) {
+            if let previousRecord = readServiceRecord(at: recordURL),
+               let previousIdentity = previousRecord.serviceIdentity,
+               processMatchesServiceIdentity(previousRecord.processID, identity: previousIdentity) {
                 // One-time migration from the dev-43 channel-persistent child
                 // process to launchd ownership. After this handover only
                 // SMAppService controls the service lifecycle.
-                try await retireServiceProcess(previousProcessID)
+                try await retireServiceProcess(
+                    previousRecord.processID,
+                    identity: previousIdentity
+                )
             }
             try? FileManager.default.removeItem(at: recordURL)
             try service.register()
@@ -328,9 +365,13 @@ public actor EngineProcessSupervisor {
             // the bundled plist and executable are present. Registration is
             // the operation that creates that record; any malformed bundle is
             // then returned as a concrete SMAppService error.
-            if let previousProcessID = readServiceRecord(at: recordURL)?.processID,
-               processIsRunning(previousProcessID) {
-                try await retireServiceProcess(previousProcessID)
+            if let previousRecord = readServiceRecord(at: recordURL),
+               let previousIdentity = previousRecord.serviceIdentity,
+               processMatchesServiceIdentity(previousRecord.processID, identity: previousIdentity) {
+                try await retireServiceProcess(
+                    previousRecord.processID,
+                    identity: previousIdentity
+                )
             }
             try? FileManager.default.removeItem(at: recordURL)
             do {
@@ -399,7 +440,8 @@ public actor EngineProcessSupervisor {
                record.endpoint.protocolVersion == WireProtocol.version,
                record.sessionToken == sessionToken,
                record.serviceIdentity == serviceIdentity,
-               processIsRunning(record.processID) {
+               processIsRunning(record.processID),
+               processMatchesServiceIdentity(record.processID, identity: serviceIdentity) {
                 try validate(endpoint: record.endpoint)
                 attachedProcessID = record.processID
                 Self.logger.info(
@@ -542,8 +584,11 @@ public actor EngineProcessSupervisor {
         processID > 1 && (Darwin.kill(processID, 0) == 0 || errno == EPERM)
     }
 
-    private func retireServiceProcess(_ processID: Int32) async throws {
-        guard processIsRunning(processID) else { return }
+    private func retireServiceProcess(
+        _ processID: Int32,
+        identity: ServiceIdentity
+    ) async throws {
+        guard processMatchesServiceIdentity(processID, identity: identity) else { return }
         guard Darwin.kill(processID, SIGTERM) == 0 || errno == ESRCH else {
             throw EngineClientError.serviceHandoverTimedOut
         }
@@ -555,6 +600,17 @@ public actor EngineProcessSupervisor {
         guard !processIsRunning(processID) else {
             throw EngineClientError.serviceHandoverTimedOut
         }
+    }
+
+    private func processMatchesServiceIdentity(
+        _ processID: Int32,
+        identity: ServiceIdentity
+    ) -> Bool {
+        processIsRunning(processID)
+            && ProcessExecutableIdentity.matches(
+                processID: processID,
+                expectedPath: identity.engineExecutablePath
+            )
     }
 
     private func makeServiceIdentity(engineExecutable: URL) throws -> ServiceIdentity {

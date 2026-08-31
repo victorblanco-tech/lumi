@@ -227,6 +227,12 @@ adding work or coupling to the realtime integration lanes.
 
 ### Fase 6 – iPhone Remote Beta (`0.6.0`)
 
+Voor deze functionele fase wordt eerst de compatibele
+[0.5.2 runtime- en codebase-hardening](epic-08-runtime-and-codebase-hardening.md)
+afgerond. Deze patch voegt geen nieuwe workflow toe en bewaart het 0.5.1
+datamodel, maar begrenst de control plane en verwijdert niet-ondersteunde
+productiepaden.
+
 - lokale discovery en pairing;
 - current/next deck en planpreview;
 - theme-, scene- en loopaanpassingen;

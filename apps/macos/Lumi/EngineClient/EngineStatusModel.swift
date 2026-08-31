@@ -1611,11 +1611,13 @@ final class EngineStatusModel: ObservableObject {
         var workerPayload = payload
         guard case let .string(root)? = payload["root"],
               case let .string(sourceID)? = payload["sourceId"],
+              let observedSourceID = trustedUSBSourceID(root: root),
               let scopedURL = try securityScopedUSBURL(root: root, sourceID: sourceID),
               scopedURL.startAccessingSecurityScopedResource() else {
             throw IsolatedUSBWorkerError.authorizationRequired
         }
         workerPayload["root"] = .string(scopedURL.path)
+        workerPayload["observedSourceId"] = .string(observedSourceID)
         defer { scopedURL.stopAccessingSecurityScopedResource() }
         return try await Task.detached(priority: .utility) {
             let manager = FileManager.default

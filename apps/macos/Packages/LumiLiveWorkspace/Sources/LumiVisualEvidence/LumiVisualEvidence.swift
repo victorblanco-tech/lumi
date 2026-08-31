@@ -100,7 +100,7 @@ struct LumiVisualEvidenceCommand {
                 canvas
                 LiveWorkspaceView(
                     state: variant.state,
-                    productVersion: "0.6.0-dev-1",
+                    productVersion: "0.5.2-dev-1",
                     appearance: .constant(variant.appearance),
                     keyNotation: .constant(variant.keyNotation),
                     allowsScrolling: false

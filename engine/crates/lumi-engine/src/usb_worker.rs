@@ -21,12 +21,16 @@ enum UsbWorkerRequest {
         #[serde(default)]
         #[serde(rename = "sourceId")]
         source_id: Option<String>,
+        #[serde(rename = "observedSourceId")]
+        observed_source_id: String,
     },
     Sync {
         root: String,
         #[serde(default)]
         #[serde(rename = "sourceId")]
         source_id: Option<String>,
+        #[serde(rename = "observedSourceId")]
+        observed_source_id: String,
         #[serde(rename = "playlistIds")]
         playlist_ids: Vec<u32>,
     },
@@ -34,6 +38,8 @@ enum UsbWorkerRequest {
         root: String,
         #[serde(rename = "sourceId")]
         source_id: String,
+        #[serde(rename = "observedSourceId")]
+        observed_source_id: String,
         #[serde(rename = "deviceTrackId")]
         device_track_id: u32,
         #[serde(rename = "expectedIncomingRevision")]
@@ -48,27 +54,34 @@ pub fn run_usb_worker(request_path: &Path, response_path: &Path) -> Result<(), U
     let request: UsbWorkerRequest = serde_json::from_slice(&fs::read(request_path)?)?;
     let mut worker = LibraryWorker::demo()?;
     match request {
-        UsbWorkerRequest::Inspect { root, source_id } => {
-            let source_id = validated_source_id(Path::new(&root), source_id)?;
+        UsbWorkerRequest::Inspect {
+            root,
+            source_id,
+            observed_source_id,
+        } => {
+            let source_id = validated_source_id(Path::new(&root), source_id, &observed_source_id)?;
             worker.inspect_rekordbox_device(root, Some(&source_id))?;
         }
         UsbWorkerRequest::Sync {
             root,
             source_id,
+            observed_source_id,
             playlist_ids,
         } => {
-            let source_id = validated_source_id(Path::new(&root), source_id)?;
+            let source_id = validated_source_id(Path::new(&root), source_id, &observed_source_id)?;
             worker.sync_rekordbox_device(root, Some(&source_id), &playlist_ids)?;
         }
         UsbWorkerRequest::ResolveConflict {
             root,
             source_id,
+            observed_source_id,
             device_track_id,
             expected_incoming_revision,
             expected_active_revision,
             choice,
         } => {
-            let source_id = validated_source_id(Path::new(&root), Some(source_id))?;
+            let source_id =
+                validated_source_id(Path::new(&root), Some(source_id), &observed_source_id)?;
             let choice = match choice.as_str() {
                 "keep-lumi" => DeviceReviewChoice::KeepLumi,
                 "use-usb" => DeviceReviewChoice::UseUsb,
@@ -95,15 +108,27 @@ pub fn run_usb_worker(request_path: &Path, response_path: &Path) -> Result<(), U
 /// physical equal-model FAT test proved that an otherwise healthy volume can
 /// block indefinitely on a new root-level file write. Identity metadata must
 /// therefore never touch removable media or prevent read-only inspection.
-fn validated_source_id(root: &Path, preferred: Option<String>) -> Result<String, UsbWorkerError> {
+fn validated_source_id(
+    root: &Path,
+    preferred: Option<String>,
+    observed: &str,
+) -> Result<String, UsbWorkerError> {
     if !root.is_absolute() || !root.join("PIONEER/rekordbox/exportLibrary.db").is_file() {
         return Err(UsbWorkerError::InvalidDeviceRoot(
             root.display().to_string(),
         ));
     }
-    preferred
+    let observed = valid_source_id(observed)
+        .then_some(observed)
+        .filter(|value| value.starts_with("usb-fs:v2-"))
+        .ok_or(UsbWorkerError::InvalidPhysicalIdentity)?;
+    let preferred = preferred
         .filter(|value| valid_source_id(value))
-        .ok_or(UsbWorkerError::InvalidSourceIdentity)
+        .ok_or(UsbWorkerError::InvalidSourceIdentity)?;
+    if preferred == observed || migratable_legacy_source_id(&preferred) {
+        return Ok(preferred);
+    }
+    Err(UsbWorkerError::SourceIdentityMismatch)
 }
 
 fn valid_source_id(value: &str) -> bool {
@@ -111,6 +136,14 @@ fn valid_source_id(value: &str) -> bool {
         && (value.starts_with("usb-fs:") || value.starts_with("usb-local:"))
         && !value.contains('/')
         && !value.contains('\\')
+}
+
+fn migratable_legacy_source_id(value: &str) -> bool {
+    value.starts_with("usb-local:")
+        || value.starts_with("usb-fs:hardware-")
+        || value.strip_prefix("usb-fs:").is_some_and(|identity| {
+            !identity.is_empty() && !identity.contains(':') && !identity.starts_with("v2-")
+        })
 }
 
 #[derive(Debug, Error)]
@@ -127,6 +160,10 @@ pub enum UsbWorkerError {
     InvalidDeviceRoot(String),
     #[error("USB source identity is missing or invalid")]
     InvalidSourceIdentity,
+    #[error("USB physical identity is missing or invalid")]
+    InvalidPhysicalIdentity,
+    #[error("USB source identity does not match the connected physical media")]
+    SourceIdentityMismatch,
 }
 
 #[cfg(test)]
@@ -140,6 +177,7 @@ mod tests {
             "kind": "sync",
             "root": "/Volumes/USB",
             "sourceId": "usb-local:one",
+            "observedSourceId": "usb-fs:v2-physical",
             "playlistIds": [7, 9]
         }))?;
         assert!(matches!(
@@ -160,7 +198,11 @@ mod tests {
         let root = device_root("preserve")?;
         let preferred = "usb-fs:hardware-existing-source";
         assert_eq!(
-            validated_source_id(&root, Some(preferred.to_owned()))?,
+            validated_source_id(
+                &root,
+                Some(preferred.to_owned()),
+                "usb-fs:v2-current-physical",
+            )?,
             preferred
         );
         let root_entries = fs::read_dir(&root)?.collect::<Result<Vec<_>, _>>()?;
@@ -175,18 +217,45 @@ mod tests {
     {
         let root = device_root("invalid-source")?;
         assert!(matches!(
-            validated_source_id(&root, None),
+            validated_source_id(&root, None, "usb-fs:v2-current-physical"),
             Err(UsbWorkerError::InvalidSourceIdentity)
         ));
 
         let invalid_root = unique_temp_root("no-library");
         fs::create_dir_all(&invalid_root)?;
         assert!(matches!(
-            validated_source_id(&invalid_root, Some("usb-local:valid".to_owned())),
+            validated_source_id(
+                &invalid_root,
+                Some("usb-local:valid".to_owned()),
+                "usb-fs:v2-current-physical",
+            ),
             Err(UsbWorkerError::InvalidDeviceRoot(_))
         ));
         fs::remove_dir_all(root)?;
         fs::remove_dir_all(invalid_root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn modern_trusted_identity_must_match_current_physical_media() -> Result<(), UsbWorkerError> {
+        let root = device_root("identity-mismatch")?;
+        assert!(matches!(
+            validated_source_id(
+                &root,
+                Some("usb-fs:v2-trusted".to_owned()),
+                "usb-fs:v2-replacement",
+            ),
+            Err(UsbWorkerError::SourceIdentityMismatch)
+        ));
+        assert_eq!(
+            validated_source_id(
+                &root,
+                Some("usb-fs:v2-trusted".to_owned()),
+                "usb-fs:v2-trusted",
+            )?,
+            "usb-fs:v2-trusted"
+        );
+        fs::remove_dir_all(root)?;
         Ok(())
     }
 
