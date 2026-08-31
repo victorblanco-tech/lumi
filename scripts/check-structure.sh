@@ -68,12 +68,17 @@ required_paths=(
   "scripts/check-architecture.sh"
   "scripts/check-epic-2a-evidence.sh"
   "scripts/verify-rust.sh"
+  "scripts/classify-ci-changes.sh"
+  "scripts/test-ci-classification.sh"
+  "scripts/verify-docs.py"
+  "scripts/verify-docs.sh"
   "scripts/verify-prolink-bridge.sh"
   "scripts/verify-prolink-simulator.sh"
   "scripts/run-prolink-simulator.sh"
   "scripts/package-prolink-simulator-local.sh"
   "scripts/prolink-simulatorctl.sh"
   "scripts/verify-apple.sh"
+  "scripts/verify-apple-fast.sh"
   "scripts/verify.sh"
   "scripts/verify-local.sh"
   "scripts/verify-functional.sh"
@@ -156,11 +161,16 @@ if grep -REq '\.font\(\.[A-Za-z]|Color\.(red|green|orange|blue|purple|pink)' \
 fi
 
 foundation_workflow="$repository_root/.github/workflows/foundation.yml"
+development_workflow="$repository_root/.github/workflows/development.yml"
 if ! grep -Fq 'workflow_dispatch:' "$foundation_workflow" \
   || ! grep -Fq 'pull_request:' "$foundation_workflow" \
-  || ! grep -Fq '      - dev' "$foundation_workflow" \
-  || ! grep -Fq '      - main' "$foundation_workflow"; then
-  echo "ERROR: public Foundation CI must cover dev and main while retaining manual dispatch." >&2
+  || ! grep -Fq '      - main' "$foundation_workflow" \
+  || ! grep -Fq '      - "v*"' "$foundation_workflow"; then
+  echo "ERROR: Foundation CI must cover main PRs, release tags and manual dispatch." >&2
+  exit 1
+fi
+if grep -Fq '      - dev' "$foundation_workflow"; then
+  echo "ERROR: Foundation CI must not duplicate the development push workflow." >&2
   exit 1
 fi
 if ! grep -Fq 'runs-on: ubuntu-24.04' "$foundation_workflow" \
@@ -179,6 +189,19 @@ if grep -Fq 'run: ./scripts/verify.sh' "$foundation_workflow"; then
 fi
 if [[ "$(grep -Fc 'uses: actions/cache@v5' "$foundation_workflow")" != "2" ]]; then
   echo "ERROR: both CI platform jobs must restore their manifest-keyed build cache." >&2
+  exit 1
+fi
+if ! grep -Fq 'name: Foundation gate' "$foundation_workflow" \
+  || ! grep -Fq './scripts/classify-ci-changes.sh' "$foundation_workflow" \
+  || ! grep -Fq './scripts/verify-docs.sh' "$foundation_workflow"; then
+  echo "ERROR: Foundation CI must expose its stable classified protection gate." >&2
+  exit 1
+fi
+if ! grep -Fq '      - dev' "$development_workflow" \
+  || ! grep -Fq './scripts/verify-apple-fast.sh' "$development_workflow" \
+  || ! grep -Fq './scripts/verify-apple.sh' "$development_workflow" \
+  || ! grep -Fq 'name: Development gate' "$development_workflow"; then
+  echo "ERROR: dev pushes must use the classified fast development workflow." >&2
   exit 1
 fi
 if grep -Eq '^[[:space:]]*(swift|xcodebuild)[[:space:]]' \
