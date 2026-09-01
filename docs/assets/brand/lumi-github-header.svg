@@ -50,7 +50,7 @@
   <rect x="0" y="220" width="1800" height="124" fill="url(#waveFade)"/>
 
   <image x="450" y="42" width="900" height="253"
-         xlink:href="lumi-wordmark.png" href="lumi-wordmark.png"
+         xlink:href="lumi-wordmark.svg" href="lumi-wordmark.svg"
          preserveAspectRatio="xMidYMid meet"/>
 
   <rect x="710" y="328" width="380" height="2" fill="#40c9ff" opacity="0.48"/>
