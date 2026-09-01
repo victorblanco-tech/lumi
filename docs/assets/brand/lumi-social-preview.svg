@@ -46,22 +46,23 @@
            L774 370 L798 402 L822 354 L846 396 L870 372 L894 408 L918 350 L942 392
            L966 366 L990 400 L1014 358 L1038 396 L1062 372 L1086 406 L1110 346
            L1134 398 L1158 368 L1182 410 L1206 352 L1230 398 L1254 372 L1280 386"
-        fill="none" stroke="url(#spectrum)" stroke-width="4" opacity="0.32"/>
-  <rect x="0" y="320" width="1280" height="132" fill="url(#waveFade)"/>
+        fill="none" stroke="url(#spectrum)" stroke-width="4" opacity="0.32"
+        transform="translate(0 -14)"/>
+  <rect x="0" y="306" width="1280" height="132" fill="url(#waveFade)"/>
 
-  <image x="270" y="148" width="740" height="208"
+  <image x="120" y="70" width="1040" height="292"
          xlink:href="lumi-wordmark.png" href="lumi-wordmark.png"
          preserveAspectRatio="xMidYMid meet"/>
 
-  <rect x="450" y="443" width="380" height="2" fill="#40c9ff" opacity="0.48"/>
-  <text x="640" y="492" text-anchor="middle" fill="#b8c5d2"
+  <rect x="400" y="424" width="480" height="2" fill="#40c9ff" opacity="0.52"/>
+  <text x="640" y="477" text-anchor="middle" fill="#c5d1dc"
         font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
-        font-size="24" font-weight="650" letter-spacing="5">
+        font-size="29" font-weight="680" letter-spacing="3.5">
     PHRASE-AWARE LIGHTING AUTOMATION
   </text>
-  <text x="640" y="548" text-anchor="middle" fill="#6f879b"
+  <text x="640" y="544" text-anchor="middle" fill="#8199ad"
         font-family="-apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
-        font-size="18" font-weight="600" letter-spacing="3">
+        font-size="22" font-weight="620" letter-spacing="2.5">
     PRO DJ LINK · SOUNDSWITCH · ABLETON LINK
   </text>
 </svg>
