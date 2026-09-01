@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" width="1140" height="320"
+     viewBox="0 0 570 160" role="img" aria-labelledby="title description">
+  <title id="title">Lumi</title>
+  <desc id="description">Lumi sound and light wordmark.</desc>
+  <defs>
+    <linearGradient id="red" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ff334c"/><stop offset="1" stop-color="#ff142d"/>
+    </linearGradient>
+    <linearGradient id="orangeRed" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ff5b1d"/><stop offset="1" stop-color="#ff3015"/>
+    </linearGradient>
+    <linearGradient id="orange" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ff9620"/><stop offset="1" stop-color="#ff6c12"/>
+    </linearGradient>
+    <linearGradient id="amber" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffbf18"/><stop offset="1" stop-color="#ff9e06"/>
+    </linearGradient>
+    <linearGradient id="yellow" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffe72b"/><stop offset="1" stop-color="#ffd811"/>
+    </linearGradient>
+    <linearGradient id="green" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#35dc84"/><stop offset="1" stop-color="#20b95e"/>
+    </linearGradient>
+    <linearGradient id="blue" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#22aaf5"/><stop offset="1" stop-color="#1688dc"/>
+    </linearGradient>
+    <linearGradient id="cyan" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#21c9ff"/><stop offset="1" stop-color="#04a7e8"/>
+    </linearGradient>
+  </defs>
+
+  <g>
+    <rect x="10" y="64" width="10" height="32" rx="5" fill="url(#red)"/>
+    <rect x="31" y="48" width="10" height="64" rx="5" fill="url(#orangeRed)"/>
+    <rect x="52" y="32" width="10" height="96" rx="5" fill="url(#orange)"/>
+    <rect x="73" y="10" width="10" height="140" rx="5" fill="url(#amber)"/>
+    <rect x="94" y="22" width="10" height="116" rx="5" fill="url(#yellow)"/>
+    <rect x="115" y="38" width="10" height="84" rx="5" fill="url(#green)"/>
+    <rect x="136" y="55" width="10" height="50" rx="5" fill="url(#blue)"/>
+    <circle cx="166" cy="80" r="10" fill="url(#cyan)"/>
+    <path d="M184 62 L248 34 L248 42 L184 70 Z" fill="url(#cyan)"/>
+    <path d="M184 73 L248 57 L248 103 L184 87 Z" fill="url(#cyan)"/>
+    <path d="M184 90 L248 118 L248 126 L184 98 Z" fill="url(#cyan)"/>
+  </g>
+
+  <text x="268" y="126" fill="#f7f8fa"
+        font-family="Helvetica Neue, -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif"
+        font-size="124" font-weight="300" letter-spacing="-5">Lum</text>
+  <rect x="510" y="54" width="10" height="72" rx="2" fill="#f7f8fa"/>
+  <circle cx="515" cy="27" r="9" fill="url(#cyan)"/>
+</svg>
