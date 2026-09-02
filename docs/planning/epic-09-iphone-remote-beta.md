@@ -33,12 +33,15 @@ Excluded from 0.6.0:
 ADR-0040 is the accepted architecture authority. The accepted visual contract is
 recorded in `docs/design/iphone-remote/README.md`.
 
-## Current evidence (`0.6.0-dev-7` / Remote `0.1.0-dev-4`)
+## Current evidence (`0.6.0-dev-7` / Remote `0.1.0-dev-5`)
 
 - the independent iOS app target builds for the generic iOS Simulator;
 - portrait Master-first and landscape side-by-side Live compositions use the
   shared Lumi palette, RGB waveform data, Hot Cues, beatgrid, phrases and
   proportional Light Plans;
+- headed dev-5 acceptance shows a loaded Master plus a stable second Player in
+  portrait and two equal, fully visible Player surfaces in landscape, with the
+  compact control bar and complete phrase/Light Plan bands still on screen;
 - the scoped Remote v1 contract is shared through repository fixtures and has
   matching Rust/Swift decoding tests;
 - per-client delivery sequencing remains contiguous even when visual transport

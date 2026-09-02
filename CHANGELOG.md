@@ -1,5 +1,25 @@
 # Changelog
 
+## Lumi Remote 0.1.0-dev-5 - 2026-09-02
+
+### Changed
+
+- Uses Lumi's shared Rekordbox-compatible RGB channel mapping, amplitude curve
+  and normalized hue instead of the former flat direct-channel rendering.
+- Keeps two relevant numbered Player surfaces visible, including a stable empty
+  slot while the second Player has no loaded track.
+- Orders numbered Players left-to-right in landscape and keeps the Master first
+  in the scrollable portrait composition.
+- Compresses the landscape status and operation controls into one toolbar row.
+- Places Player identity, track metadata, transport metadata and role on one
+  compact landscape row so phrases and the complete Light Plan remain visible.
+- Adds readable Phrase Type labels to sufficiently wide phrase segments.
+
+### Tests
+
+- Covers the shared waveform color curve, single-Player placeholder behavior,
+  portrait Master-first ordering and landscape physical-number ordering.
+
 ## 0.6.0-dev-7 - 2026-09-02
 
 ### Fixed

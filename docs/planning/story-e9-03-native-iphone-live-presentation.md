@@ -53,6 +53,10 @@ iPhone UI that matches Lumi's macOS visual language.
   Player, track metadata, 155 BPM, RGB waveform, phrases and proportional Light
   Plan from the real gateway projection; distinct captured frames proved
   transport movement.
+- headed dev-5 acceptance verified the exact shared waveform color curve, a
+  stable second-Player waiting surface, equal landscape Player sizing and the
+  compact operation bar; a real `ARM` command round-trip and safe return to
+  `OFF` completed without moving or hiding either Player surface.
 
 ## Remaining gate
 

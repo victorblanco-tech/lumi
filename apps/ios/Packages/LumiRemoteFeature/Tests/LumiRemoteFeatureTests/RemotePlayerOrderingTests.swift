@@ -27,6 +27,56 @@ func portraitOrderingMovesTheMasterFirstWithoutRenamingPlayers() {
     )
 
     #expect(RemotePlayerOrdering.orderedPlayers(in: projection).map(\.playerNumber) == [2, 1])
+    #expect(
+        RemotePlayerOrdering.visibleSlots(in: projection, isLandscape: false)
+            .map(\.playerNumber) == [2, 1]
+    )
+    #expect(
+        RemotePlayerOrdering.visibleSlots(in: projection, isLandscape: true)
+            .map(\.playerNumber) == [1, 2]
+    )
+}
+
+@Test
+func aSingleLoadedPlayerKeepsTwoFixedNumberedSlots() {
+    let projection = projection(players: [player(1)], leaderPlayerNumber: 1)
+
+    let portrait = RemotePlayerOrdering.visibleSlots(in: projection, isLandscape: false)
+    let landscape = RemotePlayerOrdering.visibleSlots(in: projection, isLandscape: true)
+
+    #expect(portrait.map(\.playerNumber) == [1, 2])
+    #expect(portrait.map { $0.player != nil } == [true, false])
+    #expect(landscape.map(\.playerNumber) == [1, 2])
+    #expect(landscape.map { $0.player != nil } == [true, false])
+}
+
+@Test
+func remoteWaveformUsesTheSharedRekordboxRGBChannelOrderAndCurve() throws {
+    let sample = try #require(
+        RemoteWaveformSampling.sample(
+            points: [
+                RemoteWaveformPoint(low: 0, mid: 0, high: 255),
+                RemoteWaveformPoint(low: 255, mid: 0, high: 0),
+            ],
+            trackProgress: 0
+        )
+    )
+    let midpoint = try #require(
+        RemoteWaveformSampling.sample(
+            points: [
+                RemoteWaveformPoint(low: 0, mid: 0, high: 255),
+                RemoteWaveformPoint(low: 255, mid: 0, high: 0),
+            ],
+            trackProgress: 0.5
+        )
+    )
+
+    #expect(sample.red == 1)
+    #expect(sample.green == 0)
+    #expect(sample.blue == 0)
+    #expect(midpoint.red > 0.9)
+    #expect(midpoint.green > 0.9)
+    #expect(midpoint.blue == 0)
 }
 
 @Test
@@ -119,5 +169,31 @@ private func player(_ number: UInt8) -> RemotePlayer {
             hotCues: [],
             phrases: []
         )
+    )
+}
+
+private func projection(
+    players: [RemotePlayer],
+    leaderPlayerNumber: UInt8?
+) -> RemoteLiveProjection {
+    RemoteLiveProjection(
+        projectionRevision: 1,
+        stateRevision: 1,
+        engineVersion: "0.6.0-dev-7",
+        operationState: .armed,
+        leaderPlayerNumber: leaderPlayerNumber,
+        integrations: RemoteIntegrationStatus(
+            proDJLink: .ready,
+            lightOutput: .ready,
+            abletonLink: .ready,
+            abletonLinkEnabled: true,
+            abletonLinkBPMMilli: 140_000,
+            timingOffsetMillis: -20,
+            pendingTimingOffsetMillis: nil
+        ),
+        players: players,
+        livePlan: nil,
+        nextPlan: nil,
+        themeOptions: []
     )
 }

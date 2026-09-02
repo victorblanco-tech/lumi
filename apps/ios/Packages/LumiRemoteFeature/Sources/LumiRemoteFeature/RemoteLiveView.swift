@@ -51,10 +51,11 @@ public struct RemoteLiveView: View {
 
     public var body: some View {
         GeometryReader { geometry in
+            let isLandscape = geometry.size.width > geometry.size.height
             VStack(spacing: 0) {
-                RemoteTopBar(model: model, actions: actions)
+                RemoteTopBar(model: model, actions: actions, isLandscape: isLandscape)
                 Divider().overlay(LumiColor.border)
-                content(isLandscape: geometry.size.width > geometry.size.height)
+                content(isLandscape: isLandscape)
             }
             .background(LumiColor.canvas)
             .foregroundStyle(LumiColor.textPrimary)
@@ -75,19 +76,23 @@ public struct RemoteLiveView: View {
     @ViewBuilder
     private func content(isLandscape: Bool) -> some View {
         if let projection = model.projection {
-            let players = RemotePlayerOrdering.orderedPlayers(in: projection)
+            let slots = RemotePlayerOrdering.visibleSlots(
+                in: projection,
+                isLandscape: isLandscape
+            )
             if isLandscape {
                 HStack(spacing: LumiSpacing.small) {
-                    ForEach(players) { player in
-                        playerSurface(player, projection: projection)
+                    ForEach(slots) { slot in
+                        slotSurface(slot, projection: projection, isLandscape: true)
+                            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
                     }
                 }
                 .padding(LumiSpacing.small)
             } else {
                 ScrollView {
                     LazyVStack(spacing: LumiSpacing.medium) {
-                        ForEach(players) { player in
-                            playerSurface(player, projection: projection)
+                        ForEach(slots) { slot in
+                            slotSurface(slot, projection: projection, isLandscape: false)
                         }
                     }
                     .padding(LumiSpacing.small)
@@ -143,14 +148,21 @@ public struct RemoteLiveView: View {
 
     private func playerSurface(
         _ player: RemotePlayer,
-        projection: RemoteLiveProjection
+        projection: RemoteLiveProjection,
+        isLandscape: Bool
     ) -> some View {
         let isMaster = projection.leaderPlayerNumber == player.playerNumber
-        let plan = isMaster ? projection.livePlan : projection.nextPlan
+        let plan = [projection.livePlan, projection.nextPlan]
+            .compactMap { $0 }
+            .first {
+                $0.playerNumber == player.playerNumber
+                    && $0.trackLoadID == player.trackLoadID
+            }
         return RemotePlayerSurface(
             player: player,
             plan: plan,
             isMaster: isMaster,
+            isLandscape: isLandscape,
             operationState: projection.operationState,
             controlsEnabled: model.controlsEnabled,
             onSelectCue: { cue in
@@ -163,117 +175,60 @@ public struct RemoteLiveView: View {
             }
         )
     }
+
+    @ViewBuilder
+    private func slotSurface(
+        _ slot: RemotePlayerSlot,
+        projection: RemoteLiveProjection,
+        isLandscape: Bool
+    ) -> some View {
+        if let player = slot.player {
+            playerSurface(
+                player,
+                projection: projection,
+                isLandscape: isLandscape
+            )
+        } else {
+            RemoteEmptyPlayerSurface(
+                playerNumber: slot.playerNumber,
+                isLandscape: isLandscape
+            )
+        }
+    }
 }
 
 private struct RemoteTopBar: View {
     @Bindable var model: RemoteSessionModel
     let actions: RemoteLiveActions
+    let isLandscape: Bool
     @State private var confirmsStoppingShow = false
 
     var body: some View {
-        VStack(spacing: LumiSpacing.small) {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("Lumi Remote")
-                        .font(LumiTypography.sectionTitle)
-                    Text(connectionLabel)
-                        .font(LumiTypography.caption)
-                        .foregroundStyle(connectionColor)
+        VStack(spacing: isLandscape ? 3 : LumiSpacing.small) {
+            if isLandscape {
+                HStack(spacing: LumiSpacing.small) {
+                    identity
+                        .frame(width: 132, alignment: .leading)
+                    integrationStatus
+                    Spacer(minLength: 4)
+                    operationControls(compact: true)
+                    timingOffsetControl(compact: true)
                 }
-                Spacer()
-                if let integrations = model.projection?.integrations {
-                    integrationBadge("PDL", integrations.proDJLink)
-                    integrationBadge("LIGHT", integrations.lightOutput)
-                    Button {
-                        actions.setAbletonLinkEnabled(!integrations.abletonLinkEnabled)
-                    } label: {
-                        HStack(spacing: 4) {
-                            Circle()
-                                .fill(healthColor(integrations.abletonLink))
-                                .frame(width: 7, height: 7)
-                            Text(linkLabel(integrations))
-                        }
-                        .font(LumiTypography.technical.weight(.semibold))
-                        .frame(minHeight: 44)
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!model.controlsEnabled)
+            } else {
+                HStack {
+                    identity
+                    Spacer()
+                    integrationStatus
+                }
+                HStack(spacing: LumiSpacing.small) {
+                    operationControls(compact: false)
+                    timingOffsetControl(compact: false)
                 }
             }
-
-            HStack(spacing: LumiSpacing.small) {
-                ForEach(RemoteOperationState.allCases, id: \.self) { state in
-                    Button {
-                        if state == .off, model.projection?.operationState == .live {
-                            confirmsStoppingShow = true
-                        } else {
-                            actions.setOperationState(state)
-                        }
-                    } label: {
-                        Text(operationLabel(state))
-                            .font(LumiTypography.caption.weight(.bold))
-                            .frame(maxWidth: .infinity, minHeight: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .foregroundStyle(operationColor(state))
-                    .background(
-                        RoundedRectangle(cornerRadius: LumiRadius.control)
-                            .fill(operationColor(state).opacity(
-                                model.projection?.operationState == state ? 0.18 : 0.04
-                            ))
-                    )
-                    .overlay {
-                        RoundedRectangle(cornerRadius: LumiRadius.control)
-                            .stroke(
-                                model.projection?.operationState == state
-                                    ? operationColor(state)
-                                    : LumiColor.border,
-                                lineWidth: model.projection?.operationState == state ? 1.5 : 1
-                            )
-                    }
-                    .disabled(!model.controlsEnabled)
-                }
-                if let integrations = model.projection?.integrations {
-                    Menu {
-                        ForEach(Array(stride(from: -100, through: 100, by: 10)), id: \.self) { value in
-                            Button(offsetLabel(value)) {
-                                actions.setTimingOffset(value)
-                            }
-                        }
-                    } label: {
-                        Text(offsetLabel(integrations.timingOffsetMillis))
-                            .font(LumiTypography.technical.weight(.semibold))
-                            .frame(minWidth: 54, minHeight: 44)
-                    }
-                    .disabled(!model.controlsEnabled)
-                }
-            }
-
-            HStack(spacing: 5) {
-                if let error = model.lastError {
-                    Image(systemName: "exclamationmark.triangle.fill")
-                        .foregroundStyle(LumiColor.warning)
-                    Text(error)
-                        .lineLimit(1)
-                } else if !model.pendingCommandIDs.isEmpty {
-                    ProgressView()
-                        .controlSize(.mini)
-                    Text("Applying change…")
-                } else {
-                    Text("Ready")
-                        .opacity(0)
-                        .accessibilityHidden(true)
-                }
-                Spacer(minLength: 0)
-            }
-            .font(LumiTypography.caption)
-            .foregroundStyle(LumiColor.textSecondary)
-            .frame(height: 16)
-            .accessibilityElement(children: .combine)
+            commandFeedback
         }
         .padding(.horizontal, LumiSpacing.medium)
-        .padding(.vertical, LumiSpacing.small)
+        .padding(.vertical, isLandscape ? 5 : LumiSpacing.small)
         .background(LumiColor.surface)
         .alert("Stop the live show?", isPresented: $confirmsStoppingShow) {
             Button("Keep Running", role: .cancel) {}
@@ -283,6 +238,125 @@ private struct RemoteTopBar: View {
         } message: {
             Text("Lumi will stop sending new lighting choices until you arm and start it again.")
         }
+    }
+
+    private var identity: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text("Lumi Remote")
+                .font(LumiTypography.sectionTitle)
+                .lineLimit(1)
+            Text(connectionLabel)
+                .font(LumiTypography.caption)
+                .foregroundStyle(connectionColor)
+                .lineLimit(1)
+        }
+    }
+
+    @ViewBuilder
+    private var integrationStatus: some View {
+        if let integrations = model.projection?.integrations {
+            HStack(spacing: isLandscape ? 7 : LumiSpacing.small) {
+                integrationBadge("PDL", integrations.proDJLink)
+                integrationBadge("LIGHT", integrations.lightOutput)
+                Button {
+                    actions.setAbletonLinkEnabled(!integrations.abletonLinkEnabled)
+                } label: {
+                    HStack(spacing: 4) {
+                        Circle()
+                            .fill(healthColor(integrations.abletonLink))
+                            .frame(width: 7, height: 7)
+                        Text(linkLabel(integrations))
+                    }
+                    .font(LumiTypography.technical.weight(.semibold))
+                    .frame(minHeight: isLandscape ? 34 : 44)
+                }
+                .buttonStyle(.plain)
+                .disabled(!model.controlsEnabled)
+            }
+        }
+    }
+
+    private func operationControls(compact: Bool) -> some View {
+        HStack(spacing: compact ? 5 : LumiSpacing.small) {
+            ForEach(RemoteOperationState.allCases, id: \.self) { state in
+                Button {
+                    if state == .off, model.projection?.operationState == .live {
+                        confirmsStoppingShow = true
+                    } else {
+                        actions.setOperationState(state)
+                    }
+                } label: {
+                    Text(operationLabel(state))
+                        .font(LumiTypography.caption.weight(.bold))
+                        .frame(
+                            minWidth: compact ? 54 : 0,
+                            maxWidth: compact ? 64 : .infinity,
+                            minHeight: compact ? 34 : 44
+                        )
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .foregroundStyle(operationColor(state))
+                .background(
+                    RoundedRectangle(cornerRadius: LumiRadius.control)
+                        .fill(operationColor(state).opacity(
+                            model.projection?.operationState == state ? 0.18 : 0.04
+                        ))
+                )
+                .overlay {
+                    RoundedRectangle(cornerRadius: LumiRadius.control)
+                        .stroke(
+                            model.projection?.operationState == state
+                                ? operationColor(state)
+                                : LumiColor.border,
+                            lineWidth: model.projection?.operationState == state ? 1.5 : 1
+                        )
+                }
+                .disabled(!model.controlsEnabled)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func timingOffsetControl(compact: Bool) -> some View {
+        if let integrations = model.projection?.integrations {
+            Menu {
+                ForEach(Array(stride(from: -100, through: 100, by: 10)), id: \.self) { value in
+                    Button(offsetLabel(value)) {
+                        actions.setTimingOffset(value)
+                    }
+                }
+            } label: {
+                Text(offsetLabel(integrations.timingOffsetMillis))
+                    .font(LumiTypography.technical.weight(.semibold))
+                    .frame(minWidth: 54, minHeight: compact ? 34 : 44)
+            }
+            .disabled(!model.controlsEnabled)
+        }
+    }
+
+    private var commandFeedback: some View {
+        HStack(spacing: 5) {
+            if let error = model.lastError {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundStyle(LumiColor.warning)
+                Text(error)
+                    .lineLimit(1)
+            } else if !model.pendingCommandIDs.isEmpty {
+                ProgressView()
+                    .controlSize(.mini)
+                Text("Applying change…")
+            } else {
+                Text("Ready")
+                    .opacity(0)
+                    .accessibilityHidden(true)
+            }
+            Spacer(minLength: 0)
+        }
+        .font(LumiTypography.caption)
+        .foregroundStyle(LumiColor.textSecondary)
+        .frame(height: isLandscape ? 11 : 16)
+        .accessibilityElement(children: .combine)
     }
 
     private var connectionLabel: String {
@@ -326,6 +400,7 @@ private struct RemotePlayerSurface: View {
     let player: RemotePlayer
     let plan: RemoteLightPlan?
     let isMaster: Bool
+    let isLandscape: Bool
     let operationState: RemoteOperationState
     let controlsEnabled: Bool
     let onSelectCue: (RemotePlanCue) -> Void
@@ -347,58 +422,15 @@ private struct RemotePlayerSurface: View {
 
     private func playerCard(at date: Date) -> some View {
         let viewport = beatViewport(at: date)
-        return VStack(alignment: .leading, spacing: LumiSpacing.small) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("PLAYER \(player.playerNumber)")
-                        .font(LumiTypography.technical.weight(.bold))
-                    Text(player.hardwareModel ?? "Pro DJ Link Player")
-                        .font(LumiTypography.caption)
-                        .foregroundStyle(LumiColor.textSecondary)
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(isMaster ? "MASTER" : "PLAN READY")
-                        .font(LumiTypography.technical.weight(.bold))
-                        .foregroundStyle(isMaster ? operationColor(operationState) : LumiColor.accent)
-                    if isMaster, operationState == .live {
-                        Text("LIVE NOW")
-                            .font(LumiTypography.caption.weight(.bold))
-                            .foregroundStyle(LumiColor.success)
-                    }
-                }
-            }
-
-            HStack(alignment: .firstTextBaseline) {
-                HStack(alignment: .firstTextBaseline, spacing: LumiSpacing.small) {
-                    if let trackColor = player.track.colorRGB {
-                        Circle()
-                            .fill(rgbColor(trackColor))
-                            .frame(width: 9, height: 9)
-                            .accessibilityLabel("Track color")
-                    }
-                    VStack(alignment: .leading, spacing: 2) {
-                        Text(player.track.title)
-                            .font(LumiTypography.cardTitle)
-                            .lineLimit(1)
-                        Text(player.track.artist)
-                            .font(LumiTypography.metadata)
-                            .foregroundStyle(LumiColor.textSecondary)
-                            .lineLimit(1)
-                    }
-                }
-                Spacer()
-                VStack(alignment: .trailing, spacing: 2) {
-                    Text(String(format: "%.1f BPM", Double(player.transport.effectiveBPMMilli) / 1_000))
-                        .font(LumiTypography.technical.weight(.semibold))
-                    Text(metadataLabel)
-                        .font(LumiTypography.caption)
-                        .foregroundStyle(LumiColor.textSecondary)
-                }
-            }
+        return VStack(alignment: .leading, spacing: isLandscape ? 4 : LumiSpacing.small) {
+            playerHeader
 
             RemoteWaveform(player: player, viewport: viewport, isMaster: isMaster)
-                .frame(minHeight: 96)
+                .frame(height: isLandscape ? nil : 96)
+                .frame(
+                    minHeight: isLandscape ? 102 : nil,
+                    maxHeight: isLandscape ? .infinity : nil
+                )
                 .contentShape(Rectangle())
                 .gesture(waveformGestures)
                 .overlay(alignment: .bottomTrailing) {
@@ -414,7 +446,7 @@ private struct RemotePlayerSurface: View {
                 }
 
             RemotePhraseBand(player: player, viewport: viewport)
-                .frame(height: 18)
+                .frame(height: isLandscape ? 20 : 18)
 
             if let plan {
                 RemotePlanBand(
@@ -424,17 +456,18 @@ private struct RemotePlayerSurface: View {
                     controlsEnabled: controlsEnabled,
                     onSelectCue: onSelectCue
                 )
-                .frame(height: 54)
+                .frame(height: isLandscape ? 46 : 54)
             } else {
                 Text("Waiting for Light Plan")
                     .font(LumiTypography.caption)
                     .foregroundStyle(LumiColor.textSecondary)
-                    .frame(maxWidth: .infinity, minHeight: 54)
+                    .frame(maxWidth: .infinity, minHeight: isLandscape ? 46 : 54)
                     .background(LumiColor.surfaceElevated)
                     .clipShape(RoundedRectangle(cornerRadius: LumiRadius.compact))
             }
         }
-        .padding(LumiSpacing.medium)
+        .padding(isLandscape ? LumiSpacing.small : LumiSpacing.medium)
+        .frame(maxHeight: isLandscape ? .infinity : nil, alignment: .top)
         .background(LumiColor.surface)
         .clipShape(RoundedRectangle(cornerRadius: LumiRadius.panel))
         .overlay {
@@ -446,6 +479,98 @@ private struct RemotePlayerSurface: View {
         .onChange(of: isMaster) { _, newValue in
             inspectionStartBeat = nil
             manualZoomBars = newValue ? 40 : nil
+        }
+    }
+
+    @ViewBuilder
+    private var playerHeader: some View {
+        if isLandscape {
+            HStack(alignment: .center, spacing: 8) {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("PLAYER \(player.playerNumber)")
+                        .font(LumiTypography.technical.weight(.bold))
+                    Text(player.hardwareModel ?? "Pro DJ Link Player")
+                        .font(LumiTypography.caption)
+                        .foregroundStyle(LumiColor.textSecondary)
+                        .lineLimit(1)
+                }
+                .frame(width: 72, alignment: .leading)
+
+                trackIdentity
+                    .frame(maxWidth: .infinity, alignment: .leading)
+
+                VStack(alignment: .trailing, spacing: 1) {
+                    Text(String(format: "%.1f BPM", Double(player.transport.effectiveBPMMilli) / 1_000))
+                        .font(LumiTypography.technical.weight(.semibold))
+                    Text(metadataLabel)
+                        .font(LumiTypography.caption)
+                        .foregroundStyle(LumiColor.textSecondary)
+                        .lineLimit(1)
+                }
+
+                roleBadge
+                    .frame(width: 62, alignment: .trailing)
+            }
+            .frame(height: 38)
+        } else {
+            HStack(alignment: .top) {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("PLAYER \(player.playerNumber)")
+                        .font(LumiTypography.technical.weight(.bold))
+                    Text(player.hardwareModel ?? "Pro DJ Link Player")
+                        .font(LumiTypography.caption)
+                        .foregroundStyle(LumiColor.textSecondary)
+                }
+                Spacer()
+                roleBadge
+            }
+
+            HStack(alignment: .firstTextBaseline) {
+                trackIdentity
+                Spacer()
+                VStack(alignment: .trailing, spacing: 2) {
+                    Text(String(format: "%.1f BPM", Double(player.transport.effectiveBPMMilli) / 1_000))
+                        .font(LumiTypography.technical.weight(.semibold))
+                    Text(metadataLabel)
+                        .font(LumiTypography.caption)
+                        .foregroundStyle(LumiColor.textSecondary)
+                }
+            }
+        }
+    }
+
+    private var trackIdentity: some View {
+        HStack(alignment: .firstTextBaseline, spacing: isLandscape ? 5 : LumiSpacing.small) {
+            if let trackColor = player.track.colorRGB {
+                Circle()
+                    .fill(rgbColor(trackColor))
+                    .frame(width: 9, height: 9)
+                    .accessibilityLabel("Track color")
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                Text(player.track.title)
+                    .font(isLandscape ? LumiTypography.sectionTitle : LumiTypography.cardTitle)
+                    .lineLimit(1)
+                Text(player.track.artist)
+                    .font(isLandscape ? LumiTypography.caption : LumiTypography.metadata)
+                    .foregroundStyle(LumiColor.textSecondary)
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    private var roleBadge: some View {
+        VStack(alignment: .trailing, spacing: 1) {
+            Text(isMaster ? "MASTER" : "PLAN READY")
+                .font(LumiTypography.technical.weight(.bold))
+                .foregroundStyle(isMaster ? operationColor(operationState) : LumiColor.accent)
+                .lineLimit(1)
+            if isMaster, operationState == .live {
+                Text("LIVE NOW")
+                    .font(LumiTypography.caption.weight(.bold))
+                    .foregroundStyle(LumiColor.success)
+                    .lineLimit(1)
+            }
         }
     }
 
@@ -555,6 +680,52 @@ private struct RemotePlayerSurface: View {
     }
 }
 
+private struct RemoteEmptyPlayerSurface: View {
+    let playerNumber: UInt8
+    let isLandscape: Bool
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: LumiSpacing.small) {
+            HStack {
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("PLAYER \(playerNumber)")
+                        .font(LumiTypography.technical.weight(.bold))
+                    Text("Pro DJ Link Player")
+                        .font(LumiTypography.caption)
+                        .foregroundStyle(LumiColor.textSecondary)
+                }
+                Spacer()
+                Text("WAITING")
+                    .font(LumiTypography.technical.weight(.bold))
+                    .foregroundStyle(LumiColor.textSecondary)
+            }
+
+            ContentUnavailableView(
+                "Waiting for track",
+                systemImage: "cable.connector",
+                description: Text("Load a track on Player \(playerNumber).")
+            )
+            .foregroundStyle(LumiColor.textSecondary)
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .padding(isLandscape ? LumiSpacing.small : LumiSpacing.medium)
+        .frame(
+            maxWidth: .infinity,
+            minHeight: isLandscape ? 202 : 248,
+            maxHeight: isLandscape ? .infinity : nil,
+            alignment: .top
+        )
+        .background(LumiColor.surface)
+        .clipShape(RoundedRectangle(cornerRadius: LumiRadius.panel))
+        .overlay {
+            RoundedRectangle(cornerRadius: LumiRadius.panel)
+                .stroke(LumiColor.border, lineWidth: 1)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("Player \(playerNumber), waiting for a connected track")
+    }
+}
+
 private struct RemoteWaveform: View {
     let player: RemotePlayer
     let viewport: RemoteBeatViewport
@@ -576,13 +747,11 @@ private struct RemoteWaveform: View {
                 } else {
                     waveformFraction = beat / viewport.totalBeats
                 }
-                let index = min(
-                    points.count - 1,
-                    max(0, Int(waveformFraction * Double(points.count)))
-                )
-                let point = points[index]
-                let strength = max(CGFloat(point.low), CGFloat(point.mid), CGFloat(point.high)) / 255
-                let height = max(2, strength * size.height)
+                guard let sample = RemoteWaveformSampling.sample(
+                    points: points,
+                    trackProgress: waveformFraction
+                ) else { continue }
+                let height = max(2, CGFloat(sample.amplitude) * size.height * 0.86)
                 let rect = CGRect(
                     x: CGFloat(column) * columnWidth,
                     y: (size.height - height) / 2,
@@ -590,10 +759,10 @@ private struct RemoteWaveform: View {
                     height: height
                 )
                 let color = Color(
-                    red: Double(point.low) / 255,
-                    green: Double(point.mid) / 255,
-                    blue: Double(point.high) / 255
-                )
+                    red: sample.red,
+                    green: sample.green,
+                    blue: sample.blue
+                ).opacity(0.98)
                 context.fill(Path(rect), with: .color(color))
             }
             drawBeatgrid(context: context, size: size)
@@ -662,16 +831,25 @@ private struct RemotePhraseBand: View {
                         let clippedEnd = min(viewport.endBeat, Double(phrase.endBeat))
                         let x = viewport.xFraction(for: clippedStart) * geometry.size.width
                         let width = (clippedEnd - clippedStart) / viewport.visibleBeats * geometry.size.width
-                        Rectangle()
-                            .fill(
-                                phrase.colorRGB.map(rgbColor)
-                                    ?? LumiPhraseColorPalette.defaults.color(
-                                        for: phrase.roleID ?? phrase.kind
-                                    )
-                            )
-                            .frame(width: max(1, width))
-                            .offset(x: x)
-                            .accessibilityLabel(phrase.roleName ?? phrase.kind)
+                        ZStack(alignment: .leading) {
+                            Rectangle()
+                                .fill(
+                                    phrase.colorRGB.map(rgbColor)
+                                        ?? LumiPhraseColorPalette.defaults.color(
+                                            for: phrase.roleID ?? phrase.kind
+                                        )
+                                )
+                            if width >= 34 {
+                                Text(phrase.roleName ?? phrase.kind)
+                                    .font(.system(size: 8, weight: .bold, design: .rounded))
+                                    .foregroundStyle(.white.opacity(0.92))
+                                    .lineLimit(1)
+                                    .padding(.horizontal, 3)
+                            }
+                        }
+                        .frame(width: max(1, width))
+                        .offset(x: x)
+                        .accessibilityLabel(phrase.roleName ?? phrase.kind)
                     }
                 }
             }
@@ -709,7 +887,8 @@ private struct RemotePlanBand: View {
                                     .lineLimit(1)
                             }
                             .padding(.horizontal, 5)
-                            .frame(width: max(1, width), height: 54, alignment: .leading)
+                            .frame(width: max(1, width), alignment: .leading)
+                            .frame(maxHeight: .infinity, alignment: .leading)
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
@@ -814,6 +993,80 @@ public enum RemotePlayerOrdering {
             if leftMaster != rightMaster { return leftMaster }
             return left.playerNumber < right.playerNumber
         }
+    }
+
+    static func visibleSlots(
+        in projection: RemoteLiveProjection,
+        isLandscape: Bool
+    ) -> [RemotePlayerSlot] {
+        let byNumber = Dictionary(
+            uniqueKeysWithValues: projection.players.map { ($0.playerNumber, $0) }
+        )
+        var preferredNumbers: [UInt8] = []
+        func append(_ number: UInt8?) {
+            guard let number,
+                  (1 ... 4).contains(number),
+                  !preferredNumbers.contains(number) else { return }
+            preferredNumbers.append(number)
+        }
+
+        append(projection.leaderPlayerNumber)
+        append(projection.livePlan?.playerNumber)
+        append(projection.nextPlan?.playerNumber)
+        for number in byNumber.keys.sorted() {
+            append(number)
+        }
+        if preferredNumbers.count == 1, let only = preferredNumbers.first {
+            append(only.isMultiple(of: 2) ? only - 1 : only + 1)
+        }
+        for number in UInt8(1) ... UInt8(4) where preferredNumbers.count < 2 {
+            append(number)
+        }
+
+        var slots = preferredNumbers.prefix(2).map {
+            RemotePlayerSlot(playerNumber: $0, player: byNumber[$0])
+        }
+        if isLandscape {
+            slots.sort { $0.playerNumber < $1.playerNumber }
+        } else {
+            slots.sort { left, right in
+                let leftMaster = left.playerNumber == projection.leaderPlayerNumber
+                let rightMaster = right.playerNumber == projection.leaderPlayerNumber
+                if leftMaster != rightMaster { return leftMaster }
+                return left.playerNumber < right.playerNumber
+            }
+        }
+        return slots
+    }
+}
+
+struct RemotePlayerSlot: Equatable, Identifiable {
+    var id: UInt8 { playerNumber }
+    let playerNumber: UInt8
+    let player: RemotePlayer?
+}
+
+enum RemoteWaveformSampling {
+    static func sample(
+        points: [RemoteWaveformPoint],
+        trackProgress: Double
+    ) -> LumiRGBWaveformSample? {
+        guard !points.isEmpty else { return nil }
+        let progress = min(1, max(0, trackProgress))
+        let position = progress * Double(max(0, points.count - 1))
+        let lower = Int(position.rounded(.down))
+        let upper = min(points.count - 1, lower + 1)
+        let fraction = position - Double(lower)
+        let first = points[lower]
+        let second = points[upper]
+        func mix(_ lhs: UInt8, _ rhs: UInt8) -> Double {
+            (Double(lhs) + (Double(rhs) - Double(lhs)) * fraction) / 255
+        }
+        return LumiRGBWaveformSample(
+            low: mix(first.low, second.low),
+            mid: mix(first.mid, second.mid),
+            high: mix(first.high, second.high)
+        )
     }
 }
 
