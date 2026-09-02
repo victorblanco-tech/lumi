@@ -391,7 +391,7 @@ fn stopped_live_deck_start_and_operation_resume_restore_the_current_autoloop() {
         "backward seek landing",
     );
     thread::sleep(Duration::from_millis(300));
-    let _connected = exchange(
+    snapshot = exchange(
         &mut connection,
         &command(
             "verify-no-seek-duplicate",
