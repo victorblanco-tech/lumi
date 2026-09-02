@@ -35,6 +35,40 @@ func decodesCommandFailure() {
     #expect(failure?.retryable == true)
 }
 
+@Test("Remote gateway admin records and requests match the Rust wire contract")
+func remoteGatewayAdminWireContract() throws {
+    let record = try JSONDecoder().decode(
+        RemoteGatewayServiceRecord.self,
+        from: Data("""
+            {
+              "endpointHost": "127.0.0.1",
+              "endpointPort": 49151,
+              "adminToken": "0123456789abcdef0123456789abcdef",
+              "processID": 42,
+              "productVersion": "0.6.0-dev-test",
+              "installationId": "0123456789abcdef0123456789abcdef",
+              "certificateFingerprintSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "lanPort": 49152
+            }
+            """.utf8)
+    )
+
+    #expect(record.installationID == "0123456789abcdef0123456789abcdef")
+    #expect(record.certificateFingerprintSHA256.count == 64)
+
+    let request = try JSONSerialization.jsonObject(
+        with: JSONEncoder().encode(
+            RemoteGatewayAdminRequest.approveInvitation(
+                invitationID: "invitation-1",
+                shortCode: "123456"
+            )
+        )
+    ) as? [String: String]
+    #expect(request?["action"] == "approveInvitation")
+    #expect(request?["invitationId"] == "invitation-1")
+    #expect(request?["invitationID"] == nil)
+}
+
 @Test("The Swift client launches and authenticates the real Rust engine")
 func launchesRealEngine() async throws {
     let environment = ProcessInfo.processInfo.environment

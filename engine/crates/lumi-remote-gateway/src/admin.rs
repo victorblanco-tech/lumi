@@ -38,7 +38,11 @@ pub struct GatewayAdminServiceRecord {
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase", tag = "action")]
+#[serde(
+    rename_all = "camelCase",
+    rename_all_fields = "camelCase",
+    tag = "action"
+)]
 pub enum GatewayAdminRequest {
     Status,
     CreateInvitation,
@@ -471,6 +475,33 @@ mod tests {
     use crate::{
         EngineRelayHandle, InstallationIdentity, PersistentTrustStore, SharedGatewayState,
     };
+
+    #[test]
+    fn admin_wire_uses_lower_camel_case_for_ids_and_sha256() -> Result<(), Box<dyn Error>> {
+        let record = GatewayAdminServiceRecord {
+            endpoint_host: "127.0.0.1".to_owned(),
+            endpoint_port: 49_151,
+            admin_token: "token".to_owned(),
+            process_id: 42,
+            product_version: "0.6.0-dev-test".to_owned(),
+            installation_id: "installation-1".to_owned(),
+            certificate_fingerprint_sha256: "fingerprint".to_owned(),
+            lan_port: 49_152,
+        };
+        let value = serde_json::to_value(record)?;
+        assert_eq!(value["installationId"], "installation-1");
+        assert_eq!(value["certificateFingerprintSha256"], "fingerprint");
+        assert!(value.get("installationID").is_none());
+        assert!(value.get("certificateFingerprintSHA256").is_none());
+
+        let request = serde_json::to_value(GatewayAdminRequest::ApproveInvitation {
+            invitation_id: "invitation-1".to_owned(),
+            short_code: "123456".to_owned(),
+        })?;
+        assert_eq!(request["invitationId"], "invitation-1");
+        assert!(request.get("invitationID").is_none());
+        Ok(())
+    }
 
     #[tokio::test]
     async fn protected_admin_flow_creates_and_approves_one_invitation() -> Result<(), Box<dyn Error>>

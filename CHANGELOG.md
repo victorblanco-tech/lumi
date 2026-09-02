@@ -1,5 +1,20 @@
 # Changelog
 
+## 0.6.0-dev-6 - 2026-09-02
+
+### Fixed
+
+- Aligns the macOS Remote Gateway supervisor with the Rust admin wire contract
+  for `Id` and `Sha256` fields, so an enabled gateway reaches Ready instead of
+  remaining on Starting.
+- Aligns invitation approval, device revocation and Controller-transfer request
+  keys with the same lower-camel-case contract.
+
+### Tests
+
+- Adds matching Rust and Swift contract coverage plus the protected loopback
+  invitation-and-approval integration test.
+
 ## 0.6.0-dev-5 - 2026-09-02
 
 ### Added

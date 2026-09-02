@@ -33,7 +33,7 @@ Excluded from 0.6.0:
 ADR-0040 is the accepted architecture authority. The accepted visual contract is
 recorded in `docs/design/iphone-remote/README.md`.
 
-## Current evidence (`0.6.0-dev-5` / Remote `0.1.0-dev-3`)
+## Current evidence (`0.6.0-dev-6` / Remote `0.1.0-dev-3`)
 
 - the independent iOS app target builds for the generic iOS Simulator;
 - portrait Master-first and landscape side-by-side Live compositions use the
@@ -68,6 +68,8 @@ recorded in `docs/design/iphone-remote/README.md`.
 - TLS, persistent identity/trust, protected loopback administration, controller
   persistence, QR/auth wire compatibility, stale revisions and reconnect gaps
   have deterministic regression coverage;
+- the macOS supervisor and Rust gateway share an explicitly tested
+  lower-camel-case admin contract for IDs and SHA-256 fingerprints;
 - gateway disconnect, authentication failure and desktop snapshot polling do
   not park the show or add full projection work to the realtime loop.
 

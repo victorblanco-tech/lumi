@@ -112,3 +112,50 @@ func rejectsInvalidMessages() {
         try ProtocolMessageDecoder.decode(oversized)
     }
 }
+
+@Test("Swift decodes the Rust remote gateway admin wire spelling")
+func decodesRemoteGatewayAdminWireSpelling() throws {
+    let status = try JSONDecoder().decode(
+        RemoteGatewayStatus.self,
+        from: Data("""
+            {
+              "engineConnected": true,
+              "installationId": "0123456789abcdef0123456789abcdef",
+              "certificateFingerprintSha256": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+              "lanPort": 49152,
+              "pairedDevices": [{
+                "deviceId": "iphone-1",
+                "displayName": "Victor's iPhone",
+                "pairedAtUnixMillis": 100,
+                "lastSeenUnixMillis": 200,
+                "controller": true
+              }],
+              "controllerDeviceId": "iphone-1"
+            }
+            """.utf8)
+    )
+
+    #expect(status.installationID == "0123456789abcdef0123456789abcdef")
+    #expect(status.certificateFingerprintSHA256.count == 64)
+    #expect(status.pairedDevices.first?.deviceID == "iphone-1")
+    #expect(status.controllerDeviceID == "iphone-1")
+
+    let invitation = try JSONDecoder().decode(
+        RemoteGatewayPairingInvitation.self,
+        from: Data("""
+            {
+              "installationId": "0123456789abcdef0123456789abcdef",
+              "invitationId": "invitation-1",
+              "invitationSecret": "secret",
+              "shortCode": "123456",
+              "certificateFingerprintSha256": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+              "expiresAtUnixMillis": 300,
+              "approved": false
+            }
+            """.utf8)
+    )
+
+    #expect(invitation.invitationID == "invitation-1")
+    #expect(invitation.installationID == status.installationID)
+    #expect(invitation.certificateFingerprintSHA256.count == 64)
+}

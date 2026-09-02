@@ -155,7 +155,7 @@ public actor RemoteGatewaySupervisor {
     }
 }
 
-private struct RemoteGatewayServiceRecord: Codable, Sendable {
+struct RemoteGatewayServiceRecord: Codable, Sendable {
     let endpointHost: String
     let endpointPort: UInt16
     let adminToken: String
@@ -164,16 +164,27 @@ private struct RemoteGatewayServiceRecord: Codable, Sendable {
     let installationID: String
     let certificateFingerprintSHA256: String
     let lanPort: UInt16
+
+    private enum CodingKeys: String, CodingKey {
+        case endpointHost
+        case endpointPort
+        case adminToken
+        case processID
+        case productVersion
+        case installationID = "installationId"
+        case certificateFingerprintSHA256 = "certificateFingerprintSha256"
+        case lanPort
+    }
 }
 
-private struct RemoteGatewayAdminResponse: Codable, Sendable {
+struct RemoteGatewayAdminResponse: Codable, Sendable {
     let ok: Bool
     let status: RemoteGatewayStatus
     let invitation: RemoteGatewayPairingInvitation?
     let errorCode: String?
 }
 
-private enum RemoteGatewayAdminRequest: Encodable, Sendable {
+enum RemoteGatewayAdminRequest: Encodable, Sendable {
     case status
     case createInvitation
     case approveInvitation(invitationID: String, shortCode: String)
@@ -182,9 +193,9 @@ private enum RemoteGatewayAdminRequest: Encodable, Sendable {
 
     enum CodingKeys: String, CodingKey {
         case action
-        case invitationID
+        case invitationID = "invitationId"
         case shortCode
-        case deviceID
+        case deviceID = "deviceId"
     }
 
     func encode(to encoder: Encoder) throws {

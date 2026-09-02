@@ -16,6 +16,14 @@ public struct RemoteGatewayDeviceStatus: Codable, Equatable, Identifiable, Senda
     public let pairedAtUnixMillis: UInt64
     public let lastSeenUnixMillis: UInt64
     public let controller: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case deviceID = "deviceId"
+        case displayName
+        case pairedAtUnixMillis
+        case lastSeenUnixMillis
+        case controller
+    }
 }
 
 public struct RemoteGatewayStatus: Codable, Equatable, Sendable {
@@ -25,6 +33,15 @@ public struct RemoteGatewayStatus: Codable, Equatable, Sendable {
     public let lanPort: UInt16
     public let pairedDevices: [RemoteGatewayDeviceStatus]
     public let controllerDeviceID: String?
+
+    private enum CodingKeys: String, CodingKey {
+        case engineConnected
+        case installationID = "installationId"
+        case certificateFingerprintSHA256 = "certificateFingerprintSha256"
+        case lanPort
+        case pairedDevices
+        case controllerDeviceID = "controllerDeviceId"
+    }
 }
 
 public struct RemoteGatewayPairingInvitation: Codable, Equatable, Sendable {
@@ -35,6 +52,16 @@ public struct RemoteGatewayPairingInvitation: Codable, Equatable, Sendable {
     public let certificateFingerprintSHA256: String
     public let expiresAtUnixMillis: UInt64
     public let approved: Bool
+
+    private enum CodingKeys: String, CodingKey {
+        case installationID = "installationId"
+        case invitationID = "invitationId"
+        case invitationSecret
+        case shortCode
+        case certificateFingerprintSHA256 = "certificateFingerprintSha256"
+        case expiresAtUnixMillis
+        case approved
+    }
 }
 
 public struct RemoteGatewayManagementSnapshot: Equatable, Sendable {
