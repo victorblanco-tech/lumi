@@ -202,11 +202,12 @@ private struct RemoteTopBar: View {
     @Bindable var model: RemoteSessionModel
     let actions: RemoteLiveActions
     let isLandscape: Bool
+    @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var confirmsStoppingShow = false
 
     var body: some View {
         VStack(spacing: isLandscape ? 3 : LumiSpacing.small) {
-            if isLandscape {
+            if isLandscape && !dynamicTypeSize.isAccessibilitySize {
                 HStack(spacing: LumiSpacing.small) {
                     identity
                         .frame(width: 132, alignment: .leading)
@@ -246,10 +247,12 @@ private struct RemoteTopBar: View {
             Text("Lumi Remote")
                 .font(LumiTypography.sectionTitle)
                 .lineLimit(1)
+                .minimumScaleFactor(0.8)
             Text(connectionLabel)
                 .font(LumiTypography.caption)
                 .foregroundStyle(connectionColor)
                 .lineLimit(1)
+                .minimumScaleFactor(0.8)
         }
     }
 
@@ -273,6 +276,13 @@ private struct RemoteTopBar: View {
             }
             .buttonStyle(.plain)
             .disabled(!model.controlsEnabled)
+            .accessibilityLabel("Ableton Link")
+            .accessibilityValue(linkAccessibilityValue(integrations))
+            .accessibilityHint(
+                integrations.abletonLinkEnabled
+                    ? "Double tap to turn Ableton Link off"
+                    : "Double tap to turn Ableton Link on"
+            )
         }
     }
 
@@ -309,26 +319,32 @@ private struct RemoteTopBar: View {
                             maxWidth: compact ? 64 : .infinity,
                             minHeight: compact ? 34 : 44
                         )
+                        .background(
+                            RoundedRectangle(cornerRadius: LumiRadius.control)
+                                .fill(operationColor(state).opacity(
+                                    model.projection?.operationState == state ? 0.18 : 0.04
+                                ))
+                        )
+                        .overlay {
+                            RoundedRectangle(cornerRadius: LumiRadius.control)
+                                .stroke(
+                                    model.projection?.operationState == state
+                                        ? operationColor(state)
+                                        : LumiColor.border,
+                                    lineWidth: model.projection?.operationState == state ? 1.5 : 1
+                                )
+                        }
+                        .frame(maxWidth: compact ? 64 : .infinity, minHeight: 44)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
                 .foregroundStyle(operationColor(state))
-                .background(
-                    RoundedRectangle(cornerRadius: LumiRadius.control)
-                        .fill(operationColor(state).opacity(
-                            model.projection?.operationState == state ? 0.18 : 0.04
-                        ))
-                )
-                .overlay {
-                    RoundedRectangle(cornerRadius: LumiRadius.control)
-                        .stroke(
-                            model.projection?.operationState == state
-                                ? operationColor(state)
-                                : LumiColor.border,
-                            lineWidth: model.projection?.operationState == state ? 1.5 : 1
-                        )
-                }
                 .disabled(!model.controlsEnabled)
+                .accessibilityLabel(operationAccessibilityLabel(state))
+                .accessibilityValue(
+                    model.projection?.operationState == state ? "Current mode" : "Available"
+                )
+                .accessibilityHint("Double tap to change the Lumi show mode")
             }
         }
     }
@@ -346,8 +362,13 @@ private struct RemoteTopBar: View {
                 Text(offsetLabel(integrations.timingOffsetMillis))
                     .font(LumiTypography.technical.weight(.semibold))
                     .frame(minWidth: 54, minHeight: compact ? 34 : 44)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
             }
             .disabled(!model.controlsEnabled)
+            .accessibilityLabel("Lighting timing offset")
+            .accessibilityValue(offsetLabel(integrations.timingOffsetMillis))
+            .accessibilityHint("Double tap to choose an offset")
         }
     }
 
@@ -399,7 +420,8 @@ private struct RemoteTopBar: View {
             Text(label)
         }
         .font(LumiTypography.technical.weight(.semibold))
-        .accessibilityElement(children: .combine)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("\(integrationAccessibilityLabel(label)), \(healthAccessibilityLabel(health))")
     }
 
     private func linkLabel(_ status: RemoteIntegrationStatus) -> String {
@@ -409,6 +431,46 @@ private struct RemoteTopBar: View {
 
     private func offsetLabel(_ value: Int) -> String {
         value == 0 ? "0 ms" : String(format: "%+d ms", value)
+    }
+
+    private func operationAccessibilityLabel(_ state: RemoteOperationState) -> String {
+        switch state {
+        case .off: "Off"
+        case .armed: "Arm"
+        case .live: "Start"
+        case .paused: "Pause"
+        }
+    }
+
+    private func integrationAccessibilityLabel(_ label: String) -> String {
+        switch label {
+        case "PDL": "Pro DJ Link"
+        case "LIGHT": "Light Output"
+        default: label
+        }
+    }
+
+    private func healthAccessibilityLabel(_ health: RemoteIntegrationHealth) -> String {
+        switch health {
+        case .ready: "ready"
+        case .starting: "starting"
+        case .degraded: "needs attention"
+        case .unavailable: "unavailable"
+        }
+    }
+
+    private func linkAccessibilityValue(_ status: RemoteIntegrationStatus) -> String {
+        let enabled = status.abletonLinkEnabled ? "on" : "off"
+        let health = healthAccessibilityLabel(status.abletonLink)
+        guard let bpm = status.abletonLinkBPMMilli else {
+            return "\(enabled), \(health)"
+        }
+        return String(
+            format: "%@, %@, %.1f BPM",
+            enabled,
+            health,
+            Double(bpm) / 1_000
+        )
     }
 }
 
@@ -578,10 +640,12 @@ private struct RemotePlayerSurface: View {
                 Text(player.track.title)
                     .font(isLandscape ? LumiTypography.sectionTitle : LumiTypography.cardTitle)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
                 Text(player.track.artist)
                     .font(isLandscape ? LumiTypography.caption : LumiTypography.metadata)
                     .foregroundStyle(LumiColor.textSecondary)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
         }
     }

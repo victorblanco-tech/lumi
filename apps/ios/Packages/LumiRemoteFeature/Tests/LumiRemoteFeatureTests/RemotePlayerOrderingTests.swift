@@ -51,6 +51,53 @@ func aSingleLoadedPlayerKeepsTwoFixedNumberedSlots() {
 }
 
 @Test
+func liveAndNextPlansSelectTheCorrectNumberedPlayersFromAFourPlayerNetwork() {
+    let livePlan = RemoteLightPlan(
+        planID: "live-3",
+        playerNumber: 3,
+        trackLoadID: 3,
+        revision: 1,
+        themeID: nil,
+        themeName: nil,
+        cues: []
+    )
+    let nextPlan = RemoteLightPlan(
+        planID: "next-1",
+        playerNumber: 1,
+        trackLoadID: 1,
+        revision: 1,
+        themeID: nil,
+        themeName: nil,
+        cues: []
+    )
+    let base = projection(
+        players: [player(4), player(2), player(1), player(3)],
+        leaderPlayerNumber: 3
+    )
+    let projection = RemoteLiveProjection(
+        projectionRevision: base.projectionRevision,
+        stateRevision: base.stateRevision,
+        engineVersion: base.engineVersion,
+        operationState: base.operationState,
+        leaderPlayerNumber: base.leaderPlayerNumber,
+        integrations: base.integrations,
+        players: base.players,
+        livePlan: livePlan,
+        nextPlan: nextPlan,
+        themeOptions: []
+    )
+
+    #expect(
+        RemotePlayerOrdering.visibleSlots(in: projection, isLandscape: false)
+            .map(\.playerNumber) == [3, 1]
+    )
+    #expect(
+        RemotePlayerOrdering.visibleSlots(in: projection, isLandscape: true)
+            .map(\.playerNumber) == [1, 3]
+    )
+}
+
+@Test
 func remoteWaveformUsesTheSharedRekordboxRGBChannelOrderAndCurve() throws {
     let sample = try #require(
         RemoteWaveformSampling.sample(

@@ -31,7 +31,9 @@ use crate::{
 
 const TLS_HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const CLIENT_HELLO_TIMEOUT: Duration = Duration::from_secs(10);
+const CLIENT_WRITE_TIMEOUT: Duration = Duration::from_secs(5);
 const ENGINE_RECONNECT_INTERVAL: Duration = Duration::from_millis(500);
+const ENGINE_COMMAND_RESPONSE_TIMEOUT: Duration = Duration::from_secs(2);
 const CLIENT_EVENT_CAPACITY: usize = 128;
 const ENGINE_COMMAND_CAPACITY: usize = 32;
 const MAXIMUM_AUTHENTICATION_ATTEMPTS: usize = 8;
@@ -182,10 +184,18 @@ impl EngineRelayHandle {
         self.commands
             .try_send(EngineCommandRequest { command, response })
             .map_err(|_| GatewayNetworkError::EngineUnavailable)?;
-        receiver
-            .await
-            .map_err(|_| GatewayNetworkError::EngineUnavailable)?
+        await_engine_command_response(receiver, ENGINE_COMMAND_RESPONSE_TIMEOUT).await
     }
+}
+
+async fn await_engine_command_response(
+    receiver: oneshot::Receiver<Result<(), GatewayNetworkError>>,
+    maximum_duration: Duration,
+) -> Result<(), GatewayNetworkError> {
+    timeout(maximum_duration, receiver)
+        .await
+        .map_err(|_| GatewayNetworkError::EngineUnavailable)?
+        .map_err(|_| GatewayNetworkError::EngineUnavailable)?
 }
 
 struct EngineCommandRequest {
@@ -504,10 +514,25 @@ async fn write_frame<W>(writer: &mut W, frame: &RemoteFrame) -> Result<(), Gatew
 where
     W: AsyncWrite + Unpin,
 {
+    write_frame_with_timeout(writer, frame, CLIENT_WRITE_TIMEOUT).await
+}
+
+async fn write_frame_with_timeout<W>(
+    writer: &mut W,
+    frame: &RemoteFrame,
+    maximum_duration: Duration,
+) -> Result<(), GatewayNetworkError>
+where
+    W: AsyncWrite + Unpin,
+{
     let mut bytes = frame.encode()?;
     bytes.push(b'\n');
-    writer.write_all(&bytes).await?;
-    writer.flush().await?;
+    timeout(maximum_duration, async {
+        writer.write_all(&bytes).await?;
+        writer.flush().await
+    })
+    .await
+    .map_err(|_| GatewayNetworkError::SlowClient)??;
     Ok(())
 }
 
@@ -691,12 +716,13 @@ mod tests {
     use std::fs;
     use std::io;
     use std::sync::Arc;
+    use std::time::Duration;
 
     use lumi_remote_protocol::{
         MAX_REMOTE_FRAME_BYTES, REMOTE_PROTOCOL_VERSION, RemoteClientHello, RemoteFrame,
         RemoteFrameKind, RemoteServerHello,
     };
-    use tokio::io::{AsyncWriteExt as _, BufReader};
+    use tokio::io::{AsyncWriteExt as _, BufReader, duplex};
     use tokio::net::{TcpListener, TcpStream};
     use tokio_rustls::TlsConnector;
     use tokio_rustls::rustls::pki_types::{CertificateDer, ServerName};
@@ -707,7 +733,10 @@ mod tests {
         PersistentTrustStore, SharedGatewayState, random_hex,
     };
 
-    use super::{GatewayNetworkError, read_frame, serve_tls_client};
+    use super::{
+        GatewayNetworkError, await_engine_command_response, read_frame, serve_tls_client,
+        write_frame_with_timeout,
+    };
 
     #[tokio::test]
     async fn bounded_reader_rejects_oversized_and_malformed_network_frames() {
@@ -724,6 +753,33 @@ mod tests {
         assert!(matches!(
             read_frame(&mut malformed_reader).await,
             Err(GatewayNetworkError::Frame(_))
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_client_that_stops_reading_is_evicted_by_the_write_deadline() {
+        let (_reader, mut writer) = duplex(16);
+        let frame = RemoteFrame {
+            protocol_version: REMOTE_PROTOCOL_VERSION,
+            frame_kind: RemoteFrameKind::Error,
+            sequence: 1,
+            correlation_id: None,
+            payload: serde_json::json!({"detail": "x".repeat(8_192)}),
+        };
+
+        assert!(matches!(
+            write_frame_with_timeout(&mut writer, &frame, Duration::from_millis(20)).await,
+            Err(GatewayNetworkError::SlowClient)
+        ));
+    }
+
+    #[tokio::test]
+    async fn a_stalled_engine_command_cannot_hold_a_remote_client_forever() {
+        let (_sender, receiver) = tokio::sync::oneshot::channel();
+
+        assert!(matches!(
+            await_engine_command_response(receiver, Duration::from_millis(20)).await,
+            Err(GatewayNetworkError::EngineUnavailable)
         ));
     }
 

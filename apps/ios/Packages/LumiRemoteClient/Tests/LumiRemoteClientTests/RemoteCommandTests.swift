@@ -1,4 +1,5 @@
 import Foundation
+import Network
 import Testing
 
 @testable import LumiRemoteClient
@@ -123,6 +124,54 @@ private actor RejectingCredentialStore: RemoteCredentialStore {
 
     func save(_ credential: RemoteDeviceCredential) throws {}
     func remove(installationID: String) throws {}
+}
+
+private actor EmptyCredentialStore: RemoteCredentialStore {
+    func credential(for installationID: String) -> RemoteDeviceCredential? { nil }
+    func save(_ credential: RemoteDeviceCredential) {}
+    func remove(installationID: String) {}
+}
+
+@MainActor
+@Test
+func unchangedBonjourResultsDoNotRestartTheRemoteConnection() throws {
+    let model = RemoteSessionModel()
+    let controller = RemoteConnectionController(
+        model: model,
+        releaseChannel: .dev,
+        credentialStore: EmptyCredentialStore()
+    )
+    let first = try discoveredService(installationID: "installation-1", port: 61_001)
+    let replacement = try discoveredService(installationID: "installation-1", port: 61_002)
+
+    controller.update(discoveredServices: [first])
+    let firstGeneration = controller.connectionGenerationForTesting
+    controller.update(discoveredServices: [first])
+
+    #expect(firstGeneration == 1)
+    #expect(controller.connectionGenerationForTesting == firstGeneration)
+
+    controller.update(discoveredServices: [replacement])
+    #expect(controller.connectionGenerationForTesting == firstGeneration + 1)
+
+    controller.stop()
+    #expect(controller.connectionGenerationForTesting == firstGeneration + 2)
+}
+
+private func discoveredService(
+    installationID: String,
+    port: UInt16
+) throws -> RemoteDiscoveredService {
+    let endpointPort = try #require(NWEndpoint.Port(rawValue: port))
+    return RemoteDiscoveredService(
+        identity: RemoteServiceIdentity(
+            name: "Lumi Mac",
+            installationID: installationID,
+            protocolVersion: lumiRemoteProtocolVersion,
+            releaseChannel: .dev
+        ),
+        endpoint: .hostPort(host: "127.0.0.1", port: endpointPort)
+    )
 }
 
 @MainActor

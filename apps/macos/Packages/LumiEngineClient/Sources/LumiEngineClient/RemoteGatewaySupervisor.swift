@@ -7,6 +7,7 @@ public actor RemoteGatewaySupervisor {
     private let launchAgentPlistName: String?
     private let expectedProductVersion: String?
     private var service: SMAppService?
+    private var hasAttemptedServiceRecovery = false
 
     public init(
         launchAgentPlistName: String? = Bundle.main.object(
@@ -30,13 +31,24 @@ public actor RemoteGatewaySupervisor {
         case .requiresApproval:
             return .init(serviceState: .requiresApproval)
         case .enabled:
+            if !FileManager.default.fileExists(atPath: recordURL.path),
+               !hasAttemptedServiceRecovery {
+                hasAttemptedServiceRecovery = true
+                return await reconcileEnabledService(recordURL: recordURL)
+            }
             do {
-                return try await exchange(.status, recordURL: recordURL)
+                let snapshot = try await exchange(.status, recordURL: recordURL)
+                hasAttemptedServiceRecovery = false
+                return snapshot
             } catch RemoteGatewayClientError.serviceVersionMismatch {
-                return .init(
-                    serviceState: .unavailable,
-                    errorCode: "gatewayUpdateRequired"
-                )
+                // SMAppService keeps the already registered helper alive when
+                // a newer app bundle is installed at a versioned path. Reconcile
+                // it here so a normal Lumi upgrade cannot silently keep serving
+                // the previous gateway binary. The gateway's durable pairing
+                // state lives beside the library database and survives this
+                // bounded unregister/register cycle.
+                hasAttemptedServiceRecovery = true
+                return await reconcileEnabledService(recordURL: recordURL)
             } catch {
                 return .init(serviceState: .starting, errorCode: "gatewayStarting")
             }
@@ -68,15 +80,63 @@ public actor RemoteGatewaySupervisor {
         if service.status == .requiresApproval {
             throw RemoteGatewayClientError.requiresApproval
         }
+        do {
+            return try await waitUntilReady(recordURL: recordURL)
+        } catch RemoteGatewayClientError.startupTimedOut {
+            // Ad-hoc signed Dev upgrades can hit the same one-shot macOS 26
+            // launch-constraint cache miss as the engine service. Give BTM one
+            // bounded re-registration after the rejected spawn; never leave a
+            // permanently respawning stale helper behind.
+            if service.status == .enabled {
+                try await service.unregister()
+            }
+            try await Task.sleep(for: .milliseconds(250))
+            let retryService = SMAppService.agent(plistName: launchAgentPlistName)
+            self.service = retryService
+            if retryService.status == .requiresApproval {
+                throw RemoteGatewayClientError.requiresApproval
+            }
+            if retryService.status == .enabled {
+                try await retryService.unregister()
+                try await Task.sleep(for: .milliseconds(250))
+            }
+            try retryService.register()
+            return try await waitUntilReady(recordURL: recordURL)
+        }
+    }
+
+    private func waitUntilReady(
+        recordURL: URL,
+        timeout: Duration = .seconds(8)
+    ) async throws -> RemoteGatewayManagementSnapshot {
         let clock = ContinuousClock()
-        let deadline = clock.now.advanced(by: .seconds(8))
+        let deadline = clock.now.advanced(by: timeout)
         while clock.now < deadline {
             if let snapshot = try? await exchange(.status, recordURL: recordURL) {
+                hasAttemptedServiceRecovery = false
                 return snapshot
             }
             try await Task.sleep(for: .milliseconds(100))
         }
         throw RemoteGatewayClientError.startupTimedOut
+    }
+
+    private func reconcileEnabledService(
+        recordURL: URL
+    ) async -> RemoteGatewayManagementSnapshot {
+        do {
+            return try await enable(recordURL: recordURL)
+        } catch RemoteGatewayClientError.requiresApproval {
+            return .init(
+                serviceState: .requiresApproval,
+                errorCode: "requiresApproval"
+            )
+        } catch {
+            return .init(
+                serviceState: .starting,
+                errorCode: "gatewayStarting"
+            )
+        }
     }
 
     public func disable(recordURL: URL) async throws -> RemoteGatewayManagementSnapshot {
@@ -87,6 +147,7 @@ public actor RemoteGatewaySupervisor {
             try await service.unregister()
         }
         try? FileManager.default.removeItem(at: recordURL)
+        hasAttemptedServiceRecovery = false
         return .disabled
     }
 

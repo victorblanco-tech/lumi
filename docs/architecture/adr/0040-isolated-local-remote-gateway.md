@@ -53,7 +53,9 @@ The subscription sends:
 
 Backpressure coalesces transport anchors per Player. Intermediate visual frames
 may be dropped; plan, operation and command-result revisions may not. A slow or
-stalled remote is disconnected before it can block production state.
+stalled remote is disconnected before it can block production state. Every LAN
+write and gateway-to-engine command handoff has a finite deadline; exhausted
+clients release their bounded connection permit instead of holding capacity.
 
 The iPhone renders smoothly from the newest transport anchor. That visual clock
 never becomes a lighting clock and never feeds state back into the engine.
@@ -107,6 +109,12 @@ The iPhone app is a convenience client, never a show dependency. It does not
 claim continuous background execution. When suspended or disconnected it queues
 no commands. On foreground it discovers or reconnects, authenticates and obtains
 one new authoritative snapshot before enabling controls.
+
+Bonjour result updates are treated as desired connection state rather than as a
+reconnect signal. An identical service set is a no-op. Every real replacement,
+network loss or lifecycle stop advances a connection generation, closes the old
+transport and prevents late frames or send failures from mutating the new
+session.
 
 ## Consequences
 

@@ -895,6 +895,46 @@ mod tests {
     }
 
     #[test]
+    fn four_clients_remain_bounded_during_a_two_player_anchor_storm() -> Result<(), HubError> {
+        let mut hub = ProjectionHub::new(4, 8).map_err(|_| HubError::ClientLimitReached)?;
+        let clients = (0..4)
+            .map(|_| hub.connect())
+            .collect::<Result<Vec<_>, _>>()?;
+        hub.publish_projection(projection(1))?;
+
+        for sequence in 1..=20_000 {
+            let player_number = if sequence % 2 == 0 { 2 } else { 1 };
+            hub.publish_transport_anchor(
+                player_number,
+                RemoteFrame {
+                    protocol_version: REMOTE_PROTOCOL_VERSION,
+                    frame_kind: RemoteFrameKind::TransportAnchor,
+                    sequence,
+                    correlation_id: None,
+                    payload: json!({ "playerNumber": player_number, "beat": sequence }),
+                },
+            )?;
+        }
+
+        for client in clients {
+            let metrics = hub.metrics(client).ok_or(HubError::UnknownClient)?;
+            assert_eq!(metrics.critical_depth, 1);
+            assert_eq!(metrics.latest_anchor_count, 2);
+            assert_eq!(metrics.coalesced_anchor_count, 19_998);
+            let delivered = (0..3)
+                .map(|_| hub.next_frame(client))
+                .collect::<Result<Vec<_>, _>>()?;
+            let sequences = delivered
+                .into_iter()
+                .flatten()
+                .map(|frame| frame.sequence)
+                .collect::<Vec<_>>();
+            assert_eq!(sequences, vec![1, 2, 3]);
+        }
+        Ok(())
+    }
+
+    #[test]
     fn a_new_client_receives_a_complete_snapshot_with_its_own_sequence() -> Result<(), HubError> {
         let mut hub = ProjectionHub::new(2, 8).map_err(|_| HubError::ClientLimitReached)?;
         hub.publish_projection(projection(9))?;

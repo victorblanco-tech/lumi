@@ -61,6 +61,16 @@ or destabilizing the show.
   coverage without changing physical-device discovery behavior;
 - Mac helper-version validation prevents an obsolete registered gateway from
   presenting false Ready state after a Dev app update.
+- duplicate Bonjour result callbacks are no-ops; real service replacement and
+  lifecycle stops invalidate a connection generation, close the old transport
+  and suppress late state or command failures from that stale generation;
+- a deterministic four-client/two-Player storm keeps only two latest anchors
+  per client through 20,000 updates and preserves contiguous delivery order;
+- stalled LAN writers and gateway-to-engine command responses have tested
+  deadlines and release their bounded client/task capacity;
+- compact landscape controls retain their accepted visual size with full
+  44-point touch targets, accessibility Dynamic Type fallback and explicit
+  VoiceOver health/value/action descriptions.
 
 ## Remaining beta gate
 

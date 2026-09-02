@@ -33,7 +33,7 @@ Excluded from 0.6.0:
 ADR-0040 is the accepted architecture authority. The accepted visual contract is
 recorded in `docs/design/iphone-remote/README.md`.
 
-## Current evidence (`0.6.0-dev-9` / Remote `0.1.0-dev-8`)
+## Current evidence (`0.6.0-dev-10` / Remote `0.1.0-dev-9`)
 
 - the independent iOS app target builds for the generic iOS Simulator;
 - portrait Master-first and landscape side-by-side Live compositions use the
@@ -101,6 +101,16 @@ recorded in `docs/design/iphone-remote/README.md`.
   presents an update/approval message instead of reporting stale readiness;
 - gateway disconnect, authentication failure and desktop snapshot polling do
   not park the show or add full projection work to the realtime loop.
+- identical Bonjour updates preserve the active pinned-TLS session; service
+  replacement and lifecycle reconnect are generation-bound so stale tasks
+  cannot publish state or command failures into their successor;
+- four concurrent clients remain bounded through 20,000 alternating two-Player
+  anchors, while stalled client writes and engine command responses terminate
+  at deterministic deadlines;
+- normal landscape keeps its compact controls with 44-point hit targets, while
+  accessibility Dynamic Type receives the roomier two-row control composition;
+  VoiceOver announces health, value and action for every persistent booth
+  status and primary control.
 
 Physical-iPhone pairing, real Local Network permission, device rotation/gesture
 acceptance, multi-device Controller transfer and the combined booth soak remain

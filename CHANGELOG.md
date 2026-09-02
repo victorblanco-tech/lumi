@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.6.0-dev-10 / Lumi Remote 0.1.0-dev-9 - 2026-09-02
+
+### Fixed
+
+- Prevents unchanged Bonjour result callbacks from tearing down and rebuilding
+  a healthy pinned-TLS Remote session.
+- Makes reconnect, service replacement and app suspension generation-safe so a
+  cancelled connection or command can no longer overwrite the state of its
+  replacement.
+- Disconnects a LAN client that stops reading and bounds a stalled
+  gateway-to-engine command response, preserving Remote capacity without
+  affecting the autonomous show lanes.
+- Keeps compact landscape controls visually small while giving every show-mode
+  and timing control a full 44-point touch target.
+- Improves VoiceOver status, value and action descriptions for Pro DJ Link,
+  Light Output, Ableton Link, show mode and timing offset.
+
+### Tests
+
+- Adds connection-generation regression coverage for duplicate and replaced
+  Bonjour results.
+- Stress-tests four clients with 20,000 two-Player transport anchors while
+  proving bounded latest-value state and contiguous delivery sequences.
+- Adds deterministic slow-writer and stalled-engine-response deadlines.
+- Covers Live/Next Player selection on a four-Player network and retains the
+  same 40-bar fixed Live viewport across iPhone orientations.
+
 ## 0.6.0-dev-9 / Lumi Remote 0.1.0-dev-8 - 2026-09-02
 
 ### Fixed

@@ -38,6 +38,7 @@ the public-repository and GitHub Pages gates.
 - [0.6.0-dev-8 / Lumi Remote 0.1.0-dev-6 waveform parity and touch planning](0.6.0-dev-8-remote-waveform-and-touch-planning.md)
 - [Lumi Remote 0.1.0-dev-7 active and next phrase emphasis](lumi-remote-0.1.0-dev-7-active-next-emphasis.md)
 - [0.6.0-dev-9 / Lumi Remote 0.1.0-dev-8 fixed Live viewport](0.6.0-dev-9-fixed-live-viewport.md)
+- [0.6.0-dev-10 / Lumi Remote 0.1.0-dev-9 Remote hardening](0.6.0-dev-10-remote-hardening.md)
 - [0.4.0-dev-50 isolated Ableton Link Relay](0.4.0-dev-50-isolated-link-relay.md)
 - [0.4.0-dev-51 exactly-once AutoLoop output](0.4.0-dev-51-exactly-once-autoloop-output.md)
 - [0.4.0-dev-52 SoundSwitch MIDI 1.0 compatibility](0.4.0-dev-52-soundswitch-midi-compatibility.md)

@@ -25,6 +25,7 @@ public final class RemoteConnectionController: ObservableObject {
     )
     private var transport: PinnedRemoteTransport?
     private var connectionTask: Task<Void, Never>?
+    private var connectionGeneration: UInt64 = 0
     private var services: [RemoteDiscoveredService] = []
     private var pairingCandidate: PairingCandidate?
 
@@ -42,6 +43,7 @@ public final class RemoteConnectionController: ObservableObject {
     }
 
     public func update(discoveredServices: [RemoteDiscoveredService]) {
+        guard services != discoveredServices else { return }
         services = discoveredServices
         reconnect()
     }
@@ -76,6 +78,7 @@ public final class RemoteConnectionController: ObservableObject {
     }
 
     public func stop() {
+        connectionGeneration &+= 1
         connectionTask?.cancel()
         connectionTask = nil
         let transport = transport
@@ -138,9 +141,16 @@ public final class RemoteConnectionController: ObservableObject {
     }
 
     private func reconnect() {
+        connectionGeneration &+= 1
+        let generation = connectionGeneration
         connectionTask?.cancel()
         connectionTask = nil
+        let previousTransport = transport
+        transport = nil
+        commandCoordinator.disconnected()
+        model.revokeControllerLease()
         guard !services.isEmpty else {
+            Task { await previousTransport?.close() }
             if let candidate = pairingCandidate {
                 model.beginPairing(shortCode: candidate.invitation.shortCode)
             } else {
@@ -149,35 +159,45 @@ public final class RemoteConnectionController: ObservableObject {
             return
         }
         connectionTask = Task { [weak self] in
-            await self?.runConnectionLoop()
+            await previousTransport?.close()
+            guard !Task.isCancelled else { return }
+            await self?.runConnectionLoop(generation: generation)
         }
     }
 
-    private func runConnectionLoop() async {
-        while !Task.isCancelled {
+    private func runConnectionLoop(generation: UInt64) async {
+        while connectionIsCurrent(generation) {
+            var attemptedService: RemoteDiscoveredService?
             do {
                 guard let service = try await selectedService() else {
-                    model.beginPairing(shortCode: pairingCandidate?.invitation.shortCode)
+                    if connectionIsCurrent(generation) {
+                        model.beginPairing(shortCode: pairingCandidate?.invitation.shortCode)
+                    }
                     return
                 }
-                try await connect(to: service)
+                attemptedService = service
+                try await connect(to: service, generation: generation)
                 return
             } catch RemoteTransportError.gatewayRejected("approvalRequired") {
+                guard connectionIsCurrent(generation) else { return }
                 model.beginPairing(shortCode: pairingCandidate?.invitation.shortCode)
             } catch RemoteTransportError.gatewayRejected("deviceRevoked") {
-                if let service = activeService() {
+                guard connectionIsCurrent(generation) else { return }
+                if let service = attemptedService {
                     try? await credentialStore.remove(
                         installationID: service.identity.installationID
                     )
                 }
+                guard connectionIsCurrent(generation) else { return }
                 model.beginPairing(shortCode: pairingCandidate?.invitation.shortCode)
             } catch is CancellationError {
                 return
             } catch {
+                guard connectionIsCurrent(generation) else { return }
                 logger.error(
                     "Remote connection cycle failed: \(String(reflecting: error), privacy: .public)"
                 )
-                let name = activeService()?.identity.name ?? "Lumi Mac"
+                let name = attemptedService?.identity.name ?? "Lumi Mac"
                 model.reconnecting(to: name)
             }
             try? await Task.sleep(for: .seconds(1))
@@ -200,14 +220,10 @@ public final class RemoteConnectionController: ObservableObject {
         return nil
     }
 
-    private func activeService() -> RemoteDiscoveredService? {
-        if let installationID = pairingCandidate?.invitation.installationID {
-            return services.first { $0.identity.installationID == installationID }
-        }
-        return services.first
-    }
-
-    private func connect(to service: RemoteDiscoveredService) async throws {
+    private func connect(
+        to service: RemoteDiscoveredService,
+        generation: UInt64
+    ) async throws {
         let stored = try await Self.storedCredential(
             for: service.identity.installationID,
             pairingInProgress: pairingCandidate != nil,
@@ -221,65 +237,80 @@ public final class RemoteConnectionController: ObservableObject {
             model.beginPairing(shortCode: pairingCandidate?.invitation.shortCode)
             return
         }
-        let transport = PinnedRemoteTransport()
-        self.transport = transport
-        try await transport.connect(
-            to: service.endpoint,
-            certificateFingerprintSHA256: expectedFingerprint
-        )
-
-        guard let hello = Self.authenticationHello(
-            stored: stored,
-            pairingInvitation: pairingCandidate?.invitation,
-            pairingDeviceID: pairingCandidate?.deviceID,
-            pairingCredential: pairingCandidate?.credential,
-            displayName: Self.deviceName
-        ) else {
-            model.beginPairing()
-            return
-        }
-
-        let response = try await transport.authenticate(hello)
-        guard response.installationID == service.identity.installationID else {
-            throw RemoteTrustError.credentialScopeMismatch
-        }
-        if stored == nil, let candidate = pairingCandidate {
-            try await credentialStore.save(
-                RemoteDeviceCredential(
-                    installationID: response.installationID,
-                    deviceID: candidate.deviceID,
-                    credential: candidate.credential,
-                    certificateFingerprintSHA256: expectedFingerprint,
-                    releaseChannel: releaseChannel
-                )
+        guard connectionIsCurrent(generation) else { return }
+        let activeTransport = PinnedRemoteTransport()
+        transport = activeTransport
+        do {
+            try await activeTransport.connect(
+                to: service.endpoint,
+                certificateFingerprintSHA256: expectedFingerprint
             )
-            pairingCandidate = nil
-        }
-        commandCoordinator.updateControllerLease(response.controllerLeaseID)
-        if let lease = response.controllerLeaseID {
-            model.grantControllerLease(lease)
-        } else {
-            model.revokeControllerLease()
-        }
-        model.connected(to: service.identity.name)
-        let processor = RemoteFrameProcessor(model: model, macName: service.identity.name)
-        processor.reset(for: service.identity.name)
+            guard connectionIsCurrent(generation) else { throw CancellationError() }
 
-        while !Task.isCancelled, let data = try await transport.nextFrame() {
-            let frame = try frameDecoder.decodeFrame(data)
-            if frame.frameKind == .commandResult,
-               let commandID = frame.correlationID {
-                commandCoordinator.resolve(commandID: commandID)
+            guard let hello = Self.authenticationHello(
+                stored: stored,
+                pairingInvitation: pairingCandidate?.invitation,
+                pairingDeviceID: pairingCandidate?.deviceID,
+                pairingCredential: pairingCandidate?.credential,
+                displayName: Self.deviceName
+            ) else {
+                model.beginPairing()
+                throw RemoteTransportError.invalidAuthenticationResponse
             }
-            let decision = try processor.process(data)
-            switch decision {
-            case .snapshotRequired, .authoritativeSnapshotRequired:
-                try await sendSnapshotRequest(using: transport)
-            case .applied, .duplicateIgnored, .unrelated:
-                break
+
+            let response = try await activeTransport.authenticate(hello)
+            guard connectionIsCurrent(generation) else { throw CancellationError() }
+            guard response.installationID == service.identity.installationID else {
+                throw RemoteTrustError.credentialScopeMismatch
             }
+            if stored == nil, let candidate = pairingCandidate {
+                try await credentialStore.save(
+                    RemoteDeviceCredential(
+                        installationID: response.installationID,
+                        deviceID: candidate.deviceID,
+                        credential: candidate.credential,
+                        certificateFingerprintSHA256: expectedFingerprint,
+                        releaseChannel: releaseChannel
+                    )
+                )
+                pairingCandidate = nil
+            }
+            commandCoordinator.updateControllerLease(response.controllerLeaseID)
+            if let lease = response.controllerLeaseID {
+                model.grantControllerLease(lease)
+            } else {
+                model.revokeControllerLease()
+            }
+            model.connected(to: service.identity.name)
+            let processor = RemoteFrameProcessor(model: model, macName: service.identity.name)
+            processor.reset(for: service.identity.name)
+
+            while connectionIsCurrent(generation),
+                  let data = try await activeTransport.nextFrame() {
+                guard connectionIsCurrent(generation) else { return }
+                let frame = try frameDecoder.decodeFrame(data)
+                if frame.frameKind == .commandResult,
+                   let commandID = frame.correlationID {
+                    commandCoordinator.resolve(commandID: commandID)
+                }
+                let decision = try processor.process(data)
+                switch decision {
+                case .snapshotRequired, .authoritativeSnapshotRequired:
+                    try await sendSnapshotRequest(using: activeTransport)
+                case .applied, .duplicateIgnored, .unrelated:
+                    break
+                }
+            }
+            throw RemoteTransportError.connectionClosed
+        } catch {
+            await activeTransport.close()
+            if transport === activeTransport {
+                transport = nil
+                commandCoordinator.disconnected()
+                model.revokeControllerLease()
+            }
+            throw error
         }
-        throw RemoteTransportError.connectionClosed
     }
 
     static func storedCredential(
@@ -361,12 +392,15 @@ public final class RemoteConnectionController: ObservableObject {
 
     private func submit(_ command: RemoteCommand) {
         guard let transport else { return }
+        let generation = connectionGeneration
         model.markCommandPending(command.commandID)
         Task { [weak self] in
             do {
                 try await transport.send(command: command)
             } catch {
-                guard let self else { return }
+                guard let self,
+                      self.connectionGeneration == generation,
+                      self.transport === transport else { return }
                 self.commandCoordinator.resolve(commandID: command.commandID)
                 self.model.rejectCommand(command.commandID, reason: error.localizedDescription)
             }
@@ -403,4 +437,10 @@ public final class RemoteConnectionController: ObservableObject {
     private static func unixMillis(_ date: Date) -> UInt64 {
         UInt64(max(0, date.timeIntervalSince1970 * 1_000))
     }
+
+    private func connectionIsCurrent(_ generation: UInt64) -> Bool {
+        !Task.isCancelled && connectionGeneration == generation
+    }
+
+    var connectionGenerationForTesting: UInt64 { connectionGeneration }
 }
