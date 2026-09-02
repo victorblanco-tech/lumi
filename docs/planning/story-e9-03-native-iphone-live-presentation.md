@@ -1,6 +1,6 @@
 # Story E9-03: Native iPhone Live presentation
 
-- Status: **Implementation complete; visual/device acceptance pending**
+- Status: **Implementation and headed Simulator visual acceptance complete; physical-device acceptance pending**
 - Priority: **P1 product**
 - Target: `0.6.0-dev`
 - Components: Shared Live Presentation, iOS SwiftUI
@@ -49,9 +49,13 @@ iPhone UI that matches Lumi's macOS visual language.
 - Camera-deep-link pairing with matching confirmation code;
 - one fixed command-feedback line and accepted/rejected haptics without moving
   either Player surface.
+- headed landscape and portrait acceptance displayed the running `LUMI-SIM`
+  Player, track metadata, 155 BPM, RGB waveform, phrases and proportional Light
+  Plan from the real gateway projection; distinct captured frames proved
+  transport movement.
 
 ## Remaining gate
 
-Complete deterministic visual evidence across supported iPhone sizes, Dynamic
-Type and VoiceOver; then perform actual-device gesture, rotation, keep-awake and
-booth-legibility acceptance.
+Complete deterministic visual evidence across the remaining supported iPhone
+sizes, Dynamic Type and VoiceOver; then perform actual-device gesture, rotation,
+keep-awake and booth-legibility acceptance.

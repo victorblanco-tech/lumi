@@ -9,6 +9,14 @@ public actor PinnedRemoteTransport {
         label: "co.victorblan.tech.lumi.remote.tls",
         qos: .userInitiated
     )
+    // Network.framework may wait for the trust callback while its connection
+    // queue is processing the TLS state machine. Keep certificate evaluation on
+    // its own queue so completing the pin check can never be starved by that
+    // same state machine (this is especially visible in the iOS Simulator).
+    private let verificationQueue = DispatchQueue(
+        label: "co.victorblan.tech.lumi.remote.tls.verify",
+        qos: .userInitiated
+    )
     private var connection: NWConnection?
     private var receiveBuffer = Data()
     private var outgoingSequence: UInt64 = 1
@@ -36,7 +44,7 @@ public actor PinnedRemoteTransport {
                     )
                 )
             },
-            queue
+            verificationQueue
         )
         let parameters = NWParameters(tls: tls, tcp: NWProtocolTCP.Options())
         parameters.includePeerToPeer = true

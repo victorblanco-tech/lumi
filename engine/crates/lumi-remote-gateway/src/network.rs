@@ -588,7 +588,7 @@ impl BonjourAdvertisement {
     ) -> Result<Self, GatewayNetworkError> {
         let service_type = format!("{}.local.", release_channel.bonjour_service_type());
         let properties: HashMap<String, String> = release_channel
-            .discovery_metadata(&identity.installation_id)?
+            .discovery_metadata(&identity.installation_id, port)?
             .into_iter()
             .collect();
         let info = ServiceInfo::new(

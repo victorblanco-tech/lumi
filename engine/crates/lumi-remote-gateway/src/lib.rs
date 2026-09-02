@@ -68,6 +68,7 @@ impl ReleaseChannel {
     pub fn discovery_metadata(
         self,
         installation_id: &str,
+        port: u16,
     ) -> Result<BTreeMap<String, String>, GatewayConfigError> {
         if installation_id.is_empty()
             || installation_id.len() > 128
@@ -82,6 +83,7 @@ impl ReleaseChannel {
                 lumi_remote_protocol::REMOTE_PROTOCOL_VERSION.to_string(),
             ),
             ("channel".to_owned(), self.as_str().to_owned()),
+            ("port".to_owned(), port.to_string()),
         ]))
     }
 }
@@ -848,7 +850,7 @@ mod tests {
     #[test]
     fn discovery_metadata_matches_the_scoped_client_contract() {
         let metadata = ReleaseChannel::Dev
-            .discovery_metadata("installation-123")
+            .discovery_metadata("installation-123", 61_234)
             .unwrap_or_default();
         assert_eq!(
             metadata.get("id").map(String::as_str),
@@ -856,6 +858,7 @@ mod tests {
         );
         assert_eq!(metadata.get("pv").map(String::as_str), Some("1"));
         assert_eq!(metadata.get("channel").map(String::as_str), Some("dev"));
+        assert_eq!(metadata.get("port").map(String::as_str), Some("61234"));
         assert_eq!(
             ReleaseChannel::Dev.bonjour_service_type(),
             "_lumi-remote-dev._tcp"

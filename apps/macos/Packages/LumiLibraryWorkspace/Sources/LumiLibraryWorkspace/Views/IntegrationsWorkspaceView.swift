@@ -428,7 +428,7 @@ public struct IntegrationsWorkspaceView: View {
                 }
 
                 if let error = remoteGateway.errorCode, !error.isEmpty {
-                    Label(error, systemImage: "exclamationmark.triangle")
+                    Label(remoteGatewayErrorMessage(error), systemImage: "exclamationmark.triangle")
                         .font(LumiTypography.caption)
                         .foregroundStyle(LumiColor.warning)
                         .textSelection(.enabled)
@@ -592,6 +592,17 @@ public struct IntegrationsWorkspaceView: View {
 
     private var remoteControllerName: String? {
         remoteGateway.status?.pairedDevices.first(where: \.controller)?.displayName
+    }
+
+    private func remoteGatewayErrorMessage(_ code: String) -> String {
+        switch code {
+        case "gatewayUpdateRequired":
+            "This Lumi update includes a newer iPhone Remote Gateway. Turn iPhone Remote on to update it; macOS may ask you to allow the background item again."
+        case "gatewayStarting":
+            "iPhone Remote Gateway is starting."
+        default:
+            code
+        }
     }
 
     private func remotePairingExpiry(_ unixMillis: UInt64) -> String {

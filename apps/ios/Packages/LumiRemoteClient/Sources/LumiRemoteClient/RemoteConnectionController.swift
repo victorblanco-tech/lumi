@@ -1,6 +1,7 @@
 import Combine
 import Foundation
 import LumiProtocol
+import OSLog
 #if os(iOS)
 import UIKit
 #endif
@@ -18,6 +19,10 @@ public final class RemoteConnectionController: ObservableObject {
     private let credentialStore: any RemoteCredentialStore
     private let frameDecoder = RemoteFrameDecoder()
     private let commandCoordinator = RemoteCommandCoordinator()
+    private let logger = Logger(
+        subsystem: "co.victorblan.tech.lumi.remote",
+        category: "Connection"
+    )
     private var transport: PinnedRemoteTransport?
     private var connectionTask: Task<Void, Never>?
     private var services: [RemoteDiscoveredService] = []
@@ -169,6 +174,9 @@ public final class RemoteConnectionController: ObservableObject {
             } catch is CancellationError {
                 return
             } catch {
+                logger.error(
+                    "Remote connection cycle failed: \(String(reflecting: error), privacy: .public)"
+                )
                 let name = activeService()?.identity.name ?? "Lumi Mac"
                 model.reconnecting(to: name)
             }
@@ -200,8 +208,10 @@ public final class RemoteConnectionController: ObservableObject {
     }
 
     private func connect(to service: RemoteDiscoveredService) async throws {
-        let stored = try await credentialStore.credential(
-            for: service.identity.installationID
+        let stored = try await Self.storedCredential(
+            for: service.identity.installationID,
+            pairingInProgress: pairingCandidate != nil,
+            store: credentialStore
         )
         let expectedFingerprint = pairingCandidate?.invitation.installationID
             == service.identity.installationID
@@ -218,21 +228,13 @@ public final class RemoteConnectionController: ObservableObject {
             certificateFingerprintSHA256: expectedFingerprint
         )
 
-        let hello: RemoteClientHello
-        if let stored {
-            hello = .authenticate(
-                deviceID: stored.deviceID,
-                credential: stored.credential
-            )
-        } else if let candidate = pairingCandidate {
-            hello = .pair(
-                invitationID: candidate.invitation.invitationID,
-                invitationSecret: candidate.invitation.invitationSecret,
-                deviceID: candidate.deviceID,
-                displayName: Self.deviceName,
-                deviceCredential: candidate.credential
-            )
-        } else {
+        guard let hello = Self.authenticationHello(
+            stored: stored,
+            pairingInvitation: pairingCandidate?.invitation,
+            pairingDeviceID: pairingCandidate?.deviceID,
+            pairingCredential: pairingCandidate?.credential,
+            displayName: Self.deviceName
+        ) else {
             model.beginPairing()
             return
         }
@@ -278,6 +280,42 @@ public final class RemoteConnectionController: ObservableObject {
             }
         }
         throw RemoteTransportError.connectionClosed
+    }
+
+    static func storedCredential(
+        for installationID: String,
+        pairingInProgress: Bool,
+        store: any RemoteCredentialStore
+    ) async throws -> RemoteDeviceCredential? {
+        guard !pairingInProgress else { return nil }
+        return try await store.credential(for: installationID)
+    }
+
+    static func authenticationHello(
+        stored: RemoteDeviceCredential?,
+        pairingInvitation: RemotePairingInvitation?,
+        pairingDeviceID: String?,
+        pairingCredential: String?,
+        displayName: String
+    ) -> RemoteClientHello? {
+        if let invitation = pairingInvitation,
+           let pairingDeviceID,
+           let pairingCredential {
+            return .pair(
+                invitationID: invitation.invitationID,
+                invitationSecret: invitation.invitationSecret,
+                deviceID: pairingDeviceID,
+                displayName: displayName,
+                deviceCredential: pairingCredential
+            )
+        }
+        if let stored {
+            return .authenticate(
+                deviceID: stored.deviceID,
+                credential: stored.credential
+            )
+        }
+        return nil
     }
 
     private func submitStateCommand(

@@ -32,6 +32,8 @@ the public-repository and GitHub Pages gates.
 - [0.6.0-dev-4 isolated Remote projection](0.6.0-dev-4-isolated-remote-projection.md)
 - [0.6.0-dev-5 secure native iPhone Remote path](0.6.0-dev-5-secure-iphone-remote.md)
 - [0.6.0-dev-6 Remote Gateway readiness](0.6.0-dev-6-remote-gateway-readiness.md)
+- [0.6.0-dev-7 Remote Gateway update safety](0.6.0-dev-7-remote-gateway-update-safety.md)
+- [Lumi Remote 0.1.0-dev-4 pairing recovery](lumi-remote-0.1.0-dev-4-pairing-recovery.md)
 - [0.4.0-dev-50 isolated Ableton Link Relay](0.4.0-dev-50-isolated-link-relay.md)
 - [0.4.0-dev-51 exactly-once AutoLoop output](0.4.0-dev-51-exactly-once-autoloop-output.md)
 - [0.4.0-dev-52 SoundSwitch MIDI 1.0 compatibility](0.4.0-dev-52-soundswitch-midi-compatibility.md)

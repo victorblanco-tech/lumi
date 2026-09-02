@@ -1,6 +1,6 @@
 # Story E9-01: Remote Live projection and isolated gateway
 
-- Status: **Implementation complete (`0.6.0-dev-6`); physical isolation acceptance pending**
+- Status: **Implementation complete (`0.6.0-dev-7`); physical isolation acceptance pending**
 - Priority: **P0 architecture and performance**
 - Target: `0.6.0-dev`
 - Components: Engine, Remote Gateway, Protocol
@@ -57,6 +57,10 @@ never delay Pro DJ Link, Ableton Link or SoundSwitch output.
   transfer controls without exposing engine credentials or paths.
 - explicit cross-language admin-wire tests for service records, status,
   invitations, approval, revocation and Controller-transfer identifiers.
+- the signed iPhone Simulator received the actual bounded Player, RGB waveform,
+  phrase and Light Plan projection while simulator playback advanced;
+- stale helper versions are rejected by the Mac supervisor and replaced through
+  the existing opt-in service flow rather than being reported as Ready.
 
 ## Remaining gate
 

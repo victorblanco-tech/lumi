@@ -5,14 +5,19 @@ import ServiceManagement
 
 public actor RemoteGatewaySupervisor {
     private let launchAgentPlistName: String?
+    private let expectedProductVersion: String?
     private var service: SMAppService?
 
     public init(
         launchAgentPlistName: String? = Bundle.main.object(
             forInfoDictionaryKey: "LumiRemoteGatewayLaunchAgentPlistName"
+        ) as? String,
+        expectedProductVersion: String? = Bundle.main.object(
+            forInfoDictionaryKey: "LumiProductVersion"
         ) as? String
     ) {
         self.launchAgentPlistName = launchAgentPlistName
+        self.expectedProductVersion = expectedProductVersion
     }
 
     public func refresh(recordURL: URL) async -> RemoteGatewayManagementSnapshot {
@@ -27,6 +32,11 @@ public actor RemoteGatewaySupervisor {
         case .enabled:
             do {
                 return try await exchange(.status, recordURL: recordURL)
+            } catch RemoteGatewayClientError.serviceVersionMismatch {
+                return .init(
+                    serviceState: .unavailable,
+                    errorCode: "gatewayUpdateRequired"
+                )
             } catch {
                 return .init(serviceState: .starting, errorCode: "gatewayStarting")
             }
@@ -43,7 +53,11 @@ public actor RemoteGatewaySupervisor {
         self.service = service
         switch service.status {
         case .enabled:
-            break
+            if let expectedProductVersion,
+               (try? readRecord(at: recordURL).productVersion) != expectedProductVersion {
+                try await service.unregister()
+                try service.register()
+            }
         case .notRegistered, .notFound:
             try service.register()
         case .requiresApproval:
@@ -142,15 +156,7 @@ public actor RemoteGatewaySupervisor {
             RemoteGatewayServiceRecord.self,
             from: Data(contentsOf: url)
         )
-        guard record.endpointHost == "127.0.0.1",
-              record.endpointPort > 0,
-              record.adminToken.count >= 32,
-              record.processID > 1,
-              record.installationID.count == 32,
-              record.certificateFingerprintSHA256.count == 64,
-              record.lanPort > 0 else {
-            throw RemoteGatewayClientError.invalidServiceRecord
-        }
+        try record.validate(expectedProductVersion: expectedProductVersion)
         return record
     }
 }
@@ -174,6 +180,21 @@ struct RemoteGatewayServiceRecord: Codable, Sendable {
         case installationID = "installationId"
         case certificateFingerprintSHA256 = "certificateFingerprintSha256"
         case lanPort
+    }
+
+    func validate(expectedProductVersion: String?) throws {
+        guard endpointHost == "127.0.0.1",
+              endpointPort > 0,
+              adminToken.count >= 32,
+              processID > 1,
+              installationID.count == 32,
+              certificateFingerprintSHA256.count == 64,
+              lanPort > 0 else {
+            throw RemoteGatewayClientError.invalidServiceRecord
+        }
+        if let expectedProductVersion, productVersion != expectedProductVersion {
+            throw RemoteGatewayClientError.serviceVersionMismatch
+        }
     }
 }
 
@@ -328,6 +349,7 @@ public enum RemoteGatewayClientError: Error, Equatable, LocalizedError {
     case registrationFailed
     case startupTimedOut
     case invalidServiceRecord
+    case serviceVersionMismatch
     case connectionTimedOut
     case connectionFailed
     case connectionClosed
@@ -342,6 +364,7 @@ public enum RemoteGatewayClientError: Error, Equatable, LocalizedError {
         case .registrationFailed: "Lumi Remote Gateway could not be enabled."
         case .startupTimedOut: "Lumi Remote Gateway did not become ready in time."
         case .invalidServiceRecord: "Lumi Remote Gateway published an invalid local record."
+        case .serviceVersionMismatch: "Lumi Remote Gateway must be updated for this Lumi version."
         case .connectionTimedOut: "Lumi Remote Gateway connection timed out."
         case .connectionFailed: "Lumi Remote Gateway could not be reached."
         case .connectionClosed: "Lumi Remote Gateway closed the connection."

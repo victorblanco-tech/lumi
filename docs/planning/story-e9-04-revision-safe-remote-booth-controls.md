@@ -47,6 +47,9 @@ double tap, reconnect or stale screen producing a second or incorrect mutation.
 - authoritative accepted/rejected command reconciliation, fixed feedback and
   haptics;
 - persisted one-Controller ownership with explicit Mac transfer and revoke.
+- headed Simulator acceptance transferred the single Controller lease and sent
+  `ARM`, `START` and confirmed `OFF` through the real TLS gateway to the existing
+  reducer, with authoritative state reflected back in the iPhone presentation.
 
 ## Remaining gate
 

@@ -33,7 +33,7 @@ Excluded from 0.6.0:
 ADR-0040 is the accepted architecture authority. The accepted visual contract is
 recorded in `docs/design/iphone-remote/README.md`.
 
-## Current evidence (`0.6.0-dev-6` / Remote `0.1.0-dev-3`)
+## Current evidence (`0.6.0-dev-7` / Remote `0.1.0-dev-4`)
 
 - the independent iOS app target builds for the generic iOS Simulator;
 - portrait Master-first and landscape side-by-side Live compositions use the
@@ -47,6 +47,8 @@ recorded in `docs/design/iphone-remote/README.md`.
   mutating command IDs after the first admission;
 - release-channel Bonjour discovery, native Camera deep-link pairing and
   Keychain credential storage are wired without exposing engine credentials;
+- a newly scanned invitation safely supersedes stale Keychain state and stores
+  its replacement only after approved pinned-TLS pairing succeeds;
 - the separately packaged gateway binds the LAN only after the user enables
   iPhone Remote and advertises the matching Dev, RC or Production service;
 - every LAN session uses rustls TLS with a persistent per-installation
@@ -70,10 +72,22 @@ recorded in `docs/design/iphone-remote/README.md`.
   have deterministic regression coverage;
 - the macOS supervisor and Rust gateway share an explicitly tested
   lower-camel-case admin contract for IDs and SHA-256 fingerprints;
+- the signed iPhone Simulator completed the real Bonjour -> pinned-TLS -> QR
+  pairing -> explicit Mac approval path against a running Dev gateway;
+- Controller transfer enabled the booth controls, `ARM`, `START` and confirmed
+  `OFF` reached the authoritative reducer exactly once, and simulated playback
+  advanced the displayed Player, waveform and Light Plan;
+- terminating and relaunching the Simulator app restored the authenticated
+  session from its scoped Keychain credential without scanning another QR code;
+- release-scoped Bonjour metadata exposes the ephemeral TLS port only for the
+  CoreSimulator host-loopback route; physical iPhones retain normal Bonjour
+  endpoint routing and the same certificate pin;
+- the Mac rejects a service record from an older bundled Remote Gateway and
+  presents an update/approval message instead of reporting stale readiness;
 - gateway disconnect, authentication failure and desktop snapshot polling do
   not park the show or add full projection work to the realtime loop.
 
-Physical-iPhone pairing, real Local Network permission, rotation/gesture
+Physical-iPhone pairing, real Local Network permission, device rotation/gesture
 acceptance, multi-device Controller transfer and the combined booth soak remain
 open. No current Mac live-performance behavior is changed by this feature.
 

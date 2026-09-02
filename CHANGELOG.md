@@ -1,5 +1,40 @@
 # Changelog
 
+## 0.6.0-dev-7 - 2026-09-02
+
+### Fixed
+
+- Rejects a stale Remote Gateway service record from an older Lumi build and
+  re-registers the bundled helper when the user enables the updated service.
+- Publishes the gateway's ephemeral TLS port in release-scoped Bonjour discovery
+  metadata so the iOS Simulator can avoid its synthetic host-service route;
+  the existing certificate pin remains the trust boundary.
+- Gives the user an actionable update message instead of reporting an obsolete
+  helper as Ready.
+
+### Tests
+
+- Completes headed Mac-to-iPhone Simulator acceptance through QR pairing,
+  explicit approval, Controller transfer, Live projection, `ARM`, `START`,
+  confirmed `OFF`, moving transport and credential-backed app relaunch.
+
+## Lumi Remote 0.1.0-dev-4 - 2026-09-02
+
+### Fixed
+
+- Gives an explicitly scanned pairing invitation precedence over a stale
+  Keychain credential, allowing a trusted Mac to be paired again after its
+  local Remote trust state was reset.
+- Replaces the stale credential only after the new invitation is approved and
+  the pinned-TLS pairing succeeds.
+- Bypasses unreadable legacy Keychain data while a deliberate new pairing is
+  in progress, so recovery cannot stall before the TLS connection begins.
+- Keeps certificate evaluation off the Network.framework connection queue and
+  uses an explicit loopback endpoint only in CoreSimulator, while physical
+  iPhones retain normal multi-interface Bonjour routing.
+- Declares the Keychain access group required by signed iPhone and headed
+  Simulator builds.
+
 ## 0.6.0-dev-6 - 2026-09-02
 
 ### Fixed

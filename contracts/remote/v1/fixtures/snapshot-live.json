@@ -6,7 +6,7 @@
   "payload": {
     "projectionRevision": 7,
     "stateRevision": 21,
-    "engineVersion": "0.6.0-dev-6",
+    "engineVersion": "0.6.0-dev-7",
     "operationState": "armed",
     "leaderPlayerNumber": 1,
     "integrations": {

@@ -52,6 +52,63 @@ func authenticationHelloMatchesTheRustTaggedContract() throws {
 
 @MainActor
 @Test
+func scannedPairingInvitationReplacesAStaleStoredCredential() throws {
+    let stored = RemoteDeviceCredential(
+        installationID: "installation-123",
+        deviceID: "stale-device",
+        credential: String(repeating: "c", count: 32),
+        certificateFingerprintSHA256: String(repeating: "a", count: 64),
+        releaseChannel: .dev
+    )
+    let invitation = RemotePairingInvitation(
+        installationID: "installation-123",
+        invitationID: "invitation-123456",
+        invitationSecret: String(repeating: "i", count: 32),
+        shortCode: "123456",
+        certificateFingerprintSHA256: String(repeating: "b", count: 64),
+        expiresAtUnixMillis: 2_000
+    )
+    let hello = try #require(
+        RemoteConnectionController.authenticationHello(
+            stored: stored,
+            pairingInvitation: invitation,
+            pairingDeviceID: "replacement-device",
+            pairingCredential: String(repeating: "n", count: 32),
+            displayName: "Test iPhone"
+        )
+    )
+    let object = try #require(
+        JSONSerialization.jsonObject(with: JSONEncoder().encode(hello)) as? [String: String]
+    )
+
+    #expect(object["kind"] == "pair")
+    #expect(object["invitationId"] == invitation.invitationID)
+    #expect(object["deviceId"] == "replacement-device")
+    #expect(object["deviceId"] != stored.deviceID)
+}
+
+@MainActor
+@Test
+func scannedPairingInvitationBypassesUnreadableKeychainState() async throws {
+    let credential = try await RemoteConnectionController.storedCredential(
+        for: "installation-123",
+        pairingInProgress: true,
+        store: RejectingCredentialStore()
+    )
+    #expect(credential == nil)
+}
+
+private actor RejectingCredentialStore: RemoteCredentialStore {
+    func credential(for installationID: String) throws -> RemoteDeviceCredential? {
+        throw RemoteCredentialStoreError.invalidStoredCredential
+    }
+
+    func save(_ credential: RemoteDeviceCredential) throws {}
+    func remove(installationID: String) throws {}
+}
+
+@MainActor
+@Test
 func localCommandFailureKeepsTheAuthenticatedSessionConnected() throws {
     let model = RemoteSessionModel()
     model.connected(to: "Booth Mac")
@@ -86,6 +143,13 @@ func localCommandFailureKeepsTheAuthenticatedSessionConnected() throws {
             expectedChannel: .dev
         )
     }
+}
+
+@Test func discoveryMetadataAcceptsOnlyAUsableAdvertisedPort() {
+    #expect(RemoteDiscoveryMetadata.advertisedPort(textRecord: ["port": "60755"]) == 60_755)
+    #expect(RemoteDiscoveryMetadata.advertisedPort(textRecord: ["port": "0"]) == nil)
+    #expect(RemoteDiscoveryMetadata.advertisedPort(textRecord: ["port": "70000"]) == nil)
+    #expect(RemoteDiscoveryMetadata.advertisedPort(textRecord: [:]) == nil)
 }
 
 @Test func pairingCodeRoundTripsAndRejectsExpiredInvitation() throws {

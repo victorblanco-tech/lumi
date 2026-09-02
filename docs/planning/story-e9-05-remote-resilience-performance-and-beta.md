@@ -1,6 +1,6 @@
 # Story E9-05: Remote resilience, performance and beta delivery
 
-- Status: **In progress (automated resilience foundation complete)**
+- Status: **In progress (automated resilience and headed Simulator acceptance complete)**
 - Priority: **P0 show safety**
 - Target: `0.6.0-beta`
 - Components: Engine, Gateway, iOS, Release
@@ -54,6 +54,13 @@ or destabilizing the show.
 - macOS and iOS product targets build with strict concurrency and warnings as
   errors; the packaged Mac app contains the independent gateway executable and
   channel-specific LaunchAgent.
+- a signed headed Simulator client completed fresh pairing, Controller transfer,
+  portrait and landscape live projection and operation commands, then
+  reconnected from Keychain after leaving the app without replaying a command;
+- simulator-only Bonjour routing and iOS Keychain entitlements have regression
+  coverage without changing physical-device discovery behavior;
+- Mac helper-version validation prevents an obsolete registered gateway from
+  presenting false Ready state after a Dev app update.
 
 ## Remaining beta gate
 

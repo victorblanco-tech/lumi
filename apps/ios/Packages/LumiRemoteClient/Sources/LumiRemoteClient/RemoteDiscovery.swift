@@ -26,6 +26,7 @@ public enum RemoteDiscoveryMetadata {
     public static let installationIDKey = "id"
     public static let protocolVersionKey = "pv"
     public static let releaseChannelKey = "channel"
+    public static let portKey = "port"
 
     public static func identity(
         serviceName: String,
@@ -47,6 +48,13 @@ public enum RemoteDiscoveryMetadata {
         )
         try identity.validate(for: expectedChannel)
         return identity
+    }
+
+    public static func advertisedPort(textRecord: [String: String]) -> UInt16? {
+        guard let value = textRecord[portKey],
+              let port = UInt16(value),
+              port > 0 else { return nil }
+        return port
     }
 }
 
@@ -125,7 +133,26 @@ public final class BonjourRemoteDiscovery: ObservableObject {
                     textRecord: textRecord.dictionary,
                     expectedChannel: releaseChannel
                 )
-                accepted.append(RemoteDiscoveredService(identity: identity, endpoint: result.endpoint))
+                #if targetEnvironment(simulator)
+                // CoreSimulator shares the Mac network stack but resolving a
+                // Bonjour service endpoint for the host can select a synthetic
+                // loopback route that accepts TCP and never completes TLS.
+                // The advertised ephemeral port lets headed tests use the
+                // explicit host loopback route while real iPhones continue to
+                // use the Bonjour endpoint and its normal multi-interface path.
+                let endpoint: NWEndpoint
+                if let port = RemoteDiscoveryMetadata.advertisedPort(
+                    textRecord: textRecord.dictionary
+                ),
+                   let networkPort = NWEndpoint.Port(rawValue: port) {
+                    endpoint = .hostPort(host: "127.0.0.1", port: networkPort)
+                } else {
+                    endpoint = result.endpoint
+                }
+                #else
+                let endpoint = result.endpoint
+                #endif
+                accepted.append(RemoteDiscoveredService(identity: identity, endpoint: endpoint))
             } catch {
                 rejected += 1
             }

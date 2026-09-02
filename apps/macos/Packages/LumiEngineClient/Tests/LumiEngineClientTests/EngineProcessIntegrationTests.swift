@@ -55,6 +55,10 @@ func remoteGatewayAdminWireContract() throws {
 
     #expect(record.installationID == "0123456789abcdef0123456789abcdef")
     #expect(record.certificateFingerprintSHA256.count == 64)
+    try record.validate(expectedProductVersion: "0.6.0-dev-test")
+    #expect(throws: RemoteGatewayClientError.serviceVersionMismatch) {
+        try record.validate(expectedProductVersion: "0.6.0-dev-newer")
+    }
 
     let request = try JSONSerialization.jsonObject(
         with: JSONEncoder().encode(

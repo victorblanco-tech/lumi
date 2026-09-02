@@ -48,6 +48,13 @@ device has control and revoke it without accounts or internet.
   paired-device state and explicit service enablement;
 - controller ownership persists across gateway restart and every trust mutation
   disconnects existing sessions for mandatory reauthentication.
+- headed acceptance completed Bonjour discovery, matching-code QR pairing,
+  explicit Mac approval and deliberate Controller transfer in the signed iPhone
+  Simulator;
+- the approved credential survived app termination and restored the pinned-TLS
+  session from the channel-scoped Keychain without a second invitation;
+- CoreSimulator uses the explicitly advertised ephemeral port over host
+  loopback, while physical iPhones keep the normal Bonjour service endpoint.
 
 ## Remaining gate
 
