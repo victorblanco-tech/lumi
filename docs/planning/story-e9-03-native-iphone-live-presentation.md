@@ -63,6 +63,9 @@ iPhone UI that matches Lumi's macOS visual language.
 - tapping either a coloured Phrase segment or its Light Plan block opens the
   same compact phrase editor; its Phrase selector mirrors the Mac workflow and
   mutations remain restricted to future phrases owned by the Controller.
+- Remote dev-7 mirrors the Mac plan hierarchy without replacing configured
+  Phrase colors: `ACTIVE` receives a red live glow and exactly one upcoming
+  item receives the blue `NEXT` treatment, driven by the visual transport beat.
 - headed dev-6 acceptance used the packaged dev-8 engine and live LAN simulator:
   `90s Bitch - Extended Mix` retained clear cyan, red and pink regions and two
   distinct frames proved that the remaining time and waveform viewport followed

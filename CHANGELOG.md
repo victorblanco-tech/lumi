@@ -1,5 +1,24 @@
 # Changelog
 
+## Lumi Remote 0.1.0-dev-7 - 2026-09-02
+
+### Changed
+
+- Mirrors Lumi's live-plan hierarchy in the booth UI: the running phrase and
+  AutoLoop receive a red live glow while exactly one upcoming phrase and
+  AutoLoop receive the blue `NEXT` treatment.
+- Keeps the configured Phrase colors visible underneath the status treatment
+  and preserves the entire upcoming block as its touch target for adjustment.
+- Advances `ACTIVE` and `NEXT` from the same interpolated transport position as
+  the waveform, so the status cannot visibly lag behind the fixed playhead.
+
+### Tests
+
+- Proves completed, active, next and later planned classification, including
+  the exact phrase-boundary handoff.
+- Completes headed portrait and landscape acceptance against the running Lumi
+  Remote Gateway and LAN Pro DJ Link simulator.
+
 ## Lumi Remote 0.1.0-dev-6 - 2026-09-02
 
 ### Changed

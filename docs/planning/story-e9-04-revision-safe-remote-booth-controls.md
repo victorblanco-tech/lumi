@@ -56,6 +56,8 @@ double tap, reconnect or stale screen producing a second or incorrect mutation.
 - headed dev-6 acceptance opened the touch sheet on the next planned Intro,
   exposed the complete adjustment surface, and verified that selecting the
   running Drop changed it to `Live · locked` with every mutation disabled.
+- dev-7 keeps the blue `NEXT` block as a full-width touch target while its red
+  `ACTIVE` predecessor remains inspectable and immutable.
 
 ## Remaining gate
 

@@ -629,6 +629,7 @@ private struct RemotePlayerSurface: View {
             startBeat: start,
             endBeat: start + visible,
             totalBeats: total,
+            currentBeat: visualBeat,
             playheadFraction: playheadFraction
         )
     }
@@ -862,6 +863,24 @@ private struct RemotePhraseBand: View {
                             }
                         }
                         .frame(width: max(1, width))
+                        .overlay {
+                            if let plan,
+                               let cue = plan.cues.first(where: { $0.phraseIndex == phrase.index }) {
+                                let status = RemotePlanCuePresentation.status(
+                                    for: cue,
+                                    in: plan.cues,
+                                    currentBeat: viewport.currentBeat
+                                )
+                                if status == .active || status == .next {
+                                    Rectangle()
+                                        .fill(status.color.opacity(status == .active ? 0.17 : 0.10))
+                                        .overlay {
+                                            Rectangle()
+                                                .stroke(status.color.opacity(0.95), lineWidth: status == .active ? 1.5 : 1)
+                                        }
+                                }
+                            }
+                        }
                         .offset(x: x)
                         .accessibilityLabel(phrase.roleName ?? phrase.kind)
                     }
@@ -905,10 +924,42 @@ private struct RemotePlanBand: View {
                         let clippedEnd = min(viewport.endBeat, Double(cue.endBeat))
                         let x = viewport.xFraction(for: clippedStart) * geometry.size.width
                         let width = (clippedEnd - clippedStart) / viewport.visibleBeats * geometry.size.width
+                        let status = RemotePlanCuePresentation.status(
+                            for: cue,
+                            in: plan.cues,
+                            currentBeat: viewport.currentBeat
+                        )
                         Button {
                             onSelectCue(cue)
                         } label: {
-                            VStack(alignment: .leading, spacing: 2) {
+                            VStack(alignment: .leading, spacing: 1) {
+                                if status == .active || status == .next {
+                                    if width >= 52 {
+                                        HStack(spacing: 3) {
+                                            Circle()
+                                                .fill(status.color)
+                                                .frame(width: 5, height: 5)
+                                            Text(status.label)
+                                                .font(.system(size: 7, weight: .bold, design: .rounded))
+                                                .foregroundStyle(status.color)
+                                                .lineLimit(1)
+                                            Spacer(minLength: 0)
+                                            if controlsEnabled,
+                                               cue.startBeat > player.transport.beat,
+                                               width >= 72 {
+                                                Image(systemName: "slider.horizontal.3")
+                                                    .font(.system(size: 7, weight: .bold))
+                                                    .foregroundStyle(LumiColor.accent)
+                                            }
+                                        }
+                                    } else {
+                                        Text(status.label)
+                                            .font(.system(size: 6, weight: .bold, design: .rounded))
+                                            .foregroundStyle(status.color)
+                                            .lineLimit(1)
+                                            .fixedSize(horizontal: true, vertical: false)
+                                    }
+                                }
                                 Text(cue.autoloopName ?? "Hold")
                                     .font(LumiTypography.caption.weight(.semibold))
                                     .lineLimit(1)
@@ -923,23 +974,36 @@ private struct RemotePlanBand: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .background(LumiColor.surfaceElevated)
-                        .overlay(alignment: .leading) {
-                            Rectangle().fill(LumiColor.accent).frame(width: 1)
+                        .background(status.backgroundColor)
+                        .overlay(alignment: .top) {
+                            Rectangle()
+                                .fill(status.color.opacity(status.topLineOpacity))
+                                .frame(height: status == .active ? 3 : status == .next ? 2 : 1)
                         }
                         .overlay(alignment: .topTrailing) {
                             if controlsEnabled,
                                cue.startBeat > player.transport.beat,
-                               width >= 42 {
+                               status != .next,
+                               width >= 52 {
                                 Image(systemName: "slider.horizontal.3")
                                     .font(.system(size: 7, weight: .bold))
                                     .foregroundStyle(LumiColor.accent)
                                     .padding(4)
                             }
                         }
+                        .overlay {
+                            if status == .active || status == .next {
+                                Rectangle()
+                                    .stroke(status.color.opacity(0.88), lineWidth: status == .active ? 1.5 : 1)
+                            }
+                        }
+                        .shadow(
+                            color: status.color.opacity(status == .active ? 0.34 : status == .next ? 0.20 : 0),
+                            radius: status == .active ? 4 : status == .next ? 2 : 0
+                        )
                         .offset(x: x)
                         .accessibilityLabel(
-                            "Phrase \(cue.phraseIndex + 1), \(cue.autoloopName ?? "hold current AutoLoop")"
+                            "\(status.label), phrase \(cue.phraseIndex + 1), \(cue.autoloopName ?? "hold current AutoLoop")"
                         )
                         .accessibilityHint(
                             cue.startBeat > player.transport.beat
@@ -958,6 +1022,7 @@ private struct RemoteBeatViewport: Equatable {
     let startBeat: Double
     let endBeat: Double
     let totalBeats: Double
+    let currentBeat: Double
     let playheadFraction: Double?
 
     var visibleBeats: Double { max(1, endBeat - startBeat) }
@@ -972,6 +1037,71 @@ private struct RemoteBeatViewport: Equatable {
 
     func intersects(start: Double, end: Double) -> Bool {
         end > startBeat && start < endBeat
+    }
+}
+
+enum RemotePlanCueVisualStatus: Equatable {
+    case completed
+    case active
+    case next
+    case planned
+
+    var label: String {
+        switch self {
+        case .completed: "DONE"
+        case .active: "ACTIVE"
+        case .next: "NEXT"
+        case .planned: "PLANNED"
+        }
+    }
+
+    var color: Color {
+        switch self {
+        case .active: Color(red: 0.92, green: 0.20, blue: 0.26)
+        case .next: LumiColor.accent
+        case .completed: LumiColor.success.opacity(0.65)
+        case .planned: LumiColor.textSecondary.opacity(0.72)
+        }
+    }
+
+    var backgroundColor: Color {
+        switch self {
+        case .active: color.opacity(0.15)
+        case .next: color.opacity(0.11)
+        case .completed: LumiColor.surfaceElevated.opacity(0.48)
+        case .planned: LumiColor.surfaceElevated
+        }
+    }
+
+    var topLineOpacity: Double {
+        switch self {
+        case .active, .next: 1
+        case .completed: 0.32
+        case .planned: 0.38
+        }
+    }
+}
+
+enum RemotePlanCuePresentation {
+    static func status(
+        for cue: RemotePlanCue,
+        in cues: [RemotePlanCue],
+        currentBeat: Double
+    ) -> RemotePlanCueVisualStatus {
+        if Double(cue.endBeat) <= currentBeat { return .completed }
+        if Double(cue.startBeat) <= currentBeat && currentBeat < Double(cue.endBeat) {
+            return .active
+        }
+        let next = cues
+            .filter { Double($0.startBeat) > currentBeat }
+            .min {
+                if $0.startBeat == $1.startBeat {
+                    return $0.phraseIndex < $1.phraseIndex
+                }
+                return $0.startBeat < $1.startBeat
+            }
+        if next?.phraseIndex == cue.phraseIndex { return .next }
+        return .planned
     }
 }
 

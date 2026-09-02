@@ -184,6 +184,76 @@ func onlyAnUpcomingPhraseCanBeAdjustedByTheController() {
     )
 }
 
+@Test
+func livePlanPresentationMarksExactlyTheActiveAndNextPhrases() {
+    let cues = [
+        planCue(index: 0, startBeat: 0, endBeat: 32),
+        planCue(index: 1, startBeat: 32, endBeat: 64),
+        planCue(index: 2, startBeat: 64, endBeat: 96),
+        planCue(index: 3, startBeat: 96, endBeat: 128),
+    ]
+
+    #expect(
+        RemotePlanCuePresentation.status(
+            for: cues[0],
+            in: cues,
+            currentBeat: 47.5
+        ) == .completed
+    )
+    #expect(
+        RemotePlanCuePresentation.status(
+            for: cues[1],
+            in: cues,
+            currentBeat: 47.5
+        ) == .active
+    )
+    #expect(
+        RemotePlanCuePresentation.status(
+            for: cues[2],
+            in: cues,
+            currentBeat: 47.5
+        ) == .next
+    )
+    #expect(
+        RemotePlanCuePresentation.status(
+            for: cues[3],
+            in: cues,
+            currentBeat: 47.5
+        ) == .planned
+    )
+}
+
+@Test
+func nextPhrasePresentationMovesAtTheExactPhraseBoundary() {
+    let cues = [
+        planCue(index: 0, startBeat: 0, endBeat: 32),
+        planCue(index: 1, startBeat: 32, endBeat: 64),
+        planCue(index: 2, startBeat: 64, endBeat: 96),
+    ]
+
+    #expect(
+        RemotePlanCuePresentation.status(
+            for: cues[0],
+            in: cues,
+            currentBeat: 32
+        ) == .completed
+    )
+    #expect(
+        RemotePlanCuePresentation.status(
+            for: cues[1],
+            in: cues,
+            currentBeat: 32
+        ) == .active
+    )
+    #expect(
+        RemotePlanCuePresentation.status(
+            for: cues[2],
+            in: cues,
+            currentBeat: 32
+        ) == .next
+    )
+}
+
 private func player(_ number: UInt8) -> RemotePlayer {
     RemotePlayer(
         playerNumber: number,
@@ -211,6 +281,25 @@ private func player(_ number: UInt8) -> RemotePlayer {
             hotCues: [],
             phrases: []
         )
+    )
+}
+
+private func planCue(
+    index: UInt16,
+    startBeat: UInt64,
+    endBeat: UInt64
+) -> RemotePlanCue {
+    RemotePlanCue(
+        phraseIndex: index,
+        startBeat: startBeat,
+        endBeat: endBeat,
+        locked: false,
+        themeID: 1,
+        themeName: "Blue Pink",
+        autoloopNumber: UInt8(index + 1),
+        autoloopName: "AutoLoop \(index + 1)",
+        staticLookName: nil,
+        availableAutoloops: []
     )
 }
 
