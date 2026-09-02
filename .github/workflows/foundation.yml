@@ -72,7 +72,7 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Restore portable Rust build cache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
@@ -102,7 +102,7 @@ jobs:
           java-version: "21"
 
       - name: Restore Apple build cache
-        uses: actions/cache@v5
+        uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry
