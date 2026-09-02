@@ -34,6 +34,10 @@ communiceert via lokaal wifi/LAN.
 - Een booth-netwerk blijft een operationele dependency voor remote bediening,
   maar niet voor de engine of de show.
 
+ADR-0040 refines this decision with a separately supervised, LAN-facing Remote
+Gateway, a scoped remote protocol and explicit backpressure. The loopback engine
+endpoint is not exposed directly.
+
 ## Afgewezen alternatieven
 
 ### Alleen een mobiele webinterface
