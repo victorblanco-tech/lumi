@@ -423,6 +423,10 @@ fn simulator_track_uses_exact_lumi_revision_and_fails_closed_on_stale_or_unknown
     assert_eq!(identity.provider_kind(), "demo");
     assert_eq!(identity.lumi_timeline_revision(), 2);
     assert_eq!(metadata.phrases()[0].kind(), PhraseKind::Build);
+    assert!(
+        context.phrase_role_json(0)["colorRgb"].as_u64().is_some(),
+        "library-backed phrases must project the configured Phrase color"
+    );
     let resolved = context.resolve(ThemeId::new(1))?;
     assert_eq!(resolved[0].role_id, "synth");
     assert_eq!(resolved[0].strategy, "auto");

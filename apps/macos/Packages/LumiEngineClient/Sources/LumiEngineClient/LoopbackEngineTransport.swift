@@ -21,7 +21,7 @@ final class DeadlineContinuationGate<Value: Sendable>: @unchecked Sendable {
     func arm(
         on queue: DispatchQueue,
         after seconds: TimeInterval,
-        error: EngineClientError,
+        error: any Error,
         onTimeout: @escaping @Sendable () -> Void
     ) {
         let item = DispatchWorkItem { [self] in
@@ -43,7 +43,7 @@ final class DeadlineContinuationGate<Value: Sendable>: @unchecked Sendable {
         resolve(with: .success(value))
     }
 
-    func fail(_ error: EngineClientError) {
+    func fail(_ error: any Error) {
         resolve(with: .failure(error))
     }
 
@@ -97,7 +97,7 @@ public actor LoopbackEngineTransport: EngineTransport {
             gate.arm(
                 on: queue,
                 after: timeouts.connectSeconds,
-                error: .connectionTimedOut,
+                error: EngineClientError.connectionTimedOut,
                 onTimeout: { connection.cancel() }
             )
             connection.stateUpdateHandler = { state in
@@ -105,7 +105,7 @@ public actor LoopbackEngineTransport: EngineTransport {
                 case .ready:
                     gate.succeed(())
                 case .failed, .cancelled:
-                    gate.fail(.connectionFailed)
+                    gate.fail(EngineClientError.connectionFailed)
                 default:
                     break
                 }
@@ -161,14 +161,14 @@ public actor LoopbackEngineTransport: EngineTransport {
             gate.arm(
                 on: queue,
                 after: timeout,
-                error: .requestTimedOut,
+                error: EngineClientError.requestTimedOut,
                 onTimeout: { connection.cancel() }
             )
             connection.send(content: data, completion: .contentProcessed { error in
                 if error == nil {
                     gate.succeed(())
                 } else {
-                    gate.fail(.connectionClosed)
+                    gate.fail(EngineClientError.connectionClosed)
                 }
             })
         }
@@ -204,7 +204,7 @@ public actor LoopbackEngineTransport: EngineTransport {
             gate.arm(
                 on: queue,
                 after: timeout,
-                error: .requestTimedOut,
+                error: EngineClientError.requestTimedOut,
                 onTimeout: { connection.cancel() }
             )
             connection.receive(
@@ -214,15 +214,14 @@ public actor LoopbackEngineTransport: EngineTransport {
                 if let data, !data.isEmpty {
                     gate.succeed(data)
                 } else if error != nil || isComplete {
-                    gate.fail(.connectionClosed)
+                    gate.fail(EngineClientError.connectionClosed)
                 } else {
-                    gate.fail(.connectionFailed)
+                    gate.fail(EngineClientError.connectionFailed)
                 }
             }
         }
     }
 }
-
 private struct SessionAuthentication: Encodable {
     let sessionToken: String
 }

@@ -28,6 +28,12 @@ fn actual_engine_snapshot_maps_to_the_scoped_remote_live_contract() {
             && !player.track.title.is_empty()
             && player.track.duration_beats > 0
     }));
+    let projected_phrases = projection
+        .players
+        .iter()
+        .flat_map(|player| player.track.phrases.iter())
+        .collect::<Vec<_>>();
+    assert!(!projected_phrases.is_empty());
     let encoded = serde_json::to_string(&projection)
         .unwrap_or_else(|error| panic!("remote projection must serialize: {error}"));
     assert!(!encoded.contains("library"));

@@ -6,16 +6,31 @@
 
 #![forbid(unsafe_code)]
 
+mod admin;
 mod engine_client;
+mod identity;
+mod network;
+mod trust_store;
 
+pub use admin::{
+    GatewayAdminRecordGuard, GatewayAdminRequest, GatewayAdminResponse, GatewayAdminServer,
+    GatewayAdminServiceRecord, GatewayAdminStatus, GatewayPairedDeviceStatus,
+    GatewayPairingInvitation,
+};
 pub use engine_client::{
     EngineClientError, EngineProjectionClient, EngineRemoteEndpoint, EngineRemoteServiceRecord,
 };
+pub use identity::{IdentityError, InstallationIdentity, random_hex};
+pub use network::{
+    EngineRelayHandle, GatewayNetworkError, GatewayNetworkServer, SharedGatewayState,
+};
+pub use trust_store::{PersistentTrustStore, TrustStoreError};
 
 use std::collections::{BTreeMap, VecDeque};
 use std::net::IpAddr;
 
 use lumi_remote_protocol::{RemoteCommand, RemoteFrame, RemoteFrameKind, RemoteLiveProjection};
+use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq as _;
 use thiserror::Error;
@@ -314,6 +329,10 @@ impl GatewayCommandPolicy {
         self.controller = None;
     }
 
+    pub fn controller(&self) -> Option<&ControllerLease> {
+        self.controller.as_ref()
+    }
+
     pub fn authorize(
         &self,
         device_id: &str,
@@ -396,6 +415,26 @@ impl GatewayCommandGuard {
 
     pub fn revoke_control(&mut self) {
         self.policy.revoke_control();
+    }
+
+    pub fn controller(&self) -> Option<&ControllerLease> {
+        self.policy.controller()
+    }
+
+    pub fn grant_first_controller(&mut self, device_id: &str, lease_id: String) -> Option<String> {
+        if self.policy.controller().is_none() {
+            self.policy
+                .transfer_control(device_id.to_owned(), lease_id.clone());
+            return Some(lease_id);
+        }
+        self.controller_lease_for(device_id)
+    }
+
+    pub fn controller_lease_for(&self, device_id: &str) -> Option<String> {
+        self.policy
+            .controller()
+            .filter(|controller| controller.device_id == device_id)
+            .map(|controller| controller.lease_id.clone())
     }
 
     pub fn admit(
@@ -510,13 +549,22 @@ pub struct PairingInvitationDetails {
     pub approved: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PairedDevice {
     pub device_id: String,
     pub display_name: String,
     pub credential_sha256: [u8; 32],
     pub paired_at_unix_millis: u64,
     pub last_seen_unix_millis: u64,
+    #[serde(default)]
+    pub controller: bool,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairingRegistrySnapshot {
+    pub devices: Vec<PairedDevice>,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -526,6 +574,41 @@ pub struct PairingRegistry {
 }
 
 impl PairingRegistry {
+    pub fn from_snapshot(snapshot: PairingRegistrySnapshot) -> Result<Self, PairingError> {
+        if snapshot.devices.len() > MAX_PAIRED_DEVICES {
+            return Err(PairingError::DeviceLimitReached);
+        }
+        let mut devices = BTreeMap::new();
+        let mut controller_count = 0_usize;
+        for device in snapshot.devices {
+            let is_controller = device.controller;
+            validate_public_identifier(&device.device_id, 128)?;
+            validate_public_identifier(&device.display_name, 128)?;
+            if device.paired_at_unix_millis == 0
+                || device.last_seen_unix_millis < device.paired_at_unix_millis
+                || devices.insert(device.device_id.clone(), device).is_some()
+            {
+                return Err(PairingError::InvalidPersistedDevice);
+            }
+            if is_controller {
+                controller_count = controller_count.saturating_add(1);
+            }
+        }
+        if controller_count > 1 {
+            return Err(PairingError::InvalidPersistedDevice);
+        }
+        Ok(Self {
+            pending: BTreeMap::new(),
+            devices,
+        })
+    }
+
+    pub fn snapshot(&self) -> PairingRegistrySnapshot {
+        PairingRegistrySnapshot {
+            devices: self.devices.values().cloned().collect(),
+        }
+    }
+
     pub fn create_invitation(
         &mut self,
         request: PairingInvitationRequest,
@@ -599,7 +682,7 @@ impl PairingRegistry {
     ) -> Result<PairedDevice, PairingError> {
         let invitation = self
             .pending
-            .remove(invitation_id)
+            .get(invitation_id)
             .ok_or(PairingError::InvitationUnknown)?;
         if now_unix_millis > invitation.expires_at_unix_millis {
             return Err(PairingError::InvitationExpired);
@@ -619,12 +702,14 @@ impl PairingRegistry {
         if !self.devices.contains_key(&device_id) && self.devices.len() >= MAX_PAIRED_DEVICES {
             return Err(PairingError::DeviceLimitReached);
         }
+        self.pending.remove(invitation_id);
         let device = PairedDevice {
             device_id: device_id.clone(),
             display_name,
             credential_sha256: hash_secret(device_credential.as_bytes()),
             paired_at_unix_millis: now_unix_millis,
             last_seen_unix_millis: now_unix_millis,
+            controller: self.devices.is_empty(),
         };
         self.devices.insert(device_id, device.clone());
         Ok(device)
@@ -654,6 +739,27 @@ impl PairingRegistry {
 
     pub fn paired_devices(&self) -> impl Iterator<Item = &PairedDevice> {
         self.devices.values()
+    }
+
+    pub fn contains_device(&self, device_id: &str) -> bool {
+        self.devices.contains_key(device_id)
+    }
+
+    pub fn controller_device_id(&self) -> Option<&str> {
+        self.devices
+            .values()
+            .find(|device| device.controller)
+            .map(|device| device.device_id.as_str())
+    }
+
+    pub fn set_controller(&mut self, device_id: &str) -> Result<(), PairingError> {
+        if !self.devices.contains_key(device_id) {
+            return Err(PairingError::DeviceUnknown);
+        }
+        for device in self.devices.values_mut() {
+            device.controller = device.device_id == device_id;
+        }
+        Ok(())
     }
 }
 
@@ -690,6 +796,8 @@ pub enum PairingError {
     InvalidIdentifier,
     #[error("pairing device credential is invalid")]
     InvalidCredential,
+    #[error("persisted paired-device data is invalid")]
+    InvalidPersistedDevice,
     #[error("paired device limit reached")]
     DeviceLimitReached,
     #[error("paired device is unknown or revoked")]
@@ -796,6 +904,22 @@ mod tests {
     }
 
     #[test]
+    fn disconnects_a_client_before_its_bounded_critical_queue_can_grow() -> Result<(), HubError> {
+        let mut hub = ProjectionHub::new(1, 8).map_err(|_| HubError::ClientLimitReached)?;
+        let client = hub.connect()?;
+        for revision in 1..=8 {
+            assert!(hub.publish_projection(projection(revision))?.is_empty());
+        }
+        assert_eq!(
+            hub.metrics(client).map(|metrics| metrics.critical_depth),
+            Some(8)
+        );
+        assert_eq!(hub.publish_projection(projection(9))?, vec![client]);
+        assert!(hub.metrics(client).is_none());
+        Ok(())
+    }
+
+    #[test]
     fn rejects_mutation_without_matching_controller_lease() {
         let mut policy = GatewayCommandPolicy::default();
         policy.transfer_control("phone-a".to_owned(), "lease-a".to_owned());
@@ -875,10 +999,27 @@ mod tests {
             Err(PairingError::ApprovalRequired)
         );
 
-        // An unapproved exchange consumes the one-use invitation. A fresh
-        // physical invitation is required instead of allowing brute force.
+        // A phone may arrive before the Mac user has compared and approved
+        // the code. The invitation remains pending, but it becomes one-use
+        // immediately after one approved successful exchange.
+        registry.approve("invitation-0001", "214730")?;
+        registry.exchange(
+            "invitation-0001",
+            "0123456789abcdef0123456789abcdef",
+            "phone-1".to_owned(),
+            "Booth iPhone".to_owned(),
+            "abcdef0123456789abcdef0123456789",
+            2_000,
+        )?;
         assert_eq!(
-            registry.approve("invitation-0001", "214730"),
+            registry.exchange(
+                "invitation-0001",
+                "0123456789abcdef0123456789abcdef",
+                "phone-2".to_owned(),
+                "Other iPhone".to_owned(),
+                "abcdef0123456789abcdef0123456789",
+                2_001,
+            ),
             Err(PairingError::InvitationUnknown)
         );
         Ok(())

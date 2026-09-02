@@ -54,6 +54,44 @@ func completedPinchAppliesExactlyOnceAndStaysInsideTheTrack() {
     )
 }
 
+@Test
+func playingTransportInterpolatesSmoothlyButNeverRunsAwayWhenStale() {
+    let player = RemotePlayer(
+        playerNumber: 1,
+        hardwareModel: "CDJ-1500X",
+        trackLoadID: 8,
+        transport: RemoteTransportAnchor(
+            trackLoadID: 8,
+            beat: 0,
+            positionMillis: 250,
+            effectiveBPMMilli: 120_000,
+            playing: true,
+            discontinuityRevision: 1,
+            observedAtUnixMillis: 1_000
+        ),
+        track: RemoteTrack(
+            trackID: 1,
+            title: "Fixture",
+            artist: "Lumi",
+            originalBPMMilli: 120_000,
+            colorRGB: nil,
+            key: "",
+            durationBeats: 4,
+            beatGrid: RemoteBeatGrid(
+                beatsPerBar: 4,
+                durationMillis: 2_000,
+                timesMillis: [0, 500, 1_000, 1_500]
+            ),
+            waveform: [],
+            hotCues: [],
+            phrases: []
+        )
+    )
+
+    #expect(RemoteTransportInterpolation.visualBeat(player: player, atUnixMillis: 1_250) == 1)
+    #expect(RemoteTransportInterpolation.visualBeat(player: player, atUnixMillis: 5_000) == 2)
+}
+
 private func player(_ number: UInt8) -> RemotePlayer {
     RemotePlayer(
         playerNumber: number,

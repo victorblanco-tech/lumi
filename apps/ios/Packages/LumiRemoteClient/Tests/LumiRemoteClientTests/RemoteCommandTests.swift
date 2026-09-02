@@ -24,6 +24,47 @@ func commandEncodingMatchesTheRustTaggedAllowlist() throws {
     #expect(payload["expectedStateRevision"] as? UInt64 == 7)
 }
 
+@Test
+func authenticationHelloMatchesTheRustTaggedContract() throws {
+    let encoded = try JSONEncoder().encode(
+        RemoteClientHello.pair(
+            invitationID: "invitation-123456",
+            invitationSecret: String(repeating: "i", count: 32),
+            deviceID: "iphone-1",
+            displayName: "Test iPhone",
+            deviceCredential: String(repeating: "c", count: 32)
+        )
+    )
+    let object = try #require(
+        JSONSerialization.jsonObject(with: encoded) as? [String: String]
+    )
+    #expect(object["kind"] == "pair")
+    #expect(object["invitationId"] == "invitation-123456")
+    #expect(object["deviceId"] == "iphone-1")
+    #expect(object["deviceCredential"] == String(repeating: "c", count: 32))
+
+    let response = Data(#"{"kind":"authenticated","installationId":"install-1","controllerLeaseId":"lease-1"}"#.utf8)
+    #expect(
+        try JSONDecoder().decode(RemoteServerHello.self, from: response)
+            == .authenticated(installationID: "install-1", controllerLeaseID: "lease-1")
+    )
+}
+
+@MainActor
+@Test
+func localCommandFailureKeepsTheAuthenticatedSessionConnected() throws {
+    let model = RemoteSessionModel()
+    model.connected(to: "Booth Mac")
+    model.grantControllerLease("lease-1")
+    let before = model.rejectedCommandFeedbackRevision
+
+    model.reportError("The timing offset is outside the supported range.")
+
+    #expect(model.connectionPhase == .connected(macName: "Booth Mac"))
+    #expect(model.controllerLeaseID == "lease-1")
+    #expect(model.rejectedCommandFeedbackRevision == before + 1)
+}
+
 @Test func discoveryMetadataRejectsWrongReleaseAndProtocol() throws {
     let valid = try RemoteDiscoveryMetadata.identity(
         serviceName: "Booth Mac",
@@ -52,6 +93,7 @@ func commandEncodingMatchesTheRustTaggedAllowlist() throws {
         installationID: "installation-123",
         invitationID: "invitation-123456",
         invitationSecret: String(repeating: "s", count: 32),
+        shortCode: "123456",
         certificateFingerprintSHA256: String(repeating: "a", count: 64),
         expiresAtUnixMillis: 2_000
     )
@@ -87,6 +129,7 @@ func commandEncodingMatchesTheRustTaggedAllowlist() throws {
     )
     let projection = try decoder.decodeProjection(snapshotFrame)
     #expect(projection.players.first?.hardwareModel == "CDJ-1500X")
+    #expect(projection.players.first?.track.phrases.first?.colorRGB == 0xFF_00_00)
     #expect(projection.livePlan?.cues.last?.staticLookName == "Moving Heads OFF")
 
     let commandFrame = try decoder.decodeFrame(
@@ -169,6 +212,7 @@ func pairingInvitationRejectsAnExpiredOrInvalidFingerprint() {
         installationID: "install-12345678",
         invitationID: "invitation-123456",
         invitationSecret: String(repeating: "s", count: 32),
+        shortCode: "123456",
         certificateFingerprintSHA256: String(repeating: "a", count: 64),
         expiresAtUnixMillis: 99
     )
@@ -180,6 +224,7 @@ func pairingInvitationRejectsAnExpiredOrInvalidFingerprint() {
         installationID: "install-12345678",
         invitationID: "invitation-123456",
         invitationSecret: String(repeating: "s", count: 32),
+        shortCode: "123456",
         certificateFingerprintSHA256: String(repeating: "z", count: 64),
         expiresAtUnixMillis: 101
     )

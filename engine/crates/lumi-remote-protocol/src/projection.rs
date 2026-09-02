@@ -125,6 +125,7 @@ pub struct RemotePhrase {
     pub kind: String,
     pub role_id: Option<String>,
     pub role_name: Option<String>,
+    pub color_rgb: Option<u32>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -574,7 +575,8 @@ impl EnginePhraseWire {
             end_beat: self.end_beat,
             kind: self.kind,
             role_id: self.role.as_ref().map(|role| role.role_id.clone()),
-            role_name: self.role.map(|role| role.role_name),
+            role_name: self.role.as_ref().map(|role| role.role_name.clone()),
+            color_rgb: self.role.and_then(|role| role.color_rgb),
         })
     }
 }
@@ -584,6 +586,7 @@ impl EnginePhraseWire {
 struct EnginePhraseRoleWire {
     role_id: String,
     role_name: String,
+    color_rgb: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -865,7 +868,8 @@ mod tests {
     #[test]
     fn converts_an_internal_snapshot_to_a_live_only_contract()
     -> Result<(), Box<dyn std::error::Error>> {
-        let value = serde_json::json!({
+        let value: serde_json::Value = serde_json::from_str(
+            r#"{
             "kind": "stateSnapshot",
             "stateRevision": 12,
             "operationState": "live",
@@ -904,7 +908,7 @@ mod tests {
                     "beatGrid": { "beatsPerBar": 4, "durationMillis": 219000, "timesMillis": [0, 429] },
                     "waveformPreview": { "source": "localLibrary", "style": "rgb", "points": [{ "low": 255, "mid": 96, "high": 64 }] },
                     "hotCues": [{ "index": 1, "timeMillis": 0, "loopEndMillis": null, "name": "Do not forward", "colorRgb": 16711680 }],
-                    "phrases": [{ "index": 0, "startBeat": 0, "endBeat": 32, "kind": "intro", "role": { "roleId": "intro", "roleName": "Intro" } }]
+                    "phrases": [{ "index": 0, "startBeat": 0, "endBeat": 32, "kind": "intro", "role": { "roleId": "intro", "roleName": "Intro", "colorRgb": 16711680 } }]
                 }
             }],
             "livePlan": {
@@ -930,11 +934,16 @@ mod tests {
             "nextPlan": null,
             "planningOptions": { "themes": [{ "id": 1, "name": "Blue Pink" }], "scenes": [] },
             "library": { "databasePath": "/Users/example/SECRET.sqlite" }
-        });
+        }"#,
+        )?;
         let payload = value.as_object().ok_or("test payload must be an object")?;
         let projection = RemoteLiveProjection::from_engine_snapshot_payload(payload, 1, 10)?;
         let encoded = serde_json::to_string(&projection)?;
         assert_eq!(projection.players[0].player_number, 1);
+        assert_eq!(
+            projection.players[0].track.phrases[0].color_rgb,
+            Some(0xFF_00_00)
+        );
         assert_eq!(
             projection
                 .live_plan

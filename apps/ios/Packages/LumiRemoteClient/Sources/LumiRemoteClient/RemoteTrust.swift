@@ -53,6 +53,7 @@ public struct RemotePairingInvitation: Codable, Equatable, Sendable {
     public let installationID: String
     public let invitationID: String
     public let invitationSecret: String
+    public let shortCode: String
     public let certificateFingerprintSHA256: String
     public let expiresAtUnixMillis: UInt64
 
@@ -60,19 +61,24 @@ public struct RemotePairingInvitation: Codable, Equatable, Sendable {
         installationID: String,
         invitationID: String,
         invitationSecret: String,
+        shortCode: String,
         certificateFingerprintSHA256: String,
         expiresAtUnixMillis: UInt64
     ) {
         self.installationID = installationID
         self.invitationID = invitationID
         self.invitationSecret = invitationSecret
+        self.shortCode = shortCode
         self.certificateFingerprintSHA256 = certificateFingerprintSHA256
         self.expiresAtUnixMillis = expiresAtUnixMillis
     }
 
     public func validate(nowUnixMillis: UInt64) throws {
         guard expiresAtUnixMillis > nowUnixMillis else { throw RemoteTrustError.invitationExpired }
-        guard invitationSecret.count >= 32, invitationID.count >= 16 else {
+        guard invitationSecret.count >= 32,
+              invitationID.count >= 16,
+              shortCode.count == 6,
+              shortCode.allSatisfy(\.isNumber) else {
             throw RemoteTrustError.invalidInvitation
         }
         let fingerprint = certificateFingerprintSHA256.lowercased()

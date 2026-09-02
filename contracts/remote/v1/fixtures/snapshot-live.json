@@ -6,7 +6,7 @@
   "payload": {
     "projectionRevision": 7,
     "stateRevision": 21,
-    "engineVersion": "0.6.0-dev-3",
+    "engineVersion": "0.6.0-dev-5",
     "operationState": "armed",
     "leaderPlayerNumber": 1,
     "integrations": {
@@ -60,7 +60,8 @@
               "endBeat": 65,
               "kind": "intro",
               "roleId": "intro",
-              "roleName": "Intro"
+              "roleName": "Intro",
+              "colorRgb": 16711680
             },
             {
               "index": 1,
@@ -68,7 +69,8 @@
               "endBeat": 129,
               "kind": "buildup",
               "roleId": "buildup",
-              "roleName": "Buildup"
+              "roleName": "Buildup",
+              "colorRgb": 16776960
             }
           ]
         }

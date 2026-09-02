@@ -183,6 +183,7 @@ struct FoundationView: View {
                         autoloopFeedback: engineStatus.autoloopCatalogFeedback,
                         midiIntegrationFeedback: engineStatus.midiIntegrationFeedback,
                         abletonLinkFeedback: engineStatus.abletonLinkFeedback,
+                        remoteGateway: engineStatus.remoteGatewayState,
                         lightPlanningPolicy: engineStatus.lightPlanningState.policy,
                         lightPlanningFeedback: engineStatus.lightPlanningFeedback,
                         abletonLinkAutoStart: $preferences.abletonLinkAutoStart,
@@ -204,6 +205,29 @@ struct FoundationView: View {
                         },
                         onTestAbletonLinkHelper: {
                             Task { await engineStatus.testAbletonLinkHelper() }
+                        },
+                        onSetRemoteGatewayEnabled: { enabled in
+                            Task { await engineStatus.setRemoteGatewayEnabled(enabled) }
+                        },
+                        onRefreshRemoteGateway: {
+                            Task { await engineStatus.refreshRemoteGateway() }
+                        },
+                        onCreateRemoteInvitation: {
+                            Task { await engineStatus.createRemotePairingInvitation() }
+                        },
+                        onApproveRemoteInvitation: { invitationID, shortCode in
+                            Task {
+                                await engineStatus.approveRemotePairing(
+                                    invitationID: invitationID,
+                                    shortCode: shortCode
+                                )
+                            }
+                        },
+                        onRevokeRemoteDevice: { deviceID in
+                            Task { await engineStatus.revokeRemoteDevice(deviceID: deviceID) }
+                        },
+                        onTransferRemoteControl: { deviceID in
+                            Task { await engineStatus.transferRemoteControl(to: deviceID) }
                         },
                         onSendMidiAddressLearnPulse: { targetKind, targetNumber, bankNumber in
                             Task {

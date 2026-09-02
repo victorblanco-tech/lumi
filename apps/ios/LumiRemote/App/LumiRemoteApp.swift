@@ -1,39 +1,52 @@
 import LumiRemoteClient
 import LumiRemoteFeature
 import SwiftUI
+import UIKit
 
 @main
 struct LumiRemoteApp: App {
-    @State private var session = RemoteSessionModel()
-    @StateObject private var discovery = BonjourRemoteDiscovery(
-        releaseChannel: LumiRemoteApp.releaseChannel
-    )
+    @Environment(\.scenePhase) private var scenePhase
+    @State private var session: RemoteSessionModel
+    @StateObject private var discovery: BonjourRemoteDiscovery
+    @StateObject private var connection: RemoteConnectionController
+
+    init() {
+        let session = RemoteSessionModel()
+        _session = State(initialValue: session)
+        _discovery = StateObject(
+            wrappedValue: BonjourRemoteDiscovery(releaseChannel: Self.releaseChannel)
+        )
+        _connection = StateObject(
+            wrappedValue: RemoteConnectionController(
+                model: session,
+                releaseChannel: Self.releaseChannel
+            )
+        )
+    }
 
     var body: some Scene {
         WindowGroup {
             RemoteLiveView(
                 model: session,
                 actions: RemoteLiveActions(
-                    setOperationState: { _ in },
-                    setAbletonLinkEnabled: { _ in },
-                    setTimingOffset: { _ in },
-                    selectTheme: { _, _, _ in },
-                    selectAutoloop: { _, _, _ in },
-                    setCueLock: { _, _, _ in }
+                    setOperationState: connection.setOperationState,
+                    setAbletonLinkEnabled: connection.setAbletonLinkEnabled,
+                    setTimingOffset: connection.setTimingOffset,
+                    selectTheme: connection.selectTheme,
+                    selectAutoloop: connection.selectAutoloop,
+                    setCueLock: connection.setCueLock
                 )
             )
+            .preferredColorScheme(.dark)
             .task {
-                session.beginDiscovery()
-                discovery.start()
+                if scenePhase == .active {
+                    UIApplication.shared.isIdleTimerDisabled = true
+                    session.beginDiscovery()
+                    discovery.start()
+                }
             }
             .onChange(of: discovery.services) { _, services in
-                if services.isEmpty {
-                    session.beginDiscovery()
-                } else {
-                    // A discovered Mac exposes no show state. Explicit Mac
-                    // approval and pinned TLS still precede connection.
-                    session.beginPairing()
-                }
+                connection.update(discoveredServices: services)
             }
             .onChange(of: discovery.state) { _, state in
                 switch state {
@@ -42,6 +55,25 @@ struct LumiRemoteApp: App {
                 case .failed:
                     session.unavailable("Lumi Remote could not browse the local network.")
                 case .idle, .searching, .ready:
+                    break
+                }
+            }
+            .onOpenURL { url in
+                connection.acceptPairingURL(url)
+            }
+            .onChange(of: scenePhase) { _, phase in
+                switch phase {
+                case .active:
+                    UIApplication.shared.isIdleTimerDisabled = true
+                    session.beginDiscovery()
+                    discovery.start()
+                case .background:
+                    UIApplication.shared.isIdleTimerDisabled = false
+                    connection.stop()
+                    discovery.stop()
+                case .inactive:
+                    break
+                @unknown default:
                     break
                 }
             }

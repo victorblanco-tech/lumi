@@ -6,12 +6,17 @@ controls. It does not contain Local Playback, Library, USB Sync or Track Edit.
 
 ## Current development status
 
-The target and shared Live presentation compile for iOS 18. Bonjour discovery,
-release-channel isolation, Keychain credential storage, scoped Remote protocol
-decoding and safe command construction are implemented. The gateway remains
-fail-closed until pinned TLS, Mac approval, persistent trust and the independent
-engine projection feed are complete. Consequently this target is not yet a
-usable physical-iPhone beta and never substitutes demo show state.
+The native target builds for iOS 18 and has been exercised in portrait and
+landscape on the iOS Simulator. Bonjour discovery, release-channel isolation,
+pinned TLS, native Camera deep-link pairing, Keychain credential storage,
+Mac approval and revocation, scoped Remote decoding and revision-safe booth
+controls are implemented. The independently packaged, opt-in Mac Remote Gateway
+receives only the path-free Live projection from the engine and cannot sit in
+the Pro DJ Link, SoundSwitch or Ableton Link paths.
+
+This is not yet a physical-iPhone beta: real Local Network permission,
+pairing/reconnect, two-phone Controller transfer and combined show-soak evidence
+remain mandatory. The app never substitutes demo show state.
 
 ## Local validation
 

@@ -5,6 +5,7 @@ public enum RemoteFrameProcessingDecision: Equatable, Sendable {
     case applied
     case duplicateIgnored
     case snapshotRequired(expected: UInt64, received: UInt64)
+    case authoritativeSnapshotRequired
     case unrelated
 }
 
@@ -80,6 +81,9 @@ public final class RemoteFrameProcessor {
                     result.commandID,
                     reason: "The show changed on the Mac. Refresh before trying again."
                 )
+                awaitsSnapshot = true
+                model.reconnecting(to: macName)
+                return .authoritativeSnapshotRequired
             case .rejected:
                 model.rejectCommand(
                     result.commandID,

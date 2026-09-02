@@ -216,6 +216,7 @@ struct LibraryPhrasePlanContext {
     end_beat: u32,
     role_id: PhraseRoleId,
     role_name: String,
+    role_color_rgb: u32,
     strategy: PhraseLoopStrategy,
 }
 
@@ -514,6 +515,7 @@ impl LibraryPlanContext {
                 json!({
                     "roleId": phrase.role_id.as_str(),
                     "roleName": phrase.role_name,
+                    "colorRgb": phrase.role_color_rgb,
                 })
             })
     }
@@ -2267,6 +2269,7 @@ impl LibraryWorker {
                     end_beat: phrase.end_beat(),
                     role_id: phrase.role_id().clone(),
                     role_name: role_display_name(role_catalog.roles(), phrase.role_id()),
+                    role_color_rgb: role_color_rgb(role_catalog.roles(), phrase.role_id()),
                     strategy: phrase.loop_strategy().clone(),
                 })
                 .collect(),
@@ -3737,6 +3740,13 @@ fn role_display_name(roles: &[PhraseRole], id: &PhraseRoleId) -> String {
         .map(PhraseRole::display_name)
         .unwrap_or_else(|| id.as_str())
         .to_owned()
+}
+
+fn role_color_rgb(roles: &[PhraseRole], id: &PhraseRoleId) -> u32 {
+    roles.iter().find(|role| role.id() == id).map_or_else(
+        || lumi_library::default_phrase_role_color_rgb(id.as_str()),
+        PhraseRole::color_rgb,
+    )
 }
 
 fn planner_phrase_kind(phrase: &PhraseInstance, phrase_count: usize) -> PhraseKind {

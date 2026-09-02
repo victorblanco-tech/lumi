@@ -1,6 +1,6 @@
 # Story E9-01: Remote Live projection and isolated gateway
 
-- Status: **Projection boundary complete (`0.6.0-dev-4`); TLS packaging in progress**
+- Status: **Implementation complete (`0.6.0-dev-5`); physical isolation acceptance pending**
 - Priority: **P0 architecture and performance**
 - Target: `0.6.0-dev`
 - Components: Engine, Remote Gateway, Protocol
@@ -47,9 +47,17 @@ never delay Pro DJ Link, Ableton Link or SoundSwitch output.
   state/plan revision conflicts and no alternate mutation path;
 - end-to-end loopback authentication, snapshot and command-result tests;
 - desktop polling cannot force waveform projection work into the realtime loop.
+- a pinned-rustls LAN listener, persistent installation identity and protected
+  device trust store;
+- an independently packaged, opt-in Remote Gateway LaunchAgent with
+  release-channel Bonjour identity and a protected loopback management API;
+- bounded LAN clients, frames, authentication attempts, command queues and
+  slow-consumer handling with deterministic regression coverage;
+- macOS status, one-use pairing invitation, approval, revocation and Controller
+  transfer controls without exposing engine credentials or paths.
 
 ## Remaining gate
 
-Add the pinned-TLS LAN listener, persistent trust, gateway supervision and
-macOS integration status. These must pass isolation and load tests before the
-gateway is packaged or enabled.
+Validate discovery and certificate pinning on a physical iPhone, then run the
+combined two-Player, SoundSwitch, Ableton Link and deliberately overloaded
+Remote soak. The Gateway remains opt-in until that evidence passes.

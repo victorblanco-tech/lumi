@@ -1,10 +1,14 @@
+import AppKit
+import CoreImage.CIFilterBuiltins
 import LumiDesignSystem
+import LumiProtocol
 import SwiftUI
 
 public enum IntegrationsWorkspaceSection: String, CaseIterable, Identifiable, Sendable {
     case overview
     case deckInputs
     case abletonLink
+    case iphoneRemote
     case lightingOutputs
     case diagnostics
 
@@ -16,6 +20,7 @@ public struct IntegrationsWorkspaceView: View {
     private let autoloopFeedback: String?
     private let midiIntegrationFeedback: String?
     private let abletonLinkFeedback: String?
+    private let remoteGateway: RemoteGatewayManagementSnapshot
     private let rendersInteractiveControls: Bool
     private let onOpenLibrarySources: @MainActor () -> Void
     private let onAutoloopMutation: @Sendable (AutoloopCatalogMutationRequest) -> Void
@@ -23,6 +28,12 @@ public struct IntegrationsWorkspaceView: View {
     private let onStopMidi: @Sendable () -> Void
     private let onSetAbletonLinkEnabled: @Sendable (Bool) -> Void
     private let onTestAbletonLinkHelper: @Sendable () -> Void
+    private let onSetRemoteGatewayEnabled: @Sendable (Bool) -> Void
+    private let onRefreshRemoteGateway: @Sendable () -> Void
+    private let onCreateRemoteInvitation: @Sendable () -> Void
+    private let onApproveRemoteInvitation: @Sendable (String, String) -> Void
+    private let onRevokeRemoteDevice: @Sendable (String) -> Void
+    private let onTransferRemoteControl: @Sendable (String) -> Void
     private let onSendMidiAddressLearnPulse: @Sendable (String, UInt16, UInt16?) -> Void
     private let onTriggerMidiAutoloop: @Sendable (UInt16, UInt16) -> Void
     private let lightPlanningPolicy: LightPlanningPolicyState
@@ -39,6 +50,7 @@ public struct IntegrationsWorkspaceView: View {
         autoloopFeedback: String? = nil,
         midiIntegrationFeedback: String? = nil,
         abletonLinkFeedback: String? = nil,
+        remoteGateway: RemoteGatewayManagementSnapshot = .disabled,
         lightPlanningPolicy: LightPlanningPolicyState = .init(),
         lightPlanningFeedback: String? = nil,
         abletonLinkAutoStart: Binding<Bool> = .constant(false),
@@ -49,6 +61,12 @@ public struct IntegrationsWorkspaceView: View {
         onStopMidi: @escaping @Sendable () -> Void = {},
         onSetAbletonLinkEnabled: @escaping @Sendable (Bool) -> Void = { _ in },
         onTestAbletonLinkHelper: @escaping @Sendable () -> Void = {},
+        onSetRemoteGatewayEnabled: @escaping @Sendable (Bool) -> Void = { _ in },
+        onRefreshRemoteGateway: @escaping @Sendable () -> Void = {},
+        onCreateRemoteInvitation: @escaping @Sendable () -> Void = {},
+        onApproveRemoteInvitation: @escaping @Sendable (String, String) -> Void = { _, _ in },
+        onRevokeRemoteDevice: @escaping @Sendable (String) -> Void = { _ in },
+        onTransferRemoteControl: @escaping @Sendable (String) -> Void = { _ in },
         onSendMidiAddressLearnPulse: @escaping @Sendable (String, UInt16, UInt16?) -> Void = { _, _, _ in },
         onTriggerMidiAutoloop: @escaping @Sendable (UInt16, UInt16) -> Void = { _, _ in },
         onSaveLightPlanningPolicy: @escaping @Sendable (LightPlanningPolicyState) -> Void = { _ in },
@@ -60,6 +78,7 @@ public struct IntegrationsWorkspaceView: View {
         self.autoloopFeedback = autoloopFeedback
         self.midiIntegrationFeedback = midiIntegrationFeedback
         self.abletonLinkFeedback = abletonLinkFeedback
+        self.remoteGateway = remoteGateway
         self.lightPlanningPolicy = lightPlanningPolicy
         self.lightPlanningFeedback = lightPlanningFeedback
         self.rendersInteractiveControls = rendersInteractiveControls
@@ -69,6 +88,12 @@ public struct IntegrationsWorkspaceView: View {
         self.onStopMidi = onStopMidi
         self.onSetAbletonLinkEnabled = onSetAbletonLinkEnabled
         self.onTestAbletonLinkHelper = onTestAbletonLinkHelper
+        self.onSetRemoteGatewayEnabled = onSetRemoteGatewayEnabled
+        self.onRefreshRemoteGateway = onRefreshRemoteGateway
+        self.onCreateRemoteInvitation = onCreateRemoteInvitation
+        self.onApproveRemoteInvitation = onApproveRemoteInvitation
+        self.onRevokeRemoteDevice = onRevokeRemoteDevice
+        self.onTransferRemoteControl = onTransferRemoteControl
         self.onSendMidiAddressLearnPulse = onSendMidiAddressLearnPulse
         self.onTriggerMidiAutoloop = onTriggerMidiAutoloop
         self.onSaveLightPlanningPolicy = onSaveLightPlanningPolicy
@@ -141,6 +166,8 @@ public struct IntegrationsWorkspaceView: View {
             ProDJLinkIntegrationView(integration: library.deckInputIntegration)
         case .abletonLink:
             abletonLink
+        case .iphoneRemote:
+            iphoneRemote
         case .lightingOutputs:
             AutoloopCatalogSettingsView(
                 catalog: library.autoloopCatalog,
@@ -198,6 +225,13 @@ public struct IntegrationsWorkspaceView: View {
                         state: lightingOutputState,
                         actionTitle: "Open Lighting Outputs"
                     ) { section = .lightingOutputs }
+                    overviewCard(
+                        title: "Remote Control",
+                        provider: "iPhone Remote",
+                        detail: remoteGatewayStatusLabel,
+                        state: remoteGatewayComponentState,
+                        actionTitle: "Open iPhone Remote"
+                    ) { section = .iphoneRemote }
                 }
                 VStack(alignment: .leading, spacing: LumiSpacing.medium) {
                     Text("PARALLEL SOUNDSWITCH INPUTS")
@@ -318,6 +352,257 @@ public struct IntegrationsWorkspaceView: View {
             .frame(maxWidth: 900, alignment: .leading)
         }
         .accessibilityIdentifier("lumi.integrations.abletonLink")
+    }
+
+    private var iphoneRemote: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: LumiSpacing.xLarge) {
+                LumiPanel {
+                    VStack(alignment: .leading, spacing: LumiSpacing.large) {
+                        HStack(spacing: LumiSpacing.medium) {
+                            Image(systemName: "iphone.and.arrow.forward")
+                                .font(.system(size: 28, weight: .semibold))
+                                .foregroundStyle(LumiColor.accent)
+                            VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+                                Text("iPhone Remote")
+                                    .font(LumiTypography.cardTitle)
+                                Text("Follow and adjust Live Decks from the DJ booth over your local network.")
+                                    .font(LumiTypography.body)
+                                    .foregroundStyle(LumiColor.textSecondary)
+                            }
+                            Spacer()
+                            Circle()
+                                .fill(remoteGatewayComponentState.color)
+                                .frame(width: 10, height: 10)
+                            Text(remoteGatewayStatusLabel)
+                                .font(LumiTypography.metadata.weight(.semibold))
+                            Toggle(
+                                "iPhone Remote",
+                                isOn: Binding(
+                                    get: { remoteGatewayEnabled },
+                                    set: onSetRemoteGatewayEnabled
+                                )
+                            )
+                            .labelsHidden()
+                            .toggleStyle(.switch)
+                            .disabled(!rendersInteractiveControls)
+                            .accessibilityIdentifier("lumi.integrations.iphoneRemote.enabled")
+                        }
+
+                        Divider()
+
+                        HStack(spacing: LumiSpacing.xLarge) {
+                            linkValue(
+                                "ENGINE",
+                                remoteGateway.status?.engineConnected == true ? "Connected" : "Waiting"
+                            )
+                            linkValue(
+                                "LOCAL NETWORK",
+                                remoteGateway.status.map { "TLS · port \($0.lanPort)" } ?? "Off"
+                            )
+                            linkValue(
+                                "PAIRED IPHONES",
+                                "\(remoteGateway.status?.pairedDevices.count ?? 0)"
+                            )
+                            linkValue(
+                                "CONTROLLER",
+                                remoteControllerName ?? "None"
+                            )
+                        }
+                    }
+                }
+
+                if remoteGateway.serviceState == .requiresApproval {
+                    LumiPanel {
+                        Label(
+                            "Allow Lumi Remote Gateway in System Settings › General › Login Items, then refresh.",
+                            systemImage: "person.badge.shield.checkmark"
+                        )
+                        .foregroundStyle(LumiColor.warning)
+                    }
+                }
+
+                if remoteGateway.serviceState == .ready {
+                    pairingPanel
+                    pairedDevicesPanel
+                }
+
+                if let error = remoteGateway.errorCode, !error.isEmpty {
+                    Label(error, systemImage: "exclamationmark.triangle")
+                        .font(LumiTypography.caption)
+                        .foregroundStyle(LumiColor.warning)
+                        .textSelection(.enabled)
+                }
+
+                LumiPanel {
+                    VStack(alignment: .leading, spacing: LumiSpacing.medium) {
+                        Text("Safety boundary")
+                            .font(LumiTypography.cardTitle)
+                        Label("Local Wi-Fi only; Lumi does not expose a cloud or internet endpoint.", systemImage: "wifi")
+                        Label("Only the paired controller iPhone may change show state or future AutoLoops.", systemImage: "lock.shield")
+                        Label("The Remote reads the Live projection; disconnecting it cannot interrupt Pro DJ Link, Ableton Link or lighting output.", systemImage: "checkmark.shield")
+                    }
+                    .font(LumiTypography.caption)
+                    .foregroundStyle(LumiColor.textSecondary)
+                }
+            }
+            .padding(LumiSpacing.xLarge)
+            .frame(maxWidth: 940, alignment: .leading)
+        }
+        .onAppear(perform: onRefreshRemoteGateway)
+        .accessibilityIdentifier("lumi.integrations.iphoneRemote")
+    }
+
+    private var pairingPanel: some View {
+        LumiPanel {
+            VStack(alignment: .leading, spacing: LumiSpacing.large) {
+                HStack {
+                    VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
+                        Text("Pair a New iPhone")
+                            .font(LumiTypography.cardTitle)
+                        Text("Invitations expire after five minutes and work once.")
+                            .font(LumiTypography.caption)
+                            .foregroundStyle(LumiColor.textSecondary)
+                    }
+                    Spacer()
+                    Button("Create Pairing Code", action: onCreateRemoteInvitation)
+                        .buttonStyle(.borderedProminent)
+                        .tint(LumiColor.accent)
+                        .disabled(!rendersInteractiveControls)
+                }
+
+                if let invitation = remoteGateway.invitation,
+                   let url = RemotePairingVisual.pairingURL(invitation) {
+                    Divider()
+                    HStack(alignment: .center, spacing: LumiSpacing.xLarge) {
+                        if let image = RemotePairingVisual.qrImage(for: url) {
+                            Image(nsImage: image)
+                                .interpolation(.none)
+                                .resizable()
+                                .frame(width: 176, height: 176)
+                                .background(Color.white)
+                                .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
+                                .accessibilityLabel("Pairing QR code")
+                        }
+                        VStack(alignment: .leading, spacing: LumiSpacing.medium) {
+                            Text(invitation.shortCode)
+                                .font(.system(size: 36, weight: .bold, design: .monospaced))
+                                .foregroundStyle(LumiColor.accent)
+                            Text("Scan this code with the iPhone Camera. Confirm that the same six digits appear on both devices, then approve here.")
+                                .font(LumiTypography.body)
+                                .foregroundStyle(LumiColor.textSecondary)
+                            Text("Expires \(remotePairingExpiry(invitation.expiresAtUnixMillis))")
+                                .font(LumiTypography.caption)
+                                .foregroundStyle(LumiColor.textSecondary)
+                            Button("Approve This iPhone") {
+                                onApproveRemoteInvitation(
+                                    invitation.invitationID,
+                                    invitation.shortCode
+                                )
+                            }
+                            .buttonStyle(.borderedProminent)
+                            .tint(LumiColor.success)
+                            .disabled(!rendersInteractiveControls)
+                        }
+                        Spacer()
+                    }
+                }
+            }
+        }
+    }
+
+    private var pairedDevicesPanel: some View {
+        LumiPanel {
+            VStack(alignment: .leading, spacing: LumiSpacing.medium) {
+                Text("Paired iPhones")
+                    .font(LumiTypography.cardTitle)
+                if let devices = remoteGateway.status?.pairedDevices, !devices.isEmpty {
+                    ForEach(devices) { device in
+                        Divider()
+                        HStack(spacing: LumiSpacing.medium) {
+                            Image(systemName: "iphone")
+                                .foregroundStyle(device.controller ? LumiColor.accent : LumiColor.textSecondary)
+                            VStack(alignment: .leading, spacing: 2) {
+                                HStack(spacing: LumiSpacing.small) {
+                                    Text(device.displayName)
+                                        .font(LumiTypography.body.weight(.semibold))
+                                    if device.controller {
+                                        Text("CONTROLLER")
+                                            .font(LumiTypography.technical.weight(.bold))
+                                            .foregroundStyle(LumiColor.accent)
+                                    }
+                                }
+                                Text("Last seen \(remoteLastSeen(device.lastSeenUnixMillis))")
+                                    .font(LumiTypography.caption)
+                                    .foregroundStyle(LumiColor.textSecondary)
+                            }
+                            Spacer()
+                            if !device.controller {
+                                Button("Make Controller") {
+                                    onTransferRemoteControl(device.deviceID)
+                                }
+                                .buttonStyle(.bordered)
+                                .disabled(!rendersInteractiveControls)
+                            }
+                            Button("Revoke", role: .destructive) {
+                                onRevokeRemoteDevice(device.deviceID)
+                            }
+                            .buttonStyle(.bordered)
+                            .disabled(!rendersInteractiveControls)
+                        }
+                    }
+                } else {
+                    ContentUnavailableView(
+                        "No Paired iPhones",
+                        systemImage: "iphone.slash",
+                        description: Text("Create a pairing code to connect Lumi Remote.")
+                    )
+                    .frame(maxWidth: .infinity, minHeight: 130)
+                }
+            }
+        }
+    }
+
+    private var remoteGatewayComponentState: LumiComponentState {
+        switch remoteGateway.serviceState {
+        case .disabled: .empty
+        case .starting: .loading
+        case .ready:
+            remoteGateway.status?.engineConnected == true ? .ready : .degraded
+        case .requiresApproval, .unavailable: .degraded
+        }
+    }
+
+    private var remoteGatewayEnabled: Bool {
+        switch remoteGateway.serviceState {
+        case .starting, .ready, .requiresApproval: true
+        case .disabled, .unavailable: false
+        }
+    }
+
+    private var remoteGatewayStatusLabel: String {
+        switch remoteGateway.serviceState {
+        case .disabled: "Off"
+        case .starting: "Starting"
+        case .ready: remoteGateway.status?.engineConnected == true ? "Ready" : "Engine Unavailable"
+        case .requiresApproval: "Approval Required"
+        case .unavailable: "Unavailable"
+        }
+    }
+
+    private var remoteControllerName: String? {
+        remoteGateway.status?.pairedDevices.first(where: \.controller)?.displayName
+    }
+
+    private func remotePairingExpiry(_ unixMillis: UInt64) -> String {
+        Date(timeIntervalSince1970: Double(unixMillis) / 1_000)
+            .formatted(.relative(presentation: .named))
+    }
+
+    private func remoteLastSeen(_ unixMillis: UInt64) -> String {
+        guard unixMillis > 0 else { return "never" }
+        return Date(timeIntervalSince1970: Double(unixMillis) / 1_000)
+            .formatted(.relative(presentation: .named))
     }
 
     private func linkValue(_ label: String, _ value: String) -> some View {
@@ -630,6 +915,7 @@ public struct IntegrationsWorkspaceView: View {
         case .overview: "Overview"
         case .deckInputs: "Pro DJ Link"
         case .abletonLink: "Ableton Link"
+        case .iphoneRemote: "iPhone Remote"
         case .lightingOutputs: "Lighting Outputs"
         case .diagnostics: "Diagnostics"
         }
@@ -640,6 +926,7 @@ public struct IntegrationsWorkspaceView: View {
         case .overview: "point.3.connected.trianglepath.dotted"
         case .deckInputs: "play.square.stack.fill"
         case .abletonLink: "link"
+        case .iphoneRemote: "iphone.and.arrow.forward"
         case .lightingOutputs: "lightbulb.2.fill"
         case .diagnostics: "stethoscope"
         }
@@ -652,6 +939,49 @@ public struct IntegrationsWorkspaceView: View {
         } else {
             Image(systemName: sectionIcon(value))
         }
+    }
+}
+
+private enum RemotePairingVisual {
+    private struct Payload: Encodable {
+        let installationID: String
+        let invitationID: String
+        let invitationSecret: String
+        let shortCode: String
+        let certificateFingerprintSHA256: String
+        let expiresAtUnixMillis: UInt64
+    }
+
+    static func pairingURL(_ invitation: RemoteGatewayPairingInvitation) -> URL? {
+        let payload = Payload(
+            installationID: invitation.installationID,
+            invitationID: invitation.invitationID,
+            invitationSecret: invitation.invitationSecret,
+            shortCode: invitation.shortCode,
+            certificateFingerprintSHA256: invitation.certificateFingerprintSHA256,
+            expiresAtUnixMillis: invitation.expiresAtUnixMillis
+        )
+        guard let data = try? JSONEncoder().encode(payload) else { return nil }
+        let token = data.base64EncodedString()
+            .replacingOccurrences(of: "+", with: "-")
+            .replacingOccurrences(of: "/", with: "_")
+            .replacingOccurrences(of: "=", with: "")
+        var components = URLComponents(string: "lumi://pair")
+        components?.queryItems = [URLQueryItem(name: "invitation", value: token)]
+        return components?.url
+    }
+
+    static func qrImage(for url: URL) -> NSImage? {
+        let filter = CIFilter.qrCodeGenerator()
+        filter.message = Data(url.absoluteString.utf8)
+        filter.correctionLevel = "M"
+        guard let output = filter.outputImage?.transformed(
+            by: CGAffineTransform(scaleX: 10, y: 10)
+        ) else { return nil }
+        let representation = NSCIImageRep(ciImage: output)
+        let image = NSImage(size: representation.size)
+        image.addRepresentation(representation)
+        return image
     }
 }
 

@@ -67,6 +67,8 @@ public struct RemoteLiveView: View {
                 )
                 .presentationDetents([.medium])
             }
+            .sensoryFeedback(.success, trigger: model.acceptedCommandFeedbackRevision)
+            .sensoryFeedback(.error, trigger: model.rejectedCommandFeedbackRevision)
         }
     }
 
@@ -108,7 +110,9 @@ public struct RemoteLiveView: View {
             (
                 "Lumi Mac Found",
                 "iphone.and.arrow.forward",
-                "Open Integrations › iPhone Remote on the Mac to approve this iPhone."
+                model.pairingShortCode.map {
+                    "Confirm code \($0) on the Mac, then approve this iPhone in Integrations › iPhone Remote."
+                } ?? "Create a pairing code in Integrations › iPhone Remote on the Mac, then scan it with the iPhone Camera."
             )
         case let .incompatible(required, received):
             (
@@ -245,6 +249,28 @@ private struct RemoteTopBar: View {
                     .disabled(!model.controlsEnabled)
                 }
             }
+
+            HStack(spacing: 5) {
+                if let error = model.lastError {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(LumiColor.warning)
+                    Text(error)
+                        .lineLimit(1)
+                } else if !model.pendingCommandIDs.isEmpty {
+                    ProgressView()
+                        .controlSize(.mini)
+                    Text("Applying change…")
+                } else {
+                    Text("Ready")
+                        .opacity(0)
+                        .accessibilityHidden(true)
+                }
+                Spacer(minLength: 0)
+            }
+            .font(LumiTypography.caption)
+            .foregroundStyle(LumiColor.textSecondary)
+            .frame(height: 16)
+            .accessibilityElement(children: .combine)
         }
         .padding(.horizontal, LumiSpacing.medium)
         .padding(.vertical, LumiSpacing.small)
@@ -309,8 +335,19 @@ private struct RemotePlayerSurface: View {
     @GestureState private var magnification: CGFloat = 1
 
     var body: some View {
-        let viewport = beatViewport
-        VStack(alignment: .leading, spacing: LumiSpacing.small) {
+        TimelineView(
+            .animation(
+                minimumInterval: 1.0 / 60.0,
+                paused: !player.transport.playing
+            )
+        ) { timeline in
+            playerCard(at: timeline.date)
+        }
+    }
+
+    private func playerCard(at date: Date) -> some View {
+        let viewport = beatViewport(at: date)
+        return VStack(alignment: .leading, spacing: LumiSpacing.small) {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
                     Text("PLAYER \(player.playerNumber)")
@@ -433,15 +470,23 @@ private struct RemotePlayerSurface: View {
         return manualZoomBars ?? automatic
     }
 
-    private var beatViewport: RemoteBeatViewport {
+    private func beatViewport(at date: Date) -> RemoteBeatViewport {
         let total = max(1, Double(player.track.durationBeats))
         let visible = min(total, effectiveVisibleBars * 4)
-        let baseStart = automaticViewportStart(visibleBeats: visible, totalBeats: total)
+        let visualBeat = RemoteTransportInterpolation.visualBeat(
+            player: player,
+            atUnixMillis: UInt64(max(0, date.timeIntervalSince1970 * 1_000))
+        )
+        let baseStart = automaticViewportStart(
+            currentBeat: visualBeat,
+            visibleBeats: visible,
+            totalBeats: total
+        )
         let translated = -Double(dragTranslation) * visible / 320
         let proposed = (inspectionStartBeat ?? baseStart) + translated
         let start = clampedStart(proposed, visibleBeats: visible, totalBeats: total)
         let playheadFraction = isMaster
-            ? (Double(player.transport.beat) - start) / visible
+            ? (visualBeat - start) / visible
             : nil
         return RemoteBeatViewport(
             startBeat: start,
@@ -461,7 +506,11 @@ private struct RemotePlayerSurface: View {
                     let visible = effectiveVisibleBars * 4
                     let total = max(1, Double(player.track.durationBeats))
                     let current = inspectionStartBeat
-                        ?? automaticViewportStart(visibleBeats: visible, totalBeats: total)
+                        ?? automaticViewportStart(
+                            currentBeat: Double(player.transport.beat),
+                            visibleBeats: visible,
+                            totalBeats: total
+                        )
                     inspectionStartBeat = clampedStart(
                         current - Double(value.translation.width) * visible / 320,
                         visibleBeats: visible,
@@ -486,9 +535,13 @@ private struct RemotePlayerSurface: View {
         )
     }
 
-    private func automaticViewportStart(visibleBeats: Double, totalBeats: Double) -> Double {
+    private func automaticViewportStart(
+        currentBeat: Double,
+        visibleBeats: Double,
+        totalBeats: Double
+    ) -> Double {
         let proposed = isMaster
-            ? Double(player.transport.beat) - visibleBeats * 0.24
+            ? currentBeat - visibleBeats * 0.24
             : (totalBeats - visibleBeats) / 2
         return clampedStart(proposed, visibleBeats: visibleBeats, totalBeats: totalBeats)
     }
@@ -610,7 +663,12 @@ private struct RemotePhraseBand: View {
                         let x = viewport.xFraction(for: clippedStart) * geometry.size.width
                         let width = (clippedEnd - clippedStart) / viewport.visibleBeats * geometry.size.width
                         Rectangle()
-                            .fill(LumiPhraseColorPalette.defaults.color(for: phrase.roleID ?? phrase.kind))
+                            .fill(
+                                phrase.colorRGB.map(rgbColor)
+                                    ?? LumiPhraseColorPalette.defaults.color(
+                                        for: phrase.roleID ?? phrase.kind
+                                    )
+                            )
                             .frame(width: max(1, width))
                             .offset(x: x)
                             .accessibilityLabel(phrase.roleName ?? phrase.kind)
@@ -770,6 +828,29 @@ enum RemoteWaveformViewportMath {
     }
 }
 
+enum RemoteTransportInterpolation {
+    /// Presentation-only interpolation. The bounded prediction prevents a
+    /// stale connection from making the phone appear live indefinitely.
+    static func visualBeat(player: RemotePlayer, atUnixMillis now: UInt64) -> Double {
+        let anchor = player.transport
+        guard anchor.playing else { return Double(anchor.beat) }
+        let elapsedMillis = min(750, now.saturatingSubtracting(anchor.observedAtUnixMillis))
+        if let positionMillis = anchor.positionMillis,
+           player.track.originalBPMMilli > 0 {
+            let playbackRate = Double(anchor.effectiveBPMMilli)
+                / Double(player.track.originalBPMMilli)
+            let predictedPosition = Double(positionMillis)
+                + Double(elapsedMillis) * playbackRate
+            return beatFor(
+                timeMillis: UInt64(max(0, predictedPosition)),
+                in: player.track
+            )
+        }
+        return Double(anchor.beat)
+            + Double(elapsedMillis) * Double(anchor.effectiveBPMMilli) / 60_000_000
+    }
+}
+
 private func operationLabel(_ state: RemoteOperationState) -> String {
     switch state {
     case .off: "OFF"
@@ -813,8 +894,18 @@ private func beatFor(timeMillis: UInt64, in track: RemoteTrack) -> Double {
         let duration = max(1, track.beatGrid?.durationMillis ?? 1)
         return Double(timeMillis) / Double(duration) * Double(max(1, track.durationBeats))
     }
-    let index = beatGrid.timesMillis.partitioningIndex { $0 >= timeMillis }
-    return Double(min(index, Int(track.durationBeats)))
+    let upperIndex = beatGrid.timesMillis.partitioningIndex { $0 >= timeMillis }
+    if upperIndex == 0 { return 0 }
+    if upperIndex >= beatGrid.timesMillis.count {
+        return Double(min(upperIndex, Int(track.durationBeats)))
+    }
+    let lowerIndex = upperIndex - 1
+    let lowerTime = beatGrid.timesMillis[lowerIndex]
+    let upperTime = beatGrid.timesMillis[upperIndex]
+    guard upperTime > lowerTime else { return Double(upperIndex) }
+    let fraction = Double(timeMillis.saturatingSubtracting(lowerTime))
+        / Double(upperTime - lowerTime)
+    return min(Double(track.durationBeats), Double(lowerIndex) + fraction)
 }
 
 private func timeMillisFor(beat: Double, in track: RemoteTrack) -> UInt64 {
@@ -854,5 +945,11 @@ private extension RandomAccessCollection {
             }
         }
         return distance(from: startIndex, to: lower)
+    }
+}
+
+private extension UInt64 {
+    func saturatingSubtracting(_ other: UInt64) -> UInt64 {
+        self >= other ? self - other : 0
     }
 }

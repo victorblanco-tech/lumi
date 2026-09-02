@@ -1,6 +1,6 @@
 # Story E9-05: Remote resilience, performance and beta delivery
 
-- Status: **Planned**
+- Status: **In progress (automated resilience foundation complete)**
 - Priority: **P0 show safety**
 - Target: `0.6.0-beta`
 - Components: Engine, Gateway, iOS, Release
@@ -40,3 +40,28 @@ or destabilizing the show.
 - independent iPhone and simulator tags create controlled draft releases;
 - physical-iPhone and show-lab evidence remains mandatory and is not replaced
   by the Simulator artifact.
+
+## Implemented evidence
+
+- bounded frame sizes, client counts, authentication attempts, admin messages,
+  engine command queues and per-client delivery buffers;
+- slow clients are disconnected while latest-value transport anchors coalesce;
+- malformed, oversized, stale, duplicate and sequence-gap behavior is covered;
+- gateway TLS, protected identity/trust persistence and authenticated admin
+  operations execute in local network tests;
+- iOS foreground/background explicitly closes and recreates transport; no
+  command survives disconnect;
+- macOS and iOS product targets build with strict concurrency and warnings as
+  errors; the packaged Mac app contains the independent gateway executable and
+  channel-specific LaunchAgent.
+
+## Remaining beta gate
+
+- deterministic screenshots across supported iPhone sizes and accessibility
+  settings;
+- physical iPhone discovery, pairing, rotation and lifecycle matrix;
+- two-phone Controller transfer/revoke evidence;
+- combined two-Player, SoundSwitch and Ableton Link soak with Remote connected,
+  disconnected and deliberately overloaded;
+- measured command latency and visual-state-age percentiles;
+- signing/TestFlight setup only after the separate Apple membership decision.

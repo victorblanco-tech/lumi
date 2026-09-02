@@ -1,6 +1,6 @@
 # Lumi Remote for iPhone
 
-Status: **Accepted design; implementation in progress**
+Status: **Accepted design; native implementation ready for device acceptance**
 Target: **0.6.0 – iPhone Remote Beta**
 
 ## Product purpose
@@ -77,7 +77,8 @@ Each loaded card shows:
 
 - track color, title, artist, effective BPM, key and remaining time;
 - the same cached RGB waveform, Rekordbox beatgrid and Hot Cue markers as macOS;
-- a fixed Live playhead and phrase band directly below the waveform;
+- a fixed Live playhead and phrase band directly below the waveform, using the
+  current user-configured Lumi Phrase colors from the Mac;
 - a proportional Light Plan timeline aligned to the same beat space;
 - the active or selected Theme, AutoLoop and applied Static Look.
 
@@ -139,6 +140,6 @@ two phones from issuing conflicting booth actions.
 - Dynamic Type without hiding operation state or Player identity;
 - color is always paired with text and shape;
 - haptics distinguish accepted, rejected and destructive actions;
-- an optional keep-awake setting applies only while the Remote Live screen is
-  foregrounded;
+- keep-awake applies only while the Remote Live screen is foregrounded and is
+  released immediately when the app backgrounds;
 - no essential action depends on a hover gesture or tiny waveform marker.

@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.6.0-dev-5 - 2026-09-02
+
+### Added
+
+- Completes the opt-in, separately supervised local-network Remote Gateway with
+  channel-scoped Bonjour discovery, pinned TLS and explicit QR approval.
+- Connects the native Lumi Remote iPhone client to the authoritative Live
+  projection and revision-safe booth command allowlist.
+- Adds paired-device management, one explicit Controller lease, revoke and
+  Controller transfer in `Integrations > iPhone Remote`.
+
+### Changed
+
+- Uses the same dark booth presentation, RGB waveforms, Hot Cues, beatgrid,
+  current user-configured Phrase colors and proportional Light Plans on iPhone.
+- Keeps full deck/plan state change-driven and bounds visual transport anchors
+  to a coalescible 20 Hz presentation stream.
+
+### Safety
+
+- Keeps the Remote Gateway outside Pro DJ Link, SoundSwitch MIDI and Ableton
+  Link execution, with bounded clients, queues, frames and authentication.
+- Disables controls across reconnect, sequence gaps and revision conflicts
+  until a new authoritative snapshot and Controller lease arrive.
+- Stores only credential verifiers on Mac and credentials in iPhone Keychain;
+  backgrounding or disconnecting queues no command.
+
 ## 0.6.0-dev-3 - 2026-09-02
 
 ### Added

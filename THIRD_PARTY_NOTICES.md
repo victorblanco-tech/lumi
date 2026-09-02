@@ -62,6 +62,22 @@ license and module notices are retained in the runtime's `legal` directory.
 OpenJDK is distributed under GPL-2.0 with the Classpath Exception; individual
 modules can contain additional notices listed in that directory.
 
+## Local Remote Gateway security and discovery
+
+Lumi's separately supervised local iPhone Remote Gateway bundles Rust crates
+for encrypted transport, certificate generation and Bonjour discovery. The
+direct dependencies are:
+
+- rustls 0.23.43 — Apache-2.0 OR ISC OR MIT;
+- tokio-rustls 0.26.4 — MIT OR Apache-2.0;
+- rcgen 0.14.10 — MIT OR Apache-2.0;
+- ring 0.17.14 — Apache-2.0 AND ISC;
+- mdns-sd 0.21.1 — Apache-2.0 OR MIT.
+
+Their exact versions and transitive dependencies are pinned by `Cargo.lock`.
+The relevant project and license files are distributed by their respective
+crates and source repositories.
+
 ## Product names
 
 Rekordbox, SoundSwitch, Control One and other product names are used only to

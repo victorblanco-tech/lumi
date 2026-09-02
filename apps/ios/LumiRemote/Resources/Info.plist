@@ -14,6 +14,17 @@
     <string>6.0</string>
     <key>CFBundleName</key>
     <string>$(PRODUCT_NAME)</string>
+    <key>CFBundleURLTypes</key>
+    <array>
+        <dict>
+            <key>CFBundleURLName</key>
+            <string>co.victorblan.tech.lumi.remote.pairing</string>
+            <key>CFBundleURLSchemes</key>
+            <array>
+                <string>lumi</string>
+            </array>
+        </dict>
+    </array>
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>

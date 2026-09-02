@@ -72,7 +72,9 @@ xcodebuild \
 built_app="build/DerivedData/Build/Products/Dev/Lumi.app"
 built_info_plist="$built_app/Contents/Info.plist"
 built_engine_helper="$built_app/Contents/Helpers/lumi-engine"
+built_remote_gateway="$built_app/Contents/Helpers/lumi-remote-gateway"
 built_launch_agent="$built_app/Contents/Library/LaunchAgents/co.victorblan.tech.lumi.dev.engine.plist"
+built_remote_launch_agent="$built_app/Contents/Library/LaunchAgents/co.victorblan.tech.lumi.dev.remote-gateway.plist"
 built_link_helper="$built_app/Contents/Resources/link/Carabiner"
 built_app_icon="$built_app/Contents/Resources/AppIcon.icns"
 built_asset_catalog="$built_app/Contents/Resources/Assets.car"
@@ -102,6 +104,10 @@ if [[ ! -x "$built_engine_helper" ]]; then
   echo "ERROR: the built app does not contain an executable Lumi engine helper." >&2
   exit 1
 fi
+if [[ ! -x "$built_remote_gateway" ]]; then
+  echo "ERROR: the built app does not contain the independent Remote Gateway helper." >&2
+  exit 1
+fi
 
 if [[ -z "$(/usr/libexec/PlistBuddy -c 'Print :NSRemovableVolumesUsageDescription' "$built_info_plist" 2>/dev/null)" ]]; then
   echo "ERROR: the built app does not explain its read-only USB access." >&2
@@ -120,6 +126,21 @@ if ! otool -s __TEXT __info_plist "$built_engine_helper" >/dev/null 2>&1; then
   echo "ERROR: the built Lumi engine helper has no embedded Info.plist." >&2
   exit 1
 fi
+if ! otool -v -s __TEXT __info_plist "$built_remote_gateway" \
+  | grep -q '<key>NSLocalNetworkUsageDescription</key>'; then
+  echo "ERROR: the built Remote Gateway does not explain its local-network access." >&2
+  exit 1
+fi
+if ! otool -v -s __TEXT __info_plist "$built_remote_gateway" \
+  | grep -q '_lumi-remote-dev._tcp'; then
+  echo "ERROR: the built Remote Gateway does not declare its Bonjour service." >&2
+  exit 1
+fi
+if [[ ! -f "$built_remote_launch_agent" ]]; then
+  echo "ERROR: the built app does not contain the opt-in Remote Gateway LaunchAgent." >&2
+  exit 1
+fi
+plutil -lint "$built_remote_launch_agent" >/dev/null
 
 if [[ ! -x "$built_link_helper" ]]; then
   echo "ERROR: the built app does not contain the managed Ableton Link helper." >&2
@@ -133,6 +154,11 @@ fi
 
 if ! file "$built_engine_helper" | grep -q 'arm64'; then
   echo "ERROR: the built Lumi engine helper is not Apple Silicon arm64." >&2
+  exit 1
+fi
+
+if ! file "$built_remote_gateway" | grep -q 'arm64'; then
+  echo "ERROR: the built Remote Gateway helper is not Apple Silicon arm64." >&2
   exit 1
 fi
 

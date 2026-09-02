@@ -1,6 +1,6 @@
 # Story E9-03: Native iPhone Live presentation
 
-- Status: **In progress (native target and Live surface compile)**
+- Status: **Implementation complete; visual/device acceptance pending**
 - Priority: **P1 product**
 - Target: `0.6.0-dev`
 - Components: Shared Live Presentation, iOS SwiftUI
@@ -44,9 +44,14 @@ iPhone UI that matches Lumi's macOS visual language.
 - aligned phrase and proportional Light Plan bands;
 - compact integration/offset/operation controls and operation-state styling;
 - explicit discovery, pairing, unavailable and version-mismatch empty states.
+- native app lifecycle reconnect, no background command queue and foreground
+  keep-awake behavior;
+- Camera-deep-link pairing with matching confirmation code;
+- one fixed command-feedback line and accepted/rejected haptics without moving
+  either Player surface.
 
 ## Remaining gate
 
-Complete deterministic visual fixtures across supported iPhone sizes, Dynamic
-Type and VoiceOver; refine the pairing presentation; then perform actual-device
-gesture, rotation, keep-awake and booth-legibility acceptance.
+Complete deterministic visual evidence across supported iPhone sizes, Dynamic
+Type and VoiceOver; then perform actual-device gesture, rotation, keep-awake and
+booth-legibility acceptance.

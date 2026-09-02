@@ -18,6 +18,9 @@ public final class RemoteSessionModel {
     public private(set) var pendingCommandIDs: Set<String> = []
     public private(set) var lastError: String?
     public private(set) var controllerLeaseID: String?
+    public private(set) var pairingShortCode: String?
+    public private(set) var acceptedCommandFeedbackRevision: UInt64 = 0
+    public private(set) var rejectedCommandFeedbackRevision: UInt64 = 0
 
     public init() {}
 
@@ -29,16 +32,19 @@ public final class RemoteSessionModel {
     public func beginDiscovery() {
         connectionPhase = .discovering
         lastError = nil
+        pairingShortCode = nil
     }
 
-    public func beginPairing() {
+    public func beginPairing(shortCode: String? = nil) {
         connectionPhase = .pairing
         lastError = nil
+        pairingShortCode = shortCode
     }
 
     public func connected(to macName: String) {
         connectionPhase = .connected(macName: macName)
         lastError = nil
+        pairingShortCode = nil
     }
 
     public func grantControllerLease(_ leaseID: String) {
@@ -123,21 +129,30 @@ public final class RemoteSessionModel {
 
     public func markCommandPending(_ commandID: String) {
         pendingCommandIDs.insert(commandID)
+        lastError = nil
     }
 
     public func acknowledgeCommand(_ commandID: String) {
-        pendingCommandIDs.remove(commandID)
+        guard pendingCommandIDs.remove(commandID) != nil else { return }
+        acceptedCommandFeedbackRevision &+= 1
     }
 
     public func rejectCommand(_ commandID: String, reason: String) {
         pendingCommandIDs.remove(commandID)
         lastError = reason
+        rejectedCommandFeedbackRevision &+= 1
+    }
+
+    public func reportError(_ reason: String) {
+        lastError = reason
+        rejectedCommandFeedbackRevision &+= 1
     }
 
     public func reconnecting(to macName: String, at date: Date = .now) {
         connectionPhase = .reconnecting(macName: macName, staleSince: date)
         pendingCommandIDs.removeAll()
         controllerLeaseID = nil
+        pairingShortCode = nil
     }
 
     public func unavailable(_ reason: String? = nil) {
@@ -145,6 +160,7 @@ public final class RemoteSessionModel {
         pendingCommandIDs.removeAll()
         controllerLeaseID = nil
         lastError = reason
+        pairingShortCode = nil
     }
 
     public func incompatible(receivedProtocol: Int) {
@@ -154,5 +170,6 @@ public final class RemoteSessionModel {
         )
         pendingCommandIDs.removeAll()
         controllerLeaseID = nil
+        pairingShortCode = nil
     }
 }

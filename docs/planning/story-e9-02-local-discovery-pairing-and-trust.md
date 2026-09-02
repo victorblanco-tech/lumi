@@ -1,6 +1,6 @@
 # Story E9-02: Local discovery, pairing and device trust
 
-- Status: **In progress (trust foundation)**
+- Status: **Implementation complete; physical-device acceptance pending**
 - Priority: **P0 security**
 - Target: `0.6.0-dev`
 - Components: Remote Gateway, macOS Integrations, iOS Remote Client
@@ -40,9 +40,17 @@ device has control and revoke it without accounts or internet.
 - per-device credential verifier on Mac and channel-scoped Keychain store on
   iPhone;
 - release-channel, protocol, certificate-fingerprint and QR payload validation.
+- persistent protected Mac installation identity and rustls TLS listener;
+- exact leaf-certificate pinning in the native iPhone transport;
+- authenticated, protected loopback administration for status, invitation,
+  approval, revocation and Controller transfer;
+- Mac `Integrations > iPhone Remote` management UI with QR, matching short code,
+  paired-device state and explicit service enablement;
+- controller ownership persists across gateway restart and every trust mutation
+  disconnects existing sessions for mandatory reauthentication.
 
 ## Remaining gate
 
-Generate and persist the Mac installation certificate, bind the authenticated
-TLS session, pin it on iPhone, build the Mac approval/revoke UI and validate the
-complete flow on a physical iPhone. Discovery never enables controls by itself.
+Validate the complete flow on a physical iPhone, including Local Network
+permission, client-isolated Wi-Fi failure, certificate mismatch, revocation and
+two-device Controller transfer. Discovery never enables controls by itself.

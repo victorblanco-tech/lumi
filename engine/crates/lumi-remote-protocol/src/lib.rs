@@ -6,6 +6,7 @@
 
 #![forbid(unsafe_code)]
 
+mod auth;
 mod command;
 mod frame;
 mod projection;
@@ -26,3 +27,4 @@ pub use projection::{
 
 #[cfg(test)]
 mod contract_tests;
+pub use auth::{RemoteAuthenticationError, RemoteClientHello, RemoteServerHello};

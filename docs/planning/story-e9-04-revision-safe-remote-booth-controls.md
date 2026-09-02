@@ -1,6 +1,6 @@
 # Story E9-04: Revision-safe remote booth controls
 
-- Status: **In progress (command safety contract)**
+- Status: **Implementation complete; physical multi-device acceptance pending**
 - Priority: **P0 safety / P1 product**
 - Target: `0.6.0-dev`
 - Components: iOS Remote Client, Gateway, Engine
@@ -41,10 +41,15 @@ double tap, reconnect or stale screen producing a second or incorrect mutation.
 - per-target pending command suppression and disconnect cleanup on iPhone;
 - accepted, duplicate, conflict and rejected acknowledgements;
 - Start-to-Off confirmation in the native Live UI.
+- authenticated TLS transport from every native action to the gateway;
+- separate bounded gateway-to-engine command handoff with no disconnected
+  replay or offline queue;
+- authoritative accepted/rejected command reconciliation, fixed feedback and
+  haptics;
+- persisted one-Controller ownership with explicit Mac transfer and revoke.
 
 ## Remaining gate
 
-Route admitted commands through the separate gateway-to-engine command path,
-reconcile authoritative acknowledgements in the UI, add haptics and validate
-lease transfer/two-device behavior. No control is enabled before this path is
-authenticated end-to-end.
+Validate lease transfer and duplicate-tap behavior with two physical devices
+during a running hardware show. No control is enabled before the complete path
+is authenticated and a current snapshot has arrived.

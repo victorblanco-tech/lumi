@@ -606,7 +606,7 @@ impl RemoteProjectionPublisher {
             let _ = self.latest_projection.send(Some(projection.clone()));
             let _ = self
                 .updates
-                .send(EngineRemoteUpdate::Projection(projection));
+                .send(EngineRemoteUpdate::Projection(Box::new(projection)));
             return Ok(());
         }
 

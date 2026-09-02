@@ -33,7 +33,7 @@ Excluded from 0.6.0:
 ADR-0040 is the accepted architecture authority. The accepted visual contract is
 recorded in `docs/design/iphone-remote/README.md`.
 
-## Current evidence (`0.6.0-dev-4` / Remote `0.1.0-dev-2`)
+## Current evidence (`0.6.0-dev-5` / Remote `0.1.0-dev-3`)
 
 - the independent iOS app target builds for the generic iOS Simulator;
 - portrait Master-first and landscape side-by-side Live compositions use the
@@ -45,21 +45,35 @@ recorded in `docs/design/iphone-remote/README.md`.
   anchors are coalesced;
 - command construction is revision-bound and the gateway rejects duplicate
   mutating command IDs after the first admission;
-- release-channel Bonjour discovery, QR invitation validation and Keychain
-  credential storage compile without exposing engine credentials;
-- the gateway executable still fails closed and does not bind the LAN.
+- release-channel Bonjour discovery, native Camera deep-link pairing and
+  Keychain credential storage are wired without exposing engine credentials;
+- the separately packaged gateway binds the LAN only after the user enables
+  iPhone Remote and advertises the matching Dev, RC or Production service;
+- every LAN session uses rustls TLS with a persistent per-installation
+  certificate pinned from a one-use, five-minute pairing invitation;
+- the Mac stores only device credential verifiers in protected, atomically
+  replaced trust state and exposes approve, revoke and Controller transfer in
+  `Integrations > iPhone Remote`;
 - the engine now publishes an authenticated, path-free Live projection over a
   second loopback-only endpoint that is independent from desktop lifecycle;
 - complete waveform/plan state is change-driven while transport/BPM anchors
   are bounded to 20 Hz and can be coalesced;
 - revision-safe Remote commands reach the existing reducer through a bounded
   queue and have end-to-end command-result coverage;
+- the native client authenticates, obtains exactly one current snapshot before
+  controls enable, routes the complete booth-safe command allowlist, displays a
+  fixed command-feedback region and emits accepted/rejected haptics;
+- foreground/background handling explicitly tears down discovery and transport,
+  queues nothing and keeps the iPhone awake only while Remote Live is active;
+- TLS, persistent identity/trust, protected loopback administration, controller
+  persistence, QR/auth wire compatibility, stale revisions and reconnect gaps
+  have deterministic regression coverage;
 - gateway disconnect, authentication failure and desktop snapshot polling do
   not park the show or add full projection work to the realtime loop.
 
-Pinned TLS, persistent trust, Mac pairing UI, LAN command execution and
-physical-iPhone acceptance remain open. No current Mac live-performance
-behavior is changed by this foundation.
+Physical-iPhone pairing, real Local Network permission, rotation/gesture
+acceptance, multi-device Controller transfer and the combined booth soak remain
+open. No current Mac live-performance behavior is changed by this feature.
 
 ## Delivery stories
 

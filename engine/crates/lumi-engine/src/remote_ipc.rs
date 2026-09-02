@@ -29,7 +29,7 @@ const MAXIMUM_GATEWAY_CONNECTIONS: usize = 1;
 
 #[derive(Clone, Debug)]
 pub(crate) enum EngineRemoteUpdate {
-    Projection(RemoteLiveProjection),
+    Projection(Box<RemoteLiveProjection>),
     TransportAnchor {
         player_number: u8,
         anchor: RemoteTransportAnchor,
@@ -136,7 +136,7 @@ async fn serve_client(
                             continue;
                         }
                         last_projection_revision = projection.projection_revision;
-                        projection_frame(sequence, RemoteFrameKind::Projection, projection)?
+                        projection_frame(sequence, RemoteFrameKind::Projection, *projection)?
                     }
                     EngineRemoteUpdate::TransportAnchor { player_number, anchor } => RemoteFrame {
                         protocol_version: REMOTE_PROTOCOL_VERSION,
@@ -314,6 +314,8 @@ enum RemoteIpcError {
 
 #[cfg(test)]
 mod tests {
+    use std::error::Error;
+    use std::io;
     use std::net::Ipv4Addr;
 
     use lumi_remote_protocol::{
@@ -353,15 +355,13 @@ mod tests {
 
     async fn test_endpoint(
         token: &str,
-    ) -> (
+    ) -> io::Result<(
         std::net::SocketAddr,
         tokio::task::JoinHandle<()>,
         mpsc::Receiver<RemoteCommandRequest>,
-    ) {
-        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))
-            .await
-            .expect("bind test endpoint");
-        let address = listener.local_addr().expect("test endpoint address");
+    )> {
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
+        let address = listener.local_addr()?;
         let (_latest_sender, latest_receiver) = watch::channel(Some(projection()));
         let (updates, _) = broadcast::channel::<EngineRemoteUpdate>(8);
         let (command_sender, command_receiver) = mpsc::channel(4);
@@ -372,26 +372,26 @@ mod tests {
             updates,
             command_sender,
         ));
-        (address, task, command_receiver)
+        Ok((address, task, command_receiver))
     }
 
     #[tokio::test]
-    async fn authenticates_streams_snapshot_and_round_trips_command_result() {
+    async fn authenticates_streams_snapshot_and_round_trips_command_result()
+    -> Result<(), Box<dyn Error>> {
         let token = "a".repeat(64);
-        let (address, task, mut commands) = test_endpoint(&token).await;
-        let stream = TcpStream::connect(address).await.expect("connect gateway");
+        let (address, task, mut commands) = test_endpoint(&token).await?;
+        let stream = TcpStream::connect(address).await?;
         let (reader, mut writer) = stream.into_split();
         writer
             .write_all(format!("{{\"remoteGatewayToken\":\"{token}\"}}\n").as_bytes())
-            .await
-            .expect("authenticate gateway");
+            .await?;
         let mut reader = BufReader::new(reader);
         let mut line = Vec::new();
-        reader
-            .read_until(b'\n', &mut line)
-            .await
-            .expect("read snapshot");
-        let snapshot = RemoteFrame::decode(&line[..line.len() - 1]).expect("decode snapshot");
+        reader.read_until(b'\n', &mut line).await?;
+        let snapshot_bytes = line
+            .strip_suffix(b"\n")
+            .ok_or_else(|| io::Error::other("snapshot omitted newline delimiter"))?;
+        let snapshot = RemoteFrame::decode(snapshot_bytes)?;
         assert_eq!(snapshot.frame_kind, RemoteFrameKind::Snapshot);
 
         let command = RemoteCommand {
@@ -408,16 +408,15 @@ mod tests {
             frame_kind: RemoteFrameKind::Command,
             sequence: 1,
             correlation_id: Some(command.command_id.clone()),
-            payload: serde_json::to_value(command).expect("encode command"),
+            payload: serde_json::to_value(command)?,
         };
-        let mut bytes = frame.encode().expect("encode frame");
+        let mut bytes = frame.encode()?;
         bytes.push(b'\n');
-        writer.write_all(&bytes).await.expect("write command");
+        writer.write_all(&bytes).await?;
 
         let request = timeout(Duration::from_secs(1), commands.recv())
-            .await
-            .expect("receive command before timeout")
-            .expect("command channel remains open");
+            .await?
+            .ok_or_else(|| io::Error::other("command channel closed before request"))?;
         request
             .response
             .send(RemoteCommandResult {
@@ -427,34 +426,38 @@ mod tests {
                 plan_revision: None,
                 reason_code: None,
             })
-            .expect("return command result");
+            .map_err(|_| io::Error::other("gateway dropped command-result receiver"))?;
 
         line.clear();
-        reader
-            .read_until(b'\n', &mut line)
-            .await
-            .expect("read command result");
-        let result = RemoteFrame::decode(&line[..line.len() - 1]).expect("decode result");
+        reader.read_until(b'\n', &mut line).await?;
+        let result_bytes = line
+            .strip_suffix(b"\n")
+            .ok_or_else(|| io::Error::other("command result omitted newline delimiter"))?;
+        let result = RemoteFrame::decode(result_bytes)?;
         assert_eq!(result.frame_kind, RemoteFrameKind::CommandResult);
         assert_eq!(result.correlation_id.as_deref(), Some("remote-command-1"));
         task.abort();
+        Ok(())
     }
 
     #[tokio::test]
-    async fn rejects_an_incorrect_gateway_token_without_streaming_state() {
-        let (address, task, _commands) = test_endpoint(&"a".repeat(64)).await;
-        let mut stream = TcpStream::connect(address).await.expect("connect gateway");
+    async fn rejects_an_incorrect_gateway_token_without_streaming_state()
+    -> Result<(), Box<dyn Error>> {
+        let (address, task, _commands) = test_endpoint(&"a".repeat(64)).await?;
+        let mut stream = TcpStream::connect(address).await?;
         stream
             .write_all(b"{\"remoteGatewayToken\":\"wrong\"}\n")
-            .await
-            .expect("send rejected authentication");
+            .await?;
         let mut reader = BufReader::new(stream);
         let mut line = Vec::new();
-        let received = timeout(Duration::from_secs(1), reader.read_until(b'\n', &mut line))
-            .await
-            .expect("authentication rejection closes promptly")
-            .expect("read rejected connection");
-        assert_eq!(received, 0);
+        let received = timeout(Duration::from_secs(1), reader.read_until(b'\n', &mut line)).await?;
+        match received {
+            Ok(0) => {}
+            Err(error) if error.kind() == io::ErrorKind::ConnectionReset => {}
+            Ok(_) => return Err(io::Error::other("rejected gateway streamed state").into()),
+            Err(error) => return Err(error.into()),
+        }
         task.abort();
+        Ok(())
     }
 }

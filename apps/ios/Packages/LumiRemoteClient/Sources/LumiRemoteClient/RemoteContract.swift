@@ -191,6 +191,7 @@ public struct RemotePhrase: Codable, Equatable, Identifiable, Sendable {
     public let kind: String
     public let roleID: String?
     public let roleName: String?
+    public let colorRGB: UInt32?
 
     enum CodingKeys: String, CodingKey {
         case index
@@ -199,6 +200,7 @@ public struct RemotePhrase: Codable, Equatable, Identifiable, Sendable {
         case kind
         case roleID = "roleId"
         case roleName
+        case colorRGB = "colorRgb"
     }
 }
 

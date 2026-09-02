@@ -128,6 +128,52 @@ func duplicateFrameCannotApplyASecondMutationResult() throws {
     #expect(try processor.process(data) == .duplicateIgnored)
 }
 
+@MainActor
+@Test
+func revisionConflictDisablesControlsUntilAnAuthoritativeSnapshotArrives() throws {
+    let model = RemoteSessionModel()
+    let processor = RemoteFrameProcessor(model: model, macName: "MacBook Pro")
+    #expect(
+        try processor.process(frameData(kind: .snapshot, sequence: 1, projectionRevision: 1))
+            == .applied
+    )
+    model.grantControllerLease("lease-1")
+    model.markCommandPending("command-1")
+
+    let resultPayload = try JSONDecoder().decode(
+        JSONValue.self,
+        from: JSONEncoder().encode(
+            RemoteCommandResult(
+                commandID: "command-1",
+                status: .conflict,
+                stateRevision: 2,
+                planRevision: nil,
+                reasonCode: "revisionConflict"
+            )
+        )
+    )
+    let result = RemoteFrame(
+        frameKind: .commandResult,
+        sequence: 2,
+        correlationID: "command-1",
+        payload: resultPayload
+    )
+    #expect(
+        try processor.process(JSONEncoder().encode(result))
+            == .authoritativeSnapshotRequired
+    )
+    #expect(!model.controlsEnabled)
+    #expect(model.lastError == "The show changed on the Mac. Refresh before trying again.")
+
+    #expect(
+        try processor.process(frameData(kind: .snapshot, sequence: 3, projectionRevision: 2))
+            == .applied
+    )
+    #expect(!model.controlsEnabled)
+    model.grantControllerLease("lease-2")
+    #expect(model.controlsEnabled)
+}
+
 private func frameData(
     kind: RemoteFrameKind,
     sequence: UInt64,
