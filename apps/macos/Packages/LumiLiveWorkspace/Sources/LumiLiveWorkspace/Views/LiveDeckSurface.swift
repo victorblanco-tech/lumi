@@ -1601,11 +1601,10 @@ struct LiveWaveformMotionPlan: Equatable {
 
     func startBeat(for playheadBeat: Double) -> Double {
         guard followsLiveViewport else { return viewportStartBeat }
-        let maximumStart = max(0, totalBeats - visibleBeats)
-        return min(
-            maximumStart,
-            max(0, playheadBeat - visibleBeats * LiveDeckViewportPolicy.playheadFraction)
-        )
+        // A Live deck is a moving timeline, not a bounded editor viewport.
+        // Allow black pre-roll and post-roll outside the track so the playhead
+        // stays at one physical position from the first beat to the last.
+        return playheadBeat - visibleBeats * LiveDeckViewportPolicy.playheadFraction
     }
 
     func positionMillis(at date: Date) -> Double? {

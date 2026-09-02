@@ -333,6 +333,7 @@ fn local_deck_preview_keeps_the_same_eight_bit_rgb_scale_as_detail()
         .local_playback_track(track_id, timeline_revision)?
         .into_parts();
     let preview = context.waveform_preview_json();
+    let remote = context.remote_waveform_preview_json();
     let maximum_channel = preview["points"]
         .as_array()
         .ok_or("preview points are missing")?
@@ -343,6 +344,12 @@ fn local_deck_preview_keeps_the_same_eight_bit_rgb_scale_as_detail()
         .ok_or("preview channels are missing")?;
 
     assert_eq!(preview["source"], "localLibrary");
+    assert_eq!(remote["source"], "localLibraryDetail");
+    assert!(
+        remote["points"].as_array().map_or(0, Vec::len)
+            >= preview["points"].as_array().map_or(0, Vec::len),
+        "Remote static projection must retain at least the Mac preview detail"
+    );
     assert!(
         maximum_channel > 31,
         "bounded preview must retain 8-bit RGB values"

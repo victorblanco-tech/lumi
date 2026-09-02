@@ -66,6 +66,17 @@ iPhone UI that matches Lumi's macOS visual language.
 - Remote dev-7 mirrors the Mac plan hierarchy without replacing configured
   Phrase colors: `ACTIVE` receives a red live glow and exactly one upcoming
   item receives the blue `NEXT` treatment, driven by the visual transport beat.
+- Remote dev-8 fixes the Master playhead at the same 22% position from the
+  first beat through the final beat and renders the necessary outside-track
+  area as black; portrait and landscape are regression-locked to the same
+  40-bar musical viewport.
+- The integration strip is structural rather than conditional: `PDL`, `LIGHT`
+  and `LINK` remain visible with unavailable health during discovery and
+  reconnect instead of disappearing with the projection.
+- Track/plan projection changes deliver the complete 16,384-point RGB asset in
+  a compact lossless wire form, rendered with the same normalized one-pixel
+  line treatment as macOS. Two full Player waveforms remain inside the bounded
+  frame; realtime transport anchors never carry or rebuild waveform data.
 - headed dev-6 acceptance used the packaged dev-8 engine and live LAN simulator:
   `90s Bitch - Extended Mix` retained clear cyan, red and pink regions and two
   distinct frames proved that the remaining time and waveform viewport followed

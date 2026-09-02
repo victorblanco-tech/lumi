@@ -255,26 +255,41 @@ private struct RemoteTopBar: View {
 
     @ViewBuilder
     private var integrationStatus: some View {
-        if let integrations = model.projection?.integrations {
-            HStack(spacing: isLandscape ? 7 : LumiSpacing.small) {
-                integrationBadge("PDL", integrations.proDJLink)
-                integrationBadge("LIGHT", integrations.lightOutput)
-                Button {
-                    actions.setAbletonLinkEnabled(!integrations.abletonLinkEnabled)
-                } label: {
-                    HStack(spacing: 4) {
-                        Circle()
-                            .fill(healthColor(integrations.abletonLink))
-                            .frame(width: 7, height: 7)
-                        Text(linkLabel(integrations))
-                    }
-                    .font(LumiTypography.technical.weight(.semibold))
-                    .frame(minHeight: isLandscape ? 34 : 44)
+        let integrations = visibleIntegrations
+        HStack(spacing: isLandscape ? 7 : LumiSpacing.small) {
+            integrationBadge("PDL", integrations.proDJLink)
+            integrationBadge("LIGHT", integrations.lightOutput)
+            Button {
+                actions.setAbletonLinkEnabled(!integrations.abletonLinkEnabled)
+            } label: {
+                HStack(spacing: 4) {
+                    Circle()
+                        .fill(healthColor(integrations.abletonLink))
+                        .frame(width: 7, height: 7)
+                    Text(linkLabel(integrations))
                 }
-                .buttonStyle(.plain)
-                .disabled(!model.controlsEnabled)
+                .font(LumiTypography.technical.weight(.semibold))
+                .frame(minHeight: isLandscape ? 34 : 44)
             }
+            .buttonStyle(.plain)
+            .disabled(!model.controlsEnabled)
         }
+    }
+
+    private var visibleIntegrations: RemoteIntegrationStatus {
+        guard case .connected = model.connectionPhase,
+              let integrations = model.projection?.integrations else {
+            return RemoteIntegrationStatus(
+                proDJLink: .unavailable,
+                lightOutput: .unavailable,
+                abletonLink: .unavailable,
+                abletonLinkEnabled: false,
+                abletonLinkBPMMilli: nil,
+                timingOffsetMillis: model.projection?.integrations.timingOffsetMillis ?? 0,
+                pendingTimingOffsetMillis: nil
+            )
+        }
+        return integrations
     }
 
     private func operationControls(compact: Bool) -> some View {
@@ -603,7 +618,10 @@ private struct RemotePlayerSurface: View {
 
     private var baseVisibleBars: Double {
         let totalBars = max(1, Double(player.track.durationBeats) / 4)
-        let automatic = isMaster ? min(40, totalBars) : totalBars
+        let automatic = RemoteWaveformViewportMath.automaticVisibleBars(
+            isMaster: isMaster,
+            totalBars: totalBars
+        )
         return manualZoomBars ?? automatic
     }
 
@@ -621,7 +639,12 @@ private struct RemotePlayerSurface: View {
         )
         let translated = -Double(dragTranslation) * visible / 320
         let proposed = (inspectionStartBeat ?? baseStart) + translated
-        let start = clampedStart(proposed, visibleBeats: visible, totalBeats: total)
+        let followsLive = isMaster
+            && inspectionStartBeat == nil
+            && abs(dragTranslation) < 0.001
+        let start = followsLive
+            ? proposed
+            : clampedStart(proposed, visibleBeats: visible, totalBeats: total)
         let playheadFraction = isMaster
             ? (visualBeat - start) / visible
             : nil
@@ -678,10 +701,12 @@ private struct RemotePlayerSurface: View {
         visibleBeats: Double,
         totalBeats: Double
     ) -> Double {
-        let proposed = isMaster
-            ? currentBeat - visibleBeats * 0.24
-            : (totalBeats - visibleBeats) / 2
-        return clampedStart(proposed, visibleBeats: visibleBeats, totalBeats: totalBeats)
+        RemoteWaveformViewportMath.automaticStartBeat(
+            currentBeat: currentBeat,
+            visibleBeats: visibleBeats,
+            totalBeats: totalBeats,
+            isMaster: isMaster
+        )
     }
 
     private func clampedStart(
@@ -748,11 +773,11 @@ private struct RemoteWaveform: View {
         Canvas { context, size in
             let points = player.track.waveform
             guard !points.isEmpty else { return }
-            let visibleCount = max(1, min(points.count, Int(ceil(size.width))))
-            let columnWidth = size.width / CGFloat(visibleCount)
+            let visibleCount = max(1, Int(ceil(size.width)))
             for column in 0 ..< visibleCount {
                 let fraction = Double(column) / Double(max(1, visibleCount - 1))
                 let beat = viewport.startBeat + fraction * viewport.visibleBeats
+                guard beat >= 0, beat <= viewport.totalBeats else { continue }
                 let waveformFraction: Double
                 if let beatGrid = player.track.beatGrid {
                     let time = timeMillisFor(beat: beat, in: player.track)
@@ -764,19 +789,17 @@ private struct RemoteWaveform: View {
                     points: points,
                     trackProgress: waveformFraction
                 ) else { continue }
-                let height = max(2, CGFloat(sample.amplitude) * size.height * 0.86)
-                let rect = CGRect(
-                    x: CGFloat(column) * columnWidth,
-                    y: (size.height - height) / 2,
-                    width: max(1, columnWidth),
-                    height: height
-                )
+                let amplitude = CGFloat(sample.amplitude) * size.height * 0.43
+                let x = CGFloat(column) + 0.5
+                var line = Path()
+                line.move(to: CGPoint(x: x, y: size.height / 2 - amplitude))
+                line.addLine(to: CGPoint(x: x, y: size.height / 2 + amplitude))
                 let color = Color(
                     red: sample.red,
                     green: sample.green,
                     blue: sample.blue
                 ).opacity(0.98)
-                context.fill(Path(rect), with: .color(color))
+                context.stroke(line, with: .color(color), lineWidth: 1)
             }
             drawBeatgrid(context: context, size: size)
             if isMaster, let fraction = viewport.playheadFraction,
@@ -1370,8 +1393,8 @@ enum RemoteWaveformSampling {
         points: [RemoteWaveformPoint],
         trackProgress: Double
     ) -> LumiRGBWaveformSample? {
-        guard !points.isEmpty else { return nil }
-        let progress = min(1, max(0, trackProgress))
+        guard !points.isEmpty, (0 ... 1).contains(trackProgress) else { return nil }
+        let progress = trackProgress
         let position = progress * Double(max(0, points.count - 1))
         let lower = Int(position.rounded(.down))
         let upper = min(points.count - 1, lower + 1)
@@ -1390,6 +1413,34 @@ enum RemoteWaveformSampling {
 }
 
 enum RemoteWaveformViewportMath {
+    static let defaultLiveVisibleBars = 40.0
+    static let livePlayheadFraction = 0.22
+
+    static func automaticVisibleBars(
+        isMaster: Bool,
+        totalBars: Double
+    ) -> Double {
+        let safeTotal = max(1, totalBars)
+        return isMaster ? min(defaultLiveVisibleBars, safeTotal) : safeTotal
+    }
+
+    static func automaticStartBeat(
+        currentBeat: Double,
+        visibleBeats: Double,
+        totalBeats: Double,
+        isMaster: Bool
+    ) -> Double {
+        guard isMaster else {
+            return min(
+                max(0, (totalBeats - visibleBeats) / 2),
+                max(0, totalBeats - min(visibleBeats, totalBeats))
+            )
+        }
+        // Live follow deliberately permits negative and beyond-track viewport
+        // bounds. The empty area renders black and keeps the playhead fixed.
+        return currentBeat - visibleBeats * livePlayheadFraction
+    }
+
     static func committedVisibleBars(
         baseVisibleBars: Double,
         magnification: Double,

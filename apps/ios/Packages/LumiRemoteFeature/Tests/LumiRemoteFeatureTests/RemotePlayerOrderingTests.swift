@@ -105,6 +105,39 @@ func completedPinchAppliesExactlyOnceAndStaysInsideTheTrack() {
 }
 
 @Test
+func liveViewportKeepsOneZoomLevelAndFixedPlayheadAtTrackBoundaries() {
+    let portraitBars = RemoteWaveformViewportMath.automaticVisibleBars(
+        isMaster: true,
+        totalBars: 188
+    )
+    let landscapeBars = RemoteWaveformViewportMath.automaticVisibleBars(
+        isMaster: true,
+        totalBars: 188
+    )
+    #expect(portraitBars == 40)
+    #expect(landscapeBars == portraitBars)
+
+    let visibleBeats = portraitBars * 4
+    for beat in [0.0, 4.0, 751.0, 752.0] {
+        let start = RemoteWaveformViewportMath.automaticStartBeat(
+            currentBeat: beat,
+            visibleBeats: visibleBeats,
+            totalBeats: 752,
+            isMaster: true
+        )
+        #expect(abs((beat - start) / visibleBeats - 0.22) < 0.000_1)
+    }
+}
+
+@Test
+func waveformSamplingLeavesOutOfTrackLeadSpaceEmpty() {
+    let points = [RemoteWaveformPoint(low: 0, mid: 0, high: 255)]
+
+    #expect(RemoteWaveformSampling.sample(points: points, trackProgress: -0.01) == nil)
+    #expect(RemoteWaveformSampling.sample(points: points, trackProgress: 1.01) == nil)
+}
+
+@Test
 func playingTransportInterpolatesSmoothlyButNeverRunsAwayWhenStale() {
     let player = RemotePlayer(
         playerNumber: 1,

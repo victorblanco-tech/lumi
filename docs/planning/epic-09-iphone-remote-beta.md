@@ -33,7 +33,7 @@ Excluded from 0.6.0:
 ADR-0040 is the accepted architecture authority. The accepted visual contract is
 recorded in `docs/design/iphone-remote/README.md`.
 
-## Current evidence (`0.6.0-dev-8` / Remote `0.1.0-dev-7`)
+## Current evidence (`0.6.0-dev-9` / Remote `0.1.0-dev-8`)
 
 - the independent iOS app target builds for the generic iOS Simulator;
 - portrait Master-first and landscape side-by-side Live compositions use the
@@ -51,6 +51,9 @@ recorded in `docs/design/iphone-remote/README.md`.
 - the running phrase/AutoLoop uses Lumi's red live emphasis and exactly one
   upcoming phrase/AutoLoop uses the blue `NEXT` emphasis; both follow the same
   interpolated transport position as the fixed waveform playhead;
+- the Master playhead remains at 22% for the complete track on macOS and
+  iPhone, using black pre-roll/post-roll at the boundaries; iPhone portrait
+  and landscape both retain the same 40-bar Live zoom;
 - the scoped Remote v1 contract is shared through repository fixtures and has
   matching Rust/Swift decoding tests;
 - per-client delivery sequencing remains contiguous even when visual transport
@@ -138,6 +141,8 @@ The iPhone target contains no engine process supervision, USB or local audio.
   master handover.
 - Operation state, Ableton Link, timing offset and allowed future-plan edits are
   accepted exactly once or fail visibly on a revision conflict.
+- PDL, Light Output and Link health stay visible during discovery and reconnect
+  without presenting stale status as healthy.
 - Disconnect, app suspension, Wi-Fi change and gateway restart queue no command
   and do not alter the running show.
 - A gateway flood/slow-client test causes no missed or late AutoLoop and no

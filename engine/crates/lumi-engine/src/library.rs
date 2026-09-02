@@ -373,8 +373,22 @@ impl LibraryPlanContext {
     #[must_use]
     pub fn waveform_preview_json(&self) -> Value {
         let points = deck_waveform_preview_points(&self.waveform, MAX_DECK_WAVEFORM_PREVIEW_POINTS);
+        Self::waveform_preview_value("localLibrary", &points)
+    }
+
+    /// Returns the detailed, still bounded waveform used by the Remote static
+    /// projection. Remote transport anchors are published separately, so this
+    /// larger asset is sent only when the track/plan projection changes and
+    /// never enters the realtime Pro DJ Link or lighting lanes.
+    #[must_use]
+    pub fn remote_waveform_preview_json(&self) -> Value {
+        let points = deck_waveform_preview_points(&self.waveform, MAX_DECK_WAVEFORM_DETAIL_POINTS);
+        Self::waveform_preview_value("localLibraryDetail", &points)
+    }
+
+    fn waveform_preview_value(source: &str, points: &[[u8; 3]]) -> Value {
         json!({
-            "source": "localLibrary",
+            "source": source,
             "style": "rgb",
             "points": points.iter().map(|point| json!({
                 // Keep the bounded snapshot at the same 8-bit RGB scale as

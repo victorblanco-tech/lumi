@@ -67,6 +67,24 @@ public struct RemoteIntegrationStatus: Codable, Equatable, Sendable {
     public let timingOffsetMillis: Int
     public let pendingTimingOffsetMillis: Int?
 
+    public init(
+        proDJLink: RemoteIntegrationHealth,
+        lightOutput: RemoteIntegrationHealth,
+        abletonLink: RemoteIntegrationHealth,
+        abletonLinkEnabled: Bool,
+        abletonLinkBPMMilli: UInt64?,
+        timingOffsetMillis: Int,
+        pendingTimingOffsetMillis: Int?
+    ) {
+        self.proDJLink = proDJLink
+        self.lightOutput = lightOutput
+        self.abletonLink = abletonLink
+        self.abletonLinkEnabled = abletonLinkEnabled
+        self.abletonLinkBPMMilli = abletonLinkBPMMilli
+        self.timingOffsetMillis = timingOffsetMillis
+        self.pendingTimingOffsetMillis = pendingTimingOffsetMillis
+    }
+
     enum CodingKeys: String, CodingKey {
         case proDJLink = "proDjLink"
         case lightOutput
@@ -166,6 +184,43 @@ public struct RemoteWaveformPoint: Codable, Equatable, Sendable {
     public let low: UInt8
     public let mid: UInt8
     public let high: UInt8
+}
+
+extension RemoteWaveformPoint {
+    private enum CodingKeys: String, CodingKey {
+        case low
+        case mid
+        case high
+    }
+
+    public init(from decoder: Decoder) throws {
+        let single = try decoder.singleValueContainer()
+        if let packed = try? single.decode(String.self) {
+            guard packed.utf8.count == 6,
+                  let low = UInt8(packed.prefix(2), radix: 16),
+                  let mid = UInt8(packed.dropFirst(2).prefix(2), radix: 16),
+                  let high = UInt8(packed.suffix(2), radix: 16) else {
+                throw DecodingError.dataCorruptedError(
+                    in: single,
+                    debugDescription: "Packed waveform points require exactly six hexadecimal characters."
+                )
+            }
+            self.low = low
+            self.mid = mid
+            self.high = high
+            return
+        }
+
+        let keyed = try decoder.container(keyedBy: CodingKeys.self)
+        low = try keyed.decode(UInt8.self, forKey: .low)
+        mid = try keyed.decode(UInt8.self, forKey: .mid)
+        high = try keyed.decode(UInt8.self, forKey: .high)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var single = encoder.singleValueContainer()
+        try single.encode(String(format: "%02x%02x%02x", low, mid, high))
+    }
 }
 
 public struct RemoteHotCue: Codable, Equatable, Identifiable, Sendable {

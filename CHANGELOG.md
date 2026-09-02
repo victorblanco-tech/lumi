@@ -1,5 +1,29 @@
 # Changelog
 
+## 0.6.0-dev-9 / Lumi Remote 0.1.0-dev-8 - 2026-09-02
+
+### Fixed
+
+- Keeps the Master playhead at the same 22% Live position for the complete
+  track on macOS and iPhone, including the first and last bars.
+- Renders empty pre-roll and post-roll as black instead of moving the playhead
+  or stretching the first/last waveform sample.
+- Makes 40 visible bars one tested iPhone Live contract in both portrait and
+  landscape; rotation changes the layout, not the musical zoom level.
+- Keeps the PDL, LIGHT and LINK health indicators in the Remote header during
+  discovery, reconnect and unavailable states, using neutral unavailable
+  status instead of removing the indicators.
+- Sends the complete 16,384-point RGB waveform losslessly in a compact static
+  track projection and renders it with the same normalized line treatment as
+  macOS; frequent transport anchors stay small and independent.
+
+### Tests
+
+- Covers fixed-playhead behavior at track start, normal playback and track end
+  in both Live clients, plus out-of-track waveform sampling.
+- Verifies two complete lossless Player waveforms fit the 512 KiB Remote frame
+  and do not enlarge desktop polling snapshots or realtime transport updates.
+
 ## Lumi Remote 0.1.0-dev-7 - 2026-09-02
 
 ### Changed

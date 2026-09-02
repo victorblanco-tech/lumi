@@ -1,4 +1,4 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 use serde_json::{Map, Value};
 use thiserror::Error;
 
@@ -99,12 +99,73 @@ pub struct RemoteBeatGrid {
     pub times_millis: Vec<u64>,
 }
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RemoteWaveformPoint {
     pub low: u8,
     pub mid: u8,
     pub high: u8,
+}
+
+// Waveforms are immutable track assets and can contain 16,384 RGB points per
+// player. Encoding each point as a JSON object would exceed the Remote's
+// bounded frame. Six hexadecimal characters retain the exact three bytes in
+// roughly a quarter of the space. The decoder also accepts the original object
+// form so older fixtures and transition builds remain readable.
+impl Serialize for RemoteWaveformPoint {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_str(&format!(
+            "{:02x}{:02x}{:02x}",
+            self.low, self.mid, self.high
+        ))
+    }
+}
+
+impl<'de> Deserialize<'de> for RemoteWaveformPoint {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Wire {
+            Packed(String),
+            Expanded { low: u8, mid: u8, high: u8 },
+        }
+
+        match Wire::deserialize(deserializer)? {
+            Wire::Expanded { low, mid, high } => Ok(Self { low, mid, high }),
+            Wire::Packed(value) => {
+                let bytes = value.as_bytes();
+                if bytes.len() != 6 {
+                    return Err(D::Error::custom(
+                        "packed Remote waveform point must contain six hexadecimal characters",
+                    ));
+                }
+                let decode = |offset| {
+                    let high = hex_nibble(bytes[offset])?;
+                    let low = hex_nibble(bytes[offset + 1])?;
+                    Some((high << 4) | low)
+                };
+                Ok(Self {
+                    low: decode(0).ok_or_else(|| D::Error::custom("invalid waveform hex"))?,
+                    mid: decode(2).ok_or_else(|| D::Error::custom("invalid waveform hex"))?,
+                    high: decode(4).ok_or_else(|| D::Error::custom("invalid waveform hex"))?,
+                })
+            }
+        }
+    }
+}
+
+const fn hex_nibble(byte: u8) -> Option<u8> {
+    match byte {
+        b'0'..=b'9' => Some(byte - b'0'),
+        b'a'..=b'f' => Some(byte - b'a' + 10),
+        b'A'..=b'F' => Some(byte - b'A' + 10),
+        _ => None,
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -789,9 +850,12 @@ pub enum ProjectionError {
 
 #[cfg(test)]
 mod tests {
+    use crate::{MAX_REMOTE_FRAME_BYTES, REMOTE_PROTOCOL_VERSION, RemoteFrame, RemoteFrameKind};
+
     use super::{
-        IntegrationHealth, OperationState, ProjectionError, RemoteIntegrationStatus,
-        RemoteLiveProjection, RemotePlayer, RemoteTrack, RemoteTransportAnchor,
+        IntegrationHealth, MAX_REMOTE_WAVEFORM_POINTS, OperationState, ProjectionError,
+        RemoteIntegrationStatus, RemoteLiveProjection, RemotePlayer, RemoteTrack,
+        RemoteTransportAnchor, RemoteWaveformPoint,
     };
 
     fn projection() -> RemoteLiveProjection {
@@ -846,6 +910,59 @@ mod tests {
     #[test]
     fn accepts_a_small_live_only_projection() {
         assert_eq!(projection().validate(), Ok(()));
+    }
+
+    #[test]
+    fn waveform_points_are_lossless_compact_and_legacy_readable()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let point = RemoteWaveformPoint {
+            low: 0xff,
+            mid: 0x60,
+            high: 0x04,
+        };
+        assert_eq!(serde_json::to_string(&point)?, r#""ff6004""#);
+        assert_eq!(
+            serde_json::from_str::<RemoteWaveformPoint>(r#""ff6004""#)?,
+            point
+        );
+        assert_eq!(
+            serde_json::from_str::<RemoteWaveformPoint>(r#"{"low":255,"mid":96,"high":4}"#,)?,
+            point
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn two_lossless_waveforms_fit_the_bounded_remote_frame()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut projection = projection();
+        let points = vec![
+            RemoteWaveformPoint {
+                low: 255,
+                mid: 255,
+                high: 255,
+            };
+            MAX_REMOTE_WAVEFORM_POINTS
+        ];
+        projection.players[0].track.waveform = points.clone();
+        let mut second = projection.players[0].clone();
+        second.player_number = 2;
+        second.track_load_id = 100;
+        second.transport.track_load_id = 100;
+        second.track.waveform = points;
+        projection.players.push(second);
+        projection.validate()?;
+
+        let frame = RemoteFrame {
+            protocol_version: REMOTE_PROTOCOL_VERSION,
+            frame_kind: RemoteFrameKind::Projection,
+            sequence: 1,
+            correlation_id: None,
+            payload: serde_json::to_value(projection)?,
+        };
+        let encoded = frame.encode()?;
+        assert!(encoded.len() < MAX_REMOTE_FRAME_BYTES);
+        Ok(())
     }
 
     #[test]

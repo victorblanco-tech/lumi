@@ -3,6 +3,24 @@ import Testing
 
 @testable import LumiRemoteClient
 
+@Test("Remote waveform RGB points use the compact lossless wire form")
+func compactRemoteWaveformPointRoundTripsAndReadsLegacyObjects() throws {
+    let packed = try JSONDecoder().decode(
+        RemoteWaveformPoint.self,
+        from: Data(#""ff6004""#.utf8)
+    )
+    #expect(packed.low == 255)
+    #expect(packed.mid == 96)
+    #expect(packed.high == 4)
+    #expect(String(decoding: try JSONEncoder().encode(packed), as: UTF8.self) == #""ff6004""#)
+
+    let legacy = try JSONDecoder().decode(
+        RemoteWaveformPoint.self,
+        from: Data(#"{"low":255,"mid":96,"high":4}"#.utf8)
+    )
+    #expect(legacy == packed)
+}
+
 @MainActor
 @Test
 func commandEncodingMatchesTheRustTaggedAllowlist() throws {

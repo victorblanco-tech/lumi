@@ -84,7 +84,9 @@ Each loaded card shows:
 
 Pinch zoom and horizontal inspection are visual only. The phone never seeks a
 physical Player. A `Follow Live` action returns an inspected Live card to its
-fixed-playhead viewport.
+fixed-playhead viewport. The automatic Master view always shows 40 bars in both
+orientations and keeps the playhead at 22%; black lead space at track boundaries
+prevents the marker from moving.
 
 ## Landscape composition
 

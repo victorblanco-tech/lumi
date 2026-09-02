@@ -585,7 +585,7 @@ impl RemoteProjectionPublisher {
         let static_key = remote_static_key(runtime);
         if force || self.last_static_key.as_ref() != Some(&static_key) {
             let observed_at = unix_time_millis();
-            let envelope = snapshot_envelope_without_library(
+            let envelope = snapshot_envelope_for_remote(
                 runtime,
                 self.next_projection_revision,
                 "remote-projection",
@@ -4323,7 +4323,7 @@ fn snapshot_envelope(
     sequence: u64,
     correlation_id: &str,
 ) -> Result<MessageEnvelope, EngineError> {
-    snapshot_envelope_internal(runtime, sequence, correlation_id, true)
+    snapshot_envelope_internal(runtime, sequence, correlation_id, true, false)
 }
 
 fn snapshot_envelope_without_library(
@@ -4331,7 +4331,15 @@ fn snapshot_envelope_without_library(
     sequence: u64,
     correlation_id: &str,
 ) -> Result<MessageEnvelope, EngineError> {
-    snapshot_envelope_internal(runtime, sequence, correlation_id, false)
+    snapshot_envelope_internal(runtime, sequence, correlation_id, false, false)
+}
+
+fn snapshot_envelope_for_remote(
+    runtime: &EngineRuntime,
+    sequence: u64,
+    correlation_id: &str,
+) -> Result<MessageEnvelope, EngineError> {
+    snapshot_envelope_internal(runtime, sequence, correlation_id, false, true)
 }
 
 fn snapshot_envelope_internal(
@@ -4339,6 +4347,7 @@ fn snapshot_envelope_internal(
     sequence: u64,
     correlation_id: &str,
     include_library: bool,
+    include_remote_waveform_detail: bool,
 ) -> Result<MessageEnvelope, EngineError> {
     let state = runtime.state.state();
     let mut payload = Map::new();
@@ -4648,7 +4657,13 @@ fn snapshot_envelope_internal(
                         Value::Null
                     }
                 },
-                LibraryPlanContext::waveform_preview_json,
+                |context| {
+                    if include_remote_waveform_detail {
+                        context.remote_waveform_preview_json()
+                    } else {
+                        context.waveform_preview_json()
+                    }
+                },
             );
             let local_playback = if runtime.deck_source_mode == DeckSourceMode::LocalPlayback {
                 library_context.map_or(Value::Null, LibraryPlanContext::local_playback_json)
