@@ -1,6 +1,6 @@
 # Epic 9 – Native iPhone Remote Beta
 
-Status: **Proposed for product validation** | Target: **0.6.0** | Priority: **P0/P1**
+Status: **In development** | Target: **0.6.0** | Priority: **P0/P1**
 
 ## Outcome
 
@@ -30,8 +30,28 @@ Excluded from 0.6.0:
 - cloud relay, remote internet access, watchOS and iPad-specific layouts;
 - editing phrase boundaries or Phrase Roles during a show.
 
-ADR-0040 is the proposed architecture authority. The accepted visual contract is
-recorded in `docs/design/iphone-remote/README.md` after product validation.
+ADR-0040 is the accepted architecture authority. The accepted visual contract is
+recorded in `docs/design/iphone-remote/README.md`.
+
+## Current evidence (`0.6.0-dev-3` / Remote `0.1.0-dev-1`)
+
+- the independent iOS app target builds for the generic iOS Simulator;
+- portrait Master-first and landscape side-by-side Live compositions use the
+  shared Lumi palette, RGB waveform data, Hot Cues, beatgrid, phrases and
+  proportional Light Plans;
+- the scoped Remote v1 contract is shared through repository fixtures and has
+  matching Rust/Swift decoding tests;
+- per-client delivery sequencing remains contiguous even when visual transport
+  anchors are coalesced;
+- command construction is revision-bound and the gateway rejects duplicate
+  mutating command IDs after the first admission;
+- release-channel Bonjour discovery, QR invitation validation and Keychain
+  credential storage compile without exposing engine credentials;
+- the gateway executable still fails closed and does not bind the LAN.
+
+Pinned TLS, the independently published engine projection feed, Mac pairing UI,
+live command execution and physical-iPhone acceptance remain open. No current
+Mac live-performance behavior is changed by this foundation.
 
 ## Delivery stories
 
@@ -83,4 +103,3 @@ personally provisioned physical iPhone for real Bonjour, Local Network permissio
 pairing and lifecycle tests. TestFlight and external beta distribution are a
 separate gate requiring Apple Developer Program membership and App Store Connect
 configuration.
-

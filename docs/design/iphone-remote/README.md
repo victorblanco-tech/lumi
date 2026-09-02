@@ -1,6 +1,6 @@
 # Lumi Remote for iPhone
 
-Status: **Proposed for product validation**  
+Status: **Accepted design; implementation in progress**
 Target: **0.6.0 – iPhone Remote Beta**
 
 ## Product purpose
@@ -142,4 +142,3 @@ two phones from issuing conflicting booth actions.
 - an optional keep-awake setting applies only while the Remote Live screen is
   foregrounded;
 - no essential action depends on a hover gesture or tiny waveform marker.
-

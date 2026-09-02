@@ -6,16 +6,24 @@ script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 repository_root="$(dirname "$script_dir")"
 distribution_root="$repository_root/build/prolink-simulator-app"
 app_name="Lumi Pro DJ Link Simulator"
-release_version="$(tr -d '[:space:]' < "$repository_root/VERSION")"
+release_version="$(tr -d '[:space:]' < "$repository_root/tools/prolink-simulator/VERSION")"
 marketing_version="${release_version%%-*}"
-build_number="${release_version##*-}"
+build_number="1"
 
-if [[ ! "$marketing_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ || ! "$build_number" =~ ^[0-9]+$ ]]; then
-  echo "ERROR: VERSION must use the Lumi development format x.y.z-dev-N." >&2
+if [[ "$release_version" =~ -(dev|rc)-([0-9]+)$ ]]; then
+  build_number="${BASH_REMATCH[2]}"
+fi
+if [[ ! "$marketing_version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+  echo "ERROR: tools/prolink-simulator/VERSION must use x.y.z, x.y.z-dev-N or x.y.z-rc-N." >&2
   exit 1
 fi
 
-temurin_cache="$repository_root/build/package-toolchains/temurin-21-macos-aarch64"
+case "$(uname -m)" in
+  arm64) temurin_architecture="aarch64" ;;
+  x86_64) temurin_architecture="x64" ;;
+  *) echo "ERROR: unsupported simulator packaging architecture: $(uname -m)" >&2; exit 1 ;;
+esac
+temurin_cache="$repository_root/build/package-toolchains/temurin-21-macos-${temurin_architecture}"
 packaging_java_home="${SIMULATOR_PACKAGING_JAVA_HOME:-$temurin_cache/Contents/Home}"
 
 if [[ ! -x "$packaging_java_home/bin/jpackage" ]]; then
@@ -24,7 +32,7 @@ if [[ ! -x "$packaging_java_home/bin/jpackage" ]]; then
   metadata="$download_root/metadata.json"
   archive="$download_root/temurin.tar.gz"
   curl --fail --location --silent --show-error \
-    'https://api.adoptium.net/v3/assets/latest/21/hotspot?architecture=aarch64&heap_size=normal&image_type=jdk&jvm_impl=hotspot&os=mac&project=jdk&vendor=eclipse' \
+    "https://api.adoptium.net/v3/assets/latest/21/hotspot?architecture=${temurin_architecture}&heap_size=normal&image_type=jdk&jvm_impl=hotspot&os=mac&project=jdk&vendor=eclipse" \
     --output "$metadata"
   download_url="$(jq -er '.[0].binary.package.link' "$metadata")"
   expected_checksum="$(jq -er '.[0].binary.package.checksum' "$metadata")"
@@ -74,7 +82,8 @@ xcrun actool "$repository_root/apps/macos/Lumi/Resources/Assets.xcassets" \
   --app-icon AppIcon \
   --output-partial-info-plist "$icon_output/Info.plist" >/dev/null
 
-dmg="$distribution_root/Lumi-Pro-DJ-Link-Simulator-${release_version}-macOS-arm64.dmg"
+package_architecture="$(uname -m)"
+dmg="$distribution_root/Lumi-Pro-DJ-Link-Simulator-${release_version}-macOS-${package_architecture}.dmg"
 rm -f "$dmg"
 app_image_root="$staging_root/app-image"
 # jpackage rejects pre-1.0 versions whose first component is zero. The

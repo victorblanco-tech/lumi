@@ -1,6 +1,6 @@
 # Story E9-03: Native iPhone Live presentation
 
-- Status: **Planned after design acceptance**
+- Status: **In progress (native target and Live surface compile)**
 - Priority: **P1 product**
 - Target: `0.6.0-dev`
 - Components: Shared Live Presentation, iOS SwiftUI
@@ -33,3 +33,20 @@ iPhone UI that matches Lumi's macOS visual language.
 - no Local Playback, Library or developer surface is reachable in the product
   target.
 
+## Implemented evidence
+
+- independent native SwiftUI app target with Dev/RC/Production identities;
+- portrait Master-first ordering without renaming physical Players;
+- landscape side-by-side composition;
+- detected Player model, track color, title/artist, BPM/key/remaining time;
+- RGB waveform viewport with fixed Master playhead, beatgrid, Hot Cue letters,
+  pinch zoom, horizontal inspection and `Follow Live`;
+- aligned phrase and proportional Light Plan bands;
+- compact integration/offset/operation controls and operation-state styling;
+- explicit discovery, pairing, unavailable and version-mismatch empty states.
+
+## Remaining gate
+
+Complete deterministic visual fixtures across supported iPhone sizes, Dynamic
+Type and VoiceOver; refine the pairing presentation; then perform actual-device
+gesture, rotation, keep-awake and booth-legibility acceptance.

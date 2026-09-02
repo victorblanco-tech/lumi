@@ -45,6 +45,7 @@ Decision Records (ADR's) die de belangrijkste besluiten vastleggen.
 - [ADR-0036: Phrase Role-owned visual identity](adr/0036-phrase-role-owned-visual-identity.md)
 - [ADR-0039: Bounded control plane and authoritative local identities](adr/0039-bounded-control-plane-and-authoritative-local-identities.md)
 - [ADR-0040: Isolated local Remote Gateway and scoped iPhone protocol](adr/0040-isolated-local-remote-gateway.md)
+- [ADR-0041: Independent product releases inside the Lumi monorepo](adr/0041-independent-monorepo-product-releases.md)
 
 Release- en deploymentmanagement staat in [`docs/release`](../release/README.md).
 

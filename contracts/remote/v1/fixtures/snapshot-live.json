@@ -1,0 +1,121 @@
+{
+  "protocolVersion": 1,
+  "frameKind": "snapshot",
+  "sequence": 1,
+  "correlationId": null,
+  "payload": {
+    "projectionRevision": 7,
+    "stateRevision": 21,
+    "engineVersion": "0.6.0-dev-3",
+    "operationState": "armed",
+    "leaderPlayerNumber": 1,
+    "integrations": {
+      "proDjLink": "ready",
+      "lightOutput": "ready",
+      "abletonLink": "ready",
+      "abletonLinkEnabled": true,
+      "abletonLinkBpmMilli": 140000,
+      "timingOffsetMillis": -20,
+      "pendingTimingOffsetMillis": null
+    },
+    "players": [
+      {
+        "playerNumber": 1,
+        "hardwareModel": "CDJ-1500X",
+        "trackLoadId": 99,
+        "transport": {
+          "trackLoadId": 99,
+          "beat": 65,
+          "positionMillis": 27428,
+          "effectiveBpmMilli": 140000,
+          "playing": true,
+          "discontinuityRevision": 3,
+          "observedAtUnixMillis": 1788332400000
+        },
+        "track": {
+          "trackId": 42,
+          "title": "Example Track",
+          "artist": "Example Artist",
+          "originalBpmMilli": 140000,
+          "colorRgb": 16726058,
+          "key": "A minor",
+          "durationBeats": 512,
+          "beatGrid": {
+            "beatsPerBar": 4,
+            "durationMillis": 219428,
+            "timesMillis": [0, 428, 857, 1285, 1714]
+          },
+          "waveform": [
+            { "low": 240, "mid": 30, "high": 70 },
+            { "low": 255, "mid": 75, "high": 135 },
+            { "low": 45, "mid": 180, "high": 255 }
+          ],
+          "hotCues": [
+            { "index": 1, "timeMillis": 27428, "loopEndMillis": null, "colorRgb": 16725290 }
+          ],
+          "phrases": [
+            {
+              "index": 0,
+              "startBeat": 1,
+              "endBeat": 65,
+              "kind": "intro",
+              "roleId": "intro",
+              "roleName": "Intro"
+            },
+            {
+              "index": 1,
+              "startBeat": 65,
+              "endBeat": 129,
+              "kind": "buildup",
+              "roleId": "buildup",
+              "roleName": "Buildup"
+            }
+          ]
+        }
+      }
+    ],
+    "livePlan": {
+      "planId": "plan-99",
+      "playerNumber": 1,
+      "trackLoadId": 99,
+      "revision": 4,
+      "themeId": 2,
+      "themeName": "Green Pink",
+      "cues": [
+        {
+          "phraseIndex": 0,
+          "startBeat": 1,
+          "endBeat": 65,
+          "locked": true,
+          "themeId": 2,
+          "themeName": "Green Pink",
+          "autoloopNumber": 6,
+          "autoloopName": "Intro Green Pink",
+          "staticLookName": null,
+          "availableAutoloops": [
+            { "number": 6, "name": "Intro Green Pink", "bankNumber": 2 }
+          ]
+        },
+        {
+          "phraseIndex": 1,
+          "startBeat": 65,
+          "endBeat": 129,
+          "locked": false,
+          "themeId": 2,
+          "themeName": "Green Pink",
+          "autoloopNumber": 17,
+          "autoloopName": "Buildup Green Pink",
+          "staticLookName": "Moving Heads OFF",
+          "availableAutoloops": [
+            { "number": 17, "name": "Buildup Green Pink", "bankNumber": 2 }
+          ]
+        }
+      ]
+    },
+    "nextPlan": null,
+    "themeOptions": [
+      { "id": 1, "name": "Blue Pink" },
+      { "id": 2, "name": "Green Pink" }
+    ]
+  }
+}

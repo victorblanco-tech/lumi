@@ -107,15 +107,17 @@ jobs:
             apps/macos/Packages/LumiLiveWorkspace/.build
             apps/macos/Packages/LumiLibraryWorkspace/.build
             apps/macos/Packages/LumiEngineClient/.build
+            apps/ios/Packages/LumiRemoteClient/.build
+            apps/ios/Packages/LumiRemoteFeature/.build
             bridges/prolink/target
             build/carabiner-runtime
             build/DerivedData
             build/engine-service-target
             build/maven-repository
             build/prolink-bridge-runtime
-          key: apple-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'apps/macos/Lumi.xcodeproj/project.pbxproj', 'apps/macos/Packages/**/Package.swift') }}
+          key: apple-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'apps/macos/Lumi.xcodeproj/project.pbxproj', 'apps/macos/Packages/**/Package.swift', 'apps/ios/LumiRemote.xcodeproj/project.pbxproj', 'apps/ios/Packages/**/Package.swift') }}
           restore-keys: |
-            apple-v1-${{ runner.os }}-${{ runner.arch }}-
+            apple-v2-${{ runner.os }}-${{ runner.arch }}-
       - name: Prepare pinned Ableton Link runtime for a full fallback
         if: needs.classify.outputs.full == '1'
         run: |

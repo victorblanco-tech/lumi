@@ -1,6 +1,6 @@
 # ADR-0040: Isolated local Remote Gateway and scoped iPhone protocol
 
-- Status: **Proposed**
+- Status: **Accepted**
 - Date: **2026-09-02**
 - Target: **0.6.0**
 
@@ -143,4 +143,3 @@ work and provides poor backpressure behavior.
 
 Rejected because it adds latency, accounts, privacy scope and an internet
 dependency to a local booth workflow.
-

@@ -1,5 +1,8 @@
-import AppKit
 import SwiftUI
+
+#if canImport(AppKit)
+import AppKit
+#endif
 
 public enum LumiWaveformZoomAnchor: String, CaseIterable, Identifiable, Sendable {
     case mouse
@@ -130,7 +133,9 @@ public struct LumiWaveformZoomControls: View {
             } label: {
                 Image(systemName: "slider.horizontal.3")
             }
+            #if os(macOS)
             .menuStyle(.borderlessButton)
+            #endif
             .fixedSize()
             .help("Waveform mouse and trackpad settings")
             .accessibilityLabel("Waveform interaction settings")
@@ -142,6 +147,7 @@ public struct LumiWaveformZoomControls: View {
 
 /// Captures vertical wheel zoom and horizontal trackpad/mouse panning without
 /// taking pointer hit testing away from the waveform underneath it.
+#if os(macOS)
 public struct LumiWaveformInteractionMonitor: NSViewRepresentable {
     private let onScroll: @MainActor (Double) -> Void
     private let onZoom: @MainActor (_ delta: Double, _ pointerFraction: Double) -> Void
@@ -286,3 +292,4 @@ public final class LumiSpacebarMonitorView: NSView {
         return responder is NSTextField
     }
 }
+#endif

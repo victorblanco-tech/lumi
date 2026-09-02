@@ -1,0 +1,105 @@
+name: Independent product release
+
+on:
+  push:
+    tags:
+      - 'lumi-remote-v*'
+      - 'prolink-simulator-v*'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: product-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  remote:
+    name: Lumi Remote iOS validation
+    if: startsWith(github.ref_name, 'lumi-remote-v')
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - name: Validate product tag
+        run: scripts/check-product-tag.sh remote "$GITHUB_REF_NAME"
+      - name: Select release configuration
+        id: configuration
+        run: |
+          version="$(tr -d '[:space:]' < apps/ios/VERSION)"
+          case "$version" in
+            *-dev-*) configuration=Dev ;;
+            *-rc-*) configuration=RC ;;
+            *) configuration=Release ;;
+          esac
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "configuration=$configuration" >> "$GITHUB_OUTPUT"
+      - name: Test Remote packages
+        run: |
+          swift test -Xswiftc -warnings-as-errors --package-path apps/ios/Packages/LumiRemoteClient
+          swift test -Xswiftc -warnings-as-errors --package-path apps/ios/Packages/LumiRemoteFeature
+      - name: Build iOS Simulator application
+        run: |
+          xcodebuild \
+            -project apps/ios/LumiRemote.xcodeproj \
+            -scheme LumiRemote \
+            -configuration '${{ steps.configuration.outputs.configuration }}' \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/iOSReleaseDerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            GCC_TREAT_WARNINGS_AS_ERRORS=YES \
+            -quiet \
+            build
+      - name: Package validation artifact
+        run: |
+          product='build/iOSReleaseDerivedData/Build/Products/${{ steps.configuration.outputs.configuration }}-iphonesimulator'
+          app="$(find "$product" -maxdepth 1 -type d -name '*.app' -print -quit)"
+          test -n "$app"
+          archive="build/Lumi-Remote-${{ steps.configuration.outputs.version }}-iOS-Simulator.zip"
+          ditto -c -k --keepParent "$app" "$archive"
+          shasum -a 256 "$archive" > "$archive.sha256"
+      - name: Create controlled draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version='${{ steps.configuration.outputs.version }}'
+          archive="build/Lumi-Remote-$version-iOS-Simulator.zip"
+          gh release create "$GITHUB_REF_NAME" \
+            --draft \
+            --title "Lumi Remote $version" \
+            --notes "Validation build for the Lumi Remote iOS Simulator. This is not an installable physical-iPhone beta; TestFlight remains a separate signing gate." \
+            "$archive" "$archive.sha256"
+
+  simulator:
+    name: Pro DJ Link Simulator package
+    if: startsWith(github.ref_name, 'prolink-simulator-v')
+    runs-on: macos-26
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: maven
+      - name: Validate product tag
+        run: scripts/check-product-tag.sh simulator "$GITHUB_REF_NAME"
+      - name: Package self-contained simulator
+        env:
+          SIMULATOR_PACKAGING_JAVA_HOME: ${{ env.JAVA_HOME }}
+        run: |
+          scripts/package-prolink-simulator-app-local.sh
+          dmg="$(find build/prolink-simulator-app -maxdepth 1 -type f -name '*.dmg' -print -quit)"
+          test -n "$dmg"
+          shasum -a 256 "$dmg" > "$dmg.sha256"
+          echo "SIMULATOR_DMG=$dmg" >> "$GITHUB_ENV"
+      - name: Create controlled draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          version="$(tr -d '[:space:]' < tools/prolink-simulator/VERSION)"
+          gh release create "$GITHUB_REF_NAME" \
+            --draft \
+            --title "Lumi Pro DJ Link Simulator $version" \
+            --notes "Development-only self-contained macOS simulator package. Review and publish this draft manually after installation verification." \
+            "$SIMULATOR_DMG" "$SIMULATOR_DMG.sha256"

@@ -1,0 +1,233 @@
+import Foundation
+import Testing
+
+@testable import LumiRemoteClient
+
+@MainActor
+@Test
+func commandEncodingMatchesTheRustTaggedAllowlist() throws {
+    let coordinator = RemoteCommandCoordinator(controllerLeaseID: "lease-1")
+    let projection = try fixtureProjection()
+    let command = try coordinator.makeStateCommand(
+        { .setOperationState(.live, expectedStateRevision: $0) },
+        projection: projection,
+        target: "operation",
+        commandID: "command-1",
+        now: Date(timeIntervalSince1970: 1)
+    )
+    let object = try #require(
+        JSONSerialization.jsonObject(with: JSONEncoder().encode(command)) as? [String: Any]
+    )
+    let payload = try #require(object["command"] as? [String: Any])
+    #expect(payload["kind"] as? String == "setOperationState")
+    #expect(payload["operationState"] as? String == "live")
+    #expect(payload["expectedStateRevision"] as? UInt64 == 7)
+}
+
+@Test func discoveryMetadataRejectsWrongReleaseAndProtocol() throws {
+    let valid = try RemoteDiscoveryMetadata.identity(
+        serviceName: "Booth Mac",
+        textRecord: ["id": "installation-123", "pv": "1", "channel": "dev"],
+        expectedChannel: .dev
+    )
+    #expect(valid.installationID == "installation-123")
+    #expect(throws: RemoteTrustError.releaseChannelMismatch) {
+        try RemoteDiscoveryMetadata.identity(
+            serviceName: "Booth Mac",
+            textRecord: ["id": "installation-123", "pv": "1", "channel": "production"],
+            expectedChannel: .dev
+        )
+    }
+    #expect(throws: RemoteTrustError.protocolMismatch) {
+        try RemoteDiscoveryMetadata.identity(
+            serviceName: "Booth Mac",
+            textRecord: ["id": "installation-123", "pv": "9", "channel": "dev"],
+            expectedChannel: .dev
+        )
+    }
+}
+
+@Test func pairingCodeRoundTripsAndRejectsExpiredInvitation() throws {
+    let invitation = RemotePairingInvitation(
+        installationID: "installation-123",
+        invitationID: "invitation-123456",
+        invitationSecret: String(repeating: "s", count: 32),
+        certificateFingerprintSHA256: String(repeating: "a", count: 64),
+        expiresAtUnixMillis: 2_000
+    )
+    let codec = RemotePairingCodeCodec()
+    let url = try codec.encode(invitation)
+    #expect(try codec.decode(url, nowUnixMillis: 1_000) == invitation)
+    #expect(throws: RemoteTrustError.invitationExpired) {
+        try codec.decode(url, nowUnixMillis: 2_000)
+    }
+}
+
+@Test func credentialsAreBoundToInstallationAndReleaseChannel() throws {
+    let credential = RemoteDeviceCredential(
+        installationID: "installation-123",
+        deviceID: "iphone-123",
+        credential: String(repeating: "c", count: 32),
+        certificateFingerprintSHA256: String(repeating: "b", count: 64),
+        releaseChannel: .dev
+    )
+    try credential.validate(for: "installation-123", expectedChannel: .dev)
+    #expect(throws: RemoteTrustError.credentialScopeMismatch) {
+        try credential.validate(for: "other-installation", expectedChannel: .dev)
+    }
+    #expect(throws: RemoteTrustError.credentialScopeMismatch) {
+        try credential.validate(for: "installation-123", expectedChannel: .production)
+    }
+}
+
+@Test func sharedRemoteFixturesDecodeInTheSwiftClient() throws {
+    let decoder = RemoteFrameDecoder()
+    let snapshotFrame = try decoder.decodeFrame(
+        Data(contentsOf: remoteFixture("snapshot-live.json"))
+    )
+    let projection = try decoder.decodeProjection(snapshotFrame)
+    #expect(projection.players.first?.hardwareModel == "CDJ-1500X")
+    #expect(projection.livePlan?.cues.last?.staticLookName == "Moving Heads OFF")
+
+    let commandFrame = try decoder.decodeFrame(
+        Data(contentsOf: remoteFixture("command-autoloop.json"))
+    )
+    let commandData = try JSONEncoder().encode(commandFrame.payload)
+    let command = try JSONDecoder().decode(RemoteCommand.self, from: commandData)
+    #expect(command.commandID == "command-123")
+    #expect(
+        command.command == .selectAutoloopForPhrase(
+            .init(
+                planID: "plan-99",
+                trackLoadID: 99,
+                expectedPlanRevision: 4,
+                phraseIndex: 1
+            ),
+            autoloopNumber: 17
+        )
+    )
+
+    let resultFrame = try decoder.decodeFrame(
+        Data(contentsOf: remoteFixture("command-result-conflict.json"))
+    )
+    #expect(try decoder.decodeCommandResult(resultFrame).status == .conflict)
+}
+
+private func remoteFixture(_ name: String) -> URL {
+    var repository = URL(fileURLWithPath: #filePath)
+    for _ in 0 ..< 7 {
+        repository.deleteLastPathComponent()
+    }
+    return repository
+        .appendingPathComponent("contracts/remote/v1/fixtures")
+        .appendingPathComponent(name)
+}
+
+@MainActor
+@Test
+func repeatedTapCannotCreateASecondPendingMutation() throws {
+    let coordinator = RemoteCommandCoordinator(controllerLeaseID: "lease-1")
+    let projection = try fixtureProjection()
+    _ = try coordinator.makeStateCommand(
+        { .setAbletonLinkEnabled(true, expectedStateRevision: $0) },
+        projection: projection,
+        target: "ableton-link",
+        commandID: "command-1"
+    )
+    #expect(throws: RemoteCommandBuildError.duplicatePendingTarget) {
+        try coordinator.makeStateCommand(
+            { .setAbletonLinkEnabled(true, expectedStateRevision: $0) },
+            projection: projection,
+            target: "ableton-link",
+            commandID: "command-2"
+        )
+    }
+}
+
+@MainActor
+@Test
+func currentPhraseCannotBeMutated() throws {
+    let coordinator = RemoteCommandCoordinator(controllerLeaseID: "lease-1")
+    let projection = try fixtureProjection()
+    let player = try #require(projection.players.first)
+    let plan = try #require(projection.livePlan)
+    let cue = try #require(plan.cues.first)
+    #expect(throws: RemoteCommandBuildError.phraseAlreadyStarted) {
+        try coordinator.makePlanCommand(
+            plan: plan,
+            cue: cue,
+            player: player,
+            payload: { .setCueLock($0, locked: true) },
+            target: "plan-cue"
+        )
+    }
+}
+
+@Test
+func pairingInvitationRejectsAnExpiredOrInvalidFingerprint() {
+    let expired = RemotePairingInvitation(
+        installationID: "install-12345678",
+        invitationID: "invitation-123456",
+        invitationSecret: String(repeating: "s", count: 32),
+        certificateFingerprintSHA256: String(repeating: "a", count: 64),
+        expiresAtUnixMillis: 99
+    )
+    #expect(throws: RemoteTrustError.invitationExpired) {
+        try expired.validate(nowUnixMillis: 100)
+    }
+
+    let invalidFingerprint = RemotePairingInvitation(
+        installationID: "install-12345678",
+        invitationID: "invitation-123456",
+        invitationSecret: String(repeating: "s", count: 32),
+        certificateFingerprintSHA256: String(repeating: "z", count: 64),
+        expiresAtUnixMillis: 101
+    )
+    #expect(throws: RemoteTrustError.invalidCertificateFingerprint) {
+        try invalidFingerprint.validate(nowUnixMillis: 100)
+    }
+}
+
+private func fixtureProjection() throws -> RemoteLiveProjection {
+    let json = #"""
+    {
+      "projectionRevision": 8,
+      "stateRevision": 7,
+      "engineVersion": "0.6.0-dev-3",
+      "operationState": "armed",
+      "leaderPlayerNumber": 1,
+      "integrations": {
+        "proDjLink": "ready", "lightOutput": "ready", "abletonLink": "ready",
+        "abletonLinkEnabled": true, "abletonLinkBpmMilli": 140000,
+        "timingOffsetMillis": -20, "pendingTimingOffsetMillis": null
+      },
+      "players": [{
+        "playerNumber": 1, "hardwareModel": "CDJ-1500X", "trackLoadId": 9,
+        "transport": {
+          "trackLoadId": 9, "beat": 48, "positionMillis": 1000,
+          "effectiveBpmMilli": 140000, "playing": true,
+          "discontinuityRevision": 1, "observedAtUnixMillis": 1
+        },
+        "track": {
+          "trackId": 1, "title": "Example Track", "artist": "Example Artist",
+          "originalBpmMilli": 140000, "colorRgb": null, "key": "A minor",
+          "durationBeats": 512, "beatGrid": null, "waveform": [],
+          "hotCues": [], "phrases": []
+        }
+      }],
+      "livePlan": {
+        "planId": "plan-1", "playerNumber": 1, "trackLoadId": 9,
+        "revision": 3, "themeId": 2, "themeName": "Blue Pink",
+        "cues": [{
+          "phraseIndex": 0, "startBeat": 32, "endBeat": 64, "locked": false,
+          "themeId": 2, "themeName": "Blue Pink", "autoloopNumber": 1,
+          "autoloopName": "Intro", "staticLookName": null,
+          "availableAutoloops": []
+        }]
+      },
+      "nextPlan": null,
+      "themeOptions": []
+    }
+    """#
+    return try JSONDecoder().decode(RemoteLiveProjection.self, from: Data(json.utf8))
+}

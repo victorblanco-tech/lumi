@@ -69,7 +69,7 @@ else
       README.md|CHANGELOG.md|CODE_OF_CONDUCT.md|CONTRIBUTING.md|SECURITY.md|THIRD_PARTY_NOTICES.md|TRADEMARKS.md|LICENSE|docs/*|.github/ISSUE_TEMPLATE/*|.github/PULL_REQUEST_TEMPLATE.md|.github/release.yml)
         docs=1
         ;;
-      apps/macos/*|bridges/prolink/*|tools/prolink-simulator/*)
+      apps/macos/*|apps/ios/*|bridges/prolink/*|tools/prolink-simulator/*)
         apple=1
         ;;
       engine/*|contracts/*|fixtures/*|Cargo.toml|Cargo.lock|rust-toolchain.toml|rust-toolchain)

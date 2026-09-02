@@ -1,6 +1,6 @@
 # Story E9-04: Revision-safe remote booth controls
 
-- Status: **Planned**
+- Status: **In progress (command safety contract)**
 - Priority: **P0 safety / P1 product**
 - Target: `0.6.0-dev`
 - Components: iOS Remote Client, Gateway, Engine
@@ -30,3 +30,21 @@ double tap, reconnect or stale screen producing a second or incorrect mutation.
 - repeated taps, retransmission and two paired devices cannot apply a command
   more than once.
 
+## Implemented evidence
+
+- explicit booth-safe command allowlist matching Rust and Swift fixtures;
+- state, track-load and plan revision contexts;
+- bounded offset and AutoLoop validation;
+- future-phrase-only plan mutation guard;
+- single Controller lease authorization;
+- bounded gateway idempotency ledger with duplicate admission result;
+- per-target pending command suppression and disconnect cleanup on iPhone;
+- accepted, duplicate, conflict and rejected acknowledgements;
+- Start-to-Off confirmation in the native Live UI.
+
+## Remaining gate
+
+Route admitted commands through the separate gateway-to-engine command path,
+reconcile authoritative acknowledgements in the UI, add haptics and validate
+lease transfer/two-device behavior. No control is enabled before this path is
+authenticated end-to-end.

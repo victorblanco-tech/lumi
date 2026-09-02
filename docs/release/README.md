@@ -28,6 +28,7 @@ the public-repository and GitHub Pages gates.
 - [0.5.2-dev-3 supported USB ingestion only](0.5.2-dev-3-supported-usb-ingestion-only.md)
 - [0.5.2-dev-4 isolated data lane](0.5.2-dev-4-isolated-data-lane.md)
 - [0.5.2-dev-5 retired-path cleanup](0.5.2-dev-5-retired-path-cleanup.md)
+- [0.6.0-dev-3 iPhone Remote foundation](0.6.0-dev-3-iphone-remote-foundation.md)
 - [0.4.0-dev-50 isolated Ableton Link Relay](0.4.0-dev-50-isolated-link-relay.md)
 - [0.4.0-dev-51 exactly-once AutoLoop output](0.4.0-dev-51-exactly-once-autoloop-output.md)
 - [0.4.0-dev-52 SoundSwitch MIDI 1.0 compatibility](0.4.0-dev-52-soundswitch-midi-compatibility.md)
@@ -69,3 +70,8 @@ app first; each copied database must pass SQLite integrity validation.
 
 De actuele productversie staat in [`VERSION`](../../VERSION). Git-tags gebruiken
 dezelfde versie met een `v`-prefix, bijvoorbeeld `v0.1.0`.
+
+Lumi Remote en de Pro DJ Link Simulator blijven in dezelfde repository, maar
+hebben een onafhankelijke versie en releasegeschiedenis. Zie
+[ADR-0041](../architecture/adr/0041-independent-monorepo-product-releases.md)
+voor de drie version sources en tag-prefixes.

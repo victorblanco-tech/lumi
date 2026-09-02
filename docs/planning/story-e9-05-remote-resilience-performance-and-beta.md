@@ -31,3 +31,12 @@ or destabilizing the show.
 - the beta is installable on a clean physical iPhone and pairs with a clean Mac
   installation using documented steps.
 
+## Prepared foundation
+
+- Remote Client and Remote Live packages run warnings-as-errors tests;
+- the Xcode product is built by local Apple verification;
+- malformed, oversized, stale, duplicate and sequence-gap contract behavior is
+  covered without a network;
+- independent iPhone and simulator tags create controlled draft releases;
+- physical-iPhone and show-lab evidence remains mandatory and is not replaced
+  by the Simulator artifact.

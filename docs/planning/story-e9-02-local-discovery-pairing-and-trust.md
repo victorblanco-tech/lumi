@@ -1,6 +1,6 @@
 # Story E9-02: Local discovery, pairing and device trust
 
-- Status: **Planned**
+- Status: **In progress (trust foundation)**
 - Priority: **P0 security**
 - Target: `0.6.0-dev`
 - Components: Remote Gateway, macOS Integrations, iOS Remote Client
@@ -30,3 +30,19 @@ device has control and revoke it without accounts or internet.
 - pairing and reconnect work on a physical iPhone with Wi-Fi and fail clearly on
   a client-isolated network.
 
+## Implemented evidence
+
+- release-specific Bonjour service names and minimal validated TXT metadata;
+- native iOS Bonjour browser with clear permission/failure states;
+- one-use five-minute invitation, matching short code and explicit approval
+  registry;
+- bounded authentication attempt limiter and maximum paired-device count;
+- per-device credential verifier on Mac and channel-scoped Keychain store on
+  iPhone;
+- release-channel, protocol, certificate-fingerprint and QR payload validation.
+
+## Remaining gate
+
+Generate and persist the Mac installation certificate, bind the authenticated
+TLS session, pin it on iPhone, build the Mac approval/revoke UI and validate the
+complete flow on a physical iPhone. Discovery never enables controls by itself.

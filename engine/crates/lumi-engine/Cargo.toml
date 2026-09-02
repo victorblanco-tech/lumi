@@ -23,6 +23,7 @@ lumi-protocol = { path = "../lumi-protocol" }
 lumi-prolink-input = { path = "../lumi-prolink-input" }
 lumi-rekordbox-analysis = { path = "../lumi-rekordbox-analysis" }
 lumi-rekordbox-device = { path = "../lumi-rekordbox-device" }
+lumi-remote-protocol = { path = "../lumi-remote-protocol" }
 lumi-simulator = { path = "../lumi-simulator" }
 lumi-timing-output = { path = "../lumi-timing-output" }
 serde = { version = "1", features = ["derive"] }

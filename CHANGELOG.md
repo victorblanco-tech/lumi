@@ -1,5 +1,26 @@
 # Changelog
 
+## 0.6.0-dev-3 - 2026-09-02
+
+### Added
+
+- Starts the native Lumi Remote product with an independent `0.1.0-dev-1`
+  version, iOS app target and controlled draft-release path.
+- Adds the bounded Remote v1 Live projection and command contract with shared
+  Rust/Swift fixtures, contiguous client delivery sequencing and fail-closed
+  gateway policy.
+- Adds the native portrait and landscape Live presentation foundation,
+  release-scoped Bonjour discovery, QR invitation validation and channel-bound
+  Keychain credential storage.
+
+### Safety
+
+- Keeps the Remote Gateway LAN listener and every remote mutation disabled
+  until pinned TLS, persistent Mac trust, explicit pairing approval and the
+  isolated engine command path are complete.
+- Adds architecture checks that keep iPhone presentation and gateway work out
+  of Pro DJ Link, Ableton Link, SoundSwitch output, Library and Local Playback.
+
 ## 0.6.0-dev-2 - 2026-08-31
 
 ### Changed
