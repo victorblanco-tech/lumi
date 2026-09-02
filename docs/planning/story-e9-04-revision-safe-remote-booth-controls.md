@@ -50,6 +50,12 @@ double tap, reconnect or stale screen producing a second or incorrect mutation.
 - headed Simulator acceptance transferred the single Controller lease and sent
   `ARM`, `START` and confirmed `OFF` through the real TLS gateway to the existing
   reducer, with authoritative state reflected back in the iPhone presentation.
+- Remote dev-6 exposes that existing safe command path from both the Phrase and
+  Light Plan bands, with one Phrase selector and explicit read-only feedback
+  for live, completed and Viewer-only selections.
+- headed dev-6 acceptance opened the touch sheet on the next planned Intro,
+  exposed the complete adjustment surface, and verified that selecting the
+  running Drop changed it to `Live · locked` with every mutation disabled.
 
 ## Remaining gate
 

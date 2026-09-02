@@ -813,13 +813,18 @@ fn deck_waveform_preview_points(points: &[WaveformPoint], maximum: usize) -> Vec
     points
         .chunks(chunk_size)
         .map(|chunk| {
-            chunk.iter().fold([0_u8; 3], |peak, point| {
-                [
-                    peak[0].max(point.low()),
-                    peak[1].max(point.mid()),
-                    peak[2].max(point.high()),
-                ]
-            })
+            // A component-wise maximum invents a new pale/white colour when
+            // neighbouring source samples peak in different frequency bands.
+            // Keep the loudest real sample instead: its peak still preserves
+            // waveform height while its RGB relationship remains identical to
+            // the detailed Rekordbox waveform used by Lumi's Mac surfaces.
+            let selected = chunk.iter().max_by_key(|point| {
+                let peak = point.low().max(point.mid()).max(point.high());
+                let energy =
+                    u16::from(point.low()) + u16::from(point.mid()) + u16::from(point.high());
+                (peak, energy)
+            });
+            selected.map_or([0_u8; 3], |point| [point.low(), point.mid(), point.high()])
         })
         .collect()
 }

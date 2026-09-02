@@ -299,7 +299,7 @@ fn mounted_device_sync_hydrates_the_same_canonical_track_by_real_and_simulator_i
 }
 
 #[test]
-fn deck_waveform_preview_is_bounded_and_peak_preserving() {
+fn deck_waveform_preview_is_bounded_peak_and_hue_preserving() {
     let mut waveform = (0..16_384)
         .map(|_| WaveformPoint::new(8, 16, 24))
         .collect::<Vec<_>>();
@@ -309,6 +309,14 @@ fn deck_waveform_preview_is_bounded_and_peak_preserving() {
 
     assert_eq!(preview.len(), 1_024);
     assert!(preview.contains(&[255, 254, 253]));
+
+    let distinct_hues = [WaveformPoint::new(255, 0, 0), WaveformPoint::new(0, 255, 0)];
+    let hue_preserving = deck_waveform_preview_points(&distinct_hues, 1);
+    assert_eq!(hue_preserving.len(), 1);
+    assert!(
+        hue_preserving[0] == [255, 0, 0] || hue_preserving[0] == [0, 255, 0],
+        "downsampling must retain a real source hue instead of inventing yellow"
+    );
 }
 
 #[test]

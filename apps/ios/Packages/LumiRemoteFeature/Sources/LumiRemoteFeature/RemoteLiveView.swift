@@ -63,7 +63,8 @@ public struct RemoteLiveView: View {
                 RemotePlanCueSheet(
                     projection: selection.projection,
                     plan: selection.plan,
-                    cue: selection.cue,
+                    initialCue: selection.cue,
+                    controlsEnabled: model.controlsEnabled,
                     actions: actions
                 )
                 .presentationDetents([.medium])
@@ -445,7 +446,12 @@ private struct RemotePlayerSurface: View {
                     }
                 }
 
-            RemotePhraseBand(player: player, viewport: viewport)
+            RemotePhraseBand(
+                player: player,
+                plan: plan,
+                viewport: viewport,
+                onSelectCue: onSelectCue
+            )
                 .frame(height: isLandscape ? 20 : 18)
 
             if let plan {
@@ -476,6 +482,12 @@ private struct RemotePlayerSurface: View {
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Player \(player.playerNumber), \(player.hardwareModel ?? "Pro DJ Link Player")")
+        .accessibilityAction(named: "Adjust next phrase") {
+            guard let cue = plan?.cues.first(where: {
+                $0.startBeat > player.transport.beat
+            }) else { return }
+            onSelectCue(cue)
+        }
         .onChange(of: isMaster) { _, newValue in
             inspectionStartBeat = nil
             manualZoomBars = newValue ? 40 : nil
@@ -820,7 +832,9 @@ private struct RemoteWaveform: View {
 
 private struct RemotePhraseBand: View {
     let player: RemotePlayer
+    let plan: RemoteLightPlan?
     let viewport: RemoteBeatViewport
+    let onSelectCue: (RemotePlanCue) -> Void
 
     var body: some View {
         GeometryReader { geometry in
@@ -853,8 +867,25 @@ private struct RemotePhraseBand: View {
                     }
                 }
             }
+            .contentShape(Rectangle())
+            .gesture(
+                SpatialTapGesture().onEnded { value in
+                    guard let plan, geometry.size.width > 0 else { return }
+                    let fraction = min(1, max(0, value.location.x / geometry.size.width))
+                    let tappedBeat = viewport.startBeat
+                        + Double(fraction) * viewport.visibleBeats
+                    guard let phrase = player.track.phrases.first(where: {
+                        Double($0.startBeat) <= tappedBeat && tappedBeat < Double($0.endBeat)
+                    }),
+                    let cue = plan.cues.first(where: { $0.phraseIndex == phrase.index }) else {
+                        return
+                    }
+                    onSelectCue(cue)
+                }
+            )
         }
         .clipShape(RoundedRectangle(cornerRadius: 3))
+        .accessibilityHint("Tap a phrase to inspect or adjust its future Light Plan choice")
     }
 }
 
@@ -892,14 +923,28 @@ private struct RemotePlanBand: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                        .disabled(!controlsEnabled || cue.startBeat <= player.transport.beat)
                         .background(LumiColor.surfaceElevated)
                         .overlay(alignment: .leading) {
                             Rectangle().fill(LumiColor.accent).frame(width: 1)
                         }
+                        .overlay(alignment: .topTrailing) {
+                            if controlsEnabled,
+                               cue.startBeat > player.transport.beat,
+                               width >= 42 {
+                                Image(systemName: "slider.horizontal.3")
+                                    .font(.system(size: 7, weight: .bold))
+                                    .foregroundStyle(LumiColor.accent)
+                                    .padding(4)
+                            }
+                        }
                         .offset(x: x)
                         .accessibilityLabel(
                             "Phrase \(cue.phraseIndex + 1), \(cue.autoloopName ?? "hold current AutoLoop")"
+                        )
+                        .accessibilityHint(
+                            cue.startBeat > player.transport.beat
+                                ? "Tap to adjust this future phrase"
+                                : "Tap to inspect this phrase"
                         )
                     }
                 }
@@ -933,48 +978,165 @@ private struct RemoteBeatViewport: Equatable {
 private struct RemotePlanCueSheet: View {
     let projection: RemoteLiveProjection
     let plan: RemoteLightPlan
-    let cue: RemotePlanCue
+    let initialCue: RemotePlanCue
+    let controlsEnabled: Bool
     let actions: RemoteLiveActions
     @Environment(\.dismiss) private var dismiss
+    @State private var selectedPhraseIndex: UInt16
+
+    init(
+        projection: RemoteLiveProjection,
+        plan: RemoteLightPlan,
+        initialCue: RemotePlanCue,
+        controlsEnabled: Bool,
+        actions: RemoteLiveActions
+    ) {
+        self.projection = projection
+        self.plan = plan
+        self.initialCue = initialCue
+        self.controlsEnabled = controlsEnabled
+        self.actions = actions
+        _selectedPhraseIndex = State(initialValue: initialCue.phraseIndex)
+    }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section("Phrase \(cue.phraseIndex + 1)") {
-                    LabeledContent("Theme", value: cue.themeName ?? plan.themeName ?? "None")
-                    LabeledContent("AutoLoop", value: cue.autoloopName ?? "Hold current")
-                    LabeledContent("Static Look", value: cue.staticLookName ?? "None")
+                Section("Selected phrase") {
+                    Menu {
+                        ForEach(plan.cues) { candidate in
+                            Button {
+                                selectedPhraseIndex = candidate.phraseIndex
+                            } label: {
+                                if candidate.phraseIndex == cue.phraseIndex {
+                                    Label(phraseLabel(candidate), systemImage: "checkmark")
+                                } else {
+                                    Text(phraseLabel(candidate))
+                                }
+                            }
+                        }
+                    } label: {
+                        selectionRow("Phrase", value: phraseLabel(cue))
+                    }
+                    LabeledContent("Status", value: phraseStateLabel)
+                    if let staticLookName = cue.staticLookName {
+                        LabeledContent("Static Look", value: staticLookName)
+                    }
                 }
-                Section("Change future plan") {
-                    Menu("Theme from this phrase") {
+
+                Section("Light Plan") {
+                    Menu {
                         ForEach(projection.themeOptions) { theme in
                             Button(theme.name) {
                                 actions.selectTheme(plan, cue, theme.id)
                                 dismiss()
                             }
                         }
+                    } label: {
+                        selectionRow(
+                            "Theme / Bank",
+                            value: cue.themeName ?? plan.themeName ?? "None"
+                        )
                     }
-                    Menu("AutoLoop for this phrase") {
+                    .disabled(!canEdit)
+
+                    Menu {
                         ForEach(cue.availableAutoloops) { autoloop in
-                            Button(autoloop.name) {
+                            Button("Bank \(autoloop.bankNumber) · \(autoloop.name)") {
                                 actions.selectAutoloop(plan, cue, autoloop.number)
                                 dismiss()
                             }
                         }
+                    } label: {
+                        selectionRow(
+                            "AutoLoop",
+                            value: cue.autoloopName ?? "Hold current"
+                        )
                     }
-                    Button(cue.locked ? "Unlock choice" : "Lock choice") {
+                    .disabled(!canEdit || cue.availableAutoloops.isEmpty)
+
+                    Button {
                         actions.setCueLock(plan, cue, !cue.locked)
                         dismiss()
+                    } label: {
+                        Label(
+                            cue.locked ? "Unlock choice" : "Lock choice",
+                            systemImage: cue.locked ? "lock.open" : "lock"
+                        )
+                    }
+                    .disabled(!canEdit)
+                }
+
+                if !canEdit {
+                    Section {
+                        Label(editingUnavailableReason, systemImage: "info.circle")
+                            .font(LumiTypography.caption)
+                            .foregroundStyle(LumiColor.textSecondary)
                     }
                 }
             }
-            .navigationTitle("Light Plan")
+            .navigationTitle("Adjust Light Plan")
             .toolbar {
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Done") { dismiss() }
                 }
             }
         }
+    }
+
+    private var cue: RemotePlanCue {
+        plan.cues.first(where: { $0.phraseIndex == selectedPhraseIndex }) ?? initialCue
+    }
+
+    private var player: RemotePlayer? {
+        projection.players.first {
+            $0.playerNumber == plan.playerNumber && $0.trackLoadID == plan.trackLoadID
+        }
+    }
+
+    private var canEdit: Bool {
+        RemotePlanCueEditing.canEdit(
+            cue: cue,
+            currentBeat: player?.transport.beat,
+            controlsEnabled: controlsEnabled
+        )
+    }
+
+    private var phraseStateLabel: String {
+        switch RemotePlanCueEditing.phase(cue: cue, currentBeat: player?.transport.beat) {
+        case .unavailable: "Unavailable"
+        case .completed: "Completed"
+        case .live: "Live · locked"
+        case .planned: cue.locked ? "Planned · locked" : "Planned · adjustable"
+        }
+    }
+
+    private var editingUnavailableReason: String {
+        guard controlsEnabled else {
+            return "This iPhone is in Viewer mode. Transfer Controller access from Lumi on the Mac to make changes."
+        }
+        return "A phrase can only be adjusted before it starts. Running and completed phrases remain locked."
+    }
+
+    private func phraseLabel(_ candidate: RemotePlanCue) -> String {
+        let name = player?.track.phrases.first(where: { $0.index == candidate.phraseIndex })
+            .map { $0.roleName ?? $0.kind }
+            ?? "Phrase"
+        return "\(candidate.phraseIndex + 1) · \(name)"
+    }
+
+    private func selectionRow(_ title: String, value: String) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Text(value)
+                .foregroundStyle(LumiColor.textSecondary)
+                .lineLimit(1)
+            Image(systemName: "chevron.up.chevron.down")
+                .font(.caption2)
+                .foregroundStyle(LumiColor.textSecondary)
+        }
+        .contentShape(Rectangle())
     }
 }
 
@@ -1044,6 +1206,33 @@ struct RemotePlayerSlot: Equatable, Identifiable {
     var id: UInt8 { playerNumber }
     let playerNumber: UInt8
     let player: RemotePlayer?
+}
+
+enum RemotePlanCuePhase: Equatable {
+    case unavailable
+    case completed
+    case live
+    case planned
+}
+
+enum RemotePlanCueEditing {
+    static func phase(
+        cue: RemotePlanCue,
+        currentBeat: UInt64?
+    ) -> RemotePlanCuePhase {
+        guard let currentBeat else { return .unavailable }
+        if cue.endBeat <= currentBeat { return .completed }
+        if cue.startBeat <= currentBeat { return .live }
+        return .planned
+    }
+
+    static func canEdit(
+        cue: RemotePlanCue,
+        currentBeat: UInt64?,
+        controlsEnabled: Bool
+    ) -> Bool {
+        controlsEnabled && phase(cue: cue, currentBeat: currentBeat) == .planned
+    }
 }
 
 enum RemoteWaveformSampling {

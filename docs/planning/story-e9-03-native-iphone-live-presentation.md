@@ -57,6 +57,16 @@ iPhone UI that matches Lumi's macOS visual language.
   stable second-Player waiting surface, equal landscape Player sizing and the
   compact operation bar; a real `ARM` command round-trip and safe return to
   `OFF` completed without moving or hiding either Player surface.
+- dev-6 removes the remaining preview-colour mismatch at its source: bounded
+  waveform buckets retain the loudest real RGB sample instead of synthesizing
+  a pale component-wise maximum.
+- tapping either a coloured Phrase segment or its Light Plan block opens the
+  same compact phrase editor; its Phrase selector mirrors the Mac workflow and
+  mutations remain restricted to future phrases owned by the Controller.
+- headed dev-6 acceptance used the packaged dev-8 engine and live LAN simulator:
+  `90s Bitch - Extended Mix` retained clear cyan, red and pink regions and two
+  distinct frames proved that the remaining time and waveform viewport followed
+  playback.
 
 ## Remaining gate
 

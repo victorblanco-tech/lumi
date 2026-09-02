@@ -33,7 +33,7 @@ Excluded from 0.6.0:
 ADR-0040 is the accepted architecture authority. The accepted visual contract is
 recorded in `docs/design/iphone-remote/README.md`.
 
-## Current evidence (`0.6.0-dev-7` / Remote `0.1.0-dev-5`)
+## Current evidence (`0.6.0-dev-8` / Remote `0.1.0-dev-6`)
 
 - the independent iOS app target builds for the generic iOS Simulator;
 - portrait Master-first and landscape side-by-side Live compositions use the
@@ -42,6 +42,12 @@ recorded in `docs/design/iphone-remote/README.md`.
 - headed dev-5 acceptance shows a loaded Master plus a stable second Player in
   portrait and two equal, fully visible Player surfaces in landscape, with the
   compact control bar and complete phrase/Light Plan bands still on screen;
+- bounded waveform transport now preserves one real dominant RGB sample per
+  bucket, preventing the independent channel peaks from creating the pale
+  waveform that differed from the detailed Mac renderer;
+- both the Phrase band and Light Plan band open one touch-first editor with a
+  Phrase selector and Theme/Bank, AutoLoop and lock controls; current and past
+  phrases remain inspectable but immutable;
 - the scoped Remote v1 contract is shared through repository fixtures and has
   matching Rust/Swift decoding tests;
 - per-client delivery sequencing remains contiguous even when visual transport

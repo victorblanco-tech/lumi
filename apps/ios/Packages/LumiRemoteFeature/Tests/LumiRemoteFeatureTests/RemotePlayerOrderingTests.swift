@@ -142,6 +142,48 @@ func playingTransportInterpolatesSmoothlyButNeverRunsAwayWhenStale() {
     #expect(RemoteTransportInterpolation.visualBeat(player: player, atUnixMillis: 5_000) == 2)
 }
 
+@Test
+func onlyAnUpcomingPhraseCanBeAdjustedByTheController() {
+    let cue = RemotePlanCue(
+        phraseIndex: 3,
+        startBeat: 64,
+        endBeat: 96,
+        locked: false,
+        themeID: 1,
+        themeName: "Blue Pink",
+        autoloopNumber: 7,
+        autoloopName: "Intro Blue Pink",
+        staticLookName: nil,
+        availableAutoloops: []
+    )
+
+    #expect(RemotePlanCueEditing.phase(cue: cue, currentBeat: nil) == .unavailable)
+    #expect(RemotePlanCueEditing.phase(cue: cue, currentBeat: 32) == .planned)
+    #expect(RemotePlanCueEditing.phase(cue: cue, currentBeat: 64) == .live)
+    #expect(RemotePlanCueEditing.phase(cue: cue, currentBeat: 96) == .completed)
+    #expect(
+        RemotePlanCueEditing.canEdit(
+            cue: cue,
+            currentBeat: 32,
+            controlsEnabled: true
+        )
+    )
+    #expect(
+        !RemotePlanCueEditing.canEdit(
+            cue: cue,
+            currentBeat: 32,
+            controlsEnabled: false
+        )
+    )
+    #expect(
+        !RemotePlanCueEditing.canEdit(
+            cue: cue,
+            currentBeat: 64,
+            controlsEnabled: true
+        )
+    )
+}
+
 private func player(_ number: UInt8) -> RemotePlayer {
     RemotePlayer(
         playerNumber: number,

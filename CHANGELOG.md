@@ -1,5 +1,36 @@
 # Changelog
 
+## Lumi Remote 0.1.0-dev-6 - 2026-09-02
+
+### Changed
+
+- Makes both the coloured Phrase band and proportional Light Plan blocks
+  touch targets that open one compact phrase editor.
+- Adds an in-sheet Phrase selector followed by the current Theme/Bank,
+  AutoLoop, Static Look and lock state.
+- Keeps running and completed phrases inspectable while only allowing the
+  Controller to mutate an upcoming phrase.
+- Shows a subtle adjustment affordance on editable future Light Plan blocks.
+
+### Tests
+
+- Covers unavailable, completed, live and planned phrase states and proves
+  that only an upcoming phrase owned by the Controller is editable.
+
+## 0.6.0-dev-8 - 2026-09-02
+
+### Fixed
+
+- Downsamples bounded Live and Remote waveform previews by selecting the
+  loudest real RGB sample instead of independently combining channel peaks.
+- Preserves the source hue and prevents artificial white/pastel waveform
+  columns while retaining peak height and bounded visual payloads.
+
+### Tests
+
+- Proves bounded preview downsampling retains a real source hue and never
+  invents a mixed colour from neighbouring samples.
+
 ## Lumi Remote 0.1.0-dev-5 - 2026-09-02
 
 ### Changed
