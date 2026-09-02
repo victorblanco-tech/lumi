@@ -49,6 +49,26 @@ func staleTransportAnchorCannotRewindThePlayer() throws {
 
 @MainActor
 @Test
+func leaderTransportAnchorUpdatesTheDisplayedAbletonLinkTempo() throws {
+    let model = RemoteSessionModel()
+    try model.apply(.fixture(revision: 1), from: "MacBook Pro")
+    try model.applyTransportAnchor(
+        playerNumber: 1,
+        anchor: .init(
+            trackLoadID: 99,
+            beat: 36,
+            positionMillis: 18_000,
+            effectiveBPMMilli: 142_500,
+            playing: true,
+            discontinuityRevision: 1,
+            observedAtUnixMillis: 110
+        )
+    )
+    #expect(model.projection?.integrations.abletonLinkBPMMilli == 142_500)
+}
+
+@MainActor
+@Test
 func frameGapDisablesControlsUntilACompleteSnapshotArrives() throws {
     let model = RemoteSessionModel()
     let processor = RemoteFrameProcessor(model: model, macName: "MacBook Pro")
@@ -128,7 +148,7 @@ extension RemoteLiveProjection {
         Self(
             projectionRevision: revision,
             stateRevision: revision,
-            engineVersion: "0.6.0-dev-3",
+            engineVersion: "0.6.0-dev-4",
             operationState: .armed,
             leaderPlayerNumber: 1,
             integrations: .init(

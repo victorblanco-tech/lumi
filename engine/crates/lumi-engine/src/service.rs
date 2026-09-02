@@ -46,10 +46,20 @@ pub struct ServiceRecordGuard {
 struct ServiceRecord {
     endpoint: StartupReady,
     session_token: String,
+    remote_gateway_endpoint: RemoteGatewayEngineEndpoint,
+    remote_gateway_token: String,
     #[serde(rename = "processID")]
     process_id: u32,
     product_version: String,
     service_identity: ServiceIdentity,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteGatewayEngineEndpoint {
+    pub host: String,
+    pub port: u16,
+    pub protocol_version: u16,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -95,6 +105,7 @@ impl ServiceBootstrap {
     pub fn publish_record(
         &self,
         port: u16,
+        remote_gateway_port: u16,
     ) -> Result<Option<ServiceRecordGuard>, ServiceBootstrapError> {
         let Some(record_path) = &self.record_path else {
             return Ok(None);
@@ -118,6 +129,12 @@ impl ServiceBootstrap {
                 protocol_version: PROTOCOL_VERSION,
             },
             session_token: self.session_token.clone(),
+            remote_gateway_endpoint: RemoteGatewayEngineEndpoint {
+                host: "127.0.0.1".to_owned(),
+                port: remote_gateway_port,
+                protocol_version: lumi_remote_protocol::REMOTE_PROTOCOL_VERSION,
+            },
+            remote_gateway_token: derive_remote_gateway_token(&self.session_token),
             process_id,
             product_version: product_version.clone(),
             service_identity: ServiceIdentity {
@@ -144,6 +161,13 @@ impl ServiceBootstrap {
             process_id,
         }))
     }
+}
+
+pub fn derive_remote_gateway_token(session_token: &str) -> String {
+    let mut digest = Sha256::new();
+    digest.update(b"lumi-remote-gateway-engine-ipc-v1\0");
+    digest.update(session_token.as_bytes());
+    format!("{:x}", digest.finalize())
 }
 
 impl Drop for ServiceRecordGuard {
@@ -251,7 +275,9 @@ pub enum ServiceBootstrapError {
 
 #[cfg(test)]
 mod tests {
-    use super::{ServiceIdentity, ServiceRecord};
+    use super::{
+        RemoteGatewayEngineEndpoint, ServiceIdentity, ServiceRecord, derive_remote_gateway_token,
+    };
     use crate::StartupReady;
 
     #[test]
@@ -265,6 +291,12 @@ mod tests {
                 protocol_version: 1,
             },
             session_token: "a".repeat(64),
+            remote_gateway_endpoint: RemoteGatewayEngineEndpoint {
+                host: "127.0.0.1".to_owned(),
+                port: 17_001,
+                protocol_version: 1,
+            },
+            remote_gateway_token: derive_remote_gateway_token(&"a".repeat(64)),
             process_id: 42,
             product_version: "0.5.0-dev-12".to_owned(),
             service_identity: ServiceIdentity {
@@ -286,6 +318,21 @@ mod tests {
                 .get("engineExecutableSha256")
                 .is_none()
         );
+        assert_eq!(encoded["remoteGatewayEndpoint"]["host"], "127.0.0.1");
+        assert_eq!(encoded["remoteGatewayEndpoint"]["port"], 17_001);
+        assert_eq!(
+            encoded["remoteGatewayToken"].as_str().map(str::len),
+            Some(64)
+        );
         Ok(())
+    }
+
+    #[test]
+    fn gateway_token_is_scoped_and_deterministic() {
+        let desktop = "a".repeat(64);
+        let remote = derive_remote_gateway_token(&desktop);
+        assert_eq!(remote.len(), 64);
+        assert_ne!(remote, desktop);
+        assert_eq!(remote, derive_remote_gateway_token(&desktop));
     }
 }

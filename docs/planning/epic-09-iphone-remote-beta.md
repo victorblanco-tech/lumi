@@ -33,7 +33,7 @@ Excluded from 0.6.0:
 ADR-0040 is the accepted architecture authority. The accepted visual contract is
 recorded in `docs/design/iphone-remote/README.md`.
 
-## Current evidence (`0.6.0-dev-3` / Remote `0.1.0-dev-1`)
+## Current evidence (`0.6.0-dev-4` / Remote `0.1.0-dev-2`)
 
 - the independent iOS app target builds for the generic iOS Simulator;
 - portrait Master-first and landscape side-by-side Live compositions use the
@@ -48,10 +48,18 @@ recorded in `docs/design/iphone-remote/README.md`.
 - release-channel Bonjour discovery, QR invitation validation and Keychain
   credential storage compile without exposing engine credentials;
 - the gateway executable still fails closed and does not bind the LAN.
+- the engine now publishes an authenticated, path-free Live projection over a
+  second loopback-only endpoint that is independent from desktop lifecycle;
+- complete waveform/plan state is change-driven while transport/BPM anchors
+  are bounded to 20 Hz and can be coalesced;
+- revision-safe Remote commands reach the existing reducer through a bounded
+  queue and have end-to-end command-result coverage;
+- gateway disconnect, authentication failure and desktop snapshot polling do
+  not park the show or add full projection work to the realtime loop.
 
-Pinned TLS, the independently published engine projection feed, Mac pairing UI,
-live command execution and physical-iPhone acceptance remain open. No current
-Mac live-performance behavior is changed by this foundation.
+Pinned TLS, persistent trust, Mac pairing UI, LAN command execution and
+physical-iPhone acceptance remain open. No current Mac live-performance
+behavior is changed by this foundation.
 
 ## Delivery stories
 

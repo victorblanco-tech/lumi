@@ -8,7 +8,7 @@ func portraitOrderingMovesTheMasterFirstWithoutRenamingPlayers() {
     let projection = RemoteLiveProjection(
         projectionRevision: 1,
         stateRevision: 1,
-        engineVersion: "0.6.0-dev-3",
+        engineVersion: "0.6.0-dev-4",
         operationState: .armed,
         leaderPlayerNumber: 2,
         integrations: RemoteIntegrationStatus(

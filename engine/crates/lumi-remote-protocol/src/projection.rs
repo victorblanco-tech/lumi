@@ -795,7 +795,7 @@ mod tests {
         RemoteLiveProjection {
             projection_revision: 8,
             state_revision: 7,
-            engine_version: "0.6.0-dev-3".to_owned(),
+            engine_version: "0.6.0-dev-4".to_owned(),
             operation_state: OperationState::Armed,
             leader_player_number: Some(1),
             integrations: RemoteIntegrationStatus {
@@ -869,7 +869,7 @@ mod tests {
             "kind": "stateSnapshot",
             "stateRevision": 12,
             "operationState": "live",
-            "engineVersion": "0.6.0-dev-3",
+            "engineVersion": "0.6.0-dev-4",
             "leaderDeckId": 1,
             "deckSource": { "mode": "connectedDecks", "status": "ready" },
             "midiIntegration": {

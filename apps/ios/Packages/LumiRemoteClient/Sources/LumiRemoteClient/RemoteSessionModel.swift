@@ -93,13 +93,27 @@ public final class RemoteSessionModel {
             transport: anchor,
             track: player.track
         )
+        let integrations: RemoteIntegrationStatus
+        if current.leaderPlayerNumber == playerNumber {
+            integrations = RemoteIntegrationStatus(
+                proDJLink: current.integrations.proDJLink,
+                lightOutput: current.integrations.lightOutput,
+                abletonLink: current.integrations.abletonLink,
+                abletonLinkEnabled: current.integrations.abletonLinkEnabled,
+                abletonLinkBPMMilli: anchor.effectiveBPMMilli,
+                timingOffsetMillis: current.integrations.timingOffsetMillis,
+                pendingTimingOffsetMillis: current.integrations.pendingTimingOffsetMillis
+            )
+        } else {
+            integrations = current.integrations
+        }
         projection = RemoteLiveProjection(
             projectionRevision: current.projectionRevision,
             stateRevision: current.stateRevision,
             engineVersion: current.engineVersion,
             operationState: current.operationState,
             leaderPlayerNumber: current.leaderPlayerNumber,
-            integrations: current.integrations,
+            integrations: integrations,
             players: players,
             livePlan: current.livePlan,
             nextPlan: current.nextPlan,

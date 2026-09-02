@@ -1,6 +1,6 @@
 # Story E9-01: Remote Live projection and isolated gateway
 
-- Status: **In progress (`0.6.0-dev-3`)**
+- Status: **Projection boundary complete (`0.6.0-dev-4`); TLS packaging in progress**
 - Priority: **P0 architecture and performance**
 - Target: `0.6.0-dev`
 - Components: Engine, Remote Gateway, Protocol
@@ -39,9 +39,17 @@ never delay Pro DJ Link, Ableton Link or SoundSwitch output.
 - independent contiguous delivery sequences and mandatory reconnect snapshot;
 - gateway client saturation disconnect and metrics;
 - fail-closed gateway binary with loopback-only engine configuration.
+- a distinct authenticated engine-to-gateway loopback endpoint whose disconnect
+  never parks or mutates the running show;
+- static projection publication only on actual state/plan changes plus
+  coalescible 20 Hz transport anchors for BPM, beat and playhead;
+- bounded remote command handoff into the existing reducer with authoritative
+  state/plan revision conflicts and no alternate mutation path;
+- end-to-end loopback authentication, snapshot and command-result tests;
+- desktop polling cannot force waveform projection work into the realtime loop.
 
 ## Remaining gate
 
-Add the independent engine projection publisher/subscriber, TLS LAN listener,
-gateway supervision and macOS integration status. These must pass isolation and
-load tests before the gateway is packaged or enabled.
+Add the pinned-TLS LAN listener, persistent trust, gateway supervision and
+macOS integration status. These must pass isolation and load tests before the
+gateway is packaged or enabled.

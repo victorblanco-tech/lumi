@@ -4,7 +4,7 @@ use std::io::{self, Write as _};
 use std::net::Ipv4Addr;
 #[cfg(not(test))]
 use std::path::PathBuf;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use lumi_deck_source::DeckSourceProvider as _;
 use lumi_domain::{
@@ -45,6 +45,10 @@ use lumi_protocol::{
     CommandDisposition, CommandIdCache, InvalidCacheCapacity, MAX_MESSAGE_BYTES, MessageDecoder,
     MessageEnvelope, MessageType, PROTOCOL_VERSION,
 };
+use lumi_remote_protocol::{
+    OperationTarget as RemoteOperationTarget, RemoteCommand, RemoteCommandKind,
+    RemoteCommandResult, RemoteCommandResultStatus, RemoteLiveProjection, RemoteTransportAnchor,
+};
 use lumi_simulator::{
     ManualClock, MonotonicClock as _, SimulationControl, SimulatorDeckSourceProvider,
     SimulatorError,
@@ -63,13 +67,14 @@ use tokio::io::{
     AsyncBufRead, AsyncBufReadExt as _, AsyncRead, AsyncReadExt as _, AsyncWriteExt as _, BufReader,
 };
 use tokio::net::{TcpListener, TcpStream};
+use tokio::sync::{broadcast, mpsc, watch};
 use tokio::time::{MissedTickBehavior, timeout};
 
 use crate::StartupReady;
 use crate::autoloop_executor::{
     AutoloopCueExecutor, AutoloopExecutionIdentity, AutoloopExecutorState, AutoloopTarget,
 };
-use crate::commands::{DeckSourceSelection, SessionCommand, decode_command};
+use crate::commands::{DeckSourceSelection, PlanCommandContext, SessionCommand, decode_command};
 use crate::library::{LibraryPlanContext, LibraryWorker, LibraryWorkerError, ResolvedLibraryCue};
 use crate::link_relay::LinkRelay;
 #[cfg(test)]
@@ -77,7 +82,8 @@ use crate::link_relay::{
     MAXIMUM_PROLINK_TIMING_STALE_AFTER, MINIMUM_PROLINK_TIMING_STALE_AFTER,
     prolink_timing_stale_after,
 };
-use crate::service::{ServiceBootstrap, ServiceBootstrapError};
+use crate::remote_ipc::{EngineRemoteUpdate, RemoteCommandRequest};
+use crate::service::{ServiceBootstrap, ServiceBootstrapError, derive_remote_gateway_token};
 
 const EXIT_AFTER_CLIENT_DISCONNECT_ENVIRONMENT_KEY: &str = "LUMI_EXIT_AFTER_CLIENT_DISCONNECT";
 #[cfg(not(test))]
@@ -93,6 +99,9 @@ const COMMAND_ID_CACHE_CAPACITY: usize = 256;
 const LIBRARY_CONTEXT_CAPACITY: usize = 256;
 const AUTOLOOP_FORECAST_HORIZON_BEATS: u32 = 4;
 const AUTOLOOP_DEADLINE_REPLACEMENT_TOLERANCE: Duration = Duration::from_millis(10);
+const REMOTE_PROJECTION_INTERVAL: Duration = Duration::from_millis(50);
+const REMOTE_UPDATE_CAPACITY: usize = 128;
+const REMOTE_COMMAND_CAPACITY: usize = 32;
 #[cfg(not(test))]
 const PROLINK_JAVA_ENVIRONMENT_KEY: &str = "LUMI_PROLINK_JAVA";
 #[cfg(not(test))]
@@ -123,7 +132,25 @@ pub async fn run() -> Result<(), EngineError> {
 
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
     let endpoint = listener.local_addr()?;
-    let _service_record = service.publish_record(endpoint.port())?;
+    let remote_gateway_listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
+    let remote_gateway_endpoint = remote_gateway_listener.local_addr()?;
+    let gateway_token = derive_remote_gateway_token(&service.session_token);
+    let (latest_remote_projection, latest_remote_projection_receiver) = watch::channel(None);
+    let (remote_updates, _) = broadcast::channel(REMOTE_UPDATE_CAPACITY);
+    let (remote_command_sender, mut remote_command_receiver) =
+        mpsc::channel(REMOTE_COMMAND_CAPACITY);
+    tokio::spawn(crate::remote_ipc::serve(
+        remote_gateway_listener,
+        gateway_token,
+        latest_remote_projection_receiver,
+        remote_updates.clone(),
+        remote_command_sender,
+    ));
+    let mut remote_publisher =
+        RemoteProjectionPublisher::new(latest_remote_projection, remote_updates);
+    remote_publisher.publish(&runtime, true)?;
+    let _service_record =
+        service.publish_record(endpoint.port(), remote_gateway_endpoint.port())?;
     write_startup_record(endpoint.port())?;
     let mut termination =
         tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
@@ -135,12 +162,20 @@ pub async fn run() -> Result<(), EngineError> {
         let accepted = tokio::select! {
             _ = termination.recv() => break,
             accepted = listener.accept() => Some(accepted?),
+            request = remote_command_receiver.recv() => {
+                if let Some(request) = request {
+                    apply_remote_command_request(&mut runtime, request);
+                    remote_publisher.publish(&runtime, true)?;
+                }
+                None
+            }
             _ = idle_pump.tick() => {
                 runtime.integration_pump_metrics.record(Instant::now());
                 process_deck_input_messages(&mut runtime)?;
                 runtime
                     .output_worker
                     .service_pending_autoloop();
+                remote_publisher.publish(&runtime, false)?;
                 None
             }
         };
@@ -150,8 +185,15 @@ pub async fn run() -> Result<(), EngineError> {
         if !peer.ip().is_loopback() {
             continue;
         }
-        match serve_authenticated_client(stream, &session_token, &mut runtime, &mut termination)
-            .await
+        match serve_authenticated_client(
+            stream,
+            &session_token,
+            &mut runtime,
+            &mut termination,
+            &mut remote_command_receiver,
+            &mut remote_publisher,
+        )
+        .await
         {
             Ok(AuthenticatedClientExit::Shutdown) => break,
             Ok(AuthenticatedClientExit::Disconnected) if exit_after_client_disconnect => break,
@@ -204,6 +246,8 @@ async fn serve_authenticated_client(
     expected_token: &str,
     runtime: &mut EngineRuntime,
     termination: &mut tokio::signal::unix::Signal,
+    remote_commands: &mut mpsc::Receiver<RemoteCommandRequest>,
+    remote_publisher: &mut RemoteProjectionPublisher,
 ) -> Result<AuthenticatedClientExit, EngineError> {
     let (mut reader, mut writer) = stream.into_split();
     let authentication_bytes = timeout(
@@ -249,6 +293,13 @@ async fn serve_authenticated_client(
                 runtime
                     .output_worker
                     .service_pending_autoloop();
+                remote_publisher.publish(runtime, false)?;
+            }
+            request = remote_commands.recv() => {
+                if let Some(request) = request {
+                    apply_remote_command_request(runtime, request);
+                    remote_publisher.publish(runtime, true)?;
+                }
             }
             command = read_command_line(&mut command_reader, &mut command_buffer) => {
                 let Some(command_bytes) = command? else {
@@ -272,6 +323,11 @@ async fn serve_authenticated_client(
                     )?,
                 };
                 write_envelope(&mut writer, &response).await?;
+                // Desktop snapshot polling is not a remote-state mutation.
+                // Let the publisher's static key decide whether a complete
+                // projection is needed so waveform payloads never enter the
+                // realtime path at the UI polling cadence.
+                remote_publisher.publish(runtime, false)?;
             }
         }
     }
@@ -461,6 +517,202 @@ impl EngineRuntime {
             0
         }
     }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct RemoteStaticKey {
+    operation: OperationState,
+    leader_player: Option<u8>,
+    loaded_players: Vec<(u8, u64, u64, Option<String>)>,
+    plans: Vec<(u8, u64, u64)>,
+    library_revision: u64,
+    source_status: DeckSourceStatus,
+    midi_state: MidiSourceState,
+    link_state: TimingOutputState,
+    link_enabled: bool,
+    link_peers: u32,
+    timing_offset_millis: i16,
+    pending_timing_offset_millis: Option<i16>,
+}
+
+struct RemoteProjectionPublisher {
+    latest_projection: watch::Sender<Option<RemoteLiveProjection>>,
+    updates: broadcast::Sender<EngineRemoteUpdate>,
+    last_static_key: Option<RemoteStaticKey>,
+    last_anchors: BTreeMap<u8, RemoteTransportAnchor>,
+    last_publish: Option<Instant>,
+    next_projection_revision: u64,
+    available: bool,
+}
+
+impl RemoteProjectionPublisher {
+    fn new(
+        latest_projection: watch::Sender<Option<RemoteLiveProjection>>,
+        updates: broadcast::Sender<EngineRemoteUpdate>,
+    ) -> Self {
+        Self {
+            latest_projection,
+            updates,
+            last_static_key: None,
+            last_anchors: BTreeMap::new(),
+            last_publish: None,
+            next_projection_revision: 1,
+            available: false,
+        }
+    }
+
+    fn publish(&mut self, runtime: &EngineRuntime, force: bool) -> Result<(), EngineError> {
+        if runtime.deck_source_mode != DeckSourceMode::ConnectedDecks {
+            if self.available {
+                self.available = false;
+                self.last_static_key = None;
+                self.last_anchors.clear();
+                let _ = self.latest_projection.send(None);
+                let _ = self.updates.send(EngineRemoteUpdate::Unavailable);
+            }
+            return Ok(());
+        }
+
+        let now = Instant::now();
+        if !force
+            && self.last_publish.is_some_and(|last| {
+                now.saturating_duration_since(last) < REMOTE_PROJECTION_INTERVAL
+            })
+        {
+            return Ok(());
+        }
+        self.last_publish = Some(now);
+        let static_key = remote_static_key(runtime);
+        if force || self.last_static_key.as_ref() != Some(&static_key) {
+            let observed_at = unix_time_millis();
+            let envelope = snapshot_envelope_without_library(
+                runtime,
+                self.next_projection_revision,
+                "remote-projection",
+            )?;
+            let projection = RemoteLiveProjection::from_engine_snapshot_payload(
+                &envelope.payload,
+                self.next_projection_revision,
+                observed_at,
+            )?;
+            self.next_projection_revision = self.next_projection_revision.saturating_add(1);
+            self.last_static_key = Some(static_key);
+            self.last_anchors = projection
+                .players
+                .iter()
+                .map(|player| (player.player_number, player.transport.clone()))
+                .collect();
+            self.available = true;
+            let _ = self.latest_projection.send(Some(projection.clone()));
+            let _ = self
+                .updates
+                .send(EngineRemoteUpdate::Projection(projection));
+            return Ok(());
+        }
+
+        let observed_at = unix_time_millis();
+        for (player_number, anchor) in remote_transport_anchors(runtime, observed_at) {
+            let unchanged = self
+                .last_anchors
+                .get(&player_number)
+                .is_some_and(|previous| {
+                    previous.track_load_id == anchor.track_load_id
+                        && previous.beat == anchor.beat
+                        && previous.position_millis == anchor.position_millis
+                        && previous.effective_bpm_milli == anchor.effective_bpm_milli
+                        && previous.playing == anchor.playing
+                        && previous.discontinuity_revision == anchor.discontinuity_revision
+                });
+            if unchanged {
+                continue;
+            }
+            self.last_anchors.insert(player_number, anchor.clone());
+            let _ = self.updates.send(EngineRemoteUpdate::TransportAnchor {
+                player_number,
+                anchor,
+            });
+        }
+        Ok(())
+    }
+}
+
+fn remote_static_key(runtime: &EngineRuntime) -> RemoteStaticKey {
+    let state = runtime.state.state();
+    let loaded_players = state
+        .decks()
+        .map(|(deck_id, deck)| {
+            (
+                deck_id.value(),
+                deck.track_load_id().value(),
+                deck.track_id().value(),
+                runtime
+                    .direct_deck_source
+                    .device_name(deck_id)
+                    .map(str::to_owned),
+            )
+        })
+        .collect();
+    let plans = state
+        .decks()
+        .filter_map(|(deck_id, _)| {
+            state
+                .plan(deck_id)
+                .map(|plan| (deck_id.value(), plan.id().value(), plan.revision().value()))
+        })
+        .collect();
+    let link = runtime.link_relay.status();
+    RemoteStaticKey {
+        operation: state.operation(),
+        leader_player: state.leader_deck().map(lumi_domain::DeckId::value),
+        loaded_players,
+        plans,
+        library_revision: runtime.library_revision,
+        source_status: runtime.direct_deck_source.diagnostics().source_status,
+        midi_state: runtime.output_worker.midi_status().state,
+        link_state: link.state,
+        link_enabled: runtime.link_relay.enabled(),
+        link_peers: link.peers,
+        timing_offset_millis: runtime.output_worker.timing_offset_millis(),
+        pending_timing_offset_millis: runtime.output_worker.pending_timing_offset_millis(),
+    }
+}
+
+fn remote_transport_anchors(
+    runtime: &EngineRuntime,
+    observed_at_unix_millis: u64,
+) -> Vec<(u8, RemoteTransportAnchor)> {
+    runtime
+        .state
+        .state()
+        .decks()
+        .filter_map(|(deck_id, deck)| {
+            let transport = runtime.direct_deck_source.transport(deck.track_load_id())?;
+            let position_millis = runtime
+                .planning_worker
+                .library_context(deck.track_load_id())
+                .and_then(|context| context.millis_at_beat(transport.beat));
+            Some((
+                deck_id.value(),
+                RemoteTransportAnchor {
+                    track_load_id: deck.track_load_id().value(),
+                    beat: u64::from(transport.beat),
+                    position_millis,
+                    effective_bpm_milli: u64::from(transport.effective_bpm_milli),
+                    playing: transport.playing,
+                    discontinuity_revision: transport.discontinuity_revision,
+                    observed_at_unix_millis,
+                },
+            ))
+        })
+        .collect()
+}
+
+fn unix_time_millis() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| {
+            u64::try_from(duration.as_millis()).unwrap_or(u64::MAX)
+        })
 }
 
 fn initialized_product_runtime() -> Result<EngineRuntime, EngineError> {
@@ -2479,6 +2731,151 @@ fn handle_command(
         );
     }
     Ok(response)
+}
+
+fn apply_remote_command_request(runtime: &mut EngineRuntime, request: RemoteCommandRequest) {
+    let result = apply_remote_command(runtime, request.command);
+    let _ = request.response.send(result);
+}
+
+fn apply_remote_command(
+    runtime: &mut EngineRuntime,
+    command: RemoteCommand,
+) -> RemoteCommandResult {
+    let command_id = command.command_id;
+    let application = remote_session_command(runtime, command.command)
+        .and_then(|command| apply_command(runtime, command));
+    let (status, reason_code, actual_plan_revision) = match &application {
+        Ok(()) => (RemoteCommandResultStatus::Accepted, None, None),
+        Err(CommandApplicationError::StateRevisionConflict { .. }) => (
+            RemoteCommandResultStatus::Conflict,
+            Some("stateRevisionConflict".to_owned()),
+            None,
+        ),
+        Err(CommandApplicationError::RevisionConflict { actual, .. }) => (
+            RemoteCommandResultStatus::Conflict,
+            Some("planRevisionConflict".to_owned()),
+            Some(actual.value()),
+        ),
+        Err(CommandApplicationError::TrackLoadMismatch) => (
+            RemoteCommandResultStatus::Conflict,
+            Some("trackLoadConflict".to_owned()),
+            None,
+        ),
+        Err(CommandApplicationError::StartedLivePhraseNotEditable) => (
+            RemoteCommandResultStatus::Rejected,
+            Some("phraseAlreadyStarted".to_owned()),
+            None,
+        ),
+        Err(CommandApplicationError::InvalidOperationTransition { .. }) => (
+            RemoteCommandResultStatus::Rejected,
+            Some("invalidOperationTransition".to_owned()),
+            None,
+        ),
+        Err(_) => (
+            RemoteCommandResultStatus::Rejected,
+            Some("commandRejected".to_owned()),
+            None,
+        ),
+    };
+    RemoteCommandResult {
+        command_id,
+        status,
+        state_revision: Some(runtime.state.state().revision().value()),
+        plan_revision: actual_plan_revision,
+        reason_code,
+    }
+}
+
+fn remote_session_command(
+    runtime: &EngineRuntime,
+    command: RemoteCommandKind,
+) -> Result<SessionCommand, CommandApplicationError> {
+    match command {
+        RemoteCommandKind::SetOperationState {
+            operation_state,
+            expected_state_revision,
+        } => Ok(SessionCommand::SetOperationState {
+            expected_revision: lumi_domain::StateRevision::new(expected_state_revision),
+            command: match operation_state {
+                RemoteOperationTarget::Off => OperationCommand::Off,
+                RemoteOperationTarget::Armed => OperationCommand::Arm,
+                RemoteOperationTarget::Live => OperationCommand::Start,
+                RemoteOperationTarget::Paused => OperationCommand::Pause,
+            },
+        }),
+        RemoteCommandKind::SetAbletonLinkEnabled {
+            enabled,
+            expected_state_revision,
+        } => {
+            validate_state_revision(
+                runtime,
+                lumi_domain::StateRevision::new(expected_state_revision),
+            )?;
+            Ok(SessionCommand::SetAbletonLinkEnabled { enabled })
+        }
+        RemoteCommandKind::SetOutputTimingOffset {
+            millis,
+            expected_state_revision,
+        } => {
+            validate_state_revision(
+                runtime,
+                lumi_domain::StateRevision::new(expected_state_revision),
+            )?;
+            Ok(SessionCommand::SetOutputTimingOffset { millis })
+        }
+        RemoteCommandKind::SelectThemeFromPhrase {
+            plan_id,
+            track_load_id,
+            expected_plan_revision,
+            phrase_index,
+            theme_id,
+        } => Ok(SessionCommand::SelectThemeFromPhrase {
+            context: remote_plan_context(plan_id, track_load_id, expected_plan_revision)?,
+            phrase_index,
+            theme_id: ThemeId::new(theme_id),
+        }),
+        RemoteCommandKind::SelectAutoloopForPhrase {
+            plan_id,
+            track_load_id,
+            expected_plan_revision,
+            phrase_index,
+            autoloop_number,
+        } => Ok(SessionCommand::SelectScene {
+            context: remote_plan_context(plan_id, track_load_id, expected_plan_revision)?,
+            phrase_index,
+            scene_id: SceneId::new(u64::from(autoloop_number)),
+        }),
+        RemoteCommandKind::SetCueLock {
+            plan_id,
+            track_load_id,
+            expected_plan_revision,
+            phrase_index,
+            locked,
+        } => Ok(SessionCommand::SetCueLock {
+            context: remote_plan_context(plan_id, track_load_id, expected_plan_revision)?,
+            phrase_index,
+            locked,
+        }),
+        RemoteCommandKind::RequestSnapshot => Ok(SessionCommand::GetSnapshot {
+            include_library: false,
+        }),
+    }
+}
+
+fn remote_plan_context(
+    plan_id: String,
+    track_load_id: u64,
+    expected_plan_revision: u64,
+) -> Result<PlanCommandContext, CommandApplicationError> {
+    let plan_id = plan_id
+        .parse::<u64>()
+        .map_err(|_| CommandApplicationError::PlanUnavailable)?;
+    Ok(PlanCommandContext {
+        plan_id: lumi_domain::PlanId::new(plan_id),
+        track_load_id: TrackLoadId::new(track_load_id),
+        expected_revision: PlanRevision::new(expected_plan_revision),
+    })
 }
 
 fn transport_ack_envelope(
@@ -4910,6 +5307,8 @@ pub enum EngineError {
     Io(#[from] io::Error),
     #[error("JSON encoding failed: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("remote Live projection failed: {0}")]
+    RemoteProjection(#[from] lumi_remote_protocol::ProjectionError),
     #[error("timestamp formatting failed: {0}")]
     TimeFormat(#[from] time::error::Format),
     #[error("domain runtime initialization failed: {0}")]

@@ -3,7 +3,10 @@ use crate::commands::PlanCommandContext;
 use lumi_domain::{ClientId, CommandSequence, OperationCommand, ThemeId, UserCommandEnvelope};
 use lumi_library::AutoloopTheme;
 use lumi_output_dry_run::canonical_output_transcript;
-use lumi_remote_protocol::RemoteLiveProjection;
+use lumi_remote_protocol::{
+    OperationTarget as RemoteOperationTarget, RemoteCommand, RemoteCommandKind,
+    RemoteCommandResultStatus, RemoteLiveProjection,
+};
 use lumi_simulator::{SimulationControl, SimulationSpeed};
 
 #[test]
@@ -30,6 +33,75 @@ fn actual_engine_snapshot_maps_to_the_scoped_remote_live_contract() {
     assert!(!encoded.contains("library"));
     assert!(!encoded.contains("audioUri"));
     assert!(!encoded.contains("/Volumes/"));
+}
+
+#[test]
+fn remote_operation_commands_use_the_authoritative_revision_gate() {
+    let mut runtime =
+        initialized_runtime().unwrap_or_else(|error| panic!("runtime must initialize: {error}"));
+    let expected = runtime.state.state().revision().value();
+    let accepted = apply_remote_command(
+        &mut runtime,
+        RemoteCommand {
+            command_id: "remote-arm-1".to_owned(),
+            controller_lease_id: "lease-1".to_owned(),
+            issued_at_unix_millis: 1,
+            command: RemoteCommandKind::SetOperationState {
+                operation_state: RemoteOperationTarget::Armed,
+                expected_state_revision: expected,
+            },
+        },
+    );
+    assert_eq!(accepted.status, RemoteCommandResultStatus::Accepted);
+    assert_eq!(runtime.state.state().operation(), OperationState::Armed);
+
+    let stale = apply_remote_command(
+        &mut runtime,
+        RemoteCommand {
+            command_id: "remote-arm-stale".to_owned(),
+            controller_lease_id: "lease-1".to_owned(),
+            issued_at_unix_millis: 2,
+            command: RemoteCommandKind::SetOperationState {
+                operation_state: RemoteOperationTarget::Armed,
+                expected_state_revision: expected,
+            },
+        },
+    );
+    assert_eq!(stale.status, RemoteCommandResultStatus::Conflict);
+    assert_eq!(stale.reason_code.as_deref(), Some("stateRevisionConflict"));
+    assert_eq!(runtime.state.state().operation(), OperationState::Armed);
+}
+
+#[test]
+fn remote_publisher_is_unavailable_outside_connected_players() {
+    let runtime = initialized_runtime_for_mode(ManualClock::new(0), DeckSourceMode::LocalPlayback)
+        .unwrap_or_else(|error| panic!("runtime must initialize: {error}"));
+    let (latest, latest_receiver) = watch::channel(None);
+    let (updates, _) = broadcast::channel(8);
+    let mut publisher = RemoteProjectionPublisher::new(latest, updates);
+    publisher
+        .publish(&runtime, true)
+        .unwrap_or_else(|error| panic!("publisher must remain fail closed: {error}"));
+    assert!(latest_receiver.borrow().is_none());
+}
+
+#[test]
+fn remote_publisher_exposes_only_the_connected_live_projection() {
+    let mut runtime =
+        initialized_runtime().unwrap_or_else(|error| panic!("runtime must initialize: {error}"));
+    runtime.deck_source_mode = DeckSourceMode::ConnectedDecks;
+    let (latest, latest_receiver) = watch::channel(None);
+    let (updates, _) = broadcast::channel(8);
+    let mut publisher = RemoteProjectionPublisher::new(latest, updates);
+    publisher
+        .publish(&runtime, true)
+        .unwrap_or_else(|error| panic!("publisher must create projection: {error}"));
+    let projection = latest_receiver
+        .borrow()
+        .clone()
+        .unwrap_or_else(|| panic!("connected projection must be published"));
+    assert_eq!(projection.players.len(), 2);
+    assert_eq!(projection.projection_revision, 1);
 }
 
 #[test]

@@ -6,6 +6,12 @@
 
 #![forbid(unsafe_code)]
 
+mod engine_client;
+
+pub use engine_client::{
+    EngineClientError, EngineProjectionClient, EngineRemoteEndpoint, EngineRemoteServiceRecord,
+};
+
 use std::collections::{BTreeMap, VecDeque};
 use std::net::IpAddr;
 
@@ -712,7 +718,7 @@ mod tests {
         RemoteLiveProjection {
             projection_revision: revision,
             state_revision: revision,
-            engine_version: "0.6.0-dev-3".to_owned(),
+            engine_version: "0.6.0-dev-4".to_owned(),
             operation_state: OperationState::Off,
             leader_player_number: None,
             integrations: RemoteIntegrationStatus {

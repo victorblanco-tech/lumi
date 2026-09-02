@@ -193,7 +193,7 @@ private func fixtureProjection() throws -> RemoteLiveProjection {
     {
       "projectionRevision": 8,
       "stateRevision": 7,
-      "engineVersion": "0.6.0-dev-3",
+      "engineVersion": "0.6.0-dev-4",
       "operationState": "armed",
       "leaderPlayerNumber": 1,
       "integrations": {
