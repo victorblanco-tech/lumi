@@ -33,7 +33,7 @@ Excluded from 0.6.0:
 ADR-0040 is the accepted architecture authority. The accepted visual contract is
 recorded in `docs/design/iphone-remote/README.md`.
 
-## Current evidence (`0.6.0-dev-10` / Remote `0.1.0-dev-10`)
+## Current evidence (`0.6.0-dev-11` / Remote `0.1.0-dev-11`)
 
 - the independent iOS app target builds for the generic iOS Simulator;
 - portrait Master-first and landscape side-by-side Live compositions use the
@@ -115,6 +115,15 @@ recorded in `docs/design/iphone-remote/README.md`.
   stable high-resolution RGB track raster is translated by Core Animation,
   rather than resampled and repainted through SwiftUI every display frame.
   Live pinch zoom remains anchored to the fixed 22% Master playhead.
+- Remote dev-11 removes the residual once-per-beat hitch without smoothing or
+  steering from noisy precise-position packets. The gateway projects the
+  canonical Beat lane's true monotonic observation time; the iPhone moves only
+  the live Master layer at native display cadence and keeps all static geometry
+  outside the frame loop.
+- the signed dev-11 build restored its existing aiVoon pairing during live LAN
+  simulator playback. A 15.959-second physical-device `Animation Hitches`
+  trace contained no interaction delay above 33 ms and one 16.67 ms frame
+  hitch.
 
 Physical-iPhone pairing and real Local Network permission are proven on the
 personally provisioned device. Extended rotation/gesture acceptance,

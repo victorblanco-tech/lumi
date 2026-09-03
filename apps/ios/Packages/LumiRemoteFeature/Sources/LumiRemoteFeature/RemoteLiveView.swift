@@ -1151,6 +1151,7 @@ private final class RemoteWaveformLayerHostView: UIView {
     private var hotCues: [RemoteHotCue] = []
     private var hotCueLayers: [(line: CALayer, badge: CATextLayer)] = []
     private var appliedBoundsSize = CGSize.zero
+    private var staticGeometryNeedsUpdate = true
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -1173,10 +1174,11 @@ private final class RemoteWaveformLayerHostView: UIView {
         layer.addSublayer(playheadCapLayer)
 
         let displayLink = CADisplayLink(target: self, selector: #selector(renderFrame))
+        let nativeMaximum = Float(max(60, UIScreen.main.maximumFramesPerSecond))
         displayLink.preferredFrameRateRange = CAFrameRateRange(
             minimum: 30,
-            maximum: 60,
-            preferred: 60
+            maximum: nativeMaximum,
+            preferred: nativeMaximum
         )
         displayLink.add(to: .main, forMode: .common)
         displayLink.isPaused = true
@@ -1217,6 +1219,7 @@ private final class RemoteWaveformLayerHostView: UIView {
             return
         }
         appliedBoundsSize = bounds.size
+        staticGeometryNeedsUpdate = true
         renderFrame()
     }
 
@@ -1230,6 +1233,15 @@ private final class RemoteWaveformLayerHostView: UIView {
     ) {
         let imageChanged = self.rasterImage !== rasterImage
         let hotCuesChanged = hotCues != player.track.hotCues
+        let transportDiscontinuity = self.player?.trackLoadID != player.trackLoadID
+            || self.player?.transport.discontinuityRevision
+                != player.transport.discontinuityRevision
+            || self.player?.transport.playing != player.transport.playing
+        let geometryChanged = imageChanged
+            || hotCuesChanged
+            || self.visibleBeats != max(1, visibleBeats)
+            || self.isMaster != isMaster
+            || self.player?.track.durationBeats != player.track.durationBeats
         self.rasterImage = rasterImage
         self.player = player
         self.visibleBeats = max(1, visibleBeats)
@@ -1244,8 +1256,14 @@ private final class RemoteWaveformLayerHostView: UIView {
             hotCues = player.track.hotCues
             rebuildHotCueLayers()
         }
+        staticGeometryNeedsUpdate = staticGeometryNeedsUpdate || geometryChanged
         updateRenderingState()
-        renderFrame()
+        // Continuous network anchors only replace interpolation evidence. The
+        // display link consumes them on the next VSync; an asynchronous socket
+        // callback must not insert an extra, off-cycle layer movement.
+        if geometryChanged || transportDiscontinuity || !isMaster || !player.transport.playing {
+            renderFrame()
+        }
     }
 
     func stopRendering() {
@@ -1263,7 +1281,12 @@ private final class RemoteWaveformLayerHostView: UIView {
     }
 
     private func updateRenderingState() {
-        displayLink?.isPaused = window == nil || player?.transport.playing != true
+        // Prepared Players render a fixed overview. Only the live Master needs
+        // a display-rate clock, so a two-Player transition never doubles the
+        // waveform animation work.
+        displayLink?.isPaused = window == nil
+            || !isMaster
+            || player?.transport.playing != true
     }
 
     @objc private func renderFrame() {
@@ -1286,16 +1309,32 @@ private final class RemoteWaveformLayerHostView: UIView {
         let height = bounds.height
         let fullTrackWidth = width * CGFloat(totalBeats / visibleBeats)
         let waveformX = -width * CGFloat(startBeat / visibleBeats)
-        let playheadX = width * CGFloat(RemoteWaveformViewportMath.livePlayheadFraction)
 
         CATransaction.begin()
         CATransaction.setDisableActions(true)
-        waveformLayer.bounds = CGRect(x: 0, y: 0, width: fullTrackWidth, height: height)
+        updateStaticGeometryIfNeeded(
+            fullTrackWidth: fullTrackWidth,
+            height: height,
+            playheadX: width * CGFloat(RemoteWaveformViewportMath.livePlayheadFraction),
+            track: player.track
+        )
         waveformLayer.position = CGPoint(x: waveformX, y: 0)
+        CATransaction.commit()
+    }
+
+    private func updateStaticGeometryIfNeeded(
+        fullTrackWidth: CGFloat,
+        height: CGFloat,
+        playheadX: CGFloat,
+        track: RemoteTrack
+    ) {
+        guard staticGeometryNeedsUpdate else { return }
+        staticGeometryNeedsUpdate = false
+        waveformLayer.bounds = CGRect(x: 0, y: 0, width: fullTrackWidth, height: height)
         layoutHotCueLayers(
             fullTrackWidth: fullTrackWidth,
             height: height,
-            track: player.track
+            track: track
         )
         playheadLayer.isHidden = !isMaster
         playheadCapLayer.isHidden = !isMaster
@@ -1303,7 +1342,6 @@ private final class RemoteWaveformLayerHostView: UIView {
         playheadLayer.position = CGPoint(x: playheadX - 1, y: 0)
         playheadCapLayer.bounds = CGRect(x: 0, y: 0, width: 7, height: 7)
         playheadCapLayer.position = CGPoint(x: playheadX - 3.5, y: 0)
-        CATransaction.commit()
     }
 
     private func rebuildHotCueLayers() {

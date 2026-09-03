@@ -524,6 +524,7 @@ struct EngineDeckWire {
     effective_bpm_milli: u64,
     playing: bool,
     playback_position_millis: Option<u64>,
+    playback_position_observed_at_unix_millis: Option<u64>,
     transport_revision: Option<u64>,
     track: EngineTrackWire,
 }
@@ -543,7 +544,9 @@ impl EngineDeckWire {
                 effective_bpm_milli: self.effective_bpm_milli,
                 playing: self.playing,
                 discontinuity_revision: self.transport_revision.unwrap_or(0),
-                observed_at_unix_millis,
+                observed_at_unix_millis: self
+                    .playback_position_observed_at_unix_millis
+                    .unwrap_or(observed_at_unix_millis),
             },
             track: self.track.into_remote()?,
         })

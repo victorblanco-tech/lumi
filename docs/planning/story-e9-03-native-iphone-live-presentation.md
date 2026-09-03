@@ -85,6 +85,16 @@ iPhone UI that matches Lumi's macOS visual language.
   stable full-track RGB raster. Core Animation moves that raster below the fixed
   22% Master playhead; pinch zoom cannot enter inspection mode or move the
   playhead out of view.
+- Remote dev-11 keeps the same raster and fixed-playhead contract while
+  removing two independent cadence problems: canonical Pro DJ Link beat
+  anchors retain their original monotonic observation time, and continuous
+  socket updates are consumed only on display VSync. Static waveform geometry
+  is no longer recalculated per frame, only the Master owns a display clock,
+  and ProMotion iPhones use their native refresh rate.
+- physical dev-11 acceptance on aiVoon restored the existing pinned-TLS
+  session and stayed connected during LAN simulator playback. A 15.959-second
+  `Animation Hitches` trace reported no interaction delay over 33 ms and one
+  16.67 ms frame hitch.
 
 ## Remaining gate
 

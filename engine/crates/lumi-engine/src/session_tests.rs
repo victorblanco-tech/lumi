@@ -10,6 +10,20 @@ use lumi_remote_protocol::{
 use lumi_simulator::{SimulationControl, SimulationSpeed};
 
 #[test]
+fn remote_anchor_preserves_the_canonical_monotonic_observation_time() {
+    let now = Instant::now();
+    let observed = now.checked_sub(Duration::from_millis(37)).unwrap_or(now);
+    assert_eq!(
+        unix_millis_for_monotonic_observation(10_000, now, observed),
+        9_963
+    );
+    assert_eq!(
+        unix_millis_for_monotonic_observation(10_000, now, now),
+        10_000
+    );
+}
+
+#[test]
 fn actual_engine_snapshot_maps_to_the_scoped_remote_live_contract() {
     let mut runtime =
         initialized_runtime().unwrap_or_else(|error| panic!("runtime must initialize: {error}"));

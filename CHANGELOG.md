@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.6.0-dev-11 / Lumi Remote 0.1.0-dev-11 - 2026-09-03
+
+### Fixed
+
+- Preserves the actual monotonic observation time of each canonical Pro DJ
+  Link beat in Remote transport anchors. The iPhone no longer re-anchors a
+  beat to the later gateway publication time and therefore does not step back
+  slightly at each incoming beat.
+- Keeps tempo-only updates phase-continuous while explicit play, pause, seek,
+  Hot Cue and track-load discontinuities still re-anchor immediately.
+
+### Performance
+
+- Moves only the live Master waveform at display rate; a prepared Player keeps
+  its fixed overview without running a second display clock.
+- Uses the physical iPhone's native refresh rate and moves only the waveform
+  layer per frame. Beatgrid, Hot Cue and playhead geometry are recalculated
+  only for layout, track or zoom changes.
+- Applies continuous socket anchors on the next display VSync instead of
+  inserting extra off-cycle layer updates.
+
+### Tests
+
+- Regression-locks canonical beat timestamps across the Rust Remote boundary
+  and proves that a tempo-only status update cannot reset playback phase.
+- Builds and tests the actual iOS/UIKit renderer with warnings as errors.
+
+### Known limitation
+
+- Physical-device playback exposed a remaining clock-domain error: Remote
+  interpolation still compared a Mac wall-clock timestamp with the iPhone
+  wall clock. When those clocks differ, the 750 ms stale-data guard can pause
+  the visual timeline before the next anchor. This is addressed in dev-12.
+
 ## Lumi Remote 0.1.0-dev-10 - 2026-09-03
 
 ### Fixed

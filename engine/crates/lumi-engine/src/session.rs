@@ -681,6 +681,7 @@ fn remote_transport_anchors(
     runtime: &EngineRuntime,
     observed_at_unix_millis: u64,
 ) -> Vec<(u8, RemoteTransportAnchor)> {
+    let observed_at = Instant::now();
     runtime
         .state
         .state()
@@ -700,11 +701,25 @@ fn remote_transport_anchors(
                     effective_bpm_milli: u64::from(transport.effective_bpm_milli),
                     playing: transport.playing,
                     discontinuity_revision: transport.discontinuity_revision,
-                    observed_at_unix_millis,
+                    observed_at_unix_millis: unix_millis_for_monotonic_observation(
+                        observed_at_unix_millis,
+                        observed_at,
+                        transport.anchor_observed_at,
+                    ),
                 },
             ))
         })
         .collect()
+}
+
+fn unix_millis_for_monotonic_observation(
+    now_unix_millis: u64,
+    now: Instant,
+    observed_at: Instant,
+) -> u64 {
+    let age_millis =
+        u64::try_from(now.saturating_duration_since(observed_at).as_millis()).unwrap_or(u64::MAX);
+    now_unix_millis.saturating_sub(age_millis)
 }
 
 fn unix_time_millis() -> u64 {
@@ -4642,6 +4657,8 @@ fn snapshot_envelope_internal(
         json!(state.leader_deck().map(|deck_id| deck_id.value())),
     );
     let deck_source_kind = runtime.deck_source_kind();
+    let snapshot_transport_observed_at = Instant::now();
+    let snapshot_transport_observed_at_unix_millis = unix_time_millis();
     let decks = state
         .decks()
         .map(|(deck_id, deck)| {
@@ -4670,27 +4687,21 @@ fn snapshot_envelope_internal(
             } else {
                 Value::Null
             };
-            let connected_playback_position_millis = if runtime.deck_source_mode
-                == DeckSourceMode::ConnectedDecks
-            {
-                runtime
-                    .direct_deck_source
-                    .transport(deck.track_load_id())
-                    .and_then(|transport| {
-                        library_context.and_then(|context| context.millis_at_beat(transport.beat))
-                    })
-            } else {
-                None
-            };
-            let connected_transport_revision = (runtime.deck_source_mode
-                == DeckSourceMode::ConnectedDecks)
-                .then(|| {
-                    runtime
-                        .direct_deck_source
-                        .transport(deck.track_load_id())
-                        .map(|transport| transport.discontinuity_revision)
-                })
+            let connected_transport = (runtime.deck_source_mode == DeckSourceMode::ConnectedDecks)
+                .then(|| runtime.direct_deck_source.transport(deck.track_load_id()))
                 .flatten();
+            let connected_playback_position_millis = connected_transport.and_then(|transport| {
+                library_context.and_then(|context| context.millis_at_beat(transport.beat))
+            });
+            let connected_playback_observed_at_unix_millis = connected_transport.map(|transport| {
+                unix_millis_for_monotonic_observation(
+                    snapshot_transport_observed_at_unix_millis,
+                    snapshot_transport_observed_at,
+                    transport.anchor_observed_at,
+                )
+            });
+            let connected_transport_revision =
+                connected_transport.map(|transport| transport.discontinuity_revision);
             let has_plan = state.plan(deck_id).is_some();
             let plan_eligibility = if library_context.is_some() && has_plan {
                 "readyExact"
@@ -4717,6 +4728,7 @@ fn snapshot_envelope_internal(
                 "effectiveBpmMilli": deck.effective_bpm_milli(),
                 "playing": deck.is_playing(),
                 "playbackPositionMillis": connected_playback_position_millis,
+                "playbackPositionObservedAtUnixMillis": connected_playback_observed_at_unix_millis,
                 "transportRevision": connected_transport_revision,
                 "phraseIndex": deck.phrase_index(),
                 "planEligibility": plan_eligibility,
