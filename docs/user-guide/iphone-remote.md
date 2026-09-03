@@ -14,9 +14,48 @@ revision-safe set of user commands.
 - matching Production, RC or Dev release channels.
 
 The phone needs Local Network permission. Internet access is not required while
-using the Remote. A TestFlight invitation is the supported public-beta install
-path once it is published; a Simulator archive from GitHub Releases cannot be
-installed on a physical iPhone.
+using the Remote. The current beta is installed from source with Xcode. A
+Simulator archive from GitHub Releases cannot be installed on a physical
+iPhone, and no TestFlight invitation is currently available.
+
+## Install the current beta with Xcode
+
+This is the free installation route while Lumi Remote is in its early public
+beta. It requires a Mac and an Apple Account, but it does not require a paid
+Apple Developer Program membership.
+
+1. Install the current Xcode release from the Mac App Store.
+2. Clone Lumi and switch to the documented beta branch:
+
+   ```bash
+   git clone https://github.com/victorblanco-tech/lumi.git
+   cd lumi
+   git switch dev
+   open apps/ios/LumiRemote.xcodeproj
+   ```
+
+3. In Xcode, open **Xcode → Settings → Accounts** and add your Apple Account.
+4. Select the **LumiRemote** project and target, then open **Signing &
+   Capabilities**.
+5. Enable **Automatically manage signing**, select your **Personal Team** and
+   replace the Dev bundle identifier with a unique value such as
+   `local.yourname.lumi.remote.dev` if Xcode reports that the existing one is
+   unavailable.
+6. Connect and unlock the iPhone, trust the Mac when asked and enable
+   **Settings → Privacy & Security → Developer Mode** on the iPhone if needed.
+7. Select that iPhone as the Xcode run destination and press **Run**.
+8. Start the matching **Lumi Dev** Mac app, enable its Remote Gateway and follow
+   the pairing steps below.
+
+Apple Personal Team provisioning expires after seven days. Reconnect the
+iPhone and press **Run** in Xcode again to renew the installation. Apple also
+limits free on-device testing to three devices per platform. Do not download or
+install an IPA offered by an unofficial third party.
+
+The Xcode Dev build intentionally discovers only the Dev Remote Gateway. A
+Production, RC and Dev Remote cannot cross-connect. TestFlight will become the
+preferred public installation path if the project gains enough field usage to
+justify the paid Apple Developer Program membership.
 
 ## Pair the iPhone
 

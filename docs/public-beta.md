@@ -16,6 +16,11 @@ workflow on more hardware and library combinations than the reference setup.
 - Lumi Remote pairing, portrait/landscape playback, reconnect, Controller
   transfer and future-phrase edits without affecting the running Mac show.
 
+Lumi Remote is currently an opt-in source beta. Testers install it with Xcode
+and their own Apple Account by following the
+[iPhone installation guide](user-guide/iphone-remote.md#install-the-current-beta-with-xcode).
+There is no TestFlight invitation yet.
+
 ## Before a show
 
 1. Back up Lumi and keep the source USB media backed up through your normal

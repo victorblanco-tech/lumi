@@ -34,9 +34,12 @@ show.
 - this first beta still needs broader device, Wi-Fi and multi-phone field
   coverage.
 
-Install the physical-iPhone beta through TestFlight when the public invitation
-is available. The optional GitHub Simulator artifact is for validation and is
-not installable on an iPhone.
+Install the physical-iPhone beta from source with Xcode and your own Apple
+Account by following the
+[iPhone installation guide](../user-guide/iphone-remote.md#install-the-current-beta-with-xcode).
+Free Personal Team provisioning expires after seven days. There is no
+TestFlight invitation yet; the optional GitHub Simulator artifact is for
+validation and is not installable on an iPhone.
 
 Read the [Lumi Remote guide](../user-guide/iphone-remote.md),
 [privacy information](../privacy.md) and

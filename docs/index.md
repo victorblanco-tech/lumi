@@ -15,10 +15,12 @@ description: Phrase-aware lighting automation for DJ sets.
 Lumi is a native macOS app that turns track structure into a prepared lighting
 plan. It watches the current and next deck, follows phrase changes and triggers
 your own SoundSwitch AutoLoops without taking over fixture or DMX control.
+Lumi Remote brings that same focused Live Decks experience to an iPhone in the
+booth while the Mac remains fully responsible for the show.
 
 [Download Lumi](https://github.com/victorblanco-tech/lumi/releases) ·
 [Read the user guide](user-guide/) ·
-[Use Lumi Remote](user-guide/iphone-remote.html) ·
+[Use Lumi Remote](user-guide/iphone-remote.md) ·
 [Report an issue](https://github.com/victorblanco-tech/lumi/issues)
 
 > **Public Beta:** Lumi is ready for structured field testing across different
@@ -38,7 +40,8 @@ booth controls already owned by the Mac engine.
 
 The connection stays local and encrypted. Losing the phone never stops the Mac
 engine or changes the lighting output. Continue with the
-[Lumi Remote guide](user-guide/iphone-remote.html).
+[Lumi Remote guide](user-guide/iphone-remote.md) to install the current beta
+from source with Xcode and pair it with the Mac.
 
 ![The complete Lumi workflow from trusted USB source to SoundSwitch DMX](assets/lumi-workflow.svg)
 
@@ -60,6 +63,8 @@ engine or changes the lighting output. Continue with the
 - **Works beside Control One:** manual operator choices and Lumi can coexist.
 - **Runs locally:** no internet dependency during preparation or a show.
 - **Dry-run mode:** Local Playback lets you prepare and test without decks.
+- **iPhone booth companion:** the Master, next Player, integration health and
+  revision-safe live controls remain visible beside the mixer.
 
 ## Clear integration boundaries
 
@@ -110,6 +115,11 @@ one place.
 The current reference setup uses CDJ-1500X players, a DJM-V5, SoundSwitch,
 Control One and a DMX lighting rig. Test every release with your own hardware and
 show file before live use.
+
+Lumi Remote additionally requires iOS 18 or newer. During the current beta it
+is installed from source with Xcode and the tester's own free Apple Account;
+Apple's Personal Team provisioning expires after seven days. TestFlight is a
+future distribution step and is not currently available.
 
 Continue with the [complete user guide](user-guide/).
 

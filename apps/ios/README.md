@@ -6,8 +6,8 @@ controls. It does not contain Local Playback, Library, USB Sync or Track Edit.
 
 ## Current development status
 
-Version 0.1.0 is being prepared as the first public TestFlight beta for iOS 18
-or newer. Bonjour discovery, release-channel isolation, pinned TLS, native
+Version 0.1.0 is available as a source-installed public beta for iOS 18 or
+newer. Bonjour discovery, release-channel isolation, pinned TLS, native
 Camera deep-link pairing, Keychain credential storage, Mac approval and
 revocation, scoped Remote decoding and revision-safe booth controls are
 implemented. The independently packaged, opt-in Mac Remote Gateway receives
@@ -35,17 +35,18 @@ xcodebuild \
   CODE_SIGNING_ALLOWED=NO build
 ```
 
-Before publishing an external build, complete the physical release matrix and
-the TestFlight checklist in `docs/release/lumi-remote-0.1.0-beta-readiness.md`.
+Physical-iPhone testers currently build and sign the Dev configuration with
+their own Apple Account in Xcode. The step-by-step route and seven-day Personal
+Team limitation are documented in `docs/user-guide/iphone-remote.md`.
 
 ## Version and release
 
 The independent product version is in `apps/ios/VERSION`. Tags use
 `lumi-remote-vX.Y.Z`; that tag validates and creates a controlled draft GitHub
 Release with an iOS Simulator validation artifact. It does not imply a signed
-physical-iPhone build. TestFlight remains a separate Apple signing and App
-Store Connect gate; users should install the public beta through TestFlight,
-not from the Simulator archive.
+physical-iPhone build. TestFlight remains a future, separate Apple signing and
+App Store Connect gate. Until then, testers install the app from source with
+Xcode; the Simulator archive remains unsuitable for physical iPhones.
 
 Architecture and product details:
 
