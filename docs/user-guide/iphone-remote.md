@@ -5,7 +5,7 @@ the show authority; the iPhone displays its current state and sends a small,
 revision-safe set of user commands.
 
 <p align="center">
-  <img src="../assets/screenshots/lumi-remote-live.png" alt="Lumi Remote showing two live Players, RGB waveforms and their Light Plans" width="390">
+  <img src="../assets/screenshots/lumi-remote-live-device.png" alt="Lumi Remote on iPhone showing two live Players, RGB waveforms and their Light Plans" width="390">
 </p>
 
 ## Requirements

@@ -7,7 +7,7 @@ without putting the phone in any show-critical execution path.
 ## Included
 
 - portrait Master-first and landscape side-by-side Player layouts;
-- fixed-playhead, pinch-zoomable RGB waveform with beatgrid and Hot Cues;
+- smooth, pinch-zoomable RGB waveform with beatgrid and Hot Cues;
 - proportional Lumi phrase and Light Plan timelines with **Active** and **Next**
   emphasis;
 - real Player number, hardware model, track metadata, BPM and remaining time;
