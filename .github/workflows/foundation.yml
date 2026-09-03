@@ -90,7 +90,7 @@ jobs:
     needs: classify
     if: needs.classify.outputs.apple == '1'
     runs-on: macos-26
-    timeout-minutes: 20
+    timeout-minutes: 30
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
