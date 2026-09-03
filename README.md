@@ -43,7 +43,9 @@ Light Plans from the authoritative Mac engine. From the phone you can change
 `Off`, `Arm`, `Start` and `Pause`, control Ableton Link and timing offset, and
 adjust a future Theme or AutoLoop without leaving the mixer.
 
-![Lumi Remote showing the live Master and its next phrase](docs/assets/screenshots/lumi-remote-live.png)
+<p align="center">
+  <img src="docs/assets/screenshots/lumi-remote-live.png" alt="Lumi Remote showing two live Players, RGB waveforms and their Light Plans" width="390">
+</p>
 
 The Remote connects directly to the paired Lumi Mac over the local network
 using pinned TLS. It does not stream audio, use a cloud relay or sit in the Pro

@@ -36,7 +36,9 @@ reach. It mirrors the authoritative RGB waveform, phrases and Light Plan, keeps
 the three integration states visible, and allows only the same revision-safe
 booth controls already owned by the Mac engine.
 
-![Lumi Remote showing the live Master and its next phrase](assets/screenshots/lumi-remote-live.png)
+<p align="center">
+  <img src="assets/screenshots/lumi-remote-live.png" alt="Lumi Remote showing two live Players, RGB waveforms and their Light Plans" width="390">
+</p>
 
 The connection stays local and encrypted. Losing the phone never stops the Mac
 engine or changes the lighting output. Continue with the

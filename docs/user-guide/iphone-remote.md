@@ -4,7 +4,9 @@ Lumi Remote is the focused Live Decks companion for the booth. The Mac remains
 the show authority; the iPhone displays its current state and sends a small,
 revision-safe set of user commands.
 
-![Lumi Remote showing the live Master and its next phrase](../assets/screenshots/lumi-remote-live.png)
+<p align="center">
+  <img src="../assets/screenshots/lumi-remote-live.png" alt="Lumi Remote showing two live Players, RGB waveforms and their Light Plans" width="390">
+</p>
 
 ## Requirements
 
