@@ -27,26 +27,28 @@ beta. It requires a Mac and an Apple Account, but it does not require a paid
 Apple Developer Program membership.
 
 1. Install the current Xcode release from the Mac App Store.
-2. Clone Lumi and switch to the documented beta branch:
+2. Clone Lumi and switch to the immutable Remote beta tag:
 
    ```bash
    git clone https://github.com/victorblanco-tech/lumi.git
    cd lumi
-   git switch dev
+   git switch --detach lumi-remote-v0.1.0
    open apps/ios/LumiRemote.xcodeproj
    ```
 
-3. In Xcode, open **Xcode → Settings → Accounts** and add your Apple Account.
-4. Select the **LumiRemote** project and target, then open **Signing &
+3. Choose **Product → Scheme → Edit Scheme**, select **Run** and set its build
+   configuration to **Release**. This connects to the Production Lumi Gateway.
+4. In Xcode, open **Xcode → Settings → Accounts** and add your Apple Account.
+5. Select the **LumiRemote** project and target, then open **Signing &
    Capabilities**.
-5. Enable **Automatically manage signing**, select your **Personal Team** and
-   replace the Dev bundle identifier with a unique value such as
-   `local.yourname.lumi.remote.dev` if Xcode reports that the existing one is
+6. Enable **Automatically manage signing**, select your **Personal Team** and
+   replace the Release bundle identifier with a unique value such as
+   `local.yourname.lumi.remote` if Xcode reports that the existing one is
    unavailable.
-6. Connect and unlock the iPhone, trust the Mac when asked and enable
+7. Connect and unlock the iPhone, trust the Mac when asked and enable
    **Settings → Privacy & Security → Developer Mode** on the iPhone if needed.
-7. Select that iPhone as the Xcode run destination and press **Run**.
-8. Start the matching **Lumi Dev** Mac app, enable its Remote Gateway and follow
+8. Select that iPhone as the Xcode run destination and press **Run**.
+9. Start **Lumi 0.6.0** on the Mac, enable its Remote Gateway and follow
    the pairing steps below.
 
 Apple Personal Team provisioning expires after seven days. Reconnect the
@@ -54,10 +56,10 @@ iPhone and press **Run** in Xcode again to renew the installation. Apple also
 limits free on-device testing to three devices per platform. Do not download or
 install an IPA offered by an unofficial third party.
 
-The Xcode Dev build intentionally discovers only the Dev Remote Gateway. A
-Production, RC and Dev Remote cannot cross-connect. TestFlight will become the
-preferred public installation path if the project gains enough field usage to
-justify the paid Apple Developer Program membership.
+Production, RC and Dev Remotes cannot cross-connect. The Release configuration
+above deliberately pairs with the Production Mac app. TestFlight will become
+the preferred public installation path if the project gains enough field usage
+to justify the paid Apple Developer Program membership.
 
 ## Pair the iPhone
 
@@ -99,7 +101,6 @@ Landscape keeps numbered Players side by side. Each loaded card contains:
 - the real `Player n` identity and detected hardware model;
 - title, artist, track color, effective BPM, key and remaining time;
 - the same cached RGB waveform, beatgrid and Hot Cue markers used by Lumi;
-- a fixed Master playhead with a default 40-bar viewport;
 - proportional Lumi phrases and the compiled Light Plan;
 - clear red **Active** and blue **Next** plan emphasis.
 

@@ -1,5 +1,32 @@
 # Changelog
 
+## 0.6.0 / Lumi Remote 0.1.0 - 2026-09-03
+
+### Added
+
+- Introduces Lumi Remote, a native iPhone companion for the authoritative Live
+  Decks state, operation controls and future phrase-aware Light Plan changes.
+- Adds an independently supervised, opt-in Remote Gateway with local Bonjour
+  discovery, one-use pairing, pinned TLS and revocable Controller access.
+- Establishes independent product versions and release tags for Lumi Remote and
+  the Pro DJ Link Simulator within the Lumi repository.
+
+### Changed
+
+- Presents the live Master and prepared next Player in compact portrait and
+  landscape layouts with vivid RGB waveforms, Hot Cues, phrases, Light Plans,
+  hardware identity and persistent integration health.
+- Moves Remote transport rendering into the receiving iPhone clock domain and
+  uses bounded native animation so phone presentation cannot pressure the Mac
+  show lanes.
+
+### Distribution
+
+- Free physical-iPhone testing uses the immutable `lumi-remote-v0.1.0` source
+  tag, Xcode and the tester's Apple Account until TestFlight is enabled.
+- Adds controlled draft-release automation for the macOS DMG/checksum/SBOM and
+  the independently versioned iOS Simulator validation artifact.
+
 ## 0.6.0-dev-12 / Lumi Remote 0.1.0-dev-12 - 2026-09-03
 
 ### Fixed

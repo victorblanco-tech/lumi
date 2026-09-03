@@ -16,7 +16,7 @@ be uploaded to App Store Connect and distributed through TestFlight.
       are part of the asset catalog and verified in local/CI builds.
 - [x] Local Network purpose text and exempt-encryption declaration are present.
 - [x] Public privacy information, user guide and beta release notes are present.
-- [ ] Freeze the exact Lumi macOS 0.6.0 and Remote 0.1.0 compatibility pair.
+- [x] Freeze the exact Lumi macOS 0.6.0 and Remote 0.1.0 compatibility pair.
 
 ## Local verification
 
@@ -68,6 +68,11 @@ be uploaded to App Store Connect and distributed through TestFlight.
 7. Submit the build to External TestFlight review.
 8. Tag the exact source commit `lumi-remote-v0.1.0`; review and publish the
    controlled GitHub draft with the matching release notes.
+
+The source-distributed 0.1.0 Public Beta intentionally stops before the App
+Store Connect steps above. Testers build the immutable tag with their own Apple
+Account; TestFlight remains a later distribution upgrade rather than a runtime
+dependency.
 
 Never commit a signing certificate, provisioning profile, App Store Connect API
 key or Apple account credential. CI signing is a later hardening step after the

@@ -4,6 +4,10 @@ Lumi Remote is the native iPhone booth companion for Lumi. It opens directly
 into Live Decks and keeps the current Master and prepared next Player visible
 without putting the phone in any show-critical execution path.
 
+<p align="center">
+  <img src="https://raw.githubusercontent.com/victorblanco-tech/lumi/lumi-remote-v0.1.0/docs/assets/screenshots/lumi-remote-live-device.png" alt="Lumi Remote on iPhone showing two live Players and their Light Plans" width="390">
+</p>
+
 ## Included
 
 - portrait Master-first and landscape side-by-side Player layouts;
@@ -36,11 +40,12 @@ show.
 
 Install the physical-iPhone beta from source with Xcode and your own Apple
 Account by following the
-[iPhone installation guide](../user-guide/iphone-remote.md#install-the-current-beta-with-xcode).
+[iPhone installation guide](https://github.com/victorblanco-tech/lumi/blob/lumi-remote-v0.1.0/docs/user-guide/iphone-remote.md#install-the-current-beta-with-xcode).
 Free Personal Team provisioning expires after seven days. There is no
 TestFlight invitation yet; the optional GitHub Simulator artifact is for
 validation and is not installable on an iPhone.
 
-Read the [Lumi Remote guide](../user-guide/iphone-remote.md),
-[privacy information](../privacy.md) and
-[public beta guidance](../public-beta.md) before testing a live setup.
+Read the [Lumi Remote guide](https://github.com/victorblanco-tech/lumi/blob/lumi-remote-v0.1.0/docs/user-guide/iphone-remote.md),
+[privacy information](https://github.com/victorblanco-tech/lumi/blob/lumi-remote-v0.1.0/docs/privacy.md) and
+[public beta guidance](https://github.com/victorblanco-tech/lumi/blob/lumi-remote-v0.1.0/docs/public-beta.md)
+before testing a live setup.
