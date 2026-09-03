@@ -33,7 +33,7 @@ Excluded from 0.6.0:
 ADR-0040 is the accepted architecture authority. The accepted visual contract is
 recorded in `docs/design/iphone-remote/README.md`.
 
-## Current evidence (`0.6.0-dev-10` / Remote `0.1.0-dev-9`)
+## Current evidence (`0.6.0-dev-10` / Remote `0.1.0-dev-10`)
 
 - the independent iOS app target builds for the generic iOS Simulator;
 - portrait Master-first and landscape side-by-side Live compositions use the
@@ -111,10 +111,15 @@ recorded in `docs/design/iphone-remote/README.md`.
   accessibility Dynamic Type receives the roomier two-row control composition;
   VoiceOver announces health, value and action for every persistent booth
   status and primary control.
+- Remote dev-10 removes the remaining iPhone-only playback bottleneck: one
+  stable high-resolution RGB track raster is translated by Core Animation,
+  rather than resampled and repainted through SwiftUI every display frame.
+  Live pinch zoom remains anchored to the fixed 22% Master playhead.
 
-Physical-iPhone pairing, real Local Network permission, device rotation/gesture
-acceptance, multi-device Controller transfer and the combined booth soak remain
-open. No current Mac live-performance behavior is changed by this feature.
+Physical-iPhone pairing and real Local Network permission are proven on the
+personally provisioned device. Extended rotation/gesture acceptance,
+multi-device Controller transfer and the combined booth soak remain open. No
+current Mac live-performance behavior is changed by this feature.
 
 ## Delivery stories
 

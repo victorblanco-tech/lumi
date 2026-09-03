@@ -177,6 +177,42 @@ func liveViewportKeepsOneZoomLevelAndFixedPlayheadAtTrackBoundaries() {
 }
 
 @Test
+func liveViewportIgnoresInspectionAndDragAtEveryZoomLevel() {
+    let currentBeat = 381.5
+    for visibleBeats in [8.0, 40.0, 160.0, 752.0] {
+        let start = RemoteWaveformViewportMath.resolvedStartBeat(
+            currentBeat: currentBeat,
+            visibleBeats: visibleBeats,
+            totalBeats: 752,
+            isMaster: true,
+            inspectionStartBeat: 500,
+            dragTranslation: 190
+        )
+
+        #expect(
+            abs(
+                (currentBeat - start) / visibleBeats
+                    - RemoteWaveformViewportMath.livePlayheadFraction
+            ) < 0.000_1
+        )
+    }
+}
+
+@Test
+func plannedPlayerCanStillBeInspectedWithoutLeavingTrackBounds() {
+    let start = RemoteWaveformViewportMath.resolvedStartBeat(
+        currentBeat: 64,
+        visibleBeats: 160,
+        totalBeats: 752,
+        isMaster: false,
+        inspectionStartBeat: 700,
+        dragTranslation: -320
+    )
+
+    #expect(start == 592)
+}
+
+@Test
 func waveformSamplingLeavesOutOfTrackLeadSpaceEmpty() {
     let points = [RemoteWaveformPoint(low: 0, mid: 0, high: 255)]
 

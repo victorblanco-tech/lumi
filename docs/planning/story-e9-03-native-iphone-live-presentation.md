@@ -1,6 +1,6 @@
 # Story E9-03: Native iPhone Live presentation
 
-- Status: **Implementation and headed Simulator visual acceptance complete; physical-device acceptance pending**
+- Status: **Implementation, headed Simulator and initial physical-device acceptance complete; booth soak pending**
 - Priority: **P1 product**
 - Target: `0.6.0-dev`
 - Components: Shared Live Presentation, iOS SwiftUI
@@ -81,9 +81,13 @@ iPhone UI that matches Lumi's macOS visual language.
   `90s Bitch - Extended Mix` retained clear cyan, red and pink regions and two
   distinct frames proved that the remaining time and waveform viewport followed
   playback.
+- Remote dev-10 replaces iPhone's per-frame SwiftUI waveform repaint with a
+  stable full-track RGB raster. Core Animation moves that raster below the fixed
+  22% Master playhead; pinch zoom cannot enter inspection mode or move the
+  playhead out of view.
 
 ## Remaining gate
 
 Complete deterministic visual evidence across the remaining supported iPhone
-sizes, Dynamic Type and VoiceOver; then perform actual-device gesture, rotation,
-keep-awake and booth-legibility acceptance.
+sizes, Dynamic Type and VoiceOver, plus the combined booth soak and extended
+physical-device gesture/rotation acceptance.

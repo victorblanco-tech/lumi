@@ -1,5 +1,22 @@
 # Changelog
 
+## Lumi Remote 0.1.0-dev-10 - 2026-09-03
+
+### Fixed
+
+- Replaces the per-frame SwiftUI waveform repaint on iPhone with one stable,
+  high-resolution RGB track raster that moves through Core Animation.
+- Keeps the live Master playhead fixed at 22% while pinch zoom changes only the
+  musical viewport; a pinch can no longer accidentally enter inspection mode.
+- Moves phrase and Light Plan animation onto a separate bounded 30 Hz visual
+  clock so waveform movement does not rebuild the complete Player surface.
+
+### Tests
+
+- Builds the actual iOS/UIKit renderer for the iPhone Simulator.
+- Regression-locks the fixed playhead across all supported zoom levels and
+  retains bounded inspection for a prepared non-Master Player.
+
 ## 0.6.0-dev-10 / Lumi Remote 0.1.0-dev-9 - 2026-09-02
 
 ### Fixed

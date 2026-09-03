@@ -1,6 +1,9 @@
 import LumiDesignSystem
 import LumiRemoteClient
 import SwiftUI
+#if os(iOS)
+import UIKit
+#endif
 
 public struct RemoteLiveActions: Sendable {
     public let setOperationState: @MainActor @Sendable (RemoteOperationState) -> Void
@@ -488,22 +491,20 @@ private struct RemotePlayerSurface: View {
     @GestureState private var magnification: CGFloat = 1
 
     var body: some View {
-        TimelineView(
-            .animation(
-                minimumInterval: 1.0 / 60.0,
-                paused: !player.transport.playing
-            )
-        ) { timeline in
-            playerCard(at: timeline.date)
-        }
+        playerCard
     }
 
-    private func playerCard(at date: Date) -> some View {
-        let viewport = beatViewport(at: date)
+    private var playerCard: some View {
         return VStack(alignment: .leading, spacing: isLandscape ? 4 : LumiSpacing.small) {
             playerHeader
 
-            RemoteWaveform(player: player, viewport: viewport, isMaster: isMaster)
+            RemoteWaveform(
+                player: player,
+                visibleBeats: effectiveVisibleBars * 4,
+                inspectionStartBeat: isMaster ? nil : inspectionStartBeat,
+                dragTranslation: isMaster ? 0 : dragTranslation,
+                isMaster: isMaster
+            )
                 .frame(height: isLandscape ? nil : 96)
                 .frame(
                     minHeight: isLandscape ? 102 : nil,
@@ -512,7 +513,7 @@ private struct RemotePlayerSurface: View {
                 .contentShape(Rectangle())
                 .gesture(waveformGestures)
                 .overlay(alignment: .bottomTrailing) {
-                    if inspectionStartBeat != nil {
+                    if !isMaster, inspectionStartBeat != nil {
                         Button("Follow Live") {
                             inspectionStartBeat = nil
                         }
@@ -523,31 +524,7 @@ private struct RemotePlayerSurface: View {
                     }
                 }
 
-            RemotePhraseBand(
-                player: player,
-                plan: plan,
-                viewport: viewport,
-                onSelectCue: onSelectCue
-            )
-                .frame(height: isLandscape ? 20 : 18)
-
-            if let plan {
-                RemotePlanBand(
-                    player: player,
-                    plan: plan,
-                    viewport: viewport,
-                    controlsEnabled: controlsEnabled,
-                    onSelectCue: onSelectCue
-                )
-                .frame(height: isLandscape ? 46 : 54)
-            } else {
-                Text("Waiting for Light Plan")
-                    .font(LumiTypography.caption)
-                    .foregroundStyle(LumiColor.textSecondary)
-                    .frame(maxWidth: .infinity, minHeight: isLandscape ? 46 : 54)
-                    .background(LumiColor.surfaceElevated)
-                    .clipShape(RoundedRectangle(cornerRadius: LumiRadius.compact))
-            }
+            movingPlanBands
         }
         .padding(isLandscape ? LumiSpacing.small : LumiSpacing.medium)
         .frame(maxHeight: isLandscape ? .infinity : nil, alignment: .top)
@@ -568,6 +545,44 @@ private struct RemotePlayerSurface: View {
         .onChange(of: isMaster) { _, newValue in
             inspectionStartBeat = nil
             manualZoomBars = newValue ? 40 : nil
+        }
+    }
+
+    private var movingPlanBands: some View {
+        TimelineView(
+            .animation(
+                minimumInterval: 1.0 / 30.0,
+                paused: !player.transport.playing
+            )
+        ) { timeline in
+            let viewport = beatViewport(at: timeline.date)
+            VStack(alignment: .leading, spacing: isLandscape ? 4 : LumiSpacing.small) {
+                RemotePhraseBand(
+                    player: player,
+                    plan: plan,
+                    viewport: viewport,
+                    onSelectCue: onSelectCue
+                )
+                .frame(height: isLandscape ? 20 : 18)
+
+                if let plan {
+                    RemotePlanBand(
+                        player: player,
+                        plan: plan,
+                        viewport: viewport,
+                        controlsEnabled: controlsEnabled,
+                        onSelectCue: onSelectCue
+                    )
+                    .frame(height: isLandscape ? 46 : 54)
+                } else {
+                    Text("Waiting for Light Plan")
+                        .font(LumiTypography.caption)
+                        .foregroundStyle(LumiColor.textSecondary)
+                        .frame(maxWidth: .infinity, minHeight: isLandscape ? 46 : 54)
+                        .background(LumiColor.surfaceElevated)
+                        .clipShape(RoundedRectangle(cornerRadius: LumiRadius.compact))
+                }
+            }
         }
     }
 
@@ -696,19 +711,14 @@ private struct RemotePlayerSurface: View {
             player: player,
             atUnixMillis: UInt64(max(0, date.timeIntervalSince1970 * 1_000))
         )
-        let baseStart = automaticViewportStart(
+        let start = RemoteWaveformViewportMath.resolvedStartBeat(
             currentBeat: visualBeat,
             visibleBeats: visible,
-            totalBeats: total
+            totalBeats: total,
+            isMaster: isMaster,
+            inspectionStartBeat: inspectionStartBeat,
+            dragTranslation: Double(dragTranslation)
         )
-        let translated = -Double(dragTranslation) * visible / 320
-        let proposed = (inspectionStartBeat ?? baseStart) + translated
-        let followsLive = isMaster
-            && inspectionStartBeat == nil
-            && abs(dragTranslation) < 0.001
-        let start = followsLive
-            ? proposed
-            : clampedStart(proposed, visibleBeats: visible, totalBeats: total)
         let playheadFraction = isMaster
             ? (visualBeat - start) / visible
             : nil
@@ -725,9 +735,11 @@ private struct RemotePlayerSurface: View {
         SimultaneousGesture(
             DragGesture(minimumDistance: 5)
                 .updating($dragTranslation) { value, state, _ in
+                    guard !isMaster else { return }
                     state = value.translation.width
                 }
                 .onEnded { value in
+                    guard !isMaster else { return }
                     let visible = effectiveVisibleBars * 4
                     let total = max(1, Double(player.track.durationBeats))
                     let current = inspectionStartBeat
@@ -736,7 +748,7 @@ private struct RemotePlayerSurface: View {
                             visibleBeats: visible,
                             totalBeats: total
                         )
-                    inspectionStartBeat = clampedStart(
+                    inspectionStartBeat = RemoteWaveformViewportMath.clampedStartBeat(
                         current - Double(value.translation.width) * visible / 320,
                         visibleBeats: visible,
                         totalBeats: total
@@ -756,7 +768,7 @@ private struct RemotePlayerSurface: View {
                         magnification: Double(value.magnification),
                         totalBars: totalBars
                     )
-                }
+            }
         )
     }
 
@@ -773,13 +785,6 @@ private struct RemotePlayerSurface: View {
         )
     }
 
-    private func clampedStart(
-        _ value: Double,
-        visibleBeats: Double,
-        totalBeats: Double
-    ) -> Double {
-        min(max(0, value), max(0, totalBeats - min(visibleBeats, totalBeats)))
-    }
 }
 
 private struct RemoteEmptyPlayerSurface: View {
@@ -830,10 +835,53 @@ private struct RemoteEmptyPlayerSurface: View {
 
 private struct RemoteWaveform: View {
     let player: RemotePlayer
-    let viewport: RemoteBeatViewport
+    let visibleBeats: Double
+    let inspectionStartBeat: Double?
+    let dragTranslation: CGFloat
     let isMaster: Bool
+#if os(iOS)
+    @State private var rasterImage: CGImage?
+    @State private var renderedContentKey: RemoteWaveformRasterContentKey?
+#endif
 
     var body: some View {
+#if os(iOS)
+        GeometryReader { _ in
+            ZStack {
+                Color.black
+                if let rasterImage {
+                    RemoteWaveformLayerView(
+                        rasterImage: rasterImage,
+                        player: player,
+                        visibleBeats: visibleBeats,
+                        inspectionStartBeat: inspectionStartBeat,
+                        dragTranslation: dragTranslation,
+                        isMaster: isMaster
+                    )
+                }
+            }
+            .task(id: rasterKey) {
+                let requestedKey = rasterKey
+                if renderedContentKey != requestedKey.contentKey {
+                    // A previous track must never flash while the next RGB
+                    // raster is prepared. The black backing remains stable.
+                    rasterImage = nil
+                    renderedContentKey = nil
+                }
+                let points = player.track.waveform
+                let track = player.track
+                let rendered = await Task.detached(priority: .utility) {
+                    Self.makeRasterImage(points: points, track: track)
+                }.value
+                guard !Task.isCancelled, requestedKey == rasterKey else { return }
+                rasterImage = rendered
+                renderedContentKey = requestedKey.contentKey
+            }
+        }
+        .background(.black)
+        .clipShape(RoundedRectangle(cornerRadius: LumiRadius.compact))
+#else
+        let viewport = currentViewport
         Canvas { context, size in
             let points = player.track.waveform
             guard !points.isEmpty else { return }
@@ -894,9 +942,36 @@ private struct RemoteWaveform: View {
                 }
             }
         }
+#endif
+    }
+
+#if !os(iOS)
+    private var currentViewport: RemoteBeatViewport {
+        let total = max(1, Double(player.track.durationBeats))
+        let visible = min(total, max(1, visibleBeats))
+        let visualBeat = RemoteTransportInterpolation.visualBeat(
+            player: player,
+            atUnixMillis: UInt64(max(0, Date().timeIntervalSince1970 * 1_000))
+        )
+        let start = RemoteWaveformViewportMath.resolvedStartBeat(
+            currentBeat: visualBeat,
+            visibleBeats: visible,
+            totalBeats: total,
+            isMaster: isMaster,
+            inspectionStartBeat: inspectionStartBeat,
+            dragTranslation: Double(dragTranslation)
+        )
+        return RemoteBeatViewport(
+            startBeat: start,
+            endBeat: start + visible,
+            totalBeats: total,
+            currentBeat: visualBeat,
+            playheadFraction: isMaster ? RemoteWaveformViewportMath.livePlayheadFraction : nil
+        )
     }
 
     private func drawBeatgrid(context: GraphicsContext, size: CGSize) {
+        let viewport = currentViewport
         let first = Int(floor(viewport.startBeat))
         let last = Int(ceil(viewport.endBeat))
         guard last - first <= 512 else { return }
@@ -916,7 +991,369 @@ private struct RemoteWaveform: View {
             )
         }
     }
+#endif
+
+#if os(iOS)
+    private var rasterKey: RemoteWaveformRasterKey {
+        RemoteWaveformRasterKey(player: player)
+    }
+
+    nonisolated private static func makeRasterImage(
+        points: [RemoteWaveformPoint],
+        track: RemoteTrack
+    ) -> CGImage? {
+        guard !points.isEmpty else { return nil }
+        // Remain below iPhone GPU texture limits while retaining substantially
+        // more detail than one on-screen column per sample. Zooming translates
+        // this stable full-track raster instead of repainting every frame.
+        let width = min(16_384, max(points.count, 8_192))
+        let height = 192
+        guard let context = CGContext(
+            data: nil,
+            width: width,
+            height: height,
+            bitsPerComponent: 8,
+            bytesPerRow: width * 4,
+            space: CGColorSpaceCreateDeviceRGB(),
+            bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
+        ) else { return nil }
+
+        let center = Double(height) / 2
+        let maximumAmplitude = Double(height) * 0.43
+        context.setLineWidth(1)
+        for pixel in 0 ..< width {
+            if pixel.isMultiple(of: 256), Task.isCancelled { return nil }
+            let beat = Double(pixel) / Double(max(1, width - 1))
+                * Double(max(1, track.durationBeats))
+            let trackProgress: Double
+            if let beatGrid = track.beatGrid {
+                trackProgress = Double(timeMillisFor(beat: beat, in: track))
+                    / Double(max(1, beatGrid.durationMillis))
+            } else {
+                trackProgress = beat / Double(max(1, track.durationBeats))
+            }
+            guard let sample = RemoteWaveformSampling.sample(
+                points: points,
+                trackProgress: trackProgress
+            ) else { continue }
+            let amplitude = sample.amplitude * maximumAmplitude
+            context.setStrokeColor(
+                red: sample.red,
+                green: sample.green,
+                blue: sample.blue,
+                alpha: 0.98
+            )
+            let x = Double(pixel) + 0.5
+            context.move(to: CGPoint(x: x, y: center - amplitude))
+            context.addLine(to: CGPoint(x: x, y: center + amplitude))
+            context.strokePath()
+        }
+
+        let beatsPerBar = Int(max(1, track.beatGrid?.beatsPerBar ?? 4))
+        for beat in 0 ... Int(max(1, track.durationBeats)) {
+            let x = Double(beat) / Double(max(1, track.durationBeats))
+                * Double(width)
+            let isBar = beat.isMultiple(of: beatsPerBar)
+            context.setLineWidth(isBar ? 1.2 : 0.6)
+            context.setStrokeColor(
+                red: 1,
+                green: 1,
+                blue: 1,
+                alpha: isBar ? 0.30 : 0.09
+            )
+            context.move(to: CGPoint(x: x, y: 0))
+            context.addLine(to: CGPoint(x: x, y: Double(height)))
+            context.strokePath()
+        }
+        return context.makeImage()
+    }
+#endif
 }
+
+#if os(iOS)
+private struct RemoteWaveformRasterContentKey: Hashable {
+    let trackLoadID: UInt64
+    let trackID: UInt64?
+    let pointCount: Int
+    let firstPoint: UInt32?
+    let lastPoint: UInt32?
+}
+
+private struct RemoteWaveformRasterKey: Hashable {
+    let contentKey: RemoteWaveformRasterContentKey
+    let durationBeats: UInt64
+    let beatGridCount: Int
+    let firstBeatTimeMillis: UInt64?
+    let lastBeatTimeMillis: UInt64?
+
+    init(player: RemotePlayer) {
+        func packed(_ point: RemoteWaveformPoint?) -> UInt32? {
+            point.map {
+                UInt32($0.low) << 16 | UInt32($0.mid) << 8 | UInt32($0.high)
+            }
+        }
+        contentKey = RemoteWaveformRasterContentKey(
+            trackLoadID: player.trackLoadID,
+            trackID: player.track.trackID,
+            pointCount: player.track.waveform.count,
+            firstPoint: packed(player.track.waveform.first),
+            lastPoint: packed(player.track.waveform.last)
+        )
+        durationBeats = player.track.durationBeats
+        beatGridCount = player.track.beatGrid?.timesMillis.count ?? 0
+        firstBeatTimeMillis = player.track.beatGrid?.timesMillis.first
+        lastBeatTimeMillis = player.track.beatGrid?.timesMillis.last
+    }
+}
+
+private struct RemoteWaveformLayerView: UIViewRepresentable {
+    let rasterImage: CGImage
+    let player: RemotePlayer
+    let visibleBeats: Double
+    let inspectionStartBeat: Double?
+    let dragTranslation: CGFloat
+    let isMaster: Bool
+
+    func makeUIView(context: Context) -> RemoteWaveformLayerHostView {
+        RemoteWaveformLayerHostView()
+    }
+
+    func updateUIView(_ uiView: RemoteWaveformLayerHostView, context: Context) {
+        uiView.update(
+            rasterImage: rasterImage,
+            player: player,
+            visibleBeats: visibleBeats,
+            inspectionStartBeat: inspectionStartBeat,
+            dragTranslation: dragTranslation,
+            isMaster: isMaster
+        )
+    }
+
+    static func dismantleUIView(_ uiView: RemoteWaveformLayerHostView, coordinator: ()) {
+        uiView.stopRendering()
+    }
+}
+
+private final class RemoteWaveformLayerHostView: UIView {
+    private let waveformLayer = CALayer()
+    private let playheadLayer = CALayer()
+    private let playheadCapLayer = CALayer()
+    // UIKit guarantees this view's lifetime work happens on the main thread.
+    // Swift 6 treats deinit as nonisolated, so keep the display-link reference
+    // explicitly unsafe-nonisolated while still touching it only from UIKit.
+    nonisolated(unsafe) private var displayLink: CADisplayLink?
+    private var rasterImage: CGImage?
+    private var player: RemotePlayer?
+    private var visibleBeats = 1.0
+    private var inspectionStartBeat: Double?
+    private var dragTranslation: CGFloat = 0
+    private var isMaster = false
+    private var hotCues: [RemoteHotCue] = []
+    private var hotCueLayers: [(line: CALayer, badge: CATextLayer)] = []
+    private var appliedBoundsSize = CGSize.zero
+
+    override init(frame: CGRect) {
+        super.init(frame: frame)
+        isOpaque = true
+        backgroundColor = .black
+        layer.masksToBounds = true
+        waveformLayer.anchorPoint = .zero
+        waveformLayer.contentsGravity = .resize
+        waveformLayer.magnificationFilter = .linear
+        waveformLayer.minificationFilter = .linear
+        playheadLayer.anchorPoint = .zero
+        playheadLayer.backgroundColor = UIColor.white.cgColor
+        playheadLayer.shadowColor = UIColor.black.cgColor
+        playheadLayer.shadowOpacity = 0.5
+        playheadLayer.shadowRadius = 1
+        playheadCapLayer.anchorPoint = .zero
+        playheadCapLayer.backgroundColor = UIColor.white.cgColor
+        layer.addSublayer(waveformLayer)
+        layer.addSublayer(playheadLayer)
+        layer.addSublayer(playheadCapLayer)
+
+        let displayLink = CADisplayLink(target: self, selector: #selector(renderFrame))
+        displayLink.preferredFrameRateRange = CAFrameRateRange(
+            minimum: 30,
+            maximum: 60,
+            preferred: 60
+        )
+        displayLink.add(to: .main, forMode: .common)
+        displayLink.isPaused = true
+        self.displayLink = displayLink
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationDidBecomeActive),
+            name: UIApplication.didBecomeActiveNotification,
+            object: nil
+        )
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(applicationWillResignActive),
+            name: UIApplication.willResignActiveNotification,
+            object: nil
+        )
+    }
+
+    @available(*, unavailable)
+    required init?(coder: NSCoder) {
+        nil
+    }
+
+    deinit {
+        displayLink?.invalidate()
+        NotificationCenter.default.removeObserver(self)
+    }
+
+    override func didMoveToWindow() {
+        super.didMoveToWindow()
+        updateRenderingState()
+    }
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        guard abs(appliedBoundsSize.width - bounds.width) > 0.5
+                || abs(appliedBoundsSize.height - bounds.height) > 0.5 else {
+            return
+        }
+        appliedBoundsSize = bounds.size
+        renderFrame()
+    }
+
+    func update(
+        rasterImage: CGImage,
+        player: RemotePlayer,
+        visibleBeats: Double,
+        inspectionStartBeat: Double?,
+        dragTranslation: CGFloat,
+        isMaster: Bool
+    ) {
+        let imageChanged = self.rasterImage !== rasterImage
+        let hotCuesChanged = hotCues != player.track.hotCues
+        self.rasterImage = rasterImage
+        self.player = player
+        self.visibleBeats = max(1, visibleBeats)
+        self.inspectionStartBeat = inspectionStartBeat
+        self.dragTranslation = dragTranslation
+        self.isMaster = isMaster
+        if imageChanged {
+            waveformLayer.contents = rasterImage
+            waveformLayer.contentsScale = UIScreen.main.scale
+        }
+        if hotCuesChanged {
+            hotCues = player.track.hotCues
+            rebuildHotCueLayers()
+        }
+        updateRenderingState()
+        renderFrame()
+    }
+
+    func stopRendering() {
+        displayLink?.invalidate()
+        displayLink = nil
+    }
+
+    @objc private func applicationDidBecomeActive() {
+        updateRenderingState()
+        renderFrame()
+    }
+
+    @objc private func applicationWillResignActive() {
+        displayLink?.isPaused = true
+    }
+
+    private func updateRenderingState() {
+        displayLink?.isPaused = window == nil || player?.transport.playing != true
+    }
+
+    @objc private func renderFrame() {
+        guard let player, bounds.width > 0, bounds.height > 0 else { return }
+        let totalBeats = max(1, Double(player.track.durationBeats))
+        let visibleBeats = min(totalBeats, self.visibleBeats)
+        let currentBeat = RemoteTransportInterpolation.visualBeat(
+            player: player,
+            atUnixMillis: UInt64(max(0, Date().timeIntervalSince1970 * 1_000))
+        )
+        let startBeat = RemoteWaveformViewportMath.resolvedStartBeat(
+            currentBeat: currentBeat,
+            visibleBeats: visibleBeats,
+            totalBeats: totalBeats,
+            isMaster: isMaster,
+            inspectionStartBeat: inspectionStartBeat,
+            dragTranslation: Double(dragTranslation)
+        )
+        let width = bounds.width
+        let height = bounds.height
+        let fullTrackWidth = width * CGFloat(totalBeats / visibleBeats)
+        let waveformX = -width * CGFloat(startBeat / visibleBeats)
+        let playheadX = width * CGFloat(RemoteWaveformViewportMath.livePlayheadFraction)
+
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        waveformLayer.bounds = CGRect(x: 0, y: 0, width: fullTrackWidth, height: height)
+        waveformLayer.position = CGPoint(x: waveformX, y: 0)
+        layoutHotCueLayers(
+            fullTrackWidth: fullTrackWidth,
+            height: height,
+            track: player.track
+        )
+        playheadLayer.isHidden = !isMaster
+        playheadCapLayer.isHidden = !isMaster
+        playheadLayer.bounds = CGRect(x: 0, y: 0, width: 2, height: height)
+        playheadLayer.position = CGPoint(x: playheadX - 1, y: 0)
+        playheadCapLayer.bounds = CGRect(x: 0, y: 0, width: 7, height: 7)
+        playheadCapLayer.position = CGPoint(x: playheadX - 3.5, y: 0)
+        CATransaction.commit()
+    }
+
+    private func rebuildHotCueLayers() {
+        hotCueLayers.forEach {
+            $0.line.removeFromSuperlayer()
+            $0.badge.removeFromSuperlayer()
+        }
+        hotCueLayers = hotCues.map { cue in
+            let color = UIColor(
+                red: CGFloat((cue.colorRGB >> 16) & 0xff) / 255,
+                green: CGFloat((cue.colorRGB >> 8) & 0xff) / 255,
+                blue: CGFloat(cue.colorRGB & 0xff) / 255,
+                alpha: 1
+            )
+            let line = CALayer()
+            line.anchorPoint = .zero
+            line.backgroundColor = color.withAlphaComponent(0.72).cgColor
+            let badge = CATextLayer()
+            badge.anchorPoint = .zero
+            badge.string = hotCueLetter(cue.index)
+            badge.font = UIFont.monospacedSystemFont(ofSize: 9, weight: .semibold)
+            badge.fontSize = 9
+            badge.alignmentMode = .center
+            badge.foregroundColor = UIColor.black.withAlphaComponent(0.82).cgColor
+            badge.backgroundColor = color.cgColor
+            badge.cornerRadius = 3
+            badge.contentsScale = UIScreen.main.scale
+            waveformLayer.addSublayer(line)
+            waveformLayer.addSublayer(badge)
+            return (line, badge)
+        }
+    }
+
+    private func layoutHotCueLayers(
+        fullTrackWidth: CGFloat,
+        height: CGFloat,
+        track: RemoteTrack
+    ) {
+        for (index, layers) in hotCueLayers.enumerated() where index < hotCues.count {
+            let cue = hotCues[index]
+            let beat = beatFor(timeMillis: cue.timeMillis, in: track)
+            let x = fullTrackWidth * CGFloat(beat / max(1, Double(track.durationBeats)))
+            layers.line.bounds = CGRect(x: 0, y: 0, width: 1, height: height)
+            layers.line.position = CGPoint(x: x - 0.5, y: 0)
+            layers.badge.bounds = CGRect(x: 0, y: 0, width: 16, height: 16)
+            layers.badge.position = CGPoint(x: x - 8, y: 1)
+        }
+    }
+}
+#endif
 
 private struct RemotePhraseBand: View {
     let player: RemotePlayer
@@ -1479,6 +1916,7 @@ enum RemoteWaveformSampling {
 enum RemoteWaveformViewportMath {
     static let defaultLiveVisibleBars = 40.0
     static let livePlayheadFraction = 0.22
+    static let dragReferenceWidth = 320.0
 
     static func automaticVisibleBars(
         isMaster: Bool,
@@ -1503,6 +1941,47 @@ enum RemoteWaveformViewportMath {
         // Live follow deliberately permits negative and beyond-track viewport
         // bounds. The empty area renders black and keeps the playhead fixed.
         return currentBeat - visibleBeats * livePlayheadFraction
+    }
+
+    static func resolvedStartBeat(
+        currentBeat: Double,
+        visibleBeats: Double,
+        totalBeats: Double,
+        isMaster: Bool,
+        inspectionStartBeat: Double?,
+        dragTranslation: Double
+    ) -> Double {
+        if isMaster {
+            // Live Players never leave follow mode. Pinch changes only the
+            // visible span; the playhead remains at one physical position.
+            return automaticStartBeat(
+                currentBeat: currentBeat,
+                visibleBeats: visibleBeats,
+                totalBeats: totalBeats,
+                isMaster: true
+            )
+        }
+        let automatic = automaticStartBeat(
+            currentBeat: currentBeat,
+            visibleBeats: visibleBeats,
+            totalBeats: totalBeats,
+            isMaster: false
+        )
+        let proposed = (inspectionStartBeat ?? automatic)
+            - dragTranslation * visibleBeats / dragReferenceWidth
+        return clampedStartBeat(
+            proposed,
+            visibleBeats: visibleBeats,
+            totalBeats: totalBeats
+        )
+    }
+
+    static func clampedStartBeat(
+        _ value: Double,
+        visibleBeats: Double,
+        totalBeats: Double
+    ) -> Double {
+        min(max(0, value), max(0, totalBeats - min(visibleBeats, totalBeats)))
     }
 
     static func committedVisibleBars(
