@@ -8,7 +8,7 @@ license.workspace = true
 [dependencies]
 quick-xml = { version = "0.41.0", features = ["serialize"] }
 serde = { version = "1", features = ["derive"] }
-sha2 = "0.10.9"
+sha2 = "0.11.0"
 thiserror = "2"
 
 [lints]

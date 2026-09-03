@@ -7,7 +7,7 @@ license.workspace = true
 
 [dependencies]
 miniz_oxide = "0.8"
-sha2 = "0.10.9"
+sha2 = "0.11.0"
 thiserror = "2"
 
 [dev-dependencies]
