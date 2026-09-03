@@ -706,6 +706,7 @@ fn remote_transport_anchors(
                         observed_at,
                         transport.anchor_observed_at,
                     ),
+                    published_at_unix_millis: Some(observed_at_unix_millis),
                 },
             ))
         })

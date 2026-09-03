@@ -1,5 +1,27 @@
 # Changelog
 
+## 0.6.0-dev-12 / Lumi Remote 0.1.0-dev-12 - 2026-09-03
+
+### Fixed
+
+- Translates every Mac transport anchor into the receiving iPhone's local
+  clock domain before visual interpolation. Mac and iPhone wall-clock drift can
+  therefore no longer exhaust the 750 ms stale-data guard and pause the Live
+  waveform between otherwise healthy updates.
+- Retains source-side observation age and raw source ordering separately, so
+  delayed or reordered anchors still cannot rewind playback.
+
+### Tests
+
+- Adds a deterministic mismatched-clock regression covering both the initial
+  snapshot and subsequent transport anchors.
+- A 20.951-second physical aiVoon Animation Hitches trace during live LAN
+  simulator playback recorded no hitches and no interaction delay above 33 ms;
+  after trace startup, displayed surfaces remained between 53 and 60 per
+  second instead of periodically dropping to 20–49.
+- Leaves the accepted high-resolution RGB raster, fixed 22% playhead, 40-bar
+  Live zoom and macOS waveform renderer unchanged.
+
 ## 0.6.0-dev-11 / Lumi Remote 0.1.0-dev-11 - 2026-09-03
 
 ### Fixed

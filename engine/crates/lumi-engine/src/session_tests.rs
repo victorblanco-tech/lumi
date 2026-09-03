@@ -39,6 +39,10 @@ fn actual_engine_snapshot_maps_to_the_scoped_remote_live_contract() {
     assert_eq!(projection.players.len(), 2);
     assert!(projection.players.iter().all(|player| {
         player.track_load_id == player.transport.track_load_id
+            && player
+                .transport
+                .published_at_unix_millis
+                .is_some_and(|published| published >= player.transport.observed_at_unix_millis)
             && !player.track.title.is_empty()
             && player.track.duration_beats > 0
     }));

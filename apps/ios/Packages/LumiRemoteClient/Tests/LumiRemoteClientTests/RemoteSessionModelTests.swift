@@ -69,6 +69,69 @@ func leaderTransportAnchorUpdatesTheDisplayedAbletonLinkTempo() throws {
 
 @MainActor
 @Test
+func sourceClockIsTranslatedIntoTheReceivingIPhoneClockDomain() throws {
+    let model = RemoteSessionModel()
+    let fixture = RemoteLiveProjection.fixture(revision: 1)
+    let sourcePlayer = fixture.players[0]
+    let sourceTransport = RemoteTransportAnchor(
+        trackLoadID: sourcePlayer.trackLoadID,
+        beat: sourcePlayer.transport.beat,
+        positionMillis: sourcePlayer.transport.positionMillis,
+        effectiveBPMMilli: sourcePlayer.transport.effectiveBPMMilli,
+        playing: sourcePlayer.transport.playing,
+        discontinuityRevision: sourcePlayer.transport.discontinuityRevision,
+        observedAtUnixMillis: 9_900,
+        publishedAtUnixMillis: 10_000
+    )
+    let sourceProjection = RemoteLiveProjection(
+        projectionRevision: fixture.projectionRevision,
+        stateRevision: fixture.stateRevision,
+        engineVersion: fixture.engineVersion,
+        operationState: fixture.operationState,
+        leaderPlayerNumber: fixture.leaderPlayerNumber,
+        integrations: fixture.integrations,
+        players: [RemotePlayer(
+            playerNumber: sourcePlayer.playerNumber,
+            hardwareModel: sourcePlayer.hardwareModel,
+            trackLoadID: sourcePlayer.trackLoadID,
+            transport: sourceTransport,
+            track: sourcePlayer.track
+        )],
+        livePlan: fixture.livePlan,
+        nextPlan: fixture.nextPlan,
+        themeOptions: fixture.themeOptions
+    )
+
+    model.replaceWithSnapshot(
+        sourceProjection,
+        from: "MacBook Pro",
+        receivedAt: Date(timeIntervalSince1970: 1_000)
+    )
+
+    #expect(model.projection?.players[0].transport.observedAtUnixMillis == 999_900)
+    #expect(model.projection?.players[0].transport.publishedAtUnixMillis == 1_000_000)
+
+    try model.applyTransportAnchor(
+        playerNumber: 1,
+        anchor: RemoteTransportAnchor(
+            trackLoadID: sourcePlayer.trackLoadID,
+            beat: 36,
+            positionMillis: 18_000,
+            effectiveBPMMilli: 140_000,
+            playing: true,
+            discontinuityRevision: 1,
+            observedAtUnixMillis: 10_400,
+            publishedAtUnixMillis: 10_450
+        ),
+        receivedAt: Date(timeIntervalSince1970: 1_001)
+    )
+
+    #expect(model.projection?.players[0].transport.observedAtUnixMillis == 1_000_950)
+    #expect(model.projection?.players[0].transport.beat == 36)
+}
+
+@MainActor
+@Test
 func frameGapDisablesControlsUntilACompleteSnapshotArrives() throws {
     let model = RemoteSessionModel()
     let processor = RemoteFrameProcessor(model: model, macName: "MacBook Pro")

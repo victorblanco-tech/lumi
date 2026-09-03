@@ -134,6 +134,27 @@ public struct RemoteTransportAnchor: Codable, Equatable, Sendable {
     public let playing: Bool
     public let discontinuityRevision: UInt64
     public let observedAtUnixMillis: UInt64
+    public let publishedAtUnixMillis: UInt64?
+
+    public init(
+        trackLoadID: UInt64,
+        beat: UInt64,
+        positionMillis: UInt64?,
+        effectiveBPMMilli: UInt64,
+        playing: Bool,
+        discontinuityRevision: UInt64,
+        observedAtUnixMillis: UInt64,
+        publishedAtUnixMillis: UInt64? = nil
+    ) {
+        self.trackLoadID = trackLoadID
+        self.beat = beat
+        self.positionMillis = positionMillis
+        self.effectiveBPMMilli = effectiveBPMMilli
+        self.playing = playing
+        self.discontinuityRevision = discontinuityRevision
+        self.observedAtUnixMillis = observedAtUnixMillis
+        self.publishedAtUnixMillis = publishedAtUnixMillis
+    }
 
     enum CodingKeys: String, CodingKey {
         case trackLoadID = "trackLoadId"
@@ -143,6 +164,7 @@ public struct RemoteTransportAnchor: Codable, Equatable, Sendable {
         case playing
         case discontinuityRevision
         case observedAtUnixMillis
+        case publishedAtUnixMillis
     }
 }
 

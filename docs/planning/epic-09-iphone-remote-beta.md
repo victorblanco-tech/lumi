@@ -124,6 +124,11 @@ recorded in `docs/design/iphone-remote/README.md`.
   simulator playback. A 15.959-second physical-device `Animation Hitches`
   trace contained no interaction delay above 33 ms and one 16.67 ms frame
   hitch.
+- Remote dev-12 explicitly translates source observation age into the iPhone's
+  clock domain. A mismatched-clock regression covers snapshot and continuous
+  anchors, while a 20.951-second physical aiVoon trace during live playback
+  recorded no hitches or >33 ms interaction delays and sustained 53–60
+  displayed surfaces per complete second after startup.
 
 Physical-iPhone pairing and real Local Network permission are proven on the
 personally provisioned device. Extended rotation/gesture acceptance,

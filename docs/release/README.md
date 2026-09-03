@@ -41,6 +41,7 @@ the public-repository and GitHub Pages gates.
 - [0.6.0-dev-10 / Lumi Remote 0.1.0-dev-9 Remote hardening](0.6.0-dev-10-remote-hardening.md)
 - [Lumi Remote 0.1.0-dev-10 stable fixed waveform](lumi-remote-0.1.0-dev-10-stable-waveform.md)
 - [0.6.0-dev-11 / Lumi Remote 0.1.0-dev-11 waveform cadence](0.6.0-dev-11-remote-waveform-cadence.md)
+- [0.6.0-dev-12 / Lumi Remote 0.1.0-dev-12 clock-safe Live motion](0.6.0-dev-12-remote-clock-domain.md)
 - [0.4.0-dev-50 isolated Ableton Link Relay](0.4.0-dev-50-isolated-link-relay.md)
 - [0.4.0-dev-51 exactly-once AutoLoop output](0.4.0-dev-51-exactly-once-autoloop-output.md)
 - [0.4.0-dev-52 SoundSwitch MIDI 1.0 compatibility](0.4.0-dev-52-soundswitch-midi-compatibility.md)

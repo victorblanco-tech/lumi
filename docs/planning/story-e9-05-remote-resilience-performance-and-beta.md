@@ -71,6 +71,13 @@ or destabilizing the show.
 - compact landscape controls retain their accepted visual size with full
   44-point touch targets, accessibility Dynamic Type fallback and explicit
   VoiceOver health/value/action descriptions.
+- Mac transport timestamps are translated from source age into the receiving
+  iPhone clock domain before interpolation; raw source ordering remains
+  independently monotone and cannot be weakened by that translation.
+- the signed dev-12 build restored its physical aiVoon Controller session and a
+  20.951-second live Animation Hitches trace recorded zero hitches, zero
+  interaction delays above 33 ms and 53–60 displayed surfaces per complete
+  second after startup.
 
 ## Remaining beta gate
 

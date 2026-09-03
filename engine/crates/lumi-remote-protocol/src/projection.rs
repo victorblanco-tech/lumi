@@ -73,6 +73,12 @@ pub struct RemoteTransportAnchor {
     pub playing: bool,
     pub discontinuity_revision: u64,
     pub observed_at_unix_millis: u64,
+    /// Wall-clock time at which Lumi published this anchor.
+    ///
+    /// Together with `observed_at_unix_millis` this expresses the source-side
+    /// age without assuming that the Mac and iPhone wall clocks are aligned.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub published_at_unix_millis: Option<u64>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -357,6 +363,13 @@ impl RemotePlayer {
         {
             return Err(ProjectionError::InvalidPlayerIdentity);
         }
+        if self
+            .transport
+            .published_at_unix_millis
+            .is_some_and(|published| published < self.transport.observed_at_unix_millis)
+        {
+            return Err(ProjectionError::InvalidTransportAnchor);
+        }
         if let Some(model) = &self.hardware_model {
             validate_text("hardwareModel", model, 96, true)?;
         }
@@ -547,6 +560,7 @@ impl EngineDeckWire {
                 observed_at_unix_millis: self
                     .playback_position_observed_at_unix_millis
                     .unwrap_or(observed_at_unix_millis),
+                published_at_unix_millis: Some(observed_at_unix_millis),
             },
             track: self.track.into_remote()?,
         })
@@ -821,6 +835,8 @@ pub enum ProjectionError {
     UnknownLeader,
     #[error("remote projection Player identity is invalid")]
     InvalidPlayerIdentity,
+    #[error("remote transport anchor timing is invalid")]
+    InvalidTransportAnchor,
     #[error("remote waveform exceeds its bounded point count")]
     WaveformOversized,
     #[error("remote beatgrid exceeds its bounded beat count")]
@@ -889,6 +905,7 @@ mod tests {
                     playing: true,
                     discontinuity_revision: 2,
                     observed_at_unix_millis: 1,
+                    published_at_unix_millis: Some(1),
                 },
                 track: RemoteTrack {
                     track_id: Some(42),
@@ -908,6 +925,16 @@ mod tests {
             next_plan: None,
             theme_options: Vec::new(),
         }
+    }
+
+    #[test]
+    fn rejects_a_publish_time_before_the_source_observation() {
+        let mut projection = projection();
+        projection.players[0].transport.published_at_unix_millis = Some(0);
+        assert_eq!(
+            projection.validate(),
+            Err(ProjectionError::InvalidTransportAnchor)
+        );
     }
 
     #[test]

@@ -21,6 +21,7 @@ public final class RemoteSessionModel {
     public private(set) var pairingShortCode: String?
     public private(set) var acceptedCommandFeedbackRevision: UInt64 = 0
     public private(set) var rejectedCommandFeedbackRevision: UInt64 = 0
+    private var sourceObservationUnixMillisByPlayer: [UInt8: UInt64] = [:]
 
     public init() {}
 
@@ -57,18 +58,27 @@ public final class RemoteSessionModel {
         pendingCommandIDs.removeAll()
     }
 
-    public func apply(_ incoming: RemoteLiveProjection, from macName: String) throws {
+    public func apply(
+        _ incoming: RemoteLiveProjection,
+        from macName: String,
+        receivedAt: Date = .now
+    ) throws {
         if let current = projection,
            incoming.projectionRevision <= current.projectionRevision {
             throw RemoteContractError.nonIncreasingRevision
         }
-        projection = incoming
+        projection = localizeProjection(incoming, receivedAt: receivedAt)
         connectionPhase = .connected(macName: macName)
         lastError = nil
     }
 
-    public func replaceWithSnapshot(_ incoming: RemoteLiveProjection, from macName: String) {
-        projection = incoming
+    public func replaceWithSnapshot(
+        _ incoming: RemoteLiveProjection,
+        from macName: String,
+        receivedAt: Date = .now
+    ) {
+        sourceObservationUnixMillisByPlayer.removeAll(keepingCapacity: true)
+        projection = localizeProjection(incoming, receivedAt: receivedAt)
         connectionPhase = .connected(macName: macName)
         pendingCommandIDs.removeAll()
         lastError = nil
@@ -76,7 +86,8 @@ public final class RemoteSessionModel {
 
     public func applyTransportAnchor(
         playerNumber: UInt8,
-        anchor: RemoteTransportAnchor
+        anchor: RemoteTransportAnchor,
+        receivedAt: Date = .now
     ) throws {
         guard let current = projection,
               let playerIndex = current.players.firstIndex(where: {
@@ -86,17 +97,23 @@ public final class RemoteSessionModel {
             throw RemoteContractError.invalidTransportAnchor
         }
         let existing = current.players[playerIndex].transport
+        let lastSourceObservation = sourceObservationUnixMillisByPlayer[playerNumber]
+            ?? existing.observedAtUnixMillis
         guard anchor.discontinuityRevision >= existing.discontinuityRevision,
-              anchor.observedAtUnixMillis >= existing.observedAtUnixMillis else {
+              anchor.observedAtUnixMillis >= lastSourceObservation else {
             return
         }
+        sourceObservationUnixMillisByPlayer[playerNumber] = anchor.observedAtUnixMillis
+        let localizedAnchor = anchor.localized(
+            receivedAtUnixMillis: Self.unixMillis(receivedAt)
+        )
         var players = current.players
         let player = players[playerIndex]
         players[playerIndex] = RemotePlayer(
             playerNumber: player.playerNumber,
             hardwareModel: player.hardwareModel,
             trackLoadID: player.trackLoadID,
-            transport: anchor,
+            transport: localizedAnchor,
             track: player.track
         )
         let integrations: RemoteIntegrationStatus
@@ -106,7 +123,7 @@ public final class RemoteSessionModel {
                 lightOutput: current.integrations.lightOutput,
                 abletonLink: current.integrations.abletonLink,
                 abletonLinkEnabled: current.integrations.abletonLinkEnabled,
-                abletonLinkBPMMilli: anchor.effectiveBPMMilli,
+                abletonLinkBPMMilli: localizedAnchor.effectiveBPMMilli,
                 timingOffsetMillis: current.integrations.timingOffsetMillis,
                 pendingTimingOffsetMillis: current.integrations.pendingTimingOffsetMillis
             )
@@ -125,6 +142,44 @@ public final class RemoteSessionModel {
             nextPlan: current.nextPlan,
             themeOptions: current.themeOptions
         )
+    }
+
+    private func localizeProjection(
+        _ incoming: RemoteLiveProjection,
+        receivedAt: Date
+    ) -> RemoteLiveProjection {
+        let receivedAtUnixMillis = Self.unixMillis(receivedAt)
+        var sourceObservations: [UInt8: UInt64] = [:]
+        let players = incoming.players.map { player in
+            sourceObservations[player.playerNumber] =
+                player.transport.observedAtUnixMillis
+            return RemotePlayer(
+                playerNumber: player.playerNumber,
+                hardwareModel: player.hardwareModel,
+                trackLoadID: player.trackLoadID,
+                transport: player.transport.localized(
+                    receivedAtUnixMillis: receivedAtUnixMillis
+                ),
+                track: player.track
+            )
+        }
+        sourceObservationUnixMillisByPlayer = sourceObservations
+        return RemoteLiveProjection(
+            projectionRevision: incoming.projectionRevision,
+            stateRevision: incoming.stateRevision,
+            engineVersion: incoming.engineVersion,
+            operationState: incoming.operationState,
+            leaderPlayerNumber: incoming.leaderPlayerNumber,
+            integrations: incoming.integrations,
+            players: players,
+            livePlan: incoming.livePlan,
+            nextPlan: incoming.nextPlan,
+            themeOptions: incoming.themeOptions
+        )
+    }
+
+    private static func unixMillis(_ date: Date) -> UInt64 {
+        UInt64(max(0, date.timeIntervalSince1970 * 1_000))
     }
 
     public func markCommandPending(_ commandID: String) {
@@ -171,5 +226,29 @@ public final class RemoteSessionModel {
         pendingCommandIDs.removeAll()
         controllerLeaseID = nil
         pairingShortCode = nil
+    }
+}
+
+private extension RemoteTransportAnchor {
+    func localized(receivedAtUnixMillis: UInt64) -> RemoteTransportAnchor {
+        let sourceAgeMillis = publishedAtUnixMillis?
+            .saturatingSubtracting(observedAtUnixMillis) ?? 0
+        return RemoteTransportAnchor(
+            trackLoadID: trackLoadID,
+            beat: beat,
+            positionMillis: positionMillis,
+            effectiveBPMMilli: effectiveBPMMilli,
+            playing: playing,
+            discontinuityRevision: discontinuityRevision,
+            observedAtUnixMillis: receivedAtUnixMillis
+                .saturatingSubtracting(sourceAgeMillis),
+            publishedAtUnixMillis: receivedAtUnixMillis
+        )
+    }
+}
+
+private extension UInt64 {
+    func saturatingSubtracting(_ value: UInt64) -> UInt64 {
+        self >= value ? self - value : 0
     }
 }
