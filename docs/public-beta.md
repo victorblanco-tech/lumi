@@ -13,6 +13,13 @@ workflow on more hardware and library combinations than the reference setup.
 - exactly-once AutoLoop and Static Look selection in SoundSwitch;
 - live BPM relay through Ableton Link;
 - Local Playback and recovery after closing and reopening Lumi.
+- Lumi Remote pairing, portrait/landscape playback, reconnect, Controller
+  transfer and future-phrase edits without affecting the running Mac show.
+
+Lumi Remote is currently an opt-in source beta. Testers install it with Xcode
+and their own Apple Account by following the
+[iPhone installation guide](user-guide/iphone-remote.md#install-the-current-beta-with-xcode).
+There is no TestFlight invitation yet.
 
 ## Before a show
 
@@ -37,6 +44,7 @@ Open a GitHub issue with:
 - SoundSwitch version;
 - USB filesystem and whether one or multiple trusted sources were connected;
 - the exact sequence that succeeded or failed;
+- Lumi Remote version, iPhone model and iOS version when testing the companion;
 - a Diagnostics export when available.
 
 Do not upload music, USB databases, SoundSwitch projects, credentials, remote
