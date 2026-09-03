@@ -15,6 +15,8 @@
   ·
   <a href="docs/user-guide/README.md">User guide</a>
   ·
+  <a href="docs/user-guide/iphone-remote.md">iPhone Remote</a>
+  ·
   <a href="https://github.com/victorblanco-tech/lumi/issues">Report an issue</a>
 </p>
 
@@ -27,7 +29,28 @@ The complete show runs locally on your Mac. SoundSwitch remains responsible for
 fixtures and DMX output; Lumi acts like a virtual lighting operator beside your
 normal controller.
 
+**Take Live Decks into the booth with Lumi Remote for iPhone.** Follow the
+current Master and next Player, monitor all three integrations and adjust a
+future Theme or AutoLoop without returning to the Mac.
+
 ![Lumi Live Decks with the current and next track side by side](docs/assets/screenshots/live-decks-intro.png)
+
+## Lumi Remote for iPhone
+
+Lumi Remote brings the show-critical part of Live Decks into the booth. It
+shows the numbered Players, fixed-playhead RGB waveforms, Hot Cues, phrases and
+Light Plans from the authoritative Mac engine. From the phone you can change
+`Off`, `Arm`, `Start` and `Pause`, control Ableton Link and timing offset, and
+adjust a future Theme or AutoLoop without leaving the mixer.
+
+![Lumi Remote showing the live Master and its next phrase](docs/assets/screenshots/lumi-remote-live.png)
+
+The Remote connects directly to the paired Lumi Mac over the local network
+using pinned TLS. It does not stream audio, use a cloud relay or sit in the Pro
+DJ Link, SoundSwitch MIDI or Ableton Link execution paths. If the phone sleeps
+or disconnects, the Mac continues the show. See the
+[Lumi Remote guide](docs/user-guide/iphone-remote.md) for installation,
+pairing and beta limitations.
 
 ![The complete Lumi workflow from trusted USB source to SoundSwitch DMX](docs/assets/lumi-workflow.svg)
 
@@ -45,6 +68,8 @@ normal controller.
   needs to change.
 - Relays the live master BPM to SoundSwitch through an isolated Ableton Link
   connection.
+- Extends the show-safe Live Decks view and controls to a paired iPhone over the
+  local network, without putting the phone in a realtime integration path.
 - Supports Local Playback for preparation and dry runs without DJ hardware.
 
 ## Inside Lumi
@@ -147,6 +172,9 @@ control. A physical Control One can continue to run alongside Lumi.
 - SoundSwitch with a MIDI input for lighting output
 - Pro DJ Link-compatible players for Live Decks
 
+Lumi Remote additionally requires an iPhone running iOS 18 or newer, the same
+local network as the Mac and a matching Lumi release channel.
+
 Only the Mac is needed for Library work, Track Editor, Light Plan preview and
 Local Playback. Internet access is not required while using Lumi.
 
@@ -163,6 +191,13 @@ Local Playback. Internet access is not required while using Lumi.
 
 The [user guide](docs/user-guide/README.md) explains the complete workflow,
 operation states, timing offset, backups and troubleshooting.
+
+Lumi Remote is currently installed from source with Xcode and a tester's own
+Apple Account. This route is free, but Apple's Personal Team provisioning must
+be renewed every seven days. Follow the
+[iPhone installation guide](docs/user-guide/iphone-remote.md#install-the-current-beta-with-xcode).
+TestFlight is planned once field interest justifies an Apple Developer Program
+membership.
 
 ## Project status
 
