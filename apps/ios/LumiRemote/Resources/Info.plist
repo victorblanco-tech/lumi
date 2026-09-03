@@ -37,6 +37,8 @@
     <string>$(LUMI_RELEASE_CHANNEL)</string>
     <key>LSRequiresIPhoneOS</key>
     <true/>
+    <key>ITSAppUsesNonExemptEncryption</key>
+    <false/>
     <key>NSBonjourServices</key>
     <array>
         <string>_lumi-remote._tcp</string>

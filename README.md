@@ -29,6 +29,23 @@ normal controller.
 
 ![Lumi Live Decks with the current and next track side by side](docs/assets/screenshots/live-decks-intro.png)
 
+## Lumi Remote for iPhone
+
+Lumi Remote brings the show-critical part of Live Decks into the booth. It
+shows the numbered Players, fixed-playhead RGB waveforms, Hot Cues, phrases and
+Light Plans from the authoritative Mac engine. From the phone you can change
+`Off`, `Arm`, `Start` and `Pause`, control Ableton Link and timing offset, and
+adjust a future Theme or AutoLoop without leaving the mixer.
+
+![Lumi Remote showing the live Master and its next phrase](docs/assets/screenshots/lumi-remote-live.png)
+
+The Remote connects directly to the paired Lumi Mac over the local network
+using pinned TLS. It does not stream audio, use a cloud relay or sit in the Pro
+DJ Link, SoundSwitch MIDI or Ableton Link execution paths. If the phone sleeps
+or disconnects, the Mac continues the show. See the
+[Lumi Remote guide](docs/user-guide/iphone-remote.md) for installation,
+pairing and beta limitations.
+
 ![The complete Lumi workflow from trusted USB source to SoundSwitch DMX](docs/assets/lumi-workflow.svg)
 
 ## What Lumi does
@@ -146,6 +163,9 @@ control. A physical Control One can continue to run alongside Lumi.
 - rekordbox OneLibrary USB media for library synchronization
 - SoundSwitch with a MIDI input for lighting output
 - Pro DJ Link-compatible players for Live Decks
+
+Lumi Remote additionally requires an iPhone running iOS 18 or newer, the same
+local network as the Mac and a matching Lumi release channel.
 
 Only the Mac is needed for Library work, Track Editor, Light Plan preview and
 Local Playback. Internet access is not required while using Lumi.

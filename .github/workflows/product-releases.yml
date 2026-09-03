@@ -23,6 +23,8 @@ jobs:
       - uses: actions/checkout@v6
       - name: Validate product tag
         run: scripts/check-product-tag.sh remote "$GITHUB_REF_NAME"
+      - name: Validate App Store icon assets
+        run: scripts/check-ios-app-icon.sh
       - name: Select release configuration
         id: configuration
         run: |
@@ -64,11 +66,20 @@ jobs:
         run: |
           version='${{ steps.configuration.outputs.version }}'
           archive="build/Lumi-Remote-$version-iOS-Simulator.zip"
-          gh release create "$GITHUB_REF_NAME" \
-            --draft \
-            --title "Lumi Remote $version" \
-            --notes "Validation build for the Lumi Remote iOS Simulator. This is not an installable physical-iPhone beta; TestFlight remains a separate signing gate." \
-            "$archive" "$archive.sha256"
+          notes="docs/release/lumi-remote-$version-release-notes.md"
+          if [[ -f "$notes" ]]; then
+            gh release create "$GITHUB_REF_NAME" \
+              --draft \
+              --title "Lumi Remote $version" \
+              --notes-file "$notes" \
+              "$archive" "$archive.sha256"
+          else
+            gh release create "$GITHUB_REF_NAME" \
+              --draft \
+              --title "Lumi Remote $version" \
+              --notes "Validation build for the Lumi Remote iOS Simulator. This is not an installable physical-iPhone beta; use TestFlight for a signed physical-device build." \
+              "$archive" "$archive.sha256"
+          fi
 
   simulator:
     name: Pro DJ Link Simulator package

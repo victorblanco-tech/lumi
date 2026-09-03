@@ -552,7 +552,10 @@ private struct RemotePlayerSurface: View {
         TimelineView(
             .animation(
                 minimumInterval: 1.0 / 30.0,
-                paused: !player.transport.playing
+                paused: !RemotePlanTimelineCadence.shouldAnimate(
+                    isMaster: isMaster,
+                    isPlaying: player.transport.playing
+                )
             )
         ) { timeline in
             let viewport = beatViewport(at: timeline.date)
@@ -1392,6 +1395,15 @@ private final class RemoteWaveformLayerHostView: UIView {
     }
 }
 #endif
+
+enum RemotePlanTimelineCadence {
+    /// Only the live Master needs an independent display clock. Planned decks
+    /// still refresh from their bounded transport projections, but do not add
+    /// a second 30 Hz SwiftUI timeline while both players are running.
+    static func shouldAnimate(isMaster: Bool, isPlaying: Bool) -> Bool {
+        isMaster && isPlaying
+    }
+}
 
 private struct RemotePhraseBand: View {
     let player: RemotePlayer

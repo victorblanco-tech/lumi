@@ -8,6 +8,7 @@
 /* Begin PBXBuildFile section */
 		AA0000010000000000000001 /* LumiRemoteApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000020000000000000001 /* LumiRemoteApp.swift */; };
 		AA0000010000000000000002 /* LumiRemoteFeature in Frameworks */ = {isa = PBXBuildFile; productRef = AA00000D0000000000000001 /* LumiRemoteFeature */; };
+		AA0000010000000000000003 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA0000020000000000000008 /* Assets.xcassets */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXFileReference section */
@@ -18,6 +19,7 @@
 		AA0000020000000000000005 /* RC.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = RC.xcconfig; sourceTree = "<group>"; };
 		AA0000020000000000000006 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
 		AA0000020000000000000007 /* Lumi Remote.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Lumi Remote.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA0000020000000000000008 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -65,7 +67,7 @@
 		};
 		AA0000040000000000000006 /* Resources */ = {
 			isa = PBXGroup;
-			children = (AA0000020000000000000002 /* Info.plist */,);
+			children = (AA0000020000000000000002 /* Info.plist */, AA0000020000000000000008 /* Assets.xcassets */,);
 			path = Resources;
 			sourceTree = "<group>";
 		};
@@ -105,7 +107,7 @@
 /* End PBXProject section */
 
 /* Begin PBXResourcesBuildPhase section */
-		AA0000080000000000000001 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (); runOnlyForDeploymentPostprocessing = 0; };
+		AA0000080000000000000001 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (AA0000010000000000000003 /* Assets.xcassets in Resources */,); runOnlyForDeploymentPostprocessing = 0; };
 /* End PBXResourcesBuildPhase section */
 
 /* Begin PBXSourcesBuildPhase section */

@@ -51,6 +51,14 @@ func aSingleLoadedPlayerKeepsTwoFixedNumberedSlots() {
 }
 
 @Test
+func onlyThePlayingMasterUsesTheIndependentPlanTimeline() {
+    #expect(RemotePlanTimelineCadence.shouldAnimate(isMaster: true, isPlaying: true))
+    #expect(!RemotePlanTimelineCadence.shouldAnimate(isMaster: true, isPlaying: false))
+    #expect(!RemotePlanTimelineCadence.shouldAnimate(isMaster: false, isPlaying: true))
+    #expect(!RemotePlanTimelineCadence.shouldAnimate(isMaster: false, isPlaying: false))
+}
+
+@Test
 func liveAndNextPlansSelectTheCorrectNumberedPlayersFromAFourPlayerNetwork() {
     let livePlan = RemoteLightPlan(
         planID: "live-3",

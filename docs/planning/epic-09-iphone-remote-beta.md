@@ -33,7 +33,7 @@ Excluded from 0.6.0:
 ADR-0040 is the accepted architecture authority. The accepted visual contract is
 recorded in `docs/design/iphone-remote/README.md`.
 
-## Current evidence (`0.6.0-dev-11` / Remote `0.1.0-dev-11`)
+## Current evidence (`0.6.0-dev-12` / Remote `0.1.0-dev-13`)
 
 - the independent iOS app target builds for the generic iOS Simulator;
 - portrait Master-first and landscape side-by-side Live compositions use the
@@ -129,6 +129,11 @@ recorded in `docs/design/iphone-remote/README.md`.
   anchors, while a 20.951-second physical aiVoon trace during live playback
   recorded no hitches or >33 ms interaction delays and sustained 53–60
   displayed surfaces per complete second after startup.
+- Remote dev-13 packages the accepted Lumi app mark as a complete, opaque,
+  high-resolution iPhone/App Store icon catalog. During Start, the independent
+  phrase/Light Plan animation clock runs only for the playing Master, avoiding
+  duplicate SwiftUI frame work during two-Player overlap without touching the
+  stable Core Animation waveform or any Mac realtime lane.
 
 Physical-iPhone pairing and real Local Network permission are proven on the
 personally provisioned device. Extended rotation/gesture acceptance,

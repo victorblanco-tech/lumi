@@ -18,6 +18,7 @@ your own SoundSwitch AutoLoops without taking over fixture or DMX control.
 
 [Download Lumi](https://github.com/victorblanco-tech/lumi/releases) ·
 [Read the user guide](user-guide/) ·
+[Use Lumi Remote](user-guide/iphone-remote.html) ·
 [Report an issue](https://github.com/victorblanco-tech/lumi/issues)
 
 > **Public Beta:** Lumi is ready for structured field testing across different
@@ -25,6 +26,19 @@ your own SoundSwitch AutoLoops without taking over fixture or DMX control.
 > and complete a dry run before relying on it during a show.
 
 ![Lumi Local Playback running a prepared two-track show](assets/screenshots/local-playback.png)
+
+## Take Live Decks into the booth
+
+Lumi Remote for iPhone keeps the live Master and prepared next Player within
+reach. It mirrors the authoritative RGB waveform, phrases and Light Plan, keeps
+the three integration states visible, and allows only the same revision-safe
+booth controls already owned by the Mac engine.
+
+![Lumi Remote showing the live Master and its next phrase](assets/screenshots/lumi-remote-live.png)
+
+The connection stays local and encrypted. Losing the phone never stops the Mac
+engine or changes the lighting output. Continue with the
+[Lumi Remote guide](user-guide/iphone-remote.html).
 
 ![The complete Lumi workflow from trusted USB source to SoundSwitch DMX](assets/lumi-workflow.svg)
 

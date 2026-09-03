@@ -1,6 +1,6 @@
 # Story E9-05: Remote resilience, performance and beta delivery
 
-- Status: **In progress (automated resilience and headed Simulator acceptance complete)**
+- Status: **In progress (first physical beta candidate implemented)**
 - Priority: **P0 show safety**
 - Target: `0.6.0-beta`
 - Components: Engine, Gateway, iOS, Release
@@ -78,12 +78,20 @@ or destabilizing the show.
   20.951-second live Animation Hitches trace recorded zero hitches, zero
   interaction delays above 33 ms and 53–60 displayed surfaces per complete
   second after startup.
+- Remote dev-13 adds the production AppIcon catalog from the accepted Mac icon
+  master and makes icon dimensions/opacity a local and release-CI gate.
+- During Start, only the playing Master now owns the independent 30 Hz phrase
+  and Light Plan presentation clock. A concurrently playing planned Player
+  continues to consume bounded authoritative updates without a redundant
+  SwiftUI display loop; waveform rendering and realtime Mac integrations are
+  unchanged.
+- Public user, privacy, release-note and TestFlight-readiness documentation now
+  describes the physically proven local-only architecture.
 
 ## Remaining beta gate
 
-- deterministic screenshots across supported iPhone sizes and accessibility
-  settings;
-- physical iPhone discovery, pairing, rotation and lifecycle matrix;
+- deterministic screenshots across supported accessibility settings;
+- repeat the physical iPhone rotation and lifecycle matrix on the frozen build;
 - two-phone Controller transfer/revoke evidence;
 - combined two-Player, SoundSwitch and Ableton Link soak with Remote connected,
   disconnected and deliberately overloaded;

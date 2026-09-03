@@ -15,6 +15,7 @@ export SWIFTPM_MODULECACHE_OVERRIDE="$module_cache"
 "$script_dir/check-structure.sh"
 "$script_dir/check-architecture.sh"
 "$script_dir/test-product-versioning.sh"
+"$script_dir/check-ios-app-icon.sh"
 
 cd "$repository_root"
 
@@ -42,6 +43,15 @@ remote_info_plist="build/iOSDerivedData/Build/Products/Dev-iphonesimulator/Lumi 
 [[ -f "$remote_info_plist" ]] || { echo "ERROR: Lumi Remote iOS app was not built." >&2; exit 1; }
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :LumiProductVersion' "$remote_info_plist")" == "$(tr -d '[:space:]' < apps/ios/VERSION)" ]] || {
   echo "ERROR: built Lumi Remote version differs from apps/ios/VERSION." >&2
+  exit 1
+}
+remote_app="$(dirname "$remote_info_plist")"
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIcons:CFBundlePrimaryIcon:CFBundleIconName' "$remote_info_plist")" == "AppIcon" ]] || {
+  echo "ERROR: built Lumi Remote app does not declare AppIcon as its primary icon." >&2
+  exit 1
+}
+[[ -f "$remote_app/Assets.car" && -f "$remote_app/AppIcon60x60@2x.png" ]] || {
+  echo "ERROR: built Lumi Remote app is missing compiled AppIcon assets." >&2
   exit 1
 }
 
