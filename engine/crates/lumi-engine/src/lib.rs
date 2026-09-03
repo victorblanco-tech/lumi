@@ -8,6 +8,7 @@ mod commands;
 mod library;
 mod link_relay;
 mod phrase_role_defaults;
+mod remote_ipc;
 mod service;
 mod session;
 mod startup;

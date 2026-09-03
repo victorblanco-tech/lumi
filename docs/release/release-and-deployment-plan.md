@@ -25,8 +25,8 @@ worden alleen gebruikt voor bouwen, testen, ondertekenen en distribueren.
    naar `main` gepubliceerd.
 4. Een Git-tag identificeert exact één onveranderlijke releasecommit.
 5. Dezelfde bronrevision bouwt alle platformartefacten van een release.
-6. Versienummers zijn platformoverstijgend; buildnummers zijn platform-/CI-
-   specifiek.
+6. Ieder installeerbaar product heeft een eigen SemVer-stroom; buildnummers zijn
+   platform-/CI-specifiek.
 7. Release-assets worden opnieuw opgebouwd door CI, niet handmatig op een
    ontwikkelmachine samengesteld.
 8. Deployment naar gebruikers blijft gescheiden van het creëren van binaries.
@@ -143,18 +143,32 @@ main:  0.0.2
 
 Een grotere functionele MVP-stap mag bewust naar `0.1.0-dev-1` worden verhoogd.
 
-### 5.2 Canonieke versie
+### 5.2 Canonieke productversies
 
-Het rootbestand `VERSION` is de canonieke bronversie. Op `dev` is dit een geldige
+Het rootbestand `VERSION` is de canonieke versie voor Lumi op macOS. Op `dev` is dit een geldige
 pre-release zoals `0.0.1-dev-1`; op een productiecommit op `main` staat
 uitsluitend `MAJOR.MINOR.PATCH`. Een releasevalidatie controleert later
 automatisch dat deze gelijk is aan:
 
 - de Rust workspace/packageversie;
 - macOS `MARKETING_VERSION` / `CFBundleShortVersionString`;
-- iOS `MARKETING_VERSION` / `CFBundleShortVersionString`;
 - documentatie- en protocolversieverwijzingen waar van toepassing;
 - de Git-tag zonder `v`-prefix, uitsluitend bij productiebuilds.
+
+Lumi Remote en de Pro DJ Link Simulator hebben bewust een onafhankelijke
+productversie in respectievelijk `apps/ios/VERSION` en
+`tools/prolink-simulator/VERSION`. ADR-0041 is leidend voor de tag- en
+releaseconventie:
+
+- macOS: `vX.Y.Z`;
+- iPhone: `lumi-remote-vX.Y.Z`;
+- simulator: `prolink-simulator-vX.Y.Z`.
+
+Pushing an iPhone or simulator product tag runs
+`.github/workflows/product-releases.yml`. It validates only that product and
+creates a **draft** GitHub Release, so publishing remains a deliberate manual
+decision. Until TestFlight signing is enabled, the iPhone asset is explicitly
+an unsigned iOS Simulator validation artifact and not a physical-device build.
 
 Omdat Apple voor `CFBundleShortVersionString` alleen numerieke componenten
 gebruikt, wordt daar de suffix weggelaten. De ontwikkelstatus blijft zichtbaar
@@ -222,7 +236,9 @@ van `/Applications`.
 | Development | `dev` | geen dubbele hosted build in de solo POC-fase | nee |
 | Internal beta | handmatige run op `dev`/RC | TestFlight internal + macOS beta | bewust gestart |
 | Release candidate | releasecommit | signed kandidaten en acceptatietest | bewust gestart |
-| Production | tag `vX.Y.Z` op `main` | GitHub Release + App Store | na goedkeuring |
+| macOS Production | tag `vX.Y.Z` op `main` | GitHub Release | na goedkeuring |
+| iPhone beta/release | tag `lumi-remote-vX.Y.Z` | TestFlight/App Store | na goedkeuring |
+| Simulator | tag `prolink-simulator-vX.Y.Z` | eigen GitHub Release/DMG | na goedkeuring |
 
 ## 8. CI-pipeline
 

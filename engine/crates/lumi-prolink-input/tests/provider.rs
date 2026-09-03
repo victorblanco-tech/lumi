@@ -167,6 +167,10 @@ fn status_is_the_only_effective_tempo_authority() {
             .unwrap_or_else(|error| panic!("message should translate: {error}"));
     }
     let _ = provider.drain_timing_observations();
+    let anchor_before_tempo_change = provider
+        .transport(lumi_domain::TrackLoadId::new(1))
+        .unwrap_or_else(|| panic!("transport should remain available"))
+        .anchor_observed_at;
 
     let tempo = decoder
         .decode_line(
@@ -179,6 +183,14 @@ fn status_is_the_only_effective_tempo_authority() {
     assert_eq!(
         provider.drain_timing_observations()[0].effective_bpm_milli,
         154_767
+    );
+    assert_eq!(
+        provider
+            .transport(lumi_domain::TrackLoadId::new(1))
+            .unwrap_or_else(|| panic!("transport should remain available"))
+            .anchor_observed_at,
+        anchor_before_tempo_change,
+        "a tempo-only update must preserve the established playback phase"
     );
 
     let precise = decoder
@@ -210,13 +222,11 @@ fn status_is_the_only_effective_tempo_authority() {
     let timing = provider.drain_timing_observations();
     assert_eq!(timing.len(), 1);
     assert_eq!(timing[0].effective_bpm_milli, 154_767);
-    assert_eq!(
-        provider
-            .transport(lumi_domain::TrackLoadId::new(1))
-            .unwrap_or_else(|| panic!("transport should remain available"))
-            .effective_bpm_milli,
-        154_767
-    );
+    let transport = provider
+        .transport(lumi_domain::TrackLoadId::new(1))
+        .unwrap_or_else(|| panic!("transport should remain available"));
+    assert_eq!(transport.effective_bpm_milli, 154_767);
+    assert!(transport.anchor_observed_at >= anchor_before_tempo_change);
 }
 
 #[test]

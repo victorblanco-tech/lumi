@@ -1,0 +1,37 @@
+{
+  "protocolVersion": 1,
+  "maximumFrameBytes": 524288,
+  "maximumPlayers": 2,
+  "maximumWaveformPointsPerTrack": 16384,
+  "maximumBeatgridBeatsPerTrack": 16384,
+  "maximumHotCuesPerTrack": 16,
+  "maximumPhrasesPerTrack": 256,
+  "maximumConnectedClients": 8,
+  "maximumPairedDevices": 8,
+  "frameKinds": [
+    "hello",
+    "snapshot",
+    "projection",
+    "transportAnchor",
+    "command",
+    "commandResult",
+    "error"
+  ],
+  "allowedCommands": [
+    "setOperationState",
+    "setAbletonLinkEnabled",
+    "setOutputTimingOffset",
+    "selectThemeFromPhrase",
+    "selectAutoloopForPhrase",
+    "setCueLock",
+    "requestSnapshot"
+  ],
+  "excludedData": [
+    "library",
+    "usb",
+    "audioUri",
+    "filesystemPath",
+    "engineSessionToken",
+    "rawDiagnostics"
+  ]
+}

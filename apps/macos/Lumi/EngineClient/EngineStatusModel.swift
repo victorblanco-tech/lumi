@@ -113,6 +113,7 @@ final class EngineStatusModel: ObservableObject {
     @Published private(set) var usbSourceOperation = USBSourceOperationState.idle
     @Published private(set) var dataManagementOperation = DataManagementOperationState.idle
     @Published private(set) var backupRecords: [LibraryBackupRecord] = []
+    @Published private(set) var remoteGatewayState = RemoteGatewayManagementSnapshot.disabled
 
     private enum Lifecycle: Equatable {
         case stopped
@@ -124,11 +125,13 @@ final class EngineStatusModel: ObservableObject {
     }
 
     private let supervisor = EngineProcessSupervisor()
+    private let remoteGatewaySupervisor = RemoteGatewaySupervisor()
     private let snapshotDecoder = EngineSnapshotDecoder()
     private let libraryDecoder = LibrarySnapshotDecoder()
     private let lightPlanningDecoder = LightPlanningSnapshotDecoder()
     private var lifecycle: Lifecycle = .stopped
     private var monitoringTask: Task<Void, Never>?
+    private var remoteGatewayMonitoringTask: Task<Void, Never>?
     private var localAudioControllers: [UInt64: LocalDeckAudioController] = [:]
     private var pendingLocalTransports: [UInt64: LocalDeckTransportSnapshot] = [:]
     private var pendingLocalTransportDecks: [UInt64] = []
@@ -221,6 +224,8 @@ final class EngineStatusModel: ObservableObject {
             startMonitoring()
             synchronizeLocalAudio(with: snapshot)
             refreshBackupRecords()
+            await refreshRemoteGateway()
+            startRemoteGatewayMonitoring()
         } catch {
             await supervisor.stop()
             lifecycle = .failed
@@ -229,6 +234,106 @@ final class EngineStatusModel: ObservableObject {
             workspaceState = LiveWorkspacePresenter.failed(detail)
             libraryState = .failed(detail)
         }
+    }
+
+    func refreshRemoteGateway() async {
+        do {
+            let refreshed = await remoteGatewaySupervisor.refresh(
+                recordURL: try remoteGatewayRecordURL()
+            )
+            let currentInvitation = remoteGatewayState.invitation.flatMap { invitation in
+                invitation.expiresAtUnixMillis > UInt64(Date().timeIntervalSince1970 * 1_000)
+                    ? invitation
+                    : nil
+            }
+            remoteGatewayState = .init(
+                serviceState: refreshed.serviceState,
+                status: refreshed.status,
+                invitation: refreshed.invitation ?? currentInvitation,
+                errorCode: refreshed.errorCode
+            )
+        } catch {
+            remoteGatewayState = .init(
+                serviceState: .unavailable,
+                errorCode: error.localizedDescription
+            )
+        }
+    }
+
+    func setRemoteGatewayEnabled(_ enabled: Bool) async {
+        do {
+            let recordURL = try remoteGatewayRecordURL()
+            remoteGatewayState = enabled
+                ? try await remoteGatewaySupervisor.enable(recordURL: recordURL)
+                : try await remoteGatewaySupervisor.disable(recordURL: recordURL)
+        } catch RemoteGatewayClientError.requiresApproval {
+            remoteGatewayState = .init(
+                serviceState: .requiresApproval,
+                errorCode: "requiresApproval"
+            )
+        } catch {
+            remoteGatewayState = .init(
+                serviceState: .unavailable,
+                errorCode: error.localizedDescription
+            )
+        }
+    }
+
+    func createRemotePairingInvitation() async {
+        await updateRemoteGateway {
+            try await self.remoteGatewaySupervisor.createInvitation(
+                recordURL: try self.remoteGatewayRecordURL()
+            )
+        }
+    }
+
+    func approveRemotePairing(invitationID: String, shortCode: String) async {
+        await updateRemoteGateway {
+            try await self.remoteGatewaySupervisor.approve(
+                invitationID: invitationID,
+                shortCode: shortCode,
+                recordURL: try self.remoteGatewayRecordURL()
+            )
+        }
+    }
+
+    func revokeRemoteDevice(deviceID: String) async {
+        await updateRemoteGateway {
+            try await self.remoteGatewaySupervisor.revoke(
+                deviceID: deviceID,
+                recordURL: try self.remoteGatewayRecordURL()
+            )
+        }
+    }
+
+    func transferRemoteControl(to deviceID: String) async {
+        await updateRemoteGateway {
+            try await self.remoteGatewaySupervisor.transferControl(
+                to: deviceID,
+                recordURL: try self.remoteGatewayRecordURL()
+            )
+        }
+    }
+
+    private func updateRemoteGateway(
+        _ operation: () async throws -> RemoteGatewayManagementSnapshot
+    ) async {
+        do {
+            remoteGatewayState = try await operation()
+        } catch {
+            remoteGatewayState = .init(
+                serviceState: remoteGatewayState.serviceState,
+                status: remoteGatewayState.status,
+                invitation: remoteGatewayState.invitation,
+                errorCode: error.localizedDescription
+            )
+        }
+    }
+
+    private func remoteGatewayRecordURL() throws -> URL {
+        try libraryDatabaseURL()
+            .deletingLastPathComponent()
+            .appendingPathComponent("remote-gateway-service.json", isDirectory: false)
     }
 
     private func libraryDatabaseURL() throws -> URL {
@@ -641,6 +746,8 @@ final class EngineStatusModel: ObservableObject {
     func stop() async {
         monitoringTask?.cancel()
         monitoringTask = nil
+        remoteGatewayMonitoringTask?.cancel()
+        remoteGatewayMonitoringTask = nil
         localTransportDrainTask?.cancel()
         localTransportDrainTask = nil
         pendingLocalTransports.removeAll()
@@ -2676,6 +2783,17 @@ final class EngineStatusModel: ObservableObject {
             throw EngineClientError.executableMissing
         }
         return executable
+    }
+
+    private func startRemoteGatewayMonitoring() {
+        remoteGatewayMonitoringTask?.cancel()
+        remoteGatewayMonitoringTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .seconds(2))
+                guard !Task.isCancelled, let self else { return }
+                await self.refreshRemoteGateway()
+            }
+        }
     }
 
     private func startMonitoring() {

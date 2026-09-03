@@ -1,0 +1,13 @@
+{
+  "protocolVersion": 1,
+  "frameKind": "commandResult",
+  "sequence": 3,
+  "correlationId": "command-123",
+  "payload": {
+    "commandId": "command-123",
+    "status": "conflict",
+    "stateRevision": 22,
+    "planRevision": 5,
+    "reasonCode": "planRevisionConflict"
+  }
+}

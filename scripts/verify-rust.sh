@@ -25,6 +25,10 @@ python3 -m json.tool contracts/protocol/v1/envelope.schema.json >/dev/null
 for protocol_fixture in contracts/protocol/v1/fixtures/*.json; do
   python3 -m json.tool "$protocol_fixture" >/dev/null
 done
+python3 -m json.tool contracts/remote/v1/manifest.json >/dev/null
+for remote_fixture in contracts/remote/v1/fixtures/*.json; do
+  python3 -m json.tool "$remote_fixture" >/dev/null
+done
 
 cargo fmt --all -- --check
 cargo clippy --locked --workspace --all-targets --all-features -- -D warnings

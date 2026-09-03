@@ -40,5 +40,7 @@
 	<string>$(LUMI_DATA_DIRECTORY_NAME)</string>
 	<key>LumiEngineLaunchAgentPlistName</key>
 	<string>$(PRODUCT_BUNDLE_IDENTIFIER).engine.plist</string>
+	<key>LumiRemoteGatewayLaunchAgentPlistName</key>
+	<string>$(PRODUCT_BUNDLE_IDENTIFIER).remote-gateway.plist</string>
 </dict>
 </plist>

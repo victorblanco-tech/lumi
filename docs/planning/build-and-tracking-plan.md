@@ -240,10 +240,20 @@ patch-release blocker, maar wordt onderzocht voordat de iPhone-client nieuw
 verkeer aan het systeem toevoegt. Werkelijke Ableton Link-publicatie en
 zichtbare UI-refresh worden daarbij afzonderlijk gemeten.
 
-- lokale discovery en pairing;
-- current/next deck en planpreview;
-- theme-, scene- en loopaanpassingen;
-- operationele controls en reconnectgedrag.
+- een geïsoleerde, apart gesupervisede Remote Gateway; de engine blijft
+  loopback-only en de realtime lanes blijven buiten het mobiele datapad;
+- Bonjour-discovery, TLS, fysieke pairing, Keychain en intrekbare device trust;
+- Live Decks zonder Local Playback, Library of configuratieschermen;
+- current/next Player, RGB-waveform, Hot Cues, phrases en planpreview;
+- Theme-, AutoLoop- en lockaanpassingen voor toekomstige phrases;
+- OFF, ARM, START, PAUSE, Ableton Link en veilige timing-offsetbediening;
+- expliciet stale/reconnectgedrag zonder command queue of show-impact.
+
+De volledige uitwerking staat in
+[Epic 9 – Native iPhone Remote Beta](epic-09-iphone-remote-beta.md), de
+voorgestelde UX in
+[`docs/design/iphone-remote`](../design/iphone-remote/README.md) en de technische
+grens in [ADR-0040](../architecture/adr/0040-isolated-local-remote-gateway.md).
 
 Exit: de DJ kan zonder internet veilig vanaf een gepairde iPhone tunen.
 

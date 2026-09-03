@@ -1,0 +1,19 @@
+{
+  "protocolVersion": 1,
+  "frameKind": "command",
+  "sequence": 2,
+  "correlationId": "command-123",
+  "payload": {
+    "commandId": "command-123",
+    "controllerLeaseId": "lease-456",
+    "issuedAtUnixMillis": 1788332400100,
+    "command": {
+      "kind": "selectAutoloopForPhrase",
+      "planId": "plan-99",
+      "trackLoadId": 99,
+      "expectedPlanRevision": 4,
+      "phraseIndex": 1,
+      "autoloopNumber": 17
+    }
+  }
+}

@@ -35,6 +35,14 @@ reject_dependency \
   "engine/crates/lumi-protocol/Cargo.toml" \
   'lumi-(domain|engine|simulator|planner|lighting-output|output-dry-run)' \
   "lumi-protocol may not depend on domain, application, or provider crates."
+reject_product_dependency \
+  "engine/crates/lumi-remote-protocol/Cargo.toml" \
+  'lumi-' \
+  "the LAN-facing Remote protocol must remain independent from every internal Lumi crate."
+reject_dependency \
+  "engine/crates/lumi-remote-gateway/Cargo.toml" \
+  'lumi-(domain|engine|simulator|planner|lighting-output|output-dry-run|protocol|deck-source|library|midi|prolink|timing)' \
+  "the Remote Gateway may depend only on the scoped Remote protocol, never on show-domain or provider crates."
 reject_dependency \
   "engine/crates/lumi-planner/Cargo.toml" \
   'lumi-(engine|simulator|deck-source|lighting-output|output-dry-run|protocol)' \
@@ -106,6 +114,20 @@ reject_dependency \
   "apps/macos/Packages/LumiLibraryWorkspace/Package.swift" \
   'Lumi(EngineClient|LiveWorkspace)' \
   "LumiLibraryWorkspace must remain independent from process ownership and other features."
+reject_dependency \
+  "apps/ios/Packages/LumiRemoteClient/Package.swift" \
+  'Lumi(EngineClient|LiveWorkspace|LibraryWorkspace)' \
+  "LumiRemoteClient may not own the engine process or import desktop features."
+reject_dependency \
+  "apps/ios/Packages/LumiRemoteFeature/Package.swift" \
+  'Lumi(EngineClient|Protocol|LiveWorkspace|LibraryWorkspace)' \
+  "the iPhone Live feature may depend only on RemoteClient and the DesignSystem."
+
+if find "$repository_root/apps/ios" -type f -name '*.swift' -print0 \
+  | xargs -0 grep -Eq 'import Lumi(EngineClient|LiveWorkspace|LibraryWorkspace)|LocalPlayback'; then
+  echo "ERROR: the iPhone product must not own the engine, desktop workspaces, or Local Playback." >&2
+  exit 1
+fi
 
 if find "$repository_root/apps/macos" -type f -name '*.swift' -print0 \
   | xargs -0 grep -Eq 'BeatLinkTriggerIntegrationView|BLT MIDI Deck Frame'; then

@@ -698,6 +698,26 @@ struct LiveWorkspacePresenterTests {
         #expect(abs(nextFraction - firstFraction) < 0.000_1)
     }
 
+    @Test("Live waveform playhead stays fixed at track boundaries using empty lead space")
+    func liveWaveformMotionKeepsFixedPlayheadAtBoundaries() {
+        let motion = LiveWaveformMotionPlan(
+            waveformID: 7,
+            totalBeats: 800,
+            viewportStartBeat: 0,
+            visibleBeats: 160,
+            followsLiveViewport: true,
+            fallbackPlayheadBeat: 0,
+            visualClock: nil
+        )
+
+        for beat in [0.0, 4.0, 799.0, 800.0] {
+            let fraction = (beat - motion.startBeat(for: beat)) / motion.visibleBeats
+            #expect(abs(fraction - LiveDeckViewportPolicy.playheadFraction) < 0.000_1)
+        }
+        #expect(motion.startBeat(for: 0) < 0)
+        #expect(motion.startBeat(for: 800) + motion.visibleBeats > motion.totalBeats)
+    }
+
     @Test("Live beat coordinates preserve exact Rekordbox marker times and grid offset")
     func liveBeatGridUsesExactRekordboxTimes() throws {
         let grid = DeckBeatGridSnapshot(
@@ -929,7 +949,8 @@ struct LiveWorkspacePresenterTests {
 
         #expect(before.animationIdentity != after.animationIdentity)
         #expect(after.playheadBeat(at: Date(timeIntervalSinceReferenceDate: 101)) < 10)
-        #expect(after.startBeat(for: 4) == 0)
+        let playheadFraction = (4 - after.startBeat(for: 4)) / after.visibleBeats
+        #expect(abs(playheadFraction - LiveDeckViewportPolicy.playheadFraction) < 0.000_1)
     }
 
     @Test("One-time library waveform detail accepts the full high-resolution payload")

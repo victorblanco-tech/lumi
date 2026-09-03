@@ -101,7 +101,8 @@ struct LibraryWorkspaceTests {
         ])
         #expect(LibraryHubSection.allCases.map(\.rawValue) == ["tracks", "sources"])
         #expect(IntegrationsWorkspaceSection.allCases.map(\.rawValue) == [
-            "overview", "deckInputs", "abletonLink", "lightingOutputs", "diagnostics"
+            "overview", "deckInputs", "abletonLink", "iphoneRemote", "lightingOutputs",
+            "diagnostics"
         ])
     }
 

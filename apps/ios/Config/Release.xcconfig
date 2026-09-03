@@ -1,0 +1,4 @@
+#include "Base.xcconfig"
+PRODUCT_BUNDLE_IDENTIFIER = co.victorblan.tech.lumi.remote
+PRODUCT_NAME = Lumi Remote
+LUMI_RELEASE_CHANNEL = production

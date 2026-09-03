@@ -38,13 +38,13 @@ future Theme or AutoLoop without returning to the Mac.
 ## Lumi Remote for iPhone
 
 Lumi Remote brings the show-critical part of Live Decks into the booth. It
-shows the numbered Players, fixed-playhead RGB waveforms, Hot Cues, phrases and
-Light Plans from the authoritative Mac engine. From the phone you can change
+shows the numbered Players, vivid RGB waveforms, Hot Cues, phrases and Light
+Plans from the authoritative Mac engine. From the phone you can change
 `Off`, `Arm`, `Start` and `Pause`, control Ableton Link and timing offset, and
 adjust a future Theme or AutoLoop without leaving the mixer.
 
 <p align="center">
-  <img src="docs/assets/screenshots/lumi-remote-live.png" alt="Lumi Remote showing two live Players, RGB waveforms and their Light Plans" width="390">
+  <img src="docs/assets/screenshots/lumi-remote-live-device.png" alt="Lumi Remote on iPhone showing two live Players, RGB waveforms and their Light Plans" width="390">
 </p>
 
 The Remote connects directly to the paired Lumi Mac over the local network

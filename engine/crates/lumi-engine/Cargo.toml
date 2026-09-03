@@ -23,6 +23,7 @@ lumi-protocol = { path = "../lumi-protocol" }
 lumi-prolink-input = { path = "../lumi-prolink-input" }
 lumi-rekordbox-analysis = { path = "../lumi-rekordbox-analysis" }
 lumi-rekordbox-device = { path = "../lumi-rekordbox-device" }
+lumi-remote-protocol = { path = "../lumi-remote-protocol" }
 lumi-simulator = { path = "../lumi-simulator" }
 lumi-timing-output = { path = "../lumi-timing-output" }
 serde = { version = "1", features = ["derive"] }
@@ -31,7 +32,7 @@ sha2 = "0.10.9"
 subtle = "2"
 thiserror = "2"
 time = { version = "0.3", features = ["formatting"] }
-tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "time"] }
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "signal", "sync", "time"] }
 
 [lints]
 workspace = true

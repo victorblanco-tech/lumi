@@ -1,0 +1,140 @@
+// !$*UTF8*$!
+{
+	archiveVersion = 1;
+	classes = {};
+	objectVersion = 77;
+	objects = {
+
+/* Begin PBXBuildFile section */
+		AA0000010000000000000001 /* LumiRemoteApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = AA0000020000000000000001 /* LumiRemoteApp.swift */; };
+		AA0000010000000000000002 /* LumiRemoteFeature in Frameworks */ = {isa = PBXBuildFile; productRef = AA00000D0000000000000001 /* LumiRemoteFeature */; };
+		AA0000010000000000000003 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = AA0000020000000000000008 /* Assets.xcassets */; };
+/* End PBXBuildFile section */
+
+/* Begin PBXFileReference section */
+		AA0000020000000000000001 /* LumiRemoteApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LumiRemoteApp.swift; sourceTree = "<group>"; };
+		AA0000020000000000000002 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
+		AA0000020000000000000003 /* Base.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Base.xcconfig; sourceTree = "<group>"; };
+		AA0000020000000000000004 /* Dev.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Dev.xcconfig; sourceTree = "<group>"; };
+		AA0000020000000000000005 /* RC.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = RC.xcconfig; sourceTree = "<group>"; };
+		AA0000020000000000000006 /* Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = Release.xcconfig; sourceTree = "<group>"; };
+		AA0000020000000000000007 /* Lumi Remote.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = "Lumi Remote.app"; sourceTree = BUILT_PRODUCTS_DIR; };
+		AA0000020000000000000008 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
+/* End PBXFileReference section */
+
+/* Begin PBXFrameworksBuildPhase section */
+		AA0000030000000000000001 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (AA0000010000000000000002 /* LumiRemoteFeature in Frameworks */,);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXFrameworksBuildPhase section */
+
+/* Begin PBXGroup section */
+		AA0000040000000000000001 = {
+			isa = PBXGroup;
+			children = (
+				AA0000040000000000000002 /* LumiRemote */,
+				AA0000040000000000000005 /* Config */,
+				AA0000040000000000000004 /* Products */,
+			);
+			sourceTree = "<group>";
+		};
+		AA0000040000000000000002 /* LumiRemote */ = {
+			isa = PBXGroup;
+			children = (AA0000040000000000000003 /* App */, AA0000040000000000000006 /* Resources */,);
+			path = LumiRemote;
+			sourceTree = "<group>";
+		};
+		AA0000040000000000000003 /* App */ = {
+			isa = PBXGroup;
+			children = (AA0000020000000000000001 /* LumiRemoteApp.swift */,);
+			path = App;
+			sourceTree = "<group>";
+		};
+		AA0000040000000000000004 /* Products */ = {
+			isa = PBXGroup;
+			children = (AA0000020000000000000007 /* Lumi Remote.app */,);
+			name = Products;
+			sourceTree = "<group>";
+		};
+		AA0000040000000000000005 /* Config */ = {
+			isa = PBXGroup;
+			children = (AA0000020000000000000003, AA0000020000000000000004, AA0000020000000000000005, AA0000020000000000000006,);
+			path = Config;
+			sourceTree = "<group>";
+		};
+		AA0000040000000000000006 /* Resources */ = {
+			isa = PBXGroup;
+			children = (AA0000020000000000000002 /* Info.plist */, AA0000020000000000000008 /* Assets.xcassets */,);
+			path = Resources;
+			sourceTree = "<group>";
+		};
+/* End PBXGroup section */
+
+/* Begin PBXNativeTarget section */
+		AA0000050000000000000001 /* LumiRemote */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = AA00000A0000000000000002 /* Build configuration list for PBXNativeTarget */;
+			buildPhases = (AA0000070000000000000001 /* Sources */, AA0000030000000000000001 /* Frameworks */, AA0000080000000000000001 /* Resources */,);
+			buildRules = ();
+			dependencies = ();
+			name = LumiRemote;
+			packageProductDependencies = (AA00000D0000000000000001 /* LumiRemoteFeature */,);
+			productName = LumiRemote;
+			productReference = AA0000020000000000000007 /* Lumi Remote.app */;
+			productType = "com.apple.product-type.application";
+		};
+/* End PBXNativeTarget section */
+
+/* Begin PBXProject section */
+		AA0000060000000000000001 /* Project object */ = {
+			isa = PBXProject;
+			attributes = {BuildIndependentTargetsInParallel = 1; LastSwiftUpdateCheck = 2650; LastUpgradeCheck = 2650; TargetAttributes = {AA0000050000000000000001 = {CreatedOnToolsVersion = 26.5; };};};
+			buildConfigurationList = AA00000A0000000000000001 /* Build configuration list for PBXProject */;
+			developmentRegion = en;
+			hasScannedForEncodings = 0;
+			knownRegions = (en, Base,);
+			mainGroup = AA0000040000000000000001;
+			packageReferences = (AA00000C0000000000000001 /* XCLocalSwiftPackageReference \"Packages/LumiRemoteFeature\" */,);
+			preferredProjectObjectVersion = 77;
+			productRefGroup = AA0000040000000000000004 /* Products */;
+			projectDirPath = "";
+			projectRoot = "";
+			targets = (AA0000050000000000000001 /* LumiRemote */,);
+		};
+/* End PBXProject section */
+
+/* Begin PBXResourcesBuildPhase section */
+		AA0000080000000000000001 /* Resources */ = {isa = PBXResourcesBuildPhase; buildActionMask = 2147483647; files = (AA0000010000000000000003 /* Assets.xcassets in Resources */,); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXResourcesBuildPhase section */
+
+/* Begin PBXSourcesBuildPhase section */
+		AA0000070000000000000001 /* Sources */ = {isa = PBXSourcesBuildPhase; buildActionMask = 2147483647; files = (AA0000010000000000000001 /* LumiRemoteApp.swift in Sources */,); runOnlyForDeploymentPostprocessing = 0; };
+/* End PBXSourcesBuildPhase section */
+
+/* Begin XCBuildConfiguration section */
+		AA0000090000000000000001 /* Dev */ = {isa = XCBuildConfiguration; baseConfigurationReference = AA0000020000000000000004 /* Dev.xcconfig */; buildSettings = {CLANG_ENABLE_MODULES = YES; SDKROOT = iphoneos;}; name = Dev;};
+		AA0000090000000000000002 /* RC */ = {isa = XCBuildConfiguration; baseConfigurationReference = AA0000020000000000000005 /* RC.xcconfig */; buildSettings = {CLANG_ENABLE_MODULES = YES; SDKROOT = iphoneos;}; name = RC;};
+		AA0000090000000000000003 /* Release */ = {isa = XCBuildConfiguration; baseConfigurationReference = AA0000020000000000000006 /* Release.xcconfig */; buildSettings = {CLANG_ENABLE_MODULES = YES; SDKROOT = iphoneos;}; name = Release;};
+		AA0000090000000000000004 /* Dev */ = {isa = XCBuildConfiguration; baseConfigurationReference = AA0000020000000000000004 /* Dev.xcconfig */; buildSettings = {ENABLE_PREVIEWS = YES; SWIFT_EMIT_LOC_STRINGS = YES;}; name = Dev;};
+		AA0000090000000000000005 /* RC */ = {isa = XCBuildConfiguration; baseConfigurationReference = AA0000020000000000000005 /* RC.xcconfig */; buildSettings = {SWIFT_COMPILATION_MODE = wholemodule;}; name = RC;};
+		AA0000090000000000000006 /* Release */ = {isa = XCBuildConfiguration; baseConfigurationReference = AA0000020000000000000006 /* Release.xcconfig */; buildSettings = {SWIFT_COMPILATION_MODE = wholemodule;}; name = Release;};
+/* End XCBuildConfiguration section */
+
+/* Begin XCConfigurationList section */
+		AA00000A0000000000000001 /* Build configuration list for PBXProject */ = {isa = XCConfigurationList; buildConfigurations = (AA0000090000000000000001, AA0000090000000000000002, AA0000090000000000000003,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+		AA00000A0000000000000002 /* Build configuration list for PBXNativeTarget */ = {isa = XCConfigurationList; buildConfigurations = (AA0000090000000000000004, AA0000090000000000000005, AA0000090000000000000006,); defaultConfigurationIsVisible = 0; defaultConfigurationName = Release;};
+/* End XCConfigurationList section */
+
+/* Begin XCLocalSwiftPackageReference section */
+		AA00000C0000000000000001 /* XCLocalSwiftPackageReference \"Packages/LumiRemoteFeature\" */ = {isa = XCLocalSwiftPackageReference; relativePath = Packages/LumiRemoteFeature; };
+/* End XCLocalSwiftPackageReference section */
+
+/* Begin XCSwiftPackageProductDependency section */
+		AA00000D0000000000000001 /* LumiRemoteFeature */ = {isa = XCSwiftPackageProductDependency; package = AA00000C0000000000000001 /* XCLocalSwiftPackageReference \"Packages/LumiRemoteFeature\" */; productName = LumiRemoteFeature; };
+/* End XCSwiftPackageProductDependency section */
+	};
+	rootObject = AA0000060000000000000001 /* Project object */;
+}

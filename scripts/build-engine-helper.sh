@@ -23,7 +23,7 @@ fi
 # plist directly from the containing app bundle; no installer, root helper or
 # writes to ~/Library/LaunchAgents are required. Keep every release channel
 # isolated through its bundle identifier and Application Support directory.
-for required_variable in PRODUCT_BUNDLE_IDENTIFIER LUMI_DATA_DIRECTORY_NAME LUMI_PRODUCT_VERSION LUMI_SEED_DEMO_LIBRARY CURRENT_PROJECT_VERSION; do
+for required_variable in PRODUCT_BUNDLE_IDENTIFIER LUMI_DATA_DIRECTORY_NAME LUMI_PRODUCT_VERSION LUMI_RELEASE_CHANNEL LUMI_SEED_DEMO_LIBRARY CURRENT_PROJECT_VERSION; do
   if [[ -z "${!required_variable:-}" ]]; then
     echo "ERROR: $required_variable is required to package the Lumi engine LaunchAgent." >&2
     exit 1
@@ -60,6 +60,36 @@ if ! otool -s __TEXT __info_plist "$helpers_directory/lumi-engine" >/dev/null 2>
   exit 1
 fi
 
+# The iPhone Remote gateway has an independent executable identity and launchd
+# lifecycle. It is packaged with Lumi but registered only after the user turns
+# iPhone Remote on in Integrations.
+gateway_target_directory="$repository_root/build/remote-gateway-service-target"
+gateway_info_plist="$engine_info_plist_directory/lumi-remote-gateway-info.plist"
+plutil -create xml1 "$gateway_info_plist"
+/usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string $PRODUCT_BUNDLE_IDENTIFIER.remote-gateway" "$gateway_info_plist"
+/usr/libexec/PlistBuddy -c "Add :CFBundleName string Lumi Remote Gateway" "$gateway_info_plist"
+/usr/libexec/PlistBuddy -c "Add :CFBundleDisplayName string Lumi Remote Gateway" "$gateway_info_plist"
+/usr/libexec/PlistBuddy -c "Add :CFBundleExecutable string lumi-remote-gateway" "$gateway_info_plist"
+/usr/libexec/PlistBuddy -c "Add :CFBundlePackageType string BNDL" "$gateway_info_plist"
+/usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $LUMI_PRODUCT_VERSION" "$gateway_info_plist"
+/usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $CURRENT_PROJECT_VERSION" "$gateway_info_plist"
+/usr/libexec/PlistBuddy -c "Add :NSLocalNetworkUsageDescription string Lumi Remote securely connects a paired iPhone to this Mac over the local network." "$gateway_info_plist"
+/usr/libexec/PlistBuddy -c "Add :NSBonjourServices array" "$gateway_info_plist"
+/usr/libexec/PlistBuddy -c "Add :NSBonjourServices:0 string _lumi-remote._tcp" "$gateway_info_plist"
+/usr/libexec/PlistBuddy -c "Add :NSBonjourServices:1 string _lumi-remote-rc._tcp" "$gateway_info_plist"
+/usr/libexec/PlistBuddy -c "Add :NSBonjourServices:2 string _lumi-remote-dev._tcp" "$gateway_info_plist"
+plutil -lint "$gateway_info_plist" >/dev/null
+gateway_info_link_argument="-Wl,-sectcreate,__TEXT,__info_plist,$gateway_info_plist"
+RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C link-arg=$gateway_info_link_argument" \
+  cargo build --locked --release -p lumi-remote-gateway --target-dir "$gateway_target_directory"
+install -m 755 \
+  "$gateway_target_directory/$profile_directory/lumi-remote-gateway" \
+  "$helpers_directory/lumi-remote-gateway"
+if ! otool -s __TEXT __info_plist "$helpers_directory/lumi-remote-gateway" >/dev/null 2>&1; then
+  echo "ERROR: lumi-remote-gateway is missing its embedded LaunchAgent Info.plist." >&2
+  exit 1
+fi
+
 # Build the exact same bounded USB mode without a standalone bundle identity.
 # macOS then attributes removable-volume consent to the foreground Lumi app
 # that launches it, instead of to the persistent SMAppService engine. Keep the
@@ -92,6 +122,21 @@ plutil -create xml1 "$launch_agent_plist"
 /usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:LUMI_AUTO_PUBLISH_MIDI string 1" "$launch_agent_plist"
 /usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:LUMI_EXIT_AFTER_CLIENT_DISCONNECT string 0" "$launch_agent_plist"
 plutil -lint "$launch_agent_plist" >/dev/null
+
+gateway_launch_agent_label="${PRODUCT_BUNDLE_IDENTIFIER}.remote-gateway"
+gateway_launch_agent_plist="$launch_agents_directory/$gateway_launch_agent_label.plist"
+plutil -create xml1 "$gateway_launch_agent_plist"
+/usr/libexec/PlistBuddy -c "Add :Label string $gateway_launch_agent_label" "$gateway_launch_agent_plist"
+/usr/libexec/PlistBuddy -c "Add :BundleProgram string Contents/Helpers/lumi-remote-gateway" "$gateway_launch_agent_plist"
+/usr/libexec/PlistBuddy -c "Add :RunAtLoad bool true" "$gateway_launch_agent_plist"
+/usr/libexec/PlistBuddy -c "Add :KeepAlive bool true" "$gateway_launch_agent_plist"
+/usr/libexec/PlistBuddy -c "Add :ProcessType string Background" "$gateway_launch_agent_plist"
+/usr/libexec/PlistBuddy -c "Add :ThrottleInterval integer 5" "$gateway_launch_agent_plist"
+/usr/libexec/PlistBuddy -c "Add :EnvironmentVariables dict" "$gateway_launch_agent_plist"
+/usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:LUMI_DATA_DIRECTORY_NAME string $LUMI_DATA_DIRECTORY_NAME" "$gateway_launch_agent_plist"
+/usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:LUMI_PRODUCT_VERSION string $LUMI_PRODUCT_VERSION" "$gateway_launch_agent_plist"
+/usr/libexec/PlistBuddy -c "Add :EnvironmentVariables:LUMI_RELEASE_CHANNEL string $LUMI_RELEASE_CHANNEL" "$gateway_launch_agent_plist"
+plutil -lint "$gateway_launch_agent_plist" >/dev/null
 
 # Bundle the Direct Pro DJ Link bridge and a matching Apple Silicon runtime so
 # Lumi never depends on a separately installed JDK or Beat Link Trigger.

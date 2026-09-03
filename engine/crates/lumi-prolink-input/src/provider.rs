@@ -37,6 +37,12 @@ pub struct ProLinkTransportSnapshot {
     pub effective_bpm_milli: u32,
     pub playing: bool,
     pub discontinuity_revision: u64,
+    /// Local monotonic receipt time of the canonical position anchor.
+    ///
+    /// This is presentation evidence for downstream projections. It stays
+    /// separate from the jitter-prone precise-position lane, which is not
+    /// allowed to steer Lumi's canonical playback timeline.
+    pub anchor_observed_at: Instant,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -91,6 +97,7 @@ struct LoadedDeck {
     effective_bpm_milli: u32,
     playing: bool,
     discontinuity_revision: u64,
+    transport_anchor_observed_at: Instant,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -317,6 +324,7 @@ impl ProLinkDeckSourceProvider {
                 effective_bpm_milli: deck.effective_bpm_milli,
                 playing: deck.playing,
                 discontinuity_revision: deck.discontinuity_revision,
+                anchor_observed_at: deck.transport_anchor_observed_at,
             })
     }
 
@@ -501,6 +509,7 @@ impl ProLinkDeckSourceProvider {
         if let Some(deck) = self.decks.get_mut(&observation.deck_id) {
             deck.beat = absolute_beat;
             deck.phrase_index = phrase_index.or(previous.phrase_index);
+            deck.transport_anchor_observed_at = Instant::now();
             deck.precise_position_seen = true;
             deck.last_precise_position_millis = Some(observation.playback_position_millis);
             deck.last_precise_position_observed_at_nanos = Some(observation.observed_at_nanos);
@@ -709,6 +718,7 @@ impl ProLinkDeckSourceProvider {
                     effective_bpm_milli,
                     playing: status.playing,
                     discontinuity_revision: self.timing_generation,
+                    transport_anchor_observed_at: Instant::now(),
                 },
             );
             self.emit(
@@ -830,6 +840,12 @@ impl ProLinkDeckSourceProvider {
                 // never move the canonical Live timeline themselves.
                 if seeked || !previous.playing {
                     deck.beat = beat;
+                }
+                if seeked
+                    || (!previous.playing && previous.beat != beat)
+                    || previous.playing != status.playing
+                {
+                    deck.transport_anchor_observed_at = Instant::now();
                 }
                 deck.last_position_observed_at_nanos = observed_at_nanos;
                 if status_discontinuity_candidate {
@@ -1035,6 +1051,7 @@ impl ProLinkDeckSourceProvider {
         if let Some(deck) = self.decks.get_mut(&deck_id) {
             deck.beat = absolute_beat;
             deck.phrase_index = phrase_index.or(previous.phrase_index);
+            deck.transport_anchor_observed_at = Instant::now();
             deck.last_position_observed_at_nanos = observed_at_nanos;
             if seeked {
                 deck.pending_precise_discontinuity = None;

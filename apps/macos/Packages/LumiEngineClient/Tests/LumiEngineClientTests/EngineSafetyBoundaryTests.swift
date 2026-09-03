@@ -15,7 +15,7 @@ struct EngineSafetyBoundaryTests {
                 gate.arm(
                     on: DispatchQueue(label: "lumi.engine-timeout-test"),
                     after: 0.02,
-                    error: .requestTimedOut,
+                    error: EngineClientError.requestTimedOut,
                     onTimeout: {}
                 )
             }

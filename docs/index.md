@@ -37,7 +37,7 @@ the three integration states visible, and allows only the same revision-safe
 booth controls already owned by the Mac engine.
 
 <p align="center">
-  <img src="assets/screenshots/lumi-remote-live.png" alt="Lumi Remote showing two live Players, RGB waveforms and their Light Plans" width="390">
+  <img src="assets/screenshots/lumi-remote-live-device.png" alt="Lumi Remote on iPhone showing two live Players, RGB waveforms and their Light Plans" width="390">
 </p>
 
 The connection stays local and encrypted. Losing the phone never stops the Mac

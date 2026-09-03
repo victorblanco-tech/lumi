@@ -1,5 +1,332 @@
 # Changelog
 
+## 0.6.0 / Lumi Remote 0.1.0 - 2026-09-03
+
+### Added
+
+- Introduces Lumi Remote, a native iPhone companion for the authoritative Live
+  Decks state, operation controls and future phrase-aware Light Plan changes.
+- Adds an independently supervised, opt-in Remote Gateway with local Bonjour
+  discovery, one-use pairing, pinned TLS and revocable Controller access.
+- Establishes independent product versions and release tags for Lumi Remote and
+  the Pro DJ Link Simulator within the Lumi repository.
+
+### Changed
+
+- Presents the live Master and prepared next Player in compact portrait and
+  landscape layouts with vivid RGB waveforms, Hot Cues, phrases, Light Plans,
+  hardware identity and persistent integration health.
+- Moves Remote transport rendering into the receiving iPhone clock domain and
+  uses bounded native animation so phone presentation cannot pressure the Mac
+  show lanes.
+
+### Distribution
+
+- Free physical-iPhone testing uses the immutable `lumi-remote-v0.1.0` source
+  tag, Xcode and the tester's Apple Account until TestFlight is enabled.
+- Adds controlled draft-release automation for the macOS DMG/checksum/SBOM and
+  the independently versioned iOS Simulator validation artifact.
+
+## 0.6.0-dev-12 / Lumi Remote 0.1.0-dev-12 - 2026-09-03
+
+### Fixed
+
+- Translates every Mac transport anchor into the receiving iPhone's local
+  clock domain before visual interpolation. Mac and iPhone wall-clock drift can
+  therefore no longer exhaust the 750 ms stale-data guard and pause the Live
+  waveform between otherwise healthy updates.
+- Retains source-side observation age and raw source ordering separately, so
+  delayed or reordered anchors still cannot rewind playback.
+
+### Tests
+
+- Adds a deterministic mismatched-clock regression covering both the initial
+  snapshot and subsequent transport anchors.
+- A 20.951-second physical aiVoon Animation Hitches trace during live LAN
+  simulator playback recorded no hitches and no interaction delay above 33 ms;
+  after trace startup, displayed surfaces remained between 53 and 60 per
+  second instead of periodically dropping to 20–49.
+- Leaves the accepted high-resolution RGB raster, fixed 22% playhead, 40-bar
+  Live zoom and macOS waveform renderer unchanged.
+
+## 0.6.0-dev-11 / Lumi Remote 0.1.0-dev-11 - 2026-09-03
+
+### Fixed
+
+- Preserves the actual monotonic observation time of each canonical Pro DJ
+  Link beat in Remote transport anchors. The iPhone no longer re-anchors a
+  beat to the later gateway publication time and therefore does not step back
+  slightly at each incoming beat.
+- Keeps tempo-only updates phase-continuous while explicit play, pause, seek,
+  Hot Cue and track-load discontinuities still re-anchor immediately.
+
+### Performance
+
+- Moves only the live Master waveform at display rate; a prepared Player keeps
+  its fixed overview without running a second display clock.
+- Uses the physical iPhone's native refresh rate and moves only the waveform
+  layer per frame. Beatgrid, Hot Cue and playhead geometry are recalculated
+  only for layout, track or zoom changes.
+- Applies continuous socket anchors on the next display VSync instead of
+  inserting extra off-cycle layer updates.
+
+### Tests
+
+- Regression-locks canonical beat timestamps across the Rust Remote boundary
+  and proves that a tempo-only status update cannot reset playback phase.
+- Builds and tests the actual iOS/UIKit renderer with warnings as errors.
+
+### Known limitation
+
+- Physical-device playback exposed a remaining clock-domain error: Remote
+  interpolation still compared a Mac wall-clock timestamp with the iPhone
+  wall clock. When those clocks differ, the 750 ms stale-data guard can pause
+  the visual timeline before the next anchor. This is addressed in dev-12.
+
+## Lumi Remote 0.1.0-dev-10 - 2026-09-03
+
+### Fixed
+
+- Replaces the per-frame SwiftUI waveform repaint on iPhone with one stable,
+  high-resolution RGB track raster that moves through Core Animation.
+- Keeps the live Master playhead fixed at 22% while pinch zoom changes only the
+  musical viewport; a pinch can no longer accidentally enter inspection mode.
+- Moves phrase and Light Plan animation onto a separate bounded 30 Hz visual
+  clock so waveform movement does not rebuild the complete Player surface.
+
+### Tests
+
+- Builds the actual iOS/UIKit renderer for the iPhone Simulator.
+- Regression-locks the fixed playhead across all supported zoom levels and
+  retains bounded inspection for a prepared non-Master Player.
+
+## 0.6.0-dev-10 / Lumi Remote 0.1.0-dev-9 - 2026-09-02
+
+### Fixed
+
+- Prevents unchanged Bonjour result callbacks from tearing down and rebuilding
+  a healthy pinned-TLS Remote session.
+- Makes reconnect, service replacement and app suspension generation-safe so a
+  cancelled connection or command can no longer overwrite the state of its
+  replacement.
+- Disconnects a LAN client that stops reading and bounds a stalled
+  gateway-to-engine command response, preserving Remote capacity without
+  affecting the autonomous show lanes.
+- Keeps compact landscape controls visually small while giving every show-mode
+  and timing control a full 44-point touch target.
+- Improves VoiceOver status, value and action descriptions for Pro DJ Link,
+  Light Output, Ableton Link, show mode and timing offset.
+
+### Tests
+
+- Adds connection-generation regression coverage for duplicate and replaced
+  Bonjour results.
+- Stress-tests four clients with 20,000 two-Player transport anchors while
+  proving bounded latest-value state and contiguous delivery sequences.
+- Adds deterministic slow-writer and stalled-engine-response deadlines.
+- Covers Live/Next Player selection on a four-Player network and retains the
+  same 40-bar fixed Live viewport across iPhone orientations.
+
+## 0.6.0-dev-9 / Lumi Remote 0.1.0-dev-8 - 2026-09-02
+
+### Fixed
+
+- Keeps the Master playhead at the same 22% Live position for the complete
+  track on macOS and iPhone, including the first and last bars.
+- Renders empty pre-roll and post-roll as black instead of moving the playhead
+  or stretching the first/last waveform sample.
+- Makes 40 visible bars one tested iPhone Live contract in both portrait and
+  landscape; rotation changes the layout, not the musical zoom level.
+- Keeps the PDL, LIGHT and LINK health indicators in the Remote header during
+  discovery, reconnect and unavailable states, using neutral unavailable
+  status instead of removing the indicators.
+- Sends the complete 16,384-point RGB waveform losslessly in a compact static
+  track projection and renders it with the same normalized line treatment as
+  macOS; frequent transport anchors stay small and independent.
+
+### Tests
+
+- Covers fixed-playhead behavior at track start, normal playback and track end
+  in both Live clients, plus out-of-track waveform sampling.
+- Verifies two complete lossless Player waveforms fit the 512 KiB Remote frame
+  and do not enlarge desktop polling snapshots or realtime transport updates.
+
+## Lumi Remote 0.1.0-dev-7 - 2026-09-02
+
+### Changed
+
+- Mirrors Lumi's live-plan hierarchy in the booth UI: the running phrase and
+  AutoLoop receive a red live glow while exactly one upcoming phrase and
+  AutoLoop receive the blue `NEXT` treatment.
+- Keeps the configured Phrase colors visible underneath the status treatment
+  and preserves the entire upcoming block as its touch target for adjustment.
+- Advances `ACTIVE` and `NEXT` from the same interpolated transport position as
+  the waveform, so the status cannot visibly lag behind the fixed playhead.
+
+### Tests
+
+- Proves completed, active, next and later planned classification, including
+  the exact phrase-boundary handoff.
+- Completes headed portrait and landscape acceptance against the running Lumi
+  Remote Gateway and LAN Pro DJ Link simulator.
+
+## Lumi Remote 0.1.0-dev-6 - 2026-09-02
+
+### Changed
+
+- Makes both the coloured Phrase band and proportional Light Plan blocks
+  touch targets that open one compact phrase editor.
+- Adds an in-sheet Phrase selector followed by the current Theme/Bank,
+  AutoLoop, Static Look and lock state.
+- Keeps running and completed phrases inspectable while only allowing the
+  Controller to mutate an upcoming phrase.
+- Shows a subtle adjustment affordance on editable future Light Plan blocks.
+
+### Tests
+
+- Covers unavailable, completed, live and planned phrase states and proves
+  that only an upcoming phrase owned by the Controller is editable.
+
+## 0.6.0-dev-8 - 2026-09-02
+
+### Fixed
+
+- Downsamples bounded Live and Remote waveform previews by selecting the
+  loudest real RGB sample instead of independently combining channel peaks.
+- Preserves the source hue and prevents artificial white/pastel waveform
+  columns while retaining peak height and bounded visual payloads.
+
+### Tests
+
+- Proves bounded preview downsampling retains a real source hue and never
+  invents a mixed colour from neighbouring samples.
+
+## Lumi Remote 0.1.0-dev-5 - 2026-09-02
+
+### Changed
+
+- Uses Lumi's shared Rekordbox-compatible RGB channel mapping, amplitude curve
+  and normalized hue instead of the former flat direct-channel rendering.
+- Keeps two relevant numbered Player surfaces visible, including a stable empty
+  slot while the second Player has no loaded track.
+- Orders numbered Players left-to-right in landscape and keeps the Master first
+  in the scrollable portrait composition.
+- Compresses the landscape status and operation controls into one toolbar row.
+- Places Player identity, track metadata, transport metadata and role on one
+  compact landscape row so phrases and the complete Light Plan remain visible.
+- Adds readable Phrase Type labels to sufficiently wide phrase segments.
+
+### Tests
+
+- Covers the shared waveform color curve, single-Player placeholder behavior,
+  portrait Master-first ordering and landscape physical-number ordering.
+
+## 0.6.0-dev-7 - 2026-09-02
+
+### Fixed
+
+- Rejects a stale Remote Gateway service record from an older Lumi build and
+  re-registers the bundled helper when the user enables the updated service.
+- Publishes the gateway's ephemeral TLS port in release-scoped Bonjour discovery
+  metadata so the iOS Simulator can avoid its synthetic host-service route;
+  the existing certificate pin remains the trust boundary.
+- Gives the user an actionable update message instead of reporting an obsolete
+  helper as Ready.
+
+### Tests
+
+- Completes headed Mac-to-iPhone Simulator acceptance through QR pairing,
+  explicit approval, Controller transfer, Live projection, `ARM`, `START`,
+  confirmed `OFF`, moving transport and credential-backed app relaunch.
+
+## Lumi Remote 0.1.0-dev-4 - 2026-09-02
+
+### Fixed
+
+- Gives an explicitly scanned pairing invitation precedence over a stale
+  Keychain credential, allowing a trusted Mac to be paired again after its
+  local Remote trust state was reset.
+- Replaces the stale credential only after the new invitation is approved and
+  the pinned-TLS pairing succeeds.
+- Bypasses unreadable legacy Keychain data while a deliberate new pairing is
+  in progress, so recovery cannot stall before the TLS connection begins.
+- Keeps certificate evaluation off the Network.framework connection queue and
+  uses an explicit loopback endpoint only in CoreSimulator, while physical
+  iPhones retain normal multi-interface Bonjour routing.
+- Declares the Keychain access group required by signed iPhone and headed
+  Simulator builds.
+
+## 0.6.0-dev-6 - 2026-09-02
+
+### Fixed
+
+- Aligns the macOS Remote Gateway supervisor with the Rust admin wire contract
+  for `Id` and `Sha256` fields, so an enabled gateway reaches Ready instead of
+  remaining on Starting.
+- Aligns invitation approval, device revocation and Controller-transfer request
+  keys with the same lower-camel-case contract.
+
+### Tests
+
+- Adds matching Rust and Swift contract coverage plus the protected loopback
+  invitation-and-approval integration test.
+
+## 0.6.0-dev-5 - 2026-09-02
+
+### Added
+
+- Completes the opt-in, separately supervised local-network Remote Gateway with
+  channel-scoped Bonjour discovery, pinned TLS and explicit QR approval.
+- Connects the native Lumi Remote iPhone client to the authoritative Live
+  projection and revision-safe booth command allowlist.
+- Adds paired-device management, one explicit Controller lease, revoke and
+  Controller transfer in `Integrations > iPhone Remote`.
+
+### Changed
+
+- Uses the same dark booth presentation, RGB waveforms, Hot Cues, beatgrid,
+  current user-configured Phrase colors and proportional Light Plans on iPhone.
+- Keeps full deck/plan state change-driven and bounds visual transport anchors
+  to a coalescible 20 Hz presentation stream.
+
+### Safety
+
+- Keeps the Remote Gateway outside Pro DJ Link, SoundSwitch MIDI and Ableton
+  Link execution, with bounded clients, queues, frames and authentication.
+- Disables controls across reconnect, sequence gaps and revision conflicts
+  until a new authoritative snapshot and Controller lease arrive.
+- Stores only credential verifiers on Mac and credentials in iPhone Keychain;
+  backgrounding or disconnecting queues no command.
+
+## 0.6.0-dev-3 - 2026-09-02
+
+### Added
+
+- Starts the native Lumi Remote product with an independent `0.1.0-dev-1`
+  version, iOS app target and controlled draft-release path.
+- Adds the bounded Remote v1 Live projection and command contract with shared
+  Rust/Swift fixtures, contiguous client delivery sequencing and fail-closed
+  gateway policy.
+- Adds the native portrait and landscape Live presentation foundation,
+  release-scoped Bonjour discovery, QR invitation validation and channel-bound
+  Keychain credential storage.
+
+### Safety
+
+- Keeps the Remote Gateway LAN listener and every remote mutation disabled
+  until pinned TLS, persistent Mac trust, explicit pairing approval and the
+  isolated engine command path are complete.
+- Adds architecture checks that keep iPhone presentation and gateway work out
+  of Pro DJ Link, Ableton Link, SoundSwitch output, Library and Local Playback.
+
+## 0.6.0-dev-2 - 2026-08-31
+
+### Changed
+
+- Starts the post-0.5.2 development line with a measured physical-master tempo
+  latency baseline as its first priority; the stable 0.5.2 behavior remains the
+  comparison point and Production data is not migrated automatically.
+
 ## 0.5.2 - 2026-08-31
 
 ### Changed

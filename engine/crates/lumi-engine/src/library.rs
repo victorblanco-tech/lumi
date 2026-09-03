@@ -216,6 +216,7 @@ struct LibraryPhrasePlanContext {
     end_beat: u32,
     role_id: PhraseRoleId,
     role_name: String,
+    role_color_rgb: u32,
     strategy: PhraseLoopStrategy,
 }
 
@@ -372,8 +373,22 @@ impl LibraryPlanContext {
     #[must_use]
     pub fn waveform_preview_json(&self) -> Value {
         let points = deck_waveform_preview_points(&self.waveform, MAX_DECK_WAVEFORM_PREVIEW_POINTS);
+        Self::waveform_preview_value("localLibrary", &points)
+    }
+
+    /// Returns the detailed, still bounded waveform used by the Remote static
+    /// projection. Remote transport anchors are published separately, so this
+    /// larger asset is sent only when the track/plan projection changes and
+    /// never enters the realtime Pro DJ Link or lighting lanes.
+    #[must_use]
+    pub fn remote_waveform_preview_json(&self) -> Value {
+        let points = deck_waveform_preview_points(&self.waveform, MAX_DECK_WAVEFORM_DETAIL_POINTS);
+        Self::waveform_preview_value("localLibraryDetail", &points)
+    }
+
+    fn waveform_preview_value(source: &str, points: &[[u8; 3]]) -> Value {
         json!({
-            "source": "localLibrary",
+            "source": source,
             "style": "rgb",
             "points": points.iter().map(|point| json!({
                 // Keep the bounded snapshot at the same 8-bit RGB scale as
@@ -514,6 +529,7 @@ impl LibraryPlanContext {
                 json!({
                     "roleId": phrase.role_id.as_str(),
                     "roleName": phrase.role_name,
+                    "colorRgb": phrase.role_color_rgb,
                 })
             })
     }
@@ -811,13 +827,18 @@ fn deck_waveform_preview_points(points: &[WaveformPoint], maximum: usize) -> Vec
     points
         .chunks(chunk_size)
         .map(|chunk| {
-            chunk.iter().fold([0_u8; 3], |peak, point| {
-                [
-                    peak[0].max(point.low()),
-                    peak[1].max(point.mid()),
-                    peak[2].max(point.high()),
-                ]
-            })
+            // A component-wise maximum invents a new pale/white colour when
+            // neighbouring source samples peak in different frequency bands.
+            // Keep the loudest real sample instead: its peak still preserves
+            // waveform height while its RGB relationship remains identical to
+            // the detailed Rekordbox waveform used by Lumi's Mac surfaces.
+            let selected = chunk.iter().max_by_key(|point| {
+                let peak = point.low().max(point.mid()).max(point.high());
+                let energy =
+                    u16::from(point.low()) + u16::from(point.mid()) + u16::from(point.high());
+                (peak, energy)
+            });
+            selected.map_or([0_u8; 3], |point| [point.low(), point.mid(), point.high()])
         })
         .collect()
 }
@@ -2267,6 +2288,7 @@ impl LibraryWorker {
                     end_beat: phrase.end_beat(),
                     role_id: phrase.role_id().clone(),
                     role_name: role_display_name(role_catalog.roles(), phrase.role_id()),
+                    role_color_rgb: role_color_rgb(role_catalog.roles(), phrase.role_id()),
                     strategy: phrase.loop_strategy().clone(),
                 })
                 .collect(),
@@ -3737,6 +3759,13 @@ fn role_display_name(roles: &[PhraseRole], id: &PhraseRoleId) -> String {
         .map(PhraseRole::display_name)
         .unwrap_or_else(|| id.as_str())
         .to_owned()
+}
+
+fn role_color_rgb(roles: &[PhraseRole], id: &PhraseRoleId) -> u32 {
+    roles.iter().find(|role| role.id() == id).map_or_else(
+        || lumi_library::default_phrase_role_color_rgb(id.as_str()),
+        PhraseRole::color_rgb,
+    )
 }
 
 fn planner_phrase_kind(phrase: &PhraseInstance, phrase_count: usize) -> PhraseKind {

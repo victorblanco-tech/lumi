@@ -299,7 +299,7 @@ fn mounted_device_sync_hydrates_the_same_canonical_track_by_real_and_simulator_i
 }
 
 #[test]
-fn deck_waveform_preview_is_bounded_and_peak_preserving() {
+fn deck_waveform_preview_is_bounded_peak_and_hue_preserving() {
     let mut waveform = (0..16_384)
         .map(|_| WaveformPoint::new(8, 16, 24))
         .collect::<Vec<_>>();
@@ -309,6 +309,14 @@ fn deck_waveform_preview_is_bounded_and_peak_preserving() {
 
     assert_eq!(preview.len(), 1_024);
     assert!(preview.contains(&[255, 254, 253]));
+
+    let distinct_hues = [WaveformPoint::new(255, 0, 0), WaveformPoint::new(0, 255, 0)];
+    let hue_preserving = deck_waveform_preview_points(&distinct_hues, 1);
+    assert_eq!(hue_preserving.len(), 1);
+    assert!(
+        hue_preserving[0] == [255, 0, 0] || hue_preserving[0] == [0, 255, 0],
+        "downsampling must retain a real source hue instead of inventing yellow"
+    );
 }
 
 #[test]
@@ -325,6 +333,7 @@ fn local_deck_preview_keeps_the_same_eight_bit_rgb_scale_as_detail()
         .local_playback_track(track_id, timeline_revision)?
         .into_parts();
     let preview = context.waveform_preview_json();
+    let remote = context.remote_waveform_preview_json();
     let maximum_channel = preview["points"]
         .as_array()
         .ok_or("preview points are missing")?
@@ -335,6 +344,12 @@ fn local_deck_preview_keeps_the_same_eight_bit_rgb_scale_as_detail()
         .ok_or("preview channels are missing")?;
 
     assert_eq!(preview["source"], "localLibrary");
+    assert_eq!(remote["source"], "localLibraryDetail");
+    assert!(
+        remote["points"].as_array().map_or(0, Vec::len)
+            >= preview["points"].as_array().map_or(0, Vec::len),
+        "Remote static projection must retain at least the Mac preview detail"
+    );
     assert!(
         maximum_channel > 31,
         "bounded preview must retain 8-bit RGB values"
@@ -423,6 +438,10 @@ fn simulator_track_uses_exact_lumi_revision_and_fails_closed_on_stale_or_unknown
     assert_eq!(identity.provider_kind(), "demo");
     assert_eq!(identity.lumi_timeline_revision(), 2);
     assert_eq!(metadata.phrases()[0].kind(), PhraseKind::Build);
+    assert!(
+        context.phrase_role_json(0)["colorRgb"].as_u64().is_some(),
+        "library-backed phrases must project the configured Phrase color"
+    );
     let resolved = context.resolve(ThemeId::new(1))?;
     assert_eq!(resolved[0].role_id, "synth");
     assert_eq!(resolved[0].strategy, "auto");

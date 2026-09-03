@@ -32,6 +32,7 @@ assert_classification "$docs_only" docs/assets/brand/lumi-github-header.svg
 assert_classification "$docs_only" README.md
 assert_classification "$rust_and_apple" engine/crates/lumi-engine/src/main.rs
 assert_classification "$apple_only" apps/macos/Lumi/App/LumiApp.swift
+assert_classification "$apple_only" apps/ios/Packages/LumiRemoteClient/Package.swift
 assert_classification "$mixed_docs_apple" README.md apps/macos/Lumi/App/LumiApp.swift
 assert_classification "$safe_fallback" .github/workflows/foundation.yml
 assert_classification "$safe_fallback" future-platform/new-source.txt
