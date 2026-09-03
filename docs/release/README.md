@@ -25,6 +25,7 @@ the public-repository and GitHub Pages gates.
 - [0.5.2 release readiness](0.5.2-release-readiness.md)
 - [0.6.0 Public Beta release notes](0.6.0-release-notes.md)
 - [0.6.0 release readiness](0.6.0-release-readiness.md)
+- [0.6.1-dev-1 long-session reconnect stability](0.6.1-dev-1-long-session-reconnect.md)
 - [0.5.2-dev-1 runtime safety boundaries](0.5.2-dev-1-runtime-safety-boundaries.md)
 - [0.5.2-dev-2 direct Pro DJ Link only](0.5.2-dev-2-direct-pro-dj-link-only.md)
 - [0.5.2-dev-3 supported USB ingestion only](0.5.2-dev-3-supported-usb-ingestion-only.md)

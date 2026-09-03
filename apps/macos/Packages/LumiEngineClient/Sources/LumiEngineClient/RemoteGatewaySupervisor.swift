@@ -8,6 +8,7 @@ public actor RemoteGatewaySupervisor {
     private let expectedProductVersion: String?
     private var service: SMAppService?
     private var hasAttemptedServiceRecovery = false
+    private let adminTransport = GatewayAdminTransport()
 
     public init(
         launchAgentPlistName: String? = Bundle.main.object(
@@ -67,6 +68,7 @@ public actor RemoteGatewaySupervisor {
         case .enabled:
             if let expectedProductVersion,
                (try? readRecord(at: recordURL).productVersion) != expectedProductVersion {
+                await adminTransport.close()
                 try await service.unregister()
                 try service.register()
             }
@@ -124,6 +126,7 @@ public actor RemoteGatewaySupervisor {
     private func reconcileEnabledService(
         recordURL: URL
     ) async -> RemoteGatewayManagementSnapshot {
+        await adminTransport.close()
         do {
             return try await enable(recordURL: recordURL)
         } catch RemoteGatewayClientError.requiresApproval {
@@ -141,6 +144,7 @@ public actor RemoteGatewaySupervisor {
 
     public func disable(recordURL: URL) async throws -> RemoteGatewayManagementSnapshot {
         guard let launchAgentPlistName else { return .disabled }
+        await adminTransport.close()
         let service = service ?? SMAppService.agent(plistName: launchAgentPlistName)
         self.service = service
         if service.status == .enabled {
@@ -149,6 +153,10 @@ public actor RemoteGatewaySupervisor {
         try? FileManager.default.removeItem(at: recordURL)
         hasAttemptedServiceRecovery = false
         return .disabled
+    }
+
+    public func disconnect() async {
+        await adminTransport.close()
     }
 
     public func createInvitation(recordURL: URL) async throws -> RemoteGatewayManagementSnapshot {
@@ -185,7 +193,7 @@ public actor RemoteGatewaySupervisor {
         recordURL: URL
     ) async throws -> RemoteGatewayManagementSnapshot {
         let record = try readRecord(at: recordURL)
-        let response = try await GatewayAdminTransport.exchange(record: record, request: request)
+        let response = try await adminTransport.exchange(record: record, request: request)
         guard response.ok else {
             throw RemoteGatewayClientError.rejected(response.errorCode ?? "gatewayRejected")
         }
@@ -305,39 +313,103 @@ private struct RemoteGatewayAdminAuthentication: Encodable, Sendable {
     let adminToken: String
 }
 
-private enum GatewayAdminTransport {
+private actor GatewayAdminTransport {
     private static let queue = DispatchQueue(
         label: "co.victorblan.tech.lumi.remote-gateway-admin",
         qos: .userInitiated
     )
+    private struct ConnectionIdentity: Equatable {
+        let endpointPort: UInt16
+        let adminToken: String
+        let processID: Int32
+    }
 
-    static func exchange(
+    private var connection: NWConnection?
+    private var connectionIdentity: ConnectionIdentity?
+    private var exchangeInProgress = false
+    private var exchangeWaiters: [CheckedContinuation<Void, Never>] = []
+
+    func exchange(
         record: RemoteGatewayServiceRecord,
         request: RemoteGatewayAdminRequest
     ) async throws -> RemoteGatewayAdminResponse {
+        await acquireExchangeLease()
+        defer { releaseExchangeLease() }
+
+        let identity = ConnectionIdentity(
+            endpointPort: record.endpointPort,
+            adminToken: record.adminToken,
+            processID: record.processID
+        )
         guard let port = NWEndpoint.Port(rawValue: record.endpointPort) else {
             throw RemoteGatewayClientError.invalidServiceRecord
         }
-        let connection = NWConnection(host: .ipv4(.loopback), port: port, using: .tcp)
-        try await connect(connection)
-        defer { connection.cancel() }
-        let encoder = JSONEncoder()
-        var outbound = try encoder.encode(
-            RemoteGatewayAdminAuthentication(adminToken: record.adminToken)
-        )
-        outbound.append(0x0A)
-        outbound.append(try encoder.encode(request))
-        outbound.append(0x0A)
-        try await send(outbound, over: connection)
-        let response = try await receiveLine(over: connection)
-        return try JSONDecoder().decode(RemoteGatewayAdminResponse.self, from: response)
+        do {
+            let connection: NWConnection
+            if let existing = self.connection,
+               connectionIdentity == identity {
+                connection = existing
+            } else {
+                closeConnection()
+                let created = NWConnection(host: .ipv4(.loopback), port: port, using: .tcp)
+                try await connect(created)
+                var authentication = try JSONEncoder().encode(
+                    RemoteGatewayAdminAuthentication(adminToken: record.adminToken)
+                )
+                authentication.append(0x0A)
+                try await send(authentication, over: created)
+                self.connection = created
+                connectionIdentity = identity
+                connection = created
+            }
+
+            var outbound = try JSONEncoder().encode(request)
+            outbound.append(0x0A)
+            try await send(outbound, over: connection)
+            let response = try await receiveLine(over: connection)
+            return try JSONDecoder().decode(RemoteGatewayAdminResponse.self, from: response)
+        } catch {
+            closeConnection()
+            throw error
+        }
     }
 
-    private static func connect(_ connection: NWConnection) async throws {
+    func close() async {
+        await acquireExchangeLease()
+        closeConnection()
+        releaseExchangeLease()
+    }
+
+    private func closeConnection() {
+        connection?.stateUpdateHandler = nil
+        connection?.cancel()
+        connection = nil
+        connectionIdentity = nil
+    }
+
+    private func acquireExchangeLease() async {
+        if !exchangeInProgress {
+            exchangeInProgress = true
+            return
+        }
+        await withCheckedContinuation { continuation in
+            exchangeWaiters.append(continuation)
+        }
+    }
+
+    private func releaseExchangeLease() {
+        guard !exchangeWaiters.isEmpty else {
+            exchangeInProgress = false
+            return
+        }
+        exchangeWaiters.removeFirst().resume()
+    }
+
+    private func connect(_ connection: NWConnection) async throws {
         try await withCheckedThrowingContinuation { continuation in
             let gate = DeadlineContinuationGate<Void>(continuation)
             gate.arm(
-                on: queue,
+                on: Self.queue,
                 after: 3,
                 error: RemoteGatewayClientError.connectionTimedOut,
                 onTimeout: { connection.cancel() }
@@ -350,15 +422,15 @@ private enum GatewayAdminTransport {
                 default: break
                 }
             }
-            connection.start(queue: queue)
+            connection.start(queue: Self.queue)
         }
     }
 
-    private static func send(_ data: Data, over connection: NWConnection) async throws {
+    private func send(_ data: Data, over connection: NWConnection) async throws {
         try await withCheckedThrowingContinuation { continuation in
             let gate = DeadlineContinuationGate<Void>(continuation)
             gate.arm(
-                on: queue,
+                on: Self.queue,
                 after: 3,
                 error: RemoteGatewayClientError.requestTimedOut,
                 onTimeout: { connection.cancel() }
@@ -373,13 +445,13 @@ private enum GatewayAdminTransport {
         }
     }
 
-    private static func receiveLine(over connection: NWConnection) async throws -> Data {
+    private func receiveLine(over connection: NWConnection) async throws -> Data {
         var received = Data()
         while received.count <= 64 * 1_024 {
             let chunk: Data = try await withCheckedThrowingContinuation { continuation in
                 let gate = DeadlineContinuationGate<Data>(continuation)
                 gate.arm(
-                    on: queue,
+                    on: Self.queue,
                     after: 3,
                     error: RemoteGatewayClientError.requestTimedOut,
                     onTimeout: { connection.cancel() }

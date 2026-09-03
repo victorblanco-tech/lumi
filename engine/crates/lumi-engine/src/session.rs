@@ -200,6 +200,10 @@ pub async fn run() -> Result<(), EngineError> {
             Ok(AuthenticatedClientExit::Disconnected) => {
                 park_runtime_after_client_disconnect(&mut runtime)?;
             }
+            Err(EngineError::AuthenticatedClientIo(error)) => {
+                eprintln!("Authenticated Lumi UI session ended after an I/O failure: {error}");
+                park_runtime_after_client_disconnect(&mut runtime)?;
+            }
             Err(EngineError::AuthenticationTimeout)
             | Err(EngineError::AuthenticationOversized)
             | Err(EngineError::InvalidAuthentication)
@@ -268,7 +272,8 @@ async fn serve_authenticated_client(
         &mut writer,
         &snapshot_envelope(runtime, response_sequence, "session-bootstrap")?,
     )
-    .await?;
+    .await
+    .map_err(authenticated_client_error)?;
     let mut command_ids = CommandIdCache::new(COMMAND_ID_CACHE_CAPACITY)?;
     let mut command_reader = BufReader::new(reader);
     let mut command_buffer = Vec::with_capacity(256);
@@ -302,7 +307,7 @@ async fn serve_authenticated_client(
                 }
             }
             command = read_command_line(&mut command_reader, &mut command_buffer) => {
-                let Some(command_bytes) = command? else {
+                let Some(command_bytes) = command.map_err(authenticated_client_error)? else {
                     return Ok(AuthenticatedClientExit::Disconnected);
                 };
                 response_sequence = response_sequence
@@ -322,7 +327,9 @@ async fn serve_authenticated_client(
                         None,
                     )?,
                 };
-                write_envelope(&mut writer, &response).await?;
+                write_envelope(&mut writer, &response)
+                    .await
+                    .map_err(authenticated_client_error)?;
                 // Desktop snapshot polling is not a remote-state mutation.
                 // Let the publisher's static key decide whether a complete
                 // projection is needed so waveform payloads never enter the
@@ -330,6 +337,13 @@ async fn serve_authenticated_client(
                 remote_publisher.publish(runtime, false)?;
             }
         }
+    }
+}
+
+fn authenticated_client_error(error: EngineError) -> EngineError {
+    match error {
+        EngineError::Io(source) => EngineError::AuthenticatedClientIo(source),
+        other => other,
     }
 }
 
@@ -5333,6 +5347,8 @@ pub enum EngineError {
     NonLoopbackPeer,
     #[error("I/O failed: {0}")]
     Io(#[from] io::Error),
+    #[error("authenticated UI session I/O failed: {0}")]
+    AuthenticatedClientIo(io::Error),
     #[error("JSON encoding failed: {0}")]
     Json(#[from] serde_json::Error),
     #[error("remote Live projection failed: {0}")]

@@ -34,6 +34,9 @@ service.
   state, stop an AutoLoop, change Ableton Link or restart the engine.
 - The gateway uses one authenticated loopback command connection and a separate
   read-only Live projection subscription.
+- The Mac app keeps one authenticated admin connection to the gateway and
+  reuses it for status and management requests. Periodic health observation
+  must not create and tear down a new localhost socket on every poll.
 - Remote work runs at utility priority. It never executes on the Pro DJ Link,
   timing-output or realtime MIDI threads.
 
@@ -129,6 +132,23 @@ session.
 - Public iPhone beta distribution will eventually require Apple Developer
   Program membership; development on the owner's connected device can start
   before that.
+
+## 0.6.1 control-plane correction
+
+A physical long-running session exposed that the first 0.6.0 Mac client opened
+and cancelled a new Remote Gateway admin socket every two seconds. After about
+870 short-lived connections, new Network.framework loopback connections began
+to stall and the already authenticated desktop-engine session was reset. The
+show-critical engine lanes remained separate, but the desktop lost its decks
+and its single recovery attempt could remain failed.
+
+The admin client now retains one serialized authenticated connection, replaces
+it only when the gateway service identity changes and closes it explicitly when
+Lumi exits or disables the gateway. Desktop-engine connection and authentication
+retry transient local failures with bounded delay, while authentication,
+protocol and approval failures remain fail-closed. A detected established
+session I/O failure always parks operation and output safely before the engine
+accepts a replacement UI client.
 
 ## Rejected alternatives
 
