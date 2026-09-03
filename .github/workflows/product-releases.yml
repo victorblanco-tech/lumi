@@ -29,6 +29,8 @@ jobs:
           cache: maven
       - name: Validate product tag
         run: scripts/check-product-tag.sh macos "$GITHUB_REF_NAME"
+      - name: Fetch locked Rust dependency metadata
+        run: cargo fetch --locked
       - name: Prepare corresponding source bundles
         env:
           LUMI_PACKAGING_JAVA_HOME: ${{ env.JAVA_HOME }}
