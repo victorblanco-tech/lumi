@@ -1,8 +1,8 @@
 # Story E9-05: Remote resilience, performance and beta delivery
 
-- Status: **In progress (first physical beta candidate implemented)**
+- Status: **Source-distributed public beta complete; TestFlight deferred**
 - Priority: **P0 show safety**
-- Target: `0.6.0-beta`
+- Target: `0.6.0 / Remote 0.1.0`
 - Components: Engine, Gateway, iOS, Release
 
 ## User outcome

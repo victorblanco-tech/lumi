@@ -1,6 +1,6 @@
 # Epic 9 – Native iPhone Remote Beta
 
-Status: **In development** | Target: **0.6.0** | Priority: **P0/P1**
+Status: **Public source beta ready** | Target: **0.6.0 / Remote 0.1.0** | Priority: **P0/P1**
 
 ## Outcome
 
@@ -33,7 +33,7 @@ Excluded from 0.6.0:
 ADR-0040 is the accepted architecture authority. The accepted visual contract is
 recorded in `docs/design/iphone-remote/README.md`.
 
-## Current evidence (`0.6.0-dev-12` / Remote `0.1.0-dev-13`)
+## Release evidence (`0.6.0` / Remote `0.1.0`)
 
 - the independent iOS app target builds for the generic iOS Simulator;
 - portrait Master-first and landscape side-by-side Live compositions use the
