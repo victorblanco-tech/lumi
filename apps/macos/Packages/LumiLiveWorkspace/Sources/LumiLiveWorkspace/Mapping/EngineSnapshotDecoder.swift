@@ -762,12 +762,41 @@ public struct EngineSnapshotDecoder: Sendable {
                 loopSlot: loopSlot
             )
         }
+        let phraseRoles: [PhraseRoleOptionSnapshot]
+        if payload["phraseRoles"] == nil || payload["phraseRoles"] == .null {
+            phraseRoles = []
+        } else {
+            guard case let .array(rolePayloads) = payload["phraseRoles"] else {
+                throw EngineSnapshotDecodingError.invalidSnapshot
+            }
+            phraseRoles = try rolePayloads.map { value in
+                guard case let .object(role) = value,
+                      case let .string(id) = role["id"],
+                      case let .string(name) = role["name"],
+                      let colorRGB = unsignedInteger(role["colorRgb"]),
+                      colorRGB <= 0x00FF_FFFF,
+                      !id.isEmpty,
+                      !name.isEmpty else {
+                    throw EngineSnapshotDecodingError.invalidSnapshot
+                }
+                return PhraseRoleOptionSnapshot(
+                    id: id,
+                    name: name,
+                    colorRGB: UInt32(colorRGB)
+                )
+            }
+        }
         guard !themes.isEmpty, !scenes.isEmpty,
               Set(themes.map(\.id)).count == themes.count,
-              Set(scenes.map(\.id)).count == scenes.count else {
+              Set(scenes.map(\.id)).count == scenes.count,
+              Set(phraseRoles.map(\.id)).count == phraseRoles.count else {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
-        return PlanningOptionsSnapshot(themes: themes, scenes: scenes)
+        return PlanningOptionsSnapshot(
+            themes: themes,
+            scenes: scenes,
+            phraseRoles: phraseRoles
+        )
     }
 
     private func decodeDeck(_ value: JSONValue) throws -> DeckSnapshot {

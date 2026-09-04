@@ -94,6 +94,7 @@ booth-safe allowlist:
 - save a bounded lighting offset whose normal safe application remains the next
   phrase boundary;
 - select Theme from a future phrase;
+- change the Lumi Phrase Type of a future phrase;
 - select AutoLoop for a future phrase;
 - lock or unlock a future plan cue;
 - request a new Remote Live snapshot.
@@ -102,6 +103,12 @@ Every mutation carries an idempotency key and the same authoritative state,
 track-load and plan revisions as the local client. Library, USB, output mapping,
 manual MIDI test, service-control and developer diagnostic commands are rejected
 at the gateway even if they exist in the internal protocol.
+
+The Phrase Type catalog is projected read-only to Remote. A permitted future
+type change uses the same engine control command as macOS, persists a new
+timeline revision and rematerializes only the selected cue. It never schedules
+lighting from the gateway or iPhone and never enters the Pro DJ Link, Ableton
+Link or SoundSwitch realtime lanes.
 
 The first beta grants at most one paired device a Controller lease. Other paired
 devices are view-only. The Mac explicitly transfers or revokes that lease.

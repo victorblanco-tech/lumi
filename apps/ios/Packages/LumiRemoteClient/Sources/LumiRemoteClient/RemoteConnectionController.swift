@@ -120,6 +120,16 @@ public final class RemoteConnectionController: ObservableObject {
         }
     }
 
+    public func changePhraseRole(
+        plan: RemoteLightPlan,
+        cue: RemotePlanCue,
+        roleID: String
+    ) {
+        submitPlanCommand(plan: plan, cue: cue, target: "phraseRole") {
+            .changePhraseRole($0, roleID: roleID)
+        }
+    }
+
     public func selectAutoloop(
         plan: RemoteLightPlan,
         cue: RemotePlanCue,

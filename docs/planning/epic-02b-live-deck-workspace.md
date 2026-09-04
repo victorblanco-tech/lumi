@@ -60,6 +60,10 @@ current Live track.
   editable. An explicit pinned choice remains distinguishable from time state.
 - A future AutoLoop is phrase-specific. A future Theme choice applies from that
   phrase onward and is committed at its boundary.
+- Selecting a future phrase exposes its actual configurable Lumi Phrase Type,
+  Theme and AutoLoop. Phrase Type choices come from the active catalog (for
+  example `BUILDUP 1A` and `BUILDUP 2A`), not from the phrases already present
+  in that track.
 - Technical component health is summarized behind one compact status control.
 - iPhone portrait stacks the decks; landscape may show them side by side; both
   show phrases immediately below their waveform.
@@ -187,6 +191,13 @@ The Local Playback and connected Live Deck modes use the same Master status
 component. Their operation-state border, top control and badge therefore cannot
 drift into source-specific variants. Pause animation is restricted to the
 lightweight outlines and does not invalidate or redraw the waveform timeline.
+
+The future-phrase editor also changes the authoritative Lumi Phrase Type. The
+clicked phrase remains the target; its selector lists the active global Phrase
+Type catalog rather than duplicate instances from the same song. A type change
+creates a persisted track-timeline revision, clears only an old role-specific
+AutoLoop override for that phrase and rematerializes that cue. The current and
+completed phrases remain immutable.
 
 The accepted operation-state language is now implemented on both source modes:
 Off uses a white Master outline, Armed orange, Live red and Paused a lightweight

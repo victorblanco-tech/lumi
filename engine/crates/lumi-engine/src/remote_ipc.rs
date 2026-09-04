@@ -350,6 +350,7 @@ mod tests {
             live_plan: None,
             next_plan: None,
             theme_options: Vec::new(),
+            phrase_role_options: Vec::new(),
         }
     }
 

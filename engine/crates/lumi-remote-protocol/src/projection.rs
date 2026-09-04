@@ -51,6 +51,7 @@ pub struct RemoteLiveProjection {
     pub live_plan: Option<RemoteLightPlan>,
     pub next_plan: Option<RemoteLightPlan>,
     pub theme_options: Vec<RemoteThemeOption>,
+    pub phrase_role_options: Vec<RemotePhraseRoleOption>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -231,6 +232,14 @@ pub struct RemoteThemeOption {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
+pub struct RemotePhraseRoleOption {
+    pub id: String,
+    pub name: String,
+    pub color_rgb: u32,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct RemoteAutoloopChoice {
     pub number: u8,
     pub name: String,
@@ -316,6 +325,16 @@ impl RemoteLiveProjection {
                     name: theme.name,
                 })
                 .collect(),
+            phrase_role_options: wire
+                .planning_options
+                .phrase_roles
+                .into_iter()
+                .map(|role| RemotePhraseRoleOption {
+                    id: role.id,
+                    name: role.name,
+                    color_rgb: role.color_rgb,
+                })
+                .collect(),
         };
         projection.validate()?;
         Ok(projection)
@@ -350,6 +369,10 @@ impl RemoteLiveProjection {
         }
         for theme in &self.theme_options {
             validate_text("themeOptionName", &theme.name, 128, false)?;
+        }
+        for role in &self.phrase_role_options {
+            validate_text("phraseRoleOptionId", &role.id, 128, false)?;
+            validate_text("phraseRoleOptionName", &role.name, 128, false)?;
         }
         Ok(())
     }
@@ -672,12 +695,22 @@ struct EnginePhraseRoleWire {
 struct EnginePlanningOptionsWire {
     #[serde(default)]
     themes: Vec<EngineThemeWire>,
+    #[serde(default, rename = "phraseRoles")]
+    phrase_roles: Vec<EnginePhraseRoleOptionWire>,
 }
 
 #[derive(Deserialize)]
 struct EngineThemeWire {
     id: u64,
     name: String,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EnginePhraseRoleOptionWire {
+    id: String,
+    name: String,
+    color_rgb: u32,
 }
 
 #[derive(Deserialize)]
@@ -924,6 +957,7 @@ mod tests {
             live_plan: None,
             next_plan: None,
             theme_options: Vec::new(),
+            phrase_role_options: Vec::new(),
         }
     }
 

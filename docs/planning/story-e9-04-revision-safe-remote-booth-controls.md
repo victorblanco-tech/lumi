@@ -15,7 +15,7 @@ double tap, reconnect or stale screen producing a second or incorrect mutation.
 - `OFF`, `ARM`, `START`, `PAUSE` with authoritative acknowledgement;
 - Ableton Link enable/disable and master BPM status;
 - bounded lighting offset and pending-next-phrase confirmation;
-- Theme-from-phrase, phrase AutoLoop and cue lock/unlock;
+- Phrase Type, Theme-from-phrase, phrase AutoLoop and cue lock/unlock;
 - optimistic pending presentation reconciled to engine revisions;
 - destructive Off confirmation while Start is active;
 - accepted/rejected haptics and one stable feedback region;
@@ -36,6 +36,8 @@ double tap, reconnect or stale screen producing a second or incorrect mutation.
 - state, track-load and plan revision contexts;
 - bounded offset and AutoLoop validation;
 - future-phrase-only plan mutation guard;
+- active Phrase Type catalog projection; changing a future type persists the
+  Lumi timeline and refreshes the affected cue without replaying output;
 - single Controller lease authorization;
 - bounded gateway idempotency ledger with duplicate admission result;
 - per-target pending command suppression and disconnect cleanup on iPhone;
@@ -50,9 +52,10 @@ double tap, reconnect or stale screen producing a second or incorrect mutation.
 - headed Simulator acceptance transferred the single Controller lease and sent
   `ARM`, `START` and confirmed `OFF` through the real TLS gateway to the existing
   reducer, with authoritative state reflected back in the iPhone presentation.
-- Remote dev-6 exposes that existing safe command path from both the Phrase and
-  Light Plan bands, with one Phrase selector and explicit read-only feedback
-  for live, completed and Viewer-only selections.
+- The Phrase and Light Plan bands open one target-specific sheet. `Phrase Type`
+  selects from the active Lumi catalog (including custom variants), while Theme
+  and AutoLoop retain their existing revision-safe controls; it no longer
+  presents the track's phrase instances as if they were types.
 - headed dev-6 acceptance opened the touch sheet on the next planned Intro,
   exposed the complete adjustment surface, and verified that selecting the
   running Drop changed it to `Live · locked` with every mutation disabled.

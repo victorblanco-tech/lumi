@@ -871,10 +871,28 @@ public enum PlanActionSnapshot: Equatable, Sendable {
 public struct PlanningOptionsSnapshot: Equatable, Sendable {
     public let themes: [ThemeOptionSnapshot]
     public let scenes: [SceneOptionSnapshot]
+    public let phraseRoles: [PhraseRoleOptionSnapshot]
 
-    public init(themes: [ThemeOptionSnapshot], scenes: [SceneOptionSnapshot]) {
+    public init(
+        themes: [ThemeOptionSnapshot],
+        scenes: [SceneOptionSnapshot],
+        phraseRoles: [PhraseRoleOptionSnapshot] = []
+    ) {
         self.themes = themes
         self.scenes = scenes
+        self.phraseRoles = phraseRoles
+    }
+}
+
+public struct PhraseRoleOptionSnapshot: Equatable, Identifiable, Sendable {
+    public let id: String
+    public let name: String
+    public let colorRGB: UInt32
+
+    public init(id: String, name: String, colorRGB: UInt32) {
+        self.id = id
+        self.name = name
+        self.colorRGB = colorRGB
     }
 }
 

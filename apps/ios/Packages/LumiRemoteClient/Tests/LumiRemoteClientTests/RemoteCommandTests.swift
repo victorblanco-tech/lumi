@@ -262,6 +262,7 @@ func localCommandFailureKeepsTheAuthenticatedSessionConnected() throws {
     #expect(projection.players.first?.hardwareModel == "CDJ-1500X")
     #expect(projection.players.first?.track.phrases.first?.colorRGB == 0xFF_00_00)
     #expect(projection.livePlan?.cues.last?.staticLookName == "Moving Heads OFF")
+    #expect(projection.phraseRoleOptions.contains(where: { $0.id == "buildup-1" }))
 
     let commandFrame = try decoder.decodeFrame(
         Data(contentsOf: remoteFixture("command-autoloop.json"))
@@ -285,6 +286,32 @@ func localCommandFailureKeepsTheAuthenticatedSessionConnected() throws {
         Data(contentsOf: remoteFixture("command-result-conflict.json"))
     )
     #expect(try decoder.decodeCommandResult(resultFrame).status == .conflict)
+}
+
+@Test func phraseTypeCommandRoundTripsWithTheSelectedRoleIdentity() throws {
+    let payload = RemoteCommandPayload.changePhraseRole(
+        .init(
+            planID: "plan-99",
+            trackLoadID: 99,
+            expectedPlanRevision: 4,
+            phraseIndex: 2
+        ),
+        roleID: "buildup-2"
+    )
+    let encoded = try JSONEncoder().encode(payload)
+    let decoded = try JSONDecoder().decode(RemoteCommandPayload.self, from: encoded)
+    #expect(decoded == payload)
+
+    let json = try #require(
+        try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+    )
+    #expect(json["kind"] as? String == "changePhraseRole")
+    #expect(json["roleId"] as? String == "buildup-2")
+}
+
+@Test func olderProjectionWithoutPhraseRoleOptionsRemainsReadable() throws {
+    let projection = try fixtureProjection()
+    #expect(projection.phraseRoleOptions.isEmpty)
 }
 
 private func remoteFixture(_ name: String) -> URL {

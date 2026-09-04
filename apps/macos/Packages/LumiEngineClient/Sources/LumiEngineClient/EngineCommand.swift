@@ -447,6 +447,11 @@ public enum EngineCommand: Equatable, Sendable {
         phraseIndex: UInt64,
         sceneID: UInt64
     )
+    case changePhraseRole(
+        context: EnginePlanCommandContext,
+        phraseIndex: UInt64,
+        roleID: String
+    )
     case setCueLock(
         context: EnginePlanCommandContext,
         phraseIndex: UInt64,
@@ -766,6 +771,15 @@ public enum EngineCommand: Equatable, Sendable {
                 additional: [
                     "phraseIndex": .number(Double(phraseIndex)),
                     "sceneId": .number(Double(sceneID))
+                ]
+            )
+        case let .changePhraseRole(context, phraseIndex, roleID):
+            return planPayload(
+                "changePhraseRole",
+                context: context,
+                additional: [
+                    "phraseIndex": .number(Double(phraseIndex)),
+                    "roleId": .string(roleID)
                 ]
             )
         case let .setCueLock(context, phraseIndex, locked):

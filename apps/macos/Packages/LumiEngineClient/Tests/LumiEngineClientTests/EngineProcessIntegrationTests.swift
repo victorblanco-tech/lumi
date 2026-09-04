@@ -855,14 +855,42 @@ func editsFutureLivePhraseAndTracksPlaybackState() async throws {
             )
         )
 
-        let startedContext = EnginePlanCommandContext(
+        let originalFutureRole = cueRoleID(
+            plan(revised, field: "livePlan"),
+            phraseIndex: 1
+        )
+        let futureRoleID = originalFutureRole == "drop" ? "intro-outro" : "drop"
+        let phraseTypeContext = EnginePlanCommandContext(
             planID: planID,
             trackLoadID: UInt64(trackLoadID),
             expectedPlanRevision: UInt64(revision) + 1
         )
+        let phraseTypeChanged = try await supervisor.send(
+            .changePhraseRole(
+                context: phraseTypeContext,
+                phraseIndex: 1,
+                roleID: futureRoleID
+            ),
+            messageID: "swift-live-future-phrase-type"
+        )
+        #expect(planRevision(phraseTypeChanged, field: "livePlan") == UInt64(revision) + 2)
+        #expect(
+            cueRoleID(plan(phraseTypeChanged, field: "livePlan"), phraseIndex: 1)
+                == futureRoleID
+        )
+
+        let startedContext = EnginePlanCommandContext(
+            planID: planID,
+            trackLoadID: UInt64(trackLoadID),
+            expectedPlanRevision: UInt64(revision) + 2
+        )
         let rejected = try await supervisor.send(
-            .selectThemeFromPhrase(context: startedContext, phraseIndex: 0, themeID: 4),
-            messageID: "swift-live-started-theme"
+            .changePhraseRole(
+                context: startedContext,
+                phraseIndex: 0,
+                roleID: futureRoleID
+            ),
+            messageID: "swift-live-started-phrase-type"
         )
         #expect(EngineCommandFailure(rejected)?.code == "startedLivePhraseNotEditable")
 
@@ -997,6 +1025,17 @@ private func cueThemeID(_ plan: [String: JSONValue]?, phraseIndex: UInt64) -> UI
         return UInt64(themeID)
     }
     return nil
+}
+
+private func cueRoleID(_ plan: [String: JSONValue]?, phraseIndex: UInt64) -> String? {
+    guard case let .array(cues) = plan?["cues"] else { return nil }
+    return cues.compactMap { value -> String? in
+        guard case let .object(cue) = value,
+              cue["phraseIndex"] == .number(Double(phraseIndex)),
+              case let .object(resolution) = cue["libraryResolution"],
+              case let .string(roleID) = resolution["roleId"] else { return nil }
+        return roleID
+    }.first
 }
 
 private func leaderDeckPlaying(_ envelope: MessageEnvelope) -> Bool? {

@@ -23,6 +23,7 @@
     "setOutputTimingOffset",
     "selectThemeFromPhrase",
     "selectAutoloopForPhrase",
+    "changePhraseRole",
     "setCueLock",
     "requestSnapshot"
   ],

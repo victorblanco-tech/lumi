@@ -88,6 +88,26 @@ struct EngineCommandTests {
         #expect(payload["millis"] == .number(-35))
     }
 
+    @Test("Live Phrase Type changes carry role identity and optimistic plan revision")
+    func livePhraseTypePayload() {
+        let payload = EngineCommand.changePhraseRole(
+            context: EnginePlanCommandContext(
+                planID: "plan-42",
+                trackLoadID: 99,
+                expectedPlanRevision: 7
+            ),
+            phraseIndex: 3,
+            roleID: "buildup-2"
+        ).payload()
+
+        #expect(payload["kind"] == .string("changePhraseRole"))
+        #expect(payload["planId"] == .string("plan-42"))
+        #expect(payload["trackLoadId"] == .number(99))
+        #expect(payload["expectedPlanRevision"] == .number(7))
+        #expect(payload["phraseIndex"] == .number(3))
+        #expect(payload["roleId"] == .string("buildup-2"))
+    }
+
     @Test("Light Plan preview carries the immutable compiler inputs")
     func lightPlanPreviewPayload() {
         let policy: JSONValue = .object([

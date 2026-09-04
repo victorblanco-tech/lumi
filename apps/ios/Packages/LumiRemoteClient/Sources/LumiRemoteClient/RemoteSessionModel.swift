@@ -140,7 +140,8 @@ public final class RemoteSessionModel {
             players: players,
             livePlan: current.livePlan,
             nextPlan: current.nextPlan,
-            themeOptions: current.themeOptions
+            themeOptions: current.themeOptions,
+            phraseRoleOptions: current.phraseRoleOptions
         )
     }
 
@@ -174,7 +175,8 @@ public final class RemoteSessionModel {
             players: players,
             livePlan: incoming.livePlan,
             nextPlan: incoming.nextPlan,
-            themeOptions: incoming.themeOptions
+            themeOptions: incoming.themeOptions,
+            phraseRoleOptions: incoming.phraseRoleOptions
         )
     }
 

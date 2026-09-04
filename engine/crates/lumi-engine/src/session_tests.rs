@@ -1,7 +1,7 @@
 use super::*;
 use crate::commands::PlanCommandContext;
 use lumi_domain::{ClientId, CommandSequence, OperationCommand, ThemeId, UserCommandEnvelope};
-use lumi_library::AutoloopTheme;
+use lumi_library::{AutoloopTheme, PhraseRoleId};
 use lumi_output_dry_run::canonical_output_transcript;
 use lumi_remote_protocol::{
     MAX_REMOTE_FRAME_BYTES, OperationTarget as RemoteOperationTarget, RemoteCommand,
@@ -52,6 +52,13 @@ fn actual_engine_snapshot_maps_to_the_scoped_remote_live_contract() {
         .flat_map(|player| player.track.phrases.iter())
         .collect::<Vec<_>>();
     assert!(!projected_phrases.is_empty());
+    assert!(!projection.phrase_role_options.is_empty());
+    assert!(
+        projection
+            .phrase_role_options
+            .iter()
+            .any(|role| role.id == "buildup-1")
+    );
     let encoded = serde_json::to_string(&projection)
         .unwrap_or_else(|error| panic!("remote projection must serialize: {error}"));
     assert!(
@@ -98,6 +105,60 @@ fn remote_operation_commands_use_the_authoritative_revision_gate() {
     assert_eq!(stale.status, RemoteCommandResultStatus::Conflict);
     assert_eq!(stale.reason_code.as_deref(), Some("stateRevisionConflict"));
     assert_eq!(runtime.state.state().operation(), OperationState::Armed);
+}
+
+#[test]
+fn remote_future_phrase_type_change_uses_the_same_persistent_control_path() {
+    let mut runtime =
+        initialized_runtime_for_mode(ManualClock::new(0), DeckSourceMode::LocalPlayback)
+            .unwrap_or_else(|error| panic!("runtime must initialize: {error}"));
+    apply_current_session_command(&mut runtime, |expected_state_revision| {
+        SessionCommand::LoadLibraryTrackOnLocalDeck {
+            track_id: 1,
+            deck_id: lumi_domain::DeckId::new(1),
+            expected_timeline_revision: 1,
+            expected_state_revision,
+        }
+    });
+    let active = runtime
+        .state
+        .state()
+        .active_plan()
+        .cloned()
+        .unwrap_or_else(|| panic!("Library track must expose an active plan"));
+    let before_library_revision = runtime.library_revision;
+    let result = apply_remote_command(
+        &mut runtime,
+        RemoteCommand {
+            command_id: "remote-phrase-type-1".to_owned(),
+            controller_lease_id: "lease-1".to_owned(),
+            issued_at_unix_millis: 1,
+            command: RemoteCommandKind::ChangePhraseRole {
+                plan_id: active.id().value().to_string(),
+                track_load_id: active.track_load_id().value(),
+                expected_plan_revision: active.revision().value(),
+                phrase_index: 1,
+                role_id: "drop".to_owned(),
+            },
+        },
+    );
+
+    assert_eq!(result.status, RemoteCommandResultStatus::Accepted);
+    assert_eq!(runtime.library_revision, before_library_revision + 1);
+    assert_eq!(
+        runtime
+            .state
+            .state()
+            .active_plan()
+            .map(lumi_domain::LightingPlan::revision),
+        Some(PlanRevision::new(2))
+    );
+    let snapshot = snapshot_envelope(&runtime, 1, "remote-phrase-type")
+        .unwrap_or_else(|error| panic!("snapshot must serialize: {error}"));
+    assert_eq!(
+        snapshot.payload["livePlan"]["cues"][1]["libraryResolution"]["roleId"],
+        json!("drop")
+    );
 }
 
 #[test]
@@ -1016,6 +1077,102 @@ fn future_live_theme_change_materializes_the_selected_bank_per_phrase() {
         json!(selected_theme.value())
     );
     assert_eq!(future["libraryResolution"]["autoloopNumber"], json!(32));
+}
+
+#[test]
+fn future_live_phrase_type_change_persists_and_rematerializes_only_that_phrase() {
+    let mut runtime =
+        initialized_runtime_for_mode(ManualClock::new(0), DeckSourceMode::LocalPlayback)
+            .unwrap_or_else(|error| panic!("test engine must initialize: {error}"));
+    apply_current_session_command(&mut runtime, |expected_state_revision| {
+        SessionCommand::LoadLibraryTrackOnLocalDeck {
+            track_id: 1,
+            deck_id: lumi_domain::DeckId::new(1),
+            expected_timeline_revision: 1,
+            expected_state_revision,
+        }
+    });
+    let active = runtime
+        .state
+        .state()
+        .active_plan()
+        .cloned()
+        .unwrap_or_else(|| panic!("local Library track must have an active plan"));
+    assert!(active.cues().len() > 1, "fixture needs a future phrase");
+    let before = snapshot_envelope(&runtime, 1, "phrase-role-before")
+        .unwrap_or_else(|error| panic!("snapshot must serialize: {error}"));
+    let original_role = before.payload["livePlan"]["cues"][1]["libraryResolution"]["roleId"]
+        .as_str()
+        .unwrap_or_else(|| panic!("future phrase must expose its current role"));
+    let replacement_role = if original_role == "drop" {
+        "intro-outro"
+    } else {
+        "drop"
+    };
+
+    let started = apply_command(
+        &mut runtime,
+        SessionCommand::ChangePhraseRole {
+            context: PlanCommandContext {
+                plan_id: active.id(),
+                track_load_id: active.track_load_id(),
+                expected_revision: active.revision(),
+            },
+            phrase_index: 0,
+            role_id: PhraseRoleId::try_new(replacement_role)
+                .unwrap_or_else(|error| panic!("test role must be valid: {error}")),
+        },
+    );
+    assert!(matches!(
+        started,
+        Err(CommandApplicationError::StartedLivePhraseNotEditable)
+    ));
+
+    apply_session_command(
+        &mut runtime,
+        SessionCommand::ChangePhraseRole {
+            context: PlanCommandContext {
+                plan_id: active.id(),
+                track_load_id: active.track_load_id(),
+                expected_revision: active.revision(),
+            },
+            phrase_index: 1,
+            role_id: PhraseRoleId::try_new(replacement_role)
+                .unwrap_or_else(|error| panic!("test role must be valid: {error}")),
+        },
+    );
+
+    let revised = runtime
+        .state
+        .state()
+        .active_plan()
+        .unwrap_or_else(|| panic!("revised plan must remain active"));
+    assert_eq!(revised.revision(), PlanRevision::new(2));
+    assert_eq!(revised.cues()[0], active.cues()[0]);
+    let after = snapshot_envelope(&runtime, 2, "phrase-role-after")
+        .unwrap_or_else(|error| panic!("revised snapshot must serialize: {error}"));
+    assert_eq!(
+        after.payload["livePlan"]["cues"][1]["libraryResolution"]["roleId"],
+        json!(replacement_role)
+    );
+    assert_eq!(
+        after.payload["decks"][0]["track"]["phrases"][1]["role"]["roleId"],
+        json!(replacement_role)
+    );
+    assert_eq!(
+        after.payload["decks"][0]["track"]["identityFacts"]["timelineRevision"],
+        json!(2)
+    );
+
+    let persisted = runtime
+        .library_worker
+        .local_playback_track(1, 2)
+        .unwrap_or_else(|error| panic!("persisted timeline must reload: {error}"));
+    let (_, persisted_context) = persisted.into_parts();
+    assert_eq!(
+        persisted_context.phrase_role_json(1)["roleId"].as_str(),
+        Some(replacement_role)
+    );
 }
 
 #[test]

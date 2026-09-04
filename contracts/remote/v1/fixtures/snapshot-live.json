@@ -118,6 +118,11 @@
     "themeOptions": [
       { "id": 1, "name": "Blue Pink" },
       { "id": 2, "name": "Green Pink" }
+    ],
+    "phraseRoleOptions": [
+      { "id": "intro", "name": "Intro", "colorRgb": 16711680 },
+      { "id": "buildup-1", "name": "Buildup 1A", "colorRgb": 16776960 },
+      { "id": "buildup-2", "name": "Buildup 2A", "colorRgb": 16711935 }
     ]
   }
 }

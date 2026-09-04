@@ -43,6 +43,13 @@ pub enum RemoteCommandKind {
         phrase_index: u16,
         autoloop_number: u8,
     },
+    ChangePhraseRole {
+        plan_id: String,
+        track_load_id: u64,
+        expected_plan_revision: u64,
+        phrase_index: u16,
+        role_id: String,
+    },
     SetCueLock {
         plan_id: String,
         track_load_id: u64,
@@ -86,6 +93,12 @@ impl RemoteCommand {
             RemoteCommandKind::SelectThemeFromPhrase { plan_id, .. }
             | RemoteCommandKind::SetCueLock { plan_id, .. } => {
                 validate_identifier("planId", plan_id, 128)
+            }
+            RemoteCommandKind::ChangePhraseRole {
+                plan_id, role_id, ..
+            } => {
+                validate_identifier("planId", plan_id, 128)?;
+                validate_identifier("roleId", role_id, 128)
             }
             _ => Ok(()),
         }

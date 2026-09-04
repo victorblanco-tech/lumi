@@ -2273,13 +2273,14 @@ final class EngineStatusModel: ObservableObject {
                 return
             }
 
-            let (snapshot, _) = try await decodeSnapshotWithRecovery(
+            let (snapshot, libraryEnvelope) = try await decodeSnapshotWithRecovery(
                 envelope,
                 endpointDescription: endpointDescription,
                 protocolVersion: protocolVersion,
                 context: "plan mutation"
             )
             latestSnapshot = snapshot
+            libraryState = try decodeLibraryState(libraryEnvelope)
             let savedRevision = [snapshot.livePlan, snapshot.nextPlan]
                 .compactMap { $0 }
                 .first(where: { $0.planID == request.context.planID })?
@@ -2405,6 +2406,12 @@ final class EngineStatusModel: ObservableObject {
                 context: engineContext(context),
                 phraseIndex: phraseIndex,
                 sceneID: sceneID
+            )
+        case let .changePhraseRole(context, phraseIndex, roleID):
+            .changePhraseRole(
+                context: engineContext(context),
+                phraseIndex: phraseIndex,
+                roleID: roleID
             )
         case let .setCueLock(context, phraseIndex, locked):
             .setCueLock(

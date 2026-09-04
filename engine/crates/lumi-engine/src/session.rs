@@ -17,7 +17,7 @@ use lumi_domain::{
     SerializedRuntimeError, ThemeId, TimelineResult, TimelineSource, TrackColor, TrackLoadId,
     TrackMetadata, UserCommandEnvelope, WorkerId,
 };
-use lumi_library::AutoloopCatalog;
+use lumi_library::{AutoloopCatalog, PhraseRoleId};
 use lumi_light_plans::{
     ColorBehavior, CompiledAutoloopChoice, CompiledLightPlan, CompiledModifierChoice,
     LightPlanningPolicy, ModifierKind, SelectionEvidence, VariationHistory,
@@ -2773,8 +2773,13 @@ fn apply_remote_command(
     command: RemoteCommand,
 ) -> RemoteCommandResult {
     let command_id = command.command_id;
+    let changes_library_revision =
+        matches!(&command.command, RemoteCommandKind::ChangePhraseRole { .. });
     let application = remote_session_command(runtime, command.command)
         .and_then(|command| apply_command(runtime, command));
+    if application.is_ok() && changes_library_revision {
+        runtime.library_revision = runtime.library_revision.saturating_add(1);
+    }
     let (status, reason_code, actual_plan_revision) = match &application {
         Ok(()) => (RemoteCommandResultStatus::Accepted, None, None),
         Err(CommandApplicationError::StateRevisionConflict { .. }) => (
@@ -2795,6 +2800,11 @@ fn apply_remote_command(
         Err(CommandApplicationError::StartedLivePhraseNotEditable) => (
             RemoteCommandResultStatus::Rejected,
             Some("phraseAlreadyStarted".to_owned()),
+            None,
+        ),
+        Err(CommandApplicationError::InvalidPhraseRoleSelection) => (
+            RemoteCommandResultStatus::Rejected,
+            Some("invalidPhraseRole".to_owned()),
             None,
         ),
         Err(CommandApplicationError::InvalidOperationTransition { .. }) => (
@@ -2875,6 +2885,18 @@ fn remote_session_command(
             context: remote_plan_context(plan_id, track_load_id, expected_plan_revision)?,
             phrase_index,
             scene_id: SceneId::new(u64::from(autoloop_number)),
+        }),
+        RemoteCommandKind::ChangePhraseRole {
+            plan_id,
+            track_load_id,
+            expected_plan_revision,
+            phrase_index,
+            role_id,
+        } => Ok(SessionCommand::ChangePhraseRole {
+            context: remote_plan_context(plan_id, track_load_id, expected_plan_revision)?,
+            phrase_index,
+            role_id: PhraseRoleId::try_new(role_id)
+                .map_err(|_| CommandApplicationError::InvalidPhraseRoleSelection)?,
         }),
         RemoteCommandKind::SetCueLock {
             plan_id,
@@ -3736,6 +3758,7 @@ fn apply_command(
         SessionCommand::SelectTheme { .. }
         | SessionCommand::SelectThemeFromPhrase { .. }
         | SessionCommand::SelectScene { .. }
+        | SessionCommand::ChangePhraseRole { .. }
         | SessionCommand::SetCueLock { .. }
         | SessionCommand::RegeneratePlan { .. } => {}
     }
@@ -3772,7 +3795,7 @@ fn apply_command(
         )
     };
 
-    let (revised, materialization_scope, revise_materialized_cues) = match command {
+    let mutation = match command {
         SessionCommand::GetSnapshot { .. }
         | SessionCommand::QueryLibrary { .. }
         | SessionCommand::OpenLibraryTrackEditor { .. }
@@ -3827,6 +3850,7 @@ fn apply_command(
                 .select_theme(&current, theme_id)?,
             PlanMaterializationScope::All,
             false,
+            false,
         ),
         SessionCommand::SelectThemeFromPhrase {
             phrase_index,
@@ -3841,6 +3865,7 @@ fn apply_command(
                     theme_id,
                 )?,
                 PlanMaterializationScope::FromPhrase(phrase_index),
+                false,
                 false,
             )
         }
@@ -3873,6 +3898,7 @@ fn apply_command(
                     current.clone(),
                     PlanMaterializationScope::Phrase(phrase_index),
                     true,
+                    false,
                 )
             } else {
                 (
@@ -3883,8 +3909,41 @@ fn apply_command(
                     )?,
                     PlanMaterializationScope::Phrase(phrase_index),
                     false,
+                    false,
                 )
             }
+        }
+        SessionCommand::ChangePhraseRole {
+            phrase_index,
+            role_id,
+            ..
+        } => {
+            reject_started_live_phrase(runtime.state.state(), current.deck_id(), phrase_index)?;
+            let previous_context = runtime
+                .planning_worker
+                .library_context(current.track_load_id())
+                .cloned()
+                .ok_or(CommandApplicationError::PlanUnavailable)?;
+            let timeline_revision = runtime.library_worker.change_live_phrase_role(
+                current.track_id().value(),
+                previous_context.timeline_revision(),
+                phrase_index,
+                role_id,
+            )?;
+            let (_, mut replacement_context) = runtime
+                .library_worker
+                .local_playback_track(current.track_id().value(), timeline_revision)?
+                .into_parts();
+            replacement_context.inherit_autoloop_overrides(&previous_context, phrase_index);
+            runtime
+                .planning_worker
+                .register_library_context(current.track_load_id(), replacement_context);
+            (
+                current.clone(),
+                PlanMaterializationScope::Phrase(phrase_index),
+                true,
+                true,
+            )
         }
         SessionCommand::SetCueLock {
             phrase_index,
@@ -3899,6 +3958,7 @@ fn apply_command(
                     .set_cue_lock(&current, phrase_index, locked)?,
                 PlanMaterializationScope::None,
                 false,
+                false,
             )
         }
         SessionCommand::RegeneratePlan { .. } => (
@@ -3908,14 +3968,16 @@ fn apply_command(
                 .regenerate(&current, &input)?,
             PlanMaterializationScope::All,
             false,
+            false,
         ),
     };
+    let (revised, materialization_scope, revise_materialized_cues, force_plan_revision) = mutation;
     let materialized = runtime
         .planning_worker
         .materialize_library_plan_with_scope(revised, materialization_scope)
         .map_err(CommandApplicationError::Engine)?;
     let revised = if revise_materialized_cues {
-        if materialized.cues() == current.cues() {
+        if !force_plan_revision && materialized.cues() == current.cues() {
             return Err(PlanMutationError::NoChange.into());
         }
         current
@@ -4092,6 +4154,15 @@ fn application_error_envelope(
             "validationFailed",
             "invalidAutoloopSelection",
             "The selected Autoloop is not mapped for this Theme and Phrase Type.",
+            false,
+            None,
+        ),
+        CommandApplicationError::InvalidPhraseRoleSelection => error_envelope(
+            sequence,
+            correlation_id,
+            "validationFailed",
+            "invalidPhraseRoleSelection",
+            "The selected Phrase Type is not available.",
             false,
             None,
         ),
@@ -4326,6 +4397,8 @@ enum CommandApplicationError {
     StartedLivePhraseNotEditable,
     #[error("the selected Autoloop button is invalid")]
     InvalidAutoloopSelection,
+    #[error("the selected Phrase Type is invalid")]
+    InvalidPhraseRoleSelection,
     #[error("plan mutation failed: {0}")]
     Mutation(#[from] PlanMutationError),
     #[error("simulator control failed: {0}")]
@@ -4777,7 +4850,10 @@ fn snapshot_envelope_internal(
                         "sourceId": identity.source_id(),
                         "sourceTrackId": identity.source_track_id(),
                         "analysisRevision": identity.analysis_revision(),
-                        "timelineRevision": identity.lumi_timeline_revision(),
+                        "timelineRevision": library_context.map_or(
+                            identity.lumi_timeline_revision(),
+                            LibraryPlanContext::timeline_revision,
+                        ),
                     })),
                     "phrases": metadata.phrases().iter().map(|phrase| {
                         let role = library_context.map_or(Value::Null, |context| {
@@ -4798,7 +4874,10 @@ fn snapshot_envelope_internal(
     payload.insert("decks".to_owned(), Value::Array(decks));
     payload.insert(
         "planningOptions".to_owned(),
-        planning_options_json(&runtime.planning_worker.options()),
+        planning_options_json(
+            &runtime.planning_worker.options(),
+            runtime.library_worker.phrase_role_options_json()?,
+        ),
     );
     payload.insert(
         "outputProvider".to_owned(),
@@ -5120,7 +5199,7 @@ pub(crate) const fn theme_selection_reason_name(
     }
 }
 
-fn planning_options_json(options: &PlanningOptions) -> Value {
+fn planning_options_json(options: &PlanningOptions, phrase_roles: Value) -> Value {
     json!({
         "themes": options.themes.iter().map(|theme| json!({
             "id": theme.id.value(),
@@ -5133,6 +5212,7 @@ fn planning_options_json(options: &PlanningOptions) -> Value {
             "loopBank": scene.loop_selection.bank(),
             "loopSlot": scene.loop_selection.slot(),
         })).collect::<Vec<_>>(),
+        "phraseRoles": phrase_roles,
     })
 }
 

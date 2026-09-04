@@ -187,6 +187,11 @@ public enum PlanMutationRequest: Equatable, Sendable {
         phraseIndex: UInt64,
         sceneID: UInt64
     )
+    case changePhraseRole(
+        context: PlanMutationContext,
+        phraseIndex: UInt64,
+        roleID: String
+    )
     case setCueLock(
         context: PlanMutationContext,
         phraseIndex: UInt64,
@@ -199,6 +204,7 @@ public enum PlanMutationRequest: Equatable, Sendable {
         case let .selectTheme(context, _),
              let .selectThemeFromPhrase(context, _, _),
              let .selectScene(context, _, _),
+             let .changePhraseRole(context, _, _),
              let .setCueLock(context, _, _),
              let .regeneratePlan(context):
             context

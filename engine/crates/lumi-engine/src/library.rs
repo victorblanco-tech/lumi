@@ -245,6 +245,20 @@ pub struct LocalPlaybackClockAnchor {
 
 impl LibraryPlanContext {
     #[must_use]
+    pub const fn timeline_revision(&self) -> u64 {
+        self.timeline_revision
+    }
+
+    /// Carries forward intentional per-plan AutoLoop choices when the
+    /// persisted phrase timeline is refreshed. The choice for the phrase whose
+    /// role changed is deliberately discarded because it belongs to the old
+    /// Phrase Type and may not be valid for the replacement role.
+    pub fn inherit_autoloop_overrides(&mut self, previous: &Self, changed_phrase_index: u16) {
+        self.autoloop_overrides = previous.autoloop_overrides.clone();
+        self.autoloop_overrides.remove(&changed_phrase_index);
+    }
+
+    #[must_use]
     pub const fn catalog_revision(&self) -> u64 {
         self.catalog.revision()
     }
@@ -2329,6 +2343,34 @@ impl LibraryWorker {
         Ok(())
     }
 
+    /// Changes one Lumi-owned Phrase Type from a Live plan without coupling
+    /// the operation to the Track Editor's open-document state.
+    ///
+    /// The same optimistic timeline revision and phrase-protection rules used
+    /// by the Track Editor remain authoritative. This keeps a booth edit
+    /// persistent while preventing a stale Mac or Remote client from silently
+    /// overwriting newer library work.
+    pub fn change_live_phrase_role(
+        &mut self,
+        track_id: u64,
+        expected_revision: u64,
+        phrase_index: u16,
+        role_id: PhraseRoleId,
+    ) -> Result<u64, LibraryWorkerError> {
+        let track_id = TrackId::new(track_id);
+        self.require_phrases_unlocked(track_id)?;
+        self.require_active_role(&role_id)?;
+        let head = self.require_expected_head(track_id, expected_revision)?;
+        let edited = head.edit(TimelineEditCommand::ChangeRole {
+            phrase_index,
+            role_id,
+        })?;
+        let revision = edited.revision().value();
+        self.repository
+            .append_timeline_revision(&edited, Some(head.revision()))?;
+        Ok(revision)
+    }
+
     pub fn set_phrase_loop_strategy(
         &mut self,
         track_id: u64,
@@ -3420,6 +3462,24 @@ impl LibraryWorker {
             })).collect::<Vec<_>>(),
             "mappingPolicy": "futureInitialTimelinesOnly",
         }))
+    }
+
+    pub fn phrase_role_options_json(&self) -> Result<Value, LibraryWorkerError> {
+        let catalog = self.repository.phrase_role_catalog()?;
+        Ok(Value::Array(
+            catalog
+                .roles()
+                .iter()
+                .filter(|role| !role.is_archived())
+                .map(|role| {
+                    json!({
+                        "id": role.id().as_str(),
+                        "name": role.display_name(),
+                        "colorRgb": role.color_rgb(),
+                    })
+                })
+                .collect(),
+        ))
     }
 
     fn autoloop_catalog_json(&self) -> Result<Value, LibraryWorkerError> {

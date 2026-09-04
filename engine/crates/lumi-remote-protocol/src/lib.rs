@@ -21,8 +21,8 @@ pub use frame::{
 pub use projection::{
     IntegrationHealth, OperationState, ProjectionError, RemoteAutoloopChoice, RemoteBeatGrid,
     RemoteHotCue, RemoteIntegrationStatus, RemoteLightPlan, RemoteLiveProjection, RemotePhrase,
-    RemotePlanCue, RemotePlayer, RemoteThemeOption, RemoteTrack, RemoteTransportAnchor,
-    RemoteWaveformPoint,
+    RemotePhraseRoleOption, RemotePlanCue, RemotePlayer, RemoteThemeOption, RemoteTrack,
+    RemoteTransportAnchor, RemoteWaveformPoint,
 };
 
 #[cfg(test)]

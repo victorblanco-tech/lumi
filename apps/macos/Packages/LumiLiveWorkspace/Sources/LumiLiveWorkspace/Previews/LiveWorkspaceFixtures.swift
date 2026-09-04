@@ -607,6 +607,13 @@ public enum LiveWorkspaceFixtures {
             SceneOptionSnapshot(id: 8, name: "Color Impact", category: "impact", loopBank: 4, loopSlot: 2),
             SceneOptionSnapshot(id: 9, name: "Deep Space", category: "break", loopBank: 5, loopSlot: 1),
             SceneOptionSnapshot(id: 10, name: "Slow Wave", category: "break", loopBank: 5, loopSlot: 2)
+        ],
+        phraseRoles: [
+            PhraseRoleOptionSnapshot(id: "intro-outro", name: "INTRO", colorRGB: 0xD4_2BA8),
+            PhraseRoleOptionSnapshot(id: "drop", name: "DROP", colorRGB: 0xFF_0054),
+            PhraseRoleOptionSnapshot(id: "bridge", name: "BRIDGE", colorRGB: 0x1E_C8FF),
+            PhraseRoleOptionSnapshot(id: "buildup-1", name: "BUILDUP 1A", colorRGB: 0x8A_45D6),
+            PhraseRoleOptionSnapshot(id: "custom-2", name: "BUILDUP 2A", colorRGB: 0x18_BC58)
         ]
     )
 }

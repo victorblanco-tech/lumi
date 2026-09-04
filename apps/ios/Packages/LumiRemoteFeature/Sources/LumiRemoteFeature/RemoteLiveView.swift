@@ -9,6 +9,7 @@ public struct RemoteLiveActions: Sendable {
     public let setOperationState: @MainActor @Sendable (RemoteOperationState) -> Void
     public let setAbletonLinkEnabled: @MainActor @Sendable (Bool) -> Void
     public let setTimingOffset: @MainActor @Sendable (Int) -> Void
+    public let changePhraseRole: @MainActor @Sendable (RemoteLightPlan, RemotePlanCue, String) -> Void
     public let selectTheme: @MainActor @Sendable (RemoteLightPlan, RemotePlanCue, UInt64) -> Void
     public let selectAutoloop: @MainActor @Sendable (RemoteLightPlan, RemotePlanCue, UInt8) -> Void
     public let setCueLock: @MainActor @Sendable (RemoteLightPlan, RemotePlanCue, Bool) -> Void
@@ -17,6 +18,11 @@ public struct RemoteLiveActions: Sendable {
         setOperationState: @escaping @MainActor @Sendable (RemoteOperationState) -> Void,
         setAbletonLinkEnabled: @escaping @MainActor @Sendable (Bool) -> Void,
         setTimingOffset: @escaping @MainActor @Sendable (Int) -> Void,
+        changePhraseRole: @escaping @MainActor @Sendable (
+            RemoteLightPlan,
+            RemotePlanCue,
+            String
+        ) -> Void,
         selectTheme: @escaping @MainActor @Sendable (
             RemoteLightPlan,
             RemotePlanCue,
@@ -36,6 +42,7 @@ public struct RemoteLiveActions: Sendable {
         self.setOperationState = setOperationState
         self.setAbletonLinkEnabled = setAbletonLinkEnabled
         self.setTimingOffset = setTimingOffset
+        self.changePhraseRole = changePhraseRole
         self.selectTheme = selectTheme
         self.selectAutoloop = selectAutoloop
         self.setCueLock = setCueLock
@@ -1686,7 +1693,6 @@ private struct RemotePlanCueSheet: View {
     let controlsEnabled: Bool
     let actions: RemoteLiveActions
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedPhraseIndex: UInt16
 
     init(
         projection: RemoteLiveProjection,
@@ -1700,28 +1706,35 @@ private struct RemotePlanCueSheet: View {
         self.initialCue = initialCue
         self.controlsEnabled = controlsEnabled
         self.actions = actions
-        _selectedPhraseIndex = State(initialValue: initialCue.phraseIndex)
     }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section("Selected phrase") {
+                    LabeledContent("Phrase", value: phraseLabel(cue))
                     Menu {
-                        ForEach(plan.cues) { candidate in
+                        ForEach(projection.phraseRoleOptions) { role in
                             Button {
-                                selectedPhraseIndex = candidate.phraseIndex
+                                actions.changePhraseRole(plan, cue, role.id)
+                                dismiss()
                             } label: {
-                                if candidate.phraseIndex == cue.phraseIndex {
-                                    Label(phraseLabel(candidate), systemImage: "checkmark")
+                                if role.id == currentPhraseRoleID {
+                                    Label(role.name, systemImage: "checkmark")
                                 } else {
-                                    Text(phraseLabel(candidate))
+                                    Text(role.name)
                                 }
                             }
+                            .disabled(role.id == currentPhraseRoleID)
                         }
                     } label: {
-                        selectionRow("Phrase", value: phraseLabel(cue))
+                        selectionRow("Phrase Type", value: currentPhraseRoleName)
                     }
+                    .disabled(
+                        !canEdit
+                            || currentPhraseRoleID == nil
+                            || projection.phraseRoleOptions.isEmpty
+                    )
                     LabeledContent("Status", value: phraseStateLabel)
                     if let staticLookName = cue.staticLookName {
                         LabeledContent("Static Look", value: staticLookName)
@@ -1789,7 +1802,17 @@ private struct RemotePlanCueSheet: View {
     }
 
     private var cue: RemotePlanCue {
-        plan.cues.first(where: { $0.phraseIndex == selectedPhraseIndex }) ?? initialCue
+        initialCue
+    }
+
+    private var currentPhrase: RemotePhrase? {
+        player?.track.phrases.first(where: { $0.index == cue.phraseIndex })
+    }
+
+    private var currentPhraseRoleID: String? { currentPhrase?.roleID }
+
+    private var currentPhraseRoleName: String {
+        currentPhrase?.roleName ?? currentPhrase?.kind ?? "Unmapped"
     }
 
     private var player: RemotePlayer? {

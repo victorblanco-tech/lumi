@@ -226,6 +226,11 @@ pub enum SessionCommand {
         phrase_index: u16,
         scene_id: SceneId,
     },
+    ChangePhraseRole {
+        context: PlanCommandContext,
+        phrase_index: u16,
+        role_id: PhraseRoleId,
+    },
     SetCueLock {
         context: PlanCommandContext,
         phrase_index: u16,
@@ -303,6 +308,7 @@ impl SessionCommand {
             Self::SelectTheme { context, .. }
             | Self::SelectThemeFromPhrase { context, .. }
             | Self::SelectScene { context, .. }
+            | Self::ChangePhraseRole { context, .. }
             | Self::SetCueLock { context, .. }
             | Self::RegeneratePlan { context } => Some(*context),
         }
@@ -329,6 +335,7 @@ impl SessionCommand {
                 | Self::MutatePhraseRoleCatalog { .. }
                 | Self::MutateAutoloopCatalog { .. }
                 | Self::ReplaceLightPlanningPolicy { .. }
+                | Self::ChangePhraseRole { .. }
         )
     }
 }
@@ -606,6 +613,11 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
             context: context(envelope)?,
             phrase_index: phrase_index(envelope)?,
             scene_id: SceneId::new(unsigned(&envelope.payload, "sceneId")?),
+        }),
+        "changePhraseRole" => Ok(SessionCommand::ChangePhraseRole {
+            context: context(envelope)?,
+            phrase_index: phrase_index(envelope)?,
+            role_id: phrase_role_id(&envelope.payload)?,
         }),
         "setCueLock" => Ok(SessionCommand::SetCueLock {
             context: context(envelope)?,
