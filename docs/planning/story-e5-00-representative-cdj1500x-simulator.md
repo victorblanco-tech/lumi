@@ -1,8 +1,8 @@
 # Story E5-00: Representative CDJ-1500X simulator traffic
 
-- Status: **Implemented with two-player loops and Auto Mix; two-host verification pending**
+- Status: **Implemented with playlist-driven two-player loops and Auto Mix; two-host verification pending**
 - Priority: **P0 Critical**
-- Simulator target: `0.4.0-dev-55`
+- Simulator target: `0.4.0-dev-56`
 - GitHub tracking: [#121](https://github.com/victorblanco-tech/lumi/issues/121)
 
 ## Outcome
@@ -26,20 +26,26 @@ physical CDJ-1500X without leaving the decks powered on.
 - publish two independently controlled player identities from one simulator;
 - provide bounded per-player loops and a deterministic Auto Mix mode which
   alternates exclusive Master/On Air ownership for unattended soak tests.
+- read the USB playlist tree and let Auto Mix preload a different track from a
+  selected playlist onto the idle player before each handoff.
 
 ## Local evidence
 
 - generated PrecisePosition packets are exactly 60 bytes and round-trip device,
   track length, playback milliseconds, pitch and effective BPM through
   beat-link;
-- 20 simulator unit/API/packet tests pass, including loop-wrap and Auto Mix state
-  transitions;
+- 22 simulator unit/API/packet tests pass, including loop wrapping, playlist
+  rotation and Auto Mix state transitions;
 - the complete simulator verification and shaded-JAR build pass;
 - the Apple Silicon DMG passes checksum, bundle-signature and architecture
-  verification and identifies itself as `0.4.0-dev-55`;
+  verification and identifies itself as `0.4.0-dev-56`;
 - headed validation against a 1,197-track Rekordbox USB loaded separate tracks
   on Players 1 and 2, wrapped Player 1's 10–15 second loop repeatedly and
   completed three automatic exclusive-Master handoffs in 16 seconds.
+- headed `0.4.0-dev-56` validation read 82 nested playlists from the same USB,
+  selected a four-track playlist, automatically loaded both players and
+  completed repeated five-second shuffled handoffs while preloading the idle
+  player with a different track.
 
 Two-host discovery, sustained packet counters and the one-hour engine soak are
 separate gates. Passing this story proves the traffic generator, not Lumi's

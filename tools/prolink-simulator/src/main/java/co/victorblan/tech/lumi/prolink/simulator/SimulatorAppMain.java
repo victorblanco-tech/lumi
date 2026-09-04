@@ -368,13 +368,16 @@ public final class SimulatorAppMain {
                     });
                     SimulatorSession started = SimulatorSession.start(config);
                     appendLog("Simulator session started for " + usb + " with "
-                            + started.library().size() + " tracks", null);
+                            + started.library().size() + " tracks and "
+                            + started.library().playlistCount() + " playlists", null);
                     session = started;
                     SwingUtilities.invokeLater(() -> {
                         busy = false;
                         status.setForeground(READY);
                         status.setText("Simulator running · Players " + firstPlayer + " & " + secondPlayer);
-                        detail.setText(started.library().size() + " tracks · " + started.networkSummary());
+                        detail.setText(started.library().size() + " tracks · "
+                                + started.library().playlistCount() + " playlists · "
+                                + started.networkSummary());
                         remoteUrl.setText(started.remoteUrl());
                         remoteUrl.setVisible(true);
                         copyUrl.setVisible(true);

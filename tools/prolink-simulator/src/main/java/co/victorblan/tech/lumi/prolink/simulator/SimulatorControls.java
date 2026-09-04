@@ -38,7 +38,10 @@ final class SimulatorControls {
             case "loop-off" -> state.disableLoop();
             case "precise-burst" -> transport.triggerPreciseBurst(state.snapshot().playerNumber());
             case "auto-mix" -> autoMix.setEnabled(
-                    requiredBoolean(body, "enabled"), requiredInt(body, "intervalSeconds")
+                    requiredBoolean(body, "enabled"),
+                    requiredInt(body, "intervalSeconds"),
+                    optionalLong(body, "playlistId"),
+                    optionalBoolean(body, "shuffle", false)
             );
             default -> throw new UnknownActionException(action);
         }
@@ -93,6 +96,28 @@ final class SimulatorControls {
     private static boolean requiredBoolean(JsonNode body, String field) {
         JsonNode value = body.get(field);
         if (value == null || !value.isBoolean()) {
+            throw new IllegalArgumentException(field + " must be a boolean");
+        }
+        return value.booleanValue();
+    }
+
+    private static Long optionalLong(JsonNode body, String field) {
+        JsonNode value = body.get(field);
+        if (value == null || value.isNull()) {
+            return null;
+        }
+        if (!value.canConvertToLong()) {
+            throw new IllegalArgumentException(field + " must be an integer or null");
+        }
+        return value.longValue();
+    }
+
+    private static boolean optionalBoolean(JsonNode body, String field, boolean fallback) {
+        JsonNode value = body.get(field);
+        if (value == null || value.isNull()) {
+            return fallback;
+        }
+        if (!value.isBoolean()) {
             throw new IllegalArgumentException(field + " must be a boolean");
         }
         return value.booleanValue();

@@ -10,6 +10,8 @@ by Lumi:
 - beat number and beat within bar;
 - an independent playback loop on either player;
 - deterministic Auto Mix handoffs for unattended soak tests;
+- playlist-driven Auto Mix which preloads a different USB track onto the idle
+  player before every handoff, in playlist order or shuffled;
 - CDJ-1500X-style precise-position traffic at 50 Hz;
 - deterministic stale-position bursts which test that consumers retain only
   the newest continuous observation and never build a realtime backlog.
@@ -98,6 +100,7 @@ endpoint is intentionally public on the local network.
 GET  /api/v1/health
 GET  /api/v1/status
 GET  /api/v1/tracks?q=90s%20Bitch&limit=100
+GET  /api/v1/playlists
 POST /api/v1/control/load       {"playerNumber":1,"trackId":1256}
 POST /api/v1/control/play       {"playerNumber":1}
 POST /api/v1/control/pause      {"playerNumber":1}
@@ -109,6 +112,7 @@ POST /api/v1/control/loop       {"playerNumber":1,"startMillis":16000,"endMillis
 POST /api/v1/control/loop-off   {"playerNumber":1}
 POST /api/v1/control/precise-burst {"playerNumber":1}
 POST /api/v1/control/auto-mix   {"enabled":true,"intervalSeconds":30}
+POST /api/v1/control/auto-mix   {"enabled":true,"intervalSeconds":30,"playlistId":77,"shuffle":true}
 ```
 
 For repeatable agent or terminal tests:
@@ -117,10 +121,12 @@ For repeatable agent or terminal tests:
 export LUMI_SIM_URL='http://mac-mini.local:17840'
 export LUMI_SIM_TOKEN='choose-at-least-16-characters'
 ./scripts/prolink-simulatorctl.sh tracks '90s Bitch'
+./scripts/prolink-simulatorctl.sh playlists
 ./scripts/prolink-simulatorctl.sh load 1 1256
 ./scripts/prolink-simulatorctl.sh load 2 8042
 ./scripts/prolink-simulatorctl.sh loop 1 16000 48000
 ./scripts/prolink-simulatorctl.sh auto-mix on 30
+./scripts/prolink-simulatorctl.sh auto-mix on 30 77 shuffle
 ./scripts/prolink-simulatorctl.sh status
 ```
 

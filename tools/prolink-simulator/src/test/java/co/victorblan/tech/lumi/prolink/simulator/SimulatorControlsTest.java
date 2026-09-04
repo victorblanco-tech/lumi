@@ -22,15 +22,20 @@ class SimulatorControlsTest {
     void controlsBothPlayersLoopsAndAutoMixWithoutNetworkTiming(@TempDir Path root) throws Exception {
         PlayerState trackOne = PlayerStateTest.loadedPlayer(1, new AtomicLong());
         PlayerState trackTwo = PlayerStateTest.loadedPlayer(2, new AtomicLong());
-        UsbLibrary library = UsbLibrary.forTesting(root, List.of(
+        List<UsbLibrary.Track> sourceTracks = List.of(
                 trackOne.snapshot().track(), trackTwo.snapshot().track()
-        ));
+        );
+        UsbLibrary library = UsbLibrary.forTesting(
+                root,
+                sourceTracks,
+                List.of(new UsbLibrary.Playlist(77L, "Sets / Soak", sourceTracks))
+        );
         PlayerState first = new PlayerState(1);
         PlayerState second = new PlayerState(2);
         List<PlayerState> players = List.of(first, second);
         TestTransport transport = new TestTransport();
 
-        try (AutoMixController autoMix = new AutoMixController(players)) {
+        try (AutoMixController autoMix = new AutoMixController(players, library)) {
             SimulatorControls controls = new SimulatorControls(library, players, autoMix, transport);
             controls.apply("load", JSON.readTree("{\"playerNumber\":1,\"trackId\":10001}"));
             controls.apply("load", JSON.readTree("{\"playerNumber\":2,\"trackId\":10002}"));
@@ -39,8 +44,12 @@ class SimulatorControlsTest {
             ));
             assertTrue(first.snapshot().loopEnabled());
 
-            controls.apply("auto-mix", JSON.readTree("{\"enabled\":true,\"intervalSeconds\":5}"));
+            controls.apply("auto-mix", JSON.readTree(
+                    "{\"enabled\":true,\"intervalSeconds\":5,\"playlistId\":77,\"shuffle\":false}"
+            ));
             assertTrue(autoMix.status().enabled());
+            assertEquals("playlist", autoMix.status().mode());
+            assertEquals(77L, autoMix.status().playlistId());
             assertTrue(first.snapshot().master());
             assertFalse(second.snapshot().master());
 

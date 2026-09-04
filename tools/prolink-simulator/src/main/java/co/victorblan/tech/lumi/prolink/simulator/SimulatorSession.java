@@ -35,7 +35,7 @@ final class SimulatorSession implements AutoCloseable {
                 new PlayerState(config.playerNumber()),
                 new PlayerState(config.secondPlayerNumber())
         );
-        AutoMixController autoMix = new AutoMixController(players);
+        AutoMixController autoMix = new AutoMixController(players, library);
         ProLinkBroadcaster broadcaster;
         try {
             broadcaster = new ProLinkBroadcaster(

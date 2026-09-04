@@ -41,6 +41,9 @@ case "$command" in
       "$simulator_url/api/v1/tracks"
     echo
     ;;
+  playlists)
+    request_get '/api/v1/playlists'
+    ;;
   load)
     if [[ $# -ge 3 ]]; then player="${2:?player required}"; track_id="${3:?track ID required}"; else player=1; track_id="${2:?track ID required}"; fi
     request_post '/api/v1/control/load' "{\"playerNumber\":$player,\"trackId\":$track_id}"
@@ -75,13 +78,27 @@ case "$command" in
     ;;
   auto-mix)
     case "${2:-}" in
-      on) request_post '/api/v1/control/auto-mix' "{\"enabled\":true,\"intervalSeconds\":${3:-30}}" ;;
+      on)
+        interval="${3:-30}"
+        playlist_id="${4:-}"
+        order="${5:-shuffle}"
+        if [[ -n "$playlist_id" ]]; then
+          case "$order" in
+            shuffle) shuffle=true ;;
+            ordered) shuffle=false ;;
+            *) echo "ERROR: playlist Auto Mix order expects shuffle or ordered." >&2; exit 1 ;;
+          esac
+          request_post '/api/v1/control/auto-mix' "{\"enabled\":true,\"intervalSeconds\":$interval,\"playlistId\":$playlist_id,\"shuffle\":$shuffle}"
+        else
+          request_post '/api/v1/control/auto-mix' "{\"enabled\":true,\"intervalSeconds\":$interval}"
+        fi
+        ;;
       off) request_post '/api/v1/control/auto-mix' "{\"enabled\":false,\"intervalSeconds\":${3:-30}}" ;;
       *) echo "ERROR: auto-mix expects on or off." >&2; exit 1 ;;
     esac
     ;;
   *)
-    echo "Usage: $0 {status|tracks [query]|load [PLAYER] ID|play [PLAYER]|pause [PLAYER]|seek [PLAYER] MS|pitch [PLAYER] PERCENT|master [PLAYER] on|off|on-air [PLAYER] on|off|loop PLAYER START_MS END_MS|loop-off [PLAYER]|precise-burst [PLAYER]|auto-mix on|off [SECONDS]}" >&2
+    echo "Usage: $0 {status|tracks [query]|playlists|load [PLAYER] ID|play [PLAYER]|pause [PLAYER]|seek [PLAYER] MS|pitch [PLAYER] PERCENT|master [PLAYER] on|off|on-air [PLAYER] on|off|loop PLAYER START_MS END_MS|loop-off [PLAYER]|precise-burst [PLAYER]|auto-mix on|off [SECONDS] [PLAYLIST_ID] [shuffle|ordered]}" >&2
     exit 2
     ;;
 esac

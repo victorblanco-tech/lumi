@@ -52,6 +52,7 @@ final class RemoteControlServer implements AutoCloseable {
         server.createContext("/api/v1/health", this::health);
         server.createContext("/api/v1/status", authenticated(this::status));
         server.createContext("/api/v1/tracks", authenticated(this::tracks));
+        server.createContext("/api/v1/playlists", authenticated(this::playlists));
         server.createContext("/api/v1/control", authenticated(this::control));
         server.createContext("/", this::web);
     }
@@ -71,7 +72,7 @@ final class RemoteControlServer implements AutoCloseable {
         sendJson(exchange, 200, Map.of(
                 "status", "ready",
                 "service", "lumi-prolink-simulator",
-                "version", "0.4.0-dev-55"
+                "version", "0.4.0-dev-56"
         ));
     }
 
@@ -91,6 +92,16 @@ final class RemoteControlServer implements AutoCloseable {
         int limit = parseInteger(query.getOrDefault("limit", "100"), "limit");
         List<UsbLibrary.TrackSummary> tracks = library.search(search, limit);
         sendJson(exchange, 200, Map.of("tracks", tracks, "count", tracks.size()));
+    }
+
+    private void playlists(HttpExchange exchange) throws IOException {
+        if (!method(exchange, "GET")) {
+            return;
+        }
+        sendJson(exchange, 200, Map.of(
+                "playlists", library.playlists(),
+                "count", library.playlistCount()
+        ));
     }
 
     private void control(HttpExchange exchange) throws IOException {
@@ -157,6 +168,7 @@ final class RemoteControlServer implements AutoCloseable {
         payload.put("revision", snapshot.revision());
         payload.put("usbRoot", library.root().toString());
         payload.put("usbTrackCount", library.size());
+        payload.put("usbPlaylistCount", library.playlistCount());
         ProLinkBroadcaster.Endpoint networkEndpoint = broadcaster.endpoint();
         payload.put("networkInterface", networkEndpoint.interfaceName());
         payload.put("networkAddress", networkEndpoint.localAddressText());

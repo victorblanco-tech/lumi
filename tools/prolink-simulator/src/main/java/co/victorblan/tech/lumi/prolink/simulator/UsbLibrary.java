@@ -8,23 +8,40 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 
 final class UsbLibrary {
     private static final Path DATABASE_PATH = Path.of("PIONEER", "rekordbox", "export.pdb");
     private final Path root;
     private final Map<Integer, Track> tracks;
     private final List<Track> sortedTracks;
+    private final Map<Long, Playlist> playlists;
+    private final List<PlaylistSummary> sortedPlaylists;
 
-    private UsbLibrary(Path root, Map<Integer, Track> tracks) {
+    private UsbLibrary(Path root, Map<Integer, Track> tracks, List<Playlist> playlists) {
         this.root = root;
         this.tracks = Map.copyOf(tracks);
         this.sortedTracks = tracks.values().stream()
                 .sorted(Comparator.comparing(Track::artist, String.CASE_INSENSITIVE_ORDER)
                         .thenComparing(Track::title, String.CASE_INSENSITIVE_ORDER))
+                .toList();
+        LinkedHashMap<Long, Playlist> indexedPlaylists = new LinkedHashMap<>();
+        for (Playlist playlist : playlists) {
+            if (indexedPlaylists.put(playlist.id(), playlist) != null) {
+                throw new IllegalArgumentException("Duplicate Rekordbox playlist ID " + playlist.id());
+            }
+        }
+        this.playlists = Map.copyOf(indexedPlaylists);
+        this.sortedPlaylists = playlists.stream()
+                .map(PlaylistSummary::from)
+                .sorted(Comparator.comparing(PlaylistSummary::path, String.CASE_INSENSITIVE_ORDER))
                 .toList();
     }
 
@@ -38,7 +55,8 @@ final class UsbLibrary {
             throw new IOException("Rekordbox DeviceSQL database not found: " + databasePath);
         }
 
-        java.util.HashMap<Integer, Track> tracks = new java.util.HashMap<>();
+        HashMap<Integer, Track> tracks = new HashMap<>();
+        List<Playlist> playlists;
         try (Database database = new Database(databasePath.toFile())) {
             for (RekordboxPdb.TrackRow row : database.trackIndex.values()) {
                 int id = Math.toIntExact(row.id());
@@ -65,16 +83,21 @@ final class UsbLibrary {
                     throw new IOException("Duplicate Rekordbox track ID " + id);
                 }
             }
+            playlists = readPlaylists(database, tracks);
         }
-        return new UsbLibrary(root, tracks);
+        return new UsbLibrary(root, tracks, playlists);
     }
 
     static UsbLibrary forTesting(Path root, List<Track> sourceTracks) {
-        java.util.HashMap<Integer, Track> indexed = new java.util.HashMap<>();
+        return forTesting(root, sourceTracks, List.of());
+    }
+
+    static UsbLibrary forTesting(Path root, List<Track> sourceTracks, List<Playlist> playlists) {
+        HashMap<Integer, Track> indexed = new HashMap<>();
         for (Track track : sourceTracks) {
             indexed.put(track.id(), track);
         }
-        return new UsbLibrary(root, indexed);
+        return new UsbLibrary(root, indexed, playlists);
     }
 
     Path root() {
@@ -85,12 +108,28 @@ final class UsbLibrary {
         return tracks.size();
     }
 
+    int playlistCount() {
+        return playlists.size();
+    }
+
     Track requireTrack(int trackId) {
         Track track = tracks.get(trackId);
         if (track == null) {
             throw new IllegalArgumentException("Unknown Rekordbox track ID: " + trackId);
         }
         return track;
+    }
+
+    Playlist requirePlaylist(long playlistId) {
+        Playlist playlist = playlists.get(playlistId);
+        if (playlist == null) {
+            throw new IllegalArgumentException("Unknown Rekordbox playlist ID: " + playlistId);
+        }
+        return playlist;
+    }
+
+    List<PlaylistSummary> playlists() {
+        return sortedPlaylists;
     }
 
     List<TrackSummary> search(String query, int requestedLimit) {
@@ -109,6 +148,88 @@ final class UsbLibrary {
     private static String artist(Database database, long artistId) {
         RekordboxPdb.ArtistRow artist = database.artistIndex.get(artistId);
         return artist == null ? "" : Database.getText(artist.name());
+    }
+
+    private static List<Playlist> readPlaylists(Database database, Map<Integer, Track> tracks) {
+        ArrayList<Playlist> result = new ArrayList<>();
+        HashSet<Long> visitedEntries = new HashSet<>();
+        HashSet<Long> activeFolders = new HashSet<>();
+        collectPlaylistFolder(database, tracks, 0L, List.of(), visitedEntries, activeFolders, result);
+
+        // Healthy Rekordbox exports are rooted at parent 0. Retain orphaned
+        // rows as a safe fallback so a partially unusual tree is still useful
+        // for soak testing without inventing memberships.
+        for (List<Database.PlaylistFolderEntry> entries : database.playlistFolderIndex.values()) {
+            for (Database.PlaylistFolderEntry entry : entries) {
+                if (entry != null && !visitedEntries.contains(entry.id)) {
+                    collectPlaylistEntry(
+                            database, tracks, entry, List.of(), visitedEntries, activeFolders, result
+                    );
+                }
+            }
+        }
+        return List.copyOf(result);
+    }
+
+    private static void collectPlaylistFolder(
+            Database database,
+            Map<Integer, Track> tracks,
+            long folderId,
+            List<String> parentPath,
+            Set<Long> visitedEntries,
+            Set<Long> activeFolders,
+            List<Playlist> result
+    ) {
+        if (!activeFolders.add(folderId)) {
+            return;
+        }
+        try {
+            for (Database.PlaylistFolderEntry entry
+                    : database.playlistFolderIndex.getOrDefault(folderId, List.of())) {
+                if (entry != null) {
+                    collectPlaylistEntry(
+                            database, tracks, entry, parentPath, visitedEntries, activeFolders, result
+                    );
+                }
+            }
+        } finally {
+            activeFolders.remove(folderId);
+        }
+    }
+
+    private static void collectPlaylistEntry(
+            Database database,
+            Map<Integer, Track> tracks,
+            Database.PlaylistFolderEntry entry,
+            List<String> parentPath,
+            Set<Long> visitedEntries,
+            Set<Long> activeFolders,
+            List<Playlist> result
+    ) {
+        if (!visitedEntries.add(entry.id)) {
+            return;
+        }
+        ArrayList<String> path = new ArrayList<>(parentPath);
+        String name = entry.name == null || entry.name.isBlank()
+                ? "Playlist " + entry.id
+                : entry.name.trim();
+        path.add(name);
+        if (entry.isFolder) {
+            collectPlaylistFolder(database, tracks, entry.id, path, visitedEntries, activeFolders, result);
+            return;
+        }
+
+        ArrayList<Track> playlistTracks = new ArrayList<>();
+        for (Long rawTrackId : database.playlistIndex.getOrDefault(entry.id, List.of())) {
+            if (rawTrackId == null || rawTrackId == 0L) {
+                continue;
+            }
+            Track track = tracks.get(Math.toIntExact(rawTrackId));
+            if (track != null) {
+                playlistTracks.add(track);
+            }
+        }
+        result.add(new Playlist(entry.id, String.join(" / ", path), playlistTracks));
     }
 
     private static Path checkedDeclaredChild(Path root, String declaredPath) throws IOException {
@@ -194,6 +315,19 @@ final class UsbLibrary {
     }
 
     record BeatPoint(int absoluteBeat, int beatWithinBar, int tempoCentiBpm, long timeMillis) {
+    }
+
+    record Playlist(long id, String path, List<Track> tracks) {
+        Playlist {
+            path = path == null ? "" : path;
+            tracks = List.copyOf(tracks);
+        }
+    }
+
+    record PlaylistSummary(long playlistId, String path, int trackCount) {
+        static PlaylistSummary from(Playlist playlist) {
+            return new PlaylistSummary(playlist.id(), playlist.path(), playlist.tracks().size());
+        }
     }
 
     record TrackSummary(

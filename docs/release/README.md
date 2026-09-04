@@ -53,6 +53,7 @@ the public-repository and GitHub Pages gates.
 - [0.4.0-dev-53 representative Pro DJ Link simulator](0.4.0-dev-53-representative-prolink-simulator.md)
 - [0.4.0-dev-54 isolated realtime integration lanes](0.4.0-dev-54-isolated-realtime-integration-lanes.md)
 - [Pro DJ Link Simulator 0.4.0-dev-55 two-player soak control](prolink-simulator-0.4.0-dev-55-two-player-soak.md)
+- [Pro DJ Link Simulator 0.4.0-dev-56 playlist soak testing](prolink-simulator-0.4.0-dev-56-playlist-soak.md)
 - [0.4.0-dev-55 deterministic transport epochs and output timing](0.4.0-dev-55-deterministic-transport-and-output-timing.md)
 - [0.4.0-dev-56 bounded Live integration evidence](0.4.0-dev-56-bounded-live-integration-evidence.md)
 - [0.4.0-dev-57 dynamic Pro DJ Link device recovery](0.4.0-dev-57-dynamic-prolink-device-recovery.md)
