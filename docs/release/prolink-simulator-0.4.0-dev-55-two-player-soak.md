@@ -20,9 +20,9 @@ runtime.
 - all 20 simulator configuration, API, packet, loop and Auto Mix tests pass;
 - the shaded Java 21 build passes;
 - version consistency and repository structure pass locally;
-- the packaged app read a real 1,197-track Rekordbox USB, loaded `90s Bitch`
-  and `My Favourite Regrets` on separate players, preserved overshoot through a
-  10–15 second loop and completed three five-second Auto Mix handoffs;
+- the packaged app read a real Rekordbox USB, loaded separate tracks on both
+  players, preserved overshoot through a 10–15 second loop and completed three
+  five-second Auto Mix handoffs;
 - stopping the simulator released ports 50000 and 17840, after which the Lumi
   Dev engine and Pro DJ Link bridge restarted normally.
 
