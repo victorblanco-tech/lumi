@@ -1,6 +1,6 @@
 # Lumi Pro DJ Link Simulator
 
-This is a development-only, two-player USB-backed network simulator for testing
+This is a self-contained, two-player USB-backed network simulator for testing
 Lumi without physical CDJs. It intentionally simulates only the Pro DJ Link facts consumed
 by Lumi:
 

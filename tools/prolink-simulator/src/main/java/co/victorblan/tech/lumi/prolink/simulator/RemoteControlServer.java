@@ -72,7 +72,7 @@ final class RemoteControlServer implements AutoCloseable {
         sendJson(exchange, 200, Map.of(
                 "status", "ready",
                 "service", "lumi-prolink-simulator",
-                "version", "0.4.0-dev-56"
+                "version", "0.4.0"
         ));
     }
 

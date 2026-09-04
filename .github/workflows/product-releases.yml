@@ -160,5 +160,5 @@ jobs:
           gh release create "$GITHUB_REF_NAME" \
             --draft \
             --title "Lumi Pro DJ Link Simulator $version" \
-            --notes "Development-only self-contained macOS simulator package. Review and publish this draft manually after installation verification." \
+            --notes "Self-contained macOS simulator package for testing Lumi without physical CDJs. Review and publish this draft manually after installation verification." \
             "$SIMULATOR_DMG" "$SIMULATOR_DMG.sha256"
