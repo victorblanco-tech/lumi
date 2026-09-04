@@ -70,6 +70,22 @@ final class PlayerState {
         revision++;
     }
 
+    synchronized void jumpBeats(int beats) {
+        requireTrack();
+        if (beats == 0) {
+            throw new IllegalArgumentException("beats must not be zero");
+        }
+        capturePosition();
+        if (track.beatGrid().isEmpty()) {
+            throw new IllegalStateException("The loaded track has no beat grid");
+        }
+        int currentIndex = Math.max(0, track.beatIndexAt(Math.round(anchoredPositionMillis)));
+        int targetIndex = Math.max(0, Math.min(currentIndex + beats, track.beatGrid().size() - 1));
+        anchoredPositionMillis = track.beatGrid().get(targetIndex).timeMillis();
+        anchorNanos = nanoTime.getAsLong();
+        revision++;
+    }
+
     synchronized void setPitchPercent(double value) {
         if (!Double.isFinite(value) || value < -100.0 || value > 100.0) {
             throw new IllegalArgumentException("pitchPercent must be between -100 and 100");

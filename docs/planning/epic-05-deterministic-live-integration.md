@@ -30,6 +30,7 @@ duplicate peers, hidden restarts or UI influence.
 2. [E5-02 — Exactly-once phrase AutoLoop executor](story-e5-02-exactly-once-phrase-autoloop-executor.md)
 3. [E5-03 — Explicit playback epochs, hotcues and output offset](story-e5-03-transport-epochs-hotcues-and-offset.md)
 4. [E5-04 — Wi-Fi, lifecycle and physical release evidence](story-e5-04-wifi-lifecycle-and-physical-evidence.md)
+5. [E5-05 — Long-session recovery and deterministic fault scenarios](story-e5-05-long-session-recovery-and-fault-scenarios.md)
 
 Implementation sequence and measurable budgets are defined in the
 [one-page Live integration separation plan](live-integration-separation-plan.md).
@@ -113,6 +114,8 @@ facts rather than software assertions.
   telemetry.
 - source-to-consumer age remains bounded at the Java, Rust, AutoLoop, Link and
   display boundaries and never trends upward with run duration.
+- recovered Master planning clears global Phrase warnings while held idle
+  Players stay local to their own card, proven under repeatable packet faults.
 
 ## Release rule
 

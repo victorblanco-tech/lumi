@@ -17,6 +17,7 @@
         .panel { margin-top: 14px; }
         .players { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }
         .player.master { border-color: #ff4d5d; box-shadow: 0 0 0 1px #ff4d5d44 inset; }
+        .player.offline { border-color: #f0a43b; box-shadow: 0 0 0 1px #f0a43b44 inset; }
         .playerHeader, .autoMix, .trackActions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
         .badge { color: #63c7ff; font-size: 12px; font-weight: 700; letter-spacing: .04em; }
         .badge.live { color: #ff6677; }
@@ -49,6 +50,8 @@
         .trackName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
         .trackActions { justify-content: flex-end; }
         .error { color: #ff7b86; min-height: 20px; margin-top: 10px; }
+        .faultStatus { margin-top: 10px; padding: 10px; min-height: 40px; border-radius: 8px; background: #07090b; }
+        .faultStatus.active { color: #f5ae4e; border: 1px solid #6c4a20; }
         @media (max-width: 850px) {
             main { padding: 16px 12px; }
             .players { grid-template-columns: 1fr; }
@@ -88,6 +91,29 @@
         </div>
         <div class="subtle network" id="network">Network: —</div>
         <div class="error" id="error"></div>
+    </section>
+
+    <section class="panel">
+        <div class="autoMix">
+            <div>
+                <h2>Recovery &amp; fault scenarios</h2>
+                <div class="subtle">Deterministic Pro DJ Link interruptions for repeatable Lumi regression and soak tests.</div>
+            </div>
+            <div class="autoMixControls">
+                <label for="recoveryInterval" class="subtle">Scenario every</label>
+                <input id="recoveryInterval" type="number" min="8" max="3600" value="20">
+                <span class="subtle">seconds</span>
+                <button id="recoveryToggle">Start Recovery Soak</button>
+            </div>
+        </div>
+        <div class="controls">
+            <button data-fault="position">Master position gap · 2 s</button>
+            <button data-fault="loss">Master timing loss · 5 s</button>
+            <button data-fault="disconnect">Master disconnect · 5 s</button>
+            <button data-fault="handover">Master handover</button>
+            <button data-fault="clear">Restore all traffic</button>
+        </div>
+        <div class="faultStatus" id="faultStatus">All simulated Players and packet lanes are healthy.</div>
     </section>
 
     <section class="panel">
@@ -145,6 +171,7 @@
                 <button data-action="pause">Pause</button>
                 <button data-action="master">Master</button>
                 <button data-action="on-air">On Air</button>
+                <button data-action="online">Take offline</button>
                 <button data-action="burst">Position burst</button>
             </div>
             <div class="slider"><label>Position</label><input data-slider="seek" type="range" min="0" max="1" value="0"><output>0:00</output></div>
@@ -153,12 +180,16 @@
                 <button data-action="loop-in">Loop In</button>
                 <button data-action="loop-out">Loop Out</button>
                 <button data-action="loop-off">Loop Off</button>
+                <button data-action="jump-back">−32 beats</button>
+                <button data-action="jump-forward">+32 beats</button>
+                <button data-action="cue-start">Hot Cue start</button>
             </div>
             <div class="subtle loopStatus"></div>`;
         card.querySelector('[data-action="play"]').onclick = () => control('play', { playerNumber: number });
         card.querySelector('[data-action="pause"]').onclick = () => control('pause', { playerNumber: number });
         card.querySelector('[data-action="master"]').onclick = () => control('master', { playerNumber: number, enabled: !playerNow(number).master });
         card.querySelector('[data-action="on-air"]').onclick = () => control('on-air', { playerNumber: number, enabled: !playerNow(number).onAir });
+        card.querySelector('[data-action="online"]').onclick = () => control('player-online', { playerNumber: number, enabled: !playerOnline(number) });
         card.querySelector('[data-action="burst"]').onclick = () => control('precise-burst', { playerNumber: number });
         card.querySelector('[data-action="loop-in"]').onclick = () => { loopIn.set(number, playerNow(number).positionMillis); render(); };
         card.querySelector('[data-action="loop-out"]').onclick = () => {
@@ -167,6 +198,9 @@
             control('loop', { playerNumber: number, startMillis: start, endMillis: playerNow(number).positionMillis });
         };
         card.querySelector('[data-action="loop-off"]').onclick = () => control('loop-off', { playerNumber: number });
+        card.querySelector('[data-action="jump-back"]').onclick = () => control('beat-jump', { playerNumber: number, beats: -32 });
+        card.querySelector('[data-action="jump-forward"]').onclick = () => control('beat-jump', { playerNumber: number, beats: 32 });
+        card.querySelector('[data-action="cue-start"]').onclick = () => control('hot-cue', { playerNumber: number, positionMillis: 0 });
         bindSlider(card, number, 'seek', 'positionMillis', value => time(value));
         bindSlider(card, number, 'pitch', 'pitchPercent', value => `${value.toFixed(2)}%`);
         updatePlayerCard(card, player);
@@ -184,9 +218,11 @@
         };
     }
     function updatePlayerCard(card, player) {
+        const online = playerOnline(player.playerNumber);
         card.classList.toggle('master', player.master);
+        card.classList.toggle('offline', !online);
         const state = card.querySelector('[data-field="state"]');
-        state.textContent = player.master ? 'MASTER' : player.onAir ? 'ON AIR' : 'READY';
+        state.textContent = !online ? 'OFFLINE' : player.master ? 'MASTER' : player.onAir ? 'ON AIR' : 'READY';
         state.classList.toggle('live', player.master);
         card.querySelector('[data-field="transport"]').textContent = player.playing ? 'PLAYING' : 'PAUSED';
         card.querySelector('[data-field="bpm"]').textContent = player.track ? player.effectiveBpm.toFixed(2) : '—';
@@ -195,6 +231,8 @@
         card.querySelector('[data-field="track"]').textContent = player.track ? `${player.track.artist} — ${player.track.title}` : 'No track loaded';
         card.querySelector('[data-action="master"]').classList.toggle('active', player.master);
         card.querySelector('[data-action="on-air"]').classList.toggle('active', player.onAir);
+        card.querySelector('[data-action="online"]').textContent = online ? 'Take offline' : 'Bring online';
+        card.querySelector('[data-action="online"]').classList.toggle('active', !online);
         card.querySelector('[data-action="loop-off"]').classList.toggle('loopActive', player.loopEnabled);
         card.querySelector('.loopStatus').textContent = loopText(player);
         const seek = card.querySelector('[data-slider="seek"]');
@@ -242,6 +280,7 @@
         el('bursts').textContent = current.preciseBurstCount.toLocaleString();
         el('peers').textContent = current.proLinkPeerCount;
         el('network').textContent = `Network: ${current.networkInterface} · ${current.networkAddress} → ${current.broadcastAddress}`;
+        renderFaults();
     }
     function players() {
         if (Array.isArray(current?.players)) return current.players;
@@ -249,6 +288,35 @@
     }
     function playerNow(number) {
         return players().find(player => player.playerNumber === number);
+    }
+    function playerOnline(number) {
+        return !(current?.faults?.manuallyOfflinePlayers || []).includes(number);
+    }
+    function masterPlayer() {
+        return players().find(player => player.master) || players()[0];
+    }
+    function renderFaults() {
+        const faults = current.faults;
+        const recovery = faults.recoverySoak;
+        el('recoveryToggle').textContent = recovery.enabled ? 'Stop Recovery Soak' : 'Start Recovery Soak';
+        el('recoveryToggle').classList.toggle('active', recovery.enabled);
+        el('recoveryInterval').disabled = recovery.enabled;
+        const messages = [];
+        if (faults.manuallyOfflinePlayers.length) {
+            messages.push(`offline: Player ${faults.manuallyOfflinePlayers.join(', Player ')}`);
+        }
+        faults.activeFaults.forEach(fault => {
+            const cadence = fault.everyN === 1 ? 'all packets' : `1 in ${fault.everyN} packets`;
+            messages.push(`Player ${fault.playerNumber} ${fault.kind} on ${fault.lane} · ${cadence} · ${(fault.remainingMillis / 1000).toFixed(1)} s remaining`);
+        });
+        if (recovery.enabled) {
+            messages.push(`Recovery Soak #${recovery.eventCount} · next in ${(recovery.nextEventInMillis / 1000).toFixed(1)} s${recovery.lastEvent ? ` · last: ${recovery.lastEvent}` : ''}`);
+        }
+        const status = el('faultStatus');
+        status.textContent = messages.length
+            ? `${messages.join('  |  ')} · ${faults.totalSuppressedPackets.toLocaleString()} packets suppressed`
+            : `All simulated Players and packet lanes are healthy · ${faults.totalSuppressedPackets.toLocaleString()} packets suppressed during this session.`;
+        status.classList.toggle('active', messages.length > 0);
     }
     async function refresh() {
         try { current = await api('/api/v1/status'); render(); el('error').textContent = ''; }
@@ -304,6 +372,21 @@
         el('autoMixShuffle').disabled = !el('autoMixPlaylist').value;
         render();
     };
+    el('recoveryToggle').onclick = () => control('recovery-soak', {
+        enabled: !current.faults.recoverySoak.enabled,
+        intervalSeconds: Number(el('recoveryInterval').value)
+    });
+    document.querySelector('[data-fault="position"]').onclick = () => control('fault-position-gap', {
+        playerNumber: masterPlayer().playerNumber, durationMillis: 2000
+    });
+    document.querySelector('[data-fault="loss"]').onclick = () => control('fault-packet-loss', {
+        playerNumber: masterPlayer().playerNumber, lane: 'timing', everyN: 4, durationMillis: 5000
+    });
+    document.querySelector('[data-fault="disconnect"]').onclick = () => control('fault-disconnect', {
+        playerNumber: masterPlayer().playerNumber, durationMillis: 5000
+    });
+    document.querySelector('[data-fault="handover"]').onclick = () => control('master-handover');
+    document.querySelector('[data-fault="clear"]').onclick = () => control('clear-faults');
     let searchTimer;
     el('search').oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(search, 160); };
     refresh().then(() => Promise.all([search(), loadPlaylists()]));

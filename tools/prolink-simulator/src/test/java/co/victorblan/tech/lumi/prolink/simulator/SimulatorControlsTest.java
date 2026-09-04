@@ -35,8 +35,11 @@ class SimulatorControlsTest {
         List<PlayerState> players = List.of(first, second);
         TestTransport transport = new TestTransport();
 
-        try (AutoMixController autoMix = new AutoMixController(players, library)) {
-            SimulatorControls controls = new SimulatorControls(library, players, autoMix, transport);
+        try (AutoMixController autoMix = new AutoMixController(players, library);
+             TrafficFaultController faults = new TrafficFaultController(players, System::nanoTime, false)) {
+            SimulatorControls controls = new SimulatorControls(
+                    library, players, autoMix, transport, faults
+            );
             controls.apply("load", JSON.readTree("{\"playerNumber\":1,\"trackId\":10001}"));
             controls.apply("load", JSON.readTree("{\"playerNumber\":2,\"trackId\":10002}"));
             controls.apply("loop", JSON.readTree(
@@ -59,6 +62,19 @@ class SimulatorControlsTest {
 
             controls.apply("precise-burst", JSON.readTree("{\"playerNumber\":2}"));
             assertEquals(2, transport.lastBurstPlayer);
+
+            controls.apply("beat-jump", JSON.readTree("{\"playerNumber\":2,\"beats\":4}"));
+            assertEquals(2_000, second.snapshot().positionMillis());
+            controls.apply("fault-position-gap", JSON.readTree(
+                    "{\"playerNumber\":2,\"durationMillis\":1000}"
+            ));
+            assertFalse(faults.permit(2, TrafficFaultController.Lane.PRECISE_POSITION));
+            controls.apply("clear-faults", JSON.createObjectNode());
+            assertTrue(faults.permit(2, TrafficFaultController.Lane.PRECISE_POSITION));
+
+            controls.apply("master-handover", JSON.createObjectNode());
+            assertTrue(first.snapshot().master());
+            assertFalse(second.snapshot().master());
             assertThrows(
                     SimulatorControls.UnknownActionException.class,
                     () -> controls.apply("mystery", JSON.createObjectNode())

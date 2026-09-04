@@ -31,6 +31,7 @@ final class ProLinkBroadcaster implements AutoCloseable, SimulatorTransport {
 
     private final List<PlayerState> states;
     private final ProLinkTrafficProfile trafficProfile;
+    private final TrafficFaultController faults;
     private final Endpoint endpoint;
     private final DatagramSocket socket;
     private final DatagramSocket announcementSocket;
@@ -55,13 +56,15 @@ final class ProLinkBroadcaster implements AutoCloseable, SimulatorTransport {
     ProLinkBroadcaster(
             List<PlayerState> states,
             String requestedInterface,
-            ProLinkTrafficProfile trafficProfile
+            ProLinkTrafficProfile trafficProfile,
+            TrafficFaultController faults
     ) throws IOException {
         this.states = List.copyOf(Objects.requireNonNull(states, "states"));
         if (this.states.isEmpty()) {
             throw new IllegalArgumentException("At least one simulated player is required");
         }
         this.trafficProfile = Objects.requireNonNull(trafficProfile, "trafficProfile");
+        this.faults = Objects.requireNonNull(faults, "faults");
         java.util.Arrays.fill(lastBeatIndex, Integer.MIN_VALUE);
         java.util.Arrays.fill(lastRevision, Long.MIN_VALUE);
         this.endpoint = selectEndpoint(requestedInterface);
@@ -120,6 +123,11 @@ final class ProLinkBroadcaster implements AutoCloseable, SimulatorTransport {
         try {
             for (PlayerState state : states) {
                 PlayerState.Snapshot snapshot = state.snapshot();
+                if (!faults.permit(
+                        snapshot.playerNumber(), TrafficFaultController.Lane.ANNOUNCEMENT
+                )) {
+                    continue;
+                }
                 DatagramPacket packet = ProLinkPackets.announcement(
                         deviceName(snapshot.playerNumber()), snapshot.playerNumber(),
                         hardwareAddress(snapshot.playerNumber()), endpoint.localAddress(),
@@ -137,6 +145,9 @@ final class ProLinkBroadcaster implements AutoCloseable, SimulatorTransport {
         try {
             for (PlayerState state : states) {
                 PlayerState.Snapshot snapshot = state.snapshot();
+                if (!faults.permit(snapshot.playerNumber(), TrafficFaultController.Lane.STATUS)) {
+                    continue;
+                }
                 DatagramPacket packet = ProLinkPackets.status(
                         deviceName(snapshot.playerNumber()), snapshot, packetCounter.incrementAndGet()
                 );
@@ -165,6 +176,9 @@ final class ProLinkBroadcaster implements AutoCloseable, SimulatorTransport {
                 if (!lastPlaying[player] || snapshot.beatIndex() != lastBeatIndex[player]) {
                     lastPlaying[player] = true;
                     lastBeatIndex[player] = snapshot.beatIndex();
+                    if (!faults.permit(player, TrafficFaultController.Lane.BEAT)) {
+                        continue;
+                    }
                     send(ProLinkPackets.beat(deviceName(player), snapshot), BEAT_PORT);
                     beatPacketCount.incrementAndGet();
                 }
@@ -179,6 +193,11 @@ final class ProLinkBroadcaster implements AutoCloseable, SimulatorTransport {
             for (PlayerState state : states) {
                 PlayerState.Snapshot snapshot = state.snapshot();
                 if (snapshot.track() == null) {
+                    continue;
+                }
+                if (!faults.permit(
+                        snapshot.playerNumber(), TrafficFaultController.Lane.PRECISE_POSITION
+                )) {
                     continue;
                 }
                 send(
@@ -241,16 +260,24 @@ final class ProLinkBroadcaster implements AutoCloseable, SimulatorTransport {
                     snapshot.positionMillis(),
                     stalePosition + index * trafficProfile.precisePositionIntervalMillis()
             );
-            send(ProLinkPackets.precisePosition(deviceName, snapshot, position), BEAT_PORT);
-            precisePositionPacketCount.incrementAndGet();
+            if (faults.permit(
+                    snapshot.playerNumber(), TrafficFaultController.Lane.PRECISE_POSITION
+            )) {
+                send(ProLinkPackets.precisePosition(deviceName, snapshot, position), BEAT_PORT);
+                precisePositionPacketCount.incrementAndGet();
+            }
         }
         // End every burst with a current observation so consumers which
         // correctly keep only the latest value recover immediately.
-        send(
-                ProLinkPackets.precisePosition(deviceName, snapshot, snapshot.positionMillis()),
-                BEAT_PORT
-        );
-        precisePositionPacketCount.incrementAndGet();
+        if (faults.permit(
+                snapshot.playerNumber(), TrafficFaultController.Lane.PRECISE_POSITION
+        )) {
+            send(
+                    ProLinkPackets.precisePosition(deviceName, snapshot, snapshot.positionMillis()),
+                    BEAT_PORT
+            );
+            precisePositionPacketCount.incrementAndGet();
+        }
         preciseBurstCount.incrementAndGet();
     }
 

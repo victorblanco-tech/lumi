@@ -9,17 +9,20 @@ final class SimulatorControls {
     private final List<PlayerState> players;
     private final AutoMixController autoMix;
     private final SimulatorTransport transport;
+    private final TrafficFaultController faults;
 
     SimulatorControls(
             UsbLibrary library,
             List<PlayerState> players,
             AutoMixController autoMix,
-            SimulatorTransport transport
+            SimulatorTransport transport,
+            TrafficFaultController faults
     ) {
         this.library = library;
         this.players = List.copyOf(players);
         this.autoMix = autoMix;
         this.transport = transport;
+        this.faults = faults;
     }
 
     void apply(String action, JsonNode body) {
@@ -29,6 +32,8 @@ final class SimulatorControls {
             case "play" -> state.play();
             case "pause" -> state.pause();
             case "seek" -> state.seek(requiredLong(body, "positionMillis"));
+            case "hot-cue" -> state.seek(requiredLong(body, "positionMillis"));
+            case "beat-jump" -> state.jumpBeats(requiredInt(body, "beats"));
             case "pitch" -> state.setPitchPercent(requiredDouble(body, "pitchPercent"));
             case "master" -> setMaster(state, requiredBoolean(body, "enabled"));
             case "on-air" -> state.setOnAir(requiredBoolean(body, "enabled"));
@@ -37,6 +42,26 @@ final class SimulatorControls {
             );
             case "loop-off" -> state.disableLoop();
             case "precise-burst" -> transport.triggerPreciseBurst(state.snapshot().playerNumber());
+            case "player-online" -> faults.setPlayerOnline(
+                    state.snapshot().playerNumber(), requiredBoolean(body, "enabled")
+            );
+            case "fault-position-gap" -> faults.startPositionGap(
+                    state.snapshot().playerNumber(), requiredInt(body, "durationMillis")
+            );
+            case "fault-disconnect" -> faults.startDisconnect(
+                    state.snapshot().playerNumber(), requiredInt(body, "durationMillis")
+            );
+            case "fault-packet-loss" -> faults.startPacketLoss(
+                    state.snapshot().playerNumber(),
+                    TrafficFaultController.Lane.parse(requiredText(body, "lane")),
+                    requiredInt(body, "everyN"),
+                    requiredInt(body, "durationMillis")
+            );
+            case "clear-faults" -> faults.clearFaults();
+            case "master-handover" -> autoMix.transitionNowForTesting();
+            case "recovery-soak" -> faults.setRecoverySoak(
+                    requiredBoolean(body, "enabled"), requiredInt(body, "intervalSeconds")
+            );
             case "auto-mix" -> autoMix.setEnabled(
                     requiredBoolean(body, "enabled"),
                     requiredInt(body, "intervalSeconds"),
@@ -66,7 +91,16 @@ final class SimulatorControls {
     }
 
     private static boolean requiresPlayer(String action) {
-        return !"auto-mix".equals(action);
+        return !List.of("auto-mix", "clear-faults", "master-handover", "recovery-soak")
+                .contains(action);
+    }
+
+    private static String requiredText(JsonNode body, String field) {
+        JsonNode value = body.get(field);
+        if (value == null || !value.isTextual() || value.textValue().isBlank()) {
+            throw new IllegalArgumentException(field + " must be text");
+        }
+        return value.textValue();
     }
 
     private static int requiredInt(JsonNode body, String field) {

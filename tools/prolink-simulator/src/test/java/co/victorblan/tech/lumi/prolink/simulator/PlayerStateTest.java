@@ -44,6 +44,19 @@ class PlayerStateTest {
         assertEquals(2_250, snapshot.positionMillis());
     }
 
+    @Test
+    void beatJumpUsesTheUsbBeatGridAndCreatesOneDiscontinuity() {
+        AtomicLong clock = new AtomicLong();
+        PlayerState player = loadedPlayer(1, clock);
+        player.seek(500);
+        long before = player.snapshot().revision();
+
+        player.jumpBeats(2);
+
+        assertEquals(1_500, player.snapshot().positionMillis());
+        assertEquals(before + 1, player.snapshot().revision());
+    }
+
     static PlayerState loadedPlayer(int number, AtomicLong clock) {
         PlayerState player = new PlayerState(number, clock::get);
         player.load(new UsbLibrary.Track(
