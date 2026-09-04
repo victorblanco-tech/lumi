@@ -1,5 +1,33 @@
 # Changelog
 
+## 0.6.1 - 2026-09-04
+
+### Fixed
+
+- Keeps the macOS client connected across long-running shows by reusing one
+  authenticated Remote Gateway health connection and retrying transient local
+  engine socket replacement without retrying invalid credentials or approvals.
+- Parks operation, Ableton Link and lighting output safely when an authenticated
+  client connection fails unexpectedly, while allowing the persistent engine
+  and an open Lumi window to reconnect cleanly.
+- Prevents a long-running Remote Gateway session from exhausting local control
+  connections and causing Live Decks to disappear.
+
+### Verified
+
+- Completes an extended headed playlist soak with two simulated CDJ Players,
+  repeated Master handoffs, changing BPM, locally resolved phrase plans,
+  SoundSwitch AutoLoop output and one stable Ableton Link peer.
+- Keeps the realtime Pro DJ Link input, exactly-once SoundSwitch MIDI output and
+  Ableton Link relay lanes unchanged by the control-plane repair.
+
+### Compatible products
+
+- Lumi Remote `0.1.0` remains the compatible iPhone companion; its independently
+  versioned source and validation release do not change in this patch.
+- Pro DJ Link Simulator `0.4.0-dev-56` is the independently released development
+  test tool used for the playlist soak and is not bundled with Lumi.
+
 ## 0.6.0 / Lumi Remote 0.1.0 - 2026-09-03
 
 ### Added

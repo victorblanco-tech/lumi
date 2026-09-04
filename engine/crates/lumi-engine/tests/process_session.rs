@@ -222,6 +222,13 @@ fn real_engine_process_serves_state_and_fails_safe_between_ui_clients() {
             .and_then(|output| output.get("recordCount")),
         Some(&Value::from(0))
     );
+    // Exercise the unexpected-I/O path as well as the ordinary EOF path. A
+    // client can disappear with a partial frame when macOS replaces a UI
+    // process; the persistent engine must fail-safe and accept the next UI.
+    if let Err(error) = write!(connection, "{{") {
+        let _ = child.kill();
+        panic!("partial command must be writable: {error}");
+    }
     drop(connection);
 
     thread::sleep(Duration::from_millis(40));

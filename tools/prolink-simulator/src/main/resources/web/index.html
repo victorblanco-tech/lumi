@@ -8,34 +8,51 @@
         :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
         * { box-sizing: border-box; }
         body { margin: 0; background: #050607; color: #f4f7fa; }
-        main { max-width: 980px; margin: 0 auto; padding: 28px; }
-        h1 { font-size: 22px; margin: 0 0 4px; }
+        main { max-width: 1240px; margin: 0 auto; padding: 24px; }
+        h1, h2 { margin: 0; }
+        h1 { font-size: 22px; }
+        h2 { font-size: 17px; }
         .subtle { color: #8e9aa7; font-size: 13px; }
-        .panel { background: #111417; border: 1px solid #27313a; border-radius: 12px; padding: 16px; margin-top: 16px; }
-        .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 10px; }
-        .metric { background: #0a0c0e; border-radius: 8px; padding: 10px; }
-        .metric span { display: block; color: #8e9aa7; font-size: 11px; text-transform: uppercase; }
-        .metric strong { display: block; margin-top: 4px; font-size: 16px; overflow: hidden; text-overflow: ellipsis; overflow-wrap: anywhere; }
-        button, input { border-radius: 7px; border: 1px solid #35424d; background: #171c21; color: #f4f7fa; min-height: 36px; }
-        button { padding: 0 14px; cursor: pointer; }
+        .panel, .player { background: #0d1013; border: 1px solid #27313a; border-radius: 12px; padding: 15px; }
+        .panel { margin-top: 14px; }
+        .players { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; margin-top: 14px; }
+        .player.master { border-color: #ff4d5d; box-shadow: 0 0 0 1px #ff4d5d44 inset; }
+        .playerHeader, .autoMix, .trackActions { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+        .badge { color: #63c7ff; font-size: 12px; font-weight: 700; letter-spacing: .04em; }
+        .badge.live { color: #ff6677; }
+        .grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; margin-top: 12px; }
+        .metric { background: #07090b; border-radius: 7px; padding: 9px; min-width: 0; }
+        .metric span { display: block; color: #8e9aa7; font-size: 10px; text-transform: uppercase; }
+        .metric strong { display: block; margin-top: 3px; font-size: 14px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .trackTitle { margin-top: 9px; font-size: 15px; font-weight: 650; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; min-height: 19px; }
+        button, input, select { border-radius: 7px; border: 1px solid #35424d; background: #171c21; color: #f4f7fa; min-height: 34px; }
+        button { padding: 0 12px; cursor: pointer; }
         button:hover { border-color: #63c7ff; }
         button.primary { background: #0c75a9; border-color: #63c7ff; }
-        button.active { border-color: #ff4d5d; color: #ff7b86; }
+        button.active { border-color: #ff4d5d; color: #ff7b86; background: #2a1015; }
+        button.loopActive { border-color: #36d37e; color: #5eea99; }
+        button:disabled { opacity: .45; cursor: default; }
         input[type="search"] { width: 100%; padding: 0 10px; }
+        input[type="number"] { width: 80px; padding: 0 8px; }
         input[type="range"] { width: 100%; accent-color: #63c7ff; }
-        .controls { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
-        .slider { margin-top: 14px; display: grid; grid-template-columns: 90px 1fr 90px; gap: 10px; align-items: center; }
+        select { max-width: 330px; min-width: 230px; padding: 0 28px 0 9px; }
+        .check { display: inline-flex; align-items: center; gap: 5px; color: #8e9aa7; font-size: 13px; }
+        .controls { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 10px; }
+        .slider { margin-top: 10px; display: grid; grid-template-columns: 58px 1fr 70px; gap: 8px; align-items: center; }
+        .loopStatus { margin-top: 8px; min-height: 17px; }
+        .autoMix { flex-wrap: wrap; }
+        .autoMixControls { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+        .network { margin-top: 10px; }
         .tracks { max-height: 330px; overflow: auto; margin-top: 10px; border: 1px solid #27313a; border-radius: 8px; }
-        .track { width: 100%; display: grid; grid-template-columns: 1fr 1fr 80px 90px; text-align: left; border: 0; border-bottom: 1px solid #20272d; border-radius: 0; background: #0b0e10; }
-        .track:hover { background: #121a20; }
+        .track { display: grid; grid-template-columns: minmax(0, 1fr) 130px 86px auto; align-items: center; gap: 10px; padding: 8px 10px; border-bottom: 1px solid #20272d; background: #080b0d; }
+        .track:last-child { border-bottom: 0; }
+        .trackName { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+        .trackActions { justify-content: flex-end; }
         .error { color: #ff7b86; min-height: 20px; margin-top: 10px; }
-        @media (max-width: 720px) {
-            main { padding: 18px 14px; }
-            h1 { font-size: 20px; }
-            .panel { padding: 12px; }
-            .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-            .slider { grid-template-columns: 72px minmax(0, 1fr) 52px; }
-            .track { grid-template-columns: minmax(0, 1fr) 72px; }
+        @media (max-width: 850px) {
+            main { padding: 16px 12px; }
+            .players { grid-template-columns: 1fr; }
+            .track { grid-template-columns: minmax(0, 1fr) auto; }
             .track .secondary { display: none; }
         }
     </style>
@@ -43,30 +60,33 @@
 <body>
 <main>
     <h1>Lumi Pro DJ Link Simulator</h1>
-    <div class="subtle">Development-only USB player · remote control enabled</div>
+    <div class="subtle">Two USB-backed players · loops and unattended soak testing</div>
+
+    <section class="players" id="players"></section>
 
     <section class="panel">
+        <div class="autoMix">
+            <div>
+                <h2>Auto Mix</h2>
+                <div class="subtle" id="autoMixStatus">Load a track on both players to start a soak test.</div>
+            </div>
+            <div class="autoMixControls">
+                <label for="autoMixPlaylist" class="subtle">Playlist</label>
+                <select id="autoMixPlaylist"><option value="">Manually loaded tracks</option></select>
+                <label class="check"><input id="autoMixShuffle" type="checkbox" checked> Shuffle</label>
+                <label for="autoMixInterval" class="subtle">Switch every</label>
+                <input id="autoMixInterval" type="number" min="5" max="3600" value="30">
+                <span class="subtle">seconds</span>
+                <button class="primary" id="autoMixToggle">Start Auto Mix</button>
+            </div>
+        </div>
         <div class="grid">
-            <div class="metric"><span>Player</span><strong id="player">—</strong></div>
-            <div class="metric"><span>Transport</span><strong id="transport">—</strong></div>
-            <div class="metric"><span>Effective BPM</span><strong id="bpm">—</strong></div>
-            <div class="metric"><span>Beat</span><strong id="beat">—</strong></div>
             <div class="metric"><span>Traffic</span><strong id="traffic">—</strong></div>
             <div class="metric"><span>Precise packets</span><strong id="precisePackets">—</strong></div>
             <div class="metric"><span>Position bursts</span><strong id="bursts">—</strong></div>
             <div class="metric"><span>Peers</span><strong id="peers">—</strong></div>
         </div>
-        <div class="metric" style="margin-top: 10px"><span>Loaded track</span><strong id="loaded">No track loaded</strong></div>
-        <div class="controls">
-            <button class="primary" id="play">Play</button>
-            <button id="pause">Pause</button>
-            <button id="master">Master</button>
-            <button id="onAir">On Air</button>
-            <button id="burst">Trigger position burst</button>
-        </div>
-        <div class="slider"><label for="seek">Position</label><input id="seek" type="range" min="0" max="1" value="0"><output id="seekValue">0:00</output></div>
-        <div class="slider"><label for="pitch">Pitch</label><input id="pitch" type="range" min="-20" max="20" step="0.05" value="0"><output id="pitchValue">0.00%</output></div>
-        <div class="subtle" id="network" style="margin-top: 12px">Network: —</div>
+        <div class="subtle network" id="network">Network: —</div>
         <div class="error" id="error"></div>
     </section>
 
@@ -82,8 +102,9 @@
     history.replaceState({}, '', location.pathname);
     const el = id => document.getElementById(id);
     let current = null;
-    let seekDragging = false;
-    let pitchDragging = false;
+    let availablePlaylists = [];
+    const sliderInteractions = new Set();
+    const loopIn = new Map();
 
     async function api(path, options = {}) {
         const response = await fetch(path, {
@@ -95,50 +116,198 @@
         return body;
     }
     async function control(action, body = {}) {
-        try { current = await api(`/api/v1/control/${action}`, { method: 'POST', body: JSON.stringify(body) }); render(); el('error').textContent = ''; }
-        catch (error) { el('error').textContent = error.message; }
+        try {
+            current = await api(`/api/v1/control/${action}`, { method: 'POST', body: JSON.stringify(body) });
+            render();
+            el('error').textContent = '';
+        } catch (error) { el('error').textContent = error.message; }
     }
-    function time(ms) { const seconds = Math.floor(ms / 1000); return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`; }
+    function time(ms) {
+        const seconds = Math.max(0, Math.floor(ms / 1000));
+        return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`;
+    }
+    function playerCard(player) {
+        const number = player.playerNumber;
+        const card = document.createElement('article');
+        card.className = 'player';
+        card.dataset.playerCard = String(number);
+        card.innerHTML = `
+            <div class="playerHeader"><h2>Player ${number}</h2><span class="badge" data-field="state"></span></div>
+            <div class="grid">
+                <div class="metric"><span>Transport</span><strong data-field="transport"></strong></div>
+                <div class="metric"><span>Effective BPM</span><strong data-field="bpm"></strong></div>
+                <div class="metric"><span>Beat</span><strong data-field="beat"></strong></div>
+                <div class="metric"><span>Position</span><strong data-field="position"></strong></div>
+            </div>
+            <div class="trackTitle" data-field="track"></div>
+            <div class="controls">
+                <button data-action="play" class="primary">Play</button>
+                <button data-action="pause">Pause</button>
+                <button data-action="master">Master</button>
+                <button data-action="on-air">On Air</button>
+                <button data-action="burst">Position burst</button>
+            </div>
+            <div class="slider"><label>Position</label><input data-slider="seek" type="range" min="0" max="1" value="0"><output>0:00</output></div>
+            <div class="slider"><label>Pitch</label><input data-slider="pitch" type="range" min="-20" max="20" step="0.05" value="0"><output>0.00%</output></div>
+            <div class="controls">
+                <button data-action="loop-in">Loop In</button>
+                <button data-action="loop-out">Loop Out</button>
+                <button data-action="loop-off">Loop Off</button>
+            </div>
+            <div class="subtle loopStatus"></div>`;
+        card.querySelector('[data-action="play"]').onclick = () => control('play', { playerNumber: number });
+        card.querySelector('[data-action="pause"]').onclick = () => control('pause', { playerNumber: number });
+        card.querySelector('[data-action="master"]').onclick = () => control('master', { playerNumber: number, enabled: !playerNow(number).master });
+        card.querySelector('[data-action="on-air"]').onclick = () => control('on-air', { playerNumber: number, enabled: !playerNow(number).onAir });
+        card.querySelector('[data-action="burst"]').onclick = () => control('precise-burst', { playerNumber: number });
+        card.querySelector('[data-action="loop-in"]').onclick = () => { loopIn.set(number, playerNow(number).positionMillis); render(); };
+        card.querySelector('[data-action="loop-out"]').onclick = () => {
+            const start = loopIn.get(number);
+            if (start === undefined) { el('error').textContent = `Set Loop In on Player ${number} first.`; return; }
+            control('loop', { playerNumber: number, startMillis: start, endMillis: playerNow(number).positionMillis });
+        };
+        card.querySelector('[data-action="loop-off"]').onclick = () => control('loop-off', { playerNumber: number });
+        bindSlider(card, number, 'seek', 'positionMillis', value => time(value));
+        bindSlider(card, number, 'pitch', 'pitchPercent', value => `${value.toFixed(2)}%`);
+        updatePlayerCard(card, player);
+        return card;
+    }
+    function bindSlider(card, playerNumber, type, field, formatter) {
+        const slider = card.querySelector(`[data-slider="${type}"]`);
+        const output = slider.nextElementSibling;
+        const key = `${playerNumber}:${type}`;
+        slider.oninput = event => { sliderInteractions.add(key); output.textContent = formatter(Number(event.target.value)); };
+        slider.onchange = event => {
+            sliderInteractions.delete(key);
+            const action = type === 'seek' ? 'seek' : 'pitch';
+            control(action, { playerNumber, [field]: Number(event.target.value) });
+        };
+    }
+    function updatePlayerCard(card, player) {
+        card.classList.toggle('master', player.master);
+        const state = card.querySelector('[data-field="state"]');
+        state.textContent = player.master ? 'MASTER' : player.onAir ? 'ON AIR' : 'READY';
+        state.classList.toggle('live', player.master);
+        card.querySelector('[data-field="transport"]').textContent = player.playing ? 'PLAYING' : 'PAUSED';
+        card.querySelector('[data-field="bpm"]').textContent = player.track ? player.effectiveBpm.toFixed(2) : '—';
+        card.querySelector('[data-field="beat"]').textContent = player.beatNumber ? `${player.beatNumber} · ${player.beatWithinBar}/4` : '—';
+        card.querySelector('[data-field="position"]').textContent = time(player.positionMillis);
+        card.querySelector('[data-field="track"]').textContent = player.track ? `${player.track.artist} — ${player.track.title}` : 'No track loaded';
+        card.querySelector('[data-action="master"]').classList.toggle('active', player.master);
+        card.querySelector('[data-action="on-air"]').classList.toggle('active', player.onAir);
+        card.querySelector('[data-action="loop-off"]').classList.toggle('loopActive', player.loopEnabled);
+        card.querySelector('.loopStatus').textContent = loopText(player);
+        const seek = card.querySelector('[data-slider="seek"]');
+        if (!sliderInteractions.has(`${player.playerNumber}:seek`)) {
+            seek.max = player.track ? player.track.durationMillis : 1;
+            seek.value = player.positionMillis;
+            seek.nextElementSibling.textContent = time(player.positionMillis);
+        }
+        const pitch = card.querySelector('[data-slider="pitch"]');
+        if (!sliderInteractions.has(`${player.playerNumber}:pitch`)) {
+            pitch.value = player.pitchPercent;
+            pitch.nextElementSibling.textContent = `${player.pitchPercent.toFixed(2)}%`;
+        }
+    }
+    function loopText(player) {
+        if (player.loopEnabled) return `Loop ${time(player.loopStartMillis)} → ${time(player.loopEndMillis)} · ${player.loopWrapCount} wraps`;
+        if (loopIn.has(player.playerNumber)) return `Loop In marked at ${time(loopIn.get(player.playerNumber))}; move the player and press Loop Out.`;
+        return 'Set Loop In, move to the end point, then press Loop Out.';
+    }
+    function escapeText(value) {
+        const span = document.createElement('span'); span.textContent = value || ''; return span.innerHTML;
+    }
     function render() {
         if (!current) return;
-        el('player').textContent = `Deck ${current.playerNumber}`;
-        el('transport').textContent = current.playing ? 'PLAYING' : 'PAUSED';
-        el('bpm').textContent = current.track ? current.effectiveBpm.toFixed(2) : '—';
-        el('beat').textContent = current.beatNumber ? `${current.beatNumber} · ${current.beatWithinBar}/4` : '—';
+        players().forEach(player => {
+            let card = el('players').querySelector(`[data-player-card="${player.playerNumber}"]`);
+            if (!card) { card = playerCard(player); el('players').append(card); }
+            updatePlayerCard(card, player);
+        });
+        const mix = current.autoMix;
+        el('autoMixToggle').textContent = mix.enabled ? 'Stop Auto Mix' : 'Start Auto Mix';
+        el('autoMixToggle').classList.toggle('active', mix.enabled);
+        el('autoMixInterval').disabled = mix.enabled;
+        el('autoMixPlaylist').disabled = mix.enabled;
+        el('autoMixShuffle').disabled = mix.enabled || !el('autoMixPlaylist').value;
+        if (mix.enabled && mix.playlistId !== null) {
+            el('autoMixPlaylist').value = String(mix.playlistId);
+            el('autoMixShuffle').checked = mix.shuffle;
+        }
+        el('autoMixStatus').textContent = mix.enabled
+            ? `${mix.playlistPath ? `${mix.playlistPath} · ` : ''}Player ${mix.leaderPlayerNumber} is live · transition ${mix.transitionCount} · next switch in ${(mix.nextTransitionInMillis / 1000).toFixed(1)} s`
+            : autoMixReadyText();
         el('traffic').textContent = current.trafficProfile;
         el('precisePackets').textContent = current.precisePositionPacketCount.toLocaleString();
         el('bursts').textContent = current.preciseBurstCount.toLocaleString();
         el('peers').textContent = current.proLinkPeerCount;
-        el('loaded').textContent = current.track ? `${current.track.artist} — ${current.track.title}` : 'No track loaded';
-        el('master').classList.toggle('active', current.master);
-        el('onAir').classList.toggle('active', current.onAir);
-        if (!seekDragging) { el('seek').max = current.track ? current.track.durationMillis : 1; el('seek').value = current.positionMillis; el('seekValue').textContent = time(current.positionMillis); }
-        if (!pitchDragging) { el('pitch').value = current.pitchPercent; el('pitchValue').textContent = `${current.pitchPercent.toFixed(2)}%`; }
         el('network').textContent = `Network: ${current.networkInterface} · ${current.networkAddress} → ${current.broadcastAddress}`;
     }
-    async function refresh() { try { current = await api('/api/v1/status'); render(); el('error').textContent = ''; } catch (error) { el('error').textContent = error.message; } }
+    function players() {
+        if (Array.isArray(current?.players)) return current.players;
+        return current ? [current] : [];
+    }
+    function playerNow(number) {
+        return players().find(player => player.playerNumber === number);
+    }
+    async function refresh() {
+        try { current = await api('/api/v1/status'); render(); el('error').textContent = ''; }
+        catch (error) { el('error').textContent = error.message; }
+    }
     async function search() {
         try {
             const result = await api(`/api/v1/tracks?q=${encodeURIComponent(el('search').value)}&limit=200`);
             el('tracks').replaceChildren(...result.tracks.map(track => {
-                const button = document.createElement('button'); button.className = 'track';
-                for (const [text, className] of [[track.title, ''], [track.artist, 'secondary'], [track.bpm.toFixed(2), ''], [`ID ${track.trackId}`, 'secondary']]) {
-                    const span = document.createElement('span'); span.textContent = text; span.className = className; button.append(span);
-                }
-                button.onclick = () => control('load', { trackId: track.trackId }); return button;
+                const row = document.createElement('div'); row.className = 'track';
+                row.innerHTML = `<div class="trackName"><strong>${escapeText(track.title)}</strong><div class="subtle">${escapeText(track.artist)}</div></div><span class="secondary">${track.bpm.toFixed(2)} BPM</span><span class="secondary">ID ${track.trackId}</span><div class="trackActions"></div>`;
+                const actions = row.querySelector('.trackActions');
+                players().forEach(player => {
+                    const button = document.createElement('button');
+                    button.textContent = `Load P${player.playerNumber}`;
+                    button.onclick = () => control('load', { playerNumber: player.playerNumber, trackId: track.trackId });
+                    actions.append(button);
+                });
+                return row;
             }));
         } catch (error) { el('error').textContent = error.message; }
     }
-    el('play').onclick = () => control('play'); el('pause').onclick = () => control('pause');
-    el('master').onclick = () => control('master', { enabled: !current.master });
-    el('onAir').onclick = () => control('on-air', { enabled: !current.onAir });
-    el('burst').onclick = () => control('precise-burst');
-    el('seek').oninput = event => { seekDragging = true; el('seekValue').textContent = time(Number(event.target.value)); };
-    el('seek').onchange = event => { seekDragging = false; control('seek', { positionMillis: Number(event.target.value) }); };
-    el('pitch').oninput = event => { pitchDragging = true; el('pitchValue').textContent = `${Number(event.target.value).toFixed(2)}%`; };
-    el('pitch').onchange = event => { pitchDragging = false; control('pitch', { pitchPercent: Number(event.target.value) }); };
-    let searchTimer; el('search').oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(search, 160); };
-    refresh(); search(); setInterval(refresh, 200);
+    async function loadPlaylists() {
+        try {
+            const result = await api('/api/v1/playlists');
+            availablePlaylists = result.playlists;
+            const select = el('autoMixPlaylist');
+            const manual = select.firstElementChild;
+            select.replaceChildren(manual, ...availablePlaylists.map(playlist => {
+                const option = document.createElement('option');
+                option.value = String(playlist.playlistId);
+                option.textContent = `${playlist.path} (${playlist.trackCount})`;
+                option.disabled = playlist.trackCount < 2;
+                return option;
+            }));
+            render();
+        } catch (error) { el('error').textContent = error.message; }
+    }
+    function autoMixReadyText() {
+        const playlistId = Number(el('autoMixPlaylist').value);
+        const playlist = availablePlaylists.find(item => item.playlistId === playlistId);
+        return playlist
+            ? `Ready to cycle ${playlist.trackCount} tracks from ${playlist.path}.`
+            : 'Alternates both manually loaded players for unattended soak testing.';
+    }
+    el('autoMixToggle').onclick = () => control('auto-mix', {
+        enabled: !current.autoMix.enabled,
+        intervalSeconds: Number(el('autoMixInterval').value),
+        playlistId: el('autoMixPlaylist').value ? Number(el('autoMixPlaylist').value) : null,
+        shuffle: el('autoMixShuffle').checked
+    });
+    el('autoMixPlaylist').onchange = () => {
+        el('autoMixShuffle').disabled = !el('autoMixPlaylist').value;
+        render();
+    };
+    let searchTimer;
+    el('search').oninput = () => { clearTimeout(searchTimer); searchTimer = setTimeout(search, 160); };
+    refresh().then(() => Promise.all([search(), loadPlaylists()]));
+    setInterval(refresh, 200);
 </script>
 </body>
 </html>

@@ -131,6 +131,7 @@ final class EngineStatusModel: ObservableObject {
     private let lightPlanningDecoder = LightPlanningSnapshotDecoder()
     private var lifecycle: Lifecycle = .stopped
     private var monitoringTask: Task<Void, Never>?
+    private var engineRecoveryTask: Task<Void, Never>?
     private var remoteGatewayMonitoringTask: Task<Void, Never>?
     private var localAudioControllers: [UInt64: LocalDeckAudioController] = [:]
     private var pendingLocalTransports: [UInt64: LocalDeckTransportSnapshot] = [:]
@@ -746,6 +747,8 @@ final class EngineStatusModel: ObservableObject {
     func stop() async {
         monitoringTask?.cancel()
         monitoringTask = nil
+        engineRecoveryTask?.cancel()
+        engineRecoveryTask = nil
         remoteGatewayMonitoringTask?.cancel()
         remoteGatewayMonitoringTask = nil
         localTransportDrainTask?.cancel()
@@ -796,6 +799,7 @@ final class EngineStatusModel: ObservableObject {
         } else {
             await supervisor.stop()
         }
+        await remoteGatewaySupervisor.disconnect()
         lifecycle = .stopped
         latestSnapshot = nil
         lastLibraryRevision = nil
@@ -2920,9 +2924,28 @@ final class EngineStatusModel: ObservableObject {
         lifecycle = .disconnected
         workspaceState = LiveWorkspacePresenter.disconnected()
         libraryState = .failed("Reconnecting to the local Lumi engine…")
-        Task { [weak self] in
-            try? await Task.sleep(for: .milliseconds(100))
-            await self?.start()
+        engineRecoveryTask?.cancel()
+        engineRecoveryTask = Task { [weak self] in
+            let retryDelays: [Duration] = [
+                .milliseconds(100),
+                .milliseconds(500),
+                .seconds(1),
+                .seconds(2),
+                .seconds(5),
+            ]
+            for delay in retryDelays {
+                do {
+                    try await Task.sleep(for: delay)
+                } catch {
+                    return
+                }
+                guard let self, self.lifecycle != .stopped else { return }
+                await self.start()
+                if self.lifecycle == .ready {
+                    Self.logger.notice("Recovered the local Lumi engine session")
+                    return
+                }
+            }
         }
     }
 

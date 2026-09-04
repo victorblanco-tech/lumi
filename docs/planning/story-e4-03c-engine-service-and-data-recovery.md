@@ -137,3 +137,20 @@ login/crash restart and the one-hour physical-DMX evidence were still open.
 Still open for RC evidence: login-start approval behavior, the physical
 engine-kill/reconnect check on the final signed candidate, and the one-hour
 CDJ/SoundSwitch/DMX soak.
+
+## 0.6.1-dev-1 long-session reconnect correction
+
+- a 31-minute headed hardware session reproduced a desktop-engine reset while
+  both CDJ-1500X Players and the DJM-V5 remained discoverable;
+- the correlated macOS trace showed about 870 two-second Remote Gateway admin
+  connections followed by stalled new loopback connections and one reset
+  established engine socket;
+- Remote Gateway status now reuses one authenticated serialized admin
+  connection instead of continuously creating and cancelling TCP sockets;
+- transient engine connection, timeout and closed-socket failures receive
+  bounded retry, while authentication and protocol failures are never retried;
+- recovery after an established session failure repeats with bounded backoff
+  instead of remaining offline after one failed handover;
+- an unexpected authenticated partial-frame disconnect now takes the same
+  fail-safe Off path as a clean UI EOF and the persistent engine accepts the
+  next authenticated client.

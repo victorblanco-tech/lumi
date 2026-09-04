@@ -43,6 +43,7 @@ public actor EngineProcessSupervisor {
     private var commandSequence: UInt64 = 0
     private var exchangeInProgress = false
     private var exchangeWaiters: [CheckedContinuation<Void, Never>] = []
+    private let connectionRetryDelays: [Duration]
 
     private struct ServiceRecord: Codable {
         let endpoint: EngineEndpoint
@@ -67,6 +68,19 @@ public actor EngineProcessSupervisor {
     ) {
         self.transport = transport
         self.launchAgentPlistName = launchAgentPlistName
+        connectionRetryDelays = [.milliseconds(150), .milliseconds(400)]
+    }
+
+    init(
+        transport: any EngineTransport,
+        launchAgentPlistName: String?,
+        connectionRetryDelays: [Duration],
+        sessionTokenForTesting: String
+    ) {
+        self.transport = transport
+        self.launchAgentPlistName = launchAgentPlistName
+        self.connectionRetryDelays = connectionRetryDelays
+        sessionToken = sessionTokenForTesting
     }
 
     public func launch(
@@ -209,10 +223,37 @@ public actor EngineProcessSupervisor {
             throw EngineClientError.authenticationFailed
         }
 
-        try await transport.connect(to: endpoint)
-        let snapshot = try await transport.authenticate(sessionToken: sessionToken)
-        Self.logger.info("Authenticated local Lumi engine session")
-        return snapshot
+        for attempt in 0...connectionRetryDelays.count {
+            do {
+                try await transport.connect(to: endpoint)
+                let snapshot = try await transport.authenticate(sessionToken: sessionToken)
+                Self.logger.info("Authenticated local Lumi engine session")
+                return snapshot
+            } catch {
+                await transport.close()
+                guard attempt < connectionRetryDelays.count,
+                      Self.isTransientConnectionError(error) else {
+                    throw error
+                }
+                let nextAttempt = attempt + 2
+                Self.logger.notice(
+                    "Local engine connection was transiently unavailable; retrying attempt \(nextAttempt, privacy: .public)"
+                )
+                try await Task.sleep(for: connectionRetryDelays[attempt])
+            }
+        }
+
+        throw EngineClientError.connectionFailed
+    }
+
+    private static func isTransientConnectionError(_ error: any Error) -> Bool {
+        guard let clientError = error as? EngineClientError else { return false }
+        return switch clientError {
+        case .connectionFailed, .connectionTimedOut, .requestTimedOut, .connectionClosed:
+            true
+        default:
+            false
+        }
     }
 
     public func send(

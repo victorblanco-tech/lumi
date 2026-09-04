@@ -41,28 +41,64 @@ case "$command" in
       "$simulator_url/api/v1/tracks"
     echo
     ;;
+  playlists)
+    request_get '/api/v1/playlists'
+    ;;
   load)
-    request_post '/api/v1/control/load' "{\"trackId\":${2:?track ID required}}"
+    if [[ $# -ge 3 ]]; then player="${2:?player required}"; track_id="${3:?track ID required}"; else player=1; track_id="${2:?track ID required}"; fi
+    request_post '/api/v1/control/load' "{\"playerNumber\":$player,\"trackId\":$track_id}"
     ;;
   play|pause)
-    request_post "/api/v1/control/$command" '{}'
+    player="${2:-1}"
+    request_post "/api/v1/control/$command" "{\"playerNumber\":$player}"
     ;;
   seek)
-    request_post '/api/v1/control/seek' "{\"positionMillis\":${2:?position in milliseconds required}}"
+    if [[ $# -ge 3 ]]; then player="${2:?player required}"; position="${3:?position required}"; else player=1; position="${2:?position required}"; fi
+    request_post '/api/v1/control/seek' "{\"playerNumber\":$player,\"positionMillis\":$position}"
     ;;
   pitch)
-    request_post '/api/v1/control/pitch' "{\"pitchPercent\":${2:?pitch percentage required}}"
+    if [[ $# -ge 3 ]]; then player="${2:?player required}"; pitch="${3:?pitch required}"; else player=1; pitch="${2:?pitch required}"; fi
+    request_post '/api/v1/control/pitch' "{\"playerNumber\":$player,\"pitchPercent\":$pitch}"
     ;;
   master|on-air)
-    case "${2:-}" in
+    if [[ $# -ge 3 ]]; then player="${2:?player required}"; toggle="${3:-}"; else player=1; toggle="${2:-}"; fi
+    case "$toggle" in
       on) enabled=true ;;
       off) enabled=false ;;
       *) echo "ERROR: $command expects on or off." >&2; exit 1 ;;
     esac
-    request_post "/api/v1/control/$command" "{\"enabled\":$enabled}"
+    request_post "/api/v1/control/$command" "{\"playerNumber\":$player,\"enabled\":$enabled}"
+    ;;
+  loop)
+    request_post '/api/v1/control/loop' "{\"playerNumber\":${2:?player required},\"startMillis\":${3:?start required},\"endMillis\":${4:?end required}}"
+    ;;
+  loop-off|precise-burst)
+    player="${2:-1}"
+    request_post "/api/v1/control/$command" "{\"playerNumber\":$player}"
+    ;;
+  auto-mix)
+    case "${2:-}" in
+      on)
+        interval="${3:-30}"
+        playlist_id="${4:-}"
+        order="${5:-shuffle}"
+        if [[ -n "$playlist_id" ]]; then
+          case "$order" in
+            shuffle) shuffle=true ;;
+            ordered) shuffle=false ;;
+            *) echo "ERROR: playlist Auto Mix order expects shuffle or ordered." >&2; exit 1 ;;
+          esac
+          request_post '/api/v1/control/auto-mix' "{\"enabled\":true,\"intervalSeconds\":$interval,\"playlistId\":$playlist_id,\"shuffle\":$shuffle}"
+        else
+          request_post '/api/v1/control/auto-mix' "{\"enabled\":true,\"intervalSeconds\":$interval}"
+        fi
+        ;;
+      off) request_post '/api/v1/control/auto-mix' "{\"enabled\":false,\"intervalSeconds\":${3:-30}}" ;;
+      *) echo "ERROR: auto-mix expects on or off." >&2; exit 1 ;;
+    esac
     ;;
   *)
-    echo "Usage: $0 {status|tracks [query]|load ID|play|pause|seek MS|pitch PERCENT|master on|off|on-air on|off}" >&2
+    echo "Usage: $0 {status|tracks [query]|playlists|load [PLAYER] ID|play [PLAYER]|pause [PLAYER]|seek [PLAYER] MS|pitch [PLAYER] PERCENT|master [PLAYER] on|off|on-air [PLAYER] on|off|loop PLAYER START_MS END_MS|loop-off [PLAYER]|precise-burst [PLAYER]|auto-mix on|off [SECONDS] [PLAYLIST_ID] [shuffle|ordered]}" >&2
     exit 2
     ;;
 esac

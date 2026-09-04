@@ -29,8 +29,10 @@ public final class SimulatorMain {
         }));
 
         System.out.println("Lumi Pro DJ Link Simulator is ready");
-        System.out.println("USB: " + session.library().root() + " (" + session.library().size() + " tracks)");
-        System.out.println("Player: " + config.playerNumber());
+        System.out.println("USB: " + session.library().root() + " ("
+                + session.library().size() + " tracks, "
+                + session.library().playlistCount() + " playlists)");
+        System.out.println("Players: " + config.playerNumber() + " and " + config.secondPlayerNumber());
         System.out.println("Network: " + session.networkSummary());
         System.out.println("Remote control: " + session.remoteUrl());
         System.out.println("API token: " + config.controlToken());

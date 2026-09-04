@@ -159,7 +159,8 @@ public final class SimulatorAppMain {
 
         private final JFrame frame = new JFrame(APP_NAME);
         private final JComboBox<Path> usbVolumes = new JComboBox<>();
-        private final JSpinner playerNumber = new JSpinner(new SpinnerNumberModel(1, 1, 4, 1));
+        private final JSpinner firstPlayerNumber = new JSpinner(new SpinnerNumberModel(1, 1, 4, 1));
+        private final JSpinner secondPlayerNumber = new JSpinner(new SpinnerNumberModel(2, 1, 4, 1));
         private final JCheckBox autoStart = new JCheckBox("Start automatically when a Rekordbox USB is found", true);
         private final JButton startStop = new JButton("Start simulator");
         private final JButton refresh = new JButton("Refresh USBs");
@@ -215,7 +216,7 @@ public final class SimulatorAppMain {
             title.setFont(title.getFont().deriveFont(Font.BOLD, 24f));
             title.setAlignmentX(0f);
             root.add(title);
-            JLabel subtitle = new JLabel("USB-backed development deck for Lumi");
+            JLabel subtitle = new JLabel("Two USB-backed development players for Lumi");
             subtitle.setForeground(MUTED);
             subtitle.setAlignmentX(0f);
             root.add(subtitle);
@@ -223,7 +224,11 @@ public final class SimulatorAppMain {
 
             root.add(row("Rekordbox USB", usbVolumes, refresh));
             root.add(Box.createVerticalStrut(10));
-            root.add(row("Player number", playerNumber));
+            root.add(row(
+                    "Player numbers",
+                    new JLabel("First"), firstPlayerNumber,
+                    new JLabel("Second"), secondPlayerNumber
+            ));
             root.add(Box.createVerticalStrut(12));
             autoStart.setAlignmentX(0f);
             root.add(autoStart);
@@ -352,21 +357,27 @@ public final class SimulatorAppMain {
             setControlsEnabled(false);
             status.setText("Starting simulator…");
             detail.setText("Reading the Rekordbox USB and joining the local Pro DJ Link network.");
-            int player = (Integer) playerNumber.getValue();
+            int firstPlayer = (Integer) firstPlayerNumber.getValue();
+            int secondPlayer = (Integer) secondPlayerNumber.getValue();
             Thread.startVirtualThread(() -> {
                 try {
                     SimulatorConfig config = SimulatorConfig.parse(new String[]{
-                            "--usb", usb.toString(), "--player", Integer.toString(player)
+                            "--usb", usb.toString(),
+                            "--player", Integer.toString(firstPlayer),
+                            "--second-player", Integer.toString(secondPlayer)
                     });
                     SimulatorSession started = SimulatorSession.start(config);
                     appendLog("Simulator session started for " + usb + " with "
-                            + started.library().size() + " tracks", null);
+                            + started.library().size() + " tracks and "
+                            + started.library().playlistCount() + " playlists", null);
                     session = started;
                     SwingUtilities.invokeLater(() -> {
                         busy = false;
                         status.setForeground(READY);
-                        status.setText("Simulator running · Deck " + player);
-                        detail.setText(started.library().size() + " tracks · " + started.networkSummary());
+                        status.setText("Simulator running · Players " + firstPlayer + " & " + secondPlayer);
+                        detail.setText(started.library().size() + " tracks · "
+                                + started.library().playlistCount() + " playlists · "
+                                + started.networkSummary());
                         remoteUrl.setText(started.remoteUrl());
                         remoteUrl.setVisible(true);
                         copyUrl.setVisible(true);
@@ -407,7 +418,8 @@ public final class SimulatorAppMain {
 
         private void setControlsEnabled(boolean enabled) {
             usbVolumes.setEnabled(enabled);
-            playerNumber.setEnabled(enabled);
+            firstPlayerNumber.setEnabled(enabled);
+            secondPlayerNumber.setEnabled(enabled);
             refresh.setEnabled(enabled);
             autoStart.setEnabled(enabled);
             startStop.setEnabled(enabled);
@@ -420,7 +432,8 @@ public final class SimulatorAppMain {
         }
 
         private void applySettings() {
-            playerNumber.setValue(Integer.parseInt(settings.getProperty("playerNumber", "1")));
+            firstPlayerNumber.setValue(Integer.parseInt(settings.getProperty("playerNumber", "1")));
+            secondPlayerNumber.setValue(Integer.parseInt(settings.getProperty("secondPlayerNumber", "2")));
             autoStart.setSelected(Boolean.parseBoolean(settings.getProperty("autoStart", "true")));
         }
 
@@ -441,7 +454,8 @@ public final class SimulatorAppMain {
                 if (usb != null) {
                     settings.setProperty("usbRoot", usb.toString());
                 }
-                settings.setProperty("playerNumber", playerNumber.getValue().toString());
+                settings.setProperty("playerNumber", firstPlayerNumber.getValue().toString());
+                settings.setProperty("secondPlayerNumber", secondPlayerNumber.getValue().toString());
                 settings.setProperty("autoStart", Boolean.toString(autoStart.isSelected()));
                 try (var output = Files.newOutputStream(SETTINGS_FILE)) {
                     settings.store(output, APP_NAME);
