@@ -69,6 +69,14 @@ final class UsbLibrary {
         return new UsbLibrary(root, tracks);
     }
 
+    static UsbLibrary forTesting(Path root, List<Track> sourceTracks) {
+        java.util.HashMap<Integer, Track> indexed = new java.util.HashMap<>();
+        for (Track track : sourceTracks) {
+            indexed.put(track.id(), track);
+        }
+        return new UsbLibrary(root, indexed);
+    }
+
     Path root() {
         return root;
     }

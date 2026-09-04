@@ -24,23 +24,28 @@ final class RemoteControlServer implements AutoCloseable {
     private static final ObjectMapper JSON = new ObjectMapper();
 
     private final UsbLibrary library;
-    private final PlayerState state;
-    private final ProLinkBroadcaster broadcaster;
+    private final List<PlayerState> players;
+    private final AutoMixController autoMix;
+    private final SimulatorTransport broadcaster;
+    private final SimulatorControls controls;
     private final String token;
     private final HttpServer server;
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
 
     RemoteControlServer(
             UsbLibrary library,
-            PlayerState state,
-            ProLinkBroadcaster broadcaster,
+            List<PlayerState> players,
+            AutoMixController autoMix,
+            SimulatorTransport broadcaster,
             String bindAddress,
             int port,
             String token
     ) throws IOException {
         this.library = library;
-        this.state = state;
+        this.players = List.copyOf(players);
+        this.autoMix = autoMix;
         this.broadcaster = broadcaster;
+        this.controls = new SimulatorControls(library, players, autoMix, broadcaster);
         this.token = token;
         server = HttpServer.create(new InetSocketAddress(InetAddress.getByName(bindAddress), port), 0);
         server.setExecutor(executor);
@@ -66,7 +71,7 @@ final class RemoteControlServer implements AutoCloseable {
         sendJson(exchange, 200, Map.of(
                 "status", "ready",
                 "service", "lumi-prolink-simulator",
-                "version", "0.4.0-dev-54"
+                "version", "0.4.0-dev-55"
         ));
     }
 
@@ -100,22 +105,10 @@ final class RemoteControlServer implements AutoCloseable {
         }
         String action = path.substring(prefix.length());
         try {
-            JsonNode body = readBody(exchange);
-            switch (action) {
-                case "load" -> state.load(library.requireTrack(requiredInt(body, "trackId")));
-                case "play" -> state.play();
-                case "pause" -> state.pause();
-                case "seek" -> state.seek(requiredLong(body, "positionMillis"));
-                case "pitch" -> state.setPitchPercent(requiredDouble(body, "pitchPercent"));
-                case "master" -> state.setMaster(requiredBoolean(body, "enabled"));
-                case "on-air" -> state.setOnAir(requiredBoolean(body, "enabled"));
-                case "precise-burst" -> broadcaster.triggerPreciseBurst();
-                default -> {
-                    sendError(exchange, 404, "Unknown control action: " + action);
-                    return;
-                }
-            }
+            controls.apply(action, readBody(exchange));
             sendJson(exchange, 200, statusPayload());
+        } catch (SimulatorControls.UnknownActionException failure) {
+            sendError(exchange, 404, failure.getMessage());
         } catch (IllegalArgumentException | IllegalStateException failure) {
             sendError(exchange, 400, failure.getMessage());
         }
@@ -145,9 +138,13 @@ final class RemoteControlServer implements AutoCloseable {
     }
 
     private Map<String, Object> statusPayload() {
-        PlayerState.Snapshot snapshot = state.snapshot();
+        PlayerState.Snapshot snapshot = players.getFirst().snapshot();
         LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
         payload.put("service", "lumi-prolink-simulator");
+        payload.put("players", players.stream().map(PlayerState::snapshot).map(this::playerPayload).toList());
+        payload.put("autoMix", autoMix.status());
+        // Keep the original single-player fields for scripts made for older
+        // simulator builds. New clients should consume the players array.
         payload.put("playerNumber", snapshot.playerNumber());
         payload.put("playing", snapshot.playing());
         payload.put("master", snapshot.master());
@@ -180,6 +177,26 @@ final class RemoteControlServer implements AutoCloseable {
         } else {
             payload.put("track", UsbLibrary.TrackSummary.from(snapshot.track()));
         }
+        return payload;
+    }
+
+    private LinkedHashMap<String, Object> playerPayload(PlayerState.Snapshot snapshot) {
+        LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
+        payload.put("playerNumber", snapshot.playerNumber());
+        payload.put("playing", snapshot.playing());
+        payload.put("master", snapshot.master());
+        payload.put("onAir", snapshot.onAir());
+        payload.put("pitchPercent", snapshot.pitchPercent());
+        payload.put("effectiveBpm", snapshot.effectiveBpm());
+        payload.put("positionMillis", snapshot.positionMillis());
+        payload.put("beatNumber", snapshot.beatNumber());
+        payload.put("beatWithinBar", snapshot.beatWithinBar());
+        payload.put("revision", snapshot.revision());
+        payload.put("loopEnabled", snapshot.loopEnabled());
+        payload.put("loopStartMillis", snapshot.loopStartMillis());
+        payload.put("loopEndMillis", snapshot.loopEndMillis());
+        payload.put("loopWrapCount", snapshot.loopWrapCount());
+        payload.put("track", snapshot.track() == null ? null : UsbLibrary.TrackSummary.from(snapshot.track()));
         return payload;
     }
 
@@ -216,38 +233,6 @@ final class RemoteControlServer implements AutoCloseable {
             return JSON.createObjectNode();
         }
         return JSON.readTree(bytes);
-    }
-
-    private static int requiredInt(JsonNode body, String field) {
-        JsonNode value = body.get(field);
-        if (value == null || !value.canConvertToInt()) {
-            throw new IllegalArgumentException(field + " must be an integer");
-        }
-        return value.intValue();
-    }
-
-    private static long requiredLong(JsonNode body, String field) {
-        JsonNode value = body.get(field);
-        if (value == null || !value.canConvertToLong()) {
-            throw new IllegalArgumentException(field + " must be an integer");
-        }
-        return value.longValue();
-    }
-
-    private static double requiredDouble(JsonNode body, String field) {
-        JsonNode value = body.get(field);
-        if (value == null || !value.isNumber()) {
-            throw new IllegalArgumentException(field + " must be a number");
-        }
-        return value.doubleValue();
-    }
-
-    private static boolean requiredBoolean(JsonNode body, String field) {
-        JsonNode value = body.get(field);
-        if (value == null || !value.isBoolean()) {
-            throw new IllegalArgumentException(field + " must be a boolean");
-        }
-        return value.booleanValue();
     }
 
     private static boolean method(HttpExchange exchange, String expected) throws IOException {
@@ -306,4 +291,5 @@ final class RemoteControlServer implements AutoCloseable {
     @FunctionalInterface
     private interface Handler extends HttpHandler {
     }
+
 }

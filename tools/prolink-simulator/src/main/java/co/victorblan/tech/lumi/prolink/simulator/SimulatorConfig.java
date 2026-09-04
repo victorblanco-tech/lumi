@@ -8,6 +8,7 @@ record SimulatorConfig(
         Path usbRoot,
         String networkInterface,
         int playerNumber,
+        int secondPlayerNumber,
         String bindAddress,
         int controlPort,
         String controlToken,
@@ -19,6 +20,7 @@ record SimulatorConfig(
         Path usbRoot = null;
         String networkInterface = null;
         int playerNumber = 1;
+        int secondPlayerNumber = 2;
         String bindAddress = "0.0.0.0";
         int controlPort = DEFAULT_CONTROL_PORT;
         String controlToken = System.getenv("LUMI_SIM_TOKEN");
@@ -30,6 +32,9 @@ record SimulatorConfig(
                 case "--usb" -> usbRoot = Path.of(requiredValue(arguments, ++index, argument));
                 case "--interface" -> networkInterface = requiredValue(arguments, ++index, argument);
                 case "--player" -> playerNumber = Integer.parseInt(requiredValue(arguments, ++index, argument));
+                case "--second-player" -> secondPlayerNumber = Integer.parseInt(
+                        requiredValue(arguments, ++index, argument)
+                );
                 case "--bind" -> bindAddress = requiredValue(arguments, ++index, argument);
                 case "--port" -> controlPort = Integer.parseInt(requiredValue(arguments, ++index, argument));
                 case "--token" -> controlToken = requiredValue(arguments, ++index, argument);
@@ -47,6 +52,12 @@ record SimulatorConfig(
         if (playerNumber < 1 || playerNumber > 4) {
             throw new IllegalArgumentException("--player must be between 1 and 4");
         }
+        if (secondPlayerNumber < 1 || secondPlayerNumber > 4) {
+            throw new IllegalArgumentException("--second-player must be between 1 and 4");
+        }
+        if (secondPlayerNumber == playerNumber) {
+            throw new IllegalArgumentException("--player and --second-player must be different");
+        }
         if (controlPort < 1 || controlPort > 65_535) {
             throw new IllegalArgumentException("--port must be between 1 and 65535");
         }
@@ -57,7 +68,7 @@ record SimulatorConfig(
             throw new IllegalArgumentException("Control token must contain at least 16 characters");
         }
         return new SimulatorConfig(
-                usbRoot.toAbsolutePath().normalize(), networkInterface, playerNumber,
+                usbRoot.toAbsolutePath().normalize(), networkInterface, playerNumber, secondPlayerNumber,
                 bindAddress, controlPort, controlToken, trafficProfile
         );
     }
@@ -71,7 +82,8 @@ record SimulatorConfig(
 
                 Options:
                   --interface en0     Network interface used for Pro DJ Link broadcasts
-                  --player 1          Simulated player number (1-4, default 1)
+                  --player 1          First simulated player number (1-4, default 1)
+                  --second-player 2   Second simulated player number (1-4, default 2)
                   --bind 0.0.0.0      Remote control bind address
                   --port 17840        Remote control HTTP port
                   --token VALUE       Remote control token (or LUMI_SIM_TOKEN)

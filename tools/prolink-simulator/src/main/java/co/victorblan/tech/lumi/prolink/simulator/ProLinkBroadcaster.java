@@ -22,14 +22,14 @@ import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.atomic.AtomicLong;
 import java.util.concurrent.atomic.AtomicReference;
 
-final class ProLinkBroadcaster implements AutoCloseable {
+final class ProLinkBroadcaster implements AutoCloseable, SimulatorTransport {
     private static final int ANNOUNCEMENT_PORT = 50_000;
     private static final int BEAT_PORT = 50_001;
     private static final int STATUS_PORT = 50_002;
-    private static final String DEVICE_NAME = "LUMI-SIM";
+    private static final String DEVICE_NAME_PREFIX = "LUMI-SIM-";
     private static final long PEER_LEASE_NANOS = TimeUnit.SECONDS.toNanos(6);
 
-    private final PlayerState state;
+    private final List<PlayerState> states;
     private final ProLinkTrafficProfile trafficProfile;
     private final Endpoint endpoint;
     private final DatagramSocket socket;
@@ -41,23 +41,29 @@ final class ProLinkBroadcaster implements AutoCloseable {
     );
     private final AtomicInteger packetCounter = new AtomicInteger();
     private final AtomicBoolean running = new AtomicBoolean();
+    private final AtomicBoolean closed = new AtomicBoolean();
     private final AtomicLong announcementPacketCount = new AtomicLong();
     private final AtomicLong statusPacketCount = new AtomicLong();
     private final AtomicLong beatPacketCount = new AtomicLong();
     private final AtomicLong precisePositionPacketCount = new AtomicLong();
     private final AtomicLong preciseBurstCount = new AtomicLong();
     private final AtomicReference<String> lastTrafficError = new AtomicReference<>();
-    private volatile int lastBeatIndex = Integer.MIN_VALUE;
-    private volatile long lastRevision = Long.MIN_VALUE;
-    private volatile boolean lastPlaying;
+    private final int[] lastBeatIndex = new int[5];
+    private final long[] lastRevision = new long[5];
+    private final boolean[] lastPlaying = new boolean[5];
 
     ProLinkBroadcaster(
-            PlayerState state,
+            List<PlayerState> states,
             String requestedInterface,
             ProLinkTrafficProfile trafficProfile
     ) throws IOException {
-        this.state = Objects.requireNonNull(state, "state");
+        this.states = List.copyOf(Objects.requireNonNull(states, "states"));
+        if (this.states.isEmpty()) {
+            throw new IllegalArgumentException("At least one simulated player is required");
+        }
         this.trafficProfile = Objects.requireNonNull(trafficProfile, "trafficProfile");
+        java.util.Arrays.fill(lastBeatIndex, Integer.MIN_VALUE);
+        java.util.Arrays.fill(lastRevision, Long.MIN_VALUE);
         this.endpoint = selectEndpoint(requestedInterface);
         this.socket = new DatagramSocket(new InetSocketAddress(endpoint.localAddress(), 0));
         socket.setBroadcast(true);
@@ -72,6 +78,9 @@ final class ProLinkBroadcaster implements AutoCloseable {
     }
 
     void start() {
+        if (closed.get()) {
+            throw new IllegalStateException("The Pro DJ Link broadcaster is already closed");
+        }
         if (!running.compareAndSet(false, true)) {
             return;
         }
@@ -102,18 +111,23 @@ final class ProLinkBroadcaster implements AutoCloseable {
         }
     }
 
-    Endpoint endpoint() {
+    @Override
+    public Endpoint endpoint() {
         return endpoint;
     }
 
     private void sendAnnouncementSafely() {
         try {
-            DatagramPacket packet = ProLinkPackets.announcement(
-                    DEVICE_NAME, state.snapshot().playerNumber(), endpoint.hardwareAddress(),
-                    endpoint.localAddress(), 2
-            );
-            send(packet, ANNOUNCEMENT_PORT);
-            announcementPacketCount.incrementAndGet();
+            for (PlayerState state : states) {
+                PlayerState.Snapshot snapshot = state.snapshot();
+                DatagramPacket packet = ProLinkPackets.announcement(
+                        deviceName(snapshot.playerNumber()), snapshot.playerNumber(),
+                        hardwareAddress(snapshot.playerNumber()), endpoint.localAddress(),
+                        states.size() + peers.size(System.nanoTime())
+                );
+                send(packet, ANNOUNCEMENT_PORT);
+                announcementPacketCount.incrementAndGet();
+            }
         } catch (Exception failure) {
             report("announcement", failure);
         }
@@ -121,12 +135,15 @@ final class ProLinkBroadcaster implements AutoCloseable {
 
     private void sendStatusSafely() {
         try {
-            DatagramPacket packet = ProLinkPackets.status(
-                    DEVICE_NAME, state.snapshot(), packetCounter.incrementAndGet()
-            );
-            send(packet, STATUS_PORT);
-            sendStatusToPeers(packet);
-            statusPacketCount.incrementAndGet();
+            for (PlayerState state : states) {
+                PlayerState.Snapshot snapshot = state.snapshot();
+                DatagramPacket packet = ProLinkPackets.status(
+                        deviceName(snapshot.playerNumber()), snapshot, packetCounter.incrementAndGet()
+                );
+                send(packet, STATUS_PORT);
+                sendStatusToPeers(packet);
+                statusPacketCount.incrementAndGet();
+            }
         } catch (Exception failure) {
             report("status", failure);
         }
@@ -134,20 +151,23 @@ final class ProLinkBroadcaster implements AutoCloseable {
 
     private void sendBeatWhenDueSafely() {
         try {
-            PlayerState.Snapshot snapshot = state.snapshot();
-            if (snapshot.revision() != lastRevision) {
-                lastRevision = snapshot.revision();
-                lastBeatIndex = snapshot.beatIndex();
-            }
-            if (!snapshot.playing() || snapshot.beatIndex() < 0) {
-                lastPlaying = false;
-                return;
-            }
-            if (!lastPlaying || snapshot.beatIndex() != lastBeatIndex) {
-                lastPlaying = true;
-                lastBeatIndex = snapshot.beatIndex();
-                send(ProLinkPackets.beat(DEVICE_NAME, snapshot), BEAT_PORT);
-                beatPacketCount.incrementAndGet();
+            for (PlayerState state : states) {
+                PlayerState.Snapshot snapshot = state.snapshot();
+                int player = snapshot.playerNumber();
+                if (snapshot.revision() != lastRevision[player]) {
+                    lastRevision[player] = snapshot.revision();
+                    lastBeatIndex[player] = snapshot.beatIndex();
+                }
+                if (!snapshot.playing() || snapshot.beatIndex() < 0) {
+                    lastPlaying[player] = false;
+                    continue;
+                }
+                if (!lastPlaying[player] || snapshot.beatIndex() != lastBeatIndex[player]) {
+                    lastPlaying[player] = true;
+                    lastBeatIndex[player] = snapshot.beatIndex();
+                    send(ProLinkPackets.beat(deviceName(player), snapshot), BEAT_PORT);
+                    beatPacketCount.incrementAndGet();
+                }
             }
         } catch (Exception failure) {
             report("beat", failure);
@@ -156,17 +176,19 @@ final class ProLinkBroadcaster implements AutoCloseable {
 
     private void sendPrecisePositionSafely() {
         try {
-            PlayerState.Snapshot snapshot = state.snapshot();
-            if (snapshot.track() == null) {
-                return;
+            for (PlayerState state : states) {
+                PlayerState.Snapshot snapshot = state.snapshot();
+                if (snapshot.track() == null) {
+                    continue;
+                }
+                send(
+                        ProLinkPackets.precisePosition(
+                                deviceName(snapshot.playerNumber()), snapshot, snapshot.positionMillis()
+                        ),
+                        BEAT_PORT
+                );
+                precisePositionPacketCount.incrementAndGet();
             }
-            send(
-                    ProLinkPackets.precisePosition(
-                            DEVICE_NAME, snapshot, snapshot.positionMillis()
-                    ),
-                    BEAT_PORT
-            );
-            precisePositionPacketCount.incrementAndGet();
         } catch (Exception failure) {
             report("precise position", failure);
         }
@@ -174,46 +196,62 @@ final class ProLinkBroadcaster implements AutoCloseable {
 
     private void sendPreciseBurstSafely() {
         try {
-            PlayerState.Snapshot snapshot = state.snapshot();
-            if (snapshot.track() == null || !snapshot.playing()) {
-                return;
+            for (PlayerState state : states) {
+                sendPreciseBurst(state);
             }
-            long millisPerBeat = Math.max(
-                    1L,
-                    Math.round(60_000.0 / Math.max(1.0, snapshot.effectiveBpm()))
-            );
-            long rewindMillis = millisPerBeat * trafficProfile.burstRewindBeats();
-            long stalePosition = Math.max(0L, snapshot.positionMillis() - rewindMillis);
-            for (int index = 0; index < trafficProfile.burstPacketCount(); index++) {
-                long position = Math.min(
-                        snapshot.positionMillis(),
-                        stalePosition + index * trafficProfile.precisePositionIntervalMillis()
-                );
-                send(ProLinkPackets.precisePosition(DEVICE_NAME, snapshot, position), BEAT_PORT);
-                precisePositionPacketCount.incrementAndGet();
-            }
-            // End every burst with a current observation so consumers which
-            // correctly keep only the latest value recover immediately.
-            send(
-                    ProLinkPackets.precisePosition(
-                            DEVICE_NAME, snapshot, snapshot.positionMillis()
-                    ),
-                    BEAT_PORT
-            );
-            precisePositionPacketCount.incrementAndGet();
-            preciseBurstCount.incrementAndGet();
         } catch (Exception failure) {
             report("precise position burst", failure);
         }
     }
 
-    void triggerPreciseBurst() {
+    @Override
+    public void triggerPreciseBurst(int playerNumber) {
         if (!trafficProfile.publishesBursts()) {
             throw new IllegalStateException(
                     "The " + trafficProfile.externalName() + " profile does not publish position bursts"
             );
         }
-        scheduler.execute(this::sendPreciseBurstSafely);
+        PlayerState state = states.stream()
+                .filter(candidate -> candidate.snapshot().playerNumber() == playerNumber)
+                .findFirst()
+                .orElseThrow(() -> new IllegalArgumentException("Unknown player number " + playerNumber));
+        scheduler.execute(() -> {
+            try {
+                sendPreciseBurst(state);
+            } catch (Exception failure) {
+                report("precise position burst", failure);
+            }
+        });
+    }
+
+    private void sendPreciseBurst(PlayerState state) throws IOException {
+        PlayerState.Snapshot snapshot = state.snapshot();
+        if (snapshot.track() == null || !snapshot.playing()) {
+            return;
+        }
+        long millisPerBeat = Math.max(
+                1L,
+                Math.round(60_000.0 / Math.max(1.0, snapshot.effectiveBpm()))
+        );
+        long rewindMillis = millisPerBeat * trafficProfile.burstRewindBeats();
+        long stalePosition = Math.max(0L, snapshot.positionMillis() - rewindMillis);
+        String deviceName = deviceName(snapshot.playerNumber());
+        for (int index = 0; index < trafficProfile.burstPacketCount(); index++) {
+            long position = Math.min(
+                    snapshot.positionMillis(),
+                    stalePosition + index * trafficProfile.precisePositionIntervalMillis()
+            );
+            send(ProLinkPackets.precisePosition(deviceName, snapshot, position), BEAT_PORT);
+            precisePositionPacketCount.incrementAndGet();
+        }
+        // End every burst with a current observation so consumers which
+        // correctly keep only the latest value recover immediately.
+        send(
+                ProLinkPackets.precisePosition(deviceName, snapshot, snapshot.positionMillis()),
+                BEAT_PORT
+        );
+        precisePositionPacketCount.incrementAndGet();
+        preciseBurstCount.incrementAndGet();
     }
 
     private void send(DatagramPacket packet, int port) throws IOException {
@@ -251,11 +289,13 @@ final class ProLinkBroadcaster implements AutoCloseable {
         }
     }
 
-    int peerCount() {
+    @Override
+    public int peerCount() {
         return peers.size(System.nanoTime());
     }
 
-    TrafficDiagnostics trafficDiagnostics() {
+    @Override
+    public TrafficDiagnostics trafficDiagnostics() {
         return new TrafficDiagnostics(
                 trafficProfile.externalName(),
                 trafficProfile.statusIntervalMillis(),
@@ -311,11 +351,22 @@ final class ProLinkBroadcaster implements AutoCloseable {
         System.err.println("Pro DJ Link simulator could not send " + packetType + ": " + failure.getMessage());
     }
 
+    private String deviceName(int playerNumber) {
+        return DEVICE_NAME_PREFIX + playerNumber;
+    }
+
+    private byte[] hardwareAddress(int playerNumber) {
+        byte[] address = endpoint.hardwareAddress();
+        address[address.length - 1] = (byte) (address[address.length - 1] ^ playerNumber);
+        return address;
+    }
+
     @Override
     public void close() {
-        if (!running.getAndSet(false)) {
+        if (!closed.compareAndSet(false, true)) {
             return;
         }
+        running.set(false);
         scheduler.shutdownNow();
         announcementSocket.close();
         socket.close();

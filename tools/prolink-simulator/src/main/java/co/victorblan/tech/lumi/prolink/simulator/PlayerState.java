@@ -1,20 +1,32 @@
 package co.victorblan.tech.lumi.prolink.simulator;
 
 import java.util.Objects;
+import java.util.function.LongSupplier;
 
 final class PlayerState {
     private final int playerNumber;
+    private final LongSupplier nanoTime;
     private UsbLibrary.Track track;
     private boolean playing;
     private boolean master;
     private boolean onAir;
     private double pitchPercent;
     private double anchoredPositionMillis;
-    private long anchorNanos = System.nanoTime();
+    private long anchorNanos;
+    private boolean loopEnabled;
+    private long loopStartMillis;
+    private long loopEndMillis;
+    private long loopWrapCount;
     private long revision;
 
     PlayerState(int playerNumber) {
+        this(playerNumber, System::nanoTime);
+    }
+
+    PlayerState(int playerNumber, LongSupplier nanoTime) {
         this.playerNumber = playerNumber;
+        this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
+        anchorNanos = nanoTime.getAsLong();
     }
 
     synchronized void load(UsbLibrary.Track nextTrack) {
@@ -22,7 +34,11 @@ final class PlayerState {
         playing = false;
         pitchPercent = 0.0;
         anchoredPositionMillis = 0.0;
-        anchorNanos = System.nanoTime();
+        anchorNanos = nanoTime.getAsLong();
+        loopEnabled = false;
+        loopStartMillis = 0;
+        loopEndMillis = 0;
+        loopWrapCount = 0;
         revision++;
     }
 
@@ -34,7 +50,7 @@ final class PlayerState {
         }
         if (!playing) {
             playing = true;
-            anchorNanos = System.nanoTime();
+            anchorNanos = nanoTime.getAsLong();
             revision++;
         }
     }
@@ -50,7 +66,7 @@ final class PlayerState {
     synchronized void seek(long positionMillis) {
         requireTrack();
         anchoredPositionMillis = Math.max(0L, Math.min(positionMillis, track.durationMillis()));
-        anchorNanos = System.nanoTime();
+        anchorNanos = nanoTime.getAsLong();
         revision++;
     }
 
@@ -60,7 +76,38 @@ final class PlayerState {
         }
         capturePosition();
         pitchPercent = value;
-        anchorNanos = System.nanoTime();
+        anchorNanos = nanoTime.getAsLong();
+        revision++;
+    }
+
+    synchronized void setLoop(long startMillis, long endMillis) {
+        requireTrack();
+        if (startMillis < 0 || endMillis > track.durationMillis() || endMillis <= startMillis) {
+            throw new IllegalArgumentException(
+                    "Loop start must be before loop end and both must fit inside the loaded track"
+            );
+        }
+        capturePosition();
+        loopStartMillis = startMillis;
+        loopEndMillis = endMillis;
+        loopEnabled = true;
+        loopWrapCount = 0;
+        revision++;
+    }
+
+    synchronized void disableLoop() {
+        if (loopEnabled) {
+            capturePosition();
+            loopEnabled = false;
+            revision++;
+        }
+    }
+
+    synchronized void restartForAutoMix() {
+        requireTrack();
+        anchoredPositionMillis = loopEnabled ? loopStartMillis : 0.0;
+        anchorNanos = nanoTime.getAsLong();
+        playing = true;
         revision++;
     }
 
@@ -93,15 +140,24 @@ final class PlayerState {
                 : beat.tempoCentiBpm();
         return new Snapshot(
                 playerNumber, track, playing, master, onAir, pitchPercent, position,
-                beatIndex, beat, tempo, revision
+                beatIndex, beat, tempo, loopEnabled, loopStartMillis, loopEndMillis,
+                loopWrapCount, revision
         );
     }
 
     private void capturePosition() {
-        long now = System.nanoTime();
+        long now = nanoTime.getAsLong();
         if (playing && track != null) {
             double elapsedMillis = (now - anchorNanos) / 1_000_000.0;
             anchoredPositionMillis += elapsedMillis * (1.0 + pitchPercent / 100.0);
+            if (loopEnabled && anchoredPositionMillis >= loopEndMillis) {
+                double loopLength = loopEndMillis - loopStartMillis;
+                double elapsedInsideLoop = anchoredPositionMillis - loopStartMillis;
+                long completedLoops = Math.max(1L, (long) Math.floor(elapsedInsideLoop / loopLength));
+                anchoredPositionMillis = loopStartMillis + elapsedInsideLoop % loopLength;
+                loopWrapCount += completedLoops;
+                revision++;
+            }
         }
         anchorNanos = now;
     }
@@ -123,6 +179,10 @@ final class PlayerState {
             int beatIndex,
             UsbLibrary.BeatPoint beat,
             int originalTempoCentiBpm,
+            boolean loopEnabled,
+            long loopStartMillis,
+            long loopEndMillis,
+            long loopWrapCount,
             long revision
     ) {
         double effectiveBpm() {
