@@ -98,7 +98,7 @@ app_image_root="$staging_root/app-image"
   --app-version "1.0.0" \
   --vendor "VB Tech" \
   --copyright "Copyright © 2026 Victor Blanco" \
-  --description "Development-only USB-backed Pro DJ Link player simulator for Lumi." \
+  --description "Self-contained USB-backed Pro DJ Link player simulator for Lumi." \
   --icon "$icon_output/AppIcon.icns" \
   --mac-package-identifier co.victorblan.tech.lumi.prolinksimulator \
   --mac-package-name "Lumi Simulator" \
