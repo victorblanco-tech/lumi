@@ -16,6 +16,7 @@ public struct RemoteGatewayDeviceStatus: Codable, Equatable, Identifiable, Senda
     public let pairedAtUnixMillis: UInt64
     public let lastSeenUnixMillis: UInt64
     public let controller: Bool
+    public let clientVersion: String?
 
     private enum CodingKeys: String, CodingKey {
         case deviceID = "deviceId"
@@ -23,6 +24,7 @@ public struct RemoteGatewayDeviceStatus: Codable, Equatable, Identifiable, Senda
         case pairedAtUnixMillis
         case lastSeenUnixMillis
         case controller
+        case clientVersion
     }
 }
 
@@ -33,6 +35,7 @@ public struct RemoteGatewayStatus: Codable, Equatable, Sendable {
     public let lanPort: UInt16
     public let pairedDevices: [RemoteGatewayDeviceStatus]
     public let controllerDeviceID: String?
+    public let controllerChanges: [RemoteControllerChange]?
 
     private enum CodingKeys: String, CodingKey {
         case engineConnected
@@ -41,7 +44,15 @@ public struct RemoteGatewayStatus: Codable, Equatable, Sendable {
         case lanPort
         case pairedDevices
         case controllerDeviceID = "controllerDeviceId"
+        case controllerChanges
     }
+}
+
+public struct RemoteControllerChange: Codable, Equatable, Sendable {
+    public let atUnixMillis: UInt64
+    public let reason: String
+    public let previousDeviceId: String?
+    public let deviceId: String?
 }
 
 public struct RemoteGatewayPairingInvitation: Codable, Equatable, Sendable {

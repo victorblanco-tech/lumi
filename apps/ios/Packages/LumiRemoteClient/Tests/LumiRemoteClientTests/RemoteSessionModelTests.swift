@@ -6,6 +6,48 @@ import Testing
 
 @MainActor
 @Test
+func observerHasHealthyConnectionButNeverReceivesControlsFromProjectionChanges() throws {
+    let model = RemoteSessionModel()
+    model.updateControllerDisplayName("aiVoon")
+    for revision: UInt64 in 1...20 {
+        try model.apply(.fixture(revision: revision), from: "MacBook")
+        #expect(model.connectionIsHealthy)
+        #expect(!model.controlsEnabled)
+        #expect(model.controlRoleLabel == "View only")
+        #expect(model.controllerDisplayName == "aiVoon")
+    }
+    model.reconnecting(to: "MacBook")
+    #expect(!model.connectionIsHealthy)
+    model.replaceWithSnapshot(.fixture(revision: 1), from: "MacBook")
+    #expect(model.connectionIsHealthy)
+    #expect(!model.controlsEnabled)
+}
+
+@MainActor
+@Test
+func controllerRequiresFreshAuthenticationAfterReconnectAndFreshStateBeforeCommands() throws {
+    let model = RemoteSessionModel()
+    model.grantControllerLease("lease-1")
+    #expect(!model.controlsEnabled)
+    try model.apply(.fixture(revision: 1), from: "MacBook")
+    #expect(model.controlRoleLabel == "Controller")
+    #expect(model.controlsEnabled)
+    model.awaitingSnapshot(from: "MacBook")
+    #expect(!model.controlsEnabled)
+    model.replaceWithSnapshot(.fixture(revision: 2), from: "MacBook")
+    #expect(model.controlsEnabled)
+    model.reconnecting(to: "MacBook")
+    model.replaceWithSnapshot(.fixture(revision: 3), from: "MacBook")
+    #expect(!model.controlsEnabled)
+    model.grantControllerLease("lease-2")
+    #expect(model.controlsEnabled)
+    model.revokeControllerLease()
+    #expect(model.connectionIsHealthy)
+    #expect(!model.controlsEnabled)
+}
+
+@MainActor
+@Test
 func reconnectDisablesControlsWithoutDiscardingTheLastProjection() throws {
     let model = RemoteSessionModel()
     model.grantControllerLease("lease-1")

@@ -61,12 +61,21 @@ func authenticationHelloMatchesTheRustTaggedContract() throws {
     #expect(object["invitationId"] == "invitation-123456")
     #expect(object["deviceId"] == "iphone-1")
     #expect(object["deviceCredential"] == String(repeating: "c", count: 32))
+    #expect(object["clientVersion"] == RemoteAppVersion.current)
 
     let response = Data(#"{"kind":"authenticated","installationId":"install-1","controllerLeaseId":"lease-1"}"#.utf8)
     #expect(
         try JSONDecoder().decode(RemoteServerHello.self, from: response)
             == .authenticated(installationID: "install-1", controllerLeaseID: "lease-1")
     )
+}
+
+@Test
+func observerAuthenticationIncludesTheControllingDeviceWithoutGrantingALease() throws {
+    let data = Data(#"{"kind":"authenticated","installationId":"mac","controllerLeaseId":null,"controllerDisplayName":"aiVoon"}"#.utf8)
+    let hello = try JSONDecoder().decode(RemoteServerHello.self, from: data)
+    #expect(hello.controllerLeaseID == nil)
+    #expect(hello.controllerDisplayName == "aiVoon")
 }
 
 @MainActor

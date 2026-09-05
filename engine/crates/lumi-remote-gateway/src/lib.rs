@@ -436,15 +436,6 @@ impl GatewayCommandGuard {
         self.policy.controller()
     }
 
-    pub fn grant_first_controller(&mut self, device_id: &str, lease_id: String) -> Option<String> {
-        if self.policy.controller().is_none() {
-            self.policy
-                .transfer_control(device_id.to_owned(), lease_id.clone());
-            return Some(lease_id);
-        }
-        self.controller_lease_for(device_id)
-    }
-
     pub fn controller_lease_for(&self, device_id: &str) -> Option<String> {
         self.policy
             .controller()
@@ -685,18 +676,36 @@ pub struct PairedDevice {
     pub last_seen_unix_millis: u64,
     #[serde(default)]
     pub controller: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_version: Option<String>,
+}
+
+/// Bounded operational history. Never contains credentials, invitation codes or leases.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ControllerChange {
+    pub at_unix_millis: u64,
+    pub reason: String,
+    pub previous_device_id: Option<String>,
+    pub device_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PairingRegistrySnapshot {
     pub devices: Vec<PairedDevice>,
+    #[serde(default)]
+    pub controller_selection_initialized: bool,
+    #[serde(default)]
+    pub controller_changes: Vec<ControllerChange>,
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct PairingRegistry {
     pending: BTreeMap<String, PendingInvitation>,
     devices: BTreeMap<String, PairedDevice>,
+    controller_selection_initialized: bool,
+    controller_changes: Vec<ControllerChange>,
 }
 
 impl PairingRegistry {
@@ -704,12 +713,28 @@ impl PairingRegistry {
         if snapshot.devices.len() > MAX_PAIRED_DEVICES {
             return Err(PairingError::DeviceLimitReached);
         }
+        if snapshot.controller_changes.len() > 32 {
+            return Err(PairingError::InvalidPersistedDevice);
+        }
+        for change in &snapshot.controller_changes {
+            validate_public_identifier(&change.reason, 64)?;
+            for id in [&change.device_id, &change.previous_device_id]
+                .into_iter()
+                .flatten()
+            {
+                validate_public_identifier(id, 128)?;
+            }
+        }
+        let initialized = snapshot.controller_selection_initialized || !snapshot.devices.is_empty();
         let mut devices = BTreeMap::new();
         let mut controller_count = 0_usize;
         for device in snapshot.devices {
             let is_controller = device.controller;
             validate_public_identifier(&device.device_id, 128)?;
             validate_public_identifier(&device.display_name, 128)?;
+            if let Some(version) = &device.client_version {
+                validate_public_identifier(version, 64)?;
+            }
             if device.paired_at_unix_millis == 0
                 || device.last_seen_unix_millis < device.paired_at_unix_millis
                 || devices.insert(device.device_id.clone(), device).is_some()
@@ -726,12 +751,16 @@ impl PairingRegistry {
         Ok(Self {
             pending: BTreeMap::new(),
             devices,
+            controller_selection_initialized: initialized,
+            controller_changes: snapshot.controller_changes,
         })
     }
 
     pub fn snapshot(&self) -> PairingRegistrySnapshot {
         PairingRegistrySnapshot {
             devices: self.devices.values().cloned().collect(),
+            controller_selection_initialized: self.controller_selection_initialized,
+            controller_changes: self.controller_changes.clone(),
         }
     }
 
@@ -829,15 +858,22 @@ impl PairingRegistry {
             return Err(PairingError::DeviceLimitReached);
         }
         self.pending.remove(invitation_id);
+        let initial_pairing = !self.controller_selection_initialized;
+        let existing = self.devices.get(&device_id);
         let device = PairedDevice {
             device_id: device_id.clone(),
             display_name,
             credential_sha256: hash_secret(device_credential.as_bytes()),
             paired_at_unix_millis: now_unix_millis,
             last_seen_unix_millis: now_unix_millis,
-            controller: self.devices.is_empty(),
+            controller: initial_pairing || existing.is_some_and(|device| device.controller),
+            client_version: existing.and_then(|device| device.client_version.clone()),
         };
+        self.controller_selection_initialized = true;
         self.devices.insert(device_id, device.clone());
+        if initial_pairing {
+            self.record_controller_change(None, "firstPairing", now_unix_millis);
+        }
         Ok(device)
     }
 
@@ -886,6 +922,29 @@ impl PairingRegistry {
             device.controller = device.device_id == device_id;
         }
         Ok(())
+    }
+
+    pub fn set_client_version(&mut self, device_id: &str, version: Option<String>) {
+        // Older clients do not send a version: preserve the last known value.
+        if let (Some(device), Some(version)) = (self.devices.get_mut(device_id), version) {
+            device.client_version = Some(version);
+        }
+    }
+
+    pub fn record_controller_change(&mut self, previous: Option<String>, reason: &str, at: u64) {
+        if self.controller_changes.len() == 32 {
+            self.controller_changes.remove(0);
+        }
+        self.controller_changes.push(ControllerChange {
+            at_unix_millis: at,
+            reason: reason.to_owned(),
+            previous_device_id: previous,
+            device_id: self.controller_device_id().map(str::to_owned),
+        });
+    }
+
+    pub fn controller_changes(&self) -> &[ControllerChange] {
+        &self.controller_changes
     }
 }
 

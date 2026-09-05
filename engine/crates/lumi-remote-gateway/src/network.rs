@@ -79,23 +79,50 @@ impl SharedGatewayState {
         self.trust_revision.subscribe()
     }
 
+    /// Always called while holding registry, then guard, in that order. No
+    /// in-memory ownership changes become visible unless persistence succeeds.
+    pub(crate) async fn commit_registry(
+        &self,
+        registry: &mut PairingRegistry,
+        candidate: PairingRegistry,
+        rotate_lease: bool,
+    ) -> Result<(), GatewayNetworkError> {
+        let mut guard = self.command_guard.lock().await;
+        let owner = candidate.controller_device_id();
+        let ownership_changed = guard.controller().map(|c| c.device_id.as_str()) != owner;
+        let lease = if (ownership_changed || rotate_lease) && owner.is_some() {
+            Some(random_hex(24)?)
+        } else {
+            None
+        };
+        self.trust_store.save(&candidate)?;
+        if ownership_changed || rotate_lease {
+            if let (Some(owner), Some(lease)) = (owner, lease) {
+                guard.transfer_control(owner.to_owned(), lease);
+            } else {
+                guard.revoke_control();
+            }
+        }
+        *registry = candidate;
+        Ok(())
+    }
+
     async fn authenticate(
         &self,
         hello: RemoteClientHello,
         now: u64,
     ) -> Result<(String, RemoteServerHello), GatewayNetworkError> {
         hello.validate()?;
+        let mut registry = self.registry.lock().await;
+        let mut candidate = registry.clone();
         let (device_id, paired) = match hello {
             RemoteClientHello::Authenticate {
                 device_id,
                 credential,
+                client_version,
             } => {
-                let mut registry = self.registry.lock().await;
-                registry.authenticate(&device_id, &credential, now)?;
-                if registry.controller_device_id().is_none() {
-                    registry.set_controller(&device_id)?;
-                }
-                self.trust_store.save(&registry)?;
+                candidate.authenticate(&device_id, &credential, now)?;
+                candidate.set_client_version(&device_id, client_version);
                 (device_id, false)
             }
             RemoteClientHello::Pair {
@@ -104,9 +131,9 @@ impl SharedGatewayState {
                 device_id,
                 display_name,
                 device_credential,
+                client_version,
             } => {
-                let mut registry = self.registry.lock().await;
-                registry.exchange(
+                candidate.exchange(
                     &invitation_id,
                     &invitation_secret,
                     device_id.clone(),
@@ -114,24 +141,32 @@ impl SharedGatewayState {
                     &device_credential,
                     now,
                 )?;
-                if registry.controller_device_id().is_none() {
-                    registry.set_controller(&device_id)?;
-                }
-                self.trust_store.save(&registry)?;
+                candidate.set_client_version(&device_id, client_version);
                 (device_id, true)
             }
         };
-        let mut guard = self.command_guard.lock().await;
-        let lease = guard.grant_first_controller(&device_id, random_hex(24)?);
+        self.commit_registry(&mut registry, candidate, false)
+            .await?;
+        let lease = self
+            .command_guard
+            .lock()
+            .await
+            .controller_lease_for(&device_id);
+        let controller_display_name = registry
+            .paired_devices()
+            .find(|device| device.controller)
+            .map(|device| device.display_name.clone());
         let response = if paired {
             RemoteServerHello::Paired {
                 installation_id: self.identity.installation_id.clone(),
                 controller_lease_id: lease,
+                controller_display_name,
             }
         } else {
             RemoteServerHello::Authenticated {
                 installation_id: self.identity.installation_id.clone(),
                 controller_lease_id: lease,
+                controller_display_name,
             }
         };
         Ok((device_id, response))
@@ -307,6 +342,9 @@ async fn serve_tls_client(
         let _ = write_error(&mut writer, "rateLimited", 1).await;
         return Err(GatewayNetworkError::RateLimit(RateLimitError::Limited));
     }
+    // Subscribe before authentication: a transfer during the Hello/snapshot
+    // write must invalidate this session too, not disappear between awaits.
+    let mut trust_changes = state.trust_changes();
     let (device_id, server_hello) = match state.authenticate(hello, unix_millis()).await {
         Ok(authenticated) => authenticated,
         Err(error) => {
@@ -341,7 +379,6 @@ async fn serve_tls_client(
 
     let mut last_projection_revision = 0_u64;
     let mut updates = relay.frames.subscribe();
-    let mut trust_changes = state.trust_changes();
     if let Some(snapshot) = relay.latest_projection() {
         last_projection_revision = snapshot.projection_revision;
         write_projection(&mut writer, snapshot, delivery_sequence).await?;
@@ -801,6 +838,10 @@ pub enum GatewayNetworkError {
 }
 
 #[cfg(test)]
+#[path = "controller_tests.rs"]
+mod controller_tests;
+
+#[cfg(test)]
 mod tests {
     use std::error::Error;
     use std::fs;
@@ -1071,6 +1112,7 @@ mod tests {
             payload: serde_json::to_value(RemoteClientHello::Authenticate {
                 device_id: "iphone-1".to_owned(),
                 credential,
+                client_version: None,
             })?,
         };
         let mut bytes = hello.encode()?;

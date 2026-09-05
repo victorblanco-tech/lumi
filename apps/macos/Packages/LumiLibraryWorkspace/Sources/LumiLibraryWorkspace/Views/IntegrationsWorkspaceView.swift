@@ -530,8 +530,15 @@ public struct IntegrationsWorkspaceView: View {
                                         Text("CONTROLLER")
                                             .font(LumiTypography.technical.weight(.bold))
                                             .foregroundStyle(LumiColor.accent)
+                                    } else {
+                                        Text("VIEW ONLY")
+                                            .font(LumiTypography.technical)
+                                            .foregroundStyle(LumiColor.textSecondary)
                                     }
                                 }
+                                Text("Lumi Remote \(device.clientVersion ?? "— version not reported by this client")")
+                                    .font(LumiTypography.caption)
+                                    .foregroundStyle(LumiColor.textSecondary)
                                 Text("Last seen \(remoteLastSeen(device.lastSeenUnixMillis))")
                                     .font(LumiTypography.caption)
                                     .foregroundStyle(LumiColor.textSecondary)
@@ -558,6 +565,23 @@ public struct IntegrationsWorkspaceView: View {
                         description: Text("Create a pairing code to connect Lumi Remote.")
                     )
                     .frame(maxWidth: .infinity, minHeight: 130)
+                }
+                Text("The Controller keeps control while offline. Reconnecting or changing show mode does not transfer control.")
+                    .font(LumiTypography.caption)
+                    .foregroundStyle(LumiColor.textSecondary)
+                if let changes = remoteGateway.status?.controllerChanges, !changes.isEmpty {
+                    DisclosureGroup("Control history") {
+                        ForEach(Array(changes.enumerated().reversed()), id: \.offset) { _, change in
+                            let name = remoteGateway.status?.pairedDevices.first {
+                                $0.deviceID == change.deviceId
+                            }?.displayName ?? (change.deviceId == nil ? "No Controller" : "Removed device")
+                            let reason = change.reason == "firstPairing" ? "First pairing"
+                                : change.reason == "macTransfer" ? "Transferred on Mac" : "Controller revoked"
+                            Text("\(Date(timeIntervalSince1970: Double(change.atUnixMillis) / 1_000).formatted(date: .abbreviated, time: .standard)) · \(reason) · \(name)")
+                                .font(LumiTypography.caption)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                        }
+                    }
                 }
             }
         }

@@ -286,6 +286,7 @@ public final class RemoteConnectionController: ObservableObject {
                 pairingCandidate = nil
             }
             commandCoordinator.updateControllerLease(response.controllerLeaseID)
+            model.updateControllerDisplayName(response.controllerDisplayName)
             if let lease = response.controllerLeaseID {
                 model.grantControllerLease(lease)
             } else {

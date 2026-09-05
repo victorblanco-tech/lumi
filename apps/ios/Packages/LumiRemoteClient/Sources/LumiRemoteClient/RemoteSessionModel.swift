@@ -18,6 +18,7 @@ public final class RemoteSessionModel {
     public private(set) var pendingCommandIDs: Set<String> = []
     public private(set) var lastError: String?
     public private(set) var controllerLeaseID: String?
+    public private(set) var controllerDisplayName: String?
     public private(set) var pairingShortCode: String?
     public private(set) var acceptedCommandFeedbackRevision: UInt64 = 0
     public private(set) var rejectedCommandFeedbackRevision: UInt64 = 0
@@ -26,8 +27,20 @@ public final class RemoteSessionModel {
     public init() {}
 
     public var controlsEnabled: Bool {
+        connectionIsHealthy && controllerLeaseID != nil
+    }
+
+    public var connectionIsHealthy: Bool {
         guard case .connected = connectionPhase else { return false }
-        return projection != nil && controllerLeaseID != nil
+        return projection != nil
+    }
+
+    public var controlRoleLabel: String {
+        controllerLeaseID == nil ? "View only" : "Controller"
+    }
+
+    public func updateControllerDisplayName(_ name: String?) {
+        controllerDisplayName = name
     }
 
     public func beginDiscovery() {

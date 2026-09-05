@@ -77,20 +77,25 @@ impl PersistentTrustStore {
             .file_name()
             .and_then(|value| value.to_str())
             .ok_or_else(|| TrustStoreError::UntrustedPath(self.path.clone()))?;
-        let temporary = self
-            .path
-            .with_file_name(format!(".{file_name}.{}.tmp", std::process::id()));
+        let temporary = self.path.with_file_name(format!(
+            ".{file_name}.{}.tmp",
+            crate::random_hex(12).map_err(std::io::Error::other)?
+        ));
         let mut file = OpenOptions::new()
-            .create(true)
-            .truncate(true)
+            .create_new(true)
             .write(true)
             .mode(0o600)
             .open(&temporary)?;
-        file.write_all(&bytes)?;
-        file.sync_all()?;
-        fs::rename(&temporary, &self.path)?;
-        fs::set_permissions(&self.path, fs::Permissions::from_mode(0o600))?;
-        Ok(())
+        let result = (|| {
+            file.write_all(&bytes)?;
+            file.sync_all()?;
+            // Rename is the commit point; no fallible operation follows it.
+            fs::rename(&temporary, &self.path)
+        })();
+        if result.is_err() {
+            let _ = fs::remove_file(&temporary);
+        }
+        result.map_err(TrustStoreError::Io)
     }
 
     pub fn path(&self) -> &Path {

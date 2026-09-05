@@ -11,6 +11,8 @@ pub enum RemoteClientHello {
     Authenticate {
         device_id: String,
         credential: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        client_version: Option<String>,
     },
     Pair {
         invitation_id: String,
@@ -18,6 +20,8 @@ pub enum RemoteClientHello {
         device_id: String,
         display_name: String,
         device_credential: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        client_version: Option<String>,
     },
 }
 
@@ -27,9 +31,11 @@ impl RemoteClientHello {
             Self::Authenticate {
                 device_id,
                 credential,
+                client_version,
             } => {
                 validate_identifier(device_id, 128)?;
                 validate_secret(credential)?;
+                validate_version(client_version.as_deref())?;
             }
             Self::Pair {
                 invitation_id,
@@ -37,12 +43,14 @@ impl RemoteClientHello {
                 device_id,
                 display_name,
                 device_credential,
+                client_version,
             } => {
                 validate_identifier(invitation_id, 128)?;
                 validate_secret(invitation_secret)?;
                 validate_identifier(device_id, 128)?;
                 validate_identifier(display_name, 128)?;
                 validate_secret(device_credential)?;
+                validate_version(client_version.as_deref())?;
             }
         }
         Ok(())
@@ -59,11 +67,22 @@ pub enum RemoteServerHello {
     Authenticated {
         installation_id: String,
         controller_lease_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        controller_display_name: Option<String>,
     },
     Paired {
         installation_id: String,
         controller_lease_id: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        controller_display_name: Option<String>,
     },
+}
+
+fn validate_version(value: Option<&str>) -> Result<(), RemoteAuthenticationError> {
+    if let Some(value) = value {
+        validate_identifier(value, 64)?;
+    }
+    Ok(())
 }
 
 fn validate_identifier(value: &str, maximum: usize) -> Result<(), RemoteAuthenticationError> {
@@ -97,6 +116,7 @@ mod tests {
         let hello = RemoteClientHello::Authenticate {
             device_id: "iphone-1".to_owned(),
             credential: "short".to_owned(),
+            client_version: None,
         };
         assert_eq!(
             hello.validate(),

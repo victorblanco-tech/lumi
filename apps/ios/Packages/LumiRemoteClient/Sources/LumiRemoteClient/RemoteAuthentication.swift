@@ -1,5 +1,13 @@
 import Foundation
 
+public enum RemoteAppVersion {
+    public static var current: String {
+        Bundle.main.object(forInfoDictionaryKey: "LumiProductVersion") as? String
+            ?? Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String
+            ?? "Unknown"
+    }
+}
+
 enum RemoteClientHello: Encodable, Sendable {
     case authenticate(deviceID: String, credential: String)
     case pair(
@@ -18,10 +26,12 @@ enum RemoteClientHello: Encodable, Sendable {
         case invitationSecret
         case displayName
         case deviceCredential
+        case clientVersion
     }
 
     func encode(to encoder: any Encoder) throws {
         var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(RemoteAppVersion.current, forKey: .clientVersion)
         switch self {
         case let .authenticate(deviceID, credential):
             try values.encode("authenticate", forKey: .kind)
@@ -39,27 +49,31 @@ enum RemoteClientHello: Encodable, Sendable {
 }
 
 enum RemoteServerHello: Decodable, Equatable, Sendable {
-    case authenticated(installationID: String, controllerLeaseID: String?)
-    case paired(installationID: String, controllerLeaseID: String?)
+    case authenticated(installationID: String, controllerLeaseID: String?, controllerDisplayName: String? = nil)
+    case paired(installationID: String, controllerLeaseID: String?, controllerDisplayName: String? = nil)
 
     private enum CodingKeys: String, CodingKey {
         case kind
         case installationID = "installationId"
         case controllerLeaseID = "controllerLeaseId"
+        case controllerDisplayName
     }
 
     init(from decoder: any Decoder) throws {
         let values = try decoder.container(keyedBy: CodingKeys.self)
         let installationID = try values.decode(String.self, forKey: .installationID)
         let lease = try values.decodeIfPresent(String.self, forKey: .controllerLeaseID)
+        let owner = try values.decodeIfPresent(String.self, forKey: .controllerDisplayName)
         switch try values.decode(String.self, forKey: .kind) {
         case "authenticated": self = .authenticated(
             installationID: installationID,
-            controllerLeaseID: lease
+            controllerLeaseID: lease,
+            controllerDisplayName: owner
         )
         case "paired": self = .paired(
             installationID: installationID,
-            controllerLeaseID: lease
+            controllerLeaseID: lease,
+            controllerDisplayName: owner
         )
         default: throw RemoteTransportError.invalidAuthenticationResponse
         }
@@ -67,14 +81,20 @@ enum RemoteServerHello: Decodable, Equatable, Sendable {
 
     var installationID: String {
         switch self {
-        case let .authenticated(installationID, _), let .paired(installationID, _):
+        case let .authenticated(installationID, _, _), let .paired(installationID, _, _):
             installationID
         }
     }
 
     var controllerLeaseID: String? {
         switch self {
-        case let .authenticated(_, lease), let .paired(_, lease): lease
+        case let .authenticated(_, lease, _), let .paired(_, lease, _): lease
+        }
+    }
+
+    var controllerDisplayName: String? {
+        switch self {
+        case let .authenticated(_, _, name), let .paired(_, _, name): name
         }
     }
 }

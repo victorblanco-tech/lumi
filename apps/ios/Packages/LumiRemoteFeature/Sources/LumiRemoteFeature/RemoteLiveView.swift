@@ -214,6 +214,7 @@ private struct RemoteTopBar: View {
     let isLandscape: Bool
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var confirmsStoppingShow = false
+    @State private var showsConnectionDetails = false
 
     var body: some View {
         VStack(spacing: isLandscape ? 3 : LumiSpacing.small) {
@@ -253,16 +254,38 @@ private struct RemoteTopBar: View {
     }
 
     private var identity: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text("Lumi Remote")
-                .font(LumiTypography.sectionTitle)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-            Text(connectionLabel)
-                .font(LumiTypography.caption)
-                .foregroundStyle(connectionColor)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+        Button {
+            showsConnectionDetails = true
+        } label: {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Lumi Remote")
+                    .font(LumiTypography.sectionTitle)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Text(connectionLabel)
+                    .font(LumiTypography.caption)
+                    .foregroundStyle(connectionColor)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Lumi Remote, \(connectionLabel)")
+        .accessibilityHint("Connection, control permissions and app version")
+        .popover(isPresented: $showsConnectionDetails) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Lumi Remote").font(.headline)
+                Text(connectionLabel).foregroundStyle(connectionColor)
+                Text("Controller: \(model.controllerDisplayName ?? "Not assigned")")
+                Text("Only the Controller can change the show. Transfer control in Lumi on the Mac: Integrations → iPhone Remote.")
+                    .font(.caption)
+                Text("Version \(RemoteAppVersion.current)")
+                    .font(.caption).foregroundStyle(LumiColor.textSecondary)
+            }
+            .padding()
+            .frame(width: 290, alignment: .leading)
+            .presentationCompactAdaptation(.popover)
         }
     }
 
@@ -408,7 +431,7 @@ private struct RemoteTopBar: View {
 
     private var connectionLabel: String {
         switch model.connectionPhase {
-        case let .connected(macName): "Connected · \(macName)"
+        case .connected: "Connected · \(model.controlRoleLabel)"
         case let .reconnecting(macName, _): "Reconnecting · \(macName)"
         case .discovering: "Finding Lumi on the local network"
         case .pairing: "Pairing"
@@ -418,7 +441,7 @@ private struct RemoteTopBar: View {
     }
 
     private var connectionColor: Color {
-        model.controlsEnabled ? LumiColor.success : LumiColor.warning
+        model.connectionIsHealthy ? LumiColor.success : LumiColor.warning
     }
 
     private func integrationBadge(

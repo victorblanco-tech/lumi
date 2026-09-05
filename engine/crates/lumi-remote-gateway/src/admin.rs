@@ -77,6 +77,7 @@ pub struct GatewayAdminStatus {
     pub lan_port: u16,
     pub paired_devices: Vec<GatewayPairedDeviceStatus>,
     pub controller_device_id: Option<String>,
+    pub controller_changes: Vec<crate::ControllerChange>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -87,6 +88,7 @@ pub struct GatewayPairedDeviceStatus {
     pub paired_at_unix_millis: u64,
     pub last_seen_unix_millis: u64,
     pub controller: bool,
+    pub client_version: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -218,7 +220,7 @@ async fn serve_admin_client(
     }
 }
 
-async fn apply_request(
+pub(crate) async fn apply_request(
     request: GatewayAdminRequest,
     state: &SharedGatewayState,
     relay: &EngineRelayHandle,
@@ -236,19 +238,19 @@ async fn apply_request(
         }
         GatewayAdminRequest::RevokeDevice { device_id } => {
             let mut registry = state.registry.lock().await;
-            if registry.revoke(&device_id) {
-                let controller_matches = state
-                    .command_guard
-                    .lock()
-                    .await
-                    .controller()
-                    .is_some_and(|controller| controller.device_id == device_id);
-                if controller_matches {
-                    state.command_guard.lock().await.revoke_control();
+            let mut candidate = registry.clone();
+            let previous = candidate.controller_device_id().map(str::to_owned);
+            if candidate.revoke(&device_id) {
+                if previous.as_deref() == Some(device_id.as_str()) {
+                    candidate.record_controller_change(
+                        previous,
+                        "controllerRevoked",
+                        unix_millis(),
+                    );
                 }
                 let saved = state
-                    .trust_store
-                    .save(&registry)
+                    .commit_registry(&mut registry, candidate, false)
+                    .await
                     .map_err(|_| crate::PairingError::InvalidPersistedDevice)
                     .map(|()| None);
                 if saved.is_ok() {
@@ -261,27 +263,18 @@ async fn apply_request(
         }
         GatewayAdminRequest::TransferControl { device_id } => {
             let mut registry = state.registry.lock().await;
-            if registry.contains_device(&device_id) {
-                match random_hex(24) {
-                    Ok(lease) => {
-                        let changed = registry.set_controller(&device_id).and_then(|()| {
-                            state
-                                .trust_store
-                                .save(&registry)
-                                .map_err(|_| crate::PairingError::InvalidPersistedDevice)
-                        });
-                        if changed.is_ok() {
-                            state
-                                .command_guard
-                                .lock()
-                                .await
-                                .transfer_control(device_id, lease);
-                            state.notify_trust_changed();
-                        }
-                        changed.map(|()| None)
-                    }
-                    Err(_) => Err(crate::PairingError::InvalidCredential),
+            let mut candidate = registry.clone();
+            let previous = candidate.controller_device_id().map(str::to_owned);
+            if candidate.set_controller(&device_id).is_ok() {
+                candidate.record_controller_change(previous, "macTransfer", unix_millis());
+                let changed = state
+                    .commit_registry(&mut registry, candidate, true)
+                    .await
+                    .map_err(|_| crate::PairingError::InvalidPersistedDevice);
+                if changed.is_ok() {
+                    state.notify_trust_changed();
                 }
+                changed.map(|()| None)
             } else {
                 Err(crate::PairingError::DeviceUnknown)
             }
@@ -337,16 +330,11 @@ async fn status(
     relay: &EngineRelayHandle,
     lan_port: u16,
 ) -> GatewayAdminStatus {
-    let controller = state
-        .command_guard
-        .lock()
-        .await
-        .controller()
-        .map(|controller| controller.device_id.clone());
-    let devices = state
-        .registry
-        .lock()
-        .await
+    // One snapshot from the authoritative registry, never a mixture of two
+    // different ownership revisions during a transfer.
+    let registry = state.registry.lock().await;
+    let controller = registry.controller_device_id().map(str::to_owned);
+    let devices = registry
         .paired_devices()
         .map(|device| GatewayPairedDeviceStatus {
             device_id: device.device_id.clone(),
@@ -354,6 +342,7 @@ async fn status(
             paired_at_unix_millis: device.paired_at_unix_millis,
             last_seen_unix_millis: device.last_seen_unix_millis,
             controller: controller.as_deref() == Some(device.device_id.as_str()),
+            client_version: device.client_version.clone(),
         })
         .collect();
     GatewayAdminStatus {
@@ -363,6 +352,7 @@ async fn status(
         lan_port,
         paired_devices: devices,
         controller_device_id: controller,
+        controller_changes: registry.controller_changes().to_vec(),
     }
 }
 

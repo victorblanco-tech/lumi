@@ -93,6 +93,19 @@ The main controls mirror macOS:
 Only one paired iPhone can be Controller at a time. Viewers see the same Live
 state but cannot mutate it. Commands are never queued while disconnected.
 
+With Lumi 0.6.2 / Remote 0.1.1 or newer, the connected status explicitly says
+**Controller** or **View only**. Both are healthy connections. Tap the Lumi
+Remote heading for the controlling device and this app's version. An older
+Remote that does not report its version is shown as such on the Mac.
+
+The Controller keeps its role while offline. Opening another Remote, restarting
+the Gateway or changing show mode does not transfer control. To hand over,
+choose **Make Controller** for the desired device in **Integrations → iPhone
+Remote** on the Mac. **Revoke** removes the pairing; it does not assign another
+Controller automatically. The first paired device receives control initially.
+The Mac's **Control history** records initial assignment, explicit transfers
+and Controller revocation. Entries begin with this update, not retrospectively.
+
 ## Player view
 
 Portrait places the Master first and the prepared next Player below it.

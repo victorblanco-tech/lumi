@@ -113,6 +113,28 @@ Link or SoundSwitch realtime lanes.
 The first beta grants at most one paired device a Controller lease. Other paired
 devices are view-only. The Mac explicitly transfers or revokes that lease.
 
+#### 0.6.2 stable Controller selection
+
+The persisted selection is authoritative, including an explicitly empty
+selection after revocation. Automatic selection is permitted only at first
+pairing, not on reconnect, show-mode change or return from an offline period.
+An additive initialization flag preserves that decision even after all devices
+are revoked; old stores with paired devices migrate as already initialized.
+
+All ownership writes lock registry then command guard in one order. Candidate
+registry state (including its bounded 32-entry ownership history) is persisted
+before publishing either in-memory representation. Reconnect creates a lease
+only for the persisted owner. Authentication, explicit transfer and re-pairing
+cannot race to choose separate durable and active owners. Trust-change
+subscription starts before authentication, closing the Hello-write race.
+
+Additive handshake fields advertise client version and the Controller's display
+name. Old clients remain supported and unreported versions remain unknown.
+Connection health is distinct from control role: a healthy Observer is green
+and labelled View only, never an orange connection warning. Device/version and
+role details are available without increasing the Live header height. Nothing
+in this correction changes Pro DJ Link, tempo, MIDI or waveform processing.
+
 ### iOS lifecycle
 
 The iPhone app is a convenience client, never a show dependency. It does not
