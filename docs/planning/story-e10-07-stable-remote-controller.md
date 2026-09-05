@@ -1,6 +1,6 @@
 # E10-07 — Stable Remote Controller ownership
 
-Status: In progress · target Lumi 0.6.2-dev-6 / Remote 0.1.1-dev-3
+Status: Complete for this scoped increment · Lumi 0.6.2-dev-6 / Remote 0.1.1-dev-3
 
 The user observed a Simulator becoming view-only during Mac mode switching.
 The dev-5 test already recorded it as Observer; that observation does not
@@ -33,3 +33,13 @@ version. Preserve the original physical-iPhone ownership after testing.
 
 Record measured results and limitations before completion. Follow Epic 10 HQ
 screenshot rules; leave the latest numbered Mac build open and push to dev.
+
+## Result
+
+49 Rust tests and 201 Swift tests passed, alongside Clippy, both app builds and
+signed-package checks. Native Mac/Simulator tests covered Observer and
+Controller modes, explicit transfers, Remote and client restarts, and successful
+Remote show commands. The original physical-iPhone ownership was restored;
+no physical-iPhone installation or re-pairing took place. The historical
+unexpected transition is not attributed without evidence. See the full
+[verification report](../release/0.6.2-dev-6-controller-ownership.md).

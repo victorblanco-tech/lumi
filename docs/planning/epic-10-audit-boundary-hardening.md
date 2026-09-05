@@ -17,7 +17,7 @@ must remain unchanged unless a specific regression proves a change necessary.
 | E10-04 | In progress | Effective authentication/command budgets, outcome-preserving idempotency, bounded command lifetime and control revocation; test actual production TLS/IPC paths. |
 | E10-05 | In progress | Remote freshness and reconnect state; persistent integration status and disabled stale controls; native client tests and headed macOS/iOS acceptance. |
 | E10-06 | In progress | Correct benchmark/app-build/visual gates; simulator user guide and real HQ screenshots; final regression, performance, security and UI evidence. |
-| [E10-07](story-e10-07-stable-remote-controller.md) | In progress | Durable single-Controller ownership; two-client reconnect/transfer regression tests; separate connection/role presentation and client versions. |
+| [E10-07](story-e10-07-stable-remote-controller.md) | Complete; automated and native UI verified | Durable single-Controller ownership; two-client reconnect/transfer regression tests; separate connection/role presentation and client versions. |
 
 ## Delivery rules
 
