@@ -18,6 +18,11 @@ phrases, Light Plans, integration configuration and trusted-device information
 needed for the workflows selected by the user. Music files and rekordbox media
 remain under the user's control.
 
+Registering a writable USB may create a small `.lumi-media.json` identity file
+containing a schema version and media/source identifiers. It contains no audio,
+track names, phrases, account details or Remote credentials. Lumi does not
+modify rekordbox databases, analysis files or music on the USB.
+
 Lumi Remote communicates directly with a paired Lumi Mac on the same local
 network. Its Live projection can contain track metadata, RGB waveform data,
 Hot Cues, phrases, Light Plans and integration status. The iPhone stores its
@@ -47,4 +52,4 @@ provide explicit backup and library reset workflows.
 Security issues should be reported privately through the repository's
 [security advisory form](https://github.com/victorblanco-tech/lumi/security/advisories/new).
 
-Last updated: 3 September 2026.
+Last updated: 5 September 2026.

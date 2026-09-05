@@ -5,6 +5,7 @@ set -euo pipefail
 script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 repository_root="$(dirname "$script_dir")"
 module_cache="$repository_root/build/swift-module-cache"
+packaging_java_home="${LUMI_PACKAGING_JAVA_HOME:-${JAVA_HOME:-$repository_root/build/package-toolchains/temurin-21-macos-aarch64/Contents/Home}}"
 
 mkdir -p "$module_cache"
 export CLANG_MODULE_CACHE_PATH="$module_cache"
@@ -40,6 +41,7 @@ xcodebuild \
   -configuration Dev \
   -destination 'platform=macOS,arch=arm64' \
   -derivedDataPath build/DevDerivedData \
+  LUMI_PACKAGING_JAVA_HOME="$packaging_java_home" \
   CODE_SIGNING_ALLOWED=NO \
   GCC_TREAT_WARNINGS_AS_ERRORS=YES \
   -quiet \

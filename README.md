@@ -10,6 +10,10 @@
   <strong>Public Beta</strong> · Field testing on different DJ and lighting setups is welcome
 </p>
 
+**Current releases:** [Lumi 0.6.2 for Mac](https://github.com/victorblanco-tech/lumi/releases/tag/v0.6.2)
+and [Lumi Remote 0.1.1 for iPhone](https://github.com/victorblanco-tech/lumi/releases/tag/lumi-remote-v0.1.1).
+Install the Mac DMG; install Remote through Xcode using your own Apple Account.
+
 <p align="center">
   <a href="https://github.com/victorblanco-tech/lumi/releases">Download</a>
   ·
@@ -136,10 +140,10 @@ permits automatic output.
 
 ![Pro DJ Link connection, equipment and compatibility status](docs/assets/screenshots/integration-pro-dj-link.png)
 
-### Ableton Link — beat and BPM timing
+### Ableton Link — master tempo
 
-The isolated Ableton Link lane publishes only the authoritative master BPM,
-beat and bar timing to SoundSwitch. Its status page shows the active timing
+The isolated Ableton Link lane relays the authoritative master BPM to
+SoundSwitch without seeking or continually correcting its timeline. Its status page shows the active timing
 source, tempo, peers and bar quantum, with an optional automatic start setting.
 Stopping Link leaves the shared session cleanly without stopping SoundSwitch.
 
@@ -164,7 +168,9 @@ CDJ / DJM ── Pro DJ Link ─────────────┤
                                       └── Ableton Link ──> SoundSwitch tempo
 ```
 
-Lumi never writes to rekordbox media during normal import or synchronization.
+Lumi does not change rekordbox databases, analysis files or music. Registering a
+writable USB can add a tiny `.lumi-media.json` identity file; scanning and syncing
+read the rekordbox content without modifying it.
 Your SoundSwitch project, fixtures and DMX interface stay under SoundSwitch's
 control. A physical Control One can continue to run alongside Lumi.
 
