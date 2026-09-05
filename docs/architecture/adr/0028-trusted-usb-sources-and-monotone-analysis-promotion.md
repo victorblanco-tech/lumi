@@ -109,6 +109,10 @@ missing analysis file or invalid first phrase boundary rolls the complete sync
 back. Playlist rows are replaced only for the selected source and never leak
 between two equal-model USB devices.
 
+The identity-write and same-source revision rules below are superseded by
+[ADR 0043](0043-usb-identity-and-verified-sync-boundaries.md). The earlier physical
+write stall remains the reason registration has a separate short deadline.
+
 Rekordbox library, analysis and media data remains read-only. In practice,
 separately managed equal-model FAT media can expose the same filesystem UUID
 and an unreliable or duplicated hardware serial. Lumi therefore combines the

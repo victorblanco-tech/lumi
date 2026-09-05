@@ -18,6 +18,7 @@ private final class IsolatedUSBProcessWaiter: @unchecked Sendable {
     private let lock = NSLock()
     private var timedOut = false
     private var finished = false
+    private var reaped = false
 
     init(process: Process) {
         self.process = process
@@ -29,6 +30,7 @@ private final class IsolatedUSBProcessWaiter: @unchecked Sendable {
                 process.waitUntilExit()
                 let result: Int32?
                 lock.lock()
+                reaped = true
                 guard !finished else {
                     lock.unlock()
                     return
@@ -48,13 +50,15 @@ private final class IsolatedUSBProcessWaiter: @unchecked Sendable {
                     return
                 }
                 timedOut = true
+                finished = true
                 lock.unlock()
                 _ = Darwin.kill(process.processIdentifier, SIGTERM)
+                continuation.resume(returning: nil)
                 DispatchQueue.global(qos: .utility).asyncAfter(
                     deadline: .now() + .milliseconds(250)
                 ) { [self] in
                     lock.lock()
-                    let shouldForceExit = !finished
+                    let shouldForceExit = timedOut && !reaped
                     lock.unlock()
                     if shouldForceExit {
                         _ = Darwin.kill(process.processIdentifier, SIGKILL)
@@ -1412,7 +1416,8 @@ final class EngineStatusModel: ObservableObject {
         usbSourceOperation = USBSourceOperationState(
             phase: .reading,
             title: "Reading USB disk",
-            detail: "Indexing OneLibrary playlists and track update state. If macOS asks, allow Lumi to read removable volumes. The disk remains read-only."
+            detail: "Indexing OneLibrary playlists and track update state. Rekordbox and music files remain read-only.",
+            sourceID: sourceID
         )
         guard lifecycle == .ready,
               await acquireInteractiveExchange() else {
@@ -1439,11 +1444,26 @@ final class EngineStatusModel: ObservableObject {
                 libraryState.rekordboxDeviceInspection
             )
             if let inspection = libraryState.rekordboxDeviceInspection {
+                // Optional identity creation is a separate, short-lived worker.
+                // A slow/unwritable USB must not turn a successful read into a
+                // failed scan, and the marker never contains Rekordbox data.
+                var identityDetail = ""
+                do {
+                    _ = try await runIsolatedUSBWorker(payload: [
+                        "kind": .string("registerIdentity"),
+                        "root": .string(root),
+                        "sourceId": .string(inspection.sourceID),
+                        "mediaId": .string(UUID().uuidString.lowercased())
+                    ])
+                    identityDetail = " Persistent USB identity saved."
+                } catch {
+                    identityDetail = " USB identity could not be saved; existing local identification remains in use."
+                }
                 sourceImportFeedback = "USB indexed read-only: \(inspection.playlistCount) playlists and \(inspection.trackCount) tracks available. Choose playlists before Sync."
                 usbSourceOperation = USBSourceOperationState(
                     phase: .completed,
                     title: "USB scan complete",
-                    detail: "\(inspection.playlistCount) playlists and \(inspection.trackCount) tracks indexed read-only. Choose one or more playlists to synchronize."
+                    detail: "\(inspection.playlistCount) playlists and \(inspection.trackCount) tracks indexed read-only. Choose one or more playlists to synchronize.\(identityDetail)"
                 )
             }
         } catch {
@@ -1472,7 +1492,8 @@ final class EngineStatusModel: ObservableObject {
         usbSourceOperation = USBSourceOperationState(
             phase: .synchronizing,
             title: "Synchronizing \(playlistIDs.count) playlist\(playlistIDs.count == 1 ? "" : "s")",
-            detail: "Reading the USB read-only, importing new Lumi tracks and safely comparing existing analysis revisions."
+            detail: "Reading the USB read-only, importing new Lumi tracks and safely comparing existing analysis revisions.",
+            sourceID: sourceID
         )
         guard lifecycle == .ready,
               await acquireInteractiveExchange() else {
@@ -1488,11 +1509,16 @@ final class EngineStatusModel: ObservableObject {
         defer { isExchangingCommand = false }
         do {
             let resolvedSourceID = sourceID ?? trustedUSBSourceID(root: root)
+            guard let inspected = libraryState.rekordboxDeviceInspection,
+                  inspected.sourceID == resolvedSourceID else {
+                throw IsolatedUSBWorkerError.failed("Refresh this USB's playlists before synchronizing. No library data was changed.")
+            }
             let envelope = try await runIsolatedUSBWorker(
                 payload: [
                     "kind": .string("sync"),
                     "root": .string(root),
                     "sourceId": resolvedSourceID.map(JSONValue.string) ?? .null,
+                    "expectedDatabaseRevision": .string(inspected.databaseRevision),
                     "playlistIds": .array(
                         playlistIDs.map { .number(Double($0)) }
                     ),
@@ -1509,7 +1535,7 @@ final class EngineStatusModel: ObservableObject {
                 usbSourceOperation = USBSourceOperationState(
                     phase: .completed,
                     title: "USB sync complete",
-                    detail: "\(device.activeTracks) unique selected tracks processed · \(device.matchedTracks) available in Lumi · \(device.unmatchedTracks) held · \(device.protectedTracks) older versions protected · \(device.conflictTracks) conflicts held."
+                    detail: "\(device.activeTracks) unique selected tracks processed · \(device.matchedTracks) available in Lumi · \(device.unmatchedTracks) unmatched · \(device.protectedTracks) older versions protected · \(device.conflictTracks) changes to review."
                 )
             } else {
                 sourceImportFeedback = "USB source synced read-only. Safe track identities are now available to Pro DJ Link."
@@ -1618,6 +1644,21 @@ final class EngineStatusModel: ObservableObject {
         }
         workerPayload["root"] = .string(scopedURL.path)
         workerPayload["observedSourceId"] = .string(observedSourceID)
+        let reportsProgress = payload["kind"] == .string("sync")
+        let registersIdentity = payload["kind"] == .string("registerIdentity")
+        let updateProgress: @Sendable (String, Int, Int) async -> Void = { [weak self] stage, completed, total in
+            await MainActor.run {
+                guard let self, self.usbSourceOperation.isActive else { return }
+                self.usbSourceOperation = USBSourceOperationState(
+                    phase: .synchronizing,
+                    title: "Synchronizing USB",
+                    detail: stage,
+                    completedTracks: completed,
+                    totalTracks: total,
+                    sourceID: sourceID
+                )
+            }
+        }
         defer { scopedURL.stopAccessingSecurityScopedResource() }
         return try await Task.detached(priority: .utility) {
             let manager = FileManager.default
@@ -1656,16 +1697,35 @@ final class EngineStatusModel: ObservableObject {
             process.standardOutput = nullOutput
             process.standardError = standardError
             try process.run()
+            let progressTask = Task {
+                guard reportsProgress else { return }
+                struct Progress: Decodable {
+                    let stage: String
+                    let completed: Int
+                    let total: Int
+                }
+                let path = response.deletingPathExtension().appendingPathExtension("progress.json")
+                var previous: Data?
+                while !Task.isCancelled {
+                    if let bytes = try? Data(contentsOf: path), bytes != previous,
+                       let state = try? JSONDecoder().decode(Progress.self, from: bytes) {
+                        previous = bytes
+                        await updateProgress(state.stage, state.completed, state.total)
+                    }
+                    do { try await Task.sleep(for: .milliseconds(200)) }
+                    catch { break }
+                }
+            }
+            defer { progressTask.cancel() }
             defer {
                 if process.isRunning {
                     _ = Darwin.kill(process.processIdentifier, SIGKILL)
-                    process.waitUntilExit()
                 }
             }
 
             guard let terminationStatus = await IsolatedUSBProcessWaiter(
                 process: process
-            ).wait(timeoutSeconds: 75) else {
+            ).wait(timeoutSeconds: registersIdentity ? 3 : (reportsProgress ? 300 : 75)) else {
                 throw IsolatedUSBWorkerError.timedOut
             }
             try? standardError.synchronize()

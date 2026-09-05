@@ -18,6 +18,7 @@ must remain unchanged unless a specific regression proves a change necessary.
 | E10-05 | In progress | Remote freshness and reconnect state; persistent integration status and disabled stale controls; native client tests and headed macOS/iOS acceptance. |
 | E10-06 | In progress | Correct benchmark/app-build/visual gates; simulator user guide and real HQ screenshots; final regression, performance, security and UI evidence. |
 | [E10-07](story-e10-07-stable-remote-controller.md) | Complete; automated and native UI verified | Durable single-Controller ownership; two-client reconnect/transfer regression tests; separate connection/role presentation and client versions. |
+| [E10-08](story-e10-08-usb-library-integrity.md) | In progress | USB identity, revision-safe sync, audio/track matching and per-source UI acceptance; preserve existing Library and show availability. |
 
 ## Delivery rules
 

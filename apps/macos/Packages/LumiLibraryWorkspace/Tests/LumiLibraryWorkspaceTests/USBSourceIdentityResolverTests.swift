@@ -4,6 +4,20 @@ import Testing
 
 @Suite("USB source identity")
 struct USBSourceIdentityResolverTests {
+    @Test("Media marker preserves the registered identity and rejects malformed files")
+    func mediaMarkerValidation() throws {
+        let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: root) }
+        let file = root.appendingPathComponent(".lumi-media.json")
+        let marker = "{\"schemaVersion\":1,\"mediaId\":\"cda97db5-879c-4cef-a101-165668a78390\",\"sourceId\":\"usb-fs:v2-original\"}"
+        try Data(marker.utf8).write(to: file)
+        #expect(USBMediaIdentity.read(from: root)?.sourceId == "usb-fs:v2-original")
+        for invalid in [marker.replacingOccurrences(of: ":1,", with: ":9,"), "{}", String(repeating: "x", count: 4097)] {
+            try Data(invalid.utf8).write(to: file)
+            #expect(USBMediaIdentity.read(from: root) == nil)
+        }
+    }
     @Test("Independent FAT volumes with the same UUID remain separate")
     func independentMediaRemainSeparate() {
         let gray = USBStableSourceIdentity.sourceID(

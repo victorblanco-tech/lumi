@@ -16,6 +16,15 @@ use crate::library::{DeviceReviewChoice, LibraryWorker, LibraryWorkerError};
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 enum UsbWorkerRequest {
+    RegisterIdentity {
+        root: String,
+        #[serde(rename = "sourceId")]
+        source_id: String,
+        #[serde(rename = "observedSourceId")]
+        observed_source_id: String,
+        #[serde(rename = "mediaId")]
+        media_id: String,
+    },
     Inspect {
         root: String,
         #[serde(default)]
@@ -33,6 +42,8 @@ enum UsbWorkerRequest {
         observed_source_id: String,
         #[serde(rename = "playlistIds")]
         playlist_ids: Vec<u32>,
+        #[serde(rename = "expectedDatabaseRevision")]
+        expected_database_revision: String,
     },
     ResolveConflict {
         root: String,
@@ -52,8 +63,27 @@ enum UsbWorkerRequest {
 
 pub fn run_usb_worker(request_path: &Path, response_path: &Path) -> Result<(), UsbWorkerError> {
     let request: UsbWorkerRequest = serde_json::from_slice(&fs::read(request_path)?)?;
+    if let UsbWorkerRequest::RegisterIdentity {
+        root,
+        source_id,
+        observed_source_id,
+        media_id,
+    } = &request
+    {
+        let source_id =
+            validated_source_id(Path::new(root), Some(source_id.clone()), observed_source_id)?;
+        let identity = crate::usb_media_identity::register(Path::new(root), &source_id, media_id)?;
+        fs::write(
+            response_path,
+            serde_json::to_vec(&json!({"usbIdentity": identity}))?,
+        )?;
+        return Ok(());
+    }
     let mut worker = LibraryWorker::demo()?;
     match request {
+        UsbWorkerRequest::RegisterIdentity { .. } => {
+            unreachable!("handled without opening the Library")
+        }
         UsbWorkerRequest::Inspect {
             root,
             source_id,
@@ -67,9 +97,29 @@ pub fn run_usb_worker(request_path: &Path, response_path: &Path) -> Result<(), U
             source_id,
             observed_source_id,
             playlist_ids,
+            expected_database_revision,
         } => {
             let source_id = validated_source_id(Path::new(&root), source_id, &observed_source_id)?;
-            worker.sync_rekordbox_device(root, Some(&source_id), &playlist_ids)?;
+            lumi_rekordbox_device::verify_device_database_revision(
+                Path::new(&root),
+                &expected_database_revision,
+            )
+            .map_err(LibraryWorkerError::from)?;
+            let progress_path = response_path.with_extension("progress.json");
+            worker.sync_rekordbox_device_with_progress(
+                root,
+                Some(&source_id),
+                &playlist_ids,
+                |stage, completed, total| {
+                    let update = json!({ "stage": stage, "completed": completed, "total": total });
+                    let temporary = progress_path.with_extension("partial");
+                    if let Ok(bytes) = serde_json::to_vec(&update)
+                        && fs::write(&temporary, bytes).is_ok()
+                    {
+                        let _ = fs::rename(&temporary, &progress_path);
+                    }
+                },
+            )?;
         }
         UsbWorkerRequest::ResolveConflict {
             root,
@@ -107,7 +157,8 @@ pub fn run_usb_worker(request_path: &Path, response_path: &Path) -> Result<(), U
 /// Source identity is selected locally before the USB operation begins. A
 /// physical equal-model FAT test proved that an otherwise healthy volume can
 /// block indefinitely on a new root-level file write. Identity metadata must
-/// therefore never touch removable media or prevent read-only inspection.
+/// therefore run only in a separate short-lived worker, after inspection, with
+/// an independent deadline. An unavailable marker cannot prevent inspection.
 fn validated_source_id(
     root: &Path,
     preferred: Option<String>,
@@ -125,6 +176,12 @@ fn validated_source_id(
     let preferred = preferred
         .filter(|value| valid_source_id(value))
         .ok_or(UsbWorkerError::InvalidSourceIdentity)?;
+    if let Ok(Some(marker)) = crate::usb_media_identity::read(root) {
+        if preferred == marker.source_id || preferred == observed {
+            return Ok(marker.source_id);
+        }
+        return Err(UsbWorkerError::SourceIdentityMismatch);
+    }
     if preferred == observed || migratable_legacy_source_id(&preferred) {
         return Ok(preferred);
     }
@@ -178,7 +235,8 @@ mod tests {
             "root": "/Volumes/USB",
             "sourceId": "usb-local:one",
             "observedSourceId": "usb-fs:v2-physical",
-            "playlistIds": [7, 9]
+            "playlistIds": [7, 9],
+            "expectedDatabaseRevision": "scanned-database"
         }))?;
         assert!(matches!(
             request,

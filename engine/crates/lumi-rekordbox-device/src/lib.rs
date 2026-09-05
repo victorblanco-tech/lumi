@@ -9,7 +9,7 @@
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, File};
-use std::io::{self, Read, Seek, SeekFrom};
+use std::io::{self, Read};
 use std::path::{Component, Path, PathBuf};
 
 use rusqlite::{Connection, OpenFlags};
@@ -42,7 +42,7 @@ pub struct DeviceTrack {
     pub analysis_revision: String,
     /// Export date retained as a conservative fallback ordering fact.
     pub analyzed_at: String,
-    /// Stable, bounded signature of the audio container. It allows trusted
+    /// Full-content signature of the audio container, read with bounded memory. It allows trusted
     /// backup exports with renamed metadata to resolve to the same canonical
     /// Lumi track without hashing the complete music library.
     pub audio_signature: String,
@@ -84,6 +84,24 @@ impl DeviceLibrarySnapshot {
     #[must_use]
     pub fn track(&self, device_track_id: u32) -> Option<&DeviceTrack> {
         self.tracks.get(&device_track_id)
+    }
+
+    /// Revalidate the selected snapshot just before its SQLite transaction.
+    /// A concurrently running Rekordbox export must not produce a mixed import.
+    pub fn verify_unchanged(&self) -> Result<(), DeviceError> {
+        if sha256_file(&self.database_path, MAX_DATABASE_BYTES)? != self.database_revision {
+            return Err(DeviceError::SourceChangedDuringSync);
+        }
+        for track in self.tracks.values() {
+            let revision = analysis_set_revision(&track.analysis_dat_path)?;
+            if !track
+                .analysis_revision
+                .ends_with(&format!("anlz-set:{revision}"))
+            {
+                return Err(DeviceError::SourceChangedDuringSync);
+            }
+        }
+        Ok(())
     }
 }
 
@@ -441,8 +459,9 @@ struct OneLibraryPlaylistNode {
     parent_id: Option<u32>,
 }
 
-/// Hashes the file size plus at most 64 KiB from the start and end of an audio
-/// file. This is bounded, read-only and stable across USB copies.
+/// Full-container SHA-256, streamed with constant memory in the isolated USB
+/// worker. The versioned prefix distinguishes this from legacy end sampling.
+/// This must never run in the realtime show pump.
 pub fn audio_content_signature(path: impl AsRef<Path>) -> Result<String, DeviceError> {
     let path = path.as_ref();
     let metadata = fs::metadata(path)?;
@@ -453,23 +472,37 @@ pub fn audio_content_signature(path: impl AsRef<Path>) -> Result<String, DeviceE
     let mut file = File::open(path)?;
     let mut digest = Sha256::new();
     digest.update(length.to_le_bytes());
-    let start_length = usize::try_from(length.min(AUDIO_SIGNATURE_WINDOW_BYTES as u64))
-        .map_err(|_| DeviceError::InvalidAudioFile(path.to_path_buf()))?;
-    let mut start = vec![0_u8; start_length];
-    file.read_exact(&mut start)?;
-    digest.update(&start);
-    if length > AUDIO_SIGNATURE_WINDOW_BYTES as u64 {
-        let end_length = usize::try_from(length.min(AUDIO_SIGNATURE_WINDOW_BYTES as u64))
-            .map_err(|_| DeviceError::InvalidAudioFile(path.to_path_buf()))?;
-        file.seek(SeekFrom::End(-(end_length as i64)))?;
-        let mut end = vec![0_u8; end_length];
-        file.read_exact(&mut end)?;
-        digest.update(&end);
+    let mut buffer = [0_u8; AUDIO_SIGNATURE_WINDOW_BYTES];
+    let mut read_length = 0_u64;
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 {
+            break;
+        }
+        read_length = read_length.saturating_add(count as u64);
+        if read_length > length {
+            return Err(DeviceError::InvalidAudioFile(path.to_path_buf()));
+        }
+        digest.update(&buffer[..count]);
+    }
+    let after = file.metadata()?;
+    if read_length != length || after.len() != length || metadata.modified()? != after.modified()? {
+        return Err(DeviceError::InvalidAudioFile(path.to_path_buf()));
     }
     Ok(format!(
-        "audio:{}",
+        "audio-full-v1:{}",
         hex_digest(digest.finalize().as_slice())
     ))
+}
+
+/// A sync request is bound to the database the user actually inspected.
+pub fn verify_device_database_revision(root: &Path, expected: &str) -> Result<(), DeviceError> {
+    let canonical = fs::canonicalize(root)?;
+    let path = canonical_child(&canonical, Path::new(DATABASE_RELATIVE_PATH))?;
+    if expected.is_empty() || sha256_file(&path, MAX_DATABASE_BYTES)? != expected {
+        return Err(DeviceError::SourceChangedDuringSync);
+    }
+    Ok(())
 }
 
 /// Returns the Java `String.hashCode` of the normalized metadata tuple sent
@@ -679,6 +712,10 @@ fn normalize_identity(value: &str) -> String {
 
 #[derive(Debug, Error)]
 pub enum DeviceError {
+    #[error(
+        "USB contents changed during synchronization. Finish the Rekordbox export, then scan and sync again. Nothing from this sync was committed."
+    )]
+    SourceChangedDuringSync,
     #[error("the selected folder is not a mounted device root")]
     InvalidDeviceRoot,
     #[error(
@@ -713,6 +750,32 @@ pub enum DeviceError {
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn full_audio_identity_detects_same_size_middle_edit() -> Result<(), DeviceError> {
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap_or_default()
+            .as_nanos();
+        let root = TestDevice(std::env::temp_dir().join(format!(
+            "lumi-audio-identity-{}-{nonce}",
+            std::process::id()
+        )));
+        fs::create_dir_all(&root.0)?;
+        let path = root.0.join("edit.wav");
+        let mut bytes = vec![3_u8; 256 * 1024];
+        fs::write(&path, &bytes)?;
+        let before = audio_content_signature(&path)?;
+        bytes[128 * 1024] = 4;
+        fs::write(&path, &bytes)?;
+        let after = audio_content_signature(&path)?;
+        assert_ne!(before, after);
+        assert!(before.starts_with("audio-full-v1:"));
+        let renamed = root.0.join("renamed.wav");
+        fs::copy(&path, &renamed)?;
+        assert_eq!(after, audio_content_signature(renamed)?);
+        Ok(())
+    }
 
     struct TestDevice(PathBuf);
 
@@ -782,6 +845,9 @@ mod tests {
         let snapshot = read_device_library(&device.0)?;
         let after = sha256_file(&database_path, MAX_DATABASE_BYTES)?;
         assert_eq!(before, after);
+        snapshot.verify_unchanged()?;
+        verify_device_database_revision(&device.0, &snapshot.database_revision)?;
+        assert!(verify_device_database_revision(&device.0, "stale-scanned-revision").is_err());
         assert_eq!(snapshot.database_version, "1000");
         assert_eq!(snapshot.tracks[&10].analysis_update_count, 4);
         assert_eq!(snapshot.tracks[&10].color_rgb, Some(0x32_80_ff));
@@ -794,6 +860,10 @@ mod tests {
         // advancing the OneLibrary counters. Content identity must still make
         // the next Lumi inspection classify the track as changed.
         fs::write(analysis_directory.join("ANLZ0000.DAT"), b"updated analysis")?;
+        assert!(matches!(
+            snapshot.verify_unchanged(),
+            Err(DeviceError::SourceChangedDuringSync)
+        ));
         let updated = read_device_library(&device.0)?;
         assert_eq!(updated.tracks[&10].analysis_update_count, 4);
         assert_eq!(updated.tracks[&10].cue_update_count, 6);

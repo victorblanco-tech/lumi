@@ -25,6 +25,45 @@ use super::{
 };
 
 #[test]
+fn backup_restore_prepares_state_before_activation() -> Result<(), Box<dyn std::error::Error>> {
+    let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let root = std::env::temp_dir().join(format!("lumi-restore-boundary-{unique}"));
+    let source = root.join("Backups/saved/library.sqlite");
+    let rollback = root.join("Backups/rollback/library.sqlite");
+    let broken = root.join("Backups/broken/library.sqlite");
+    for path in [&source, &rollback, &broken] {
+        std::fs::create_dir_all(path.parent().ok_or("missing parent")?)?;
+    }
+    {
+        let path = root.join("library.sqlite");
+        let mut worker = LibraryWorker::initialize_with_repository(
+            lumi_library_sqlite::SqliteLibraryRepository::open(&path)?,
+            Some(path),
+            false,
+        )?;
+        let before = worker.snapshot_json()?;
+        worker.create_consistent_backup(&source)?;
+        std::fs::write(&broken, b"not a SQLite database")?;
+        assert!(
+            worker
+                .restore_consistent_backup(&broken, &rollback)
+                .is_err()
+        );
+        assert_eq!(worker.snapshot_json()?, before);
+        worker.restore_consistent_backup(&source, &rollback)?;
+        assert_eq!(worker.snapshot_json()?, before);
+        // A second restore also validates that the live repository remains open
+        // on the active DB, rather than the temporary staging file.
+        let second = root.join("Backups/second/library.sqlite");
+        std::fs::create_dir_all(second.parent().ok_or("missing parent")?)?;
+        worker.create_consistent_backup(&second)?;
+        assert!(second.is_file());
+    }
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
 fn fresh_release_initialization_contains_no_demo_or_personal_data()
 -> Result<(), Box<dyn std::error::Error>> {
     let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();

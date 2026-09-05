@@ -1288,6 +1288,30 @@ impl SqliteLibraryRepository {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
+    /// Persisted complete fingerprints remain authoritative even if a USB path
+    /// has since been replaced with another edit. Never re-identify an old track
+    /// by blindly hashing whatever currently occupies its former path.
+    pub fn device_audio_signatures(
+        &self,
+    ) -> Result<BTreeMap<TrackId, BTreeSet<String>>, SqliteLibraryError> {
+        let mut statement = self.connection.prepare(
+            "SELECT canonical_track_id, audio_signature FROM device_library_track_aliases
+             WHERE canonical_track_id IS NOT NULL AND audio_signature LIKE 'audio-full-v1:%'",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut signatures = BTreeMap::<TrackId, BTreeSet<String>>::new();
+        for row in rows {
+            let (id, signature) = row?;
+            signatures
+                .entry(TrackId::new(from_positive_i64(id, "track id")?))
+                .or_default()
+                .insert(signature);
+        }
+        Ok(signatures)
+    }
+
     // The four synchronized collections form one atomic device snapshot. A
     // request object would only move these explicit transaction inputs around.
     #[allow(clippy::too_many_arguments)]
@@ -1798,9 +1822,8 @@ impl SqliteLibraryRepository {
     }
 
     /// Classifies an incoming device analysis without mutating the active
-    /// track. A changed content revision from the same trusted USB is a newer
-    /// export of that source and is promoted. Competing USB sources remain
-    /// conservatively ordered by Rekordbox's export date.
+    /// track. OneLibrary revisions are ordered only by monotone counters within
+    /// the same master identity, never by USB label or containing export date.
     pub fn device_analysis_decision(
         &self,
         track_id: TrackId,
@@ -1846,13 +1869,22 @@ impl SqliteLibraryRepository {
         {
             return Ok(DeviceAnalysisDecision::Current);
         }
-        let Some((active_source, _, active_date, _)) = provenance else {
+        let Some((active_source, active_revision, active_date, _)) = provenance else {
             return Ok(if active_revision.starts_with("device:") {
                 DeviceAnalysisDecision::HoldConflict
             } else {
                 DeviceAnalysisDecision::PromoteInitial
             });
         };
+        if analysis_revision.starts_with("onelibrary:")
+            || active_revision.starts_with("onelibrary:")
+        {
+            return Ok(compare_device_analysis_revisions(
+                analysis_revision,
+                &active_revision,
+            ));
+        }
+        // Legacy providers retain their historical ordering until re-imported.
         if active_source == source_id {
             return Ok(DeviceAnalysisDecision::PromoteNewer);
         }
@@ -1865,8 +1897,7 @@ impl SqliteLibraryRepository {
 
     /// Hot cues are an independently replaceable Rekordbox projection. Their
     /// provenance must not force a beat-grid or waveform promotion: a trusted
-    /// source can refresh its own cue revision, while an older backup source
-    /// remains protected by the same monotone date rule.
+    /// source can refresh its cue revision only under the same revision policy.
     pub fn device_hot_cue_decision(
         &self,
         track_id: TrackId,
@@ -1894,6 +1925,14 @@ impl SqliteLibraryRepository {
         };
         if active_revision == analysis_revision {
             return Ok(DeviceAnalysisDecision::Current);
+        }
+        if analysis_revision.starts_with("onelibrary:")
+            || active_revision.starts_with("onelibrary:")
+        {
+            return Ok(compare_device_analysis_revisions(
+                analysis_revision,
+                &active_revision,
+            ));
         }
         if active_source == source_id {
             return Ok(DeviceAnalysisDecision::PromoteNewer);
@@ -3908,6 +3947,42 @@ impl SqliteLibraryRepository {
                 .transpose()?,
             phrases,
         )?))
+    }
+}
+
+/// Compare counters only inside the same Rekordbox master track. USB scan time,
+/// labels and the database creation date cannot establish per-track freshness.
+fn compare_device_analysis_revisions(incoming: &str, active: &str) -> DeviceAnalysisDecision {
+    fn counters(revision: &str) -> Option<[u32; 4]> {
+        let mut parts = revision.strip_prefix("onelibrary:")?.split(':');
+        let values = [
+            parts.next()?.parse().ok()?,
+            parts.next()?.parse().ok()?,
+            parts.next()?.parse().ok()?,
+            parts.next()?.parse().ok()?,
+        ];
+        (values[0] != 0 && values[1] != 0).then_some(values)
+    }
+    if incoming == active {
+        return DeviceAnalysisDecision::Current;
+    }
+    let (Some(new), Some(old)) = (counters(incoming), counters(active)) else {
+        return DeviceAnalysisDecision::HoldConflict;
+    };
+    if new[..2] != old[..2] {
+        return DeviceAnalysisDecision::HoldConflict;
+    }
+    match (new[2].cmp(&old[2]), new[3].cmp(&old[3])) {
+        (std::cmp::Ordering::Greater, std::cmp::Ordering::Equal | std::cmp::Ordering::Greater)
+        | (std::cmp::Ordering::Equal, std::cmp::Ordering::Greater) => {
+            DeviceAnalysisDecision::PromoteNewer
+        }
+        (std::cmp::Ordering::Less, std::cmp::Ordering::Equal | std::cmp::Ordering::Less)
+        | (std::cmp::Ordering::Equal, std::cmp::Ordering::Less) => {
+            DeviceAnalysisDecision::ProtectOlder
+        }
+        // Equal counters with different content and crossed counters require review.
+        _ => DeviceAnalysisDecision::HoldConflict,
     }
 }
 

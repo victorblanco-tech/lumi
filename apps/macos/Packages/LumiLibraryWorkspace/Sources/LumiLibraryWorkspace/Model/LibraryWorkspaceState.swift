@@ -837,11 +837,17 @@ public struct USBSourceOperationState: Equatable, Sendable {
     public let phase: Phase
     public let title: String
     public let detail: String
+    public let completedTracks: Int?
+    public let totalTracks: Int?
+    public let sourceID: String?
 
-    public init(phase: Phase, title: String, detail: String) {
+    public init(phase: Phase, title: String, detail: String, completedTracks: Int? = nil, totalTracks: Int? = nil, sourceID: String? = nil) {
         self.phase = phase
         self.title = title
         self.detail = detail
+        self.completedTracks = completedTracks
+        self.totalTracks = totalTracks
+        self.sourceID = sourceID
     }
 
     public static let idle = Self(phase: .idle, title: "", detail: "")

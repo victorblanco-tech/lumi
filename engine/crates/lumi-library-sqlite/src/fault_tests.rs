@@ -23,6 +23,86 @@ use super::{
 };
 
 #[test]
+fn onelibrary_revision_order_is_track_scoped_and_monotone() {
+    use super::compare_device_analysis_revisions as compare;
+    let active = "onelibrary:11:22:8:6:anlz-set:current";
+    assert_eq!(compare(active, active), DeviceAnalysisDecision::Current);
+    assert_eq!(
+        compare("onelibrary:11:22:9:6:anlz-set:new", active),
+        DeviceAnalysisDecision::PromoteNewer
+    );
+    assert_eq!(
+        compare("onelibrary:11:22:8:7:anlz-set:cue", active),
+        DeviceAnalysisDecision::PromoteNewer
+    );
+    assert_eq!(
+        compare("onelibrary:11:22:7:6:anlz-set:old", active),
+        DeviceAnalysisDecision::ProtectOlder
+    );
+    for revision in [
+        "onelibrary:11:22:8:6:anlz-set:different",
+        "onelibrary:11:22:9:5:anlz-set:crossed",
+        "onelibrary:99:22:9:9:anlz-set:other-master",
+        "onelibrary:11:99:9:9:anlz-set:other-track",
+        "onelibrary:0:22:9:9:anlz-set:missing-master",
+        "onelibrary:invalid",
+        "legacy-revision",
+    ] {
+        assert_eq!(
+            compare(revision, active),
+            DeviceAnalysisDecision::HoldConflict,
+            "{revision}"
+        );
+    }
+}
+
+#[test]
+fn same_usb_cannot_downgrade_analysis_even_with_a_later_database_date()
+-> Result<(), Box<dyn std::error::Error>> {
+    let baseline = DemoLibrarySourceProvider::curated().load_baseline()?;
+    let mut repository = SqliteLibraryRepository::in_memory()?;
+    repository.import_baseline(&baseline)?;
+    let id = repository
+        .page_tracks(TrackPageRequest::try_new(0, 1)?)?
+        .tracks()[0]
+        .id();
+    let active = "onelibrary:11:22:8:6:anlz-set:active";
+    repository.connection.execute(
+        "INSERT INTO track_analysis_provenance(track_id,source_id,device_track_id,analysis_revision,analyzed_at,hot_cues_loaded)
+         VALUES (?1,'usb-fs:v2-same',22,?2,'2026-01-01',1)",
+        rusqlite::params![to_i64(id.value())?, active],
+    )?;
+    assert_eq!(
+        repository.device_analysis_decision(
+            id,
+            "usb-fs:v2-same",
+            "onelibrary:11:22:7:6:anlz-set:older",
+            "2099-01-01"
+        )?,
+        DeviceAnalysisDecision::ProtectOlder
+    );
+    assert_eq!(
+        repository.device_analysis_decision(
+            id,
+            "usb-fs:v2-other",
+            "onelibrary:11:22:9:6:anlz-set:newer",
+            "2000-01-01"
+        )?,
+        DeviceAnalysisDecision::PromoteNewer
+    );
+    assert_eq!(
+        repository.device_analysis_decision(
+            id,
+            "usb-fs:v2-same",
+            "onelibrary:11:22:8:6:anlz-set:unknown",
+            "2099-01-01"
+        )?,
+        DeviceAnalysisDecision::HoldConflict
+    );
+    Ok(())
+}
+
+#[test]
 fn file_repository_has_explicit_wal_durability_and_bounded_lock_waiting()
 -> Result<(), Box<dyn std::error::Error>> {
     let nonce = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
