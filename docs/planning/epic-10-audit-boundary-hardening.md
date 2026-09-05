@@ -121,10 +121,10 @@ regressions. No story is complete merely because its documentation exists.
 4. Enforce Controller revocation at the final engine execution boundary, not
    only before the gateway sends. Test saturated production paths rather than
    treating the separate ProjectionHub tests as production evidence.
-5. Complete exclusive native CoreMIDI tests and headed iPhone recovery checks.
-   The first Swift process run failed its MIDI checks with Lumi running, so it
-   is not acceptance evidence. Permission was requested to stop the app/service
-   temporarily; no protected stop was bypassed.
+5. Complete headed iPhone recovery checks. The owner subsequently authorized
+   stopping Lumi Dev and its Dev services, and the exclusive native CoreMIDI
+   rerun passed all 25 engine-client tests (205 Swift tests in the full Apple
+   gate). The earlier concurrent failure is not counted as acceptance evidence.
 6. Investigate the slow Library accessibility traversal seen during headed
    testing (high UI CPU, engine still running). A sample contains substantial
    SwiftUI/AppKit accessibility and layout work; causality is not yet established.
