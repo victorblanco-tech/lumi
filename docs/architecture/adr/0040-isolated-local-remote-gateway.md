@@ -119,7 +119,8 @@ The persisted selection is authoritative, including an explicitly empty
 selection after revocation. Automatic selection is permitted only at first
 pairing, not on reconnect, show-mode change or return from an offline period.
 An additive initialization flag preserves that decision even after all devices
-are revoked; old stores with paired devices migrate as already initialized.
+are revoked; existing legacy stores, including empty ones, migrate as already
+initialized. An absent store represents the first installation.
 
 All ownership writes lock registry then command guard in one order. Candidate
 registry state (including its bounded 32-entry ownership history) is persisted

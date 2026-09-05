@@ -694,10 +694,16 @@ pub struct ControllerChange {
 #[serde(rename_all = "camelCase")]
 pub struct PairingRegistrySnapshot {
     pub devices: Vec<PairedDevice>,
-    #[serde(default)]
+    #[serde(default = "restored_controller_selection_initialized")]
     pub controller_selection_initialized: bool,
     #[serde(default)]
     pub controller_changes: Vec<ControllerChange>,
+}
+
+// A legacy persisted store may be empty because its last pairing was revoked.
+// Only a brand-new, absent store starts with automatic first-pairing selection.
+fn restored_controller_selection_initialized() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Default)]

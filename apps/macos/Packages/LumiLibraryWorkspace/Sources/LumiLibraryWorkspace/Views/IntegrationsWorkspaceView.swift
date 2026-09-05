@@ -394,7 +394,7 @@ public struct IntegrationsWorkspaceView: View {
                         HStack(spacing: LumiSpacing.xLarge) {
                             linkValue(
                                 "ENGINE",
-                                remoteGateway.status?.engineConnected == true ? "Connected" : "Waiting"
+                                remoteGateway.status.map { $0.engineConnected ? "Connected" : "Waiting" } ?? "—"
                             )
                             linkValue(
                                 "LOCAL NETWORK",
@@ -402,11 +402,11 @@ public struct IntegrationsWorkspaceView: View {
                             )
                             linkValue(
                                 "PAIRED IPHONES",
-                                "\(remoteGateway.status?.pairedDevices.count ?? 0)"
+                                remoteGateway.status.map { String($0.pairedDevices.count) } ?? "—"
                             )
                             linkValue(
                                 "CONTROLLER",
-                                remoteControllerName ?? "None"
+                                remoteGateway.status == nil ? "—" : (remoteControllerName ?? "Not assigned")
                             )
                         }
                     }

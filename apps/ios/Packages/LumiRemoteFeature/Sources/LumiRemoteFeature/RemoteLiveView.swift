@@ -277,7 +277,7 @@ private struct RemoteTopBar: View {
             VStack(alignment: .leading, spacing: 10) {
                 Text("Lumi Remote").font(.headline)
                 Text(connectionLabel).foregroundStyle(connectionColor)
-                Text("Controller: \(model.controllerDisplayName ?? "Not assigned")")
+                Text("Controller: \(model.controllerDisplayName ?? (model.controlsEnabled ? "This device" : "Not reported by this Mac"))")
                 Text("Only the Controller can change the show. Transfer control in Lumi on the Mac: Integrations → iPhone Remote.")
                     .font(.caption)
                 Text("Version \(RemoteAppVersion.current)")

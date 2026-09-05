@@ -178,6 +178,38 @@ async fn two_real_tls_clients_reauthenticate_after_explicit_transfer_without_rol
     Ok(())
 }
 
+#[tokio::test]
+async fn empty_legacy_store_does_not_silently_select_a_new_controller() -> TestResult {
+    let f = Fixture::new()?;
+    let registry = PairingRegistry::from_snapshot(serde_json::from_str(r#"{"devices":[]}"#)?)?;
+    f.state
+        .commit_registry(&mut *f.state.registry.lock().await, registry, false)
+        .await?;
+    assert!(lease(&f.pair("new-device").await?).is_none());
+    Ok(())
+}
+
+#[tokio::test]
+async fn ownership_history_is_bounded_and_contains_no_authentication_material() -> TestResult {
+    let f = Fixture::new()?;
+    f.pair("owner").await?;
+    let mut registry = f.state.registry.lock().await;
+    for at in 20..120 {
+        registry.record_controller_change(Some("owner".into()), "macTransfer", at);
+    }
+    assert_eq!(registry.controller_changes().len(), 32);
+    let history = serde_json::to_string(registry.controller_changes())?;
+    assert!(!history.contains("credential"));
+    assert!(!history.contains("lease"));
+    assert!(!history.contains(&"c".repeat(32)));
+    let mut snapshot = registry.snapshot();
+    snapshot
+        .controller_changes
+        .push(snapshot.controller_changes[0].clone());
+    assert!(PairingRegistry::from_snapshot(snapshot).is_err());
+    Ok(())
+}
+
 fn hello(id: &str) -> RemoteClientHello {
     RemoteClientHello::Authenticate {
         device_id: id.into(),
