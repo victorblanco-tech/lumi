@@ -31,6 +31,9 @@ must remain unchanged unless a specific regression proves a change necessary.
 - Test real native UI for user-visible changes. Screenshots are original
   resolution captures, visually inspected, with sensible display sizing and no
   fabricated waveform/track content.
+- Editor screenshots always have the left main navigation collapsed to its
+  icon rail. Keep the enlarged waveform and a useful phrase boundary visible;
+  use the owner's prepared 90s Bitch track, not an unprepared placeholder.
 - Ask before a product choice would change supported workflows. Implementation
   choices that preserve existing behavior can proceed independently.
 
@@ -111,6 +114,15 @@ regressions. No story is complete merely because its documentation exists.
 
 ### Remaining before this epic can be called complete
 
+The dev-5 follow-up installed and exercised the Mac app, completed all 25
+exclusive engine-client tests and fixed two false-positive acceptance gaps:
+the combined soak now requires real CoreMIDI dispatch and non-empty latency
+samples, and iOS Simulator builds now retain their own Keychain entitlements.
+The stricter 120-second soak completed 28 AutoLoops/29 pulses with 68 µs p95
+local dispatch lateness. Native Remote Observer disconnect/reconnect recovered
+without affecting the running Mac show. See the dated
+[progress report](../release/0.6.2-audit-progress.md) for bounds and limitations.
+
 1. Move synchronous SQL, preparation and expensive presentation work out of
    the show pump, with revision-bound staging and real contention tests.
 2. Preserve proven USB provenance in live lookup; the current call still drops
@@ -121,7 +133,8 @@ regressions. No story is complete merely because its documentation exists.
 4. Enforce Controller revocation at the final engine execution boundary, not
    only before the gateway sends. Test saturated production paths rather than
    treating the separate ProjectionHub tests as production evidence.
-5. Complete headed iPhone recovery checks. The owner subsequently authorized
+5. Complete headed Controller mutation and physical-iPhone recovery checks.
+   Native iPhone Simulator Observer recovery now passes. The owner authorized
    stopping Lumi Dev and its Dev services, and the exclusive native CoreMIDI
    rerun passed all 25 engine-client tests (205 Swift tests in the full Apple
    gate). The earlier concurrent failure is not counted as acceptance evidence.

@@ -44,6 +44,12 @@ if (( duration_seconds < minimum_seconds )); then
 fi
 
 cd "$repository_root"
+# The combined lane now publishes a real MIDI source; a running installed app
+# would contend for those endpoints and invalidate acceptance. Never stop it
+# automatically, especially when the owner may be performing a show.
+if [[ "$(uname -s)" == "Darwin" ]]; then
+  "$script_dir/check-apple-test-exclusivity.sh"
+fi
 mkdir -p build/Evidence
 evidence_path="${LUMI_LIVE_EVIDENCE_PATH:-$repository_root/build/Evidence/live-integration-${duration_seconds}s.json}"
 export LUMI_PROLINK_JAVA="$prolink_java"
