@@ -311,7 +311,7 @@ public struct LiveWorkspaceView: View {
         } label: {
             HStack(spacing: LumiSpacing.xSmall) {
                 Image(systemName: "metronome")
-                Text(String(format: "%+d ms", lightingTimingOffsetMillis))
+                Text(String(format: "%+d ms", pendingLightingTimingOffsetMillis ?? appliedLightingTimingOffsetMillis))
                     .monospacedDigit()
                 Text(timingConfirmationLabel)
                     .font(LumiTypography.technical.weight(.semibold))
@@ -371,7 +371,9 @@ public struct LiveWorkspaceView: View {
     }
 
     private var timingConfirmationLabel: String {
-        if appliedLightingTimingOffsetMillis != lightingTimingOffsetMillis { return "SYNC" }
+        if state.content?.lightingTimingSaveError != nil { return "NOT SAVED" }
+        if state.content?.lightingTimingSavePending == true { return "SAVING" }
+        if pendingLightingTimingOffsetMillis != nil { return "NEXT PHRASE" }
         return "SAVED"
     }
 
@@ -381,14 +383,14 @@ public struct LiveWorkspaceView: View {
 
     private var timingConfirmationDetail: String {
         let applied = String(format: "%+d ms", appliedLightingTimingOffsetMillis)
+        if let error = state.content?.lightingTimingSaveError {
+            return "Applied \(applied), but could not save: \(error). Choose the value again to retry."
+        }
         if let pendingLightingTimingOffsetMillis {
             let pending = String(format: "%+d ms", pendingLightingTimingOffsetMillis)
             return "Applied \(applied) · \(pending) activates at the next phrase."
         }
-        if appliedLightingTimingOffsetMillis != lightingTimingOffsetMillis {
-            return "Saved \(applied) · waiting for engine confirmation."
-        }
-        return "Applied: \(applied). Negative is early; positive is late."
+        return "Applied: \(applied). Changes from Mac or iPhone are saved for next time. Negative is early; positive is late."
     }
 
     private var technicalStatusButton: some View {
@@ -656,6 +658,18 @@ public struct LiveWorkspaceView: View {
         }
         let phraseState = phraseState(cue: cue, deck: deck, isLive: isLive)
         let editable = canEdit(plan) && phraseState == .planned
+        let deckPhrase = cue.flatMap { cue in
+            deck.phrases.first(where: { $0.index == cue.phraseIndex })
+        }
+        let phraseRoleChoices: [PlanSelectionChoice<String>] = options.phraseRoles.map {
+            PlanSelectionChoice(id: $0.id, name: $0.name)
+        }
+        let themeChoices: [PlanSelectionChoice<UInt64>] = options.themes.map {
+            PlanSelectionChoice(id: $0.id, name: $0.name)
+        }
+        let autoloopChoices: [PlanSelectionChoice<UInt64>] = cue.map {
+            compatibleAutoloops(for: $0, options: options)
+        } ?? []
         return VStack(alignment: .leading, spacing: LumiSpacing.small) {
             HStack {
                 Text(verbatim: isLive ? "Live phrase plan" : "Next-track phrase plan")
@@ -671,23 +685,17 @@ public struct LiveWorkspaceView: View {
                 VStack(alignment: .leading, spacing: LumiSpacing.small) {
                     HStack(spacing: LumiSpacing.small) {
                         VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-                            Text(verbatim: "PHRASE")
+                            Text(verbatim: "PHRASE TYPE")
                                 .font(LumiTypography.technical)
                                 .foregroundStyle(Color.white.opacity(0.46))
                             PlanSelectionControl(
-                                value: phraseTitle(cue),
-                                selectedID: cue.phraseIndex,
-                                choices: plan.cues.map {
-                                    PlanSelectionChoice(id: $0.phraseIndex, name: phraseTitle($0))
-                                },
-                                isEnabled: plan.cues.count > 1,
-                                onSelect: { phraseIndex in
-                                    if isLive {
-                                        selectedLivePhrase = phraseIndex
-                                    } else {
-                                        selectedPhrase = phraseIndex
-                                    }
-                                }
+                                value: deckPhrase?.roleName ?? phraseTitle(cue),
+                                selectedID: deckPhrase?.roleID ?? cue.libraryResolution?.roleID,
+                                choices: phraseRoleChoices,
+                                isEnabled: editable
+                                    && (deckPhrase?.roleID ?? cue.libraryResolution?.roleID) != nil
+                                    && !options.phraseRoles.isEmpty,
+                                onSelect: { changePhraseRole($0, cue: cue, plan: plan) }
                             )
                         }
                         VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
@@ -697,9 +705,7 @@ public struct LiveWorkspaceView: View {
                             PlanSelectionControl(
                                 value: themeName(cue),
                                 selectedID: themeID(cue),
-                                choices: options.themes.map {
-                                    PlanSelectionChoice(id: $0.id, name: $0.name)
-                                },
+                                choices: themeChoices,
                                 isEnabled: editable && themeID(cue) != nil,
                                 onSelect: { selectThemeFromPhrase($0, cue: cue, plan: plan) }
                             )
@@ -711,7 +717,7 @@ public struct LiveWorkspaceView: View {
                             PlanSelectionControl(
                                 value: autoloopName(cue),
                                 selectedID: sceneID(cue),
-                                choices: compatibleAutoloops(for: cue, options: options),
+                                choices: autoloopChoices,
                                 isEnabled: editable && sceneID(cue) != nil,
                                 onSelect: { selectScene($0, cue: cue, plan: plan) }
                             )
@@ -1110,6 +1116,20 @@ public struct LiveWorkspaceView: View {
         )
     }
 
+    private func changePhraseRole(
+        _ roleID: String,
+        cue: PlanCueSnapshot,
+        plan: PlanSnapshot
+    ) {
+        onPlanMutation(
+            .changePhraseRole(
+                context: mutationContext(for: plan),
+                phraseIndex: cue.phraseIndex,
+                roleID: roleID
+            )
+        )
+    }
+
     private func themeID(_ cue: PlanCueSnapshot) -> UInt64? {
         if case let .applyLook(themeID, _, _, _, _, _, _) = cue.action {
             return themeID
@@ -1127,7 +1147,7 @@ public struct LiveWorkspaceView: View {
     private func compatibleAutoloops(
         for cue: PlanCueSnapshot,
         options: PlanningOptionsSnapshot
-    ) -> [PlanSelectionChoice] {
+    ) -> [PlanSelectionChoice<UInt64>] {
         if let choices = cue.libraryResolution?.choices, !choices.isEmpty {
             return choices.map { PlanSelectionChoice(id: $0.id, name: $0.name) }
         }
@@ -1190,17 +1210,17 @@ public struct LiveWorkspaceView: View {
     }
 }
 
-private struct PlanSelectionChoice: Identifiable {
-    let id: UInt64
+private struct PlanSelectionChoice<ID: Hashable>: Identifiable {
+    let id: ID
     let name: String
 }
 
-private struct PlanSelectionControl: View {
+private struct PlanSelectionControl<ID: Hashable>: View {
     let value: String
-    let selectedID: UInt64?
-    let choices: [PlanSelectionChoice]
+    let selectedID: ID?
+    let choices: [PlanSelectionChoice<ID>]
     let isEnabled: Bool
-    let onSelect: (UInt64) -> Void
+    let onSelect: (ID) -> Void
 
     @State private var isPresented = false
 

@@ -39,12 +39,14 @@ xcodebuild \
   -configuration Dev \
   -destination 'generic/platform=iOS Simulator' \
   -derivedDataPath build/iOSDerivedData \
-  CODE_SIGNING_ALLOWED=NO \
+  CODE_SIGNING_ALLOWED=YES \
+  CODE_SIGN_IDENTITY=- \
   GCC_TREAT_WARNINGS_AS_ERRORS=YES \
   -quiet \
   build
 
 remote_info_plist="build/iOSDerivedData/Build/Products/Dev-iphonesimulator/Lumi Remote Dev.app/Info.plist"
+"$script_dir/check-ios-simulator-entitlements.sh" "$(dirname "$remote_info_plist")"
 [[ -f "$remote_info_plist" ]] || { echo "ERROR: Lumi Remote iOS app was not built." >&2; exit 1; }
 [[ "$(/usr/libexec/PlistBuddy -c 'Print :LumiProductVersion' "$remote_info_plist")" == "$(tr -d '[:space:]' < apps/ios/VERSION)" ]] || {
   echo "ERROR: built Lumi Remote version differs from apps/ios/VERSION." >&2

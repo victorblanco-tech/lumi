@@ -1,6 +1,6 @@
 # Story E5-00: Representative CDJ-1500X simulator traffic
 
-- Status: **Implemented with playlist-driven two-player loops and Auto Mix; two-host verification pending**
+- Status: **Implemented with playlist Auto Mix and deterministic recovery faults; two-host verification pending**
 - Priority: **P0 Critical**
 - Simulator target: `0.4.0-dev-56`
 - GitHub tracking: [#121](https://github.com/victorblanco-tech/lumi/issues/121)
@@ -28,14 +28,18 @@ physical CDJ-1500X without leaving the decks powered on.
   alternates exclusive Master/On Air ownership for unattended soak tests.
 - read the USB playlist tree and let Auto Mix preload a different track from a
   selected playlist onto the idle player before each handoff.
+- deterministically suppress exact position, timing or all traffic without
+  changing the authoritative Player clock;
+- expose Player leave/join, Master handover, Hot Cue and beat-jump actions;
+- run a repeatable Recovery Soak sequence alongside playlist Auto Mix.
 
 ## Local evidence
 
 - generated PrecisePosition packets are exactly 60 bytes and round-trip device,
   track length, playback milliseconds, pitch and effective BPM through
   beat-link;
-- 22 simulator unit/API/packet tests pass, including loop wrapping, playlist
-  rotation and Auto Mix state transitions;
+- 28 simulator unit/API/packet tests pass, including authenticated HTTP controls, loop wrapping, playlist
+  rotation, deterministic fault expiry and Recovery Soak state transitions;
 - the complete simulator verification and shaded-JAR build pass;
 - the Apple Silicon DMG passes checksum, bundle-signature and architecture
   verification and identifies itself as `0.4.0-dev-56`;

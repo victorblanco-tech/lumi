@@ -17,7 +17,7 @@ use lumi_domain::{
     SerializedRuntimeError, ThemeId, TimelineResult, TimelineSource, TrackColor, TrackLoadId,
     TrackMetadata, UserCommandEnvelope, WorkerId,
 };
-use lumi_library::AutoloopCatalog;
+use lumi_library::{AutoloopCatalog, PhraseRoleId};
 use lumi_light_plans::{
     ColorBehavior, CompiledAutoloopChoice, CompiledLightPlan, CompiledModifierChoice,
     LightPlanningPolicy, ModifierKind, SelectionEvidence, VariationHistory,
@@ -63,10 +63,8 @@ use subtle::ConstantTimeEq as _;
 use thiserror::Error;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-use tokio::io::{
-    AsyncBufRead, AsyncBufReadExt as _, AsyncRead, AsyncReadExt as _, AsyncWriteExt as _, BufReader,
-};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
+use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio::time::{MissedTickBehavior, timeout};
 
@@ -84,6 +82,10 @@ use crate::link_relay::{
 };
 use crate::remote_ipc::{EngineRemoteUpdate, RemoteCommandRequest};
 use crate::service::{ServiceBootstrap, ServiceBootstrapError, derive_remote_gateway_token};
+
+#[path = "desktop_io.rs"]
+mod desktop_io;
+use desktop_io::{AuthenticatedConnection, DesktopAcceptor, DesktopClientIo};
 
 const EXIT_AFTER_CLIENT_DISCONNECT_ENVIRONMENT_KEY: &str = "LUMI_EXIT_AFTER_CLIENT_DISCONNECT";
 #[cfg(not(test))]
@@ -148,10 +150,11 @@ pub async fn run() -> Result<(), EngineError> {
     ));
     let mut remote_publisher =
         RemoteProjectionPublisher::new(latest_remote_projection, remote_updates);
-    remote_publisher.publish(&runtime, true)?;
+    remote_publisher.publish(&runtime, true);
     let _service_record =
         service.publish_record(endpoint.port(), remote_gateway_endpoint.port())?;
     write_startup_record(endpoint.port())?;
+    let mut desktop_clients = DesktopAcceptor::start(listener, session_token);
     let mut termination =
         tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
 
@@ -161,11 +164,11 @@ pub async fn run() -> Result<(), EngineError> {
     loop {
         let accepted = tokio::select! {
             _ = termination.recv() => break,
-            accepted = listener.accept() => Some(accepted?),
+            accepted = desktop_clients.next() => accepted,
             request = remote_command_receiver.recv() => {
                 if let Some(request) = request {
                     apply_remote_command_request(&mut runtime, request);
-                    remote_publisher.publish(&runtime, true)?;
+                    remote_publisher.publish(&runtime, true);
                 }
                 None
             }
@@ -175,19 +178,15 @@ pub async fn run() -> Result<(), EngineError> {
                 runtime
                     .output_worker
                     .service_pending_autoloop();
-                remote_publisher.publish(&runtime, false)?;
+                remote_publisher.publish(&runtime, false);
                 None
             }
         };
-        let Some((stream, peer)) = accepted else {
+        let Some(connection) = accepted else {
             continue;
         };
-        if !peer.ip().is_loopback() {
-            continue;
-        }
         match serve_authenticated_client(
-            stream,
-            &session_token,
+            connection,
             &mut runtime,
             &mut termination,
             &mut remote_command_receiver,
@@ -246,37 +245,20 @@ fn write_startup_record(port: u16) -> Result<(), EngineError> {
 }
 
 async fn serve_authenticated_client(
-    stream: TcpStream,
-    expected_token: &str,
+    connection: AuthenticatedConnection,
     runtime: &mut EngineRuntime,
     termination: &mut tokio::signal::unix::Signal,
     remote_commands: &mut mpsc::Receiver<RemoteCommandRequest>,
     remote_publisher: &mut RemoteProjectionPublisher,
 ) -> Result<AuthenticatedClientExit, EngineError> {
-    let (mut reader, mut writer) = stream.into_split();
-    let authentication_bytes = timeout(
-        AUTHENTICATION_TIMEOUT,
-        read_bounded_line(&mut reader, MAXIMUM_AUTHENTICATION_BYTES),
-    )
-    .await
-    .map_err(|_| EngineError::AuthenticationTimeout)??;
-    let authentication: SessionAuthentication = serde_json::from_slice(&authentication_bytes)
-        .map_err(|_| EngineError::InvalidAuthentication)?;
-
-    if !tokens_match(expected_token, &authentication.session_token) {
-        return Err(EngineError::AuthenticationRejected);
-    }
-
+    let mut client = DesktopClientIo::start(connection);
     let mut response_sequence = 1_u64;
-    write_envelope(
-        &mut writer,
-        &snapshot_envelope(runtime, response_sequence, "session-bootstrap")?,
-    )
-    .await
-    .map_err(authenticated_client_error)?;
+    client.respond(snapshot_envelope(
+        runtime,
+        response_sequence,
+        "session-bootstrap",
+    )?)?;
     let mut command_ids = CommandIdCache::new(COMMAND_ID_CACHE_CAPACITY)?;
-    let mut command_reader = BufReader::new(reader);
-    let mut command_buffer = Vec::with_capacity(256);
     let mut integration_pump = tokio::time::interval(INTEGRATION_PUMP_INTERVAL);
     integration_pump.set_missed_tick_behavior(MissedTickBehavior::Skip);
     // The first interval tick is immediately ready. Consume it so deck input
@@ -298,16 +280,16 @@ async fn serve_authenticated_client(
                 runtime
                     .output_worker
                     .service_pending_autoloop();
-                remote_publisher.publish(runtime, false)?;
+                remote_publisher.publish(runtime, false);
             }
             request = remote_commands.recv() => {
                 if let Some(request) = request {
                     apply_remote_command_request(runtime, request);
-                    remote_publisher.publish(runtime, true)?;
+                    remote_publisher.publish(runtime, true);
                 }
             }
-            command = read_command_line(&mut command_reader, &mut command_buffer) => {
-                let Some(command_bytes) = command.map_err(authenticated_client_error)? else {
+            command = client.next_command() => {
+                let Some(command_bytes) = command? else {
                     return Ok(AuthenticatedClientExit::Disconnected);
                 };
                 response_sequence = response_sequence
@@ -327,14 +309,12 @@ async fn serve_authenticated_client(
                         None,
                     )?,
                 };
-                write_envelope(&mut writer, &response)
-                    .await
-                    .map_err(authenticated_client_error)?;
+                client.respond(response)?;
                 // Desktop snapshot polling is not a remote-state mutation.
                 // Let the publisher's static key decide whether a complete
                 // projection is needed so waveform payloads never enter the
                 // realtime path at the UI polling cadence.
-                remote_publisher.publish(runtime, false)?;
+                remote_publisher.publish(runtime, false);
             }
         }
     }
@@ -356,40 +336,6 @@ where
     writer.write_all(&encoded).await?;
     writer.flush().await?;
     Ok(())
-}
-
-async fn read_command_line<R>(
-    reader: &mut R,
-    bytes: &mut Vec<u8>,
-) -> Result<Option<Vec<u8>>, EngineError>
-where
-    R: AsyncBufRead + Unpin,
-{
-    loop {
-        let available = reader.fill_buf().await?;
-        if available.is_empty() {
-            if bytes.is_empty() {
-                return Ok(None);
-            }
-            return Err(EngineError::Io(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "command ended before a newline",
-            )));
-        }
-        let newline = available.iter().position(|byte| *byte == b'\n');
-        let payload_length = newline.unwrap_or(available.len());
-        if bytes.len().saturating_add(payload_length) > MAX_MESSAGE_BYTES {
-            return Err(EngineError::MessageOversized);
-        }
-        bytes.extend_from_slice(&available[..payload_length]);
-        let consumed = payload_length.saturating_add(usize::from(newline.is_some()));
-        reader.consume(consumed);
-        if newline.is_some() {
-            let line = bytes.clone();
-            bytes.clear();
-            return Ok(Some(line));
-        }
-    }
 }
 
 async fn read_bounded_line<R>(reader: &mut R, maximum: usize) -> Result<Vec<u8>, EngineError>
@@ -431,6 +377,7 @@ struct EngineRuntime {
     deck_source_mode: DeckSourceMode,
     planning_worker: PlanningWorker,
     output_worker: OutputWorker,
+    timing_preferences: crate::timing_preferences::TimingPreferences,
     link_relay: LinkRelay,
     library_worker: LibraryWorker,
     library_revision: u64,
@@ -557,6 +504,8 @@ struct RemoteProjectionPublisher {
     last_publish: Option<Instant>,
     next_projection_revision: u64,
     available: bool,
+    last_error: Option<String>,
+    failed_key: Option<RemoteStaticKey>,
 }
 
 impl RemoteProjectionPublisher {
@@ -572,10 +521,33 @@ impl RemoteProjectionPublisher {
             last_publish: None,
             next_projection_revision: 1,
             available: false,
+            last_error: None,
+            failed_key: None,
         }
     }
 
-    fn publish(&mut self, runtime: &EngineRuntime, force: bool) -> Result<(), EngineError> {
+    /// Remote is a fallible observer, never a show-lifecycle authority. The
+    /// infallible outer API prevents callers from propagating display errors.
+    fn publish(&mut self, runtime: &EngineRuntime, force: bool) {
+        if !force && self.failed_key.as_ref() == Some(&remote_static_key(runtime)) {
+            return;
+        }
+        if let Err(error) = self.try_publish(runtime, force) {
+            let message = error.to_string();
+            if self.last_error.as_ref() != Some(&message) {
+                eprintln!("Lumi Remote projection unavailable; show continues: {message}");
+            }
+            self.last_error = Some(message);
+            self.failed_key = Some(remote_static_key(runtime));
+            self.available = false;
+            self.last_static_key = None;
+            self.last_anchors.clear();
+            self.latest_projection.send_replace(None);
+            let _ = self.updates.send(EngineRemoteUpdate::Unavailable);
+        }
+    }
+
+    fn try_publish(&mut self, runtime: &EngineRuntime, force: bool) -> Result<(), EngineError> {
         if runtime.deck_source_mode != DeckSourceMode::ConnectedDecks {
             if self.available {
                 self.available = false;
@@ -610,6 +582,8 @@ impl RemoteProjectionPublisher {
                 observed_at,
             )?;
             self.next_projection_revision = self.next_projection_revision.saturating_add(1);
+            self.last_error = None;
+            self.failed_key = None;
             self.last_static_key = Some(static_key);
             self.last_anchors = projection
                 .players
@@ -626,6 +600,11 @@ impl RemoteProjectionPublisher {
 
         let observed_at = unix_time_millis();
         for (player_number, anchor) in remote_transport_anchors(runtime, observed_at) {
+            // A two-Player client must never receive anchors for extra Players
+            // that were intentionally omitted from its static projection.
+            if !self.last_anchors.contains_key(&player_number) {
+                continue;
+            }
             let unchanged = self
                 .last_anchors
                 .get(&player_number)
@@ -783,6 +762,19 @@ fn initialized_runtime_for_mode(
     let prolink_start_error = None;
     let mut output_worker = OutputWorker::new();
     #[cfg(not(test))]
+    let timing_path =
+        if env::var(crate::service::SERVICE_MODE_ENVIRONMENT_KEY).as_deref() == Ok("launchd") {
+            Some(crate::service::channel_data_directory()?.join("lighting-timing.json"))
+        } else {
+            None
+        };
+    #[cfg(test)]
+    let timing_path = None;
+    let timing_preferences = crate::timing_preferences::TimingPreferences::open(timing_path)?;
+    if let Some(millis) = timing_preferences.saved {
+        output_worker.request_timing_offset_millis(millis, false);
+    }
+    #[cfg(not(test))]
     let link_relay = LinkRelay::new(CarabinerTimingOutput::new(carabiner_configuration()));
     #[cfg(test)]
     let link_relay = LinkRelay::new(CarabinerTimingOutput::new(CarabinerConfiguration::default()));
@@ -845,6 +837,7 @@ fn initialized_runtime_for_mode(
         deck_source_mode,
         planning_worker,
         output_worker,
+        timing_preferences,
         link_relay,
         library_worker,
         library_revision: 1,
@@ -1068,6 +1061,11 @@ struct PlanningWorker {
     compiled_light_plans: BTreeMap<TrackLoadId, CompiledLightPlan>,
 }
 
+struct MaterializedLibraryPlan {
+    plan: LightingPlan,
+    compiled: Option<CompiledLightPlan>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PlanMaterializationScope {
     All,
@@ -1161,16 +1159,25 @@ impl PlanningWorker {
         &mut self,
         plan: LightingPlan,
     ) -> Result<LightingPlan, EngineError> {
-        self.materialize_library_plan_with_scope(plan, PlanMaterializationScope::All)
+        let context = self.library_context(plan.track_load_id());
+        let prepared = self.prepare_library_plan(plan, PlanMaterializationScope::All, context)?;
+        self.commit_compiled_plan(prepared.plan.track_load_id(), prepared.compiled);
+        Ok(prepared.plan)
     }
 
-    fn materialize_library_plan_with_scope(
-        &mut self,
+    /// Pure preparation: failed materialization must not reserve variations,
+    /// replace contexts or publish a partly compiled plan.
+    fn prepare_library_plan(
+        &self,
         plan: LightingPlan,
         scope: PlanMaterializationScope,
-    ) -> Result<LightingPlan, EngineError> {
-        let Some(context) = self.library_context(plan.track_load_id()) else {
-            return Ok(plan);
+        context: Option<&LibraryPlanContext>,
+    ) -> Result<MaterializedLibraryPlan, EngineError> {
+        let Some(context) = context else {
+            return Ok(MaterializedLibraryPlan {
+                plan,
+                compiled: None,
+            });
         };
         let initial_theme_id = plan
             .theme_decision()
@@ -1336,21 +1343,31 @@ impl PlanningWorker {
                 ))
             })
             .collect::<Result<Vec<_>, EngineError>>()?;
-        if let Some(compiled) = &compiled {
-            self.variation_history.reserve(
-                format!("track-load:{}", plan.track_load_id().value()),
-                compiled,
-            );
-            self.compiled_light_plans
-                .insert(plan.track_load_id(), compiled.clone());
+        Ok(MaterializedLibraryPlan {
+            plan: plan.with_materialized_cues(cues)?,
+            compiled,
+        })
+    }
+
+    fn commit_compiled_plan(
+        &mut self,
+        track_load_id: TrackLoadId,
+        compiled: Option<CompiledLightPlan>,
+    ) {
+        let reservation_id = format!("track-load:{}", track_load_id.value());
+        if let Some(compiled) = compiled {
+            self.variation_history.reserve(reservation_id, &compiled);
+            self.compiled_light_plans.insert(track_load_id, compiled);
             while self.compiled_light_plans.len() > LIBRARY_CONTEXT_CAPACITY {
                 let Some(oldest) = self.compiled_light_plans.keys().next().copied() else {
                     break;
                 };
                 self.compiled_light_plans.remove(&oldest);
             }
+        } else {
+            self.compiled_light_plans.remove(&track_load_id);
+            self.variation_history.release(&reservation_id);
         }
-        Ok(plan.with_materialized_cues(cues)?)
     }
 
     fn process_source_event(
@@ -1539,25 +1556,41 @@ impl PlanningWorker {
         self.planner.options()
     }
 
+    fn prepare_revised_state(
+        &self,
+        runtime: &SerializedRuntime,
+        plan: LightingPlan,
+    ) -> Result<(SerializedRuntime, u64), EngineError> {
+        let effect_sequence = self
+            .effect_sequence
+            .checked_add(1)
+            .ok_or(EngineError::PlanningEffectSequenceOverflow)?;
+        let mut candidate = runtime.clone();
+        let processed = submit_and_process(
+            &mut candidate,
+            DomainEvent::EffectResult(EffectResultEnvelope {
+                effect_id: EffectId::new(effect_sequence),
+                worker_id: WorkerId::new(1),
+                sequence: EffectSequence::new(effect_sequence),
+                completed_at: MonotonicTime::new(0),
+                result: EffectResult::PlanGenerated(plan),
+            }),
+        )?;
+        if processed.decision != lumi_domain::DecisionReason::PlanAccepted {
+            return Err(EngineError::RevisedPlanNotAccepted);
+        }
+        Ok((candidate, effect_sequence))
+    }
+
+    #[cfg(test)]
     fn accept_revised_plan(
         &mut self,
         runtime: &mut SerializedRuntime,
         plan: LightingPlan,
     ) -> Result<(), EngineError> {
-        self.effect_sequence = self
-            .effect_sequence
-            .checked_add(1)
-            .ok_or(EngineError::PlanningEffectSequenceOverflow)?;
-        submit_and_process(
-            runtime,
-            DomainEvent::EffectResult(EffectResultEnvelope {
-                effect_id: EffectId::new(self.effect_sequence),
-                worker_id: WorkerId::new(1),
-                sequence: EffectSequence::new(self.effect_sequence),
-                completed_at: MonotonicTime::new(0),
-                result: EffectResult::PlanGenerated(plan),
-            }),
-        )?;
+        let (candidate, effect_sequence) = self.prepare_revised_state(runtime, plan)?;
+        *runtime = candidate;
+        self.effect_sequence = effect_sequence;
         Ok(())
     }
 }
@@ -2764,6 +2797,22 @@ fn handle_command(
 }
 
 fn apply_remote_command_request(runtime: &mut EngineRuntime, request: RemoteCommandRequest) {
+    // A timed-out caller must not produce a surprise mutation when a queued
+    // request finally reaches the sole show-state writer. The local deadline
+    // is independent of the phone's clock.
+    if request.response.is_closed() {
+        return;
+    }
+    if Instant::now() >= request.expires_at {
+        let _ = request.response.send(RemoteCommandResult {
+            command_id: request.command.command_id,
+            status: RemoteCommandResultStatus::Rejected,
+            state_revision: Some(runtime.state.state().revision().value()),
+            plan_revision: None,
+            reason_code: Some("commandExpired".to_owned()),
+        });
+        return;
+    }
     let result = apply_remote_command(runtime, request.command);
     let _ = request.response.send(result);
 }
@@ -2773,13 +2822,23 @@ fn apply_remote_command(
     command: RemoteCommand,
 ) -> RemoteCommandResult {
     let command_id = command.command_id;
+    let changes_library_revision =
+        matches!(&command.command, RemoteCommandKind::ChangePhraseRole { .. });
     let application = remote_session_command(runtime, command.command)
         .and_then(|command| apply_command(runtime, command));
+    if application.is_ok() && changes_library_revision {
+        runtime.library_revision = runtime.library_revision.saturating_add(1);
+    }
     let (status, reason_code, actual_plan_revision) = match &application {
         Ok(()) => (RemoteCommandResultStatus::Accepted, None, None),
         Err(CommandApplicationError::StateRevisionConflict { .. }) => (
             RemoteCommandResultStatus::Conflict,
             Some("stateRevisionConflict".to_owned()),
+            None,
+        ),
+        Err(CommandApplicationError::TimingOffsetConflict) => (
+            RemoteCommandResultStatus::Conflict,
+            Some("timingOffsetConflict".to_owned()),
             None,
         ),
         Err(CommandApplicationError::RevisionConflict { actual, .. }) => (
@@ -2795,6 +2854,11 @@ fn apply_remote_command(
         Err(CommandApplicationError::StartedLivePhraseNotEditable) => (
             RemoteCommandResultStatus::Rejected,
             Some("phraseAlreadyStarted".to_owned()),
+            None,
+        ),
+        Err(CommandApplicationError::InvalidPhraseRoleSelection) => (
+            RemoteCommandResultStatus::Rejected,
+            Some("invalidPhraseRole".to_owned()),
             None,
         ),
         Err(CommandApplicationError::InvalidOperationTransition { .. }) => (
@@ -2847,11 +2911,21 @@ fn remote_session_command(
         RemoteCommandKind::SetOutputTimingOffset {
             millis,
             expected_state_revision,
+            expected_timing_offset_millis,
         } => {
-            validate_state_revision(
-                runtime,
-                lumi_domain::StateRevision::new(expected_state_revision),
-            )?;
+            if let Some(expected) = expected_timing_offset_millis {
+                // Compare the setting being edited, including a pending change.
+                // Player beats and master changes do not invalidate timing edits.
+                if runtime.output_worker.scheduling_timing_offset_millis() != expected {
+                    return Err(CommandApplicationError::TimingOffsetConflict);
+                }
+            } else {
+                // Preserve the original contract for older Remote clients.
+                validate_state_revision(
+                    runtime,
+                    lumi_domain::StateRevision::new(expected_state_revision),
+                )?;
+            }
             Ok(SessionCommand::SetOutputTimingOffset { millis })
         }
         RemoteCommandKind::SelectThemeFromPhrase {
@@ -2875,6 +2949,18 @@ fn remote_session_command(
             context: remote_plan_context(plan_id, track_load_id, expected_plan_revision)?,
             phrase_index,
             scene_id: SceneId::new(u64::from(autoloop_number)),
+        }),
+        RemoteCommandKind::ChangePhraseRole {
+            plan_id,
+            track_load_id,
+            expected_plan_revision,
+            phrase_index,
+            role_id,
+        } => Ok(SessionCommand::ChangePhraseRole {
+            context: remote_plan_context(plan_id, track_load_id, expected_plan_revision)?,
+            phrase_index,
+            role_id: PhraseRoleId::try_new(role_id)
+                .map_err(|_| CommandApplicationError::InvalidPhraseRoleSelection)?,
         }),
         RemoteCommandKind::SetCueLock {
             plan_id,
@@ -2934,6 +3020,7 @@ fn transport_ack_envelope(
 }
 
 fn process_deck_input_messages(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
+    runtime.timing_preferences.poll();
     if runtime.deck_source_mode != DeckSourceMode::ConnectedDecks {
         #[cfg(not(test))]
         maintain_direct_prolink_bridge(runtime)?;
@@ -3438,6 +3525,10 @@ fn apply_command(
             return Ok(());
         }
         SessionCommand::SetOutputTimingOffset { millis } => {
+            runtime
+                .timing_preferences
+                .request(millis)
+                .map_err(CommandApplicationError::TimingSave)?;
             let defer_until_phrase = runtime.state.state().operation() == OperationState::Live
                 && runtime
                     .leader_deck_id()
@@ -3736,6 +3827,7 @@ fn apply_command(
         SessionCommand::SelectTheme { .. }
         | SessionCommand::SelectThemeFromPhrase { .. }
         | SessionCommand::SelectScene { .. }
+        | SessionCommand::ChangePhraseRole { .. }
         | SessionCommand::SetCueLock { .. }
         | SessionCommand::RegeneratePlan { .. } => {}
     }
@@ -3772,7 +3864,9 @@ fn apply_command(
         )
     };
 
-    let (revised, materialization_scope, revise_materialized_cues) = match command {
+    let mut replacement_context = None;
+    let mut pending_phrase_edit = None;
+    let mutation = match command {
         SessionCommand::GetSnapshot { .. }
         | SessionCommand::QueryLibrary { .. }
         | SessionCommand::OpenLibraryTrackEditor { .. }
@@ -3827,6 +3921,7 @@ fn apply_command(
                 .select_theme(&current, theme_id)?,
             PlanMaterializationScope::All,
             false,
+            false,
         ),
         SessionCommand::SelectThemeFromPhrase {
             phrase_index,
@@ -3841,6 +3936,7 @@ fn apply_command(
                     theme_id,
                 )?,
                 PlanMaterializationScope::FromPhrase(phrase_index),
+                false,
                 false,
             )
         }
@@ -3862,17 +3958,21 @@ fn apply_command(
                     .ok_or(CommandApplicationError::PlanUnavailable)?;
                 let autoloop_number = u16::try_from(scene_id.value())
                     .map_err(|_| CommandApplicationError::InvalidAutoloopSelection)?;
-                runtime
+                let mut candidate_context = runtime
                     .planning_worker
                     .library_contexts
-                    .get_mut(&current.track_load_id())
-                    .ok_or(CommandApplicationError::PlanUnavailable)?
+                    .get(&current.track_load_id())
+                    .cloned()
+                    .ok_or(CommandApplicationError::PlanUnavailable)?;
+                candidate_context
                     .set_autoloop_override(theme_id, phrase_index, autoloop_number)
                     .map_err(LibraryWorkerError::from)?;
+                replacement_context = Some(candidate_context);
                 (
                     current.clone(),
                     PlanMaterializationScope::Phrase(phrase_index),
                     true,
+                    false,
                 )
             } else {
                 (
@@ -3883,8 +3983,36 @@ fn apply_command(
                     )?,
                     PlanMaterializationScope::Phrase(phrase_index),
                     false,
+                    false,
                 )
             }
+        }
+        SessionCommand::ChangePhraseRole {
+            phrase_index,
+            role_id,
+            ..
+        } => {
+            reject_started_live_phrase(runtime.state.state(), current.deck_id(), phrase_index)?;
+            let previous_context = runtime
+                .planning_worker
+                .library_context(current.track_load_id())
+                .ok_or(CommandApplicationError::PlanUnavailable)?;
+            let (prepared_edit, mut candidate_context) =
+                runtime.library_worker.prepare_live_phrase_role(
+                    current.track_id().value(),
+                    previous_context.timeline_revision(),
+                    phrase_index,
+                    role_id,
+                )?;
+            candidate_context.inherit_autoloop_overrides(previous_context, phrase_index);
+            replacement_context = Some(candidate_context);
+            pending_phrase_edit = Some(prepared_edit);
+            (
+                current.clone(),
+                PlanMaterializationScope::Phrase(phrase_index),
+                true,
+                true,
+            )
         }
         SessionCommand::SetCueLock {
             phrase_index,
@@ -3899,6 +4027,7 @@ fn apply_command(
                     .set_cue_lock(&current, phrase_index, locked)?,
                 PlanMaterializationScope::None,
                 false,
+                false,
             )
         }
         SessionCommand::RegeneratePlan { .. } => (
@@ -3908,33 +4037,64 @@ fn apply_command(
                 .regenerate(&current, &input)?,
             PlanMaterializationScope::All,
             false,
+            false,
         ),
     };
+    let (revised, materialization_scope, revise_materialized_cues, force_plan_revision) = mutation;
     let materialized = runtime
         .planning_worker
-        .materialize_library_plan_with_scope(revised, materialization_scope)
+        .prepare_library_plan(
+            revised,
+            materialization_scope,
+            replacement_context.as_ref().or_else(|| {
+                runtime
+                    .planning_worker
+                    .library_context(current.track_load_id())
+            }),
+        )
         .map_err(CommandApplicationError::Engine)?;
     let revised = if revise_materialized_cues {
-        if materialized.cues() == current.cues() {
+        if !force_plan_revision && materialized.plan.cues() == current.cues() {
             return Err(PlanMutationError::NoChange.into());
         }
         current
-            .revised(materialized.cues().to_vec())
+            .revised(materialized.plan.cues().to_vec())
             .map_err(PlanMutationError::InvalidPlan)?
     } else {
-        materialized
+        materialized.plan
     };
+    let track_load_id = revised.track_load_id();
+    let (candidate_state, effect_sequence) = runtime
+        .planning_worker
+        .prepare_revised_state(&runtime.state, revised)
+        .map_err(CommandApplicationError::Engine)?;
+
+    // All fallible preparation/reduction is complete. Persist last, then
+    // publish the already validated state/context/variation/modifier bundle.
+    // No MIDI or external effect is performed during preparation.
+    if let Some(prepared_edit) = pending_phrase_edit {
+        runtime
+            .library_worker
+            .commit_live_phrase_role(prepared_edit)?;
+    }
+    runtime.state = candidate_state;
+    runtime.planning_worker.effect_sequence = effect_sequence;
+    if let Some(context) = replacement_context {
+        runtime
+            .planning_worker
+            .register_library_context(track_load_id, context);
+    }
+    runtime
+        .planning_worker
+        .commit_compiled_plan(track_load_id, materialized.compiled);
     runtime.output_worker.synchronize_static_look_plan(
-        revised.track_load_id(),
+        track_load_id,
         runtime
             .planning_worker
             .compiled_light_plans
-            .get(&revised.track_load_id()),
+            .get(&track_load_id),
     );
-    runtime
-        .planning_worker
-        .accept_revised_plan(&mut runtime.state, revised)
-        .map_err(CommandApplicationError::Engine)
+    Ok(())
 }
 
 fn validate_state_revision(
@@ -4026,6 +4186,24 @@ fn application_error_envelope(
     error: &CommandApplicationError,
 ) -> Result<MessageEnvelope, EngineError> {
     match error {
+        CommandApplicationError::TimingSave(message) => error_envelope(
+            sequence,
+            correlation_id,
+            "commandRejected",
+            "timingSaveFailed",
+            message,
+            true,
+            None,
+        ),
+        CommandApplicationError::TimingOffsetConflict => error_envelope(
+            sequence,
+            correlation_id,
+            "revisionConflict",
+            "timingOffsetConflict",
+            "Lighting timing changed before the edit was applied.",
+            true,
+            None,
+        ),
         CommandApplicationError::StateRevisionConflict { actual, .. } => error_envelope(
             sequence,
             correlation_id,
@@ -4092,6 +4270,15 @@ fn application_error_envelope(
             "validationFailed",
             "invalidAutoloopSelection",
             "The selected Autoloop is not mapped for this Theme and Phrase Type.",
+            false,
+            None,
+        ),
+        CommandApplicationError::InvalidPhraseRoleSelection => error_envelope(
+            sequence,
+            correlation_id,
+            "validationFailed",
+            "invalidPhraseRoleSelection",
+            "The selected Phrase Type is not available.",
             false,
             None,
         ),
@@ -4297,6 +4484,10 @@ fn error_envelope(
 
 #[derive(Debug, Error)]
 enum CommandApplicationError {
+    #[error("lighting timing could not be saved: {0}")]
+    TimingSave(String),
+    #[error("lighting timing changed since this edit")]
+    TimingOffsetConflict,
     #[error("plan context is missing")]
     MissingPlanContext,
     #[error("plan revision conflict: expected {expected:?}, actual {actual:?}")]
@@ -4326,6 +4517,8 @@ enum CommandApplicationError {
     StartedLivePhraseNotEditable,
     #[error("the selected Autoloop button is invalid")]
     InvalidAutoloopSelection,
+    #[error("the selected Phrase Type is invalid")]
+    InvalidPhraseRoleSelection,
     #[error("plan mutation failed: {0}")]
     Mutation(#[from] PlanMutationError),
     #[error("simulator control failed: {0}")]
@@ -4533,6 +4726,9 @@ fn snapshot_envelope_internal(
             "autoPublishEnabled": runtime.output_worker.midi_auto_publish_enabled(),
             "timingOffsetMillis": runtime.output_worker.timing_offset_millis(),
             "pendingTimingOffsetMillis": runtime.output_worker.pending_timing_offset_millis(),
+            "savedTimingOffsetMillis": runtime.timing_preferences.saved,
+            "timingSavePending": runtime.timing_preferences.pending_writes > 0,
+            "timingSaveError": runtime.timing_preferences.error,
             "bankPreRollMillis": BANK_SETTLE_DELAY.as_millis(),
             "staticLookExecution": {
                 "mode": "exactlyOnceTransition",
@@ -4777,7 +4973,10 @@ fn snapshot_envelope_internal(
                         "sourceId": identity.source_id(),
                         "sourceTrackId": identity.source_track_id(),
                         "analysisRevision": identity.analysis_revision(),
-                        "timelineRevision": identity.lumi_timeline_revision(),
+                        "timelineRevision": library_context.map_or(
+                            identity.lumi_timeline_revision(),
+                            LibraryPlanContext::timeline_revision,
+                        ),
                     })),
                     "phrases": metadata.phrases().iter().map(|phrase| {
                         let role = library_context.map_or(Value::Null, |context| {
@@ -4798,7 +4997,10 @@ fn snapshot_envelope_internal(
     payload.insert("decks".to_owned(), Value::Array(decks));
     payload.insert(
         "planningOptions".to_owned(),
-        planning_options_json(&runtime.planning_worker.options()),
+        planning_options_json(
+            &runtime.planning_worker.options(),
+            runtime.library_worker.phrase_role_options_json()?,
+        ),
     );
     payload.insert(
         "outputProvider".to_owned(),
@@ -5120,7 +5322,7 @@ pub(crate) const fn theme_selection_reason_name(
     }
 }
 
-fn planning_options_json(options: &PlanningOptions) -> Value {
+fn planning_options_json(options: &PlanningOptions, phrase_roles: Value) -> Value {
     json!({
         "themes": options.themes.iter().map(|theme| json!({
             "id": theme.id.value(),
@@ -5133,6 +5335,7 @@ fn planning_options_json(options: &PlanningOptions) -> Value {
             "loopBank": scene.loop_selection.bank(),
             "loopSlot": scene.loop_selection.slot(),
         })).collect::<Vec<_>>(),
+        "phraseRoles": phrase_roles,
     })
 }
 
@@ -5382,6 +5585,8 @@ pub enum EngineError {
     SubmittedEventMissing,
     #[error("the planning worker effect sequence overflowed")]
     PlanningEffectSequenceOverflow,
+    #[error("the runtime did not accept the prepared plan revision")]
+    RevisedPlanNotAccepted,
     #[error("the output worker effect sequence overflowed")]
     OutputEffectSequenceOverflow,
     #[error("dry-run output failed: {0}")]

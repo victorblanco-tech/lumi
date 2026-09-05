@@ -59,6 +59,16 @@ fn real_engine_process_serves_state_and_fails_safe_between_ui_clients() {
     assert_eq!(ready.host, "127.0.0.1");
     assert_eq!(ready.protocol_version, PROTOCOL_VERSION);
 
+    // Exercise the actual listener and pump, not a standalone queue model:
+    // an idle, half-authenticated peer must not freeze show processing or
+    // prevent a legitimate desktop from connecting behind it.
+    let mut stalled_authentication = TcpStream::connect((ready.host.as_str(), ready.port))
+        .unwrap_or_else(|error| panic!("stalled client must connect: {error}"));
+    stalled_authentication
+        .write_all(b"{\"sessionToken\":")
+        .unwrap_or_else(|error| panic!("partial authentication must write: {error}"));
+    thread::sleep(Duration::from_millis(300));
+
     let mut connection = match TcpStream::connect((ready.host.as_str(), ready.port)) {
         Ok(connection) => connection,
         Err(error) => {
@@ -90,6 +100,24 @@ fn real_engine_process_serves_state_and_fails_safe_between_ui_clients() {
 
     assert_eq!(snapshot.message_type, MessageType::Snapshot);
     assert_eq!(snapshot.sequence, 1);
+    let pump_count = snapshot.payload["abletonLinkIntegration"]["enginePumpCount"]
+        .as_u64()
+        .unwrap_or_default();
+    let pump_lateness = snapshot.payload["abletonLinkIntegration"]["enginePumpMaxLatenessMicros"]
+        .as_u64()
+        .unwrap_or(u64::MAX);
+    eprintln!(
+        "stalled-auth process check: pump_count={pump_count}, max_lateness_us={pump_lateness}"
+    );
+    assert!(
+        pump_count >= 20,
+        "the 5 ms pump must continue during partial authentication"
+    );
+    assert!(
+        pump_lateness < 150_000,
+        "authentication must not stall the pump for its 5 second timeout"
+    );
+    drop(stalled_authentication);
     assert_eq!(snapshot.payload.get("stateRevision"), Some(&Value::from(2)));
     assert_eq!(
         snapshot

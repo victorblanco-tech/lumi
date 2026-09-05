@@ -16,6 +16,10 @@ You need:
 Local Playback, Track Editor and Light Plan preview work without players. Lumi
 runs locally and does not need internet access during normal use.
 
+To exercise Live Decks without physical players, use the separate
+[Pro DJ Link Simulator](pro-dj-link-simulator.md) on another Mac. It supports
+two Players, track loops and playlist-driven Auto Mix for longer tests.
+
 ## 1. Install Lumi
 
 1. Download the DMG and matching SHA-256 checksum from
@@ -51,6 +55,18 @@ Open **Library → Import & Sources**.
 Lumi remembers each physical USB source independently, including two media
 devices with the same make and model. Reconnecting a trusted source refreshes
 its status without merging its identity with another device.
+
+On a writable USB, registration can create a tiny `.lumi-media.json` file with
+Lumi's versioned media identity. It contains no music, phrases or credentials.
+Rekordbox databases and analysis files are never modified. A read-only USB can
+still be scanned; unavailable or ambiguous identity is reported rather than
+silently treating two devices as one.
+
+Scan counts are an initial comparison. Synchronization verifies the selected
+audio and analysis revisions before committing; changed source files require a
+fresh scan. Wait for the source's completion report before ejecting the USB.
+If a playlist was moved to another folder in rekordbox, select its new location
+again rather than assuming the old numeric playlist ID still identifies it.
 
 When a track differs from the Lumi copy, the review view shows the evidence Lumi
 can compare: file data, beatgrid, waveform, Hot Cues and source phrases. Choose

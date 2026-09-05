@@ -3,7 +3,8 @@ import Foundation
 public enum RemoteCommandPayload: Equatable, Sendable {
     case setOperationState(RemoteOperationState, expectedStateRevision: UInt64)
     case setAbletonLinkEnabled(Bool, expectedStateRevision: UInt64)
-    case setOutputTimingOffset(Int16, expectedStateRevision: UInt64)
+    case setOutputTimingOffset(Int16, expectedStateRevision: UInt64, expectedTimingOffsetMillis: Int16? = nil)
+    case changePhraseRole(RemotePlanMutationContext, roleID: String)
     case selectThemeFromPhrase(RemotePlanMutationContext, themeID: UInt64)
     case selectAutoloopForPhrase(RemotePlanMutationContext, autoloopNumber: UInt8)
     case setCueLock(RemotePlanMutationContext, locked: Bool)
@@ -43,10 +44,12 @@ extension RemoteCommandPayload: Codable {
         case expectedStateRevision
         case enabled
         case millis
+        case expectedTimingOffsetMillis
         case planID = "planId"
         case trackLoadID = "trackLoadId"
         case expectedPlanRevision
         case phraseIndex
+        case roleID = "roleId"
         case themeID = "themeId"
         case autoloopNumber
         case locked
@@ -56,6 +59,7 @@ extension RemoteCommandPayload: Codable {
         case setOperationState
         case setAbletonLinkEnabled
         case setOutputTimingOffset
+        case changePhraseRole
         case selectThemeFromPhrase
         case selectAutoloopForPhrase
         case setCueLock
@@ -78,7 +82,13 @@ extension RemoteCommandPayload: Codable {
         case .setOutputTimingOffset:
             self = try .setOutputTimingOffset(
                 container.decode(Int16.self, forKey: .millis),
-                expectedStateRevision: container.decode(UInt64.self, forKey: .expectedStateRevision)
+                expectedStateRevision: container.decode(UInt64.self, forKey: .expectedStateRevision),
+                expectedTimingOffsetMillis: container.decodeIfPresent(Int16.self, forKey: .expectedTimingOffsetMillis)
+            )
+        case .changePhraseRole:
+            self = try .changePhraseRole(
+                Self.decodePlanContext(from: container),
+                roleID: container.decode(String.self, forKey: .roleID)
             )
         case .selectThemeFromPhrase:
             self = try .selectThemeFromPhrase(
@@ -111,10 +121,15 @@ extension RemoteCommandPayload: Codable {
             try container.encode(Kind.setAbletonLinkEnabled, forKey: .kind)
             try container.encode(enabled, forKey: .enabled)
             try container.encode(revision, forKey: .expectedStateRevision)
-        case let .setOutputTimingOffset(millis, revision):
+        case let .setOutputTimingOffset(millis, revision, expected):
             try container.encode(Kind.setOutputTimingOffset, forKey: .kind)
             try container.encode(millis, forKey: .millis)
+            try container.encodeIfPresent(expected, forKey: .expectedTimingOffsetMillis)
             try container.encode(revision, forKey: .expectedStateRevision)
+        case let .changePhraseRole(context, roleID):
+            try container.encode(Kind.changePhraseRole, forKey: .kind)
+            try Self.encode(context, to: &container)
+            try container.encode(roleID, forKey: .roleID)
         case let .selectThemeFromPhrase(context, themeID):
             try container.encode(Kind.selectThemeFromPhrase, forKey: .kind)
             try Self.encode(context, to: &container)
@@ -209,6 +224,7 @@ public enum RemoteCommandBuildError: Error, Equatable {
     case duplicatePendingTarget
     case timingOffsetOutOfRange
     case invalidAutoloop
+    case invalidPhraseRole
     case playerNoLongerLoaded
     case phraseAlreadyStarted
 }
@@ -286,13 +302,19 @@ public final class RemoteCommandCoordinator {
         guard pendingTargets[target] == nil else {
             throw RemoteCommandBuildError.duplicatePendingTarget
         }
-        if case let .setOutputTimingOffset(millis, _) = payload,
-           !(-250 ... 250).contains(millis) {
+        if case let .setOutputTimingOffset(millis, _, expected) = payload,
+           !(-250 ... 250).contains(millis) || expected.map({ !(-250 ... 250).contains($0) }) == true {
             throw RemoteCommandBuildError.timingOffsetOutOfRange
         }
         if case let .selectAutoloopForPhrase(_, number) = payload,
            !(1 ... 32).contains(number) {
             throw RemoteCommandBuildError.invalidAutoloop
+        }
+        if case let .changePhraseRole(_, roleID) = payload,
+           roleID.isEmpty || roleID.count > 128 || roleID.unicodeScalars.contains(where: {
+               CharacterSet.controlCharacters.contains($0)
+           }) {
+            throw RemoteCommandBuildError.invalidPhraseRole
         }
         pendingTargets[target] = commandID
         return RemoteCommand(

@@ -411,13 +411,27 @@ impl SqliteLibraryRepository {
         let source = source.as_ref();
         let rollback = rollback.as_ref();
         Self::validate_backup(source)?;
-        self.create_consistent_backup(rollback)?;
         let incoming = Connection::open_with_flags(
             source,
             OpenFlags::SQLITE_OPEN_READ_ONLY | OpenFlags::SQLITE_OPEN_NO_MUTEX,
         )?;
+        // Migrate a private copy before touching the owning connection. A
+        // structurally valid old backup is not necessarily queryable by this
+        // version; opening/migrating after activation is already too late.
+        // SQLite's empty filename creates a private temporary on-disk database
+        // removed on close; large waveform libraries must not all live in RAM.
+        let mut staging_connection = Connection::open("")?;
+        Backup::new(&incoming, &mut staging_connection)?.run_to_completion(
+            128,
+            Duration::from_millis(2),
+            None,
+        )?;
+        let staging = Self::from_connection(staging_connection)?;
+        validate_backup_connection(&staging.connection)?;
+        staging.validate_restored_schema()?;
+        self.create_consistent_backup(rollback)?;
         let restore_result = (|| {
-            Backup::new(&incoming, &mut self.connection)?.run_to_completion(
+            Backup::new(&staging.connection, &mut self.connection)?.run_to_completion(
                 128,
                 Duration::from_millis(2),
                 None,
@@ -436,6 +450,43 @@ impl SqliteLibraryRepository {
             )?;
             validate_backup_connection(&self.connection)?;
             return Err(error);
+        }
+        Ok(())
+    }
+
+    fn validate_restored_schema(&self) -> Result<(), SqliteLibraryError> {
+        // Compare required table/column names with a freshly migrated schema.
+        // quick_check alone accepts missing tables and an older DB can migrate
+        // successfully without touching the damaged portion of its schema.
+        let reference = Self::in_memory()?;
+        let mut statement = reference.connection.prepare(
+            "SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+        )?;
+        let tables = statement
+            .query_map([], |row| row.get::<_, String>(0))?
+            .collect::<Result<Vec<_>, _>>()?;
+        for table in tables {
+            let columns = |connection: &Connection| -> Result<BTreeSet<String>, rusqlite::Error> {
+                connection
+                    .prepare("SELECT name FROM pragma_table_info(?1)")?
+                    .query_map([&table], |row| row.get::<_, String>(0))?
+                    .collect()
+            };
+            if !columns(&reference.connection)?.is_subset(&columns(&self.connection)?) {
+                return Err(SqliteLibraryError::CorruptData(format!(
+                    "restored backup is missing required columns in {table}"
+                )));
+            }
+        }
+        let violations: i64 = self.connection.query_row(
+            "SELECT COUNT(*) FROM pragma_foreign_key_check",
+            [],
+            |row| row.get(0),
+        )?;
+        if violations != 0 {
+            return Err(SqliteLibraryError::CorruptData(
+                "restored backup has invalid relationships".into(),
+            ));
         }
         Ok(())
     }
@@ -1237,6 +1288,30 @@ impl SqliteLibraryRepository {
         Ok(rows.collect::<Result<Vec<_>, _>>()?)
     }
 
+    /// Persisted complete fingerprints remain authoritative even if a USB path
+    /// has since been replaced with another edit. Never re-identify an old track
+    /// by blindly hashing whatever currently occupies its former path.
+    pub fn device_audio_signatures(
+        &self,
+    ) -> Result<BTreeMap<TrackId, BTreeSet<String>>, SqliteLibraryError> {
+        let mut statement = self.connection.prepare(
+            "SELECT canonical_track_id, audio_signature FROM device_library_track_aliases
+             WHERE canonical_track_id IS NOT NULL AND audio_signature LIKE 'audio-full-v1:%'",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
+        })?;
+        let mut signatures = BTreeMap::<TrackId, BTreeSet<String>>::new();
+        for row in rows {
+            let (id, signature) = row?;
+            signatures
+                .entry(TrackId::new(from_positive_i64(id, "track id")?))
+                .or_default()
+                .insert(signature);
+        }
+        Ok(signatures)
+    }
+
     // The four synchronized collections form one atomic device snapshot. A
     // request object would only move these explicit transaction inputs around.
     #[allow(clippy::too_many_arguments)]
@@ -1577,13 +1652,9 @@ impl SqliteLibraryRepository {
         }
         drop(statement);
 
-        // macOS can assign a new filesystem UUID after a device repair or
-        // reformat. Consolidate an older stable USB identity only when both
-        // identities resolve to the exact same complete canonical track set.
-        // A matching display name alone is never considered sufficient.
-        if source_id.starts_with("usb-fs:") {
-            consolidate_equivalent_usb_sources(&transaction, source_id, display_name)?;
-        }
+        // Labels and identical content do not prove physical identity. Keep
+        // independent USB sources; only explicit identity migration may rebind
+        // one source. Logical playlist grouping is a separate concern.
         let alias_tracks = aliases
             .iter()
             .filter_map(|alias| {
@@ -1751,9 +1822,8 @@ impl SqliteLibraryRepository {
     }
 
     /// Classifies an incoming device analysis without mutating the active
-    /// track. A changed content revision from the same trusted USB is a newer
-    /// export of that source and is promoted. Competing USB sources remain
-    /// conservatively ordered by Rekordbox's export date.
+    /// track. OneLibrary revisions are ordered only by monotone counters within
+    /// the same master identity, never by USB label or containing export date.
     pub fn device_analysis_decision(
         &self,
         track_id: TrackId,
@@ -1799,13 +1869,22 @@ impl SqliteLibraryRepository {
         {
             return Ok(DeviceAnalysisDecision::Current);
         }
-        let Some((active_source, _, active_date, _)) = provenance else {
+        let Some((active_source, active_revision, active_date, _)) = provenance else {
             return Ok(if active_revision.starts_with("device:") {
                 DeviceAnalysisDecision::HoldConflict
             } else {
                 DeviceAnalysisDecision::PromoteInitial
             });
         };
+        if analysis_revision.starts_with("onelibrary:")
+            || active_revision.starts_with("onelibrary:")
+        {
+            return Ok(compare_device_analysis_revisions(
+                analysis_revision,
+                &active_revision,
+            ));
+        }
+        // Legacy providers retain their historical ordering until re-imported.
         if active_source == source_id {
             return Ok(DeviceAnalysisDecision::PromoteNewer);
         }
@@ -1818,8 +1897,7 @@ impl SqliteLibraryRepository {
 
     /// Hot cues are an independently replaceable Rekordbox projection. Their
     /// provenance must not force a beat-grid or waveform promotion: a trusted
-    /// source can refresh its own cue revision, while an older backup source
-    /// remains protected by the same monotone date rule.
+    /// source can refresh its cue revision only under the same revision policy.
     pub fn device_hot_cue_decision(
         &self,
         track_id: TrackId,
@@ -1847,6 +1925,14 @@ impl SqliteLibraryRepository {
         };
         if active_revision == analysis_revision {
             return Ok(DeviceAnalysisDecision::Current);
+        }
+        if analysis_revision.starts_with("onelibrary:")
+            || active_revision.starts_with("onelibrary:")
+        {
+            return Ok(compare_device_analysis_revisions(
+                analysis_revision,
+                &active_revision,
+            ));
         }
         if active_source == source_id {
             return Ok(DeviceAnalysisDecision::PromoteNewer);
@@ -3861,6 +3947,42 @@ impl SqliteLibraryRepository {
                 .transpose()?,
             phrases,
         )?))
+    }
+}
+
+/// Compare counters only inside the same Rekordbox master track. USB scan time,
+/// labels and the database creation date cannot establish per-track freshness.
+fn compare_device_analysis_revisions(incoming: &str, active: &str) -> DeviceAnalysisDecision {
+    fn counters(revision: &str) -> Option<[u32; 4]> {
+        let mut parts = revision.strip_prefix("onelibrary:")?.split(':');
+        let values = [
+            parts.next()?.parse().ok()?,
+            parts.next()?.parse().ok()?,
+            parts.next()?.parse().ok()?,
+            parts.next()?.parse().ok()?,
+        ];
+        (values[0] != 0 && values[1] != 0).then_some(values)
+    }
+    if incoming == active {
+        return DeviceAnalysisDecision::Current;
+    }
+    let (Some(new), Some(old)) = (counters(incoming), counters(active)) else {
+        return DeviceAnalysisDecision::HoldConflict;
+    };
+    if new[..2] != old[..2] {
+        return DeviceAnalysisDecision::HoldConflict;
+    }
+    match (new[2].cmp(&old[2]), new[3].cmp(&old[3])) {
+        (std::cmp::Ordering::Greater, std::cmp::Ordering::Equal | std::cmp::Ordering::Greater)
+        | (std::cmp::Ordering::Equal, std::cmp::Ordering::Greater) => {
+            DeviceAnalysisDecision::PromoteNewer
+        }
+        (std::cmp::Ordering::Less, std::cmp::Ordering::Equal | std::cmp::Ordering::Less)
+        | (std::cmp::Ordering::Equal, std::cmp::Ordering::Less) => {
+            DeviceAnalysisDecision::ProtectOlder
+        }
+        // Equal counters with different content and crossed counters require review.
+        _ => DeviceAnalysisDecision::HoldConflict,
     }
 }
 
@@ -6123,128 +6245,6 @@ fn compare_rekordbox_dates(incoming: &str, active: &str) -> Option<std::cmp::Ord
                 .all(|(index, byte)| matches!(index, 4 | 7) || byte.is_ascii_digit())
     }
     (valid(incoming) && valid(active)).then(|| incoming.cmp(active))
-}
-
-fn consolidate_equivalent_usb_sources(
-    transaction: &Transaction<'_>,
-    source_id: &str,
-    display_name: &str,
-) -> Result<(), SqliteLibraryError> {
-    let current_tracks = complete_active_canonical_set(transaction, source_id)?;
-    let Some(current_tracks) = current_tracks.filter(|tracks| !tracks.is_empty()) else {
-        return Ok(());
-    };
-    let candidates = {
-        let mut statement = transaction.prepare(
-            "SELECT source_id
-               FROM device_library_sources
-              WHERE source_id <> ?1
-                AND source_id LIKE 'usb-fs:%'
-                AND display_name = ?2 COLLATE NOCASE",
-        )?;
-        statement
-            .query_map(params![source_id, display_name], |row| {
-                row.get::<_, String>(0)
-            })?
-            .collect::<Result<Vec<_>, _>>()?
-    };
-    for previous_source_id in candidates {
-        if complete_active_canonical_set(transaction, &previous_source_id)?.as_ref()
-            != Some(&current_tracks)
-        {
-            continue;
-        }
-        let playlist_ids = {
-            let mut statement =
-                transaction.prepare("SELECT id FROM playlists WHERE source_id = ?1")?;
-            statement
-                .query_map([&previous_source_id], |row| row.get::<_, i64>(0))?
-                .collect::<Result<Vec<_>, _>>()?
-        };
-        for playlist_id in playlist_ids {
-            transaction.execute(
-                "DELETE FROM playlist_tracks WHERE playlist_id = ?1",
-                [playlist_id],
-            )?;
-            transaction.execute("DELETE FROM playlists WHERE id = ?1", [playlist_id])?;
-        }
-        transaction.execute(
-            "UPDATE track_analysis_provenance
-                SET source_id = ?1,
-                    device_track_id = COALESCE(
-                        (SELECT MIN(a.device_track_id)
-                           FROM device_library_track_aliases a
-                          WHERE a.source_id = ?1
-                            AND a.canonical_track_id = track_analysis_provenance.track_id
-                            AND a.archived = 0),
-                        device_track_id)
-              WHERE source_id = ?2",
-            params![source_id, previous_source_id],
-        )?;
-        transaction.execute(
-            "UPDATE track_hot_cue_provenance
-                SET source_id = ?1,
-                    device_track_id = COALESCE(
-                        (SELECT MIN(a.device_track_id)
-                           FROM device_library_track_aliases a
-                          WHERE a.source_id = ?1
-                            AND a.canonical_track_id = track_hot_cue_provenance.track_id
-                            AND a.archived = 0),
-                        device_track_id)
-              WHERE source_id = ?2",
-            params![source_id, previous_source_id],
-        )?;
-        transaction.execute(
-            "UPDATE track_metadata_provenance
-                SET source_id = ?1,
-                    device_track_id = COALESCE(
-                        (SELECT MIN(a.device_track_id)
-                           FROM device_library_track_aliases a
-                          WHERE a.source_id = ?1
-                            AND a.canonical_track_id = track_metadata_provenance.track_id
-                            AND a.archived = 0),
-                        device_track_id)
-              WHERE source_id = ?2",
-            params![source_id, previous_source_id],
-        )?;
-        transaction.execute(
-            "DELETE FROM device_library_track_aliases WHERE source_id = ?1",
-            [&previous_source_id],
-        )?;
-        transaction.execute(
-            "DELETE FROM device_library_sources WHERE source_id = ?1",
-            [&previous_source_id],
-        )?;
-        transaction.execute(
-            "DELETE FROM library_sources
-              WHERE source_id = ?1
-                AND NOT EXISTS (SELECT 1 FROM tracks WHERE source_id = ?1)",
-            [&previous_source_id],
-        )?;
-    }
-    Ok(())
-}
-
-/// Returns `None` when an active alias is unresolved. Such a partial snapshot
-/// is never safe evidence for automatic source consolidation.
-fn complete_active_canonical_set(
-    transaction: &Transaction<'_>,
-    source_id: &str,
-) -> Result<Option<BTreeSet<i64>>, SqliteLibraryError> {
-    let mut statement = transaction.prepare(
-        "SELECT canonical_track_id
-           FROM device_library_track_aliases
-          WHERE source_id = ?1 AND archived = 0",
-    )?;
-    let rows = statement.query_map([source_id], |row| row.get::<_, Option<i64>>(0))?;
-    let mut tracks = BTreeSet::new();
-    for row in rows {
-        let Some(track_id) = row? else {
-            return Ok(None);
-        };
-        tracks.insert(track_id);
-    }
-    Ok(Some(tracks))
 }
 
 fn backup_staging_path(destination: &Path) -> PathBuf {

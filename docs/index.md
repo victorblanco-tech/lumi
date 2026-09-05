@@ -21,7 +21,12 @@ booth while the Mac remains fully responsible for the show.
 [Download Lumi](https://github.com/victorblanco-tech/lumi/releases) ·
 [Read the user guide](user-guide/) ·
 [Use Lumi Remote](user-guide/iphone-remote.md) ·
+[Try the Simulator](user-guide/pro-dj-link-simulator.md) ·
 [Report an issue](https://github.com/victorblanco-tech/lumi/issues)
+
+**Current public beta:** [Lumi 0.6.2](https://github.com/victorblanco-tech/lumi/releases/tag/v0.6.2)
+and [Lumi Remote 0.1.1](https://github.com/victorblanco-tech/lumi/releases/tag/lumi-remote-v0.1.1).
+The Mac has a DMG installer; the iPhone app uses the free Xcode installation route.
 
 > **Public Beta:** Lumi is ready for structured field testing across different
 > compatible DJ and lighting setups. Read the [beta test guidance](public-beta.md)

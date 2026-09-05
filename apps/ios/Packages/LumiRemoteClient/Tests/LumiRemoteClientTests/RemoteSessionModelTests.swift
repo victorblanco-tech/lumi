@@ -6,6 +6,48 @@ import Testing
 
 @MainActor
 @Test
+func observerHasHealthyConnectionButNeverReceivesControlsFromProjectionChanges() throws {
+    let model = RemoteSessionModel()
+    model.updateControllerDisplayName("aiVoon")
+    for revision: UInt64 in 1...20 {
+        try model.apply(.fixture(revision: revision), from: "MacBook")
+        #expect(model.connectionIsHealthy)
+        #expect(!model.controlsEnabled)
+        #expect(model.controlRoleLabel == "View only")
+        #expect(model.controllerDisplayName == "aiVoon")
+    }
+    model.reconnecting(to: "MacBook")
+    #expect(!model.connectionIsHealthy)
+    model.replaceWithSnapshot(.fixture(revision: 1), from: "MacBook")
+    #expect(model.connectionIsHealthy)
+    #expect(!model.controlsEnabled)
+}
+
+@MainActor
+@Test
+func controllerRequiresFreshAuthenticationAfterReconnectAndFreshStateBeforeCommands() throws {
+    let model = RemoteSessionModel()
+    model.grantControllerLease("lease-1")
+    #expect(!model.controlsEnabled)
+    try model.apply(.fixture(revision: 1), from: "MacBook")
+    #expect(model.controlRoleLabel == "Controller")
+    #expect(model.controlsEnabled)
+    model.awaitingSnapshot(from: "MacBook")
+    #expect(!model.controlsEnabled)
+    model.replaceWithSnapshot(.fixture(revision: 2), from: "MacBook")
+    #expect(model.controlsEnabled)
+    model.reconnecting(to: "MacBook")
+    model.replaceWithSnapshot(.fixture(revision: 3), from: "MacBook")
+    #expect(!model.controlsEnabled)
+    model.grantControllerLease("lease-2")
+    #expect(model.controlsEnabled)
+    model.revokeControllerLease()
+    #expect(model.connectionIsHealthy)
+    #expect(!model.controlsEnabled)
+}
+
+@MainActor
+@Test
 func reconnectDisablesControlsWithoutDiscardingTheLastProjection() throws {
     let model = RemoteSessionModel()
     model.grantControllerLease("lease-1")
@@ -151,8 +193,9 @@ func frameGapDisablesControlsUntilACompleteSnapshotArrives() throws {
     #expect(try processor.process(ignored) == .unrelated)
     let replacement = try frameData(kind: .snapshot, sequence: 8, projectionRevision: 3)
     #expect(try processor.process(replacement) == .applied)
-    #expect(!model.controlsEnabled)
-    model.grantControllerLease("lease-2")
+    // A state gap did not revoke the authenticated Controller lease. The
+    // fresh authoritative snapshot restores controls on this same connection.
+    #expect(model.controllerLeaseID == "lease-1")
     #expect(model.controlsEnabled)
     #expect(model.projection?.projectionRevision == 3)
 }
@@ -189,6 +232,59 @@ func duplicateFrameCannotApplyASecondMutationResult() throws {
     #expect(try processor.process(data) == .applied)
     #expect(model.pendingCommandIDs.isEmpty)
     #expect(try processor.process(data) == .duplicateIgnored)
+}
+
+@MainActor
+@Test
+func legacyDuplicateAndUncertainOutcomesRequireFreshStateInsteadOfSuccess() throws {
+    for (status, reason) in [(RemoteCommandResultStatus.duplicate, Optional<String>.none),
+                              (.rejected, "commandOutcomeUnknown"), (.rejected, "commandOutcomePending")] {
+        let model = RemoteSessionModel()
+        let processor = RemoteFrameProcessor(model: model, macName: "Mac")
+        _ = try processor.process(frameData(kind: .snapshot, sequence: 1, projectionRevision: 1))
+        model.markCommandPending("command-1")
+        let payload = try JSONDecoder().decode(JSONValue.self, from: JSONEncoder().encode(
+            RemoteCommandResult(commandID: "command-1", status: status, stateRevision: nil,
+                                planRevision: nil, reasonCode: reason)))
+        let frame = RemoteFrame(frameKind: .commandResult, sequence: 2,
+                                correlationID: "command-1", payload: payload)
+        #expect(try processor.process(JSONEncoder().encode(frame)) == .authoritativeSnapshotRequired)
+        #expect(!model.controlsEnabled)
+        #expect(model.pendingCommandIDs.isEmpty)
+    }
+}
+
+@MainActor
+@Test
+func engineUnavailabilityDisablesStaleControlsAndRecoversOnCompleteProjection() throws {
+    let model = RemoteSessionModel()
+    let processor = RemoteFrameProcessor(model: model, macName: "Mac")
+    model.grantControllerLease("lease-1")
+    _ = try processor.process(frameData(kind: .snapshot, sequence: 1, projectionRevision: 1))
+    #expect(model.controlsEnabled)
+    let error = RemoteFrame(frameKind: .error, sequence: 2,
+        payload: .object(["reasonCode": .string("engineUnavailable")]))
+    #expect(try processor.process(JSONEncoder().encode(error)) == .applied)
+    #expect(!model.controlsEnabled)
+    #expect(model.projection?.projectionRevision == 1)
+    #expect(model.controllerLeaseID == "lease-1")
+    #expect(try processor.process(frameData(kind: .projection, sequence: 3, projectionRevision: 2)) == .applied)
+    #expect(model.controlsEnabled)
+    #expect(model.projection?.projectionRevision == 2)
+}
+
+@MainActor
+@Test
+func reauthenticationDoesNotEnableControlsBeforeANewSnapshot() throws {
+    let model = RemoteSessionModel()
+    try model.apply(.fixture(revision: 1), from: "Mac")
+    model.grantControllerLease("lease-new")
+    model.connected(to: "Mac")
+    let processor = RemoteFrameProcessor(model: model, macName: "Mac")
+    processor.reset(for: "Mac")
+    #expect(!model.controlsEnabled)
+    _ = try processor.process(frameData(kind: .snapshot, sequence: 1, projectionRevision: 2))
+    #expect(model.controlsEnabled)
 }
 
 @MainActor
@@ -232,8 +328,7 @@ func revisionConflictDisablesControlsUntilAnAuthoritativeSnapshotArrives() throw
         try processor.process(frameData(kind: .snapshot, sequence: 3, projectionRevision: 2))
             == .applied
     )
-    #expect(!model.controlsEnabled)
-    model.grantControllerLease("lease-2")
+    #expect(model.controllerLeaseID == "lease-1")
     #expect(model.controlsEnabled)
 }
 

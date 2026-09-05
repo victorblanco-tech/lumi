@@ -42,6 +42,11 @@ must not couple SwiftUI to any one provider.
 - Future phrases in the current Live track remain editable until their phrase
   boundary starts.
 - AutoLoop selection applies to the selected future phrase.
+- Phrase Type selection applies to the selected future phrase and creates a
+  persisted Lumi-owned timeline revision. Options are read from the active
+  configurable Phrase Role catalog; no UI hard-codes a role taxonomy.
+- Changing Phrase Type invalidates only that phrase's role-specific AutoLoop
+  override and rematerializes only that future cue.
 - A Theme change can be scheduled from a selected future phrase onward.
 - At the phrase boundary the scheduled change is executed and becomes locked.
 - Revision and track-load-instance checks remain mandatory for every mutation.

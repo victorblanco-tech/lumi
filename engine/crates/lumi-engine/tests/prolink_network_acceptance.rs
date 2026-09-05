@@ -618,7 +618,24 @@ fn combined_lanes_remain_bounded_and_emit_release_evidence() {
             json!({ "kind": "setAbletonLinkEnabled", "enabled": true }),
         ),
     );
+    assert_eq!(snapshot.message_type, MessageType::Snapshot);
     sequence = sequence.saturating_add(1);
+
+    // The harness disables auto-publication. An output record alone is not
+    // proof of MIDI dispatch: the runtime can record an AutoLoop while the
+    // virtual source is stopped. This acceptance test requires real dispatch.
+    snapshot = exchange(
+        &mut connection,
+        &command(
+            "soak-publish-midi",
+            sequence,
+            json!({ "kind": "publishMidiSource" }),
+        ),
+    );
+    sequence = sequence.saturating_add(1);
+    let midi = required_object(&snapshot.payload, "midiIntegration");
+    assert_eq!(midi.get("state").and_then(Value::as_str), Some("ready"));
+    let baseline_pulses = required_u64(midi, "sentPulseCount");
 
     let ready_deadline = Instant::now() + Duration::from_secs(15);
     while !snapshot
@@ -762,6 +779,7 @@ fn combined_lanes_remain_bounded_and_emit_release_evidence() {
             maximum_engine_lateness_micros.max(required_u64(link, "enginePumpMaxLatenessMicros"));
 
         let midi = required_object(&snapshot.payload, "midiIntegration");
+        assert_eq!(midi.get("state").and_then(Value::as_str), Some("ready"));
         let scheduler = required_nested_object(midi, "realtimeScheduler");
         assert_eq!(required_u64(scheduler, "failedCount"), 0);
         let lane = required_nested_object(scheduler, "lane");
@@ -797,8 +815,9 @@ fn combined_lanes_remain_bounded_and_emit_release_evidence() {
     let final_midi = required_object(&snapshot.payload, "midiIntegration");
     let final_scheduler = required_nested_object(final_midi, "realtimeScheduler");
     let final_lane = required_nested_object(final_scheduler, "lane");
+    assert_midi_dispatch_evidence(final_midi, baseline_pulses);
     let evidence = json!({
-        "schemaVersion": 1,
+        "schemaVersion": 2,
         "appVersion": env!("CARGO_PKG_VERSION"),
         "simulatorProfile": "cdj-1500x",
         "durationSeconds": duration_seconds,
@@ -834,6 +853,7 @@ fn combined_lanes_remain_bounded_and_emit_release_evidence() {
         },
         "autoLoop": {
             "outputs": output_record_count(&snapshot),
+            "sentPulses": required_u64(final_midi, "sentPulseCount") - baseline_pulses,
             "executionEpoch": required_u64(final_scheduler, "executionEpoch"),
             "requested": required_u64(final_scheduler, "requestedCount"),
             "completed": required_u64(final_scheduler, "completedCount"),
@@ -842,6 +862,9 @@ fn combined_lanes_remain_bounded_and_emit_release_evidence() {
             "failed": required_u64(final_scheduler, "failedCount"),
             "laneQueueHighWater": required_u64(final_lane, "queueHighWater"),
             "laneSaturation": required_u64(final_lane, "saturationCount"),
+            "laneScheduled": required_u64(final_lane, "scheduledCount"),
+            "laneEmitted": required_u64(final_lane, "emittedCount"),
+            "laneLatencySamples": required_u64(final_lane, "latencySampleCount"),
             "laneLatencyP50Micros": required_u64(final_lane, "latencyP50Micros"),
             "laneLatencyP95Micros": required_u64(final_lane, "latencyP95Micros"),
             "laneLatencyP99Micros": required_u64(final_lane, "latencyP99Micros"),
@@ -870,6 +893,71 @@ fn combined_lanes_remain_bounded_and_emit_release_evidence() {
         .unwrap_or_else(|error| panic!("engine should exit after disconnect: {error}"));
     assert!(status.success());
     remove_database(&database);
+}
+
+fn assert_midi_dispatch_evidence(midi: &serde_json::Map<String, Value>, baseline_pulses: u64) {
+    assert_eq!(midi.get("state").and_then(Value::as_str), Some("ready"));
+    assert!(
+        required_u64(midi, "sentPulseCount") > baseline_pulses,
+        "no MIDI pulses were actually sent during the combined soak"
+    );
+    let scheduler = required_nested_object(midi, "realtimeScheduler");
+    assert!(required_u64(scheduler, "requestedCount") > 0);
+    assert!(required_u64(scheduler, "completedCount") > 0);
+    let lane = required_nested_object(scheduler, "lane");
+    assert!(required_u64(lane, "scheduledCount") > 0);
+    assert!(required_u64(lane, "emittedCount") > 0);
+    assert!(
+        required_u64(lane, "latencySampleCount") > 0,
+        "zero latency without any samples is not timing acceptance"
+    );
+}
+
+#[test]
+fn midi_acceptance_rejects_empty_dispatch_and_latency_counters() {
+    let valid = json!({
+        "state": "ready", "sentPulseCount": 4,
+        "realtimeScheduler": {
+            "requestedCount": 1, "completedCount": 1,
+            "lane": { "scheduledCount": 2, "emittedCount": 2, "latencySampleCount": 2 }
+        }
+    });
+    let valid_object = valid
+        .as_object()
+        .unwrap_or_else(|| panic!("fixture is an object"));
+    assert_midi_dispatch_evidence(valid_object, 0);
+    for pointer in [
+        "/sentPulseCount",
+        "/realtimeScheduler/requestedCount",
+        "/realtimeScheduler/completedCount",
+        "/realtimeScheduler/lane/scheduledCount",
+        "/realtimeScheduler/lane/emittedCount",
+        "/realtimeScheduler/lane/latencySampleCount",
+    ] {
+        let mut empty = valid.clone();
+        *empty
+            .pointer_mut(pointer)
+            .unwrap_or_else(|| panic!("fixture contains {pointer}")) = json!(0);
+        assert!(
+            std::panic::catch_unwind(|| {
+                assert_midi_dispatch_evidence(
+                    empty
+                        .as_object()
+                        .unwrap_or_else(|| panic!("fixture remains an object")),
+                    0,
+                );
+            })
+            .is_err(),
+            "empty {pointer} must not pass acceptance"
+        );
+    }
+    assert!(
+        std::panic::catch_unwind(|| {
+            assert_midi_dispatch_evidence(valid_object, 4);
+        })
+        .is_err(),
+        "old pulses must not count as output from this run"
+    );
 }
 
 fn start_engine(database: &Path) -> Child {
@@ -1067,10 +1155,14 @@ fn simulator_control(command: &str, argument: Option<&str>) {
     if let Some(argument) = argument {
         process.arg(argument);
     }
-    let status = process
-        .status()
+    let output = process
+        .output()
         .unwrap_or_else(|error| panic!("simulator {command} should launch: {error}"));
-    assert!(status.success(), "simulator {command} should succeed");
+    assert!(
+        output.status.success(),
+        "simulator {command} should succeed: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }
 
 fn simulator_status() -> Value {

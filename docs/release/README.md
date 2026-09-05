@@ -1,5 +1,9 @@
 # Release and deployment
 
+- [Lumi 0.6.2 Public Beta release notes](0.6.2-release-notes.md)
+- [Lumi Remote 0.1.1 Public Beta release notes](lumi-remote-0.1.1-release-notes.md)
+- [0.6.2 / Remote 0.1.1 release readiness](0.6.2-release-readiness.md)
+
 Start with the [production release checklist](release-checklist.md). It covers
 the current GitHub-distributed, unsigned Apple Silicon release path as well as
 the public-repository and GitHub Pages gates.

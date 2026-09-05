@@ -17,3 +17,11 @@ Lumi Remote for iPhone. It is not the desktop engine protocol.
 The authoritative limits and allowlists are recorded in `manifest.json`.
 Fixtures are consumed by the Rust protocol tests and mirrored by the Swift
 client tests.
+
+Authentication uses a `hello` frame before the initial snapshot. Optional
+`clientVersion` in both `authenticate` and `pair` payloads is a non-empty,
+control-character-free string of at most 64 bytes. The response optionally
+includes `controllerDisplayName`; absence must be accepted for older gateways.
+Only `controllerLeaseId`, not connection health or the display name, grants
+mutation permission. These additive fields retain protocol major 1 and support
+older clients which neither send a version nor display the Controller's name.

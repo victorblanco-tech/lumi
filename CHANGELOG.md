@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.6.2 / Lumi Remote 0.1.1 - 2026-09-05
+
+### Added
+
+- Edit the actual Lumi Phrase Type of a future phrase from Mac Live and iPhone,
+  alongside its Theme and AutoLoop. Phrase/plan changes commit atomically.
+- Persistent single-Controller ownership, explicit View only status, client
+  versions and a control-transfer history in the Remote integration.
+- A shared saved lighting offset, editable from either client over the full
+  −250 to +250 ms range. A running show's new value applies at the next phrase.
+
+### Fixed
+
+- Live updates no longer reset the iPhone timing picker or silently discard
+  a selection because unrelated show state changed.
+- Remote reconnect and show-mode changes do not assign a different Controller.
+- Bounded stream framing and command outcomes better handle partial reads,
+  stale requests, duplicate commands and unavailable Remote projections.
+- USB synchronization verifies source revisions and full audio fingerprints,
+  preserves separate media identities and stages restored data before activation.
+- Per-source sync progress and comparison evidence are refreshed; semantic
+  analysis comparisons avoid unnecessary reviews for equivalent data.
+
+### Documentation and distribution
+
+- Updated Mac/iPhone guides, USB identity and timing explanations, simulator
+  instructions and original-resolution Editor imagery.
+- Independent production tags: `v0.6.2` and `lumi-remote-v0.1.1`.
+  Remote remains Xcode-installed on physical iPhones, not TestFlight/App Store.
+- Existing Production data is retained; no personal Library or MIDI mappings
+  are bundled. Audit follow-ups and editor-height persistence remain documented
+  limitations, not claims of completed work.
+
 ## 0.6.1 - 2026-09-04
 
 ### Fixed

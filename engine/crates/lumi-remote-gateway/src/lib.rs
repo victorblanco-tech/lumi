@@ -29,7 +29,9 @@ pub use trust_store::{PersistentTrustStore, TrustStoreError};
 use std::collections::{BTreeMap, VecDeque};
 use std::net::IpAddr;
 
-use lumi_remote_protocol::{RemoteCommand, RemoteFrame, RemoteFrameKind, RemoteLiveProjection};
+use lumi_remote_protocol::{
+    RemoteCommand, RemoteCommandResult, RemoteFrame, RemoteFrameKind, RemoteLiveProjection,
+};
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use subtle::ConstantTimeEq as _;
@@ -384,17 +386,27 @@ pub enum CommandAuthorizationError {
     ControllerLeaseMismatch,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CommandAdmission {
     Accepted,
-    Duplicate,
+    Pending,
+    Completed(RemoteCommandResult),
+}
+
+type CommandKey = (String, String, String); // authenticated device, lease, client ID
+
+#[derive(Clone, Debug)]
+struct CommandOutcome {
+    command: RemoteCommand,
+    result: Option<RemoteCommandResult>,
 }
 
 #[derive(Clone, Debug)]
 pub struct GatewayCommandGuard {
     policy: GatewayCommandPolicy,
-    accepted: BTreeMap<(String, String), ()>,
-    insertion_order: VecDeque<(String, String)>,
+    accepted: BTreeMap<CommandKey, CommandOutcome>,
+    forwarded: BTreeMap<String, CommandKey>,
+    insertion_order: VecDeque<CommandKey>,
     capacity: usize,
 }
 
@@ -406,6 +418,7 @@ impl GatewayCommandGuard {
         Ok(Self {
             policy: GatewayCommandPolicy::default(),
             accepted: BTreeMap::new(),
+            forwarded: BTreeMap::new(),
             insertion_order: VecDeque::with_capacity(capacity),
             capacity,
         })
@@ -421,15 +434,6 @@ impl GatewayCommandGuard {
 
     pub fn controller(&self) -> Option<&ControllerLease> {
         self.policy.controller()
-    }
-
-    pub fn grant_first_controller(&mut self, device_id: &str, lease_id: String) -> Option<String> {
-        if self.policy.controller().is_none() {
-            self.policy
-                .transfer_control(device_id.to_owned(), lease_id.clone());
-            return Some(lease_id);
-        }
-        self.controller_lease_for(device_id)
     }
 
     pub fn controller_lease_for(&self, device_id: &str) -> Option<String> {
@@ -450,25 +454,120 @@ impl GatewayCommandGuard {
         if !command.is_mutating() {
             return Ok(CommandAdmission::Accepted);
         }
-        let key = (device_id.to_owned(), command.command_id.clone());
-        if self.accepted.contains_key(&key) {
-            return Ok(CommandAdmission::Duplicate);
+        let key = (
+            device_id.to_owned(),
+            command.controller_lease_id.clone(),
+            command.command_id.clone(),
+        );
+        if let Some(outcome) = self.accepted.get(&key) {
+            if outcome.command != *command {
+                return Err(CommandGuardError::CommandIdReused);
+            }
+            return Ok(match &outcome.result {
+                Some(result) => CommandAdmission::Completed(result.clone()),
+                None => CommandAdmission::Pending,
+            });
         }
-        if self.insertion_order.len() == self.capacity
-            && let Some(oldest) = self.insertion_order.pop_front()
-        {
-            self.accepted.remove(&oldest);
+        if self.insertion_order.len() == self.capacity {
+            // Never forget an in-flight/uncertain command and then execute it
+            // again. Only a known terminal outcome may leave the bounded ledger.
+            let index = self
+                .insertion_order
+                .iter()
+                .position(|key| {
+                    self.accepted
+                        .get(key)
+                        .is_some_and(|entry| entry.result.is_some())
+                })
+                .ok_or(CommandGuardError::LedgerFull)?;
+            if let Some(oldest) = self.insertion_order.remove(index) {
+                self.forwarded.remove(&forwarded_command_id(&oldest));
+                self.accepted.remove(&oldest);
+            }
         }
-        self.accepted.insert(key.clone(), ());
+        self.forwarded
+            .insert(forwarded_command_id(&key), key.clone());
+        self.accepted.insert(
+            key.clone(),
+            CommandOutcome {
+                command: command.clone(),
+                result: None,
+            },
+        );
         self.insertion_order.push_back(key);
         Ok(CommandAdmission::Accepted)
     }
+
+    pub fn forwarded_command(&self, device_id: &str, command: &RemoteCommand) -> RemoteCommand {
+        let mut forwarded = command.clone();
+        forwarded.command_id = forwarded_command_id(&(
+            device_id.to_owned(),
+            command.controller_lease_id.clone(),
+            command.command_id.clone(),
+        ));
+        forwarded
+    }
+
+    /// Called by the production relay, even when the requesting phone has
+    /// disconnected. Admission and a successful socket write are not outcomes.
+    pub fn record_result(&mut self, result: RemoteCommandResult) {
+        if let Some(key) = self.forwarded.get(&result.command_id)
+            && let Some(outcome) = self.accepted.get_mut(key)
+            && outcome.result.is_none()
+        {
+            let mut result = result;
+            result.command_id = key.2.clone();
+            outcome.result = Some(result);
+        }
+    }
+
+    pub fn result_for_device(
+        &self,
+        device_id: &str,
+        forwarded_id: &str,
+    ) -> Option<RemoteCommandResult> {
+        let key = self.forwarded.get(forwarded_id)?;
+        if key.0 != device_id {
+            return None;
+        }
+        self.accepted.get(key)?.result.clone()
+    }
+
+    pub fn authorize_forwarded(&self, command: &RemoteCommand) -> Result<(), CommandGuardError> {
+        let key = self
+            .forwarded
+            .get(&command.command_id)
+            .ok_or(CommandGuardError::UnknownCommand)?;
+        let original = &self
+            .accepted
+            .get(key)
+            .ok_or(CommandGuardError::UnknownCommand)?
+            .command;
+        self.policy
+            .authorize(&key.0, original)
+            .map_err(CommandGuardError::Unauthorized)
+    }
+}
+
+fn forwarded_command_id(key: &CommandKey) -> String {
+    let mut digest = Sha256::new();
+    for value in [&key.0, &key.1, &key.2] {
+        digest.update(value.len().to_be_bytes());
+        digest.update(value.as_bytes());
+    }
+    format!("{:x}", digest.finalize())
 }
 
 #[derive(Debug, Error)]
 pub enum CommandGuardError {
     #[error("remote command ledger capacity must be between 64 and 8192")]
     InvalidCapacity,
+    #[error("command ID was reused with different content")]
+    CommandIdReused,
+    #[error("command ledger is full of unresolved outcomes")]
+    LedgerFull,
+    #[error("command was not admitted by this gateway")]
+    UnknownCommand,
     #[error(transparent)]
     Unauthorized(CommandAuthorizationError),
 }
@@ -493,21 +592,37 @@ impl AttemptRateLimiter {
     }
 
     pub fn record(&mut self, key: &str, now_unix_millis: u64) -> Result<(), RateLimitError> {
+        self.check(key, now_unix_millis)?;
+        self.attempts
+            .entry(key.to_owned())
+            .or_default()
+            .push_back(now_unix_millis);
+        Ok(())
+    }
+
+    /// Check before authentication work. Expired identities are removed and
+    /// an address flood cannot create an unbounded map or evict active limits.
+    pub fn check(&mut self, key: &str, now_unix_millis: u64) -> Result<(), RateLimitError> {
         if key.is_empty() || key.len() > 256 || key.chars().any(char::is_control) {
             return Err(RateLimitError::InvalidKey);
         }
-        let oldest_allowed = now_unix_millis.saturating_sub(self.window_millis);
-        let attempts = self.attempts.entry(key.to_owned()).or_default();
-        while attempts
-            .front()
-            .is_some_and(|value| *value <= oldest_allowed)
+        self.attempts.retain(|_, attempts| {
+            while attempts
+                .front()
+                .is_some_and(|value| now_unix_millis.saturating_sub(*value) >= self.window_millis)
+            {
+                attempts.pop_front();
+            }
+            !attempts.is_empty()
+        });
+        if self
+            .attempts
+            .get(key)
+            .is_some_and(|attempts| attempts.len() >= self.maximum_attempts)
+            || (!self.attempts.contains_key(key) && self.attempts.len() >= 1_024)
         {
-            attempts.pop_front();
-        }
-        if attempts.len() >= self.maximum_attempts {
             return Err(RateLimitError::Limited);
         }
-        attempts.push_back(now_unix_millis);
         Ok(())
     }
 }
@@ -561,18 +676,42 @@ pub struct PairedDevice {
     pub last_seen_unix_millis: u64,
     #[serde(default)]
     pub controller: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub client_version: Option<String>,
+}
+
+/// Bounded operational history. Never contains credentials, invitation codes or leases.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ControllerChange {
+    pub at_unix_millis: u64,
+    pub reason: String,
+    pub previous_device_id: Option<String>,
+    pub device_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PairingRegistrySnapshot {
     pub devices: Vec<PairedDevice>,
+    #[serde(default = "restored_controller_selection_initialized")]
+    pub controller_selection_initialized: bool,
+    #[serde(default)]
+    pub controller_changes: Vec<ControllerChange>,
+}
+
+// A legacy persisted store may be empty because its last pairing was revoked.
+// Only a brand-new, absent store starts with automatic first-pairing selection.
+fn restored_controller_selection_initialized() -> bool {
+    true
 }
 
 #[derive(Clone, Debug, Default)]
 pub struct PairingRegistry {
     pending: BTreeMap<String, PendingInvitation>,
     devices: BTreeMap<String, PairedDevice>,
+    controller_selection_initialized: bool,
+    controller_changes: Vec<ControllerChange>,
 }
 
 impl PairingRegistry {
@@ -580,12 +719,28 @@ impl PairingRegistry {
         if snapshot.devices.len() > MAX_PAIRED_DEVICES {
             return Err(PairingError::DeviceLimitReached);
         }
+        if snapshot.controller_changes.len() > 32 {
+            return Err(PairingError::InvalidPersistedDevice);
+        }
+        for change in &snapshot.controller_changes {
+            validate_public_identifier(&change.reason, 64)?;
+            for id in [&change.device_id, &change.previous_device_id]
+                .into_iter()
+                .flatten()
+            {
+                validate_public_identifier(id, 128)?;
+            }
+        }
+        let initialized = snapshot.controller_selection_initialized || !snapshot.devices.is_empty();
         let mut devices = BTreeMap::new();
         let mut controller_count = 0_usize;
         for device in snapshot.devices {
             let is_controller = device.controller;
             validate_public_identifier(&device.device_id, 128)?;
             validate_public_identifier(&device.display_name, 128)?;
+            if let Some(version) = &device.client_version {
+                validate_public_identifier(version, 64)?;
+            }
             if device.paired_at_unix_millis == 0
                 || device.last_seen_unix_millis < device.paired_at_unix_millis
                 || devices.insert(device.device_id.clone(), device).is_some()
@@ -602,12 +757,16 @@ impl PairingRegistry {
         Ok(Self {
             pending: BTreeMap::new(),
             devices,
+            controller_selection_initialized: initialized,
+            controller_changes: snapshot.controller_changes,
         })
     }
 
     pub fn snapshot(&self) -> PairingRegistrySnapshot {
         PairingRegistrySnapshot {
             devices: self.devices.values().cloned().collect(),
+            controller_selection_initialized: self.controller_selection_initialized,
+            controller_changes: self.controller_changes.clone(),
         }
     }
 
@@ -705,15 +864,22 @@ impl PairingRegistry {
             return Err(PairingError::DeviceLimitReached);
         }
         self.pending.remove(invitation_id);
+        let initial_pairing = !self.controller_selection_initialized;
+        let existing = self.devices.get(&device_id);
         let device = PairedDevice {
             device_id: device_id.clone(),
             display_name,
             credential_sha256: hash_secret(device_credential.as_bytes()),
             paired_at_unix_millis: now_unix_millis,
             last_seen_unix_millis: now_unix_millis,
-            controller: self.devices.is_empty(),
+            controller: initial_pairing || existing.is_some_and(|device| device.controller),
+            client_version: existing.and_then(|device| device.client_version.clone()),
         };
+        self.controller_selection_initialized = true;
         self.devices.insert(device_id, device.clone());
+        if initial_pairing {
+            self.record_controller_change(None, "firstPairing", now_unix_millis);
+        }
         Ok(device)
     }
 
@@ -762,6 +928,29 @@ impl PairingRegistry {
             device.controller = device.device_id == device_id;
         }
         Ok(())
+    }
+
+    pub fn set_client_version(&mut self, device_id: &str, version: Option<String>) {
+        // Older clients do not send a version: preserve the last known value.
+        if let (Some(device), Some(version)) = (self.devices.get_mut(device_id), version) {
+            device.client_version = Some(version);
+        }
+    }
+
+    pub fn record_controller_change(&mut self, previous: Option<String>, reason: &str, at: u64) {
+        if self.controller_changes.len() == 32 {
+            self.controller_changes.remove(0);
+        }
+        self.controller_changes.push(ControllerChange {
+            at_unix_millis: at,
+            reason: reason.to_owned(),
+            previous_device_id: previous,
+            device_id: self.controller_device_id().map(str::to_owned),
+        });
+    }
+
+    pub fn controller_changes(&self) -> &[ControllerChange] {
+        &self.controller_changes
     }
 }
 
@@ -844,6 +1033,7 @@ mod tests {
             live_plan: None,
             next_plan: None,
             theme_options: Vec::new(),
+            phrase_role_options: Vec::new(),
         }
     }
 
@@ -995,10 +1185,93 @@ mod tests {
             guard.admit("phone-a", &command)?,
             CommandAdmission::Accepted
         );
+        assert_eq!(guard.admit("phone-a", &command)?, CommandAdmission::Pending);
+        let forwarded = guard.forwarded_command("phone-a", &command);
+        assert_ne!(forwarded.command_id, command.command_id);
+        assert!(guard.authorize_forwarded(&forwarded).is_ok());
+        guard.record_result(lumi_remote_protocol::RemoteCommandResult {
+            command_id: forwarded.command_id.clone(),
+            status: lumi_remote_protocol::RemoteCommandResultStatus::Conflict,
+            state_revision: Some(8),
+            plan_revision: None,
+            reason_code: Some("stateRevisionConflict".to_owned()),
+        });
+        let replay = guard
+            .result_for_device("phone-a", &forwarded.command_id)
+            .ok_or(CommandGuardError::UnknownCommand)?;
+        assert_eq!(replay.command_id, command.command_id);
+        assert_eq!(
+            replay.status,
+            lumi_remote_protocol::RemoteCommandResultStatus::Conflict
+        );
         assert_eq!(
             guard.admit("phone-a", &command)?,
-            CommandAdmission::Duplicate
+            CommandAdmission::Completed(replay)
         );
+        assert!(
+            guard
+                .result_for_device("phone-b", &forwarded.command_id)
+                .is_none()
+        );
+        let mut changed = command.clone();
+        changed.issued_at_unix_millis = 2;
+        assert!(matches!(
+            guard.admit("phone-a", &changed),
+            Err(CommandGuardError::CommandIdReused)
+        ));
+        guard.revoke_control();
+        assert!(guard.authorize_forwarded(&forwarded).is_err());
+        guard.transfer_control("phone-a".to_owned(), "lease-new".to_owned());
+        changed.controller_lease_id = "lease-new".to_owned();
+        assert_eq!(
+            guard.admit("phone-a", &changed)?,
+            CommandAdmission::Accepted
+        );
+        assert_ne!(
+            guard.forwarded_command("phone-a", &changed).command_id,
+            forwarded.command_id
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn pending_commands_cannot_be_evicted_and_executed_twice() -> Result<(), CommandGuardError> {
+        let mut guard = GatewayCommandGuard::new(64)?;
+        guard.transfer_control("phone".into(), "lease".into());
+        let mut command = RemoteCommand {
+            command_id: "0".into(),
+            controller_lease_id: "lease".into(),
+            issued_at_unix_millis: 1,
+            command: RemoteCommandKind::SetOperationState {
+                operation_state: lumi_remote_protocol::OperationTarget::Armed,
+                expected_state_revision: 1,
+            },
+        };
+        for index in 0..64 {
+            command.command_id = index.to_string();
+            assert_eq!(guard.admit("phone", &command)?, CommandAdmission::Accepted);
+        }
+        command.command_id = "overflow".into();
+        assert!(matches!(
+            guard.admit("phone", &command),
+            Err(CommandGuardError::LedgerFull)
+        ));
+        command.command_id = "0".into();
+        assert_eq!(guard.admit("phone", &command)?, CommandAdmission::Pending);
+        let forwarded = guard.forwarded_command("phone", &command);
+        guard.record_result(lumi_remote_protocol::RemoteCommandResult {
+            command_id: forwarded.command_id,
+            status: lumi_remote_protocol::RemoteCommandResultStatus::Accepted,
+            state_revision: Some(2),
+            plan_revision: None,
+            reason_code: None,
+        });
+        assert!(
+            matches!(guard.admit("phone", &command)?, CommandAdmission::Completed(result)
+            if result.status == lumi_remote_protocol::RemoteCommandResultStatus::Accepted && result.state_revision == Some(2))
+        );
+        command.command_id = "overflow".into();
+        assert_eq!(guard.admit("phone", &command)?, CommandAdmission::Accepted);
         Ok(())
     }
 
@@ -1012,6 +1285,21 @@ mod tests {
             Err(RateLimitError::Limited)
         );
         assert_eq!(limiter.record("peer-a", 2_100), Ok(()));
+        Ok(())
+    }
+
+    #[test]
+    fn limiter_checks_before_work_and_bounds_distinct_identities() -> Result<(), RateLimitError> {
+        let mut limiter = AttemptRateLimiter::new(1, 1_000)?;
+        limiter.record("peer", 0)?;
+        assert_eq!(limiter.check("peer", 1), Err(RateLimitError::Limited));
+        for index in 1..1_024 {
+            limiter.record(&format!("peer-{index}"), 1)?;
+        }
+        assert_eq!(limiter.record("overflow", 2), Err(RateLimitError::Limited));
+        assert_eq!(limiter.attempts.len(), 1_024);
+        limiter.record("fresh", 1_001)?;
+        assert_eq!(limiter.attempts.len(), 1);
         Ok(())
     }
 

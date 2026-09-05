@@ -17,7 +17,9 @@ public final class RemoteSessionModel {
     public private(set) var projection: RemoteLiveProjection?
     public private(set) var pendingCommandIDs: Set<String> = []
     public private(set) var lastError: String?
+    public private(set) var lastCommandError: String?
     public private(set) var controllerLeaseID: String?
+    public private(set) var controllerDisplayName: String?
     public private(set) var pairingShortCode: String?
     public private(set) var acceptedCommandFeedbackRevision: UInt64 = 0
     public private(set) var rejectedCommandFeedbackRevision: UInt64 = 0
@@ -26,8 +28,20 @@ public final class RemoteSessionModel {
     public init() {}
 
     public var controlsEnabled: Bool {
+        connectionIsHealthy && controllerLeaseID != nil
+    }
+
+    public var connectionIsHealthy: Bool {
         guard case .connected = connectionPhase else { return false }
-        return projection != nil && controllerLeaseID != nil
+        return projection != nil
+    }
+
+    public var controlRoleLabel: String {
+        controllerLeaseID == nil ? "View only" : "Controller"
+    }
+
+    public func updateControllerDisplayName(_ name: String?) {
+        controllerDisplayName = name
     }
 
     public func beginDiscovery() {
@@ -140,7 +154,8 @@ public final class RemoteSessionModel {
             players: players,
             livePlan: current.livePlan,
             nextPlan: current.nextPlan,
-            themeOptions: current.themeOptions
+            themeOptions: current.themeOptions,
+            phraseRoleOptions: current.phraseRoleOptions
         )
     }
 
@@ -174,7 +189,8 @@ public final class RemoteSessionModel {
             players: players,
             livePlan: incoming.livePlan,
             nextPlan: incoming.nextPlan,
-            themeOptions: incoming.themeOptions
+            themeOptions: incoming.themeOptions,
+            phraseRoleOptions: incoming.phraseRoleOptions
         )
     }
 
@@ -185,6 +201,7 @@ public final class RemoteSessionModel {
     public func markCommandPending(_ commandID: String) {
         pendingCommandIDs.insert(commandID)
         lastError = nil
+        lastCommandError = nil
     }
 
     public func acknowledgeCommand(_ commandID: String) {
@@ -195,11 +212,13 @@ public final class RemoteSessionModel {
     public func rejectCommand(_ commandID: String, reason: String) {
         pendingCommandIDs.remove(commandID)
         lastError = reason
+        lastCommandError = reason
         rejectedCommandFeedbackRevision &+= 1
     }
 
     public func reportError(_ reason: String) {
         lastError = reason
+        lastCommandError = reason
         rejectedCommandFeedbackRevision &+= 1
     }
 
@@ -207,6 +226,14 @@ public final class RemoteSessionModel {
         connectionPhase = .reconnecting(macName: macName, staleSince: date)
         pendingCommandIDs.removeAll()
         controllerLeaseID = nil
+        pairingShortCode = nil
+    }
+
+    /// The authenticated transport/lease is still valid, but its last engine
+    /// state is not. Keep the visible Players as stale and wait for fresh state.
+    public func awaitingSnapshot(from macName: String, at date: Date = .now) {
+        connectionPhase = .reconnecting(macName: macName, staleSince: date)
+        pendingCommandIDs.removeAll()
         pairingShortCode = nil
     }
 

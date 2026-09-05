@@ -28,6 +28,7 @@ final class RemoteControlServer implements AutoCloseable {
     private final AutoMixController autoMix;
     private final SimulatorTransport broadcaster;
     private final SimulatorControls controls;
+    private final TrafficFaultController faults;
     private final String token;
     private final HttpServer server;
     private final ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor();
@@ -37,6 +38,7 @@ final class RemoteControlServer implements AutoCloseable {
             List<PlayerState> players,
             AutoMixController autoMix,
             SimulatorTransport broadcaster,
+            TrafficFaultController faults,
             String bindAddress,
             int port,
             String token
@@ -45,7 +47,8 @@ final class RemoteControlServer implements AutoCloseable {
         this.players = List.copyOf(players);
         this.autoMix = autoMix;
         this.broadcaster = broadcaster;
-        this.controls = new SimulatorControls(library, players, autoMix, broadcaster);
+        this.faults = faults;
+        this.controls = new SimulatorControls(library, players, autoMix, broadcaster, faults);
         this.token = token;
         server = HttpServer.create(new InetSocketAddress(InetAddress.getByName(bindAddress), port), 0);
         server.setExecutor(executor);
@@ -72,7 +75,7 @@ final class RemoteControlServer implements AutoCloseable {
         sendJson(exchange, 200, Map.of(
                 "status", "ready",
                 "service", "lumi-prolink-simulator",
-                "version", "0.4.0"
+                "version", "0.4.1-dev-2"
         ));
     }
 
@@ -154,6 +157,7 @@ final class RemoteControlServer implements AutoCloseable {
         payload.put("service", "lumi-prolink-simulator");
         payload.put("players", players.stream().map(PlayerState::snapshot).map(this::playerPayload).toList());
         payload.put("autoMix", autoMix.status());
+        payload.put("faults", faults.status());
         // Keep the original single-player fields for scripts made for older
         // simulator builds. New clients should consume the players array.
         payload.put("playerNumber", snapshot.playerNumber());

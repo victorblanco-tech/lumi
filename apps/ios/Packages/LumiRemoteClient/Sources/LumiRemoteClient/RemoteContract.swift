@@ -107,6 +107,80 @@ public struct RemoteLiveProjection: Codable, Equatable, Sendable {
     public let livePlan: RemoteLightPlan?
     public let nextPlan: RemoteLightPlan?
     public let themeOptions: [RemoteThemeOption]
+    public let phraseRoleOptions: [RemotePhraseRoleOption]
+
+    public init(
+        projectionRevision: UInt64,
+        stateRevision: UInt64,
+        engineVersion: String,
+        operationState: RemoteOperationState,
+        leaderPlayerNumber: UInt8?,
+        integrations: RemoteIntegrationStatus,
+        players: [RemotePlayer],
+        livePlan: RemoteLightPlan?,
+        nextPlan: RemoteLightPlan?,
+        themeOptions: [RemoteThemeOption],
+        phraseRoleOptions: [RemotePhraseRoleOption] = []
+    ) {
+        self.projectionRevision = projectionRevision
+        self.stateRevision = stateRevision
+        self.engineVersion = engineVersion
+        self.operationState = operationState
+        self.leaderPlayerNumber = leaderPlayerNumber
+        self.integrations = integrations
+        self.players = players
+        self.livePlan = livePlan
+        self.nextPlan = nextPlan
+        self.themeOptions = themeOptions
+        self.phraseRoleOptions = phraseRoleOptions
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case projectionRevision
+        case stateRevision
+        case engineVersion
+        case operationState
+        case leaderPlayerNumber
+        case integrations
+        case players
+        case livePlan
+        case nextPlan
+        case themeOptions
+        case phraseRoleOptions
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        projectionRevision = try container.decode(UInt64.self, forKey: .projectionRevision)
+        stateRevision = try container.decode(UInt64.self, forKey: .stateRevision)
+        engineVersion = try container.decode(String.self, forKey: .engineVersion)
+        operationState = try container.decode(RemoteOperationState.self, forKey: .operationState)
+        leaderPlayerNumber = try container.decodeIfPresent(UInt8.self, forKey: .leaderPlayerNumber)
+        integrations = try container.decode(RemoteIntegrationStatus.self, forKey: .integrations)
+        players = try container.decode([RemotePlayer].self, forKey: .players)
+        livePlan = try container.decodeIfPresent(RemoteLightPlan.self, forKey: .livePlan)
+        nextPlan = try container.decodeIfPresent(RemoteLightPlan.self, forKey: .nextPlan)
+        themeOptions = try container.decode([RemoteThemeOption].self, forKey: .themeOptions)
+        phraseRoleOptions = try container.decodeIfPresent(
+            [RemotePhraseRoleOption].self,
+            forKey: .phraseRoleOptions
+        ) ?? []
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(projectionRevision, forKey: .projectionRevision)
+        try container.encode(stateRevision, forKey: .stateRevision)
+        try container.encode(engineVersion, forKey: .engineVersion)
+        try container.encode(operationState, forKey: .operationState)
+        try container.encodeIfPresent(leaderPlayerNumber, forKey: .leaderPlayerNumber)
+        try container.encode(integrations, forKey: .integrations)
+        try container.encode(players, forKey: .players)
+        try container.encodeIfPresent(livePlan, forKey: .livePlan)
+        try container.encodeIfPresent(nextPlan, forKey: .nextPlan)
+        try container.encode(themeOptions, forKey: .themeOptions)
+        try container.encode(phraseRoleOptions, forKey: .phraseRoleOptions)
+    }
 }
 
 public struct RemotePlayer: Codable, Equatable, Identifiable, Sendable {
@@ -331,6 +405,24 @@ public struct RemotePlanCue: Codable, Equatable, Identifiable, Sendable {
 public struct RemoteThemeOption: Codable, Equatable, Identifiable, Sendable {
     public let id: UInt64
     public let name: String
+}
+
+public struct RemotePhraseRoleOption: Codable, Equatable, Identifiable, Sendable {
+    public let id: String
+    public let name: String
+    public let colorRGB: UInt32
+
+    public init(id: String, name: String, colorRGB: UInt32) {
+        self.id = id
+        self.name = name
+        self.colorRGB = colorRGB
+    }
+
+    enum CodingKeys: String, CodingKey {
+        case id
+        case name
+        case colorRGB = "colorRgb"
+    }
 }
 
 public struct RemoteAutoloopChoice: Codable, Equatable, Identifiable, Sendable {

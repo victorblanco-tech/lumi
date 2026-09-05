@@ -7,17 +7,18 @@
 #![forbid(unsafe_code)]
 
 use std::io;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use lumi_remote_protocol::{
     REMOTE_PROTOCOL_VERSION, RemoteCommand, RemoteCommandKind, RemoteCommandResult, RemoteFrame,
     RemoteFrameKind, RemoteLiveProjection, RemoteTransportAnchor,
 };
+use lumi_stream::BoundedLineReader;
 use serde::Deserialize;
 use serde_json::json;
 use subtle::ConstantTimeEq as _;
 use thiserror::Error;
-use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
+use tokio::io::{AsyncWriteExt as _, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
 use tokio::time::timeout;
@@ -40,6 +41,7 @@ pub(crate) enum EngineRemoteUpdate {
 #[derive(Debug)]
 pub(crate) struct RemoteCommandRequest {
     pub command: RemoteCommand,
+    pub expires_at: Instant,
     pub response: oneshot::Sender<RemoteCommandResult>,
 }
 
@@ -87,14 +89,14 @@ async fn serve_client(
     command_sender: mpsc::Sender<RemoteCommandRequest>,
 ) -> Result<(), RemoteIpcError> {
     let (reader, mut writer) = stream.into_split();
-    let mut reader = BufReader::new(reader);
-    let mut line = Vec::with_capacity(256);
-    timeout(
+    let mut reader = BoundedLineReader::new(BufReader::new(reader));
+    let line = timeout(
         AUTHENTICATION_TIMEOUT,
-        read_bounded_line(&mut reader, &mut line, MAXIMUM_AUTHENTICATION_BYTES),
+        reader.next_line(MAXIMUM_AUTHENTICATION_BYTES),
     )
     .await
-    .map_err(|_| RemoteIpcError::AuthenticationTimeout)??;
+    .map_err(|_| RemoteIpcError::AuthenticationTimeout)??
+    .ok_or(RemoteIpcError::UnexpectedEnd)?;
     let authentication: GatewayAuthentication =
         serde_json::from_slice(&line).map_err(|_| RemoteIpcError::InvalidAuthentication)?;
     if !tokens_match(expected_token, &authentication.remote_gateway_token) {
@@ -118,7 +120,6 @@ async fn serve_client(
     }
 
     loop {
-        line.clear();
         tokio::select! {
             update = updates.recv() => {
                 let update = match update {
@@ -153,14 +154,10 @@ async fn serve_client(
                 write_frame(&mut writer, &frame).await?;
                 sequence = sequence.saturating_add(1);
             }
-            read = read_optional_bounded_line(
-                &mut reader,
-                &mut line,
-                lumi_remote_protocol::MAX_REMOTE_FRAME_BYTES,
-            ) => {
-                if !read? {
+            read = reader.next_line(lumi_remote_protocol::MAX_REMOTE_FRAME_BYTES) => {
+                let Some(line) = read? else {
                     return Ok(());
-                }
+                };
                 let frame = RemoteFrame::decode(&line)?;
                 if frame.frame_kind != RemoteFrameKind::Command {
                     return Err(RemoteIpcError::UnexpectedFrame);
@@ -183,6 +180,7 @@ async fn serve_client(
                 let (response, response_receiver) = oneshot::channel();
                 command_sender.try_send(RemoteCommandRequest {
                     command,
+                    expires_at: Instant::now() + COMMAND_RESULT_TIMEOUT,
                     response,
                 }).map_err(|_| RemoteIpcError::CommandQueueUnavailable)?;
                 let result = timeout(COMMAND_RESULT_TIMEOUT, response_receiver)
@@ -236,44 +234,13 @@ where
 {
     let mut encoded = frame.encode()?;
     encoded.push(b'\n');
-    writer.write_all(&encoded).await?;
-    writer.flush().await?;
+    timeout(Duration::from_secs(2), async {
+        writer.write_all(&encoded).await?;
+        writer.flush().await
+    })
+    .await
+    .map_err(|_| RemoteIpcError::WriteTimeout)??;
     Ok(())
-}
-
-async fn read_bounded_line<R>(
-    reader: &mut R,
-    bytes: &mut Vec<u8>,
-    maximum: usize,
-) -> Result<(), RemoteIpcError>
-where
-    R: tokio::io::AsyncBufRead + Unpin,
-{
-    if !read_optional_bounded_line(reader, bytes, maximum).await? {
-        return Err(RemoteIpcError::UnexpectedEnd);
-    }
-    Ok(())
-}
-
-async fn read_optional_bounded_line<R>(
-    reader: &mut R,
-    bytes: &mut Vec<u8>,
-    maximum: usize,
-) -> Result<bool, RemoteIpcError>
-where
-    R: tokio::io::AsyncBufRead + Unpin,
-{
-    let read = reader.read_until(b'\n', bytes).await?;
-    if read == 0 {
-        return Ok(false);
-    }
-    if bytes.len() > maximum.saturating_add(1) {
-        return Err(RemoteIpcError::Oversized);
-    }
-    if bytes.last() == Some(&b'\n') {
-        bytes.pop();
-    }
-    Ok(true)
 }
 
 fn tokens_match(expected: &str, received: &str) -> bool {
@@ -290,8 +257,8 @@ enum RemoteIpcError {
     AuthenticationRejected,
     #[error("gateway connection ended before authentication")]
     UnexpectedEnd,
-    #[error("gateway frame exceeds the bounded size")]
-    Oversized,
+    #[error("gateway write timed out")]
+    WriteTimeout,
     #[error("gateway sent an unexpected frame kind")]
     UnexpectedFrame,
     #[error("gateway command is invalid: {0}")]
@@ -350,6 +317,7 @@ mod tests {
             live_plan: None,
             next_plan: None,
             theme_options: Vec::new(),
+            phrase_role_options: Vec::new(),
         }
     }
 

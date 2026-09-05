@@ -88,8 +88,7 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
-      - name: Set up Java 21 for a conservative full fallback
-        if: needs.classify.outputs.full == '1'
+      - name: Set up Java 21 for the bundled Pro DJ Link bridge
         uses: actions/setup-java@v5
         with:
           distribution: temurin

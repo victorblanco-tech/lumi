@@ -1,13 +1,57 @@
 use super::*;
 use crate::commands::PlanCommandContext;
 use lumi_domain::{ClientId, CommandSequence, OperationCommand, ThemeId, UserCommandEnvelope};
-use lumi_library::AutoloopTheme;
+use lumi_library::{AutoloopTheme, PhraseRoleId};
 use lumi_output_dry_run::canonical_output_transcript;
 use lumi_remote_protocol::{
     MAX_REMOTE_FRAME_BYTES, OperationTarget as RemoteOperationTarget, RemoteCommand,
     RemoteCommandKind, RemoteCommandResultStatus, RemoteLiveProjection,
 };
 use lumi_simulator::{SimulationControl, SimulationSpeed};
+
+#[test]
+fn expired_or_abandoned_remote_commands_cannot_mutate_the_show()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut runtime = initialized_runtime()?;
+    let revision = runtime.state.state().revision();
+    let command = RemoteCommand {
+        command_id: "expired-offset".to_owned(),
+        controller_lease_id: "lease-1".to_owned(),
+        issued_at_unix_millis: 1,
+        command: RemoteCommandKind::SetOutputTimingOffset {
+            millis: -120,
+            expected_state_revision: revision.value(),
+            expected_timing_offset_millis: None,
+        },
+    };
+    let offset = runtime.output_worker.timing_offset_millis;
+    let (response, mut receiver) = tokio::sync::oneshot::channel();
+    apply_remote_command_request(
+        &mut runtime,
+        RemoteCommandRequest {
+            command: command.clone(),
+            expires_at: Instant::now() - Duration::from_millis(1),
+            response,
+        },
+    );
+    assert_eq!(
+        receiver.try_recv()?.reason_code.as_deref(),
+        Some("commandExpired")
+    );
+    let (response, receiver) = tokio::sync::oneshot::channel();
+    drop(receiver);
+    apply_remote_command_request(
+        &mut runtime,
+        RemoteCommandRequest {
+            command,
+            expires_at: Instant::now() + Duration::from_secs(2),
+            response,
+        },
+    );
+    assert_eq!(runtime.state.state().revision(), revision);
+    assert_eq!(runtime.output_worker.timing_offset_millis, offset);
+    Ok(())
+}
 
 #[test]
 fn remote_anchor_preserves_the_canonical_monotonic_observation_time() {
@@ -21,6 +65,44 @@ fn remote_anchor_preserves_the_canonical_monotonic_observation_time() {
         unix_millis_for_monotonic_observation(10_000, now, now),
         10_000
     );
+}
+
+#[test]
+fn remote_timing_compares_the_setting_while_preserving_legacy_revision_checks()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut runtime = initialized_runtime()?;
+    let stale = runtime.state.state().revision().value().saturating_add(99);
+    let mut expected = runtime.output_worker.scheduling_timing_offset_millis();
+    for millis in [-250, -249, -125, 0, 125, 249, 250] {
+        let command = RemoteCommand {
+            command_id: format!("offset-{millis}"),
+            controller_lease_id: "controller".to_owned(),
+            issued_at_unix_millis: 1,
+            command: RemoteCommandKind::SetOutputTimingOffset {
+                millis,
+                expected_state_revision: stale,
+                expected_timing_offset_millis: Some(expected),
+            },
+        };
+        assert_eq!(
+            apply_remote_command(&mut runtime, command).status,
+            RemoteCommandResultStatus::Accepted
+        );
+        assert_eq!(
+            runtime.output_worker.scheduling_timing_offset_millis(),
+            millis
+        );
+        expected = millis;
+    }
+    let legacy: RemoteCommandKind = serde_json::from_value(serde_json::json!({
+        "kind": "setOutputTimingOffset", "millis": 0, "expectedStateRevision": stale
+    }))?;
+    assert!(matches!(
+        remote_session_command(&runtime, legacy),
+        Err(CommandApplicationError::StateRevisionConflict { .. })
+    ));
+    assert_eq!(runtime.output_worker.scheduling_timing_offset_millis(), 250);
+    Ok(())
 }
 
 #[test]
@@ -52,6 +134,13 @@ fn actual_engine_snapshot_maps_to_the_scoped_remote_live_contract() {
         .flat_map(|player| player.track.phrases.iter())
         .collect::<Vec<_>>();
     assert!(!projected_phrases.is_empty());
+    assert!(!projection.phrase_role_options.is_empty());
+    assert!(
+        projection
+            .phrase_role_options
+            .iter()
+            .any(|role| role.id == "buildup-1")
+    );
     let encoded = serde_json::to_string(&projection)
         .unwrap_or_else(|error| panic!("remote projection must serialize: {error}"));
     assert!(
@@ -101,15 +190,67 @@ fn remote_operation_commands_use_the_authoritative_revision_gate() {
 }
 
 #[test]
+fn remote_future_phrase_type_change_uses_the_same_persistent_control_path() {
+    let mut runtime =
+        initialized_runtime_for_mode(ManualClock::new(0), DeckSourceMode::LocalPlayback)
+            .unwrap_or_else(|error| panic!("runtime must initialize: {error}"));
+    apply_current_session_command(&mut runtime, |expected_state_revision| {
+        SessionCommand::LoadLibraryTrackOnLocalDeck {
+            track_id: 1,
+            deck_id: lumi_domain::DeckId::new(1),
+            expected_timeline_revision: 1,
+            expected_state_revision,
+        }
+    });
+    let active = runtime
+        .state
+        .state()
+        .active_plan()
+        .cloned()
+        .unwrap_or_else(|| panic!("Library track must expose an active plan"));
+    let before_library_revision = runtime.library_revision;
+    let result = apply_remote_command(
+        &mut runtime,
+        RemoteCommand {
+            command_id: "remote-phrase-type-1".to_owned(),
+            controller_lease_id: "lease-1".to_owned(),
+            issued_at_unix_millis: 1,
+            command: RemoteCommandKind::ChangePhraseRole {
+                plan_id: active.id().value().to_string(),
+                track_load_id: active.track_load_id().value(),
+                expected_plan_revision: active.revision().value(),
+                phrase_index: 1,
+                role_id: "drop".to_owned(),
+            },
+        },
+    );
+
+    assert_eq!(result.status, RemoteCommandResultStatus::Accepted);
+    assert_eq!(runtime.library_revision, before_library_revision + 1);
+    assert_eq!(
+        runtime
+            .state
+            .state()
+            .active_plan()
+            .map(lumi_domain::LightingPlan::revision),
+        Some(PlanRevision::new(2))
+    );
+    let snapshot = snapshot_envelope(&runtime, 1, "remote-phrase-type")
+        .unwrap_or_else(|error| panic!("snapshot must serialize: {error}"));
+    assert_eq!(
+        snapshot.payload["livePlan"]["cues"][1]["libraryResolution"]["roleId"],
+        json!("drop")
+    );
+}
+
+#[test]
 fn remote_publisher_is_unavailable_outside_connected_players() {
     let runtime = initialized_runtime_for_mode(ManualClock::new(0), DeckSourceMode::LocalPlayback)
         .unwrap_or_else(|error| panic!("runtime must initialize: {error}"));
     let (latest, latest_receiver) = watch::channel(None);
     let (updates, _) = broadcast::channel(8);
     let mut publisher = RemoteProjectionPublisher::new(latest, updates);
-    publisher
-        .publish(&runtime, true)
-        .unwrap_or_else(|error| panic!("publisher must remain fail closed: {error}"));
+    publisher.publish(&runtime, true);
     assert!(latest_receiver.borrow().is_none());
 }
 
@@ -121,9 +262,7 @@ fn remote_publisher_exposes_only_the_connected_live_projection() {
     let (latest, latest_receiver) = watch::channel(None);
     let (updates, _) = broadcast::channel(8);
     let mut publisher = RemoteProjectionPublisher::new(latest, updates);
-    publisher
-        .publish(&runtime, true)
-        .unwrap_or_else(|error| panic!("publisher must create projection: {error}"));
+    publisher.publish(&runtime, true);
     let projection = latest_receiver
         .borrow()
         .clone()
@@ -141,6 +280,83 @@ fn carabiner_control_port_stays_inside_helpers_valid_range() {
     assert_eq!(
         first_available_loopback_port_in(std::iter::empty(), |_| true),
         None
+    );
+}
+
+#[test]
+fn remote_projection_failure_is_nonfatal_and_recovers_without_changing_the_show() {
+    let mut runtime = initialized_runtime().unwrap_or_else(|error| panic!("runtime: {error}"));
+    runtime.deck_source_mode = DeckSourceMode::ConnectedDecks;
+    let (latest, receiver) = watch::channel(None);
+    let (updates, _) = broadcast::channel(8);
+    let mut publisher = RemoteProjectionPublisher::new(latest, updates);
+    publisher.publish(&runtime, true);
+    assert!(receiver.borrow().is_some());
+    let revision = runtime.state.state().revision();
+    let operation = runtime.state.state().operation();
+    // Fault injection at the presentation contract: an invalid projected
+    // offset must affect only Remote, regardless of how it entered the data.
+    runtime.output_worker.timing_offset_millis = 251;
+    publisher.publish(&runtime, true);
+    assert!(receiver.borrow().is_none());
+    assert!(publisher.last_error.is_some());
+    assert_eq!(runtime.state.state().revision(), revision);
+    assert_eq!(runtime.state.state().operation(), operation);
+    runtime.output_worker.timing_offset_millis = 0;
+    publisher.publish(&runtime, true);
+    assert!(receiver.borrow().is_some());
+    assert!(publisher.last_error.is_none());
+    assert_eq!(runtime.state.state().revision(), revision);
+}
+
+#[test]
+fn remote_selects_two_players_from_actual_engine_snapshot_and_normalizes_only_display_text() {
+    let mut runtime = initialized_runtime().unwrap_or_else(|error| panic!("runtime: {error}"));
+    runtime.deck_source_mode = DeckSourceMode::ConnectedDecks;
+    let mut snapshot = snapshot_envelope_for_remote(&runtime, 1, "remote-extra-players")
+        .unwrap_or_else(|error| panic!("snapshot: {error}"));
+    let third = {
+        let mut player = snapshot.payload["decks"][0].clone();
+        player["deckId"] = json!(3);
+        player["track"]["title"] = json!(format!("{}\n", "🎵".repeat(200)));
+        player
+    };
+    snapshot
+        .payload
+        .get_mut("decks")
+        .and_then(Value::as_array_mut)
+        .unwrap_or_else(|| panic!("decks required"))
+        .push(third);
+    // Preserve the existing Live/Next pair even with an additional device.
+    let projection = RemoteLiveProjection::from_engine_snapshot_payload(&snapshot.payload, 1, 1000)
+        .unwrap_or_else(|error| panic!("projection: {error}"));
+    assert_eq!(projection.players.len(), 2);
+    assert!(
+        !projection
+            .players
+            .iter()
+            .any(|player| player.player_number == 3)
+    );
+    snapshot.payload.insert("leaderDeckId".into(), json!(3));
+    let projection = RemoteLiveProjection::from_engine_snapshot_payload(&snapshot.payload, 2, 1000)
+        .unwrap_or_else(|error| panic!("projection: {error}"));
+    let master = projection
+        .players
+        .iter()
+        .find(|player| player.player_number == 3)
+        .unwrap_or_else(|| panic!("new Master must be included"));
+    assert_eq!(master.track.title.len(), 512);
+    assert!(
+        master
+            .track
+            .title
+            .chars()
+            .all(|character| !character.is_control())
+    );
+    assert!(
+        snapshot.payload["decks"][2]["track"]["title"]
+            .as_str()
+            .is_some_and(|text| text.len() > 512)
     );
 }
 
@@ -452,8 +668,7 @@ fn integration_pump_metrics_detect_starvation_without_unbounded_samples() {
 #[tokio::test]
 async fn command_reader_retains_partial_input_when_timing_tick_cancels_the_read() {
     let (mut client, server) = tokio::io::duplex(128);
-    let mut reader = BufReader::new(server);
-    let mut buffer = Vec::new();
+    let mut reader = lumi_stream::BoundedLineReader::new(BufReader::new(server));
     client
         .write_all(b"{\"partial\":")
         .await
@@ -461,21 +676,20 @@ async fn command_reader_retains_partial_input_when_timing_tick_cancels_the_read(
 
     let interrupted = tokio::time::timeout(
         Duration::from_millis(5),
-        read_command_line(&mut reader, &mut buffer),
+        reader.next_line(MAX_MESSAGE_BYTES),
     )
     .await;
     assert!(interrupted.is_err());
-    assert_eq!(buffer, b"{\"partial\":");
 
     client
         .write_all(b"true}\n")
         .await
         .unwrap_or_else(|error| panic!("remaining command should write: {error}"));
-    let line = read_command_line(&mut reader, &mut buffer)
+    let line = reader
+        .next_line(MAX_MESSAGE_BYTES)
         .await
         .unwrap_or_else(|error| panic!("command should complete: {error}"));
     assert_eq!(line.as_deref(), Some(b"{\"partial\":true}".as_slice()));
-    assert!(buffer.is_empty());
 }
 
 #[test]
@@ -1019,6 +1233,389 @@ fn future_live_theme_change_materializes_the_selected_bank_per_phrase() {
 }
 
 #[test]
+fn future_live_phrase_type_change_persists_and_rematerializes_only_that_phrase() {
+    let mut runtime =
+        initialized_runtime_for_mode(ManualClock::new(0), DeckSourceMode::LocalPlayback)
+            .unwrap_or_else(|error| panic!("test engine must initialize: {error}"));
+    apply_current_session_command(&mut runtime, |expected_state_revision| {
+        SessionCommand::LoadLibraryTrackOnLocalDeck {
+            track_id: 1,
+            deck_id: lumi_domain::DeckId::new(1),
+            expected_timeline_revision: 1,
+            expected_state_revision,
+        }
+    });
+    let active = runtime
+        .state
+        .state()
+        .active_plan()
+        .cloned()
+        .unwrap_or_else(|| panic!("local Library track must have an active plan"));
+    assert!(active.cues().len() > 1, "fixture needs a future phrase");
+    let before = snapshot_envelope(&runtime, 1, "phrase-role-before")
+        .unwrap_or_else(|error| panic!("snapshot must serialize: {error}"));
+    let original_role = before.payload["livePlan"]["cues"][1]["libraryResolution"]["roleId"]
+        .as_str()
+        .unwrap_or_else(|| panic!("future phrase must expose its current role"));
+    let replacement_role = if original_role == "drop" {
+        "intro-outro"
+    } else {
+        "drop"
+    };
+
+    let started = apply_command(
+        &mut runtime,
+        SessionCommand::ChangePhraseRole {
+            context: PlanCommandContext {
+                plan_id: active.id(),
+                track_load_id: active.track_load_id(),
+                expected_revision: active.revision(),
+            },
+            phrase_index: 0,
+            role_id: PhraseRoleId::try_new(replacement_role)
+                .unwrap_or_else(|error| panic!("test role must be valid: {error}")),
+        },
+    );
+    assert!(matches!(
+        started,
+        Err(CommandApplicationError::StartedLivePhraseNotEditable)
+    ));
+
+    apply_session_command(
+        &mut runtime,
+        SessionCommand::ChangePhraseRole {
+            context: PlanCommandContext {
+                plan_id: active.id(),
+                track_load_id: active.track_load_id(),
+                expected_revision: active.revision(),
+            },
+            phrase_index: 1,
+            role_id: PhraseRoleId::try_new(replacement_role)
+                .unwrap_or_else(|error| panic!("test role must be valid: {error}")),
+        },
+    );
+
+    let revised = runtime
+        .state
+        .state()
+        .active_plan()
+        .unwrap_or_else(|| panic!("revised plan must remain active"));
+    assert_eq!(revised.revision(), PlanRevision::new(2));
+    assert_eq!(revised.cues()[0], active.cues()[0]);
+    let after = snapshot_envelope(&runtime, 2, "phrase-role-after")
+        .unwrap_or_else(|error| panic!("revised snapshot must serialize: {error}"));
+    assert_eq!(
+        after.payload["livePlan"]["cues"][1]["libraryResolution"]["roleId"],
+        json!(replacement_role)
+    );
+    assert_eq!(
+        after.payload["decks"][0]["track"]["phrases"][1]["role"]["roleId"],
+        json!(replacement_role)
+    );
+    assert_eq!(
+        after.payload["decks"][0]["track"]["identityFacts"]["timelineRevision"],
+        json!(2)
+    );
+
+    let persisted = runtime
+        .library_worker
+        .local_playback_track(1, 2)
+        .unwrap_or_else(|error| panic!("persisted timeline must reload: {error}"));
+    let (_, persisted_context) = persisted.into_parts();
+    assert_eq!(
+        persisted_context.phrase_role_json(1)["roleId"].as_str(),
+        Some(replacement_role)
+    );
+}
+
+#[test]
+fn live_phrase_edit_failures_leave_database_plan_and_output_unchanged()
+-> Result<(), Box<dyn std::error::Error>> {
+    for fault in ["compiler", "effect-sequence", "reducer", "sqlite"] {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let path = std::env::temp_dir().join(format!("lumi-atomic-phrase-{fault}-{unique}.sqlite"));
+        let mut runtime =
+            initialized_runtime_for_mode(ManualClock::new(0), DeckSourceMode::LocalPlayback)?;
+        runtime.library_worker = crate::library::LibraryWorker::demo_at(&path)?;
+        apply_current_session_command(&mut runtime, |expected_state_revision| {
+            SessionCommand::LoadLibraryTrackOnLocalDeck {
+                track_id: 1,
+                deck_id: lumi_domain::DeckId::new(1),
+                expected_timeline_revision: 1,
+                expected_state_revision,
+            }
+        });
+        let active = runtime
+            .state
+            .state()
+            .active_plan()
+            .cloned()
+            .ok_or("missing plan")?;
+        let original_role = runtime
+            .planning_worker
+            .library_context(active.track_load_id())
+            .ok_or("missing context")?
+            .phrase_role_json(1);
+        let replacement = if original_role["roleId"] == "drop" {
+            "intro-outro"
+        } else {
+            "drop"
+        };
+        // Exercise compiled variation state too, not just the rule-free fallback.
+        runtime
+            .planning_worker
+            .light_policy
+            .rules
+            .push(lumi_light_plans::AutoloopRule {
+                theme_id: 1,
+                role_id: "intro-outro".into(),
+                variant_id: "mapping-1".into(),
+                enabled: true,
+                selection_weight: 2,
+                color_behavior: ColorBehavior::Neutral,
+                color_rgb: vec![],
+            });
+        let database = rusqlite::Connection::open(&path)?;
+        let valid_sequence = runtime.planning_worker.effect_sequence;
+        match fault {
+            "compiler" => runtime.planning_worker.light_policy.revision = 0,
+            "effect-sequence" => runtime.planning_worker.effect_sequence = u64::MAX,
+            "reducer" => runtime.planning_worker.effect_sequence = 0,
+            "sqlite" => database.execute_batch(
+                "CREATE TRIGGER reject_test_phrase BEFORE INSERT ON phrase_points
+                 WHEN NEW.revision = 2 BEGIN SELECT RAISE(ABORT, 'injected phrase write failure'); END;"
+            )?,
+            _ => unreachable!(),
+        }
+        let before_state = runtime.state.clone();
+        let before_contexts = format!("{:?}", runtime.planning_worker.library_contexts);
+        let before_history = runtime.planning_worker.variation_history.clone();
+        let before_compiled = runtime.planning_worker.compiled_light_plans.clone();
+        let before_modifiers = runtime.output_worker.static_look_plans.clone();
+        let before_sequence = runtime.planning_worker.effect_sequence;
+        let before_output_sequence = runtime.output_worker.effect_sequence;
+        let before_generation = runtime.output_worker.realtime_generation;
+        let result = apply_command(
+            &mut runtime,
+            SessionCommand::ChangePhraseRole {
+                context: PlanCommandContext {
+                    plan_id: active.id(),
+                    track_load_id: active.track_load_id(),
+                    expected_revision: active.revision(),
+                },
+                phrase_index: 1,
+                role_id: PhraseRoleId::try_new(replacement)?,
+            },
+        );
+        assert!(result.is_err(), "fault {fault} must reject the edit");
+        match fault {
+            "compiler" => assert!(matches!(
+                result,
+                Err(CommandApplicationError::Engine(EngineError::LightPlan(_)))
+            )),
+            "effect-sequence" => assert!(matches!(
+                result,
+                Err(CommandApplicationError::Engine(
+                    EngineError::PlanningEffectSequenceOverflow
+                ))
+            )),
+            "reducer" => assert!(matches!(
+                result,
+                Err(CommandApplicationError::Engine(
+                    EngineError::RevisedPlanNotAccepted
+                ))
+            )),
+            "sqlite" => assert!(
+                result
+                    .err()
+                    .ok_or("expected SQLite error")?
+                    .to_string()
+                    .contains("injected phrase write failure")
+            ),
+            _ => unreachable!(),
+        }
+        assert_eq!(runtime.state, before_state, "{fault}: show state");
+        assert_eq!(
+            format!("{:?}", runtime.planning_worker.library_contexts),
+            before_contexts,
+            "{fault}: contexts"
+        );
+        assert_eq!(
+            runtime.planning_worker.variation_history, before_history,
+            "{fault}: variation reservations"
+        );
+        assert_eq!(
+            runtime.planning_worker.compiled_light_plans, before_compiled,
+            "{fault}: compiled plans"
+        );
+        assert_eq!(
+            runtime.output_worker.static_look_plans, before_modifiers,
+            "{fault}: output modifiers"
+        );
+        assert_eq!(runtime.planning_worker.effect_sequence, before_sequence);
+        assert_eq!(
+            runtime.output_worker.effect_sequence,
+            before_output_sequence
+        );
+        assert_eq!(runtime.output_worker.realtime_generation, before_generation);
+        let (_, persisted) = runtime
+            .library_worker
+            .local_playback_track(1, 1)?
+            .into_parts();
+        assert_eq!(
+            persisted.phrase_role_json(1),
+            original_role,
+            "{fault}: durable phrase"
+        );
+        let partial_revisions: i64 = database.query_row(
+            "SELECT COUNT(*) FROM timeline_revisions WHERE track_id = 1 AND revision = 2",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(partial_revisions, 0, "{fault}: no partial durable revision");
+        // Recovery uses exactly the same expected plan revision: the failed
+        // attempt must not consume it or leave a reservation/override behind.
+        runtime.planning_worker.effect_sequence = valid_sequence;
+        runtime.planning_worker.light_policy.revision = 1;
+        database.execute_batch("DROP TRIGGER IF EXISTS reject_test_phrase")?;
+        apply_command(
+            &mut runtime,
+            SessionCommand::ChangePhraseRole {
+                context: PlanCommandContext {
+                    plan_id: active.id(),
+                    track_load_id: active.track_load_id(),
+                    expected_revision: active.revision(),
+                },
+                phrase_index: 1,
+                role_id: PhraseRoleId::try_new(replacement)?,
+            },
+        )?;
+        let (_, recovered) = runtime
+            .library_worker
+            .local_playback_track(1, 2)?
+            .into_parts();
+        assert_eq!(recovered.phrase_role_json(1)["roleId"], replacement);
+        let recovered_plan = runtime
+            .state
+            .state()
+            .active_plan()
+            .ok_or("recovery needs active plan")?;
+        assert_eq!(recovered_plan.revision(), PlanRevision::new(2));
+        assert_eq!(recovered_plan.cues()[0], active.cues()[0]);
+        assert_eq!(runtime.output_worker.realtime_generation, before_generation);
+        drop(database);
+        drop(runtime);
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn unchanged_autoloop_choice_does_not_leave_a_hidden_override()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut runtime =
+        initialized_runtime_for_mode(ManualClock::new(0), DeckSourceMode::LocalPlayback)?;
+    apply_current_session_command(&mut runtime, |expected_state_revision| {
+        SessionCommand::LoadLibraryTrackOnLocalDeck {
+            track_id: 1,
+            deck_id: lumi_domain::DeckId::new(1),
+            expected_timeline_revision: 1,
+            expected_state_revision,
+        }
+    });
+    let active = runtime
+        .state
+        .state()
+        .active_plan()
+        .cloned()
+        .ok_or("missing plan")?;
+    let SemanticLightingAction::ApplyLook(look) = active.cues()[1].action() else {
+        panic!("fixture needs mapped future cue");
+    };
+    let before_contexts = format!("{:?}", runtime.planning_worker.library_contexts);
+    let before_state = runtime.state.clone();
+    let result = apply_command(
+        &mut runtime,
+        SessionCommand::SelectScene {
+            context: PlanCommandContext {
+                plan_id: active.id(),
+                track_load_id: active.track_load_id(),
+                expected_revision: active.revision(),
+            },
+            phrase_index: 1,
+            scene_id: look.scene_id(),
+        },
+    );
+    assert!(matches!(
+        result,
+        Err(CommandApplicationError::Mutation(
+            PlanMutationError::NoChange
+        ))
+    ));
+    assert_eq!(runtime.state, before_state);
+    assert_eq!(
+        format!("{:?}", runtime.planning_worker.library_contexts),
+        before_contexts
+    );
+    Ok(())
+}
+
+#[test]
+#[ignore = "run explicitly in release mode; component budget, not CDJ-to-MIDI acceptance"]
+fn staged_live_phrase_edit_component_budget() -> Result<(), Box<dyn std::error::Error>> {
+    let mut runtime =
+        initialized_runtime_for_mode(ManualClock::new(0), DeckSourceMode::LocalPlayback)?;
+    apply_current_session_command(&mut runtime, |expected_state_revision| {
+        SessionCommand::LoadLibraryTrackOnLocalDeck {
+            track_id: 1,
+            deck_id: lumi_domain::DeckId::new(1),
+            expected_timeline_revision: 1,
+            expected_state_revision,
+        }
+    });
+    let mut timings = Vec::with_capacity(200);
+    for index in 0..200 {
+        let active = runtime
+            .state
+            .state()
+            .active_plan()
+            .cloned()
+            .ok_or("missing plan")?;
+        let role = if index % 2 == 0 {
+            "drop"
+        } else {
+            "intro-outro"
+        };
+        let command = SessionCommand::ChangePhraseRole {
+            context: PlanCommandContext {
+                plan_id: active.id(),
+                track_load_id: active.track_load_id(),
+                expected_revision: active.revision(),
+            },
+            phrase_index: 1,
+            role_id: PhraseRoleId::try_new(role)?,
+        };
+        let started = Instant::now();
+        apply_command(&mut runtime, command)?;
+        timings.push(started.elapsed());
+    }
+    timings.sort();
+    eprintln!(
+        "Staged phrase edit (200, in-memory fixture): p50={}us p95={}us p99={}us max={}us",
+        timings[99].as_micros(),
+        timings[189].as_micros(),
+        timings[197].as_micros(),
+        timings[199].as_micros()
+    );
+    assert!(
+        timings[189] < Duration::from_millis(20),
+        "small-fixture preparation/commit budget exceeded"
+    );
+    assert!(runtime.library_worker.local_playback_track(1, 201).is_ok());
+    Ok(())
+}
+
+#[test]
 fn live_apply_look_maps_to_a_sound_switch_bank_and_autoloop_button() {
     let runtime = initialized_runtime()
         .unwrap_or_else(|error| panic!("test engine must initialize: {error}"));
@@ -1144,9 +1741,29 @@ fn local_playback_reasserts_a_restarted_phrase_and_activates_a_paused_seek_on_re
     );
     assert_eq!(runtime.output_worker.provider.records().count(), 1);
 
-    apply_session_command(
-        &mut runtime,
-        SessionCommand::SetOutputTimingOffset { millis: 20 },
+    let timing_command = |millis, expected| RemoteCommand {
+        command_id: format!("timing-{millis}"),
+        controller_lease_id: "timing-lease".to_owned(),
+        issued_at_unix_millis: 1,
+        command: RemoteCommandKind::SetOutputTimingOffset {
+            millis,
+            // Deliberately stale: playback updates must not invalidate a timing edit.
+            expected_state_revision: 0,
+            expected_timing_offset_millis: Some(expected),
+        },
+    };
+    assert_eq!(
+        apply_remote_command(&mut runtime, timing_command(20, 0)).status,
+        RemoteCommandResultStatus::Accepted
+    );
+    let collision = apply_remote_command(&mut runtime, timing_command(-100, 0));
+    // The desired value is persisted even while its live activation is deferred.
+    assert_eq!(runtime.timing_preferences.saved, Some(20));
+    assert_eq!(collision.status, RemoteCommandResultStatus::Conflict);
+    assert_eq!(runtime.timing_preferences.saved, Some(20));
+    assert_eq!(
+        collision.reason_code.as_deref(),
+        Some("timingOffsetConflict")
     );
     assert_eq!(runtime.output_worker.timing_offset_millis(), 0);
     assert_eq!(

@@ -324,6 +324,9 @@ struct LiveWorkspacePresenterTests {
         }
         midi["timingOffsetMillis"] = .number(0)
         midi["pendingTimingOffsetMillis"] = .number(20)
+        midi["savedTimingOffsetMillis"] = .number(20)
+        midi["timingSavePending"] = .boolean(false)
+        midi["timingSaveError"] = .null
         payload["midiIntegration"] = .object(midi)
         let envelope = MessageEnvelope(
             protocolVersion: recorded.protocolVersion,
@@ -344,9 +347,12 @@ struct LiveWorkspacePresenterTests {
 
         #expect(snapshot.midiIntegration?.timingOffsetMillis == 0)
         #expect(snapshot.midiIntegration?.pendingTimingOffsetMillis == 20)
+        #expect(snapshot.midiIntegration?.savedTimingOffsetMillis == 20)
+        #expect(snapshot.midiIntegration?.timingSavePending == false)
+        #expect(state.content?.lightingTimingSaveError == nil)
         #expect(state.content?.lightingTimingOffsetMillis == 0)
         #expect(state.content?.pendingLightingTimingOffsetMillis == 20)
-        #expect(state.lightingMidi.detail.contains("+0 ms saved"))
+        #expect(state.lightingMidi.detail.contains("+0 ms applied"))
         #expect(state.lightingMidi.detail.contains("+20 ms pending for next phrase"))
         #expect(state.lightingMidi.detail.contains("phrase-boundary output"))
     }
@@ -1199,14 +1205,88 @@ struct LiveWorkspacePresenterTests {
         #expect(plan?.cues[1].libraryResolution?.entryID.contains("theme-2--") == true)
     }
 
-    @Test("Fallback remains visible with authoritative decks and plan")
-    func fallbackIsExplicit() {
+    @Test("An idle Player fallback does not keep recovered Master status orange")
+    func idleFallbackDoesNotDegradeRecoveredMaster() {
         let state = LiveWorkspaceFixtures.fallback
 
-        #expect(state.condition == .fallback)
+        #expect(state.condition == .ready)
         #expect(state.content != nil)
         #expect(state.content?.plan?.status == "fallback")
-        #expect(state.diagnostic != nil)
+        #expect(state.diagnostic == nil)
+        #expect(state.planner.condition == .ready)
+        #expect(state.planner.detail.contains("1 other Player held"))
+    }
+
+    @Test("An AUTO HELD idle Player remains local while a recovered Master is ready")
+    func idleAutoHeldPlayerDoesNotDegradeRecoveredMaster() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case var .array(decks) = payload["decks"],
+              decks.count == 2,
+              case var .object(idleDeck) = decks[1] else {
+            Issue.record("Recorded fixture must contain an idle Player 2")
+            return
+        }
+        idleDeck["planEligibility"] = .string("autoHeld")
+        decks[1] = .object(idleDeck)
+        payload["decks"] = .array(decks)
+        payload["nextPlan"] = .null
+
+        let snapshot = try EngineSnapshotDecoder().decode(
+            MessageEnvelope(
+                protocolVersion: recorded.protocolVersion,
+                messageType: recorded.messageType,
+                messageId: recorded.messageId,
+                sequence: recorded.sequence,
+                correlationId: recorded.correlationId,
+                sentAt: recorded.sentAt,
+                payload: payload
+            ),
+            endpointDescription: "127.0.0.1:52841",
+            protocolVersion: 1
+        )
+        let state = LiveWorkspacePresenter.ready(snapshot)
+
+        #expect(state.condition == .ready)
+        #expect(state.diagnostic == nil)
+        #expect(state.planner.condition == .ready)
+        #expect(state.planner.detail.contains("1 other Player held"))
+        #expect(state.content?.nextDeck?.planEligibility == .autoHeld)
+    }
+
+    @Test("An AUTO HELD Master remains an explicit show-critical warning")
+    func autoHeldMasterFailsClosed() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case var .array(decks) = payload["decks"],
+              !decks.isEmpty,
+              case var .object(masterDeck) = decks[0] else {
+            Issue.record("Recorded fixture must contain Master Player 1")
+            return
+        }
+        masterDeck["planEligibility"] = .string("autoHeld")
+        decks[0] = .object(masterDeck)
+        payload["decks"] = .array(decks)
+        payload["livePlan"] = .null
+
+        let snapshot = try EngineSnapshotDecoder().decode(
+            MessageEnvelope(
+                protocolVersion: recorded.protocolVersion,
+                messageType: recorded.messageType,
+                messageId: recorded.messageId,
+                sequence: recorded.sequence,
+                correlationId: recorded.correlationId,
+                sentAt: recorded.sentAt,
+                payload: payload
+            ),
+            endpointDescription: "127.0.0.1:52841",
+            protocolVersion: 1
+        )
+        let state = LiveWorkspacePresenter.ready(snapshot)
+
+        #expect(state.condition == .fallback)
+        #expect(state.planner.condition == .degraded)
+        #expect(state.diagnostic?.contains("safe hold plan") == true)
     }
 
     @Test("Stale data retains the last complete snapshot")

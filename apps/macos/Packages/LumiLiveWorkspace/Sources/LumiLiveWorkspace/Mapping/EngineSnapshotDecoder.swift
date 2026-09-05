@@ -219,6 +219,14 @@ public struct EngineSnapshotDecoder: Sendable {
         let pendingTimingOffsetMillis = try optionalSignedInteger(
             midi["pendingTimingOffsetMillis"]
         )
+        let savedTimingOffsetMillis = try optionalSignedInteger(midi["savedTimingOffsetMillis"])
+        guard savedTimingOffsetMillis.map({ (-250...250).contains($0) }) ?? true else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        let timingSavePending: Bool
+        if case let .boolean(value) = midi["timingSavePending"] { timingSavePending = value }
+        else if midi["timingSavePending"] == nil { timingSavePending = false }
+        else { throw EngineSnapshotDecodingError.invalidSnapshot }
         guard activeBank.map({ (1...4).contains($0) }) ?? true else {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
@@ -236,6 +244,9 @@ public struct EngineSnapshotDecoder: Sendable {
             autoPublishEnabled: autoPublishEnabled,
             timingOffsetMillis: timingOffsetMillis,
             pendingTimingOffsetMillis: pendingTimingOffsetMillis,
+            savedTimingOffsetMillis: savedTimingOffsetMillis,
+            timingSavePending: timingSavePending,
+            timingSaveError: try optionalString(midi["timingSaveError"]),
             bankPreRollMillis: bankPreRollMillis,
             realtimeLane: try decodeRealtimeMidiLane(midi["realtimeScheduler"])
         )
@@ -762,12 +773,41 @@ public struct EngineSnapshotDecoder: Sendable {
                 loopSlot: loopSlot
             )
         }
+        let phraseRoles: [PhraseRoleOptionSnapshot]
+        if payload["phraseRoles"] == nil || payload["phraseRoles"] == .null {
+            phraseRoles = []
+        } else {
+            guard case let .array(rolePayloads) = payload["phraseRoles"] else {
+                throw EngineSnapshotDecodingError.invalidSnapshot
+            }
+            phraseRoles = try rolePayloads.map { value in
+                guard case let .object(role) = value,
+                      case let .string(id) = role["id"],
+                      case let .string(name) = role["name"],
+                      let colorRGB = unsignedInteger(role["colorRgb"]),
+                      colorRGB <= 0x00FF_FFFF,
+                      !id.isEmpty,
+                      !name.isEmpty else {
+                    throw EngineSnapshotDecodingError.invalidSnapshot
+                }
+                return PhraseRoleOptionSnapshot(
+                    id: id,
+                    name: name,
+                    colorRGB: UInt32(colorRGB)
+                )
+            }
+        }
         guard !themes.isEmpty, !scenes.isEmpty,
               Set(themes.map(\.id)).count == themes.count,
-              Set(scenes.map(\.id)).count == scenes.count else {
+              Set(scenes.map(\.id)).count == scenes.count,
+              Set(phraseRoles.map(\.id)).count == phraseRoles.count else {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
-        return PlanningOptionsSnapshot(themes: themes, scenes: scenes)
+        return PlanningOptionsSnapshot(
+            themes: themes,
+            scenes: scenes,
+            phraseRoles: phraseRoles
+        )
     }
 
     private func decodeDeck(_ value: JSONValue) throws -> DeckSnapshot {

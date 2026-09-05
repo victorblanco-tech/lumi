@@ -87,6 +87,8 @@ public struct LiveWorkspaceContent: Equatable, Sendable {
     public let operationState: String
     public let lightingTimingOffsetMillis: Int
     public let pendingLightingTimingOffsetMillis: Int?
+    public let lightingTimingSavePending: Bool
+    public let lightingTimingSaveError: String?
     public let abletonLinkEnabled: Bool
     public let abletonLinkState: String
     public let abletonLinkBPMMilli: UInt64?
@@ -108,6 +110,8 @@ public struct LiveWorkspaceContent: Equatable, Sendable {
         operationState: String,
         lightingTimingOffsetMillis: Int = 0,
         pendingLightingTimingOffsetMillis: Int? = nil,
+        lightingTimingSavePending: Bool = false,
+        lightingTimingSaveError: String? = nil,
         abletonLinkEnabled: Bool = false,
         abletonLinkState: String = "stopped",
         abletonLinkBPMMilli: UInt64? = nil,
@@ -128,6 +132,8 @@ public struct LiveWorkspaceContent: Equatable, Sendable {
         self.operationState = operationState
         self.lightingTimingOffsetMillis = lightingTimingOffsetMillis
         self.pendingLightingTimingOffsetMillis = pendingLightingTimingOffsetMillis
+        self.lightingTimingSavePending = lightingTimingSavePending
+        self.lightingTimingSaveError = lightingTimingSaveError
         self.abletonLinkEnabled = abletonLinkEnabled
         self.abletonLinkState = abletonLinkState
         self.abletonLinkBPMMilli = abletonLinkBPMMilli
@@ -187,6 +193,11 @@ public enum PlanMutationRequest: Equatable, Sendable {
         phraseIndex: UInt64,
         sceneID: UInt64
     )
+    case changePhraseRole(
+        context: PlanMutationContext,
+        phraseIndex: UInt64,
+        roleID: String
+    )
     case setCueLock(
         context: PlanMutationContext,
         phraseIndex: UInt64,
@@ -199,6 +210,7 @@ public enum PlanMutationRequest: Equatable, Sendable {
         case let .selectTheme(context, _),
              let .selectThemeFromPhrase(context, _, _),
              let .selectScene(context, _, _),
+             let .changePhraseRole(context, _, _),
              let .setCueLock(context, _, _),
              let .regeneratePlan(context):
             context
@@ -303,10 +315,7 @@ public enum LiveWorkspacePresenter {
             derivedCondition = .degraded
         } else if snapshot.decks.isEmpty {
             derivedCondition = .empty
-        } else if snapshot.decks.contains(where: { $0.planEligibility == .autoHeld })
-            || [snapshot.livePlan, snapshot.nextPlan]
-                .compactMap({ $0 })
-                .contains(where: { $0.status == "fallback" }) {
+        } else if showCriticalPlanningHasProblem(snapshot) {
             derivedCondition = .fallback
         } else {
             derivedCondition = .ready
@@ -373,7 +382,7 @@ public enum LiveWorkspacePresenter {
             let last = Double($0.lastDispatchLatenessMicros) / 1_000
             return " · realtime p95 \(p95.formatted(.number.precision(.fractionLength(1)))) ms · last \(last.formatted(.number.precision(.fractionLength(1)))) ms · \($0.lateDispatchCount) late"
         } ?? ""
-        return "\(midi.sourceName) · auto-publish \(midi.autoPublishEnabled ? "on" : "off") · \(midi.sentPulseCount) pulses\(bank) · timing \(offset) saved\(pending) · phrase-boundary output · bank pre-roll \(midi.bankPreRollMillis) ms\(realtime)"
+        return "\(midi.sourceName) · auto-publish \(midi.autoPublishEnabled ? "on" : "off") · \(midi.sentPulseCount) pulses\(bank) · timing \(offset) applied\(pending) · phrase-boundary output · bank pre-roll \(midi.bankPreRollMillis) ms\(realtime)"
     }
 
     private static func abletonLinkDetail(_ snapshot: EngineSnapshot) -> String {
@@ -452,8 +461,16 @@ public enum LiveWorkspacePresenter {
     private static func plannerDetail(_ snapshot: EngineSnapshot) -> String {
         let plans = [snapshot.livePlan, snapshot.nextPlan].compactMap { $0 }
         if snapshot.decks.isEmpty { return "Waiting for a loaded track" }
-        if plans.isEmpty { return "Automatic planning held" }
-        return "\(plans.count) deck plan\(plans.count == 1 ? "" : "s") ready"
+        if plans.isEmpty { return "Waiting for a Master plan" }
+        if showCriticalPlanningHasProblem(snapshot) { return "Master plan held safe" }
+        let readyCount = plans.filter { $0.status != "fallback" }.count
+        let heldDeckIDs = Set(
+            snapshot.decks.filter { $0.planEligibility == .autoHeld }.map(\.deckID)
+                + plans.filter { $0.status == "fallback" }.map(\.deckID)
+        )
+        let otherHeldCount = heldDeckIDs.filter { $0 != snapshot.leaderDeckID }.count
+        let held = otherHeldCount == 0 ? "" : " · \(otherHeldCount) other Player held"
+        return "\(readyCount) deck plan\(readyCount == 1 ? "" : "s") ready\(held)"
     }
 
     private static func plannerCondition(
@@ -461,10 +478,29 @@ public enum LiveWorkspacePresenter {
         healthy: ProviderCondition
     ) -> ProviderCondition {
         if snapshot.decks.isEmpty { return .empty }
-        let plannedDeckIDs = Set([snapshot.livePlan, snapshot.nextPlan].compactMap { $0?.deckID })
-        return snapshot.decks.allSatisfy { deck in
-            deck.planEligibility != .autoHeld && plannedDeckIDs.contains(deck.deckID)
-        } ? healthy : .degraded
+        return showCriticalPlanningHasProblem(snapshot) ? .degraded : healthy
+    }
+
+    /// Live readiness is scoped to the Player which currently owns Master.
+    /// An idle or newly joined Player can legitimately remain AUTO HELD until
+    /// it has a trusted Library match. Its card already exposes that local
+    /// state and must not keep the entire show warning orange after the active
+    /// Master has recovered with a valid plan.
+    private static func showCriticalPlanningHasProblem(_ snapshot: EngineSnapshot) -> Bool {
+        guard let leaderDeckID = snapshot.leaderDeckID else {
+            // Before a Master is elected there is no show-critical plan. This
+            // is a normal cueing/standby state, including at application start.
+            return false
+        }
+        guard let leader = snapshot.decks.first(where: { $0.deckID == leaderDeckID }) else {
+            return true
+        }
+        guard leader.planEligibility != .autoHeld,
+              let livePlan = snapshot.livePlan,
+              livePlan.deckID == leaderDeckID else {
+            return true
+        }
+        return livePlan.status == "fallback"
     }
 
     private static func content(from snapshot: EngineSnapshot) -> LiveWorkspaceContent? {
@@ -486,6 +522,8 @@ public enum LiveWorkspacePresenter {
             operationState: snapshot.operationState,
             lightingTimingOffsetMillis: snapshot.midiIntegration?.timingOffsetMillis ?? 0,
             pendingLightingTimingOffsetMillis: snapshot.midiIntegration?.pendingTimingOffsetMillis,
+            lightingTimingSavePending: snapshot.midiIntegration?.timingSavePending ?? false,
+            lightingTimingSaveError: snapshot.midiIntegration?.timingSaveError,
             abletonLinkEnabled: snapshot.abletonLinkIntegration?.enabled ?? false,
             abletonLinkState: snapshot.abletonLinkIntegration?.state ?? "stopped",
             abletonLinkBPMMilli: snapshot.abletonLinkIntegration?.bpmMilli,

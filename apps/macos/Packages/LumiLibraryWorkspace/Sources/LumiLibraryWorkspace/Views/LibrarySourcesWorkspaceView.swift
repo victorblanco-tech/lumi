@@ -68,6 +68,8 @@ public struct LibrarySourcesWorkspaceView: View {
     @State private var expandedUSBPlaylistFolderPaths: Set<String> = []
     @State private var usbPlaylistSearch = ""
     @State private var mountRevision = 0
+    @State private var mediaIdentities: [String: USBMediaIdentity] = [:]
+    @State private var identityReadGeneration = 0
     @State private var mountedUSBChoices: [URL] = []
     @State private var isUSBSourceChoicePresented = false
     @State private var usbSelectionFeedback: String?
@@ -178,11 +180,13 @@ public struct LibrarySourcesWorkspaceView: View {
             }
             if phase == .completed || phase == .failed || phase == .idle {
                 resolvingUSBReviewKey = nil
+                refreshMediaIdentities()
             }
         }
         .onAppear {
             guard !didInitializeSource else { return }
             didInitializeSource = true
+            refreshMediaIdentities()
             restoreDevicePlaylistSelection()
         }
         .onReceive(
@@ -191,6 +195,7 @@ public struct LibrarySourcesWorkspaceView: View {
             )
         ) { notification in
             mountRevision &+= 1
+            refreshMediaIdentities()
             guard let url = notification.userInfo?[NSWorkspace.volumeURLUserInfoKey] as? URL else {
                 return
             }
@@ -202,6 +207,7 @@ public struct LibrarySourcesWorkspaceView: View {
             )
         ) { _ in
             mountRevision &+= 1
+            refreshMediaIdentities()
         }
     }
 
@@ -215,7 +221,7 @@ public struct LibrarySourcesWorkspaceView: View {
                         Text("\(visibleUSBDevices.count) trusted · \(mountedTrustedSources.count) connected · Rekordbox data read only")
                             .font(LumiTypography.technical)
                             .foregroundStyle(LumiColor.textSecondary)
-                        Text("Trusted media identifies live Pro DJ Link tracks. Source identity stays in Lumi; Rekordbox and USB files are never changed.")
+                        Text("Lumi reads Rekordbox data without changing it. A tiny Lumi identity file keeps each USB recognizable across reconnects and renames.")
                             .font(LumiTypography.caption)
                             .foregroundStyle(LumiColor.textSecondary)
                     }
@@ -377,6 +383,7 @@ public struct LibrarySourcesWorkspaceView: View {
     @ViewBuilder
     private func selectedUSBInspector(device: RekordboxDeviceState?) -> some View {
         if let device {
+            let sourceIsBusy = usbOperation.isActive && usbOperation.sourceID == device.sourceID
             let displayName = USBSourceIdentityResolver.displayName(
                 for: device,
                 inspection: activeDeviceInspection
@@ -401,11 +408,22 @@ public struct LibrarySourcesWorkspaceView: View {
                                 syncSelectedDevicePlaylists(root: root)
                             }
                                 .buttonStyle(.borderedProminent)
-                                .disabled(selectedUSBPlaylistIDs.isEmpty || usbOperation.isActive || !rendersInteractiveControls)
+                                .disabled(activeDeviceInspection == nil || selectedUSBPlaylistIDs.isEmpty || usbOperation.isActive || !rendersInteractiveControls)
                         } else {
                             compactStatus("CONNECT USB TO SYNC", .empty)
                         }
                     }
+                    VStack(alignment: .leading, spacing: 4) {
+                        Text(sourceIsBusy ? usbOperation.detail : "Sync preserves Lumi phrases and keeps older or uncertain analysis for review.")
+                            .font(LumiTypography.caption)
+                            .foregroundStyle(LumiColor.textSecondary)
+                            .lineLimit(1)
+                        ProgressView(value: sourceIsBusy ? Double(usbOperation.completedTracks ?? 0) : 0,
+                                     total: Double(max(usbOperation.totalTracks ?? 1, 1)))
+                            .opacity(sourceIsBusy ? 1 : 0)
+                    }
+                    .frame(height: 34)
+                    .accessibilityIdentifier("lumi.library.sources.usb.syncProgress")
                     Divider()
                     HStack(spacing: LumiSpacing.xLarge) {
                         metric("Synced", device.activeTracks)
@@ -556,7 +574,12 @@ public struct LibrarySourcesWorkspaceView: View {
         switch usbOperation.phase {
         case .idle: "USB READY"
         case .reading: "SCANNING USB"
-        case .synchronizing: "SYNCING USB"
+        case .synchronizing:
+            if let completed = usbOperation.completedTracks, let total = usbOperation.totalTracks, total > 0 {
+                "SYNC \(completed)/\(total)"
+            } else {
+                "SYNCING USB"
+            }
         case .completed:
             usbOperation.title.localizedCaseInsensitiveContains("sync")
                 ? "SYNC COMPLETE"
@@ -1021,7 +1044,7 @@ public struct LibrarySourcesWorkspaceView: View {
                     Label("Selection impact", systemImage: "checkmark.shield.fill")
                         .font(LumiTypography.cardTitle)
                     Spacer()
-                    Text("ANALYSIS COMPLETE · NO CHANGES APPLIED")
+                    Text("INITIAL COMPARISON · NOTHING CHANGED")
                         .font(LumiTypography.technical)
                         .foregroundStyle(LumiColor.success)
                 }
@@ -1034,8 +1057,8 @@ public struct LibrarySourcesWorkspaceView: View {
                     impactMetric("Review", impact.conflictCount, .degraded)
                 }
                 Text(
-                    "Sync will add or update \(impact.changedCount) unique track\(impact.changedCount == 1 ? "" : "s"). "
-                        + "\(impact.heldCount) older or incomparable version\(impact.heldCount == 1 ? "" : "s") will be held; Lumi-owned phrases and AutoLoop choices remain unchanged."
+                    "\(impact.changedCount) potential additions or updates · \(impact.heldCount) versions need verification. "
+                        + "Sync verifies complete audio and analysis before saving, so final counts can differ. Lumi phrases and AutoLoop choices are preserved."
                 )
                 .font(LumiTypography.caption)
                 .foregroundStyle(LumiColor.textSecondary)
@@ -1326,10 +1349,13 @@ public struct LibrarySourcesWorkspaceView: View {
             return
         }
         let storedSelections = decodedDevicePlaylistSelections()[sourceID]
-        let stored = storedSelections ?? activeDeviceInspection?.selectedPlaylistIDs ?? []
+        let stored = activeDeviceInspection?.selectedPlaylistIDs ?? storedSelections ?? []
         if let inspection = activeDeviceInspection {
             let available = Set(inspection.playlists.map(\.id))
             selectedUSBPlaylistIDs = Set(stored).intersection(available)
+            if selectedUSBPlaylistIDs.isEmpty, storedSelections?.isEmpty == false {
+                usbSelectionFeedback = "The export's playlist IDs or folders changed. Choose the playlists to sync; your Lumi tracks and phrases are unchanged."
+            }
         } else {
             selectedUSBPlaylistIDs = Set(stored)
         }
@@ -1356,10 +1382,10 @@ public struct LibrarySourcesWorkspaceView: View {
         guard !selectedUSBPlaylistIDs.isEmpty else { return }
         persistDevicePlaylistSelection()
         let url = URL(fileURLWithPath: root, isDirectory: true)
-        let sourceID = stableSourceID(
+        guard let sourceID = stableSourceID(
             for: url,
             preferredSourceID: selectedUSBSourceID
-        )
+        ) else { return }
         selectedUSBSourceID = sourceID
         onDeviceSync(root, sourceID, selectedUSBPlaylistIDs.sorted())
     }
@@ -1402,7 +1428,10 @@ public struct LibrarySourcesWorkspaceView: View {
             includingResourceValuesForKeys: [.volumeNameKey],
             options: [.skipHiddenVolumes]
         )?.first { url in
-            USBSourceIdentityResolver.mountedVolume(
+            if let marker = mediaIdentities[url.path] {
+                return volumeSourceID(url) == marker.sourceId && marker.sourceId == device.sourceID
+            }
+            return USBSourceIdentityResolver.mountedVolume(
                 mountedIdentity(url),
                 represents: device,
                 among: visibleUSBDevices
@@ -1413,6 +1442,10 @@ public struct LibrarySourcesWorkspaceView: View {
     }
 
     private func volumeSourceID(_ url: URL) -> String? {
+        if let marker = mediaIdentities[url.path] {
+            guard mediaIdentities.values.filter({ $0.mediaId == marker.mediaId || $0.sourceId == marker.sourceId }).count == 1 else { return nil }
+            return marker.sourceId
+        }
         let stable = try? url.resourceValues(forKeys: [.volumeUUIDStringKey]).volumeUUIDString
         return USBStableSourceIdentity.sourceID(
             fileSystemUUID: stable,
@@ -1528,10 +1561,11 @@ public struct LibrarySourcesWorkspaceView: View {
             expected: url,
             sourceID: device.sourceID
         ) else { return }
-        selectedUSBSourceID = stableSourceID(
+        guard let sourceID = stableSourceID(
             for: authorizedURL,
             preferredSourceID: device.sourceID
-        )
+        ) else { return }
+        selectedUSBSourceID = sourceID
         rekordboxDeviceRoot = authorizedURL.path
         onDeviceInspect(authorizedURL.path, selectedUSBSourceID)
     }
@@ -1563,7 +1597,7 @@ public struct LibrarySourcesWorkspaceView: View {
 
         let panel = NSOpenPanel()
         panel.title = "Authorize Rekordbox USB"
-        panel.message = "Select \(volumeDisplayName(expected)) once. Lumi stores secure read-only access for future reconnects."
+        panel.message = "Select \(volumeDisplayName(expected)). Lumi reads Rekordbox data and may save a small USB identity file. Music and Rekordbox files are never modified."
         panel.prompt = "Authorize USB"
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
@@ -1615,6 +1649,13 @@ public struct LibrarySourcesWorkspaceView: View {
     }
 
     private func stableSourceID(for url: URL, preferredSourceID: String?) -> String? {
+        if let marker = mediaIdentities[url.path] {
+            guard volumeSourceID(url) == marker.sourceId else {
+                usbSelectionFeedback = "Duplicate Lumi USB identity detected. Reconnect only the intended USB before scanning or syncing. Nothing was merged."
+                return nil
+            }
+            return marker.sourceId
+        }
         let displayName = volumeDisplayName(url)
         let collisionSafePreferredID = preferredSourceID.flatMap { sourceID in
             guard let existing = visibleUSBDevices.first(where: { $0.sourceID == sourceID }) else {
@@ -1644,6 +1685,27 @@ public struct LibrarySourcesWorkspaceView: View {
             volumeDisplayName($0).localizedCaseInsensitiveCompare(volumeDisplayName($1))
                 == .orderedAscending
         } ?? []
+    }
+
+    private func refreshMediaIdentities() {
+        identityReadGeneration &+= 1
+        let generation = identityReadGeneration
+        Task {
+            let identities = await Task.detached(priority: .utility) {
+                var result: [String: USBMediaIdentity] = [:]
+                for volume in FileManager.default.mountedVolumeURLs(includingResourceValuesForKeys: nil, options: [.skipHiddenVolumes]) ?? [] {
+                    if let marker = USBMediaIdentity.read(from: volume) { result[volume.path] = marker }
+                }
+                return result
+            }.value
+            guard identityReadGeneration == generation else { return }
+            mediaIdentities = identities
+            let uniqueIDs = Set(identities.values.map(\.mediaId))
+            let uniqueSources = Set(identities.values.map(\.sourceId))
+            if uniqueIDs.count != identities.count || uniqueSources.count != identities.count {
+                usbSelectionFeedback = "Duplicate Lumi USB identity detected. The sources were not merged; reconnect the intended USB separately."
+            }
+        }
     }
 
     private func volumeDisplayName(_ url: URL) -> String {

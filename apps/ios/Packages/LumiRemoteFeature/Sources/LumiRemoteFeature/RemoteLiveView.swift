@@ -9,6 +9,7 @@ public struct RemoteLiveActions: Sendable {
     public let setOperationState: @MainActor @Sendable (RemoteOperationState) -> Void
     public let setAbletonLinkEnabled: @MainActor @Sendable (Bool) -> Void
     public let setTimingOffset: @MainActor @Sendable (Int) -> Void
+    public let changePhraseRole: @MainActor @Sendable (RemoteLightPlan, RemotePlanCue, String) -> Void
     public let selectTheme: @MainActor @Sendable (RemoteLightPlan, RemotePlanCue, UInt64) -> Void
     public let selectAutoloop: @MainActor @Sendable (RemoteLightPlan, RemotePlanCue, UInt8) -> Void
     public let setCueLock: @MainActor @Sendable (RemoteLightPlan, RemotePlanCue, Bool) -> Void
@@ -17,6 +18,11 @@ public struct RemoteLiveActions: Sendable {
         setOperationState: @escaping @MainActor @Sendable (RemoteOperationState) -> Void,
         setAbletonLinkEnabled: @escaping @MainActor @Sendable (Bool) -> Void,
         setTimingOffset: @escaping @MainActor @Sendable (Int) -> Void,
+        changePhraseRole: @escaping @MainActor @Sendable (
+            RemoteLightPlan,
+            RemotePlanCue,
+            String
+        ) -> Void,
         selectTheme: @escaping @MainActor @Sendable (
             RemoteLightPlan,
             RemotePlanCue,
@@ -36,6 +42,7 @@ public struct RemoteLiveActions: Sendable {
         self.setOperationState = setOperationState
         self.setAbletonLinkEnabled = setAbletonLinkEnabled
         self.setTimingOffset = setTimingOffset
+        self.changePhraseRole = changePhraseRole
         self.selectTheme = selectTheme
         self.selectAutoloop = selectAutoloop
         self.setCueLock = setCueLock
@@ -201,12 +208,83 @@ public struct RemoteLiveView: View {
     }
 }
 
+private struct RemoteTimingSelection: Identifiable {
+    let id = UUID()
+    let millis: Int
+}
+
+private struct RemoteTimingOffsetSheet: View {
+    @Environment(\.dismiss) private var dismiss
+    @State private var draftMillis: Int
+    let controlsEnabled: Bool
+    let apply: @MainActor @Sendable (Int) -> Void
+
+    init(initialMillis: Int, controlsEnabled: Bool, apply: @escaping @MainActor @Sendable (Int) -> Void) {
+        _draftMillis = State(initialValue: initialMillis)
+        self.controlsEnabled = controlsEnabled
+        self.apply = apply
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Button("Cancel") { dismiss() }
+                Spacer()
+                Text("Lighting timing").font(.headline)
+                Spacer()
+                Button("Apply") {
+                    apply(draftMillis)
+                    dismiss()
+                }
+                .fontWeight(.semibold)
+                .disabled(!controlsEnabled)
+            }
+            .buttonStyle(.plain)
+            .frame(minHeight: 44)
+            .padding(.horizontal)
+            .padding(.top, 12)
+            Form {
+                Section {
+                    Text(String(format: "%+d ms", draftMillis))
+                        .font(.title.monospacedDigit().bold())
+                        .frame(maxWidth: .infinity)
+                        .accessibilityIdentifier("lumi.remote.timing.value")
+                    Slider(
+                        value: Binding(get: { Double(draftMillis) }, set: { draftMillis = Int($0) }),
+                        in: -250...250,
+                        step: 1
+                    )
+                    .accessibilityLabel("Lighting timing offset")
+                    HStack {
+                        Text("−250 ms · Earlier")
+                        Spacer()
+                        Text("Later · +250 ms")
+                    }
+                    .font(.caption)
+                    Stepper("Fine adjustment · 1 ms", value: $draftMillis, in: -250...250)
+                    Button("Reset to 0 ms") { draftMillis = 0 }
+                } footer: {
+                    Text("Negative values trigger lighting earlier; positive values trigger it later. During playback, changes apply at the next phrase without restarting the current AutoLoop.")
+                }
+                if !controlsEnabled {
+                    Text("Reconnect as Controller to apply changes.")
+                        .foregroundStyle(LumiColor.warning)
+                }
+            }
+        }
+        .background(LumiColor.surface)
+        .foregroundStyle(LumiColor.textPrimary)
+    }
+}
+
 private struct RemoteTopBar: View {
     @Bindable var model: RemoteSessionModel
     let actions: RemoteLiveActions
     let isLandscape: Bool
     @Environment(\.dynamicTypeSize) private var dynamicTypeSize
     @State private var confirmsStoppingShow = false
+    @State private var showsConnectionDetails = false
+    @State private var timingSelection: RemoteTimingSelection?
 
     var body: some View {
         VStack(spacing: isLandscape ? 3 : LumiSpacing.small) {
@@ -235,6 +313,14 @@ private struct RemoteTopBar: View {
         .padding(.horizontal, LumiSpacing.medium)
         .padding(.vertical, isLandscape ? 5 : LumiSpacing.small)
         .background(LumiColor.surface)
+        .sheet(item: $timingSelection) { selection in
+            RemoteTimingOffsetSheet(
+                initialMillis: selection.millis,
+                controlsEnabled: model.controlsEnabled,
+                apply: actions.setTimingOffset
+            )
+            .presentationDetents([.medium, .large])
+        }
         .alert("Stop the live show?", isPresented: $confirmsStoppingShow) {
             Button("Keep Running", role: .cancel) {}
             Button("Stop Show", role: .destructive) {
@@ -246,16 +332,38 @@ private struct RemoteTopBar: View {
     }
 
     private var identity: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text("Lumi Remote")
-                .font(LumiTypography.sectionTitle)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
-            Text(connectionLabel)
-                .font(LumiTypography.caption)
-                .foregroundStyle(connectionColor)
-                .lineLimit(1)
-                .minimumScaleFactor(0.8)
+        Button {
+            showsConnectionDetails = true
+        } label: {
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Lumi Remote")
+                    .font(LumiTypography.sectionTitle)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Text(connectionLabel)
+                    .font(LumiTypography.caption)
+                    .foregroundStyle(connectionColor)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Lumi Remote, \(connectionLabel)")
+        .accessibilityHint("Connection, control permissions and app version")
+        .popover(isPresented: $showsConnectionDetails) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("Lumi Remote").font(.headline)
+                Text(connectionLabel).foregroundStyle(connectionColor)
+                Text("Controller: \(model.controllerDisplayName ?? (model.controlsEnabled ? "This device" : "Not reported by this Mac"))")
+                Text("Only the Controller can change the show. Transfer control in Lumi on the Mac: Integrations → iPhone Remote.")
+                    .font(.caption)
+                Text("Version \(RemoteAppVersion.current)")
+                    .font(.caption).foregroundStyle(LumiColor.textSecondary)
+            }
+            .padding()
+            .frame(width: 290, alignment: .leading)
+            .presentationCompactAdaptation(.popover)
         }
     }
 
@@ -355,29 +463,36 @@ private struct RemoteTopBar: View {
     @ViewBuilder
     private func timingOffsetControl(compact: Bool) -> some View {
         if let integrations = model.projection?.integrations {
-            Menu {
-                ForEach(Array(stride(from: -100, through: 100, by: 10)), id: \.self) { value in
-                    Button(offsetLabel(value)) {
-                        actions.setTimingOffset(value)
+            Button {
+                timingSelection = RemoteTimingSelection(
+                    millis: integrations.pendingTimingOffsetMillis ?? integrations.timingOffsetMillis
+                )
+            } label: {
+                VStack(spacing: 1) {
+                    Text(offsetLabel(integrations.pendingTimingOffsetMillis ?? integrations.timingOffsetMillis))
+                        .font(LumiTypography.technical.weight(.semibold))
+                    if integrations.pendingTimingOffsetMillis != nil {
+                        Text("NEXT PHRASE")
+                            .font(.system(size: 9, weight: .semibold))
+                            .foregroundStyle(LumiColor.warning)
                     }
                 }
-            } label: {
-                Text(offsetLabel(integrations.timingOffsetMillis))
-                    .font(LumiTypography.technical.weight(.semibold))
-                    .frame(minWidth: 54, minHeight: compact ? 34 : 44)
-                    .frame(minHeight: 44)
-                    .contentShape(Rectangle())
+                .frame(minWidth: 54, minHeight: 44)
+                .contentShape(Rectangle())
             }
+            .buttonStyle(.plain)
             .disabled(!model.controlsEnabled)
             .accessibilityLabel("Lighting timing offset")
-            .accessibilityValue(offsetLabel(integrations.timingOffsetMillis))
-            .accessibilityHint("Double tap to choose an offset")
+            .accessibilityValue(offsetLabel(integrations.pendingTimingOffsetMillis ?? integrations.timingOffsetMillis))
+            .accessibilityHint(integrations.pendingTimingOffsetMillis == nil
+                ? "Double tap to adjust lighting timing"
+                : "Applies at the next phrase. Double tap to adjust.")
         }
     }
 
     private var commandFeedback: some View {
         HStack(spacing: 5) {
-            if let error = model.lastError {
+            if let error = model.lastCommandError ?? model.lastError {
                 Image(systemName: "exclamationmark.triangle.fill")
                     .foregroundStyle(LumiColor.warning)
                 Text(error)
@@ -401,7 +516,7 @@ private struct RemoteTopBar: View {
 
     private var connectionLabel: String {
         switch model.connectionPhase {
-        case let .connected(macName): "Connected · \(macName)"
+        case .connected: "Connected · \(model.controlRoleLabel)"
         case let .reconnecting(macName, _): "Reconnecting · \(macName)"
         case .discovering: "Finding Lumi on the local network"
         case .pairing: "Pairing"
@@ -411,7 +526,7 @@ private struct RemoteTopBar: View {
     }
 
     private var connectionColor: Color {
-        model.controlsEnabled ? LumiColor.success : LumiColor.warning
+        model.connectionIsHealthy ? LumiColor.success : LumiColor.warning
     }
 
     private func integrationBadge(
@@ -1686,7 +1801,6 @@ private struct RemotePlanCueSheet: View {
     let controlsEnabled: Bool
     let actions: RemoteLiveActions
     @Environment(\.dismiss) private var dismiss
-    @State private var selectedPhraseIndex: UInt16
 
     init(
         projection: RemoteLiveProjection,
@@ -1700,28 +1814,35 @@ private struct RemotePlanCueSheet: View {
         self.initialCue = initialCue
         self.controlsEnabled = controlsEnabled
         self.actions = actions
-        _selectedPhraseIndex = State(initialValue: initialCue.phraseIndex)
     }
 
     var body: some View {
         NavigationStack {
             Form {
                 Section("Selected phrase") {
+                    LabeledContent("Phrase", value: phraseLabel(cue))
                     Menu {
-                        ForEach(plan.cues) { candidate in
+                        ForEach(projection.phraseRoleOptions) { role in
                             Button {
-                                selectedPhraseIndex = candidate.phraseIndex
+                                actions.changePhraseRole(plan, cue, role.id)
+                                dismiss()
                             } label: {
-                                if candidate.phraseIndex == cue.phraseIndex {
-                                    Label(phraseLabel(candidate), systemImage: "checkmark")
+                                if role.id == currentPhraseRoleID {
+                                    Label(role.name, systemImage: "checkmark")
                                 } else {
-                                    Text(phraseLabel(candidate))
+                                    Text(role.name)
                                 }
                             }
+                            .disabled(role.id == currentPhraseRoleID)
                         }
                     } label: {
-                        selectionRow("Phrase", value: phraseLabel(cue))
+                        selectionRow("Phrase Type", value: currentPhraseRoleName)
                     }
+                    .disabled(
+                        !canEdit
+                            || currentPhraseRoleID == nil
+                            || projection.phraseRoleOptions.isEmpty
+                    )
                     LabeledContent("Status", value: phraseStateLabel)
                     if let staticLookName = cue.staticLookName {
                         LabeledContent("Static Look", value: staticLookName)
@@ -1789,7 +1910,17 @@ private struct RemotePlanCueSheet: View {
     }
 
     private var cue: RemotePlanCue {
-        plan.cues.first(where: { $0.phraseIndex == selectedPhraseIndex }) ?? initialCue
+        initialCue
+    }
+
+    private var currentPhrase: RemotePhrase? {
+        player?.track.phrases.first(where: { $0.index == cue.phraseIndex })
+    }
+
+    private var currentPhraseRoleID: String? { currentPhrase?.roleID }
+
+    private var currentPhraseRoleName: String {
+        currentPhrase?.roleName ?? currentPhrase?.kind ?? "Unmapped"
     }
 
     private var player: RemotePlayer? {

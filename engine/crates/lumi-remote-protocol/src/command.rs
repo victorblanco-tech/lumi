@@ -28,6 +28,8 @@ pub enum RemoteCommandKind {
     SetOutputTimingOffset {
         millis: i16,
         expected_state_revision: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expected_timing_offset_millis: Option<i16>,
     },
     SelectThemeFromPhrase {
         plan_id: String,
@@ -42,6 +44,13 @@ pub enum RemoteCommandKind {
         expected_plan_revision: u64,
         phrase_index: u16,
         autoloop_number: u8,
+    },
+    ChangePhraseRole {
+        plan_id: String,
+        track_load_id: u64,
+        expected_plan_revision: u64,
+        phrase_index: u16,
+        role_id: String,
     },
     SetCueLock {
         plan_id: String,
@@ -67,8 +76,13 @@ impl RemoteCommand {
         validate_identifier("commandId", &self.command_id, 128)?;
         validate_identifier("controllerLeaseId", &self.controller_lease_id, 128)?;
         match &self.command {
-            RemoteCommandKind::SetOutputTimingOffset { millis, .. }
-                if !(-250..=250).contains(millis) =>
+            RemoteCommandKind::SetOutputTimingOffset {
+                millis,
+                expected_timing_offset_millis,
+                ..
+            } if !(-250..=250).contains(millis)
+                || expected_timing_offset_millis
+                    .is_some_and(|value| !(-250..=250).contains(&value)) =>
             {
                 Err(RemoteCommandError::TimingOffsetOutOfRange)
             }
@@ -86,6 +100,12 @@ impl RemoteCommand {
             RemoteCommandKind::SelectThemeFromPhrase { plan_id, .. }
             | RemoteCommandKind::SetCueLock { plan_id, .. } => {
                 validate_identifier("planId", plan_id, 128)
+            }
+            RemoteCommandKind::ChangePhraseRole {
+                plan_id, role_id, ..
+            } => {
+                validate_identifier("planId", plan_id, 128)?;
+                validate_identifier("roleId", role_id, 128)
             }
             _ => Ok(()),
         }
@@ -162,6 +182,7 @@ mod tests {
             command: RemoteCommandKind::SetOutputTimingOffset {
                 millis: 251,
                 expected_state_revision: 7,
+                expected_timing_offset_millis: None,
             },
         };
 

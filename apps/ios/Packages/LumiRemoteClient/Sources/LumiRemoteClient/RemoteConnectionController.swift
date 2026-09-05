@@ -105,8 +105,10 @@ public final class RemoteConnectionController: ObservableObject {
             model.reportError("The timing offset is outside the supported range.")
             return
         }
+        guard let timing = model.projection?.integrations,
+              let expected = Int16(exactly: timing.pendingTimingOffsetMillis ?? timing.timingOffsetMillis) else { return }
         submitStateCommand(target: "timingOffset") { revision in
-            .setOutputTimingOffset(value, expectedStateRevision: revision)
+            .setOutputTimingOffset(value, expectedStateRevision: revision, expectedTimingOffsetMillis: expected)
         }
     }
 
@@ -117,6 +119,16 @@ public final class RemoteConnectionController: ObservableObject {
     ) {
         submitPlanCommand(plan: plan, cue: cue, target: "theme") {
             .selectThemeFromPhrase($0, themeID: themeID)
+        }
+    }
+
+    public func changePhraseRole(
+        plan: RemoteLightPlan,
+        cue: RemotePlanCue,
+        roleID: String
+    ) {
+        submitPlanCommand(plan: plan, cue: cue, target: "phraseRole") {
+            .changePhraseRole($0, roleID: roleID)
         }
     }
 
@@ -276,6 +288,7 @@ public final class RemoteConnectionController: ObservableObject {
                 pairingCandidate = nil
             }
             commandCoordinator.updateControllerLease(response.controllerLeaseID)
+            model.updateControllerDisplayName(response.controllerDisplayName)
             if let lease = response.controllerLeaseID {
                 model.grantControllerLease(lease)
             } else {

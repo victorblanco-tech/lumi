@@ -22,6 +22,8 @@ jobs:
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -65,6 +67,8 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
       - name: Validate product tag
         run: scripts/check-product-tag.sh remote "$GITHUB_REF_NAME"
       - name: Validate App Store icon assets
@@ -92,7 +96,9 @@ jobs:
             -configuration '${{ steps.configuration.outputs.configuration }}' \
             -destination 'generic/platform=iOS Simulator' \
             -derivedDataPath build/iOSReleaseDerivedData \
-            CODE_SIGNING_ALLOWED=NO \
+            CURRENT_PROJECT_VERSION="$(git rev-list --count HEAD)" \
+            CODE_SIGNING_ALLOWED=YES \
+            CODE_SIGN_IDENTITY=- \
             GCC_TREAT_WARNINGS_AS_ERRORS=YES \
             -quiet \
             build
@@ -101,6 +107,7 @@ jobs:
           product='build/iOSReleaseDerivedData/Build/Products/${{ steps.configuration.outputs.configuration }}-iphonesimulator'
           app="$(find "$product" -maxdepth 1 -type d -name '*.app' -print -quit)"
           test -n "$app"
+          scripts/check-ios-simulator-entitlements.sh "$app"
           archive_name="Lumi-Remote-${{ steps.configuration.outputs.version }}-iOS-Simulator.zip"
           archive="build/$archive_name"
           ditto -c -k --keepParent "$app" "$archive"

@@ -10,8 +10,8 @@ revision-safe set of user commands.
 
 ## Requirements
 
-- Lumi Remote 0.1.0 or newer on an iPhone running iOS 18 or newer;
-- Lumi 0.6.0 or newer on an Apple Silicon Mac;
+- Lumi Remote 0.1.1 on an iPhone running iOS 18 or newer;
+- Lumi 0.6.2 or newer on an Apple Silicon Mac;
 - both devices on the same local network;
 - matching Production, RC or Dev release channels.
 
@@ -32,7 +32,7 @@ Apple Developer Program membership.
    ```bash
    git clone https://github.com/victorblanco-tech/lumi.git
    cd lumi
-   git switch --detach lumi-remote-v0.1.0
+   git switch --detach lumi-remote-v0.1.1
    open apps/ios/LumiRemote.xcodeproj
    ```
 
@@ -48,7 +48,7 @@ Apple Developer Program membership.
 7. Connect and unlock the iPhone, trust the Mac when asked and enable
    **Settings → Privacy & Security → Developer Mode** on the iPhone if needed.
 8. Select that iPhone as the Xcode run destination and press **Run**.
-9. Start **Lumi 0.6.0** on the Mac, enable its Remote Gateway and follow
+9. Start **Lumi 0.6.2** on the Mac, enable its Remote Gateway and follow
    the pairing steps below.
 
 Apple Personal Team provisioning expires after seven days. Reconnect the
@@ -87,11 +87,36 @@ The main controls mirror macOS:
 - **Start** allows the Mac engine to send the prepared lighting actions;
 - **Pause** suspends new automatic actions while retaining show state;
 - **Link** enables or disables the isolated Ableton Link relay;
-- **Timing offset** changes the saved lighting compensation for a future phrase
+- **Timing offset** changes the shared, saved lighting compensation for a future phrase
   boundary without disturbing the AutoLoop that is already running.
+
+Tap the timing value to adjust it from **−250 to +250 ms**, with a slider and
+1 ms fine adjustment. Negative values trigger earlier; positive values trigger
+later. **Apply** sends your choice; **Cancel** leaves it unchanged. During
+playback, **NEXT PHRASE** appears beside the requested value until the engine
+applies it at a phrase boundary. Incoming player updates do not reset an open
+timing editor.
+With Lumi 0.6.2 / Remote 0.1.1, changes from either
+the iPhone or Mac are saved by the Mac engine and remain after restarting Lumi.
+**NEXT PHRASE** describes activation timing, not temporary storage. Mac, RC and
+Dev installations keep their own settings. If saving fails, Mac Live shows
+**NOT SAVED** with the reason in the timing control; choose the value again to retry.
 
 Only one paired iPhone can be Controller at a time. Viewers see the same Live
 state but cannot mutate it. Commands are never queued while disconnected.
+
+With Lumi 0.6.2 / Remote 0.1.1 or newer, the connected status explicitly says
+**Controller** or **View only**. Both are healthy connections. Tap the Lumi
+Remote heading for the controlling device and this app's version. An older
+Remote that does not report its version is shown as such on the Mac.
+
+The Controller keeps its role while offline. Opening another Remote, restarting
+the Gateway or changing show mode does not transfer control. To hand over,
+choose **Make Controller** for the desired device in **Integrations → iPhone
+Remote** on the Mac. **Revoke** removes the pairing; it does not assign another
+Controller automatically. The first paired device receives control initially.
+The Mac's **Control history** records initial assignment, explicit transfers
+and Controller revocation. Entries begin with this update, not retrospectively.
 
 ## Player view
 
@@ -105,7 +130,8 @@ Landscape keeps numbered Players side by side. Each loaded card contains:
 - clear red **Active** and blue **Next** plan emphasis.
 
 Pinch changes the visible beat span without moving the Master playhead. Tapping
-a future phrase opens Theme, AutoLoop and lock controls. Active and completed
+a future phrase opens Phrase Type, Theme, AutoLoop and lock controls. Phrase Type
+lists your configured Lumi types, not repeated phrases from this track. Active and completed
 phrases remain read-only.
 
 ## Connection safety

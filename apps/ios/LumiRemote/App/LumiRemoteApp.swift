@@ -32,6 +32,7 @@ struct LumiRemoteApp: App {
                     setOperationState: connection.setOperationState,
                     setAbletonLinkEnabled: connection.setAbletonLinkEnabled,
                     setTimingOffset: connection.setTimingOffset,
+                    changePhraseRole: connection.changePhraseRole,
                     selectTheme: connection.selectTheme,
                     selectAutoloop: connection.selectAutoloop,
                     setCueLock: connection.setCueLock

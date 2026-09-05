@@ -8,10 +8,11 @@ use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use lumi_stream::BoundedLineReader;
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq as _;
 use thiserror::Error;
-use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
+use tokio::io::{AsyncWriteExt as _, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::timeout;
 
@@ -76,6 +77,7 @@ pub struct GatewayAdminStatus {
     pub lan_port: u16,
     pub paired_devices: Vec<GatewayPairedDeviceStatus>,
     pub controller_device_id: Option<String>,
+    pub controller_changes: Vec<crate::ControllerChange>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -86,6 +88,7 @@ pub struct GatewayPairedDeviceStatus {
     pub paired_at_unix_millis: u64,
     pub last_seen_unix_millis: u64,
     pub controller: bool,
+    pub client_version: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -193,7 +196,7 @@ async fn serve_admin_client(
     lan_port: u16,
 ) -> Result<(), GatewayAdminError> {
     let (reader, mut writer) = stream.into_split();
-    let mut reader = BufReader::new(reader);
+    let mut reader = BoundedLineReader::new(BufReader::new(reader));
     let authentication = timeout(
         ADMIN_AUTHENTICATION_TIMEOUT,
         read_bounded_json::<AdminAuthentication>(&mut reader),
@@ -217,7 +220,7 @@ async fn serve_admin_client(
     }
 }
 
-async fn apply_request(
+pub(crate) async fn apply_request(
     request: GatewayAdminRequest,
     state: &SharedGatewayState,
     relay: &EngineRelayHandle,
@@ -235,19 +238,19 @@ async fn apply_request(
         }
         GatewayAdminRequest::RevokeDevice { device_id } => {
             let mut registry = state.registry.lock().await;
-            if registry.revoke(&device_id) {
-                let controller_matches = state
-                    .command_guard
-                    .lock()
-                    .await
-                    .controller()
-                    .is_some_and(|controller| controller.device_id == device_id);
-                if controller_matches {
-                    state.command_guard.lock().await.revoke_control();
+            let mut candidate = registry.clone();
+            let previous = candidate.controller_device_id().map(str::to_owned);
+            if candidate.revoke(&device_id) {
+                if previous.as_deref() == Some(device_id.as_str()) {
+                    candidate.record_controller_change(
+                        previous,
+                        "controllerRevoked",
+                        unix_millis(),
+                    );
                 }
                 let saved = state
-                    .trust_store
-                    .save(&registry)
+                    .commit_registry(&mut registry, candidate, false)
+                    .await
                     .map_err(|_| crate::PairingError::InvalidPersistedDevice)
                     .map(|()| None);
                 if saved.is_ok() {
@@ -260,27 +263,18 @@ async fn apply_request(
         }
         GatewayAdminRequest::TransferControl { device_id } => {
             let mut registry = state.registry.lock().await;
-            if registry.contains_device(&device_id) {
-                match random_hex(24) {
-                    Ok(lease) => {
-                        let changed = registry.set_controller(&device_id).and_then(|()| {
-                            state
-                                .trust_store
-                                .save(&registry)
-                                .map_err(|_| crate::PairingError::InvalidPersistedDevice)
-                        });
-                        if changed.is_ok() {
-                            state
-                                .command_guard
-                                .lock()
-                                .await
-                                .transfer_control(device_id, lease);
-                            state.notify_trust_changed();
-                        }
-                        changed.map(|()| None)
-                    }
-                    Err(_) => Err(crate::PairingError::InvalidCredential),
+            let mut candidate = registry.clone();
+            let previous = candidate.controller_device_id().map(str::to_owned);
+            if candidate.set_controller(&device_id).is_ok() {
+                candidate.record_controller_change(previous, "macTransfer", unix_millis());
+                let changed = state
+                    .commit_registry(&mut registry, candidate, true)
+                    .await
+                    .map_err(|_| crate::PairingError::InvalidPersistedDevice);
+                if changed.is_ok() {
+                    state.notify_trust_changed();
                 }
+                changed.map(|()| None)
             } else {
                 Err(crate::PairingError::DeviceUnknown)
             }
@@ -336,16 +330,11 @@ async fn status(
     relay: &EngineRelayHandle,
     lan_port: u16,
 ) -> GatewayAdminStatus {
-    let controller = state
-        .command_guard
-        .lock()
-        .await
-        .controller()
-        .map(|controller| controller.device_id.clone());
-    let devices = state
-        .registry
-        .lock()
-        .await
+    // One snapshot from the authoritative registry, never a mixture of two
+    // different ownership revisions during a transfer.
+    let registry = state.registry.lock().await;
+    let controller = registry.controller_device_id().map(str::to_owned);
+    let devices = registry
         .paired_devices()
         .map(|device| GatewayPairedDeviceStatus {
             device_id: device.device_id.clone(),
@@ -353,6 +342,7 @@ async fn status(
             paired_at_unix_millis: device.paired_at_unix_millis,
             last_seen_unix_millis: device.last_seen_unix_millis,
             controller: controller.as_deref() == Some(device.device_id.as_str()),
+            client_version: device.client_version.clone(),
         })
         .collect();
     GatewayAdminStatus {
@@ -362,26 +352,20 @@ async fn status(
         lan_port,
         paired_devices: devices,
         controller_device_id: controller,
+        controller_changes: registry.controller_changes().to_vec(),
     }
 }
 
 async fn read_bounded_json<T>(
-    reader: &mut (impl tokio::io::AsyncBufRead + Unpin),
+    reader: &mut BoundedLineReader<impl tokio::io::AsyncBufRead + Unpin>,
 ) -> Result<T, GatewayAdminError>
 where
     T: for<'de> Deserialize<'de>,
 {
-    let mut bytes = Vec::with_capacity(512);
-    let read = reader.read_until(b'\n', &mut bytes).await?;
-    if read == 0 {
-        return Err(GatewayAdminError::UnexpectedEnd);
-    }
-    if bytes.len() > MAXIMUM_ADMIN_LINE_BYTES.saturating_add(1) {
-        return Err(GatewayAdminError::Oversized);
-    }
-    if bytes.last() == Some(&b'\n') {
-        bytes.pop();
-    }
+    let bytes = reader
+        .next_line(MAXIMUM_ADMIN_LINE_BYTES)
+        .await?
+        .ok_or(GatewayAdminError::UnexpectedEnd)?;
     Ok(serde_json::from_slice(&bytes)?)
 }
 
@@ -520,7 +504,10 @@ mod tests {
             identity,
             PersistentTrustStore::new(directory.join("trust.json")),
         )?;
-        let relay = EngineRelayHandle::start(directory.join("missing-engine-record.json"));
+        let relay = EngineRelayHandle::start(
+            directory.join("missing-engine-record.json"),
+            state.command_guard.clone(),
+        );
         let record_path = directory.join("admin.json");
         let (server, _record_guard) = GatewayAdminServer::bind(
             state,

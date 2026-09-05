@@ -56,6 +56,12 @@ case "$command" in
     if [[ $# -ge 3 ]]; then player="${2:?player required}"; position="${3:?position required}"; else player=1; position="${2:?position required}"; fi
     request_post '/api/v1/control/seek' "{\"playerNumber\":$player,\"positionMillis\":$position}"
     ;;
+  hot-cue)
+    request_post '/api/v1/control/hot-cue' "{\"playerNumber\":${2:?player required},\"positionMillis\":${3:?position required}}"
+    ;;
+  beat-jump)
+    request_post '/api/v1/control/beat-jump' "{\"playerNumber\":${2:?player required},\"beats\":${3:?beats required}}"
+    ;;
   pitch)
     if [[ $# -ge 3 ]]; then player="${2:?player required}"; pitch="${3:?pitch required}"; else player=1; pitch="${2:?pitch required}"; fi
     request_post '/api/v1/control/pitch' "{\"playerNumber\":$player,\"pitchPercent\":$pitch}"
@@ -75,6 +81,31 @@ case "$command" in
   loop-off|precise-burst)
     player="${2:-1}"
     request_post "/api/v1/control/$command" "{\"playerNumber\":$player}"
+    ;;
+  player-online)
+    player="${2:?player required}"
+    case "${3:-}" in
+      on) enabled=true ;;
+      off) enabled=false ;;
+      *) echo "ERROR: player-online expects PLAYER on or off." >&2; exit 1 ;;
+    esac
+    request_post '/api/v1/control/player-online' "{\"playerNumber\":$player,\"enabled\":$enabled}"
+    ;;
+  fault-position-gap|fault-disconnect)
+    request_post "/api/v1/control/$command" "{\"playerNumber\":${2:?player required},\"durationMillis\":${3:-5000}}"
+    ;;
+  fault-packet-loss)
+    request_post '/api/v1/control/fault-packet-loss' "{\"playerNumber\":${2:?player required},\"lane\":\"${3:-timing}\",\"everyN\":${4:-4},\"durationMillis\":${5:-5000}}"
+    ;;
+  clear-faults|master-handover)
+    request_post "/api/v1/control/$command" '{}'
+    ;;
+  recovery-soak)
+    case "${2:-}" in
+      on) request_post '/api/v1/control/recovery-soak' "{\"enabled\":true,\"intervalSeconds\":${3:-20}}" ;;
+      off) request_post '/api/v1/control/recovery-soak' "{\"enabled\":false,\"intervalSeconds\":${3:-20}}" ;;
+      *) echo "ERROR: recovery-soak expects on or off." >&2; exit 1 ;;
+    esac
     ;;
   auto-mix)
     case "${2:-}" in
@@ -98,7 +129,7 @@ case "$command" in
     esac
     ;;
   *)
-    echo "Usage: $0 {status|tracks [query]|playlists|load [PLAYER] ID|play [PLAYER]|pause [PLAYER]|seek [PLAYER] MS|pitch [PLAYER] PERCENT|master [PLAYER] on|off|on-air [PLAYER] on|off|loop PLAYER START_MS END_MS|loop-off [PLAYER]|precise-burst [PLAYER]|auto-mix on|off [SECONDS] [PLAYLIST_ID] [shuffle|ordered]}" >&2
+    echo "Usage: $0 {status|tracks [query]|playlists|load [PLAYER] ID|play [PLAYER]|pause [PLAYER]|seek [PLAYER] MS|hot-cue PLAYER MS|beat-jump PLAYER BEATS|pitch [PLAYER] PERCENT|master [PLAYER] on|off|on-air [PLAYER] on|off|loop PLAYER START_MS END_MS|loop-off [PLAYER]|precise-burst [PLAYER]|player-online PLAYER on|off|fault-position-gap PLAYER [MS]|fault-disconnect PLAYER [MS]|fault-packet-loss PLAYER [LANE] [EVERY_N] [MS]|clear-faults|master-handover|auto-mix on|off [SECONDS] [PLAYLIST_ID] [shuffle|ordered]|recovery-soak on|off [SECONDS]}" >&2
     exit 2
     ;;
 esac

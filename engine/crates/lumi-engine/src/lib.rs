@@ -12,6 +12,8 @@ mod remote_ipc;
 mod service;
 mod session;
 mod startup;
+mod timing_preferences;
+mod usb_media_identity;
 mod usb_worker;
 
 pub use session::{EngineError, run};

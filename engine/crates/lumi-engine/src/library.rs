@@ -153,6 +153,16 @@ struct DeviceReviewComparison {
     file_detail: String,
 }
 
+impl DeviceReviewComparison {
+    fn is_unchanged(&self) -> bool {
+        !self.beat_grid_changed
+            && !self.hot_cues_changed
+            && !self.file_data_changed
+            && !self.raw_phrases_changed
+            && !self.waveform_changed
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct LibraryLocalPlaybackTrack {
     metadata: TrackMetadata,
@@ -209,6 +219,14 @@ pub struct LibraryPlanContext {
     autoloop_overrides: BTreeMap<u16, VariantId>,
 }
 
+/// A validated, not-yet-persisted edit. The show must accept the corresponding
+/// plan before the sole Library writer commits this optimistic revision.
+pub struct PreparedLivePhraseEdit {
+    timeline: LumiPhraseTimeline,
+    expected_revision: TimelineRevision,
+    role_id: PhraseRoleId,
+}
+
 #[derive(Clone, Debug)]
 struct LibraryPhrasePlanContext {
     phrase_index: u16,
@@ -244,6 +262,20 @@ pub struct LocalPlaybackClockAnchor {
 }
 
 impl LibraryPlanContext {
+    #[must_use]
+    pub const fn timeline_revision(&self) -> u64 {
+        self.timeline_revision
+    }
+
+    /// Carries forward intentional per-plan AutoLoop choices when the
+    /// persisted phrase timeline is refreshed. The choice for the phrase whose
+    /// role changed is deliberately discarded because it belongs to the old
+    /// Phrase Type and may not be valid for the replacement role.
+    pub fn inherit_autoloop_overrides(&mut self, previous: &Self, changed_phrase_index: u16) {
+        self.autoloop_overrides = previous.autoloop_overrides.clone();
+        self.autoloop_overrides.remove(&changed_phrase_index);
+    }
+
     #[must_use]
     pub const fn catalog_revision(&self) -> u64 {
         self.catalog.revision()
@@ -1056,7 +1088,7 @@ impl LibraryWorker {
     }
 
     #[cfg(test)]
-    fn demo_at(path: &std::path::Path) -> Result<Self, LibraryWorkerError> {
+    pub(crate) fn demo_at(path: &std::path::Path) -> Result<Self, LibraryWorkerError> {
         Self::initialize_with_repository(
             SqliteLibraryRepository::open(path)?,
             Some(path.to_path_buf()),
@@ -1159,24 +1191,27 @@ impl LibraryWorker {
     ) -> Result<(), LibraryWorkerError> {
         self.validate_backup_location(source)?;
         self.validate_backup_location(rollback)?;
+        // Hydration, migration and presentation must also succeed BEFORE
+        // activating the backup. Never return a source-missing error after
+        // already replacing the user's active database.
+        SqliteLibraryRepository::validate_backup(source)?;
+        let temporary = RekordboxImportTemporaryRoot::create()?;
+        let staging_path = temporary.path().join("restore.sqlite");
+        fs::copy(source, &staging_path)?;
+        let mut prepared = Self::initialize_with_repository(
+            SqliteLibraryRepository::open(&staging_path)?,
+            Some(staging_path.clone()),
+            false,
+        )?;
+        let _ = prepared.snapshot_json()?;
+        // Include staging WAL contents in the immutable activation snapshot.
+        let ready_path = temporary.path().join("ready.sqlite");
+        prepared.repository.create_consistent_backup(&ready_path)?;
         self.repository
-            .restore_consistent_backup(source, rollback)?;
-        self.pending_source_refresh = None;
-        self.pending_device_inspection = None;
-        self.device_review_comparisons_by_source.clear();
-        self.pending_library_reset = None;
-        self.pending_light_plan_preview = None;
-        let persisted = self
-            .repository
-            .library_source(&lumi_library::LibrarySourceId::try_new(&self.source_id)?)?
-            .ok_or(LibraryWorkerError::MissingLibrarySource)?;
-        self.source_id = persisted.id().as_str().to_owned();
-        self.source_kind = persisted.kind().to_owned();
-        self.source_name = persisted.display_name().to_owned();
-        self.source_revision = persisted.revision().as_str().to_owned();
-        seed_default_role_catalog(&mut self.repository)?;
-        seed_default_autoloop_catalog(&mut self.repository)?;
-        self.ensure_imported_timelines()?;
+            .restore_consistent_backup(&ready_path, rollback)?;
+        prepared.database_path = self.database_path.clone();
+        std::mem::swap(&mut self.repository, &mut prepared.repository);
+        *self = prepared;
         Ok(())
     }
 
@@ -1364,12 +1399,24 @@ impl LibraryWorker {
         Ok(())
     }
 
+    #[cfg(test)]
     pub fn sync_rekordbox_device(
         &mut self,
         root: impl AsRef<Path>,
         source_id: Option<&str>,
         playlist_ids: &[u32],
     ) -> Result<RekordboxDeviceSyncResult, LibraryWorkerError> {
+        self.sync_rekordbox_device_with_progress(root, source_id, playlist_ids, |_, _, _| {})
+    }
+
+    pub fn sync_rekordbox_device_with_progress(
+        &mut self,
+        root: impl AsRef<Path>,
+        source_id: Option<&str>,
+        playlist_ids: &[u32],
+        progress: impl Fn(&str, usize, usize),
+    ) -> Result<RekordboxDeviceSyncResult, LibraryWorkerError> {
+        progress("Reading USB playlists and analysis revisions", 0, 0);
         let mut snapshot = read_device_library(root)?;
         if let Some(source_id) = source_id.filter(|value| !value.trim().is_empty()) {
             snapshot.source_id = source_id.to_owned();
@@ -1399,17 +1446,43 @@ impl LibraryWorker {
             .tracks
             .retain(|device_track_id, _| selected_track_ids.contains(device_track_id));
         snapshot.playlists = selected_playlists;
-        for track in snapshot.tracks.values_mut() {
+        let total = snapshot.tracks.len();
+        let mut verified_paths = BTreeMap::new();
+        for (index, track) in snapshot.tracks.values_mut().enumerate() {
+            progress("Verifying track audio", index, total);
             track.audio_signature = audio_content_signature(&track.audio_path)?;
+            verified_paths.insert(track.audio_path.clone(), track.audio_signature.clone());
         }
+        progress(
+            "Matching verified audio with the Lumi Library",
+            total,
+            total,
+        );
         let stored_aliases = self.repository.device_alias_states(&snapshot.source_id)?;
         let candidates = self.repository.device_match_candidates()?;
+        let persisted_signatures = self.repository.device_audio_signatures()?;
         let mut audio_candidates = BTreeMap::<String, Vec<TrackId>>::new();
         for candidate in &candidates {
-            let Some(path) = file_uri_path(&candidate.audio_uri) else {
+            if let Some(signatures) = persisted_signatures.get(&candidate.track_id) {
+                for signature in signatures {
+                    audio_candidates
+                        .entry(signature.clone())
+                        .or_default()
+                        .push(candidate.track_id);
+                }
+                continue;
+            }
+            let locations = self.repository.device_audio_uris(candidate.track_id)?;
+            let available = first_available_audio_uri(&candidate.audio_uri, &locations);
+            let Some(path) = file_uri_path(&available) else {
                 continue;
             };
-            if let Ok(signature) = audio_content_signature(path) {
+            if let Ok(signature) = verified_paths
+                .get(&path)
+                .cloned()
+                .map(Ok)
+                .unwrap_or_else(|| audio_content_signature(path))
+            {
                 audio_candidates
                     .entry(signature)
                     .or_default()
@@ -1420,69 +1493,26 @@ impl LibraryWorker {
             .tracks
             .values()
             .map(|device_track| {
-                let strict_matches = candidates
-                    .iter()
-                    .filter(|candidate| device_track_matches(candidate, device_track))
-                    .collect::<Vec<_>>();
-                let metadata_matches = candidates
-                    .iter()
-                    .filter(|candidate| device_metadata_matches(candidate, device_track))
-                    .collect::<Vec<_>>();
-                let stored_canonical = stored_aliases
+                let audio_matches = audio_candidates
+                    .get(&device_track.audio_signature)
+                    .map(Vec::as_slice)
+                    .unwrap_or_default();
+                let previous_track = stored_aliases
                     .get(&device_track.device_track_id)
-                    .and_then(|state| state.canonical_track_id);
-                let stored_is_device_import = stored_canonical.is_some_and(|track_id| {
-                    candidates.iter().any(|candidate| {
-                        candidate.track_id == track_id
-                            && candidate.source_kind == "rekordbox-device"
-                            && !candidate.has_user_timeline_edits
-                    })
-                });
-                let canonical_repair = stored_is_device_import.then(|| {
-                    metadata_matches
-                        .iter()
-                        .filter(|candidate| candidate.source_kind != "rekordbox-device")
-                        .copied()
-                        .collect::<Vec<_>>()
-                });
-                let (canonical_track_id, candidate_count, match_kind) = if canonical_repair
-                    .as_ref()
-                    .is_some_and(|matches| matches.len() == 1)
-                {
-                    (
-                        canonical_repair
-                            .as_ref()
-                            .and_then(|matches| matches.first())
-                            .map(|candidate| candidate.track_id),
-                        1,
-                        "metadata-canonical-repair",
-                    )
-                } else if strict_matches.len() == 1 {
-                    (Some(strict_matches[0].track_id), 1, "metadata+file-size")
-                } else if strict_matches.is_empty() {
-                    let audio_matches = audio_candidates
-                        .get(&device_track.audio_signature)
-                        .map(Vec::as_slice)
-                        .unwrap_or_default();
-                    if audio_matches.len() == 1 {
-                        (audio_matches.first().copied(), 1, "audio-signature")
-                    } else if audio_matches.is_empty() && metadata_matches.len() == 1 {
-                        (Some(metadata_matches[0].track_id), 1, "metadata-exact")
+                    .and_then(|alias| alias.canonical_track_id)
+                    .filter(|id| audio_matches.contains(id));
+                let (canonical_track_id, candidate_count, match_kind) =
+                    if let Some(id) = previous_track {
+                        (Some(id), 1, "verified-existing-alias")
+                    } else if audio_matches.len() == 1 {
+                        (audio_matches.first().copied(), 1, "audio-full-v1")
+                    } else if audio_matches.is_empty() {
+                        // Metadata is a suggestion for creative timeline reuse, not
+                        // authority to overwrite a different edition's identity.
+                        (None, 0, "unmatched")
                     } else {
-                        let candidate_count = audio_matches.len().max(metadata_matches.len());
-                        (
-                            None,
-                            candidate_count,
-                            if candidate_count == 0 {
-                                "unmatched"
-                            } else {
-                                "ambiguous"
-                            },
-                        )
-                    }
-                } else {
-                    (None, strict_matches.len(), "ambiguous")
-                };
+                        (None, audio_matches.len(), "ambiguous")
+                    };
                 (
                     device_track,
                     canonical_track_id,
@@ -1597,6 +1627,13 @@ impl LibraryWorker {
             .iter()
             .chain(promotable_hot_cues.iter())
             .map(|(track_id, track)| (*track_id, *track))
+            .chain(matched_tracks.iter().filter_map(|(id, (track, decision))| {
+                matches!(
+                    decision,
+                    lumi_library_sqlite::DeviceAnalysisDecision::HoldConflict
+                )
+                .then_some((*id, *track))
+            }))
             .collect::<BTreeMap<_, _>>();
         let parsed_analyses = if analysis_tracks.is_empty() {
             BTreeMap::new()
@@ -1616,6 +1653,37 @@ impl LibraryWorker {
             )?;
             snapshot_resolved_analysis_data(&request)?.tracks
         };
+        // A container hash can change while every imported component remains
+        // identical. This is equality, not evidence that either revision is
+        // newer: retain the active provenance and do not create a false review.
+        for (id, (track, decision)) in &mut matched_tracks {
+            if !matches!(
+                decision,
+                lumi_library_sqlite::DeviceAnalysisDecision::HoldConflict
+            ) {
+                continue;
+            }
+            let Some(parsed) = parsed_analyses.get(&id.value().to_string()) else {
+                continue;
+            };
+            let incoming = device_analysis_upsert(&snapshot.source_id, *id, track, parsed)?;
+            let Some(active) = self.repository.track(*id)? else {
+                continue;
+            };
+            if active.beat_grid() == &incoming.beat_grid
+                && active.hot_cues() == incoming.hot_cues.as_slice()
+                && active.raw_phrases() == incoming.raw_phrases.as_slice()
+                && active.waveform() == incoming.waveform.as_slice()
+            {
+                *decision = lumi_library_sqlite::DeviceAnalysisDecision::Current;
+                if let Some(alias) = aliases
+                    .iter_mut()
+                    .find(|a| a.device_track_id == track.device_track_id)
+                {
+                    alias.sync_disposition = "current".to_owned();
+                }
+            }
+        }
         let analyses = promotable_tracks
             .iter()
             .map(|(track_id, device_track)| {
@@ -1712,8 +1780,8 @@ impl LibraryWorker {
                         .ok_or(LibraryWorkerError::RekordboxImportOverflow)?;
                     let imported = ImportedTrackAnalysis::try_new(
                         lumi_library::SourceTrackId::try_new(format!(
-                            "onelibrary:{}",
-                            device_track.device_track_id
+                            "onelibrary:{}:{}",
+                            device_track.device_track_id, device_track.audio_signature
                         ))?,
                         SourceRevision::try_new(format!(
                             "device:{}:{}",
@@ -1744,6 +1812,13 @@ impl LibraryWorker {
                 })
                 .collect::<Result<Vec<_>, LibraryWorkerError>>()?
         };
+        progress("Rechecking USB contents before saving", total, total);
+        snapshot.verify_unchanged()?;
+        progress(
+            "Saving playlists and track revisions atomically",
+            total,
+            total,
+        );
         self.repository.sync_device_aliases(
             &snapshot.source_id,
             &snapshot.display_name,
@@ -1917,30 +1992,23 @@ impl LibraryWorker {
                             "You chose to keep the active Lumi version for this exact USB revision."
                                 .to_owned(),
                     }
-                } else if previous.sync_disposition == "held-conflict" {
-                    DeviceInspectionTrack {
-                        status: "conflict",
-                        detail: "This USB analysis differs from the active Lumi analysis and their source dates cannot order them safely. Lumi kept the active analysis for review."
-                            .to_owned(),
-                    }
-                } else if previous.sync_disposition == "protected-older" {
-                    DeviceInspectionTrack {
-                        status: "usb-outdated",
-                        detail: "Lumi has a newer protected analysis; sync did not downgrade it."
-                            .to_owned(),
-                    }
-                } else if previous.metadata_revision == track.metadata_revision
-                    && previous.analysis_revision == track.analysis_revision
-                {
-                    DeviceInspectionTrack {
-                        status: "current",
-                        detail: "USB and Lumi use the same synchronized track revision.".to_owned(),
-                    }
                 } else {
-                    DeviceInspectionTrack {
-                        status: "usb-newer",
-                        detail: "This trusted USB changed after its previous Lumi sync.".to_owned(),
-                    }
+                    // Recompute against the active Library, not the last scan's
+                    // saved disposition. Another USB may have refreshed it, or
+                    // this USB may now contain an older export.
+                    let id = previous
+                        .canonical_track_id
+                        .ok_or(LibraryWorkerError::InvalidRekordboxDeviceRoot)?;
+                    let decision = self.repository.device_analysis_decision(
+                        id,
+                        &snapshot.source_id,
+                        &track.analysis_revision,
+                        &track.analyzed_at,
+                    )?;
+                    device_inspection_decision(
+                        decision,
+                        previous.metadata_revision != track.metadata_revision,
+                    )
                 }
             } else {
                 let matches = candidates
@@ -2006,23 +2074,28 @@ impl LibraryWorker {
             tracks.insert(track.device_track_id, state);
         }
         let review_comparisons = self.device_review_comparisons(&snapshot, &stored)?;
-        let mut selected_playlist_ids = self
-            .repository
-            .device_selected_playlist_ids(&snapshot.source_id)?;
+        for (id, comparison) in &review_comparisons {
+            if comparison.is_unchanged()
+                && let Some(state) = tracks.get_mut(id)
+                && state.status == "conflict"
+            {
+                *state = DeviceInspectionTrack {
+                    status: "current",
+                    detail: "Export fingerprints differ, but all imported components are identical. Lumi's active version is unchanged.".to_owned(),
+                };
+            }
+        }
         let selected_paths = self
             .repository
             .device_selected_playlist_paths(&snapshot.source_id)?
             .into_iter()
             .collect::<BTreeSet<_>>();
-        selected_playlist_ids.extend(
-            snapshot
-                .playlists
-                .iter()
-                .filter(|playlist| selected_paths.contains(&playlist.path))
-                .map(|playlist| playlist.device_playlist_id),
-        );
-        selected_playlist_ids.sort_unstable();
-        selected_playlist_ids.dedup();
+        let selected_playlist_ids = snapshot
+            .playlists
+            .iter()
+            .filter(|playlist| selected_paths.contains(&playlist.path))
+            .map(|playlist| playlist.device_playlist_id)
+            .collect();
         Ok(DeviceInspection {
             snapshot,
             selected_playlist_ids,
@@ -2036,19 +2109,27 @@ impl LibraryWorker {
         snapshot: &DeviceLibrarySnapshot,
         stored: &BTreeMap<u32, lumi_library_sqlite::StoredDeviceAliasState>,
     ) -> Result<BTreeMap<u32, DeviceReviewComparison>, LibraryWorkerError> {
-        let conflicts = stored
-            .iter()
-            .filter_map(|(device_track_id, alias)| {
-                if alias.sync_disposition != "held-conflict" {
-                    return None;
-                }
-                Some((
-                    *device_track_id,
-                    alias.canonical_track_id?,
-                    snapshot.tracks.get(device_track_id)?,
-                ))
-            })
-            .collect::<Vec<_>>();
+        let mut conflicts = Vec::new();
+        for (device_track_id, alias) in stored {
+            let (Some(id), Some(track)) = (
+                alias.canonical_track_id,
+                snapshot.tracks.get(device_track_id),
+            ) else {
+                continue;
+            };
+            let decision = self.repository.device_analysis_decision(
+                id,
+                &snapshot.source_id,
+                &track.analysis_revision,
+                &track.analyzed_at,
+            )?;
+            if matches!(
+                decision,
+                lumi_library_sqlite::DeviceAnalysisDecision::HoldConflict
+            ) {
+                conflicts.push((*device_track_id, id, track));
+            }
+        }
         if conflicts.is_empty() {
             return Ok(BTreeMap::new());
         }
@@ -2226,11 +2307,19 @@ impl LibraryWorker {
     ) -> Result<LibraryLocalPlaybackTrack, LibraryWorkerError> {
         let track_id = TrackId::new(track_id);
         self.ensure_timeline(track_id)?;
+        let timeline = self.require_expected_head(track_id, expected_timeline_revision)?;
+        self.playback_track_for_timeline(&timeline)
+    }
+
+    fn playback_track_for_timeline(
+        &self,
+        timeline: &LumiPhraseTimeline,
+    ) -> Result<LibraryLocalPlaybackTrack, LibraryWorkerError> {
+        let track_id = timeline.track_id();
         let track = self
             .repository
             .track(track_id)?
             .ok_or(LibraryWorkerError::UnknownTrack(track_id.value()))?;
-        let timeline = self.require_expected_head(track_id, expected_timeline_revision)?;
         let role_catalog = self.repository.phrase_role_catalog()?;
         let catalog = self.repository.autoloop_catalog()?;
         let duration_beats = timeline.total_beats();
@@ -2326,6 +2415,52 @@ impl LibraryWorker {
         let edited = head.edit(command)?;
         self.repository
             .append_timeline_revision(&edited, Some(head.revision()))?;
+        Ok(())
+    }
+
+    /// Changes one Lumi-owned Phrase Type from a Live plan without coupling
+    /// the operation to the Track Editor's open-document state.
+    ///
+    /// The same optimistic timeline revision and phrase-protection rules used
+    /// by the Track Editor remain authoritative. This keeps a booth edit
+    /// persistent while preventing a stale Mac or Remote client from silently
+    /// overwriting newer library work.
+    pub fn prepare_live_phrase_role(
+        &self,
+        track_id: u64,
+        expected_revision: u64,
+        phrase_index: u16,
+        role_id: PhraseRoleId,
+    ) -> Result<(PreparedLivePhraseEdit, LibraryPlanContext), LibraryWorkerError> {
+        let track_id = TrackId::new(track_id);
+        self.require_phrases_unlocked(track_id)?;
+        self.require_active_role(&role_id)?;
+        let head = self.require_expected_head(track_id, expected_revision)?;
+        let edited = head.edit(TimelineEditCommand::ChangeRole {
+            phrase_index,
+            role_id: role_id.clone(),
+        })?;
+        let (_, context) = self.playback_track_for_timeline(&edited)?.into_parts();
+        Ok((
+            PreparedLivePhraseEdit {
+                timeline: edited,
+                expected_revision: head.revision(),
+                role_id,
+            },
+            context,
+        ))
+    }
+
+    pub fn commit_live_phrase_role(
+        &mut self,
+        prepared: PreparedLivePhraseEdit,
+    ) -> Result<(), LibraryWorkerError> {
+        self.require_phrases_unlocked(prepared.timeline.track_id())?;
+        self.require_active_role(&prepared.role_id)?;
+        // SQLite checks the expected head in the same transaction as append.
+        // No fallible hydration/planning may follow this durable commit.
+        self.repository
+            .append_timeline_revision(&prepared.timeline, Some(prepared.expected_revision))?;
         Ok(())
     }
 
@@ -3160,7 +3295,9 @@ impl LibraryWorker {
                         let active_source = track.active_source_name
                             .as_deref()
                             .unwrap_or("the active Lumi analysis");
-                        let reason = match track.active_analyzed_at.as_deref() {
+                        let reason = if track.incoming_analysis_revision.starts_with("onelibrary:") {
+                            format!("This USB export differs from {active_source}. The per-track revision counters do not establish a safely newer version. Compare the components below; export dates alone do not determine freshness. Lumi kept the active analysis.")
+                        } else { match track.active_analyzed_at.as_deref() {
                             Some(active_date) if active_date == track.incoming_analyzed_at => format!(
                                 "This USB analysis differs from {active_source}. Both are dated {active_date}, so Lumi cannot safely determine which is newer and kept the active analysis."
                             ),
@@ -3171,7 +3308,7 @@ impl LibraryWorker {
                             None => format!(
                                 "This USB analysis differs from {active_source}, but comparable provenance is unavailable. Lumi kept the active analysis."
                             ),
-                        };
+                        }};
                         let comparison = review_comparisons
                             .and_then(|items| items.get(&track.device_track_id));
                         json!({
@@ -3420,6 +3557,24 @@ impl LibraryWorker {
             })).collect::<Vec<_>>(),
             "mappingPolicy": "futureInitialTimelinesOnly",
         }))
+    }
+
+    pub fn phrase_role_options_json(&self) -> Result<Value, LibraryWorkerError> {
+        let catalog = self.repository.phrase_role_catalog()?;
+        Ok(Value::Array(
+            catalog
+                .roles()
+                .iter()
+                .filter(|role| !role.is_archived())
+                .map(|role| {
+                    json!({
+                        "id": role.id().as_str(),
+                        "name": role.display_name(),
+                        "colorRgb": role.color_rgb(),
+                    })
+                })
+                .collect(),
+        ))
     }
 
     fn autoloop_catalog_json(&self) -> Result<Value, LibraryWorkerError> {
@@ -4133,6 +4288,39 @@ fn device_track_matches(candidate: &DeviceMatchCandidate, device: &DeviceTrack) 
     fs::metadata(path)
         .map(|metadata| metadata.is_file() && metadata.len() == u64::from(device.file_size))
         .unwrap_or(false)
+}
+
+fn device_inspection_decision(
+    decision: lumi_library_sqlite::DeviceAnalysisDecision,
+    metadata_changed: bool,
+) -> DeviceInspectionTrack {
+    use lumi_library_sqlite::DeviceAnalysisDecision as Decision;
+    let (status, detail) = match decision {
+        Decision::Current if metadata_changed => (
+            "usb-newer",
+            "Track metadata changed; sync checks its update counter independently. Beatgrid and Lumi phrases are unchanged.",
+        ),
+        Decision::Current | Decision::KeepActive => (
+            "current",
+            "This analysis is current or explicitly retained in Lumi.",
+        ),
+        Decision::PromoteInitial | Decision::PromoteNewer => (
+            "usb-newer",
+            "The USB has an initial analysis or higher update counters for the same Rekordbox track.",
+        ),
+        Decision::ProtectOlder => (
+            "usb-outdated",
+            "This USB has older track update counters. Lumi will keep the newer analysis.",
+        ),
+        Decision::HoldConflict => (
+            "conflict",
+            "Content differs but the track update counters do not prove it is newer. Review the differences before replacing Lumi data.",
+        ),
+    };
+    DeviceInspectionTrack {
+        status,
+        detail: detail.to_owned(),
+    }
 }
 
 fn device_metadata_matches(candidate: &DeviceMatchCandidate, device: &DeviceTrack) -> bool {

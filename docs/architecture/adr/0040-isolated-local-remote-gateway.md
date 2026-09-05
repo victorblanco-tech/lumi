@@ -94,6 +94,7 @@ booth-safe allowlist:
 - save a bounded lighting offset whose normal safe application remains the next
   phrase boundary;
 - select Theme from a future phrase;
+- change the Lumi Phrase Type of a future phrase;
 - select AutoLoop for a future phrase;
 - lock or unlock a future plan cue;
 - request a new Remote Live snapshot.
@@ -103,8 +104,37 @@ track-load and plan revisions as the local client. Library, USB, output mapping,
 manual MIDI test, service-control and developer diagnostic commands are rejected
 at the gateway even if they exist in the internal protocol.
 
+The Phrase Type catalog is projected read-only to Remote. A permitted future
+type change uses the same engine control command as macOS, persists a new
+timeline revision and rematerializes only the selected cue. It never schedules
+lighting from the gateway or iPhone and never enters the Pro DJ Link, Ableton
+Link or SoundSwitch realtime lanes.
+
 The first beta grants at most one paired device a Controller lease. Other paired
 devices are view-only. The Mac explicitly transfers or revokes that lease.
+
+#### 0.6.2 stable Controller selection
+
+The persisted selection is authoritative, including an explicitly empty
+selection after revocation. Automatic selection is permitted only at first
+pairing, not on reconnect, show-mode change or return from an offline period.
+An additive initialization flag preserves that decision even after all devices
+are revoked; existing legacy stores, including empty ones, migrate as already
+initialized. An absent store represents the first installation.
+
+All ownership writes lock registry then command guard in one order. Candidate
+registry state (including its bounded 32-entry ownership history) is persisted
+before publishing either in-memory representation. Reconnect creates a lease
+only for the persisted owner. Authentication, explicit transfer and re-pairing
+cannot race to choose separate durable and active owners. Trust-change
+subscription starts before authentication, closing the Hello-write race.
+
+Additive handshake fields advertise client version and the Controller's display
+name. Old clients remain supported and unreported versions remain unknown.
+Connection health is distinct from control role: a healthy Observer is green
+and labelled View only, never an orange connection warning. Device/version and
+role details are available without increasing the Live header height. Nothing
+in this correction changes Pro DJ Link, tempo, MIDI or waveform processing.
 
 ### iOS lifecycle
 
@@ -171,3 +201,48 @@ work and provides poor backpressure behavior.
 
 Rejected because it adds latency, accounts, privacy scope and an internet
 dependency to a local booth workflow.
+
+## Timing edits during playback (2026-09-05)
+
+Remote timing edits now carry optional `expectedTimingOffsetMillis`. The engine
+compares this with its pending offset, or applied offset when none is pending,
+at execution. Unrelated beat, transport and master state revisions do not
+invalidate this setting edit. A concurrent timing change returns
+`timingOffsetConflict`; it is never automatically retried. Old clients that
+omit the field retain the original state-revision check. Range validation,
+Controller authorization, command expiry and queue bounds remain in force.
+
+The iPhone timing sheet owns its draft independently of incoming projections.
+Apply sends one command using the current authoritative offset as its expected
+value. While playing in Start, the output worker keeps the existing AutoLoop
+running and activates the pending value at the next phrase. Remote shows the
+pending value with NEXT PHRASE; the Mac shows an applied Remote override as
+SESSION, distinct from its saved startup default. No transport, Link phase or
+waveform processing changes are involved.
+
+Command failures remain visible across subsequent live projections and recovery
+snapshots until a new command attempt, so rejection cannot look like an ignored
+tap. Native Simulator reproduction confirmed the old offset command repeatedly
+hit a general state revision conflict during normal playback.
+
+### Shared persistent timing (dev-8, supersedes the session-only behavior above)
+
+An explicit owner requirement makes timing edits permanent regardless of client.
+The engine owns `lighting-timing.json` in its existing channel data directory.
+A bounded 16-command background writer serializes atomic replacements and fsyncs;
+the integration pump only polls completion messages and never performs file I/O.
+Saved status is published only after a successful write. Corrupt storage is
+reported without silently overwriting it or preventing the show engine from
+starting. A rejected enqueue does not alter live timing; a later disk failure
+is shown as NOT SAVED in Mac Live and an explicit edit can retry it.
+
+Persisted desired timing and live applied timing are separate: an accepted edit
+is saved for restart while activation during Start/playback remains deferred to
+the next phrase. The existing timing compare-and-set and scheduling behavior are
+unchanged. No Link, MIDI dispatch, waveform or transport changes are involved.
+
+The Mac migrates its previous UserDefaults value once when the engine has no
+saved setting or write/error in progress. Thereafter both Mac controls and Remote
+submit to the same engine command. Mac UserDefaults mirrors acknowledged saved
+values for compatibility, without emitting commands; startup never overwrites
+an engine-saved Remote choice. Dev/RC/production directories remain isolated.

@@ -61,12 +61,45 @@ func authenticationHelloMatchesTheRustTaggedContract() throws {
     #expect(object["invitationId"] == "invitation-123456")
     #expect(object["deviceId"] == "iphone-1")
     #expect(object["deviceCredential"] == String(repeating: "c", count: 32))
+    #expect(object["clientVersion"] == RemoteAppVersion.current)
 
     let response = Data(#"{"kind":"authenticated","installationId":"install-1","controllerLeaseId":"lease-1"}"#.utf8)
     #expect(
         try JSONDecoder().decode(RemoteServerHello.self, from: response)
             == .authenticated(installationID: "install-1", controllerLeaseID: "lease-1")
     )
+}
+
+@MainActor
+@Test("Lighting timing accepts the full Mac range and preserves millisecond precision", arguments: [-250, -249, -125, 0, 125, 249, 250])
+func lightingTimingCommandsPreserveFullRange(millis: Int16) throws {
+    let coordinator = RemoteCommandCoordinator(controllerLeaseID: "lease-offset")
+    let command = try coordinator.makeStateCommand(
+        { .setOutputTimingOffset(millis, expectedStateRevision: $0, expectedTimingOffsetMillis: -250) },
+        projection: fixtureProjection(),
+        target: "timingOffset"
+    )
+    let decoded = try JSONDecoder().decode(RemoteCommand.self, from: JSONEncoder().encode(command))
+    #expect(decoded.command == .setOutputTimingOffset(millis, expectedStateRevision: 7, expectedTimingOffsetMillis: -250))
+}
+
+@MainActor
+@Test("Command rejection remains readable through live refresh until the next attempt")
+func commandFailureSurvivesSnapshotRefresh() throws {
+    let model = RemoteSessionModel()
+    model.rejectCommand("timing", reason: "The show changed on the Mac.")
+    model.replaceWithSnapshot(try fixtureProjection(), from: "Mac")
+    #expect(model.lastCommandError == "The show changed on the Mac.")
+    model.markCommandPending("retry")
+    #expect(model.lastCommandError == nil)
+}
+
+@Test
+func observerAuthenticationIncludesTheControllingDeviceWithoutGrantingALease() throws {
+    let data = Data(#"{"kind":"authenticated","installationId":"mac","controllerLeaseId":null,"controllerDisplayName":"aiVoon"}"#.utf8)
+    let hello = try JSONDecoder().decode(RemoteServerHello.self, from: data)
+    #expect(hello.controllerLeaseID == nil)
+    #expect(hello.controllerDisplayName == "aiVoon")
 }
 
 @MainActor
@@ -262,6 +295,7 @@ func localCommandFailureKeepsTheAuthenticatedSessionConnected() throws {
     #expect(projection.players.first?.hardwareModel == "CDJ-1500X")
     #expect(projection.players.first?.track.phrases.first?.colorRGB == 0xFF_00_00)
     #expect(projection.livePlan?.cues.last?.staticLookName == "Moving Heads OFF")
+    #expect(projection.phraseRoleOptions.contains(where: { $0.id == "buildup-1" }))
 
     let commandFrame = try decoder.decodeFrame(
         Data(contentsOf: remoteFixture("command-autoloop.json"))
@@ -285,6 +319,32 @@ func localCommandFailureKeepsTheAuthenticatedSessionConnected() throws {
         Data(contentsOf: remoteFixture("command-result-conflict.json"))
     )
     #expect(try decoder.decodeCommandResult(resultFrame).status == .conflict)
+}
+
+@Test func phraseTypeCommandRoundTripsWithTheSelectedRoleIdentity() throws {
+    let payload = RemoteCommandPayload.changePhraseRole(
+        .init(
+            planID: "plan-99",
+            trackLoadID: 99,
+            expectedPlanRevision: 4,
+            phraseIndex: 2
+        ),
+        roleID: "buildup-2"
+    )
+    let encoded = try JSONEncoder().encode(payload)
+    let decoded = try JSONDecoder().decode(RemoteCommandPayload.self, from: encoded)
+    #expect(decoded == payload)
+
+    let json = try #require(
+        try JSONSerialization.jsonObject(with: encoded) as? [String: Any]
+    )
+    #expect(json["kind"] as? String == "changePhraseRole")
+    #expect(json["roleId"] as? String == "buildup-2")
+}
+
+@Test func olderProjectionWithoutPhraseRoleOptionsRemainsReadable() throws {
+    let projection = try fixtureProjection()
+    #expect(projection.phraseRoleOptions.isEmpty)
 }
 
 private func remoteFixture(_ name: String) -> URL {

@@ -25,6 +25,45 @@ use super::{
 };
 
 #[test]
+fn backup_restore_prepares_state_before_activation() -> Result<(), Box<dyn std::error::Error>> {
+    let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let root = std::env::temp_dir().join(format!("lumi-restore-boundary-{unique}"));
+    let source = root.join("Backups/saved/library.sqlite");
+    let rollback = root.join("Backups/rollback/library.sqlite");
+    let broken = root.join("Backups/broken/library.sqlite");
+    for path in [&source, &rollback, &broken] {
+        std::fs::create_dir_all(path.parent().ok_or("missing parent")?)?;
+    }
+    {
+        let path = root.join("library.sqlite");
+        let mut worker = LibraryWorker::initialize_with_repository(
+            lumi_library_sqlite::SqliteLibraryRepository::open(&path)?,
+            Some(path),
+            false,
+        )?;
+        let before = worker.snapshot_json()?;
+        worker.create_consistent_backup(&source)?;
+        std::fs::write(&broken, b"not a SQLite database")?;
+        assert!(
+            worker
+                .restore_consistent_backup(&broken, &rollback)
+                .is_err()
+        );
+        assert_eq!(worker.snapshot_json()?, before);
+        worker.restore_consistent_backup(&source, &rollback)?;
+        assert_eq!(worker.snapshot_json()?, before);
+        // A second restore also validates that the live repository remains open
+        // on the active DB, rather than the temporary staging file.
+        let second = root.join("Backups/second/library.sqlite");
+        std::fs::create_dir_all(second.parent().ok_or("missing parent")?)?;
+        worker.create_consistent_backup(&second)?;
+        assert!(second.is_file());
+    }
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
 fn fresh_release_initialization_contains_no_demo_or_personal_data()
 -> Result<(), Box<dyn std::error::Error>> {
     let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
@@ -1024,6 +1063,37 @@ fn phrase_protection_is_persisted_and_enforced_below_the_ui()
         },
     )?;
     assert_eq!(worker.snapshot_json()?["editor"]["timeline"]["revision"], 2);
+    Ok(())
+}
+
+#[test]
+fn prepared_live_phrase_edit_rechecks_protection_and_durable_head()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut worker = LibraryWorker::demo()?;
+    worker.open_editor(1)?;
+    let (first, _) = worker.prepare_live_phrase_role(1, 1, 1, PhraseRoleId::try_new("drop")?)?;
+    let (stale, _) =
+        worker.prepare_live_phrase_role(1, 1, 1, PhraseRoleId::try_new("intro-outro")?)?;
+    // Preparation does not append a revision or alter the open editor.
+    assert!(worker.local_playback_track(1, 1).is_ok());
+    worker.commit_live_phrase_role(first)?;
+    assert!(matches!(
+        worker.commit_live_phrase_role(stale),
+        Err(LibraryWorkerError::Persistence(
+            lumi_library_sqlite::SqliteLibraryError::RevisionConflict { .. }
+        ))
+    ));
+    let (_, committed) = worker.local_playback_track(1, 2)?.into_parts();
+    assert_eq!(committed.phrase_role_json(1)["roleId"], "drop");
+    let (protected, _) =
+        worker.prepare_live_phrase_role(1, 2, 1, PhraseRoleId::try_new("intro-outro")?)?;
+    worker.set_track_phrase_protection(1, 0, true)?;
+    assert!(matches!(
+        worker.commit_live_phrase_role(protected),
+        Err(LibraryWorkerError::TrackPhrasesProtected)
+    ));
+    let (_, unchanged) = worker.local_playback_track(1, 2)?.into_parts();
+    assert_eq!(unchanged.phrase_role_json(1), committed.phrase_role_json(1));
     Ok(())
 }
 

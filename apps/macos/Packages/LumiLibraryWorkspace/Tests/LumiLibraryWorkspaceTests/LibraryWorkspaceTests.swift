@@ -7,6 +7,34 @@ import Testing
 
 @Suite("Library workspace")
 struct LibraryWorkspaceTests {
+    @Test("Editor height migrates the user's divider and ignores automatic frame changes")
+    func editorHeightMigration() throws {
+        let suite = "lumi.editor-height-test.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preference = EditorHeightPreference(autosaveName: "editor", defaults: defaults)
+        let legacyKey = "NSSplitView Subview Frames editor"
+        defaults.set(["0.000, 0.000, 1562.000, 717.000, NO, NO"], forKey: legacyKey)
+        #expect(preference.load(fallback: 692.5) == 717)
+        defaults.set(["0, 0, 1000, 620, NO, NO"], forKey: legacyKey)
+        #expect(preference.load(fallback: 692.5) == 717)
+        preference.save(805)
+        #expect(preference.load(fallback: 692.5) == 805)
+        preference.save(.nan)
+        preference.save(-1)
+        #expect(preference.load(fallback: 692.5) == 805)
+    }
+
+    @Test("Malformed legacy editor frames use the normal default")
+    func editorHeightMalformedLegacy() throws {
+        let suite = "lumi.editor-height-test.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+        let preference = EditorHeightPreference(autosaveName: "editor", defaults: defaults)
+        defaults.set(["broken"], forKey: "NSSplitView Subview Frames editor")
+        #expect(preference.load(fallback: 692.5) == 692.5)
+    }
+
     @Test("Track Editor split keeps the accepted tall default and a stable autosave identity")
     func editorSplitLayoutContract() {
         #expect(LibraryWorkspaceLayout.defaultEditorHeight == 692.5)
