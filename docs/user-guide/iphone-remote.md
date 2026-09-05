@@ -87,8 +87,17 @@ The main controls mirror macOS:
 - **Start** allows the Mac engine to send the prepared lighting actions;
 - **Pause** suspends new automatic actions while retaining show state;
 - **Link** enables or disables the isolated Ableton Link relay;
-- **Timing offset** changes the saved lighting compensation for a future phrase
+- **Timing offset** changes the session lighting compensation for a future phrase
   boundary without disturbing the AutoLoop that is already running.
+
+Tap the timing value to adjust it from **−250 to +250 ms**, with a slider and
+1 ms fine adjustment. Negative values trigger earlier; positive values trigger
+later. **Apply** sends your choice; **Cancel** leaves it unchanged. During
+playback, **NEXT PHRASE** appears beside the requested value until the engine
+applies it at a phrase boundary. Incoming player updates do not reset an open
+timing editor.
+This requires Lumi 0.6.2-dev-7 / Remote 0.1.1-dev-4 or newer. The Mac's saved
+default still applies when Lumi starts again.
 
 Only one paired iPhone can be Controller at a time. Viewers see the same Live
 state but cannot mutate it. Commands are never queued while disconnected.

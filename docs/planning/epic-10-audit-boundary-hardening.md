@@ -144,3 +144,12 @@ without affecting the running Mac show. See the dated
    SwiftUI/AppKit accessibility and layout work; causality is not yet established.
 7. Finish original-resolution screenshots and content-aware visual evidence.
    Existing generated/placeholder images are not evidence of real UI acceptance.
+
+### Offset follow-up — dev-7 / Remote dev-4
+
+User-reported offset failures reproduced in native Simulator during Start:
+general state revision conflicts rejected edits while live projections erased
+their error messages. A stable full-range timing sheet and setting-specific
+compare-and-set address this, with pending-phrase feedback and persistent
+command errors. See [release evidence](../release/0.6.2-dev-7-remote-timing.md)
+and ADR-0040. This bounded fix leaves the larger audit items above open.

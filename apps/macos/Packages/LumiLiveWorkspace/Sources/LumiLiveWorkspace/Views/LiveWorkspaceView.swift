@@ -311,7 +311,7 @@ public struct LiveWorkspaceView: View {
         } label: {
             HStack(spacing: LumiSpacing.xSmall) {
                 Image(systemName: "metronome")
-                Text(String(format: "%+d ms", lightingTimingOffsetMillis))
+                Text(String(format: "%+d ms", pendingLightingTimingOffsetMillis ?? appliedLightingTimingOffsetMillis))
                     .monospacedDigit()
                 Text(timingConfirmationLabel)
                     .font(LumiTypography.technical.weight(.semibold))
@@ -371,7 +371,8 @@ public struct LiveWorkspaceView: View {
     }
 
     private var timingConfirmationLabel: String {
-        if appliedLightingTimingOffsetMillis != lightingTimingOffsetMillis { return "SYNC" }
+        if pendingLightingTimingOffsetMillis != nil { return "NEXT PHRASE" }
+        if appliedLightingTimingOffsetMillis != lightingTimingOffsetMillis { return "SESSION" }
         return "SAVED"
     }
 
@@ -386,7 +387,7 @@ public struct LiveWorkspaceView: View {
             return "Applied \(applied) · \(pending) activates at the next phrase."
         }
         if appliedLightingTimingOffsetMillis != lightingTimingOffsetMillis {
-            return "Saved \(applied) · waiting for engine confirmation."
+            return "Applied for this session: \(applied). The controls below change the saved Mac default."
         }
         return "Applied: \(applied). Negative is early; positive is late."
     }

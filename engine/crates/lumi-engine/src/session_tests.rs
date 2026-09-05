@@ -21,6 +21,7 @@ fn expired_or_abandoned_remote_commands_cannot_mutate_the_show()
         command: RemoteCommandKind::SetOutputTimingOffset {
             millis: -120,
             expected_state_revision: revision.value(),
+            expected_timing_offset_millis: None,
         },
     };
     let offset = runtime.output_worker.timing_offset_millis;
@@ -64,6 +65,44 @@ fn remote_anchor_preserves_the_canonical_monotonic_observation_time() {
         unix_millis_for_monotonic_observation(10_000, now, now),
         10_000
     );
+}
+
+#[test]
+fn remote_timing_compares_the_setting_while_preserving_legacy_revision_checks()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut runtime = initialized_runtime()?;
+    let stale = runtime.state.state().revision().value().saturating_add(99);
+    let mut expected = runtime.output_worker.scheduling_timing_offset_millis();
+    for millis in [-250, -249, -125, 0, 125, 249, 250] {
+        let command = RemoteCommand {
+            command_id: format!("offset-{millis}"),
+            controller_lease_id: "controller".to_owned(),
+            issued_at_unix_millis: 1,
+            command: RemoteCommandKind::SetOutputTimingOffset {
+                millis,
+                expected_state_revision: stale,
+                expected_timing_offset_millis: Some(expected),
+            },
+        };
+        assert_eq!(
+            apply_remote_command(&mut runtime, command).status,
+            RemoteCommandResultStatus::Accepted
+        );
+        assert_eq!(
+            runtime.output_worker.scheduling_timing_offset_millis(),
+            millis
+        );
+        expected = millis;
+    }
+    let legacy: RemoteCommandKind = serde_json::from_value(serde_json::json!({
+        "kind": "setOutputTimingOffset", "millis": 0, "expectedStateRevision": stale
+    }))?;
+    assert!(matches!(
+        remote_session_command(&runtime, legacy),
+        Err(CommandApplicationError::StateRevisionConflict { .. })
+    ));
+    assert_eq!(runtime.output_worker.scheduling_timing_offset_millis(), 250);
+    Ok(())
 }
 
 #[test]
@@ -1702,9 +1741,26 @@ fn local_playback_reasserts_a_restarted_phrase_and_activates_a_paused_seek_on_re
     );
     assert_eq!(runtime.output_worker.provider.records().count(), 1);
 
-    apply_session_command(
-        &mut runtime,
-        SessionCommand::SetOutputTimingOffset { millis: 20 },
+    let timing_command = |millis, expected| RemoteCommand {
+        command_id: format!("timing-{millis}"),
+        controller_lease_id: "timing-lease".to_owned(),
+        issued_at_unix_millis: 1,
+        command: RemoteCommandKind::SetOutputTimingOffset {
+            millis,
+            // Deliberately stale: playback updates must not invalidate a timing edit.
+            expected_state_revision: 0,
+            expected_timing_offset_millis: Some(expected),
+        },
+    };
+    assert_eq!(
+        apply_remote_command(&mut runtime, timing_command(20, 0)).status,
+        RemoteCommandResultStatus::Accepted
+    );
+    let collision = apply_remote_command(&mut runtime, timing_command(-100, 0));
+    assert_eq!(collision.status, RemoteCommandResultStatus::Conflict);
+    assert_eq!(
+        collision.reason_code.as_deref(),
+        Some("timingOffsetConflict")
     );
     assert_eq!(runtime.output_worker.timing_offset_millis(), 0);
     assert_eq!(

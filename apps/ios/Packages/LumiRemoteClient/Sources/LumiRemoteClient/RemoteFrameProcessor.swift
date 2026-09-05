@@ -1,5 +1,6 @@
 import Foundation
 import LumiProtocol
+import OSLog
 
 public enum RemoteFrameProcessingDecision: Equatable, Sendable {
     case applied
@@ -11,6 +12,7 @@ public enum RemoteFrameProcessingDecision: Equatable, Sendable {
 
 @MainActor
 public final class RemoteFrameProcessor {
+    private let logger = Logger(subsystem: "co.victorblan.tech.lumi.remote", category: "CommandResult")
     private let model: RemoteSessionModel
     private let decoder: RemoteFrameDecoder
     private var sequenceTracker = SequenceTracker()
@@ -90,6 +92,7 @@ public final class RemoteFrameProcessor {
             return .applied
         case .commandResult:
             let result = try decoder.decodeCommandResult(frame)
+            logger.notice("Command outcome: \(result.status.rawValue, privacy: .public), reason: \(result.reasonCode ?? "none", privacy: .public)")
             switch result.status {
             case .accepted:
                 model.acknowledgeCommand(result.commandID)
@@ -102,7 +105,9 @@ public final class RemoteFrameProcessor {
             case .conflict:
                 model.rejectCommand(
                     result.commandID,
-                    reason: "The show changed on the Mac. Refresh before trying again."
+                    reason: result.reasonCode == "timingOffsetConflict"
+                        ? "Lighting timing changed on the Mac. Check the current value and try again."
+                        : "The show changed on the Mac. Refresh before trying again."
                 )
                 awaitsSnapshot = true
                 model.awaitingSnapshot(from: macName)

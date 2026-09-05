@@ -70,6 +70,30 @@ func authenticationHelloMatchesTheRustTaggedContract() throws {
     )
 }
 
+@MainActor
+@Test("Lighting timing accepts the full Mac range and preserves millisecond precision", arguments: [-250, -249, -125, 0, 125, 249, 250])
+func lightingTimingCommandsPreserveFullRange(millis: Int16) throws {
+    let coordinator = RemoteCommandCoordinator(controllerLeaseID: "lease-offset")
+    let command = try coordinator.makeStateCommand(
+        { .setOutputTimingOffset(millis, expectedStateRevision: $0, expectedTimingOffsetMillis: -250) },
+        projection: fixtureProjection(),
+        target: "timingOffset"
+    )
+    let decoded = try JSONDecoder().decode(RemoteCommand.self, from: JSONEncoder().encode(command))
+    #expect(decoded.command == .setOutputTimingOffset(millis, expectedStateRevision: 7, expectedTimingOffsetMillis: -250))
+}
+
+@MainActor
+@Test("Command rejection remains readable through live refresh until the next attempt")
+func commandFailureSurvivesSnapshotRefresh() throws {
+    let model = RemoteSessionModel()
+    model.rejectCommand("timing", reason: "The show changed on the Mac.")
+    model.replaceWithSnapshot(try fixtureProjection(), from: "Mac")
+    #expect(model.lastCommandError == "The show changed on the Mac.")
+    model.markCommandPending("retry")
+    #expect(model.lastCommandError == nil)
+}
+
 @Test
 func observerAuthenticationIncludesTheControllingDeviceWithoutGrantingALease() throws {
     let data = Data(#"{"kind":"authenticated","installationId":"mac","controllerLeaseId":null,"controllerDisplayName":"aiVoon"}"#.utf8)

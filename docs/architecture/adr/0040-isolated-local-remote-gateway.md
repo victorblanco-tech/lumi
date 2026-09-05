@@ -201,3 +201,26 @@ work and provides poor backpressure behavior.
 
 Rejected because it adds latency, accounts, privacy scope and an internet
 dependency to a local booth workflow.
+
+## Timing edits during playback (2026-09-05)
+
+Remote timing edits now carry optional `expectedTimingOffsetMillis`. The engine
+compares this with its pending offset, or applied offset when none is pending,
+at execution. Unrelated beat, transport and master state revisions do not
+invalidate this setting edit. A concurrent timing change returns
+`timingOffsetConflict`; it is never automatically retried. Old clients that
+omit the field retain the original state-revision check. Range validation,
+Controller authorization, command expiry and queue bounds remain in force.
+
+The iPhone timing sheet owns its draft independently of incoming projections.
+Apply sends one command using the current authoritative offset as its expected
+value. While playing in Start, the output worker keeps the existing AutoLoop
+running and activates the pending value at the next phrase. Remote shows the
+pending value with NEXT PHRASE; the Mac shows an applied Remote override as
+SESSION, distinct from its saved startup default. No transport, Link phase or
+waveform processing changes are involved.
+
+Command failures remain visible across subsequent live projections and recovery
+snapshots until a new command attempt, so rejection cannot look like an ignored
+tap. Native Simulator reproduction confirmed the old offset command repeatedly
+hit a general state revision conflict during normal playback.

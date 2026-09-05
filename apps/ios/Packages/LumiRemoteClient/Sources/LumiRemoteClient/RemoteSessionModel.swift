@@ -17,6 +17,7 @@ public final class RemoteSessionModel {
     public private(set) var projection: RemoteLiveProjection?
     public private(set) var pendingCommandIDs: Set<String> = []
     public private(set) var lastError: String?
+    public private(set) var lastCommandError: String?
     public private(set) var controllerLeaseID: String?
     public private(set) var controllerDisplayName: String?
     public private(set) var pairingShortCode: String?
@@ -200,6 +201,7 @@ public final class RemoteSessionModel {
     public func markCommandPending(_ commandID: String) {
         pendingCommandIDs.insert(commandID)
         lastError = nil
+        lastCommandError = nil
     }
 
     public func acknowledgeCommand(_ commandID: String) {
@@ -210,11 +212,13 @@ public final class RemoteSessionModel {
     public func rejectCommand(_ commandID: String, reason: String) {
         pendingCommandIDs.remove(commandID)
         lastError = reason
+        lastCommandError = reason
         rejectedCommandFeedbackRevision &+= 1
     }
 
     public func reportError(_ reason: String) {
         lastError = reason
+        lastCommandError = reason
         rejectedCommandFeedbackRevision &+= 1
     }
 

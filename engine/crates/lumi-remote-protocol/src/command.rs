@@ -28,6 +28,8 @@ pub enum RemoteCommandKind {
     SetOutputTimingOffset {
         millis: i16,
         expected_state_revision: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        expected_timing_offset_millis: Option<i16>,
     },
     SelectThemeFromPhrase {
         plan_id: String,
@@ -74,8 +76,13 @@ impl RemoteCommand {
         validate_identifier("commandId", &self.command_id, 128)?;
         validate_identifier("controllerLeaseId", &self.controller_lease_id, 128)?;
         match &self.command {
-            RemoteCommandKind::SetOutputTimingOffset { millis, .. }
-                if !(-250..=250).contains(millis) =>
+            RemoteCommandKind::SetOutputTimingOffset {
+                millis,
+                expected_timing_offset_millis,
+                ..
+            } if !(-250..=250).contains(millis)
+                || expected_timing_offset_millis
+                    .is_some_and(|value| !(-250..=250).contains(&value)) =>
             {
                 Err(RemoteCommandError::TimingOffsetOutOfRange)
             }
@@ -175,6 +182,7 @@ mod tests {
             command: RemoteCommandKind::SetOutputTimingOffset {
                 millis: 251,
                 expected_state_revision: 7,
+                expected_timing_offset_millis: None,
             },
         };
 

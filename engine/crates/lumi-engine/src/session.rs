@@ -2821,6 +2821,11 @@ fn apply_remote_command(
             Some("stateRevisionConflict".to_owned()),
             None,
         ),
+        Err(CommandApplicationError::TimingOffsetConflict) => (
+            RemoteCommandResultStatus::Conflict,
+            Some("timingOffsetConflict".to_owned()),
+            None,
+        ),
         Err(CommandApplicationError::RevisionConflict { actual, .. }) => (
             RemoteCommandResultStatus::Conflict,
             Some("planRevisionConflict".to_owned()),
@@ -2891,11 +2896,21 @@ fn remote_session_command(
         RemoteCommandKind::SetOutputTimingOffset {
             millis,
             expected_state_revision,
+            expected_timing_offset_millis,
         } => {
-            validate_state_revision(
-                runtime,
-                lumi_domain::StateRevision::new(expected_state_revision),
-            )?;
+            if let Some(expected) = expected_timing_offset_millis {
+                // Compare the setting being edited, including a pending change.
+                // Player beats and master changes do not invalidate timing edits.
+                if runtime.output_worker.scheduling_timing_offset_millis() != expected {
+                    return Err(CommandApplicationError::TimingOffsetConflict);
+                }
+            } else {
+                // Preserve the original contract for older Remote clients.
+                validate_state_revision(
+                    runtime,
+                    lumi_domain::StateRevision::new(expected_state_revision),
+                )?;
+            }
             Ok(SessionCommand::SetOutputTimingOffset { millis })
         }
         RemoteCommandKind::SelectThemeFromPhrase {
@@ -4151,6 +4166,15 @@ fn application_error_envelope(
     error: &CommandApplicationError,
 ) -> Result<MessageEnvelope, EngineError> {
     match error {
+        CommandApplicationError::TimingOffsetConflict => error_envelope(
+            sequence,
+            correlation_id,
+            "revisionConflict",
+            "timingOffsetConflict",
+            "Lighting timing changed before the edit was applied.",
+            true,
+            None,
+        ),
         CommandApplicationError::StateRevisionConflict { actual, .. } => error_envelope(
             sequence,
             correlation_id,
@@ -4431,6 +4455,8 @@ fn error_envelope(
 
 #[derive(Debug, Error)]
 enum CommandApplicationError {
+    #[error("lighting timing changed since this edit")]
+    TimingOffsetConflict,
     #[error("plan context is missing")]
     MissingPlanContext,
     #[error("plan revision conflict: expected {expected:?}, actual {actual:?}")]

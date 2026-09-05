@@ -105,8 +105,10 @@ public final class RemoteConnectionController: ObservableObject {
             model.reportError("The timing offset is outside the supported range.")
             return
         }
+        guard let timing = model.projection?.integrations,
+              let expected = Int16(exactly: timing.pendingTimingOffsetMillis ?? timing.timingOffsetMillis) else { return }
         submitStateCommand(target: "timingOffset") { revision in
-            .setOutputTimingOffset(value, expectedStateRevision: revision)
+            .setOutputTimingOffset(value, expectedStateRevision: revision, expectedTimingOffsetMillis: expected)
         }
     }
 

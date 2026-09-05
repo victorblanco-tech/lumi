@@ -899,6 +899,7 @@ mod tests {
             command: RemoteCommandKind::SetOutputTimingOffset {
                 millis: -20,
                 expected_state_revision: 7,
+                expected_timing_offset_millis: None,
             },
         };
         guard
