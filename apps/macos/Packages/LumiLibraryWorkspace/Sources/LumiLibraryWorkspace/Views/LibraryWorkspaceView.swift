@@ -952,12 +952,36 @@ public struct LibraryWorkspaceView: View {
     }
 }
 
-/// Connects SwiftUI's `VSplitView` to AppKit's native divider persistence.
-///
-/// The zero-sized configurator lives inside the split view hierarchy and finds
-/// its nearest `NSSplitView` once AppKit has installed the hosting views. Giving
-/// that split view a stable autosave name lets macOS restore the user's exact
-/// editor/browser divider position on every subsequent launch.
+/// Store the deliberate divider choice separately from AppKit's frame autosave:
+/// automatic window layout may rewrite the latter without a user adjustment.
+struct EditorHeightPreference {
+    let autosaveName: String
+    let defaults: UserDefaults
+
+    var key: String { "\(autosaveName).preferredEditorHeight" }
+
+    func load(fallback: CGFloat) -> CGFloat {
+        if let number = defaults.object(forKey: key) as? NSNumber,
+           number.doubleValue.isFinite, number.doubleValue > 0 {
+            return CGFloat(number.doubleValue)
+        }
+        let frames = defaults.stringArray(forKey: "NSSplitView Subview Frames \(autosaveName)")
+        let fields = frames?.first?.split(separator: ",").map {
+            $0.trimmingCharacters(in: .whitespaces)
+        }
+        let legacy = fields.flatMap { $0.count >= 4 ? Double($0[3]) : nil }
+        let height = legacy.flatMap { $0.isFinite && $0 > 0 ? CGFloat($0) : nil } ?? fallback
+        save(height)
+        return height
+    }
+
+    func save(_ height: CGFloat) {
+        guard height.isFinite, height > 0 else { return }
+        defaults.set(Double(height), forKey: key)
+    }
+}
+
+/// Restores the preferred height once the native split hierarchy is installed.
 private struct PersistentSplitViewConfiguration: NSViewRepresentable {
     let autosaveName: String
     let defaultDividerPosition: CGFloat
@@ -974,6 +998,10 @@ private struct PersistentSplitViewConfiguration: NSViewRepresentable {
         nsView.defaultDividerPosition = defaultDividerPosition
         nsView.configureNearestSplitViewIfNeeded()
     }
+
+    static func dismantleNSView(_ nsView: SplitViewConfigurationView, coordinator: ()) {
+        nsView.stopTrackingDivider()
+    }
 }
 
 @MainActor
@@ -989,6 +1017,13 @@ private final class SplitViewConfigurationView: NSView {
     private weak var configuredSplitView: NSSplitView?
     private var retryIsScheduled = false
     private var configurationAttemptsRemaining = 40
+    private var eventMonitor: Any?
+    private var dividerDragStarted = false
+    private var dividerDidMove = false
+
+    private var preference: EditorHeightPreference {
+        EditorHeightPreference(autosaveName: autosaveName, defaults: .standard)
+    }
 
     init(autosaveName: String, defaultDividerPosition: CGFloat) {
         self.autosaveName = autosaveName
@@ -1025,18 +1060,58 @@ private final class SplitViewConfigurationView: NSView {
             return
         }
 
-        let autosaveKey = "NSSplitView Subview Frames \(autosaveName)"
-        let hasSavedPosition = UserDefaults.standard.object(forKey: autosaveKey) != nil
+        let preferredHeight = preference.load(fallback: defaultDividerPosition)
         splitView.autosaveName = autosaveName
         configuredSplitView = splitView
+        startTrackingDivider()
+        // AppKit clamps to the current window constraints; never save that
+        // clamped value over the user's preference during automatic layout.
+        DispatchQueue.main.async { [weak self, weak splitView] in
+            guard let self, let splitView, self.configuredSplitView === splitView,
+                  splitView.window != nil else { return }
+            splitView.setPosition(preferredHeight, ofDividerAt: 0)
+        }
+    }
 
-        guard !hasSavedPosition, splitView.subviews.count >= 2 else { return }
-        // AppKit installs the SwiftUI split hierarchy late in the first layout
-        // pass. Apply the accepted initial position on the next turn so it wins
-        // over SwiftUI's generic ideal-size negotiation, then let NSSplitView
-        // own every subsequent user adjustment.
-        DispatchQueue.main.async { [weak splitView] in
-            splitView?.setPosition(self.defaultDividerPosition, ofDividerAt: 0)
+    func stopTrackingDivider() {
+        if let eventMonitor { NSEvent.removeMonitor(eventMonitor) }
+        eventMonitor = nil
+        dividerDragStarted = false
+        dividerDidMove = false
+    }
+
+    private func startTrackingDivider() {
+        guard eventMonitor == nil else { return }
+        eventMonitor = NSEvent.addLocalMonitorForEvents(
+            matching: [.leftMouseDown, .leftMouseDragged, .leftMouseUp]
+        ) { [weak self] event in
+            MainActor.assumeIsolated { self?.trackDivider(event) }
+            return event
+        }
+    }
+
+    private func trackDivider(_ event: NSEvent) {
+        guard let splitView = configuredSplitView, let pane = splitView.subviews.first else { return }
+        switch event.type {
+        case .leftMouseDown:
+            let point = splitView.convert(event.locationInWindow, from: nil)
+            dividerDragStarted = event.window === splitView.window
+                && point.x >= splitView.bounds.minX && point.x <= splitView.bounds.maxX
+                && abs(point.y - pane.frame.maxY) <= max(6, splitView.dividerThickness)
+            dividerDidMove = false
+        case .leftMouseDragged:
+            if dividerDragStarted { dividerDidMove = true }
+        case .leftMouseUp:
+            let shouldSave = dividerDragStarted && dividerDidMove
+            dividerDragStarted = false
+            dividerDidMove = false
+            guard shouldSave else { return }
+            DispatchQueue.main.async { [weak self, weak splitView] in
+                guard let self, let splitView, self.configuredSplitView === splitView,
+                      let pane = splitView.subviews.first else { return }
+                self.preference.save(pane.frame.height)
+            }
+        default: break
         }
     }
 
