@@ -1028,6 +1028,37 @@ fn phrase_protection_is_persisted_and_enforced_below_the_ui()
 }
 
 #[test]
+fn prepared_live_phrase_edit_rechecks_protection_and_durable_head()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut worker = LibraryWorker::demo()?;
+    worker.open_editor(1)?;
+    let (first, _) = worker.prepare_live_phrase_role(1, 1, 1, PhraseRoleId::try_new("drop")?)?;
+    let (stale, _) =
+        worker.prepare_live_phrase_role(1, 1, 1, PhraseRoleId::try_new("intro-outro")?)?;
+    // Preparation does not append a revision or alter the open editor.
+    assert!(worker.local_playback_track(1, 1).is_ok());
+    worker.commit_live_phrase_role(first)?;
+    assert!(matches!(
+        worker.commit_live_phrase_role(stale),
+        Err(LibraryWorkerError::Persistence(
+            lumi_library_sqlite::SqliteLibraryError::RevisionConflict { .. }
+        ))
+    ));
+    let (_, committed) = worker.local_playback_track(1, 2)?.into_parts();
+    assert_eq!(committed.phrase_role_json(1)["roleId"], "drop");
+    let (protected, _) =
+        worker.prepare_live_phrase_role(1, 2, 1, PhraseRoleId::try_new("intro-outro")?)?;
+    worker.set_track_phrase_protection(1, 0, true)?;
+    assert!(matches!(
+        worker.commit_live_phrase_role(protected),
+        Err(LibraryWorkerError::TrackPhrasesProtected)
+    ));
+    let (_, unchanged) = worker.local_playback_track(1, 2)?.into_parts();
+    assert_eq!(unchanged.phrase_role_json(1), committed.phrase_role_json(1));
+    Ok(())
+}
+
+#[test]
 fn phrase_protection_keeps_the_active_workflow_query_and_page_atomic()
 -> Result<(), Box<dyn std::error::Error>> {
     let mut worker = LibraryWorker::demo()?;

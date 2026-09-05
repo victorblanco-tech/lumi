@@ -54,3 +54,18 @@ Keep the accepted waveform visuals and tempo-only Ableton Link algorithm.
 Prefer small verified changes at ownership boundaries over a broad rewrite.
 Do not change the current explicit desktop-exit parking policy as a side effect
 of moving client I/O out of the pump.
+
+## Live plan edit commit boundary
+
+The synchronous sole-writer path first prepares the edited timeline, Library
+context and materialized plan without changing active data. It reduces the plan
+against a candidate runtime state and requires an explicit `PlanAccepted` result.
+Only then does it append the timeline using SQLite's expected-head transaction.
+After that durable write, publication of the prepared state, context, variation
+reservation and modifier plan is infallible; it performs no external MIDI action.
+An error before commit leaves both the persisted timeline and the live plan intact.
+
+This staging boundary is also required when preparation moves off the show task.
+The current synchronous implementation must not be mistaken for that scheduling
+isolation: the future asynchronous apply step must revalidate track load, plan,
+timeline, catalog/policy revisions and protection before publishing any result.

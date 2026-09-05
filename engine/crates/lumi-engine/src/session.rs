@@ -1046,6 +1046,11 @@ struct PlanningWorker {
     compiled_light_plans: BTreeMap<TrackLoadId, CompiledLightPlan>,
 }
 
+struct MaterializedLibraryPlan {
+    plan: LightingPlan,
+    compiled: Option<CompiledLightPlan>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum PlanMaterializationScope {
     All,
@@ -1139,16 +1144,25 @@ impl PlanningWorker {
         &mut self,
         plan: LightingPlan,
     ) -> Result<LightingPlan, EngineError> {
-        self.materialize_library_plan_with_scope(plan, PlanMaterializationScope::All)
+        let context = self.library_context(plan.track_load_id());
+        let prepared = self.prepare_library_plan(plan, PlanMaterializationScope::All, context)?;
+        self.commit_compiled_plan(prepared.plan.track_load_id(), prepared.compiled);
+        Ok(prepared.plan)
     }
 
-    fn materialize_library_plan_with_scope(
-        &mut self,
+    /// Pure preparation: failed materialization must not reserve variations,
+    /// replace contexts or publish a partly compiled plan.
+    fn prepare_library_plan(
+        &self,
         plan: LightingPlan,
         scope: PlanMaterializationScope,
-    ) -> Result<LightingPlan, EngineError> {
-        let Some(context) = self.library_context(plan.track_load_id()) else {
-            return Ok(plan);
+        context: Option<&LibraryPlanContext>,
+    ) -> Result<MaterializedLibraryPlan, EngineError> {
+        let Some(context) = context else {
+            return Ok(MaterializedLibraryPlan {
+                plan,
+                compiled: None,
+            });
         };
         let initial_theme_id = plan
             .theme_decision()
@@ -1314,21 +1328,31 @@ impl PlanningWorker {
                 ))
             })
             .collect::<Result<Vec<_>, EngineError>>()?;
-        if let Some(compiled) = &compiled {
-            self.variation_history.reserve(
-                format!("track-load:{}", plan.track_load_id().value()),
-                compiled,
-            );
-            self.compiled_light_plans
-                .insert(plan.track_load_id(), compiled.clone());
+        Ok(MaterializedLibraryPlan {
+            plan: plan.with_materialized_cues(cues)?,
+            compiled,
+        })
+    }
+
+    fn commit_compiled_plan(
+        &mut self,
+        track_load_id: TrackLoadId,
+        compiled: Option<CompiledLightPlan>,
+    ) {
+        let reservation_id = format!("track-load:{}", track_load_id.value());
+        if let Some(compiled) = compiled {
+            self.variation_history.reserve(reservation_id, &compiled);
+            self.compiled_light_plans.insert(track_load_id, compiled);
             while self.compiled_light_plans.len() > LIBRARY_CONTEXT_CAPACITY {
                 let Some(oldest) = self.compiled_light_plans.keys().next().copied() else {
                     break;
                 };
                 self.compiled_light_plans.remove(&oldest);
             }
+        } else {
+            self.compiled_light_plans.remove(&track_load_id);
+            self.variation_history.release(&reservation_id);
         }
-        Ok(plan.with_materialized_cues(cues)?)
     }
 
     fn process_source_event(
@@ -1517,25 +1541,41 @@ impl PlanningWorker {
         self.planner.options()
     }
 
+    fn prepare_revised_state(
+        &self,
+        runtime: &SerializedRuntime,
+        plan: LightingPlan,
+    ) -> Result<(SerializedRuntime, u64), EngineError> {
+        let effect_sequence = self
+            .effect_sequence
+            .checked_add(1)
+            .ok_or(EngineError::PlanningEffectSequenceOverflow)?;
+        let mut candidate = runtime.clone();
+        let processed = submit_and_process(
+            &mut candidate,
+            DomainEvent::EffectResult(EffectResultEnvelope {
+                effect_id: EffectId::new(effect_sequence),
+                worker_id: WorkerId::new(1),
+                sequence: EffectSequence::new(effect_sequence),
+                completed_at: MonotonicTime::new(0),
+                result: EffectResult::PlanGenerated(plan),
+            }),
+        )?;
+        if processed.decision != lumi_domain::DecisionReason::PlanAccepted {
+            return Err(EngineError::RevisedPlanNotAccepted);
+        }
+        Ok((candidate, effect_sequence))
+    }
+
+    #[cfg(test)]
     fn accept_revised_plan(
         &mut self,
         runtime: &mut SerializedRuntime,
         plan: LightingPlan,
     ) -> Result<(), EngineError> {
-        self.effect_sequence = self
-            .effect_sequence
-            .checked_add(1)
-            .ok_or(EngineError::PlanningEffectSequenceOverflow)?;
-        submit_and_process(
-            runtime,
-            DomainEvent::EffectResult(EffectResultEnvelope {
-                effect_id: EffectId::new(self.effect_sequence),
-                worker_id: WorkerId::new(1),
-                sequence: EffectSequence::new(self.effect_sequence),
-                completed_at: MonotonicTime::new(0),
-                result: EffectResult::PlanGenerated(plan),
-            }),
-        )?;
+        let (candidate, effect_sequence) = self.prepare_revised_state(runtime, plan)?;
+        *runtime = candidate;
+        self.effect_sequence = effect_sequence;
         Ok(())
     }
 }
@@ -3789,6 +3829,8 @@ fn apply_command(
         )
     };
 
+    let mut replacement_context = None;
+    let mut pending_phrase_edit = None;
     let mutation = match command {
         SessionCommand::GetSnapshot { .. }
         | SessionCommand::QueryLibrary { .. }
@@ -3881,13 +3923,16 @@ fn apply_command(
                     .ok_or(CommandApplicationError::PlanUnavailable)?;
                 let autoloop_number = u16::try_from(scene_id.value())
                     .map_err(|_| CommandApplicationError::InvalidAutoloopSelection)?;
-                runtime
+                let mut candidate_context = runtime
                     .planning_worker
                     .library_contexts
-                    .get_mut(&current.track_load_id())
-                    .ok_or(CommandApplicationError::PlanUnavailable)?
+                    .get(&current.track_load_id())
+                    .cloned()
+                    .ok_or(CommandApplicationError::PlanUnavailable)?;
+                candidate_context
                     .set_autoloop_override(theme_id, phrase_index, autoloop_number)
                     .map_err(LibraryWorkerError::from)?;
+                replacement_context = Some(candidate_context);
                 (
                     current.clone(),
                     PlanMaterializationScope::Phrase(phrase_index),
@@ -3916,22 +3961,17 @@ fn apply_command(
             let previous_context = runtime
                 .planning_worker
                 .library_context(current.track_load_id())
-                .cloned()
                 .ok_or(CommandApplicationError::PlanUnavailable)?;
-            let timeline_revision = runtime.library_worker.change_live_phrase_role(
-                current.track_id().value(),
-                previous_context.timeline_revision(),
-                phrase_index,
-                role_id,
-            )?;
-            let (_, mut replacement_context) = runtime
-                .library_worker
-                .local_playback_track(current.track_id().value(), timeline_revision)?
-                .into_parts();
-            replacement_context.inherit_autoloop_overrides(&previous_context, phrase_index);
-            runtime
-                .planning_worker
-                .register_library_context(current.track_load_id(), replacement_context);
+            let (prepared_edit, mut candidate_context) =
+                runtime.library_worker.prepare_live_phrase_role(
+                    current.track_id().value(),
+                    previous_context.timeline_revision(),
+                    phrase_index,
+                    role_id,
+                )?;
+            candidate_context.inherit_autoloop_overrides(previous_context, phrase_index);
+            replacement_context = Some(candidate_context);
+            pending_phrase_edit = Some(prepared_edit);
             (
                 current.clone(),
                 PlanMaterializationScope::Phrase(phrase_index),
@@ -3968,29 +4008,58 @@ fn apply_command(
     let (revised, materialization_scope, revise_materialized_cues, force_plan_revision) = mutation;
     let materialized = runtime
         .planning_worker
-        .materialize_library_plan_with_scope(revised, materialization_scope)
+        .prepare_library_plan(
+            revised,
+            materialization_scope,
+            replacement_context.as_ref().or_else(|| {
+                runtime
+                    .planning_worker
+                    .library_context(current.track_load_id())
+            }),
+        )
         .map_err(CommandApplicationError::Engine)?;
     let revised = if revise_materialized_cues {
-        if !force_plan_revision && materialized.cues() == current.cues() {
+        if !force_plan_revision && materialized.plan.cues() == current.cues() {
             return Err(PlanMutationError::NoChange.into());
         }
         current
-            .revised(materialized.cues().to_vec())
+            .revised(materialized.plan.cues().to_vec())
             .map_err(PlanMutationError::InvalidPlan)?
     } else {
-        materialized
+        materialized.plan
     };
+    let track_load_id = revised.track_load_id();
+    let (candidate_state, effect_sequence) = runtime
+        .planning_worker
+        .prepare_revised_state(&runtime.state, revised)
+        .map_err(CommandApplicationError::Engine)?;
+
+    // All fallible preparation/reduction is complete. Persist last, then
+    // publish the already validated state/context/variation/modifier bundle.
+    // No MIDI or external effect is performed during preparation.
+    if let Some(prepared_edit) = pending_phrase_edit {
+        runtime
+            .library_worker
+            .commit_live_phrase_role(prepared_edit)?;
+    }
+    runtime.state = candidate_state;
+    runtime.planning_worker.effect_sequence = effect_sequence;
+    if let Some(context) = replacement_context {
+        runtime
+            .planning_worker
+            .register_library_context(track_load_id, context);
+    }
+    runtime
+        .planning_worker
+        .commit_compiled_plan(track_load_id, materialized.compiled);
     runtime.output_worker.synchronize_static_look_plan(
-        revised.track_load_id(),
+        track_load_id,
         runtime
             .planning_worker
             .compiled_light_plans
-            .get(&revised.track_load_id()),
+            .get(&track_load_id),
     );
-    runtime
-        .planning_worker
-        .accept_revised_plan(&mut runtime.state, revised)
-        .map_err(CommandApplicationError::Engine)
+    Ok(())
 }
 
 fn validate_state_revision(
@@ -5456,6 +5525,8 @@ pub enum EngineError {
     SubmittedEventMissing,
     #[error("the planning worker effect sequence overflowed")]
     PlanningEffectSequenceOverflow,
+    #[error("the runtime did not accept the prepared plan revision")]
+    RevisedPlanNotAccepted,
     #[error("the output worker effect sequence overflowed")]
     OutputEffectSequenceOverflow,
     #[error("dry-run output failed: {0}")]

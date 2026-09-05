@@ -209,6 +209,14 @@ pub struct LibraryPlanContext {
     autoloop_overrides: BTreeMap<u16, VariantId>,
 }
 
+/// A validated, not-yet-persisted edit. The show must accept the corresponding
+/// plan before the sole Library writer commits this optimistic revision.
+pub struct PreparedLivePhraseEdit {
+    timeline: LumiPhraseTimeline,
+    expected_revision: TimelineRevision,
+    role_id: PhraseRoleId,
+}
+
 #[derive(Clone, Debug)]
 struct LibraryPhrasePlanContext {
     phrase_index: u16,
@@ -1070,7 +1078,7 @@ impl LibraryWorker {
     }
 
     #[cfg(test)]
-    fn demo_at(path: &std::path::Path) -> Result<Self, LibraryWorkerError> {
+    pub(crate) fn demo_at(path: &std::path::Path) -> Result<Self, LibraryWorkerError> {
         Self::initialize_with_repository(
             SqliteLibraryRepository::open(path)?,
             Some(path.to_path_buf()),
@@ -2240,11 +2248,19 @@ impl LibraryWorker {
     ) -> Result<LibraryLocalPlaybackTrack, LibraryWorkerError> {
         let track_id = TrackId::new(track_id);
         self.ensure_timeline(track_id)?;
+        let timeline = self.require_expected_head(track_id, expected_timeline_revision)?;
+        self.playback_track_for_timeline(&timeline)
+    }
+
+    fn playback_track_for_timeline(
+        &self,
+        timeline: &LumiPhraseTimeline,
+    ) -> Result<LibraryLocalPlaybackTrack, LibraryWorkerError> {
+        let track_id = timeline.track_id();
         let track = self
             .repository
             .track(track_id)?
             .ok_or(LibraryWorkerError::UnknownTrack(track_id.value()))?;
-        let timeline = self.require_expected_head(track_id, expected_timeline_revision)?;
         let role_catalog = self.repository.phrase_role_catalog()?;
         let catalog = self.repository.autoloop_catalog()?;
         let duration_beats = timeline.total_beats();
@@ -2350,25 +2366,43 @@ impl LibraryWorker {
     /// by the Track Editor remain authoritative. This keeps a booth edit
     /// persistent while preventing a stale Mac or Remote client from silently
     /// overwriting newer library work.
-    pub fn change_live_phrase_role(
-        &mut self,
+    pub fn prepare_live_phrase_role(
+        &self,
         track_id: u64,
         expected_revision: u64,
         phrase_index: u16,
         role_id: PhraseRoleId,
-    ) -> Result<u64, LibraryWorkerError> {
+    ) -> Result<(PreparedLivePhraseEdit, LibraryPlanContext), LibraryWorkerError> {
         let track_id = TrackId::new(track_id);
         self.require_phrases_unlocked(track_id)?;
         self.require_active_role(&role_id)?;
         let head = self.require_expected_head(track_id, expected_revision)?;
         let edited = head.edit(TimelineEditCommand::ChangeRole {
             phrase_index,
-            role_id,
+            role_id: role_id.clone(),
         })?;
-        let revision = edited.revision().value();
+        let (_, context) = self.playback_track_for_timeline(&edited)?.into_parts();
+        Ok((
+            PreparedLivePhraseEdit {
+                timeline: edited,
+                expected_revision: head.revision(),
+                role_id,
+            },
+            context,
+        ))
+    }
+
+    pub fn commit_live_phrase_role(
+        &mut self,
+        prepared: PreparedLivePhraseEdit,
+    ) -> Result<(), LibraryWorkerError> {
+        self.require_phrases_unlocked(prepared.timeline.track_id())?;
+        self.require_active_role(&prepared.role_id)?;
+        // SQLite checks the expected head in the same transaction as append.
+        // No fallible hydration/planning may follow this durable commit.
         self.repository
-            .append_timeline_revision(&edited, Some(head.revision()))?;
-        Ok(revision)
+            .append_timeline_revision(&prepared.timeline, Some(prepared.expected_revision))?;
+        Ok(())
     }
 
     pub fn set_phrase_loop_strategy(

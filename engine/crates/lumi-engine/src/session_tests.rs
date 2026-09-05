@@ -1290,6 +1290,293 @@ fn future_live_phrase_type_change_persists_and_rematerializes_only_that_phrase()
 }
 
 #[test]
+fn live_phrase_edit_failures_leave_database_plan_and_output_unchanged()
+-> Result<(), Box<dyn std::error::Error>> {
+    for fault in ["compiler", "effect-sequence", "reducer", "sqlite"] {
+        let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+        let path = std::env::temp_dir().join(format!("lumi-atomic-phrase-{fault}-{unique}.sqlite"));
+        let mut runtime =
+            initialized_runtime_for_mode(ManualClock::new(0), DeckSourceMode::LocalPlayback)?;
+        runtime.library_worker = crate::library::LibraryWorker::demo_at(&path)?;
+        apply_current_session_command(&mut runtime, |expected_state_revision| {
+            SessionCommand::LoadLibraryTrackOnLocalDeck {
+                track_id: 1,
+                deck_id: lumi_domain::DeckId::new(1),
+                expected_timeline_revision: 1,
+                expected_state_revision,
+            }
+        });
+        let active = runtime
+            .state
+            .state()
+            .active_plan()
+            .cloned()
+            .ok_or("missing plan")?;
+        let original_role = runtime
+            .planning_worker
+            .library_context(active.track_load_id())
+            .ok_or("missing context")?
+            .phrase_role_json(1);
+        let replacement = if original_role["roleId"] == "drop" {
+            "intro-outro"
+        } else {
+            "drop"
+        };
+        // Exercise compiled variation state too, not just the rule-free fallback.
+        runtime
+            .planning_worker
+            .light_policy
+            .rules
+            .push(lumi_light_plans::AutoloopRule {
+                theme_id: 1,
+                role_id: "intro-outro".into(),
+                variant_id: "mapping-1".into(),
+                enabled: true,
+                selection_weight: 2,
+                color_behavior: ColorBehavior::Neutral,
+                color_rgb: vec![],
+            });
+        let database = rusqlite::Connection::open(&path)?;
+        let valid_sequence = runtime.planning_worker.effect_sequence;
+        match fault {
+            "compiler" => runtime.planning_worker.light_policy.revision = 0,
+            "effect-sequence" => runtime.planning_worker.effect_sequence = u64::MAX,
+            "reducer" => runtime.planning_worker.effect_sequence = 0,
+            "sqlite" => database.execute_batch(
+                "CREATE TRIGGER reject_test_phrase BEFORE INSERT ON phrase_points
+                 WHEN NEW.revision = 2 BEGIN SELECT RAISE(ABORT, 'injected phrase write failure'); END;"
+            )?,
+            _ => unreachable!(),
+        }
+        let before_state = runtime.state.clone();
+        let before_contexts = format!("{:?}", runtime.planning_worker.library_contexts);
+        let before_history = runtime.planning_worker.variation_history.clone();
+        let before_compiled = runtime.planning_worker.compiled_light_plans.clone();
+        let before_modifiers = runtime.output_worker.static_look_plans.clone();
+        let before_sequence = runtime.planning_worker.effect_sequence;
+        let before_output_sequence = runtime.output_worker.effect_sequence;
+        let before_generation = runtime.output_worker.realtime_generation;
+        let result = apply_command(
+            &mut runtime,
+            SessionCommand::ChangePhraseRole {
+                context: PlanCommandContext {
+                    plan_id: active.id(),
+                    track_load_id: active.track_load_id(),
+                    expected_revision: active.revision(),
+                },
+                phrase_index: 1,
+                role_id: PhraseRoleId::try_new(replacement)?,
+            },
+        );
+        assert!(result.is_err(), "fault {fault} must reject the edit");
+        match fault {
+            "compiler" => assert!(matches!(
+                result,
+                Err(CommandApplicationError::Engine(EngineError::LightPlan(_)))
+            )),
+            "effect-sequence" => assert!(matches!(
+                result,
+                Err(CommandApplicationError::Engine(
+                    EngineError::PlanningEffectSequenceOverflow
+                ))
+            )),
+            "reducer" => assert!(matches!(
+                result,
+                Err(CommandApplicationError::Engine(
+                    EngineError::RevisedPlanNotAccepted
+                ))
+            )),
+            "sqlite" => assert!(
+                result
+                    .err()
+                    .ok_or("expected SQLite error")?
+                    .to_string()
+                    .contains("injected phrase write failure")
+            ),
+            _ => unreachable!(),
+        }
+        assert_eq!(runtime.state, before_state, "{fault}: show state");
+        assert_eq!(
+            format!("{:?}", runtime.planning_worker.library_contexts),
+            before_contexts,
+            "{fault}: contexts"
+        );
+        assert_eq!(
+            runtime.planning_worker.variation_history, before_history,
+            "{fault}: variation reservations"
+        );
+        assert_eq!(
+            runtime.planning_worker.compiled_light_plans, before_compiled,
+            "{fault}: compiled plans"
+        );
+        assert_eq!(
+            runtime.output_worker.static_look_plans, before_modifiers,
+            "{fault}: output modifiers"
+        );
+        assert_eq!(runtime.planning_worker.effect_sequence, before_sequence);
+        assert_eq!(
+            runtime.output_worker.effect_sequence,
+            before_output_sequence
+        );
+        assert_eq!(runtime.output_worker.realtime_generation, before_generation);
+        let (_, persisted) = runtime
+            .library_worker
+            .local_playback_track(1, 1)?
+            .into_parts();
+        assert_eq!(
+            persisted.phrase_role_json(1),
+            original_role,
+            "{fault}: durable phrase"
+        );
+        let partial_revisions: i64 = database.query_row(
+            "SELECT COUNT(*) FROM timeline_revisions WHERE track_id = 1 AND revision = 2",
+            [],
+            |row| row.get(0),
+        )?;
+        assert_eq!(partial_revisions, 0, "{fault}: no partial durable revision");
+        // Recovery uses exactly the same expected plan revision: the failed
+        // attempt must not consume it or leave a reservation/override behind.
+        runtime.planning_worker.effect_sequence = valid_sequence;
+        runtime.planning_worker.light_policy.revision = 1;
+        database.execute_batch("DROP TRIGGER IF EXISTS reject_test_phrase")?;
+        apply_command(
+            &mut runtime,
+            SessionCommand::ChangePhraseRole {
+                context: PlanCommandContext {
+                    plan_id: active.id(),
+                    track_load_id: active.track_load_id(),
+                    expected_revision: active.revision(),
+                },
+                phrase_index: 1,
+                role_id: PhraseRoleId::try_new(replacement)?,
+            },
+        )?;
+        let (_, recovered) = runtime
+            .library_worker
+            .local_playback_track(1, 2)?
+            .into_parts();
+        assert_eq!(recovered.phrase_role_json(1)["roleId"], replacement);
+        let recovered_plan = runtime
+            .state
+            .state()
+            .active_plan()
+            .ok_or("recovery needs active plan")?;
+        assert_eq!(recovered_plan.revision(), PlanRevision::new(2));
+        assert_eq!(recovered_plan.cues()[0], active.cues()[0]);
+        assert_eq!(runtime.output_worker.realtime_generation, before_generation);
+        drop(database);
+        drop(runtime);
+        std::fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+#[test]
+fn unchanged_autoloop_choice_does_not_leave_a_hidden_override()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut runtime =
+        initialized_runtime_for_mode(ManualClock::new(0), DeckSourceMode::LocalPlayback)?;
+    apply_current_session_command(&mut runtime, |expected_state_revision| {
+        SessionCommand::LoadLibraryTrackOnLocalDeck {
+            track_id: 1,
+            deck_id: lumi_domain::DeckId::new(1),
+            expected_timeline_revision: 1,
+            expected_state_revision,
+        }
+    });
+    let active = runtime
+        .state
+        .state()
+        .active_plan()
+        .cloned()
+        .ok_or("missing plan")?;
+    let SemanticLightingAction::ApplyLook(look) = active.cues()[1].action() else {
+        panic!("fixture needs mapped future cue");
+    };
+    let before_contexts = format!("{:?}", runtime.planning_worker.library_contexts);
+    let before_state = runtime.state.clone();
+    let result = apply_command(
+        &mut runtime,
+        SessionCommand::SelectScene {
+            context: PlanCommandContext {
+                plan_id: active.id(),
+                track_load_id: active.track_load_id(),
+                expected_revision: active.revision(),
+            },
+            phrase_index: 1,
+            scene_id: look.scene_id(),
+        },
+    );
+    assert!(matches!(
+        result,
+        Err(CommandApplicationError::Mutation(
+            PlanMutationError::NoChange
+        ))
+    ));
+    assert_eq!(runtime.state, before_state);
+    assert_eq!(
+        format!("{:?}", runtime.planning_worker.library_contexts),
+        before_contexts
+    );
+    Ok(())
+}
+
+#[test]
+#[ignore = "run explicitly in release mode; component budget, not CDJ-to-MIDI acceptance"]
+fn staged_live_phrase_edit_component_budget() -> Result<(), Box<dyn std::error::Error>> {
+    let mut runtime =
+        initialized_runtime_for_mode(ManualClock::new(0), DeckSourceMode::LocalPlayback)?;
+    apply_current_session_command(&mut runtime, |expected_state_revision| {
+        SessionCommand::LoadLibraryTrackOnLocalDeck {
+            track_id: 1,
+            deck_id: lumi_domain::DeckId::new(1),
+            expected_timeline_revision: 1,
+            expected_state_revision,
+        }
+    });
+    let mut timings = Vec::with_capacity(200);
+    for index in 0..200 {
+        let active = runtime
+            .state
+            .state()
+            .active_plan()
+            .cloned()
+            .ok_or("missing plan")?;
+        let role = if index % 2 == 0 {
+            "drop"
+        } else {
+            "intro-outro"
+        };
+        let command = SessionCommand::ChangePhraseRole {
+            context: PlanCommandContext {
+                plan_id: active.id(),
+                track_load_id: active.track_load_id(),
+                expected_revision: active.revision(),
+            },
+            phrase_index: 1,
+            role_id: PhraseRoleId::try_new(role)?,
+        };
+        let started = Instant::now();
+        apply_command(&mut runtime, command)?;
+        timings.push(started.elapsed());
+    }
+    timings.sort();
+    eprintln!(
+        "Staged phrase edit (200, in-memory fixture): p50={}us p95={}us p99={}us max={}us",
+        timings[99].as_micros(),
+        timings[189].as_micros(),
+        timings[197].as_micros(),
+        timings[199].as_micros()
+    );
+    assert!(
+        timings[189] < Duration::from_millis(20),
+        "small-fixture preparation/commit budget exceeded"
+    );
+    assert!(runtime.library_worker.local_playback_track(1, 201).is_ok());
+    Ok(())
+}
+
+#[test]
 fn live_apply_look_maps_to_a_sound_switch_bank_and_autoloop_button() {
     let runtime = initialized_runtime()
         .unwrap_or_else(|error| panic!("test engine must initialize: {error}"));

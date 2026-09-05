@@ -77,7 +77,37 @@ regressions. No story is complete merely because its documentation exists.
 - **Documentation:** the simulator user guide is linked from the README, site
   and main guide. New images must show 90s Bitch on Player 1 and My Favourite
   Regrets on Player 2, preserving existing Lumi edits. Native HQ capture is
-  authorized by the owner but macOS screen-recording permission is pending.
+  authorized by the owner. Codex Computer Use screen-recording access is enabled;
+  a negative preflight from a separate Swift subprocess did not establish a
+  missing Computer Use permission. Native Lumi selection/capture currently
+  times out and headed acceptance is still pending.
+
+### 2026-09-05 — atomic Live phrase/plan mutation increment
+
+- Live Phrase Type edits now prepare the timeline and replacement Library
+  context without a database write. AutoLoop overrides are likewise staged,
+  never written into the active context before validation.
+- Plan materialization is side-effect-free. Variation reservations, compiled
+  modifiers and output plans are published only after the runtime has accepted
+  the candidate plan and SQLite has committed the optimistic timeline revision.
+- Runtime reduction happens against a bounded state copy; a duplicate/stale
+  effect is a rejection, not an acknowledgment of a change that never applied.
+  Only the edited track's context is prepared; other Players' waveform contexts
+  are not copied. Rendering and the tempo/MIDI algorithms are unchanged.
+- Regressions inject compiler failure, effect-sequence overflow, reducer
+  rejection and a real SQLite trigger failure during phrase insertion. They
+  assert no partial revision, changed context, variation history, compiled plan,
+  output modifier or MIDI generation. Each scenario then successfully retries
+  the same expected plan revision. Separate regressions cover a no-change
+  AutoLoop selection and protection/stale-head checks at durable commit.
+- This is code-level verification through the shared Mac/Remote command path,
+  not headed acceptance. It does not complete asynchronous SQL isolation or
+  post-restore worker hydration. Installed Lumi has not been replaced while
+  exclusive-stop approval and native UI access remain unresolved.
+- Verification: 408 Rust tests passed (14 broad-run tests intentionally ignored).
+  The explicitly run 200-edit release benchmark measured p50 381 µs, p95 445 µs,
+  p99 515 µs and max 662 µs on the small in-memory fixture. This does not claim
+  realtime latency under concurrent Library work or physical lighting acceptance.
 
 ### Remaining before this epic can be called complete
 
@@ -85,8 +115,9 @@ regressions. No story is complete merely because its documentation exists.
    the show pump, with revision-bound staging and real contention tests.
 2. Preserve proven USB provenance in live lookup; the current call still drops
    source context. Settle missing-provenance behavior before changing matching.
-3. Make complete phrase/plan mutations and post-restore worker hydration atomic,
-   including failure injection after SQL succeeds.
+3. Complete atomic post-restore worker hydration. Live phrase/plan edits now
+   prepare all fallible state work before the final transactional SQL append;
+   asynchronous preparation will also need revision revalidation before publish.
 4. Enforce Controller revocation at the final engine execution boundary, not
    only before the gateway sends. Test saturated production paths rather than
    treating the separate ProjectionHub tests as production evidence.
