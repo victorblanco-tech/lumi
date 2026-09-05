@@ -53,6 +53,15 @@ struct LumiApp: App {
                 }
         }
         .defaultSize(width: 1_280, height: 820)
+#if LUMI_DOCUMENTATION_CAPTURE
+        .commands {
+            CommandGroup(after: .saveItem) {
+                Button("Export Retina Documentation Image") {
+                    MacApplicationWindow.exportDocumentationImage()
+                }
+            }
+        }
+#endif
     }
 }
 
@@ -80,6 +89,48 @@ final class LumiApplicationDelegate: NSObject, NSApplicationDelegate {
 
 @MainActor
 private enum MacApplicationWindow {
+#if LUMI_DOCUMENTATION_CAPTURE
+    // Opt-in local documentation build only. Exports this application's own
+    // rendered content, not the desktop or other applications' windows.
+    static func exportDocumentationImage() {
+        guard let window = NSApp.mainWindow, let contentView = window.contentView else { return }
+        func editorSplit(in view: NSView) -> NSSplitView? {
+            if let split = view as? NSSplitView, !split.isVertical { return split }
+            return view.subviews.lazy.compactMap { editorSplit(in: $0) }.first
+        }
+        if let split = editorSplit(in: contentView) {
+            let preference = UserDefaults.standard.double(
+                forKey: "co.victorblan.tech.lumi.library.editor-split.preferredEditorHeight"
+            )
+            if preference > 0 { split.setPosition(preference, ofDividerAt: 0) }
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
+            writeDocumentationImage(window: window)
+        }
+    }
+
+    private static func writeDocumentationImage(window: NSWindow) {
+        guard let contentView = window.contentView else { return }
+        let bounds = contentView.bounds
+        let scale = window.backingScaleFactor
+        guard let bitmap = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int((bounds.width * scale).rounded()),
+            pixelsHigh: Int((bounds.height * scale).rounded()),
+            bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+            colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0
+        ) else { return }
+        bitmap.size = bounds.size
+        contentView.cacheDisplay(in: bounds, to: bitmap)
+        guard let data = bitmap.representation(using: .png, properties: [:]) else { return }
+        do {
+            try data.write(to: URL(fileURLWithPath: "/tmp/lumi-editor-retina.png"), options: .atomic)
+        } catch {
+            NSAlert(error: error).runModal()
+        }
+    }
+#endif
+
     static func configure(_ window: NSWindow) {
         window.contentMinSize = NSSize(width: 1_180, height: 620)
         disableAutomaticHostingSizeMeasurements(in: window.contentViewController)

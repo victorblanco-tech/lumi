@@ -28,3 +28,15 @@ There are no waveform renderer, engine, USB or lighting timing changes.
 - Original-resolution screenshot: blocked by native macOS capture permission
   (`CGPreflightScreenCaptureAccess() == false`). Do not publish a compressed
   Computer Use screenshot as a replacement.
+
+## Screenshot follow-up
+
+The earlier working method was recovered from the task history: a temporary
+Lumi build exported its own rendered AppKit window at Retina scale. This now
+produced and visually verified a 3600 × 2260 original Editor PNG with collapsed
+navigation and the user's 717-point pane. See
+`../development/retina-documentation-captures.md` for the repeatable procedure.
+
+Normal track loading was observed resetting the pane to 620 points despite the
+717-point preference. That remaining layout issue is not solved by exporting
+the documentation image at the preferred height. Keep the UI acceptance open.
