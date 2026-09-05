@@ -30,16 +30,23 @@ struct LumiApp: App {
                 .onChange(of: preferences.appearance) { _, appearance in
                     MacApplicationAppearance.apply(appearance)
                 }
-                .onChange(of: preferences.lightingTimingOffsetMillis) { _, millis in
-                    Task {
-                        await engineStatus.setLightingTimingOffset(millis)
+                .onChange(of: engineStatus.lightingTimingSettings?.savedTimingOffsetMillis) { _, millis in
+                    if let millis {
+                        // Mirror only: persisting a Remote edit must not echo a
+                        // command back into the live scheduling lane.
+                        preferences.lightingTimingOffsetMillis = millis
                     }
                 }
                 .task {
                     await engineStatus.start()
-                    await engineStatus.setLightingTimingOffset(
-                        preferences.lightingTimingOffsetMillis
-                    )
+                    if let midi = engineStatus.lightingTimingSettings {
+                        if let saved = midi.savedTimingOffsetMillis {
+                            preferences.lightingTimingOffsetMillis = saved
+                        } else if !midi.timingSavePending && midi.timingSaveError == nil {
+                            // One-time migration of the previous Mac preference.
+                            await engineStatus.setLightingTimingOffset(preferences.lightingTimingOffsetMillis)
+                        }
+                    }
                     if preferences.abletonLinkAutoStart {
                         await engineStatus.setAbletonLinkEnabled(true)
                     }

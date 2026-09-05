@@ -324,6 +324,9 @@ struct LiveWorkspacePresenterTests {
         }
         midi["timingOffsetMillis"] = .number(0)
         midi["pendingTimingOffsetMillis"] = .number(20)
+        midi["savedTimingOffsetMillis"] = .number(20)
+        midi["timingSavePending"] = .boolean(false)
+        midi["timingSaveError"] = .null
         payload["midiIntegration"] = .object(midi)
         let envelope = MessageEnvelope(
             protocolVersion: recorded.protocolVersion,
@@ -344,9 +347,12 @@ struct LiveWorkspacePresenterTests {
 
         #expect(snapshot.midiIntegration?.timingOffsetMillis == 0)
         #expect(snapshot.midiIntegration?.pendingTimingOffsetMillis == 20)
+        #expect(snapshot.midiIntegration?.savedTimingOffsetMillis == 20)
+        #expect(snapshot.midiIntegration?.timingSavePending == false)
+        #expect(state.content?.lightingTimingSaveError == nil)
         #expect(state.content?.lightingTimingOffsetMillis == 0)
         #expect(state.content?.pendingLightingTimingOffsetMillis == 20)
-        #expect(state.lightingMidi.detail.contains("+0 ms saved"))
+        #expect(state.lightingMidi.detail.contains("+0 ms applied"))
         #expect(state.lightingMidi.detail.contains("+20 ms pending for next phrase"))
         #expect(state.lightingMidi.detail.contains("phrase-boundary output"))
     }

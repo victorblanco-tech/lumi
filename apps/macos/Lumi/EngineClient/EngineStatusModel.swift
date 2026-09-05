@@ -142,7 +142,20 @@ final class EngineStatusModel: ObservableObject {
     private var pendingLibraryQuery: (generation: UInt64, request: LibraryQueryRequest)?
     private var libraryQueryGeneration: UInt64 = 0
     private var isDrainingLibraryQueries = false
-    private var latestSnapshot: EngineSnapshot?
+    @Published private(set) var lightingTimingSettings: MidiOutputIntegrationSnapshot?
+    private var latestSnapshot: EngineSnapshot? {
+        didSet {
+            let timing = latestSnapshot?.midiIntegration
+            // Do not publish every MIDI pulse/beat as a settings change.
+            if lightingTimingSettings?.timingOffsetMillis != timing?.timingOffsetMillis
+                || lightingTimingSettings?.pendingTimingOffsetMillis != timing?.pendingTimingOffsetMillis
+                || lightingTimingSettings?.savedTimingOffsetMillis != timing?.savedTimingOffsetMillis
+                || lightingTimingSettings?.timingSavePending != timing?.timingSavePending
+                || lightingTimingSettings?.timingSaveError != timing?.timingSaveError {
+                lightingTimingSettings = timing
+            }
+        }
+    }
     private var lastLibraryRevision: UInt64?
     private var endpointDescription: String?
     private var protocolVersion: Int?
@@ -2236,7 +2249,7 @@ final class EngineStatusModel: ObservableObject {
         let clamped = max(-250, min(250, millis))
         await exchangeMidiCommand(
             .setOutputTimingOffset(millis: Int16(clamped)),
-            success: "Lighting timing \(String(format: "%+d ms", clamped)) saved. A running change becomes active at the next phrase; negative is early and positive is late."
+            success: "Lighting timing \(String(format: "%+d ms", clamped)) requested. A running change becomes active at the next phrase; negative is early and positive is late."
         )
     }
 
@@ -3019,6 +3032,9 @@ final class EngineStatusModel: ObservableObject {
                 || old.autoPublishEnabled != new.autoPublishEnabled
                 || old.timingOffsetMillis != new.timingOffsetMillis
                 || old.pendingTimingOffsetMillis != new.pendingTimingOffsetMillis
+                || old.savedTimingOffsetMillis != new.savedTimingOffsetMillis
+                || old.timingSavePending != new.timingSavePending
+                || old.timingSaveError != new.timingSaveError
                 || old.bankPreRollMillis != new.bankPreRollMillis
                 || old.realtimeLane?.isHealthy != new.realtimeLane?.isHealthy
                 || old.realtimeLane?.saturationCount

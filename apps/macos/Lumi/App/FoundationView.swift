@@ -48,7 +48,7 @@ struct FoundationView: View {
                         productVersion: productVersion,
                         appearance: $preferences.appearance,
                         keyNotation: $preferences.keyNotation,
-                        lightingTimingOffsetMillis: $preferences.lightingTimingOffsetMillis,
+                        lightingTimingOffsetMillis: lightingTimingBinding,
                         allowsScrolling: false,
                         showsNavigation: false,
                         deckVisualClocks: engineStatus.deckVisualClocks,
@@ -258,7 +258,7 @@ struct FoundationView: View {
                         settings: engineStatus.libraryState.phraseRoleSettings,
                         appearance: $preferences.appearance,
                         keyNotation: $preferences.keyNotation,
-                        lightingTimingOffsetMillis: $preferences.lightingTimingOffsetMillis,
+                        lightingTimingOffsetMillis: lightingTimingBinding,
                         feedback: engineStatus.phraseRoleFeedback,
                         workflowCatalog: engineStatus.libraryState.workflowCatalog,
                         workflowFeedback: engineStatus.trackWorkflowFeedback,
@@ -296,6 +296,19 @@ struct FoundationView: View {
         .background(LumiColor.canvas)
         .tint(LumiColor.accent)
         .accessibilityIdentifier("lumi.app.shell")
+    }
+
+    private var lightingTimingBinding: Binding<Int> {
+        Binding(
+            get: {
+                let timing = engineStatus.lightingTimingSettings
+                return timing?.pendingTimingOffsetMillis ?? timing?.timingOffsetMillis
+                    ?? preferences.lightingTimingOffsetMillis
+            },
+            set: { millis in
+                Task { await engineStatus.setLightingTimingOffset(millis) }
+            }
+        )
     }
 
     private var navigationShell: some View {

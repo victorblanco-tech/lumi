@@ -142,6 +142,9 @@ public struct MidiOutputIntegrationSnapshot: Equatable, Sendable {
     public let autoPublishEnabled: Bool
     public let timingOffsetMillis: Int
     public let pendingTimingOffsetMillis: Int?
+    public let savedTimingOffsetMillis: Int?
+    public let timingSavePending: Bool
+    public let timingSaveError: String?
     public let bankPreRollMillis: UInt64
     public let realtimeLane: RealtimeMidiOutputLaneSnapshot?
 
@@ -156,6 +159,9 @@ public struct MidiOutputIntegrationSnapshot: Equatable, Sendable {
         autoPublishEnabled: Bool,
         timingOffsetMillis: Int,
         pendingTimingOffsetMillis: Int? = nil,
+        savedTimingOffsetMillis: Int? = nil,
+        timingSavePending: Bool = false,
+        timingSaveError: String? = nil,
         bankPreRollMillis: UInt64 = 50,
         realtimeLane: RealtimeMidiOutputLaneSnapshot? = nil
     ) {
@@ -169,6 +175,9 @@ public struct MidiOutputIntegrationSnapshot: Equatable, Sendable {
         self.autoPublishEnabled = autoPublishEnabled
         self.timingOffsetMillis = timingOffsetMillis
         self.pendingTimingOffsetMillis = pendingTimingOffsetMillis
+        self.savedTimingOffsetMillis = savedTimingOffsetMillis
+        self.timingSavePending = timingSavePending
+        self.timingSaveError = timingSaveError
         self.bankPreRollMillis = bankPreRollMillis
         self.realtimeLane = realtimeLane
     }

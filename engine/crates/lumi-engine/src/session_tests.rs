@@ -1757,7 +1757,10 @@ fn local_playback_reasserts_a_restarted_phrase_and_activates_a_paused_seek_on_re
         RemoteCommandResultStatus::Accepted
     );
     let collision = apply_remote_command(&mut runtime, timing_command(-100, 0));
+    // The desired value is persisted even while its live activation is deferred.
+    assert_eq!(runtime.timing_preferences.saved, Some(20));
     assert_eq!(collision.status, RemoteCommandResultStatus::Conflict);
+    assert_eq!(runtime.timing_preferences.saved, Some(20));
     assert_eq!(
         collision.reason_code.as_deref(),
         Some("timingOffsetConflict")

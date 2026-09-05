@@ -219,6 +219,14 @@ public struct EngineSnapshotDecoder: Sendable {
         let pendingTimingOffsetMillis = try optionalSignedInteger(
             midi["pendingTimingOffsetMillis"]
         )
+        let savedTimingOffsetMillis = try optionalSignedInteger(midi["savedTimingOffsetMillis"])
+        guard savedTimingOffsetMillis.map({ (-250...250).contains($0) }) ?? true else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        let timingSavePending: Bool
+        if case let .boolean(value) = midi["timingSavePending"] { timingSavePending = value }
+        else if midi["timingSavePending"] == nil { timingSavePending = false }
+        else { throw EngineSnapshotDecodingError.invalidSnapshot }
         guard activeBank.map({ (1...4).contains($0) }) ?? true else {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
@@ -236,6 +244,9 @@ public struct EngineSnapshotDecoder: Sendable {
             autoPublishEnabled: autoPublishEnabled,
             timingOffsetMillis: timingOffsetMillis,
             pendingTimingOffsetMillis: pendingTimingOffsetMillis,
+            savedTimingOffsetMillis: savedTimingOffsetMillis,
+            timingSavePending: timingSavePending,
+            timingSaveError: try optionalString(midi["timingSaveError"]),
             bankPreRollMillis: bankPreRollMillis,
             realtimeLane: try decodeRealtimeMidiLane(midi["realtimeScheduler"])
         )

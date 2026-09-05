@@ -153,3 +153,12 @@ their error messages. A stable full-range timing sheet and setting-specific
 compare-and-set address this, with pending-phrase feedback and persistent
 command errors. See [release evidence](../release/0.6.2-dev-7-remote-timing.md)
 and ADR-0040. This bounded fix leaves the larger audit items above open.
+
+### Offset follow-up — dev-8: shared saved setting
+
+Owner clarified that Remote changes must persist, not be session overrides.
+Both clients now use engine-owned, channel-local timing storage on a bounded
+background writer. Mac startup migrates its legacy preference only once;
+subsequent saved Remote edits survive restart. NEXT PHRASE still means deferred
+activation, not temporary persistence. See ADR-0040 and
+[dev-8 acceptance](../release/0.6.2-dev-8-shared-timing.md).

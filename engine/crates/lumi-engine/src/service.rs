@@ -192,7 +192,7 @@ pub fn configured_database_path() -> Result<Option<PathBuf>, ServiceBootstrapErr
     Ok(None)
 }
 
-fn channel_data_directory() -> Result<PathBuf, ServiceBootstrapError> {
+pub(crate) fn channel_data_directory() -> Result<PathBuf, ServiceBootstrapError> {
     let home = env::var_os("HOME").ok_or(ServiceBootstrapError::MissingHomeDirectory)?;
     let home = PathBuf::from(home);
     if !home.is_absolute() {

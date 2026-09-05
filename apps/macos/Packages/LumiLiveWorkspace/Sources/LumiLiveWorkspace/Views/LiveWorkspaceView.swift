@@ -371,8 +371,9 @@ public struct LiveWorkspaceView: View {
     }
 
     private var timingConfirmationLabel: String {
+        if state.content?.lightingTimingSaveError != nil { return "NOT SAVED" }
+        if state.content?.lightingTimingSavePending == true { return "SAVING" }
         if pendingLightingTimingOffsetMillis != nil { return "NEXT PHRASE" }
-        if appliedLightingTimingOffsetMillis != lightingTimingOffsetMillis { return "SESSION" }
         return "SAVED"
     }
 
@@ -382,14 +383,14 @@ public struct LiveWorkspaceView: View {
 
     private var timingConfirmationDetail: String {
         let applied = String(format: "%+d ms", appliedLightingTimingOffsetMillis)
+        if let error = state.content?.lightingTimingSaveError {
+            return "Applied \(applied), but could not save: \(error). Choose the value again to retry."
+        }
         if let pendingLightingTimingOffsetMillis {
             let pending = String(format: "%+d ms", pendingLightingTimingOffsetMillis)
             return "Applied \(applied) · \(pending) activates at the next phrase."
         }
-        if appliedLightingTimingOffsetMillis != lightingTimingOffsetMillis {
-            return "Applied for this session: \(applied). The controls below change the saved Mac default."
-        }
-        return "Applied: \(applied). Negative is early; positive is late."
+        return "Applied: \(applied). Changes from Mac or iPhone are saved for next time. Negative is early; positive is late."
     }
 
     private var technicalStatusButton: some View {

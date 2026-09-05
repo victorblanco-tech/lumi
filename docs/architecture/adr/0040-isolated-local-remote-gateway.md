@@ -224,3 +224,25 @@ Command failures remain visible across subsequent live projections and recovery
 snapshots until a new command attempt, so rejection cannot look like an ignored
 tap. Native Simulator reproduction confirmed the old offset command repeatedly
 hit a general state revision conflict during normal playback.
+
+### Shared persistent timing (dev-8, supersedes the session-only behavior above)
+
+An explicit owner requirement makes timing edits permanent regardless of client.
+The engine owns `lighting-timing.json` in its existing channel data directory.
+A bounded 16-command background writer serializes atomic replacements and fsyncs;
+the integration pump only polls completion messages and never performs file I/O.
+Saved status is published only after a successful write. Corrupt storage is
+reported without silently overwriting it or preventing the show engine from
+starting. A rejected enqueue does not alter live timing; a later disk failure
+is shown as NOT SAVED in Mac Live and an explicit edit can retry it.
+
+Persisted desired timing and live applied timing are separate: an accepted edit
+is saved for restart while activation during Start/playback remains deferred to
+the next phrase. The existing timing compare-and-set and scheduling behavior are
+unchanged. No Link, MIDI dispatch, waveform or transport changes are involved.
+
+The Mac migrates its previous UserDefaults value once when the engine has no
+saved setting or write/error in progress. Thereafter both Mac controls and Remote
+submit to the same engine command. Mac UserDefaults mirrors acknowledged saved
+values for compatibility, without emitting commands; startup never overwrites
+an engine-saved Remote choice. Dev/RC/production directories remain isolated.

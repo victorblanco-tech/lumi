@@ -377,6 +377,7 @@ struct EngineRuntime {
     deck_source_mode: DeckSourceMode,
     planning_worker: PlanningWorker,
     output_worker: OutputWorker,
+    timing_preferences: crate::timing_preferences::TimingPreferences,
     link_relay: LinkRelay,
     library_worker: LibraryWorker,
     library_revision: u64,
@@ -761,6 +762,19 @@ fn initialized_runtime_for_mode(
     let prolink_start_error = None;
     let mut output_worker = OutputWorker::new();
     #[cfg(not(test))]
+    let timing_path =
+        if env::var(crate::service::SERVICE_MODE_ENVIRONMENT_KEY).as_deref() == Ok("launchd") {
+            Some(crate::service::channel_data_directory()?.join("lighting-timing.json"))
+        } else {
+            None
+        };
+    #[cfg(test)]
+    let timing_path = None;
+    let timing_preferences = crate::timing_preferences::TimingPreferences::open(timing_path)?;
+    if let Some(millis) = timing_preferences.saved {
+        output_worker.request_timing_offset_millis(millis, false);
+    }
+    #[cfg(not(test))]
     let link_relay = LinkRelay::new(CarabinerTimingOutput::new(carabiner_configuration()));
     #[cfg(test)]
     let link_relay = LinkRelay::new(CarabinerTimingOutput::new(CarabinerConfiguration::default()));
@@ -823,6 +837,7 @@ fn initialized_runtime_for_mode(
         deck_source_mode,
         planning_worker,
         output_worker,
+        timing_preferences,
         link_relay,
         library_worker,
         library_revision: 1,
@@ -3005,6 +3020,7 @@ fn transport_ack_envelope(
 }
 
 fn process_deck_input_messages(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
+    runtime.timing_preferences.poll();
     if runtime.deck_source_mode != DeckSourceMode::ConnectedDecks {
         #[cfg(not(test))]
         maintain_direct_prolink_bridge(runtime)?;
@@ -3509,6 +3525,10 @@ fn apply_command(
             return Ok(());
         }
         SessionCommand::SetOutputTimingOffset { millis } => {
+            runtime
+                .timing_preferences
+                .request(millis)
+                .map_err(CommandApplicationError::TimingSave)?;
             let defer_until_phrase = runtime.state.state().operation() == OperationState::Live
                 && runtime
                     .leader_deck_id()
@@ -4166,6 +4186,15 @@ fn application_error_envelope(
     error: &CommandApplicationError,
 ) -> Result<MessageEnvelope, EngineError> {
     match error {
+        CommandApplicationError::TimingSave(message) => error_envelope(
+            sequence,
+            correlation_id,
+            "commandRejected",
+            "timingSaveFailed",
+            message,
+            true,
+            None,
+        ),
         CommandApplicationError::TimingOffsetConflict => error_envelope(
             sequence,
             correlation_id,
@@ -4455,6 +4484,8 @@ fn error_envelope(
 
 #[derive(Debug, Error)]
 enum CommandApplicationError {
+    #[error("lighting timing could not be saved: {0}")]
+    TimingSave(String),
     #[error("lighting timing changed since this edit")]
     TimingOffsetConflict,
     #[error("plan context is missing")]
@@ -4695,6 +4726,9 @@ fn snapshot_envelope_internal(
             "autoPublishEnabled": runtime.output_worker.midi_auto_publish_enabled(),
             "timingOffsetMillis": runtime.output_worker.timing_offset_millis(),
             "pendingTimingOffsetMillis": runtime.output_worker.pending_timing_offset_millis(),
+            "savedTimingOffsetMillis": runtime.timing_preferences.saved,
+            "timingSavePending": runtime.timing_preferences.pending_writes > 0,
+            "timingSaveError": runtime.timing_preferences.error,
             "bankPreRollMillis": BANK_SETTLE_DELAY.as_millis(),
             "staticLookExecution": {
                 "mode": "exactlyOnceTransition",

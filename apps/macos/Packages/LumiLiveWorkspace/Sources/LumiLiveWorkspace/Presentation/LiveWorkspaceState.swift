@@ -87,6 +87,8 @@ public struct LiveWorkspaceContent: Equatable, Sendable {
     public let operationState: String
     public let lightingTimingOffsetMillis: Int
     public let pendingLightingTimingOffsetMillis: Int?
+    public let lightingTimingSavePending: Bool
+    public let lightingTimingSaveError: String?
     public let abletonLinkEnabled: Bool
     public let abletonLinkState: String
     public let abletonLinkBPMMilli: UInt64?
@@ -108,6 +110,8 @@ public struct LiveWorkspaceContent: Equatable, Sendable {
         operationState: String,
         lightingTimingOffsetMillis: Int = 0,
         pendingLightingTimingOffsetMillis: Int? = nil,
+        lightingTimingSavePending: Bool = false,
+        lightingTimingSaveError: String? = nil,
         abletonLinkEnabled: Bool = false,
         abletonLinkState: String = "stopped",
         abletonLinkBPMMilli: UInt64? = nil,
@@ -128,6 +132,8 @@ public struct LiveWorkspaceContent: Equatable, Sendable {
         self.operationState = operationState
         self.lightingTimingOffsetMillis = lightingTimingOffsetMillis
         self.pendingLightingTimingOffsetMillis = pendingLightingTimingOffsetMillis
+        self.lightingTimingSavePending = lightingTimingSavePending
+        self.lightingTimingSaveError = lightingTimingSaveError
         self.abletonLinkEnabled = abletonLinkEnabled
         self.abletonLinkState = abletonLinkState
         self.abletonLinkBPMMilli = abletonLinkBPMMilli
@@ -376,7 +382,7 @@ public enum LiveWorkspacePresenter {
             let last = Double($0.lastDispatchLatenessMicros) / 1_000
             return " · realtime p95 \(p95.formatted(.number.precision(.fractionLength(1)))) ms · last \(last.formatted(.number.precision(.fractionLength(1)))) ms · \($0.lateDispatchCount) late"
         } ?? ""
-        return "\(midi.sourceName) · auto-publish \(midi.autoPublishEnabled ? "on" : "off") · \(midi.sentPulseCount) pulses\(bank) · timing \(offset) saved\(pending) · phrase-boundary output · bank pre-roll \(midi.bankPreRollMillis) ms\(realtime)"
+        return "\(midi.sourceName) · auto-publish \(midi.autoPublishEnabled ? "on" : "off") · \(midi.sentPulseCount) pulses\(bank) · timing \(offset) applied\(pending) · phrase-boundary output · bank pre-roll \(midi.bankPreRollMillis) ms\(realtime)"
     }
 
     private static func abletonLinkDetail(_ snapshot: EngineSnapshot) -> String {
@@ -516,6 +522,8 @@ public enum LiveWorkspacePresenter {
             operationState: snapshot.operationState,
             lightingTimingOffsetMillis: snapshot.midiIntegration?.timingOffsetMillis ?? 0,
             pendingLightingTimingOffsetMillis: snapshot.midiIntegration?.pendingTimingOffsetMillis,
+            lightingTimingSavePending: snapshot.midiIntegration?.timingSavePending ?? false,
+            lightingTimingSaveError: snapshot.midiIntegration?.timingSaveError,
             abletonLinkEnabled: snapshot.abletonLinkIntegration?.enabled ?? false,
             abletonLinkState: snapshot.abletonLinkIntegration?.state ?? "stopped",
             abletonLinkBPMMilli: snapshot.abletonLinkIntegration?.bpmMilli,
