@@ -255,17 +255,50 @@ impl RemoteLiveProjection {
         projection_revision: u64,
         observed_at_unix_millis: u64,
     ) -> Result<Self, ProjectionError> {
-        let wire: EngineSnapshotWire = serde_json::from_value(Value::Object(payload.clone()))
-            .map_err(|error| ProjectionError::InvalidEngineSnapshot(error.to_string()))?;
+        let mut wire: EngineSnapshotWire =
+            serde_json::from_value(Value::Object(payload.clone()))
+                .map_err(|error| ProjectionError::InvalidEngineSnapshot(error.to_string()))?;
         if wire.kind != "stateSnapshot" || wire.deck_source.mode != "connectedDecks" {
             return Err(ProjectionError::NotConnectedDecks);
         }
+        // Remote has two visible Player surfaces, not a two-device network
+        // limit. Prefer the authoritative Master and prepared plans, then fill
+        // unused positions in stable Player-number order.
+        let mut selected = Vec::with_capacity(MAX_REMOTE_PLAYERS);
+        let mut candidates = wire
+            .decks
+            .iter()
+            .map(|deck| deck.deck_id)
+            .collect::<Vec<_>>();
+        candidates.sort_unstable();
+        for candidate in wire
+            .leader_deck_id
+            .into_iter()
+            .chain(wire.live_plan.as_ref().map(|plan| plan.deck_id))
+            .chain(wire.next_plan.as_ref().map(|plan| plan.deck_id))
+            .chain(candidates)
+        {
+            if selected.len() < MAX_REMOTE_PLAYERS
+                && !selected.contains(&candidate)
+                && wire.decks.iter().any(|deck| deck.deck_id == candidate)
+            {
+                selected.push(candidate);
+            }
+        }
+        wire.decks.retain(|deck| selected.contains(&deck.deck_id));
+        wire.leader_deck_id = wire.leader_deck_id.filter(|id| selected.contains(id));
+        wire.live_plan = wire
+            .live_plan
+            .filter(|plan| selected.contains(&plan.deck_id));
+        wire.next_plan = wire
+            .next_plan
+            .filter(|plan| selected.contains(&plan.deck_id));
         let players = wire
             .decks
             .into_iter()
             .map(|deck| deck.into_remote(observed_at_unix_millis))
             .collect::<Result<Vec<_>, _>>()?;
-        let projection = Self {
+        let mut projection = Self {
             projection_revision,
             state_revision: wire.state_revision,
             engine_version: wire.engine_version,
@@ -336,8 +369,50 @@ impl RemoteLiveProjection {
                 })
                 .collect(),
         };
+        projection.normalize_display_text();
         projection.validate()?;
         Ok(projection)
+    }
+
+    fn normalize_display_text(&mut self) {
+        for player in &mut self.players {
+            if let Some(model) = &mut player.hardware_model {
+                *model = display_text(model, 96);
+            }
+            player.track.title = display_text(&player.track.title, 512);
+            player.track.artist = display_text(&player.track.artist, 512);
+            for phrase in &mut player.track.phrases {
+                if let Some(name) = &mut phrase.role_name {
+                    *name = display_text(name, 128);
+                }
+            }
+        }
+        for theme in &mut self.theme_options {
+            theme.name = display_text(&theme.name, 128);
+        }
+        for role in &mut self.phrase_role_options {
+            role.name = display_text(&role.name, 128);
+        }
+        for plan in [&mut self.live_plan, &mut self.next_plan]
+            .into_iter()
+            .flatten()
+        {
+            for cue in &mut plan.cues {
+                for name in [
+                    &mut cue.theme_name,
+                    &mut cue.autoloop_name,
+                    &mut cue.static_look_name,
+                ]
+                .into_iter()
+                .flatten()
+                {
+                    *name = display_text(name, 256);
+                }
+                for choice in &mut cue.available_autoloops {
+                    choice.name = display_text(&choice.name, 256);
+                }
+            }
+        }
     }
 
     pub fn validate(&self) -> Result<(), ProjectionError> {
@@ -489,6 +564,17 @@ impl RemoteLightPlan {
         }
         Ok(())
     }
+}
+
+fn display_text(value: &str, maximum: usize) -> String {
+    let mut text = String::new();
+    for character in value.chars().filter(|character| !character.is_control()) {
+        if text.len() + character.len_utf8() > maximum {
+            break;
+        }
+        text.push(character);
+    }
+    text
 }
 
 fn operation_state(value: &str) -> Result<OperationState, ProjectionError> {

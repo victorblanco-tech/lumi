@@ -16,6 +16,10 @@ You need:
 Local Playback, Track Editor and Light Plan preview work without players. Lumi
 runs locally and does not need internet access during normal use.
 
+To exercise Live Decks without physical players, use the separate
+[Pro DJ Link Simulator](pro-dj-link-simulator.md) on another Mac. It supports
+two Players, track loops and playlist-driven Auto Mix for longer tests.
+
 ## 1. Install Lumi
 
 1. Download the DMG and matching SHA-256 checksum from

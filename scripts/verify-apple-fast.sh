@@ -20,13 +20,37 @@ export SWIFTPM_MODULECACHE_OVERRIDE="$module_cache"
 cd "$repository_root"
 
 swift test -Xswiftc -warnings-as-errors --package-path apps/macos/Packages/LumiProtocol
-# LumiEngineClient includes real-process integration tests and therefore belongs
-# to verify-apple.sh after the release engine/helper runtimes are prepared.
+# Compile the complete client test target and run its process-independent
+# contract/safety tests. Real CoreMIDI tests still require exclusive ownership
+# in verify-apple.sh; this development gate must be safe beside a running app.
+swift test --no-parallel -Xswiftc -warnings-as-errors \
+  --package-path apps/macos/Packages/LumiEngineClient \
+  --filter 'EngineCommandTests|EngineSafetyBoundaryTests|decodesCommandFailure|remoteGatewayAdminWireContract'
 swift test -Xswiftc -warnings-as-errors --package-path apps/macos/Packages/LumiDesignSystem
 swift test -Xswiftc -warnings-as-errors --package-path apps/macos/Packages/LumiLiveWorkspace
 swift test -Xswiftc -warnings-as-errors --package-path apps/macos/Packages/LumiLibraryWorkspace
 swift test -Xswiftc -warnings-as-errors --package-path apps/ios/Packages/LumiRemoteClient
 swift test -Xswiftc -warnings-as-errors --package-path apps/ios/Packages/LumiRemoteFeature
+
+# Package tests alone cannot catch app-only SwiftUI compilation failures.
+# This builds, but never launches, the actual macOS app and bundled helpers.
+xcodebuild \
+  -project apps/macos/Lumi.xcodeproj \
+  -scheme Lumi \
+  -configuration Dev \
+  -destination 'platform=macOS,arch=arm64' \
+  -derivedDataPath build/DevDerivedData \
+  CODE_SIGNING_ALLOWED=NO \
+  GCC_TREAT_WARNINGS_AS_ERRORS=YES \
+  -quiet \
+  build
+
+mac_info_plist="build/DevDerivedData/Build/Products/Dev/Lumi.app/Contents/Info.plist"
+[[ -f "$mac_info_plist" ]] || { echo "ERROR: Lumi macOS app was not built." >&2; exit 1; }
+[[ "$(/usr/libexec/PlistBuddy -c 'Print :LumiProductVersion' "$mac_info_plist")" == "$(tr -d '[:space:]' < VERSION)" ]] || {
+  echo "ERROR: built Lumi macOS version differs from VERSION." >&2
+  exit 1
+}
 
 xcodebuild \
   -project apps/ios/LumiRemote.xcodeproj \

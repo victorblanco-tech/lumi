@@ -7,6 +7,7 @@ license.workspace = true
 
 [dependencies]
 lumi-remote-protocol = { path = "../lumi-remote-protocol" }
+lumi-stream = { path = "../lumi-stream" }
 mdns-sd = "0.21.1"
 rcgen = "0.14.10"
 serde = { version = "1", features = ["derive"] }

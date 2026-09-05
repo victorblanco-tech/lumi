@@ -212,6 +212,14 @@ public final class RemoteSessionModel {
         pairingShortCode = nil
     }
 
+    /// The authenticated transport/lease is still valid, but its last engine
+    /// state is not. Keep the visible Players as stale and wait for fresh state.
+    public func awaitingSnapshot(from macName: String, at date: Date = .now) {
+        connectionPhase = .reconnecting(macName: macName, staleSince: date)
+        pendingCommandIDs.removeAll()
+        pairingShortCode = nil
+    }
+
     public func unavailable(_ reason: String? = nil) {
         connectionPhase = .unavailable
         pendingCommandIDs.removeAll()

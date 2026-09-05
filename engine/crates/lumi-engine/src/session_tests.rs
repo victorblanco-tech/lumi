@@ -10,6 +10,49 @@ use lumi_remote_protocol::{
 use lumi_simulator::{SimulationControl, SimulationSpeed};
 
 #[test]
+fn expired_or_abandoned_remote_commands_cannot_mutate_the_show()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut runtime = initialized_runtime()?;
+    let revision = runtime.state.state().revision();
+    let command = RemoteCommand {
+        command_id: "expired-offset".to_owned(),
+        controller_lease_id: "lease-1".to_owned(),
+        issued_at_unix_millis: 1,
+        command: RemoteCommandKind::SetOutputTimingOffset {
+            millis: -120,
+            expected_state_revision: revision.value(),
+        },
+    };
+    let offset = runtime.output_worker.timing_offset_millis;
+    let (response, mut receiver) = tokio::sync::oneshot::channel();
+    apply_remote_command_request(
+        &mut runtime,
+        RemoteCommandRequest {
+            command: command.clone(),
+            expires_at: Instant::now() - Duration::from_millis(1),
+            response,
+        },
+    );
+    assert_eq!(
+        receiver.try_recv()?.reason_code.as_deref(),
+        Some("commandExpired")
+    );
+    let (response, receiver) = tokio::sync::oneshot::channel();
+    drop(receiver);
+    apply_remote_command_request(
+        &mut runtime,
+        RemoteCommandRequest {
+            command,
+            expires_at: Instant::now() + Duration::from_secs(2),
+            response,
+        },
+    );
+    assert_eq!(runtime.state.state().revision(), revision);
+    assert_eq!(runtime.output_worker.timing_offset_millis, offset);
+    Ok(())
+}
+
+#[test]
 fn remote_anchor_preserves_the_canonical_monotonic_observation_time() {
     let now = Instant::now();
     let observed = now.checked_sub(Duration::from_millis(37)).unwrap_or(now);
@@ -168,9 +211,7 @@ fn remote_publisher_is_unavailable_outside_connected_players() {
     let (latest, latest_receiver) = watch::channel(None);
     let (updates, _) = broadcast::channel(8);
     let mut publisher = RemoteProjectionPublisher::new(latest, updates);
-    publisher
-        .publish(&runtime, true)
-        .unwrap_or_else(|error| panic!("publisher must remain fail closed: {error}"));
+    publisher.publish(&runtime, true);
     assert!(latest_receiver.borrow().is_none());
 }
 
@@ -182,9 +223,7 @@ fn remote_publisher_exposes_only_the_connected_live_projection() {
     let (latest, latest_receiver) = watch::channel(None);
     let (updates, _) = broadcast::channel(8);
     let mut publisher = RemoteProjectionPublisher::new(latest, updates);
-    publisher
-        .publish(&runtime, true)
-        .unwrap_or_else(|error| panic!("publisher must create projection: {error}"));
+    publisher.publish(&runtime, true);
     let projection = latest_receiver
         .borrow()
         .clone()
@@ -202,6 +241,83 @@ fn carabiner_control_port_stays_inside_helpers_valid_range() {
     assert_eq!(
         first_available_loopback_port_in(std::iter::empty(), |_| true),
         None
+    );
+}
+
+#[test]
+fn remote_projection_failure_is_nonfatal_and_recovers_without_changing_the_show() {
+    let mut runtime = initialized_runtime().unwrap_or_else(|error| panic!("runtime: {error}"));
+    runtime.deck_source_mode = DeckSourceMode::ConnectedDecks;
+    let (latest, receiver) = watch::channel(None);
+    let (updates, _) = broadcast::channel(8);
+    let mut publisher = RemoteProjectionPublisher::new(latest, updates);
+    publisher.publish(&runtime, true);
+    assert!(receiver.borrow().is_some());
+    let revision = runtime.state.state().revision();
+    let operation = runtime.state.state().operation();
+    // Fault injection at the presentation contract: an invalid projected
+    // offset must affect only Remote, regardless of how it entered the data.
+    runtime.output_worker.timing_offset_millis = 251;
+    publisher.publish(&runtime, true);
+    assert!(receiver.borrow().is_none());
+    assert!(publisher.last_error.is_some());
+    assert_eq!(runtime.state.state().revision(), revision);
+    assert_eq!(runtime.state.state().operation(), operation);
+    runtime.output_worker.timing_offset_millis = 0;
+    publisher.publish(&runtime, true);
+    assert!(receiver.borrow().is_some());
+    assert!(publisher.last_error.is_none());
+    assert_eq!(runtime.state.state().revision(), revision);
+}
+
+#[test]
+fn remote_selects_two_players_from_actual_engine_snapshot_and_normalizes_only_display_text() {
+    let mut runtime = initialized_runtime().unwrap_or_else(|error| panic!("runtime: {error}"));
+    runtime.deck_source_mode = DeckSourceMode::ConnectedDecks;
+    let mut snapshot = snapshot_envelope_for_remote(&runtime, 1, "remote-extra-players")
+        .unwrap_or_else(|error| panic!("snapshot: {error}"));
+    let third = {
+        let mut player = snapshot.payload["decks"][0].clone();
+        player["deckId"] = json!(3);
+        player["track"]["title"] = json!(format!("{}\n", "🎵".repeat(200)));
+        player
+    };
+    snapshot
+        .payload
+        .get_mut("decks")
+        .and_then(Value::as_array_mut)
+        .unwrap_or_else(|| panic!("decks required"))
+        .push(third);
+    // Preserve the existing Live/Next pair even with an additional device.
+    let projection = RemoteLiveProjection::from_engine_snapshot_payload(&snapshot.payload, 1, 1000)
+        .unwrap_or_else(|error| panic!("projection: {error}"));
+    assert_eq!(projection.players.len(), 2);
+    assert!(
+        !projection
+            .players
+            .iter()
+            .any(|player| player.player_number == 3)
+    );
+    snapshot.payload.insert("leaderDeckId".into(), json!(3));
+    let projection = RemoteLiveProjection::from_engine_snapshot_payload(&snapshot.payload, 2, 1000)
+        .unwrap_or_else(|error| panic!("projection: {error}"));
+    let master = projection
+        .players
+        .iter()
+        .find(|player| player.player_number == 3)
+        .unwrap_or_else(|| panic!("new Master must be included"));
+    assert_eq!(master.track.title.len(), 512);
+    assert!(
+        master
+            .track
+            .title
+            .chars()
+            .all(|character| !character.is_control())
+    );
+    assert!(
+        snapshot.payload["decks"][2]["track"]["title"]
+            .as_str()
+            .is_some_and(|text| text.len() > 512)
     );
 }
 
@@ -513,8 +629,7 @@ fn integration_pump_metrics_detect_starvation_without_unbounded_samples() {
 #[tokio::test]
 async fn command_reader_retains_partial_input_when_timing_tick_cancels_the_read() {
     let (mut client, server) = tokio::io::duplex(128);
-    let mut reader = BufReader::new(server);
-    let mut buffer = Vec::new();
+    let mut reader = lumi_stream::BoundedLineReader::new(BufReader::new(server));
     client
         .write_all(b"{\"partial\":")
         .await
@@ -522,21 +637,20 @@ async fn command_reader_retains_partial_input_when_timing_tick_cancels_the_read(
 
     let interrupted = tokio::time::timeout(
         Duration::from_millis(5),
-        read_command_line(&mut reader, &mut buffer),
+        reader.next_line(MAX_MESSAGE_BYTES),
     )
     .await;
     assert!(interrupted.is_err());
-    assert_eq!(buffer, b"{\"partial\":");
 
     client
         .write_all(b"true}\n")
         .await
         .unwrap_or_else(|error| panic!("remaining command should write: {error}"));
-    let line = read_command_line(&mut reader, &mut buffer)
+    let line = reader
+        .next_line(MAX_MESSAGE_BYTES)
         .await
         .unwrap_or_else(|error| panic!("command should complete: {error}"));
     assert_eq!(line.as_deref(), Some(b"{\"partial\":true}".as_slice()));
-    assert!(buffer.is_empty());
 }
 
 #[test]

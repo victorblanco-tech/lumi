@@ -1,5 +1,10 @@
 # Lumi Pro DJ Link Simulator
 
+For installation, Player controls, loops and playlist-driven Auto Mix, start
+with the [user guide](../../docs/user-guide/pro-dj-link-simulator.md). This page
+documents development builds and their API; fault injection and Recovery Soak
+may not be available in an older installed release.
+
 This is a self-contained, two-player USB-backed network simulator for testing
 Lumi without physical CDJs. It intentionally simulates only the Pro DJ Link facts consumed
 by Lumi:

@@ -63,10 +63,8 @@ use subtle::ConstantTimeEq as _;
 use thiserror::Error;
 use time::OffsetDateTime;
 use time::format_description::well_known::Rfc3339;
-use tokio::io::{
-    AsyncBufRead, AsyncBufReadExt as _, AsyncRead, AsyncReadExt as _, AsyncWriteExt as _, BufReader,
-};
-use tokio::net::{TcpListener, TcpStream};
+use tokio::io::{AsyncRead, AsyncReadExt as _, AsyncWriteExt as _, BufReader};
+use tokio::net::TcpListener;
 use tokio::sync::{broadcast, mpsc, watch};
 use tokio::time::{MissedTickBehavior, timeout};
 
@@ -84,6 +82,10 @@ use crate::link_relay::{
 };
 use crate::remote_ipc::{EngineRemoteUpdate, RemoteCommandRequest};
 use crate::service::{ServiceBootstrap, ServiceBootstrapError, derive_remote_gateway_token};
+
+#[path = "desktop_io.rs"]
+mod desktop_io;
+use desktop_io::{AuthenticatedConnection, DesktopAcceptor, DesktopClientIo};
 
 const EXIT_AFTER_CLIENT_DISCONNECT_ENVIRONMENT_KEY: &str = "LUMI_EXIT_AFTER_CLIENT_DISCONNECT";
 #[cfg(not(test))]
@@ -148,10 +150,11 @@ pub async fn run() -> Result<(), EngineError> {
     ));
     let mut remote_publisher =
         RemoteProjectionPublisher::new(latest_remote_projection, remote_updates);
-    remote_publisher.publish(&runtime, true)?;
+    remote_publisher.publish(&runtime, true);
     let _service_record =
         service.publish_record(endpoint.port(), remote_gateway_endpoint.port())?;
     write_startup_record(endpoint.port())?;
+    let mut desktop_clients = DesktopAcceptor::start(listener, session_token);
     let mut termination =
         tokio::signal::unix::signal(tokio::signal::unix::SignalKind::terminate())?;
 
@@ -161,11 +164,11 @@ pub async fn run() -> Result<(), EngineError> {
     loop {
         let accepted = tokio::select! {
             _ = termination.recv() => break,
-            accepted = listener.accept() => Some(accepted?),
+            accepted = desktop_clients.next() => accepted,
             request = remote_command_receiver.recv() => {
                 if let Some(request) = request {
                     apply_remote_command_request(&mut runtime, request);
-                    remote_publisher.publish(&runtime, true)?;
+                    remote_publisher.publish(&runtime, true);
                 }
                 None
             }
@@ -175,19 +178,15 @@ pub async fn run() -> Result<(), EngineError> {
                 runtime
                     .output_worker
                     .service_pending_autoloop();
-                remote_publisher.publish(&runtime, false)?;
+                remote_publisher.publish(&runtime, false);
                 None
             }
         };
-        let Some((stream, peer)) = accepted else {
+        let Some(connection) = accepted else {
             continue;
         };
-        if !peer.ip().is_loopback() {
-            continue;
-        }
         match serve_authenticated_client(
-            stream,
-            &session_token,
+            connection,
             &mut runtime,
             &mut termination,
             &mut remote_command_receiver,
@@ -246,37 +245,20 @@ fn write_startup_record(port: u16) -> Result<(), EngineError> {
 }
 
 async fn serve_authenticated_client(
-    stream: TcpStream,
-    expected_token: &str,
+    connection: AuthenticatedConnection,
     runtime: &mut EngineRuntime,
     termination: &mut tokio::signal::unix::Signal,
     remote_commands: &mut mpsc::Receiver<RemoteCommandRequest>,
     remote_publisher: &mut RemoteProjectionPublisher,
 ) -> Result<AuthenticatedClientExit, EngineError> {
-    let (mut reader, mut writer) = stream.into_split();
-    let authentication_bytes = timeout(
-        AUTHENTICATION_TIMEOUT,
-        read_bounded_line(&mut reader, MAXIMUM_AUTHENTICATION_BYTES),
-    )
-    .await
-    .map_err(|_| EngineError::AuthenticationTimeout)??;
-    let authentication: SessionAuthentication = serde_json::from_slice(&authentication_bytes)
-        .map_err(|_| EngineError::InvalidAuthentication)?;
-
-    if !tokens_match(expected_token, &authentication.session_token) {
-        return Err(EngineError::AuthenticationRejected);
-    }
-
+    let mut client = DesktopClientIo::start(connection);
     let mut response_sequence = 1_u64;
-    write_envelope(
-        &mut writer,
-        &snapshot_envelope(runtime, response_sequence, "session-bootstrap")?,
-    )
-    .await
-    .map_err(authenticated_client_error)?;
+    client.respond(snapshot_envelope(
+        runtime,
+        response_sequence,
+        "session-bootstrap",
+    )?)?;
     let mut command_ids = CommandIdCache::new(COMMAND_ID_CACHE_CAPACITY)?;
-    let mut command_reader = BufReader::new(reader);
-    let mut command_buffer = Vec::with_capacity(256);
     let mut integration_pump = tokio::time::interval(INTEGRATION_PUMP_INTERVAL);
     integration_pump.set_missed_tick_behavior(MissedTickBehavior::Skip);
     // The first interval tick is immediately ready. Consume it so deck input
@@ -298,16 +280,16 @@ async fn serve_authenticated_client(
                 runtime
                     .output_worker
                     .service_pending_autoloop();
-                remote_publisher.publish(runtime, false)?;
+                remote_publisher.publish(runtime, false);
             }
             request = remote_commands.recv() => {
                 if let Some(request) = request {
                     apply_remote_command_request(runtime, request);
-                    remote_publisher.publish(runtime, true)?;
+                    remote_publisher.publish(runtime, true);
                 }
             }
-            command = read_command_line(&mut command_reader, &mut command_buffer) => {
-                let Some(command_bytes) = command.map_err(authenticated_client_error)? else {
+            command = client.next_command() => {
+                let Some(command_bytes) = command? else {
                     return Ok(AuthenticatedClientExit::Disconnected);
                 };
                 response_sequence = response_sequence
@@ -327,14 +309,12 @@ async fn serve_authenticated_client(
                         None,
                     )?,
                 };
-                write_envelope(&mut writer, &response)
-                    .await
-                    .map_err(authenticated_client_error)?;
+                client.respond(response)?;
                 // Desktop snapshot polling is not a remote-state mutation.
                 // Let the publisher's static key decide whether a complete
                 // projection is needed so waveform payloads never enter the
                 // realtime path at the UI polling cadence.
-                remote_publisher.publish(runtime, false)?;
+                remote_publisher.publish(runtime, false);
             }
         }
     }
@@ -356,40 +336,6 @@ where
     writer.write_all(&encoded).await?;
     writer.flush().await?;
     Ok(())
-}
-
-async fn read_command_line<R>(
-    reader: &mut R,
-    bytes: &mut Vec<u8>,
-) -> Result<Option<Vec<u8>>, EngineError>
-where
-    R: AsyncBufRead + Unpin,
-{
-    loop {
-        let available = reader.fill_buf().await?;
-        if available.is_empty() {
-            if bytes.is_empty() {
-                return Ok(None);
-            }
-            return Err(EngineError::Io(io::Error::new(
-                io::ErrorKind::UnexpectedEof,
-                "command ended before a newline",
-            )));
-        }
-        let newline = available.iter().position(|byte| *byte == b'\n');
-        let payload_length = newline.unwrap_or(available.len());
-        if bytes.len().saturating_add(payload_length) > MAX_MESSAGE_BYTES {
-            return Err(EngineError::MessageOversized);
-        }
-        bytes.extend_from_slice(&available[..payload_length]);
-        let consumed = payload_length.saturating_add(usize::from(newline.is_some()));
-        reader.consume(consumed);
-        if newline.is_some() {
-            let line = bytes.clone();
-            bytes.clear();
-            return Ok(Some(line));
-        }
-    }
 }
 
 async fn read_bounded_line<R>(reader: &mut R, maximum: usize) -> Result<Vec<u8>, EngineError>
@@ -557,6 +503,8 @@ struct RemoteProjectionPublisher {
     last_publish: Option<Instant>,
     next_projection_revision: u64,
     available: bool,
+    last_error: Option<String>,
+    failed_key: Option<RemoteStaticKey>,
 }
 
 impl RemoteProjectionPublisher {
@@ -572,10 +520,33 @@ impl RemoteProjectionPublisher {
             last_publish: None,
             next_projection_revision: 1,
             available: false,
+            last_error: None,
+            failed_key: None,
         }
     }
 
-    fn publish(&mut self, runtime: &EngineRuntime, force: bool) -> Result<(), EngineError> {
+    /// Remote is a fallible observer, never a show-lifecycle authority. The
+    /// infallible outer API prevents callers from propagating display errors.
+    fn publish(&mut self, runtime: &EngineRuntime, force: bool) {
+        if !force && self.failed_key.as_ref() == Some(&remote_static_key(runtime)) {
+            return;
+        }
+        if let Err(error) = self.try_publish(runtime, force) {
+            let message = error.to_string();
+            if self.last_error.as_ref() != Some(&message) {
+                eprintln!("Lumi Remote projection unavailable; show continues: {message}");
+            }
+            self.last_error = Some(message);
+            self.failed_key = Some(remote_static_key(runtime));
+            self.available = false;
+            self.last_static_key = None;
+            self.last_anchors.clear();
+            self.latest_projection.send_replace(None);
+            let _ = self.updates.send(EngineRemoteUpdate::Unavailable);
+        }
+    }
+
+    fn try_publish(&mut self, runtime: &EngineRuntime, force: bool) -> Result<(), EngineError> {
         if runtime.deck_source_mode != DeckSourceMode::ConnectedDecks {
             if self.available {
                 self.available = false;
@@ -610,6 +581,8 @@ impl RemoteProjectionPublisher {
                 observed_at,
             )?;
             self.next_projection_revision = self.next_projection_revision.saturating_add(1);
+            self.last_error = None;
+            self.failed_key = None;
             self.last_static_key = Some(static_key);
             self.last_anchors = projection
                 .players
@@ -626,6 +599,11 @@ impl RemoteProjectionPublisher {
 
         let observed_at = unix_time_millis();
         for (player_number, anchor) in remote_transport_anchors(runtime, observed_at) {
+            // A two-Player client must never receive anchors for extra Players
+            // that were intentionally omitted from its static projection.
+            if !self.last_anchors.contains_key(&player_number) {
+                continue;
+            }
             let unchanged = self
                 .last_anchors
                 .get(&player_number)
@@ -2764,6 +2742,22 @@ fn handle_command(
 }
 
 fn apply_remote_command_request(runtime: &mut EngineRuntime, request: RemoteCommandRequest) {
+    // A timed-out caller must not produce a surprise mutation when a queued
+    // request finally reaches the sole show-state writer. The local deadline
+    // is independent of the phone's clock.
+    if request.response.is_closed() {
+        return;
+    }
+    if Instant::now() >= request.expires_at {
+        let _ = request.response.send(RemoteCommandResult {
+            command_id: request.command.command_id,
+            status: RemoteCommandResultStatus::Rejected,
+            state_revision: Some(runtime.state.state().revision().value()),
+            plan_revision: None,
+            reason_code: Some("commandExpired".to_owned()),
+        });
+        return;
+    }
     let result = apply_remote_command(runtime, request.command);
     let _ = request.response.send(result);
 }

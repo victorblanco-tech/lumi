@@ -33,7 +33,7 @@ cargo test --locked -p lumi-domain --test reducer_runtime
 cargo test --locked --release -p lumi-planner \
   two_hundred_phrase_plan_completes_within_epic_one_budget
 cargo test --locked --release -p lumi-library-sqlite --test repository \
-  ten_thousand_track_fixture_meets_epic_two_a_budgets -- --exact --nocapture
+  ten_thousand_track_fixture_meets_epic_two_a_budgets -- --exact --ignored --nocapture
 cargo test --locked --release -p lumi-prolink-input \
   supervisor::tests::fifty_thousand_status_updates_remain_constant_space_and_within_budget \
   -- --exact --nocapture

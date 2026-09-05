@@ -39,7 +39,10 @@ async fn run() -> Result<(), Box<dyn Error>> {
     let identity = InstallationIdentity::load_or_create(&remote_directory.join("Identity"))?;
     let trust_store = PersistentTrustStore::new(remote_directory.join("trust.json"));
     let state = SharedGatewayState::load(identity, trust_store)?;
-    let relay = EngineRelayHandle::start(data_directory.join(ENGINE_SERVICE_RECORD));
+    let relay = EngineRelayHandle::start(
+        data_directory.join(ENGINE_SERVICE_RECORD),
+        state.command_guard.clone(),
+    );
     let display_name = display_name();
     let network = GatewayNetworkServer::bind(
         state.clone(),

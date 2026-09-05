@@ -21,6 +21,7 @@ booth while the Mac remains fully responsible for the show.
 [Download Lumi](https://github.com/victorblanco-tech/lumi/releases) ·
 [Read the user guide](user-guide/) ·
 [Use Lumi Remote](user-guide/iphone-remote.md) ·
+[Try the Simulator](user-guide/pro-dj-link-simulator.md) ·
 [Report an issue](https://github.com/victorblanco-tech/lumi/issues)
 
 > **Public Beta:** Lumi is ready for structured field testing across different

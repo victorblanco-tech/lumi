@@ -249,6 +249,80 @@ fn missing_timeline_query_returns_only_tracks_that_still_need_mapping() -> Resul
 }
 
 #[test]
+fn historical_backup_is_migrated_before_activation_without_modifying_the_backup()
+-> Result<(), Box<dyn Error>> {
+    let backup_path = temporary_database_path()?;
+    let rollback_path = temporary_database_path()?;
+    let old = Connection::open(&backup_path)?;
+    old.execute_batch(include_str!(
+        "../../../../fixtures/library-schema-v13/empty.sql"
+    ))?;
+    drop(old);
+    let mut repository = SqliteLibraryRepository::in_memory()?;
+    repository.import_baseline(&DemoLibrarySourceProvider::scaled(1)?.load_baseline()?)?;
+    repository.restore_consistent_backup(&backup_path, &rollback_path)?;
+    assert_eq!(repository.schema_version()?, 18);
+    assert!(
+        repository
+            .device_audio_uris(lumi_domain::TrackId::new(1))?
+            .is_empty()
+    );
+    assert!(repository.track_workflow_catalog().is_ok());
+    assert_eq!(
+        repository
+            .page_tracks(TrackPageRequest::try_new(0, 25)?)?
+            .total(),
+        0
+    );
+    assert_eq!(
+        SqliteLibraryRepository::open(&rollback_path)?
+            .page_tracks(TrackPageRequest::try_new(0, 25)?)?
+            .total(),
+        1
+    );
+    let original = Connection::open(&backup_path)?;
+    assert_eq!(
+        original.query_row("PRAGMA user_version", [], |row| row.get::<_, u32>(0))?,
+        13
+    );
+    drop(original);
+    std::fs::remove_file(backup_path)?;
+    std::fs::remove_file(rollback_path)?;
+    Ok(())
+}
+
+#[test]
+fn failed_backup_migration_preserves_current_library_and_does_not_create_rollback()
+-> Result<(), Box<dyn Error>> {
+    let backup_path = temporary_database_path()?;
+    let rollback_path = temporary_database_path()?;
+    let invalid = Connection::open(&backup_path)?;
+    invalid.execute_batch(include_str!(
+        "../../../../fixtures/library-schema-v13/empty.sql"
+    ))?;
+    // Valid SQLite integrity and four core tables, but migration cannot run.
+    invalid.execute_batch("DROP TABLE device_library_track_aliases;")?;
+    drop(invalid);
+    let mut repository = SqliteLibraryRepository::in_memory()?;
+    repository.import_baseline(&DemoLibrarySourceProvider::scaled(1)?.load_baseline()?)?;
+    assert!(
+        repository
+            .restore_consistent_backup(&backup_path, &rollback_path)
+            .is_err()
+    );
+    assert_eq!(repository.schema_version()?, 18);
+    assert_eq!(
+        repository
+            .page_tracks(TrackPageRequest::try_new(0, 25)?)?
+            .total(),
+        1
+    );
+    assert!(!rollback_path.exists());
+    std::fs::remove_file(backup_path)?;
+    Ok(())
+}
+
+#[test]
 fn migrates_version_one_timeline_history_without_losing_rows() -> Result<(), Box<dyn Error>> {
     let path = temporary_database_path()?;
     {

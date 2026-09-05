@@ -17,6 +17,8 @@
   ·
   <a href="docs/user-guide/iphone-remote.md">iPhone Remote</a>
   ·
+  <a href="docs/user-guide/pro-dj-link-simulator.md">Simulator</a>
+  ·
   <a href="https://github.com/victorblanco-tech/lumi/issues">Report an issue</a>
 </p>
 

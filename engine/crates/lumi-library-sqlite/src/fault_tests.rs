@@ -1299,7 +1299,7 @@ fn stable_filesystem_identity_replaces_ephemeral_mount_records_atomically()
 }
 
 #[test]
-fn changed_filesystem_uuid_consolidates_only_an_equivalent_named_usb()
+fn independent_filesystem_identities_preserve_equal_labels_and_identical_contents()
 -> Result<(), Box<dyn std::error::Error>> {
     let baseline = DemoLibrarySourceProvider::curated().load_baseline()?;
     let mut repository = SqliteLibraryRepository::in_memory()?;
@@ -1362,11 +1362,11 @@ fn changed_filesystem_uuid_consolidates_only_an_equivalent_named_usb()
         &[],
         &[],
     )?;
-    assert_eq!(repository.device_source_summaries()?.len(), 1);
-    assert_eq!(
-        repository.device_audio_uris(track_ids[0])?,
-        vec!["file://localhost/Volumes/DJ%20VIC%20GRAY/Track.mp3"]
-    );
+    assert_eq!(repository.device_source_summaries()?.len(), 2);
+    let locations = repository.device_audio_uris(track_ids[0])?;
+    assert_eq!(locations.len(), 2);
+    assert!(locations.contains(&"file://localhost/Volumes/DJ%20VIC%20GRAY/Track.mp3".to_owned()));
+    assert!(locations.contains(&"file://localhost/Volumes/Old%20Gray/Track.mp3".to_owned()));
 
     let mut different_aliases = vec![alias_for(
         track_ids[1],
@@ -1382,7 +1382,7 @@ fn changed_filesystem_uuid_consolidates_only_an_equivalent_named_usb()
         &[],
         &[],
     )?;
-    assert_eq!(repository.device_source_summaries()?.len(), 2);
+    assert_eq!(repository.device_source_summaries()?.len(), 3);
     Ok(())
 }
 

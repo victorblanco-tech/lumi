@@ -8,10 +8,11 @@ use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
+use lumi_stream::BoundedLineReader;
 use serde::{Deserialize, Serialize};
 use subtle::ConstantTimeEq as _;
 use thiserror::Error;
-use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
+use tokio::io::{AsyncWriteExt as _, BufReader};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::time::timeout;
 
@@ -193,7 +194,7 @@ async fn serve_admin_client(
     lan_port: u16,
 ) -> Result<(), GatewayAdminError> {
     let (reader, mut writer) = stream.into_split();
-    let mut reader = BufReader::new(reader);
+    let mut reader = BoundedLineReader::new(BufReader::new(reader));
     let authentication = timeout(
         ADMIN_AUTHENTICATION_TIMEOUT,
         read_bounded_json::<AdminAuthentication>(&mut reader),
@@ -366,22 +367,15 @@ async fn status(
 }
 
 async fn read_bounded_json<T>(
-    reader: &mut (impl tokio::io::AsyncBufRead + Unpin),
+    reader: &mut BoundedLineReader<impl tokio::io::AsyncBufRead + Unpin>,
 ) -> Result<T, GatewayAdminError>
 where
     T: for<'de> Deserialize<'de>,
 {
-    let mut bytes = Vec::with_capacity(512);
-    let read = reader.read_until(b'\n', &mut bytes).await?;
-    if read == 0 {
-        return Err(GatewayAdminError::UnexpectedEnd);
-    }
-    if bytes.len() > MAXIMUM_ADMIN_LINE_BYTES.saturating_add(1) {
-        return Err(GatewayAdminError::Oversized);
-    }
-    if bytes.last() == Some(&b'\n') {
-        bytes.pop();
-    }
+    let bytes = reader
+        .next_line(MAXIMUM_ADMIN_LINE_BYTES)
+        .await?
+        .ok_or(GatewayAdminError::UnexpectedEnd)?;
     Ok(serde_json::from_slice(&bytes)?)
 }
 
@@ -520,7 +514,10 @@ mod tests {
             identity,
             PersistentTrustStore::new(directory.join("trust.json")),
         )?;
-        let relay = EngineRelayHandle::start(directory.join("missing-engine-record.json"));
+        let relay = EngineRelayHandle::start(
+            directory.join("missing-engine-record.json"),
+            state.command_guard.clone(),
+        );
         let record_path = directory.join("admin.json");
         let (server, _record_guard) = GatewayAdminServer::bind(
             state,

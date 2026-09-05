@@ -11,9 +11,10 @@ use std::path::Path;
 use lumi_remote_protocol::{
     MAX_REMOTE_FRAME_BYTES, REMOTE_PROTOCOL_VERSION, RemoteCommand, RemoteFrame, RemoteFrameKind,
 };
+use lumi_stream::BoundedLineReader;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
-use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
+use tokio::io::{AsyncWriteExt as _, BufReader};
 use tokio::net::TcpStream;
 use tokio::net::tcp::{OwnedReadHalf, OwnedWriteHalf};
 
@@ -76,7 +77,7 @@ impl EngineRemoteServiceRecord {
 }
 
 pub struct EngineProjectionClient {
-    reader: BufReader<OwnedReadHalf>,
+    reader: BoundedLineReader<BufReader<OwnedReadHalf>>,
     writer: OwnedWriteHalf,
     next_command_sequence: u64,
 }
@@ -98,24 +99,16 @@ impl EngineProjectionClient {
         writer.write_all(&encoded).await?;
         writer.flush().await?;
         Ok(Self {
-            reader: BufReader::new(reader),
+            reader: BoundedLineReader::new(BufReader::new(reader)),
             writer,
             next_command_sequence: 1,
         })
     }
 
     pub async fn next_frame(&mut self) -> Result<Option<RemoteFrame>, EngineClientError> {
-        let mut encoded = Vec::with_capacity(4_096);
-        let read = self.reader.read_until(b'\n', &mut encoded).await?;
-        if read == 0 {
+        let Some(encoded) = self.reader.next_line(MAX_REMOTE_FRAME_BYTES).await? else {
             return Ok(None);
-        }
-        if encoded.len() > MAX_REMOTE_FRAME_BYTES.saturating_add(1) {
-            return Err(EngineClientError::OversizedFrame);
-        }
-        if encoded.last() == Some(&b'\n') {
-            encoded.pop();
-        }
+        };
         Ok(Some(RemoteFrame::decode(&encoded)?))
     }
 
@@ -183,5 +176,57 @@ mod tests {
             record.validate(),
             Err(EngineClientError::EngineMustRemainLoopback)
         ));
+    }
+
+    #[tokio::test]
+    async fn production_client_preserves_a_frame_when_command_work_cancels_its_read()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use tokio::io::{AsyncBufReadExt as _, AsyncWriteExt as _, BufReader};
+        use tokio::net::TcpListener;
+        use tokio::sync::oneshot;
+        use tokio::time::{Duration, timeout};
+        let listener = TcpListener::bind("127.0.0.1:0").await?;
+        let port = listener.local_addr()?.port();
+        let (resume, paused) = oneshot::channel();
+        let server = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await?;
+            let (reader, mut writer) = stream.into_split();
+            BufReader::new(reader)
+                .read_until(b'\n', &mut Vec::new())
+                .await?;
+            writer
+                .write_all(b"{\"protocolVersion\":1,\"frameKind\":")
+                .await?;
+            paused.await.map_err(std::io::Error::other)?;
+            writer
+                .write_all(b"\"error\",\"sequence\":1,\"payload\":{\"reasonCode\":\"test\"}}\n")
+                .await?;
+            Ok::<(), std::io::Error>(())
+        });
+        let record = EngineRemoteServiceRecord {
+            remote_gateway_endpoint: EngineRemoteEndpoint {
+                host: "127.0.0.1".into(),
+                port,
+                protocol_version: 1,
+            },
+            remote_gateway_token: "a".repeat(64),
+            process_id: 42,
+            product_version: "test".into(),
+        };
+        let mut client = super::EngineProjectionClient::connect(&record).await?;
+        assert!(
+            timeout(Duration::from_millis(30), client.next_frame())
+                .await
+                .is_err()
+        );
+        resume
+            .send(())
+            .map_err(|_| std::io::Error::other("server ended"))?;
+        let frame = timeout(Duration::from_secs(1), client.next_frame())
+            .await??
+            .ok_or_else(|| std::io::Error::other("missing frame"))?;
+        assert_eq!(frame.payload["reasonCode"], "test");
+        server.await??;
+        Ok(())
     }
 }
