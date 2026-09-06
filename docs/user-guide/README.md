@@ -25,13 +25,19 @@ two Players, track loops and playlist-driven Auto Mix for longer tests.
 1. Download the DMG and matching SHA-256 checksum from
    [GitHub Releases](https://github.com/victorblanco-tech/lumi/releases).
 2. Compare the downloaded DMG checksum with the published checksum.
-3. Open the DMG and drag Lumi to its included Applications destination.
-4. Open Lumi once.
-5. If macOS blocks the unsigned app, open **System Settings → Privacy &
+3. Finish any active show and quit Lumi. Open the DMG, double-click
+   **Install Lumi.pkg** and follow macOS Installer. It creates the right folder;
+   no dragging or manual folder setup is needed. Administrator approval may be required.
+4. Eject the DMG and open Lumi from `/Applications/Lumi`.
+5. If macOS blocks the unsigned installer or app, open **System Settings → Privacy &
    Security**, choose **Open Anyway**, then confirm **Open**.
 
 Production, RC and Dev builds can coexist. They use separate applications,
 preferences and databases:
+
+An update replaces only the selected channel's app. Your library, phrases,
+MIDI mappings and settings remain in place. Licenses, corresponding source
+archives and build information are in **Licenses & Sources** inside the DMG.
 
 | Channel | Installation folder |
 | --- | --- |

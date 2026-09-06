@@ -10,7 +10,7 @@
   <strong>Public Beta</strong> · Field testing on different DJ and lighting setups is welcome
 </p>
 
-**Current releases:** [Lumi 0.6.2 for Mac](https://github.com/victorblanco-tech/lumi/releases/tag/v0.6.2)
+**Current releases:** [Lumi 0.6.3 for Mac](https://github.com/victorblanco-tech/lumi/releases/tag/v0.6.3)
 and [Lumi Remote 0.1.1 for iPhone](https://github.com/victorblanco-tech/lumi/releases/tag/lumi-remote-v0.1.1).
 Install the Mac DMG; install Remote through Xcode using your own Apple Account.
 
@@ -191,7 +191,8 @@ Local Playback. Internet access is not required while using Lumi.
 ## Start here
 
 1. Download the DMG and checksum from [GitHub Releases](https://github.com/victorblanco-tech/lumi/releases).
-2. Install Lumi and complete the one-time macOS **Open Anyway** step if needed.
+2. Open **Install Lumi.pkg** inside the DMG and follow macOS Installer.
+   Complete the macOS **Open Anyway** step if needed.
 3. Add a trusted USB source and synchronize the playlists you want in Lumi.
 4. Review the beatgrid and phrases, then mark prepared tracks **Ready for Show**.
 5. Map your SoundSwitch Banks, AutoLoops and optional Static Looks.

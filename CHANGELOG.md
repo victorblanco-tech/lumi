@@ -1,5 +1,18 @@
 # Changelog
 
+## 0.6.3 - 2026-09-06
+
+### Installation
+
+- A native macOS Installer inside the DMG creates the correct Lumi channel folder
+  automatically. No dragging onto a potentially missing destination is needed.
+- A compact, two-item DMG keeps licensing, corresponding source and build details
+  together without crowding the installation window.
+- Fixed-location, identity-checked app replacement preserves Library data,
+  settings and other channels. Packaging checks verify the actual app payload.
+- Lumi Remote remains at 0.1.1. No waveform, planning or integration behavior is
+  changed in this Mac packaging patch.
+
 ## 0.6.2 / Lumi Remote 0.1.1 - 2026-09-05
 
 ### Added

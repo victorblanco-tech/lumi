@@ -24,7 +24,7 @@ booth while the Mac remains fully responsible for the show.
 [Try the Simulator](user-guide/pro-dj-link-simulator.md) ·
 [Report an issue](https://github.com/victorblanco-tech/lumi/issues)
 
-**Current public beta:** [Lumi 0.6.2](https://github.com/victorblanco-tech/lumi/releases/tag/v0.6.2)
+**Current public beta:** [Lumi 0.6.3](https://github.com/victorblanco-tech/lumi/releases/tag/v0.6.3)
 and [Lumi Remote 0.1.1](https://github.com/victorblanco-tech/lumi/releases/tag/lumi-remote-v0.1.1).
 The Mac has a DMG installer; the iPhone app uses the free Xcode installation route.
 

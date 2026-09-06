@@ -48,6 +48,9 @@ jobs:
       - name: Test conservative classification behavior
         run: ./scripts/test-ci-classification.sh
 
+      - name: Test installer channel isolation policy
+        run: python3 scripts/test-macos-installer.py
+
   docs:
     name: Documentation and visual assets
     needs: classify
