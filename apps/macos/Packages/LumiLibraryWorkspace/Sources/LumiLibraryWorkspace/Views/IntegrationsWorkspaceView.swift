@@ -977,7 +977,7 @@ public struct IntegrationsWorkspaceView: View {
     }
 }
 
-private enum RemotePairingVisual {
+enum RemotePairingVisual {
     private struct Payload: Encodable {
         let installationID: String
         let invitationID: String
@@ -987,7 +987,11 @@ private enum RemotePairingVisual {
         let expiresAtUnixMillis: UInt64
     }
 
-    static func pairingURL(_ invitation: RemoteGatewayPairingInvitation) -> URL? {
+    static func pairingURL(
+        _ invitation: RemoteGatewayPairingInvitation,
+        releaseChannel: String = Bundle.main.object(forInfoDictionaryKey: "LumiReleaseChannel") as? String ?? ""
+    ) -> URL? {
+        guard let scheme = RemotePairingRoute.scheme(for: releaseChannel) else { return nil }
         let payload = Payload(
             installationID: invitation.installationID,
             invitationID: invitation.invitationID,
@@ -1001,7 +1005,7 @@ private enum RemotePairingVisual {
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "=", with: "")
-        var components = URLComponents(string: "lumi://pair")
+        var components = URLComponents(string: "\(scheme)://pair")
         components?.queryItems = [URLQueryItem(name: "invitation", value: token)]
         return components?.url
     }

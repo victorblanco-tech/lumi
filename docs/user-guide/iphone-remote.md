@@ -76,6 +76,18 @@ The iPhone stores its credential in Keychain. The Mac stores only a verifier.
 Pairing can be revoked or Controller access transferred from the same
 Integration page.
 
+### Production and Dev installed together
+
+The pairing fix in Remote 0.1.2 gives each channel its own QR link: `lumi://`
+for Production, `lumi-dev://` for Dev and `lumi-rc://` for RC. Update **both**
+iPhone apps when an older Dev app opens your Production QR code: older Remotes
+registered the same link, so updating Production alone cannot remove that conflict.
+There is no need to delete either app or its existing pairing.
+
+Production QR codes from Lumi 0.6.3 remain compatible. New Dev/RC pairings need
+a Mac build containing the channel-specific QR fix; older Dev/RC Mac builds
+still generate the shared link. Existing authenticated connections are unchanged.
+
 ## Live controls
 
 The top bar stays visible during connection, reconnect and playback. It shows

@@ -50,7 +50,7 @@ public final class RemoteConnectionController: ObservableObject {
 
     public func acceptPairingURL(_ url: URL, now: Date = .now) {
         do {
-            let invitation = try RemotePairingCodeCodec().decode(
+            let invitation = try RemotePairingCodeCodec(releaseChannel: releaseChannel).decode(
                 url,
                 nowUnixMillis: Self.unixMillis(now)
             )
