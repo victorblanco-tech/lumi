@@ -24,7 +24,7 @@ jobs:
           ref: dev
 
       - name: Set up Java 21 for Maven dependency resolution
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v6
         with:
           distribution: temurin
           java-version: "21"
