@@ -1,7 +1,7 @@
-Lumi for macOS - unsigned development build
-============================================
+Lumi for macOS - public beta
+===========================
 
-This early Apple Silicon build is distributed outside the Mac App Store and is
+This Apple Silicon build is distributed outside the Mac App Store and is
 not signed with a paid Apple Developer ID.
 
 Install
@@ -14,14 +14,17 @@ data and preferences:
 - Dev: /Applications/Lumi/Dev/Lumi Dev <version>.app
 - RC: /Applications/Lumi/RC/Lumi RC <version>.app
 
-1. Create the matching channel folder above if it does not exist yet.
-2. Drag the Lumi app onto the channel-specific Applications shortcut in this
-   disk image. Dev points to /Applications/Lumi/Dev, RC to
-   /Applications/Lumi/RC and Production to /Applications/Lumi.
-3. Open the channel folder and try to start Lumi once.
-4. If macOS blocks the app, open System Settings > Privacy & Security.
-5. Find the Lumi message in Security and choose Open Anyway.
-6. Confirm Open when macOS asks again.
+1. Finish any active show and quit Lumi.
+2. Open Install Lumi.pkg in this disk image and follow macOS Installer.
+   The installer creates the correct channel folder automatically. No dragging
+   or manual folder creation is needed. Administrator approval may be required.
+3. Eject this disk image and open Lumi from the channel folder above.
+4. If macOS blocks the installer or app, open System Settings > Privacy & Security.
+5. For the verified official download, choose Open Anyway and confirm Open.
+
+Only the application is installed or replaced. Existing tracks, phrases, MIDI
+mappings, preferences and other channels are not reset or imported. On a Mac
+without existing Lumi data, the production app starts with an empty library.
 
 The three channels use distinct bundle identifiers and Application Support
 directories. Installing or removing one app does not replace another channel's

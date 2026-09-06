@@ -19,7 +19,6 @@ case "$channel" in
     expected_demo_seed="1"
     expected_version_pattern='^[0-9]+\.[0-9]+\.[0-9]+-dev-[1-9][0-9]*$'
     install_directory="/Applications/Lumi/Dev"
-    install_shortcut_name="Applications - Lumi - Dev"
     ;;
   rc)
     build_configuration="RC"
@@ -30,7 +29,6 @@ case "$channel" in
     expected_demo_seed="0"
     expected_version_pattern='^[0-9]+\.[0-9]+\.[0-9]+-rc-[1-9][0-9]*$'
     install_directory="/Applications/Lumi/RC"
-    install_shortcut_name="Applications - Lumi - RC"
     ;;
   release)
     build_configuration="Release"
@@ -41,7 +39,6 @@ case "$channel" in
     expected_demo_seed="0"
     expected_version_pattern='^[0-9]+\.[0-9]+\.[0-9]+$'
     install_directory="/Applications/Lumi"
-    install_shortcut_name="Applications - Lumi"
     ;;
   *)
     echo "Usage: $0 [dev|rc|release] [output-directory]" >&2
@@ -137,7 +134,7 @@ case "$channel" in
     packaged_bundle_name="Lumi.app"
     ;;
 esac
-packaged_app="$staging_directory/$packaged_bundle_name"
+packaged_app="$temporary_root/payload/$packaged_bundle_name"
 packaged_helper="$packaged_app/Contents/Helpers/lumi-engine"
 packaged_usb_worker="$packaged_app/Contents/Helpers/lumi-usb-worker"
 packaged_launch_agent="$packaged_app/Contents/Library/LaunchAgents/$expected_bundle_identifier.engine.plist"
@@ -148,7 +145,7 @@ carabiner_source_name="Carabiner-1.2.0-complete-source.tar.gz"
 carabiner_source="$repository_root/build/carabiner-runtime/$carabiner_source_name"
 java_source_name="Lumi-Pro-DJ-Link-Java-dependencies-complete-source.tar.gz"
 java_source="$repository_root/build/java-runtime-sources/$java_source_name"
-mkdir -p "$staging_directory"
+mkdir -p "$staging_directory" "$temporary_root/payload"
 ditto "$source_app" "$packaged_app"
 
 if [[ ! -x "$packaged_helper" ]]; then
@@ -288,27 +285,29 @@ if [[ "$packaged_data_directory" != "$expected_data_directory" ]]; then
   exit 1
 fi
 
-ln -s "$install_directory" "$staging_directory/$install_shortcut_name"
+installer_name="Install Lumi.pkg"
+/usr/bin/python3 "$script_dir/build-macos-installer.py" \
+  "$packaged_app" "$staging_directory/$installer_name"
+information_directory="$staging_directory/Licenses & Sources"
+mkdir -p "$information_directory"
 cp "$repository_root/docs/release/unsigned-macos-installation.txt" \
-  "$staging_directory/README - Install $app_name.txt"
-cp "$repository_root/LICENSE" "$staging_directory/LICENSE.txt"
-cp "$repository_root/TRADEMARKS.md" "$staging_directory/TRADEMARKS.md"
+  "$information_directory/README - Install $app_name.txt"
+cp "$repository_root/LICENSE" "$information_directory/LICENSE.txt"
+cp "$repository_root/TRADEMARKS.md" "$information_directory/TRADEMARKS.md"
 cp "$repository_root/THIRD_PARTY_NOTICES.md" \
-  "$staging_directory/THIRD-PARTY-NOTICES.md"
-install -d "$staging_directory/Corresponding Source"
+  "$information_directory/THIRD-PARTY-NOTICES.md"
+install -d "$information_directory/Corresponding Source"
 install -m 644 "$carabiner_source" \
-  "$staging_directory/Corresponding Source/$carabiner_source_name"
+  "$information_directory/Corresponding Source/$carabiner_source_name"
 install -m 644 "$java_source" \
-  "$staging_directory/Corresponding Source/$java_source_name"
+  "$information_directory/Corresponding Source/$java_source_name"
 {
   echo "Lumi source code"
   echo
   echo "Lumi is available under the Eclipse Public License 2.0."
   echo "Preferred source form: https://github.com/victorblanco-tech/lumi"
-  echo
-  echo "If that repository is private when you receive this build, request"
-  echo "corresponding source access from the person who distributed it."
-} > "$staging_directory/SOURCE-AND-LICENSE.txt"
+  echo "Source revision: $source_revision"
+} > "$information_directory/SOURCE-AND-LICENSE.txt"
 {
   echo "$app_name $canonical_version"
   echo "Channel $channel"
@@ -316,12 +315,13 @@ install -m 644 "$java_source" \
   echo "Source revision $source_revision"
   echo "Architecture arm64"
   echo "Signing ad hoc (not Developer ID / notarized)"
-} > "$staging_directory/BUILD-INFO.txt"
+} > "$information_directory/BUILD-INFO.txt"
 
 sbom_name="Lumi-$canonical_version-sbom.spdx.json"
 sbom_file="$release_directory/$sbom_name"
 "$repository_root/scripts/generate-sbom.sh" "$sbom_file"
-cp "$sbom_file" "$staging_directory/$sbom_name"
+cp "$sbom_file" "$information_directory/$sbom_name"
+cp "$script_dir/packaging/installer-finder-layout.dsstore" "$staging_directory/.DS_Store"
 
 artifact_name="Lumi-$canonical_version-arm64.dmg"
 temporary_dmg="$temporary_root/$artifact_name"
@@ -344,16 +344,10 @@ hdiutil attach "$temporary_dmg" \
   -mountpoint "$mount_directory" \
   -quiet
 mounted=1
-codesign --verify --deep --strict --verbose=2 "$mount_directory/$packaged_bundle_name"
-test -x "$mount_directory/$packaged_bundle_name/Contents/Helpers/lumi-engine"
-test -x "$mount_directory/$packaged_bundle_name/Contents/Helpers/lumi-usb-worker"
-test -f "$mount_directory/$packaged_bundle_name/Contents/Library/LaunchAgents/$expected_bundle_identifier.engine.plist"
-test -f "$mount_directory/Corresponding Source/$carabiner_source_name"
-test -f "$mount_directory/Corresponding Source/$java_source_name"
-if [[ "$(readlink "$mount_directory/$install_shortcut_name")" != "$install_directory" ]]; then
-  echo "ERROR: packaged install shortcut does not target '$install_directory'." >&2
-  exit 1
-fi
+/usr/bin/python3 "$script_dir/verify-macos-installer.py" \
+  "$mount_directory/$installer_name" "$packaged_app"
+test -f "$mount_directory/Licenses & Sources/Corresponding Source/$carabiner_source_name"
+test -f "$mount_directory/Licenses & Sources/Corresponding Source/$java_source_name"
 hdiutil detach "$mount_directory" -quiet
 mounted=0
 

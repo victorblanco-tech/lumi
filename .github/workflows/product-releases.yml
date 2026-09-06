@@ -31,6 +31,8 @@ jobs:
           cache: maven
       - name: Validate product tag
         run: scripts/check-product-tag.sh macos "$GITHUB_REF_NAME"
+      - name: Verify native installer channel isolation
+        run: /usr/bin/python3 scripts/test-macos-installer.py
       - name: Fetch locked Rust dependency metadata
         run: cargo fetch --locked
       - name: Prepare corresponding source bundles
