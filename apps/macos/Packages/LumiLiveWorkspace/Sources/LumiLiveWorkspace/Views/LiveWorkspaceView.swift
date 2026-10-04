@@ -579,6 +579,7 @@ public struct LiveWorkspaceView: View {
                                     plan: plan,
                                     musicalKey: musicalKey(for: deck),
                                     isLocalPlayback: content.sourceMode == "localPlayback",
+                                    playerUSB: content.playerUSBs.first { $0.playerNumber == deckID },
                                     visualClock: deckVisualClocks[deck.deckID],
                                     waveformOverride: localPlaybackWaveforms[deck.deckID],
                                     lightingTimingOffsetMillis: content.lightingTimingOffsetMillis,
@@ -625,7 +626,11 @@ public struct LiveWorkspaceView: View {
                                 .frame(maxWidth: .infinity)
                                 .accessibilityIdentifier(deckID == 1 ? "lumi.deck.a" : "lumi.deck.b")
                             } else {
-                                emptyDeckSurface(deckID: deckID, sourceMode: content.sourceMode)
+                                emptyDeckSurface(
+                                    deckID: deckID,
+                                    sourceMode: content.sourceMode,
+                                    playerUSB: content.playerUSBs.first { $0.playerNumber == deckID }
+                                )
                                     .frame(maxWidth: .infinity)
                             }
                         }
@@ -847,11 +852,24 @@ public struct LiveWorkspaceView: View {
         .overlay(alignment: .top) { Divider().overlay(Color.white.opacity(0.1)) }
     }
 
-    private func emptyDeckSurface(deckID: UInt64, sourceMode: String) -> some View {
+    private func emptyDeckSurface(
+        deckID: UInt64,
+        sourceMode: String,
+        playerUSB: LivePlayerUSBSnapshot?
+    ) -> some View {
         VStack(spacing: LumiSpacing.medium) {
             Text(verbatim: "PLAYER \(deckID)")
                 .font(LumiTypography.technical.weight(.semibold))
                 .foregroundStyle(LumiColor.accent)
+            if sourceMode != "localPlayback" {
+                LumiPlayerUSBBadge(
+                    state: playerUSB?.state ?? "unavailable",
+                    sourceName: playerUSB?.sourceName,
+                    colorID: playerUSB?.colorID
+                )
+                .frame(height: 16)
+                .accessibilityIdentifier("lumi.live.player.\(deckID).usb")
+            }
             Image(systemName: sourceMode == "localPlayback" ? "music.note.list" : "cable.connector")
                 .font(LumiTypography.screenTitle)
                 .foregroundStyle(LumiColor.textSecondary)

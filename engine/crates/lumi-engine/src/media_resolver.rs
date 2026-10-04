@@ -29,6 +29,7 @@ pub(crate) struct MediaStatus {
     pub state: &'static str,
     pub source_id: Option<String>,
     pub source_name: Option<String>,
+    pub color_id: Option<u8>,
     pub generation: u64,
     pub last_verified_unix_millis: Option<u64>,
     pub elapsed_millis: Option<u64>,
@@ -159,6 +160,11 @@ impl MediaResolver {
     /// bridge batch. Looking only at a final device map would miss that reset.
     pub fn observe(&mut self, event: &BridgeEvent, now: Instant) {
         match event {
+            BridgeEvent::USBMedia(media) => {
+                if let Some(slot) = self.slots.get_mut(&media.device_number) {
+                    slot.status.color_id = media.color_id;
+                }
+            }
             BridgeEvent::DeviceLost(device) => self.remove(device.device_number),
             BridgeEvent::SourceStatus(status)
                 if matches!(
@@ -191,6 +197,7 @@ impl MediaResolver {
                             state: "resolving",
                             source_id: None,
                             source_name: None,
+                            color_id: None,
                             generation,
                             last_verified_unix_millis: None,
                             elapsed_millis: None,
@@ -266,6 +273,7 @@ impl MediaResolver {
                     elapsed,
                 } => {
                     if slot.media_id.as_ref().is_some_and(|old| old != &media_id) {
+                        slot.status.color_id = None;
                         self.next_generation = self.next_generation.saturating_add(1);
                         slot.generation = self.next_generation;
                         slot.status.generation = slot.generation;
@@ -291,6 +299,7 @@ impl MediaResolver {
             slot.status.state = state;
             slot.status.detail = detail.to_owned();
             if state != "trusted" {
+                slot.status.color_id = None;
                 slot.status.last_verified_unix_millis = None;
                 slot.failures = slot.failures.saturating_add(1);
             }
@@ -306,6 +315,7 @@ impl MediaResolver {
                         slot.status.state = "conflict";
                         slot.status.source_id = None;
                         slot.status.source_name = None;
+                        slot.status.color_id = None;
                         slot.status.last_verified_unix_millis = None;
                         slot.status.detail = "The same USB marker was found on two Players; review the local sources".to_owned();
                     }
@@ -514,6 +524,35 @@ mod tests {
             thread::sleep(Duration::from_millis(2));
         }
     }
+    #[test]
+    fn native_usb_color_is_display_only_and_cleared_on_device_loss()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut resolver = MediaResolver::disabled();
+        resolver.observe(&found(1, "192.168.1.1"), Instant::now());
+        resolver.observe(
+            &BridgeEvent::USBMedia(lumi_prolink_input::USBMedia {
+                device_number: 1,
+                color_id: Some(7),
+            }),
+            Instant::now(),
+        );
+        let status = resolver.status(1).ok_or("missing discovered player")?;
+        assert_eq!(status.color_id, Some(7));
+        assert_eq!(status.state, "resolving");
+        assert!(status.source_name.is_none());
+        resolver.observe(
+            &BridgeEvent::DeviceLost(Device {
+                device_number: 1,
+                device_name: "CDJ-1500X".to_owned(),
+                address: "192.168.1.1".to_owned(),
+            }),
+            Instant::now(),
+        );
+        resolver.observe(&found(1, "192.168.1.1"), Instant::now());
+        assert_eq!(resolver.status(1).and_then(|s| s.color_id), None);
+        Ok(())
+    }
+
     #[test]
     fn late_completion_cannot_attach_to_a_reconnected_player()
     -> Result<(), Box<dyn std::error::Error>> {

@@ -51,6 +51,17 @@ final class BeatLinkRuntime implements AutoCloseable {
 
         DeviceFinder.getInstance().addDeviceAnnouncementListener(deviceListener);
         VirtualCdj.getInstance().addUpdateListener(this::receivedDeviceUpdate);
+        // Passive media broadcasts only: never request media or change a Player.
+        VirtualCdj.getInstance().addMediaDetailsListener(details -> {
+            if (details.slotReference.slot != CdjStatus.TrackSourceSlot.USB_SLOT
+                    || details.slotReference.player < 1 || details.slotReference.player > 6) return;
+            var raw = details.getRawBytes();
+            if (raw.remaining() < org.deepsymmetry.beatlink.MediaDetails.MINIMUM_PACKET_SIZE) return;
+            int colorId = Byte.toUnsignedInt(raw.get(0xa8));
+            publisher.publishLatest(BridgeTrafficClass.DISPLAY, 256 + details.slotReference.player,
+                    "usbMedia", new BridgePayloads.USBMedia(details.slotReference.player,
+                            colorId <= 8 && details.trackCount > 0 ? colorId : null));
+        });
         BeatFinder.getInstance().addBeatListener(beat -> {
             if (!hasExactBeat(beat.getEffectiveTempo(), beat.getBeatWithinBar())) {
                 return;

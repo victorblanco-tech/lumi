@@ -252,8 +252,33 @@ Evidence so far:
   change or output trigger was needed. This passes basic two-source identity
   acceptance, not source-scoped live track or physical lighting acceptance.
 
+## Live USB presentation
+
+The owner requested a compact mounted-USB label in Mac Live and Lumi Remote,
+using the native rekordbox/CDJ media color (CHRM Pink, GRAY Blue), not track
+color or a user-defined Lumi palette. The label sits below Player identity and
+remains available without a loaded track. Its row reserves space so identity
+updates do not move the waveform. A separate small status icon distinguishes
+verified identity from resolving, unknown, conflict or unavailable.
+
+The bridge listens passively for Beat Link `MediaDetails` updates and forwards
+only Player number and native media color ID on the replaceable display lane.
+It does not send media queries. Color is presentation evidence, never identity
+or trackmatching authority. Players that do not broadcast it retain a neutral
+swatch; Lumi does not infer a color from the USB name. Loss/reconnect and failed
+identity resolution clear previous color evidence.
+
+The Remote projection exposes a bounded optional `playerUsbs` list with Player
+number, identity state, verified source name and native color ID. It excludes
+marker IDs, canonical source IDs, network addresses and resolver error details.
+Older snapshots remain readable. Live transport anchor updates preserve the USB
+list. This addition does not change transport, planning or MIDI decisions.
+
+Implementation: Lumi 0.6.4-dev-2 and Lumi Remote 0.1.3-dev-1. Native UI and
+real-CDJ color acceptance must be recorded before declaring this increment done.
+
 Pending: robust mount/media epochs for live lookup, cross-Player loading,
-physical failure cases, Remote presentation and end-to-end timing comparison.
+physical failure cases and end-to-end timing comparison.
 Periodic identity revalidation alone is not sufficient to authorize a newly
 loaded track after a USB swap. Phase 3 must reject stale media and track-load
 results before consuming a source binding. No full live recognition or lighting

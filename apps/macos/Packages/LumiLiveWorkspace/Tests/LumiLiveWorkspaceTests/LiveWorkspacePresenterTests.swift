@@ -1448,7 +1448,16 @@ struct LiveWorkspacePresenterTests {
             "precisePositionMessageCount": .number(280),
             "authoritativePositionCount": .number(278),
             "positionDiscontinuityCount": .number(3),
-            "positionAuthorityReady": .boolean(true)
+            "positionAuthorityReady": .boolean(true),
+            "discoveredPlayers": .array([
+                .object(["playerNumber": .number(1), "usbMedia": .object([
+                    "state": .string("trusted"), "sourceName": .string("DJ VIC GRAY"), "colorId": .number(7)
+                ])]),
+                .object(["playerNumber": .number(2), "usbMedia": .object([
+                    "state": .string("conflict"), "sourceName": .string("STALE"), "colorId": .number(1)
+                ])]),
+                .object(["playerNumber": .number(33), "usbMedia": .null])
+            ])
         ])
         let envelope = MessageEnvelope(
             protocolVersion: recorded.protocolVersion,
@@ -1472,6 +1481,11 @@ struct LiveWorkspacePresenterTests {
         #expect(snapshot.deckInputIntegration?.positionAuthorityReady == true)
         #expect(snapshot.deckInputIntegration?.authoritativePositionCount == 278)
         #expect(snapshot.deckInputIntegration?.positionDiscontinuityCount == 3)
+        #expect(snapshot.deckInputIntegration?.playerUSBs.count == 2)
+        #expect(snapshot.deckInputIntegration?.playerUSBs.first?.sourceName == "DJ VIC GRAY")
+        #expect(snapshot.deckInputIntegration?.playerUSBs.first?.colorID == 7)
+        #expect(snapshot.deckInputIntegration?.playerUSBs.last?.sourceName == nil)
+        #expect(snapshot.deckInputIntegration?.playerUSBs.last?.colorID == nil)
     }
 
     @Test("Malformed optional Pro DJ Link diagnostics fail strict decoding")

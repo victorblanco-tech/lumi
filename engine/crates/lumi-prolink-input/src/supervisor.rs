@@ -220,6 +220,7 @@ impl IngressLatencyHistogram {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CoalescingKey {
+    USBMedia(u8),
     DeckStatus(u8),
     TempoStatus(u8),
     PrecisePosition(u8),
@@ -232,6 +233,7 @@ fn coalescing_key(message: &BridgeMessage) -> Option<CoalescingKey> {
         return None;
     }
     match &message.event {
+        BridgeEvent::USBMedia(media) => Some(CoalescingKey::USBMedia(media.device_number)),
         BridgeEvent::DeckStatus(status) => Some(CoalescingKey::DeckStatus(status.device_number)),
         BridgeEvent::TempoStatus(status) => Some(CoalescingKey::TempoStatus(status.device_number)),
         BridgeEvent::PrecisePosition(position) => {

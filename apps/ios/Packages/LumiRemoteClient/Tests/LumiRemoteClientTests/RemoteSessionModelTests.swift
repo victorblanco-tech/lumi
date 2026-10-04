@@ -87,6 +87,8 @@ func staleTransportAnchorCannotRewindThePlayer() throws {
         )
     )
     #expect(model.projection?.players[0].transport.beat == 32)
+    #expect(model.projection?.playerUSBs.first?.sourceName == "DJ VIC GRAY")
+    #expect(model.projection?.playerUSBs.first?.colorID == 7)
 }
 
 @MainActor
@@ -393,7 +395,8 @@ extension RemoteLiveProjection {
             )],
             livePlan: nil,
             nextPlan: nil,
-            themeOptions: []
+            themeOptions: [],
+            playerUSBs: [.init(playerNumber: 1, state: "trusted", sourceName: "DJ VIC GRAY", colorID: 7)]
         )
     }
 }

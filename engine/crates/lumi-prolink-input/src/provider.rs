@@ -265,7 +265,7 @@ impl ProLinkDeckSourceProvider {
             BridgeEvent::PrecisePosition(position) => {
                 self.queue_precise_position(position, observed_at_nanos)?;
             }
-            BridgeEvent::TrackMetadata(_) => {
+            BridgeEvent::TrackMetadata(_) | BridgeEvent::USBMedia(_) => {
                 // Metadata hydration is handled by Lumi's USB/library mirror.
             }
         }

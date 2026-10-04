@@ -52,6 +52,7 @@ pub enum BridgeEvent {
     SourceStatus(SourceStatus),
     DeviceFound(Device),
     DeviceLost(Device),
+    USBMedia(USBMedia),
     DeckStatus(DeckStatus),
     Beat(Beat),
     TempoStatus(TempoStatus),
@@ -92,6 +93,13 @@ pub struct Device {
     pub device_number: u8,
     pub device_name: String,
     pub address: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct USBMedia {
+    pub device_number: u8,
+    pub color_id: Option<u8>,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -265,6 +273,7 @@ fn decode_event(message_type: &str, payload: Value) -> Result<BridgeEvent, Bridg
         "sourceStatus" => decode_payload(payload).map(BridgeEvent::SourceStatus),
         "deviceFound" => decode_payload(payload).map(BridgeEvent::DeviceFound),
         "deviceLost" => decode_payload(payload).map(BridgeEvent::DeviceLost),
+        "usbMedia" => decode_payload(payload).map(BridgeEvent::USBMedia),
         "deckStatus" => decode_payload(payload).map(BridgeEvent::DeckStatus),
         "transportStatus" => decode_payload(payload).map(BridgeEvent::DeckStatus),
         "beat" => decode_payload(payload).map(BridgeEvent::Beat),
@@ -293,6 +302,11 @@ fn validate_event(event: &BridgeEvent) -> Result<(), BridgeDecodeError> {
         }
         BridgeEvent::DeviceFound(device) | BridgeEvent::DeviceLost(device) => {
             validate_device(device)?;
+        }
+        BridgeEvent::USBMedia(media) => {
+            if !(1..=6).contains(&media.device_number) || media.color_id.is_some_and(|id| id > 8) {
+                return Err(BridgeDecodeError::InvalidPayload("usbMedia"));
+            }
         }
         BridgeEvent::DeckStatus(status) => {
             let has_track_id = status.rekordbox_id != 0;

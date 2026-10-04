@@ -9,6 +9,26 @@ const PRECISE_POSITION: &str =
     include_str!("../../../../contracts/prolink-bridge/v1/fixtures/precise-position.json");
 
 #[test]
+fn usb_media_color_decodes_as_display_evidence_only() -> Result<(), Box<dyn std::error::Error>> {
+    for (number, color, valid) in [(1, 7, true), (2, 1, true), (33, 7, false), (1, 9, false)] {
+        let mut decoder = BridgeDecoder::new();
+        decoder.decode_line(HELLO)?;
+        let line = serde_json::json!({
+            "protocol": PROTOCOL_NAME, "protocolVersion": PROTOCOL_VERSION,
+            "sequence": 2, "observedAtNanos": 1, "type": "usbMedia", "trafficClass": "display",
+            "payload": { "deviceNumber": number, "colorId": color }
+        })
+        .to_string();
+        let result = decoder.decode_line(&line);
+        assert_eq!(result.is_ok(), valid);
+        if let Ok(message) = result {
+            assert!(matches!(message.event, BridgeEvent::USBMedia(_)));
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn decodes_versioned_hello_and_rich_deck_status() {
     let mut decoder = BridgeDecoder::new();
     let hello = decoder

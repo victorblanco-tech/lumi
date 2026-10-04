@@ -97,6 +97,7 @@ public struct RemoteIntegrationStatus: Codable, Equatable, Sendable {
 }
 
 public struct RemoteLiveProjection: Codable, Equatable, Sendable {
+    public let playerUSBs: [RemotePlayerUSB]
     public let projectionRevision: UInt64
     public let stateRevision: UInt64
     public let engineVersion: String
@@ -120,9 +121,11 @@ public struct RemoteLiveProjection: Codable, Equatable, Sendable {
         livePlan: RemoteLightPlan?,
         nextPlan: RemoteLightPlan?,
         themeOptions: [RemoteThemeOption],
-        phraseRoleOptions: [RemotePhraseRoleOption] = []
+        phraseRoleOptions: [RemotePhraseRoleOption] = [],
+        playerUSBs: [RemotePlayerUSB] = []
     ) {
         self.projectionRevision = projectionRevision
+        self.playerUSBs = playerUSBs
         self.stateRevision = stateRevision
         self.engineVersion = engineVersion
         self.operationState = operationState
@@ -143,6 +146,7 @@ public struct RemoteLiveProjection: Codable, Equatable, Sendable {
         case leaderPlayerNumber
         case integrations
         case players
+        case playerUSBs = "playerUsbs"
         case livePlan
         case nextPlan
         case themeOptions
@@ -158,6 +162,7 @@ public struct RemoteLiveProjection: Codable, Equatable, Sendable {
         leaderPlayerNumber = try container.decodeIfPresent(UInt8.self, forKey: .leaderPlayerNumber)
         integrations = try container.decode(RemoteIntegrationStatus.self, forKey: .integrations)
         players = try container.decode([RemotePlayer].self, forKey: .players)
+        playerUSBs = try container.decodeIfPresent([RemotePlayerUSB].self, forKey: .playerUSBs) ?? []
         livePlan = try container.decodeIfPresent(RemoteLightPlan.self, forKey: .livePlan)
         nextPlan = try container.decodeIfPresent(RemoteLightPlan.self, forKey: .nextPlan)
         themeOptions = try container.decode([RemoteThemeOption].self, forKey: .themeOptions)
@@ -176,10 +181,23 @@ public struct RemoteLiveProjection: Codable, Equatable, Sendable {
         try container.encodeIfPresent(leaderPlayerNumber, forKey: .leaderPlayerNumber)
         try container.encode(integrations, forKey: .integrations)
         try container.encode(players, forKey: .players)
+        try container.encode(playerUSBs, forKey: .playerUSBs)
         try container.encodeIfPresent(livePlan, forKey: .livePlan)
         try container.encodeIfPresent(nextPlan, forKey: .nextPlan)
         try container.encode(themeOptions, forKey: .themeOptions)
         try container.encode(phraseRoleOptions, forKey: .phraseRoleOptions)
+    }
+}
+
+public struct RemotePlayerUSB: Codable, Equatable, Sendable {
+    public let playerNumber: UInt8
+    public let state: String
+    public let sourceName: String?
+    public let colorID: UInt8?
+
+    enum CodingKeys: String, CodingKey {
+        case playerNumber, state, sourceName
+        case colorID = "colorId"
     }
 }
 

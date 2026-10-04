@@ -246,6 +246,7 @@ public struct AbletonLinkIntegrationSnapshot: Equatable, Sendable {
 }
 
 public struct DeckInputIntegrationSnapshot: Equatable, Sendable {
+    public let playerUSBs: [LivePlayerUSBSnapshot]
     public let state: String
     public let destinationName: String?
     public let protocolName: String
@@ -277,7 +278,8 @@ public struct DeckInputIntegrationSnapshot: Equatable, Sendable {
         precisePositionMessageCount: UInt64 = 0,
         authoritativePositionCount: UInt64 = 0,
         positionDiscontinuityCount: UInt64 = 0,
-        positionAuthorityReady: Bool = false
+        positionAuthorityReady: Bool = false,
+        playerUSBs: [LivePlayerUSBSnapshot] = []
     ) {
         self.state = state
         self.destinationName = destinationName
@@ -294,6 +296,22 @@ public struct DeckInputIntegrationSnapshot: Equatable, Sendable {
         self.authoritativePositionCount = authoritativePositionCount
         self.positionDiscontinuityCount = positionDiscontinuityCount
         self.positionAuthorityReady = positionAuthorityReady
+        self.playerUSBs = playerUSBs
+    }
+}
+
+public struct LivePlayerUSBSnapshot: Equatable, Sendable, Identifiable {
+    public var id: UInt64 { playerNumber }
+    public let playerNumber: UInt64
+    public let state: String
+    public let sourceName: String?
+    public let colorID: UInt8?
+
+    public init(playerNumber: UInt64, state: String, sourceName: String?, colorID: UInt8? = nil) {
+        self.playerNumber = playerNumber
+        self.state = state
+        self.sourceName = state == "trusted" ? sourceName : nil
+        self.colorID = state == "trusted" ? colorID : nil
     }
 }
 

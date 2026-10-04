@@ -171,6 +171,7 @@ public struct RemoteLiveView: View {
             }
         return RemotePlayerSurface(
             player: player,
+            usb: projection.playerUSBs.first { $0.playerNumber == player.playerNumber },
             plan: plan,
             isMaster: isMaster,
             isLandscape: isLandscape,
@@ -202,7 +203,8 @@ public struct RemoteLiveView: View {
         } else {
             RemoteEmptyPlayerSurface(
                 playerNumber: slot.playerNumber,
-                isLandscape: isLandscape
+                isLandscape: isLandscape,
+                usb: projection.playerUSBs.first { $0.playerNumber == slot.playerNumber }
             )
         }
     }
@@ -594,6 +596,7 @@ private struct RemoteTopBar: View {
 
 private struct RemotePlayerSurface: View {
     let player: RemotePlayer
+    let usb: RemotePlayerUSB?
     let plan: RemoteLightPlan?
     let isMaster: Bool
     let isLandscape: Bool
@@ -734,6 +737,7 @@ private struct RemotePlayerSurface: View {
                     .frame(width: 62, alignment: .trailing)
             }
             .frame(height: 38)
+            usbBadge
         } else {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -747,6 +751,8 @@ private struct RemotePlayerSurface: View {
                 roleBadge
             }
 
+            usbBadge
+
             HStack(alignment: .firstTextBaseline) {
                 trackIdentity
                 Spacer()
@@ -759,6 +765,16 @@ private struct RemotePlayerSurface: View {
                 }
             }
         }
+    }
+
+    private var usbBadge: some View {
+        return LumiPlayerUSBBadge(
+            state: usb?.state ?? "unavailable",
+            sourceName: usb?.sourceName,
+            colorID: usb?.colorID
+        )
+        .frame(height: 16, alignment: .leading)
+        .accessibilityIdentifier("lumi.remote.player.\(player.playerNumber).usb")
     }
 
     private var trackIdentity: some View {
@@ -908,6 +924,7 @@ private struct RemotePlayerSurface: View {
 private struct RemoteEmptyPlayerSurface: View {
     let playerNumber: UInt8
     let isLandscape: Bool
+    let usb: RemotePlayerUSB?
 
     var body: some View {
         VStack(alignment: .leading, spacing: LumiSpacing.small) {
@@ -924,6 +941,14 @@ private struct RemoteEmptyPlayerSurface: View {
                     .font(LumiTypography.technical.weight(.bold))
                     .foregroundStyle(LumiColor.textSecondary)
             }
+
+            LumiPlayerUSBBadge(
+                state: usb?.state ?? "unavailable",
+                sourceName: usb?.sourceName,
+                colorID: usb?.colorID
+            )
+            .frame(height: 16, alignment: .leading)
+            .accessibilityIdentifier("lumi.remote.player.\(playerNumber).usb")
 
             ContentUnavailableView(
                 "Waiting for track",

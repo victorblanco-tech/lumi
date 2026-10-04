@@ -114,6 +114,17 @@ tracks loaded from another Player.
 
 ## Evidence required
 
+Mac Live and Lumi Remote show the mounted USB on its owning Player, even before
+a track is loaded. Its display color is the native media color from passive
+Beat Link `MediaDetails`, not a track color and not a matching key. The color
+observation uses the replaceable display lane and performs no network requests.
+Unknown/conflicted identities never display a cached trusted name or color.
+Unavailable native colors are shown neutrally, without guessing from a label.
+
+Remote receives only a bounded optional list of Player numbers, state, verified
+source name and native color ID. Internal IDs, addresses and resolver details
+remain on the Mac. This is presentation, not Phase 3 source-scoped hydration.
+
 Unit and process tests cover identity validation, collisions, stale results,
 deadlines, failure isolation and source-scoped lookup. Native UI tests cover
 macOS and Remote presentation without layout jumps. Physical tests must prove

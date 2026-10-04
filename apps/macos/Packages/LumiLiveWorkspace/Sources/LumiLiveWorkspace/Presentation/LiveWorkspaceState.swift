@@ -74,6 +74,7 @@ public struct LiveWorkspaceState: Equatable, Sendable {
 }
 
 public struct LiveWorkspaceContent: Equatable, Sendable {
+    public let playerUSBs: [LivePlayerUSBSnapshot]
     public let liveDeck: DeckSnapshot?
     public let nextDeck: DeckSnapshot?
     public let decks: [DeckSnapshot]
@@ -117,11 +118,13 @@ public struct LiveWorkspaceContent: Equatable, Sendable {
         abletonLinkBPMMilli: UInt64? = nil,
         abletonLinkPeers: UInt64 = 0,
         simulation: SimulationSnapshot? = nil,
-        timeline: [TimelineEntrySnapshot]
+        timeline: [TimelineEntrySnapshot],
+        playerUSBs: [LivePlayerUSBSnapshot] = []
     ) {
         self.liveDeck = liveDeck
         self.nextDeck = nextDeck
         self.decks = decks
+        self.playerUSBs = playerUSBs
         self.leaderDeckID = leaderDeckID
         self.livePlan = livePlan
         self.plan = plan
@@ -529,7 +532,9 @@ public enum LiveWorkspacePresenter {
             abletonLinkBPMMilli: snapshot.abletonLinkIntegration?.bpmMilli,
             abletonLinkPeers: snapshot.abletonLinkIntegration?.peers ?? 0,
             simulation: snapshot.simulation,
-            timeline: snapshot.timeline
+            timeline: snapshot.timeline,
+            playerUSBs: snapshot.deckSource.mode == "connectedDecks"
+                ? snapshot.deckInputIntegration?.playerUSBs ?? [] : []
         )
     }
 

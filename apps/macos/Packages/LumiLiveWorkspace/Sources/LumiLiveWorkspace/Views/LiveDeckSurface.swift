@@ -10,6 +10,7 @@ struct LiveDeckSurface<Details: View>: View {
     let plan: PlanSnapshot?
     let musicalKey: String
     let isLocalPlayback: Bool
+    let playerUSB: LivePlayerUSBSnapshot?
     let visualClock: DeckVisualClockSnapshot?
     let waveformOverride: DeckWaveformPreviewSnapshot?
     let lightingTimingOffsetMillis: Int
@@ -39,6 +40,7 @@ struct LiveDeckSurface<Details: View>: View {
         plan: PlanSnapshot?,
         musicalKey: String,
         isLocalPlayback: Bool,
+        playerUSB: LivePlayerUSBSnapshot? = nil,
         visualClock: DeckVisualClockSnapshot? = nil,
         waveformOverride: DeckWaveformPreviewSnapshot? = nil,
         lightingTimingOffsetMillis: Int = 0,
@@ -58,6 +60,7 @@ struct LiveDeckSurface<Details: View>: View {
         self.plan = plan
         self.musicalKey = musicalKey
         self.isLocalPlayback = isLocalPlayback
+        self.playerUSB = playerUSB
         self.visualClock = visualClock
         self.waveformOverride = waveformOverride
         self.lightingTimingOffsetMillis = lightingTimingOffsetMillis
@@ -182,6 +185,15 @@ struct LiveDeckSurface<Details: View>: View {
                         .font(LumiTypography.technical)
                         .foregroundStyle(Color.white.opacity(0.58))
                         .lineLimit(1)
+                }
+                if !isLocalPlayback {
+                    LumiPlayerUSBBadge(
+                        state: playerUSB?.state ?? "unavailable",
+                        sourceName: playerUSB?.sourceName,
+                        colorID: playerUSB?.colorID
+                    )
+                    .accessibilityIdentifier("lumi.live.player.\(deck.deckID).usb")
+                    .frame(height: 16)
                 }
             }
                 .padding(.horizontal, LumiSpacing.small)

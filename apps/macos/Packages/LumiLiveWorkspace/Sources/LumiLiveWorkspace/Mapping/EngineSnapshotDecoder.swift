@@ -388,8 +388,23 @@ public struct EngineSnapshotDecoder: Sendable {
             precisePositionMessageCount: unsignedInteger(input["precisePositionMessageCount"]) ?? 0,
             authoritativePositionCount: unsignedInteger(input["authoritativePositionCount"]) ?? 0,
             positionDiscontinuityCount: unsignedInteger(input["positionDiscontinuityCount"]) ?? 0,
-            positionAuthorityReady: positionAuthorityReady
+            positionAuthorityReady: positionAuthorityReady,
+            playerUSBs: decodePlayerUSBs(input["discoveredPlayers"])
         )
+    }
+
+    private func decodePlayerUSBs(_ value: JSONValue?) -> [LivePlayerUSBSnapshot] {
+        guard case let .array(players) = value else { return [] }
+        return players.compactMap { player in
+            guard case let .object(fields) = player,
+                  let number = unsignedInteger(fields["playerNumber"]),
+                  (1...6).contains(number),
+                  case let .object(media) = fields["usbMedia"],
+                  case let .string(state) = media["state"] else { return nil }
+            let name: String? = if case let .string(value) = media["sourceName"] { value } else { nil }
+            let color = unsignedInteger(media["colorId"]).flatMap { $0 <= 8 ? UInt8($0) : nil }
+            return LivePlayerUSBSnapshot(playerNumber: number, state: state, sourceName: name, colorID: color)
+        }
     }
 
     private func decodeTimelineEntry(_ value: JSONValue) throws -> TimelineEntrySnapshot {
