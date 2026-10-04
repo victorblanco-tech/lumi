@@ -969,6 +969,30 @@ impl LibraryWorker {
         Ok(self.repository.autoloop_catalog()?)
     }
 
+    pub(crate) fn trust_local_usb_media(
+        &mut self,
+        marker: &crate::usb_media_identity::MediaIdentity,
+        source_id: &str,
+        physical_source_id: &str,
+    ) -> Result<bool, LibraryWorkerError> {
+        let stored = self.repository.trust_local_usb_media(
+            &marker.media_id,
+            &marker.source_id,
+            source_id,
+            physical_source_id,
+        )?;
+        if self
+            .repository
+            .trusted_usb_media(&marker.media_id, &marker.source_id)?
+            == lumi_library_sqlite::UsbMediaTrust::Conflict
+        {
+            return Err(LibraryWorkerError::Configuration(
+                "USB identity conflicts with another physical source; no automatic identity was accepted".to_owned(),
+            ));
+        }
+        Ok(stored)
+    }
+
     pub fn light_planning_policy(&self) -> Result<LightPlanningPolicy, LibraryWorkerError> {
         Ok(self.repository.light_planning_policy()?)
     }

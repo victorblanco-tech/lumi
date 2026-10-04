@@ -17,7 +17,7 @@ import java.util.HexFormat;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
-/** Opt-in hardware POC only. Never instantiated by BridgeMain or Lumi's show pump. */
+/** Bounded read-only USB marker reader. Never instantiated by BridgeMain or the show pump. */
 public final class MediaIdentityProbeMain {
     static final String MOUNT = "/C/";
     static final String FILE = ".lumi-media.json";
@@ -34,22 +34,24 @@ public final class MediaIdentityProbeMain {
 
     public static void main(String[] args) throws Exception {
         long started = System.nanoTime();
-        boolean worker = args.length == 3 && args[0].equals("--worker");
+        boolean markerOnly = args.length > 0 && (args[0].equals("--read-marker") || args[0].equals("--worker-marker"));
+        boolean worker = args.length > 0 && (args[0].equals("--worker") || args[0].equals("--worker-marker"));
         try {
-            int offset = worker ? 1 : 0;
-            if (args.length != offset + 2) {
+            int offset = worker || markerOnly ? 1 : 0;
+            if (args.length != offset + (markerOnly ? 1 : 2)) {
                 throw new ProbeFailure("invalid_arguments", "Use: MediaIdentityProbeMain PLAYER_IPV4 EXPECTED_LOCAL_SHA256");
             }
             InetAddress address = privateAddress(args[offset]);
-            String expected = args[offset + 1];
-            if (!expected.matches("[a-f0-9]{64}")) {
+            String expected = markerOnly ? "" : args[offset + 1];
+            if (!markerOnly && !expected.matches("[a-f0-9]{64}")) {
                 throw new ProbeFailure("invalid_arguments", "An exact local SHA-256 reference is required");
             }
             if (!worker) {
-                List<String> command = List.of(
+                var command = new java.util.ArrayList<>(List.of(
                         Path.of(System.getProperty("java.home"), "bin", "java").toString(),
                         "-Xmx64m", "-cp", System.getProperty("java.class.path"),
-                        MediaIdentityProbeMain.class.getName(), "--worker", address.getHostAddress(), expected);
+                        MediaIdentityProbeMain.class.getName(), markerOnly ? "--worker-marker" : "--worker", address.getHostAddress()));
+                if (!markerOnly) command.add(expected);
                 // Inherit output: no pipe can block a worker or grow a result buffer.
                 Process child = new ProcessBuilder(command).inheritIO().start();
                 int status = awaitChild(child, PROCESS_LIMIT);
@@ -64,15 +66,16 @@ public final class MediaIdentityProbeMain {
             boolean match = MessageDigest.isEqual(hash.getBytes(StandardCharsets.US_ASCII),
                     expected.getBytes(StandardCharsets.US_ASCII));
             System.out.println(JSON.writeValueAsString(new Result(
-                    match ? "verified_exact_bytes" : "reference_mismatch", address.getHostAddress(), MOUNT,
+                    markerOnly ? "marker_read" : match ? "verified_exact_bytes" : "reference_mismatch", address.getHostAddress(), MOUNT,
                     "/" + FILE, bytes.length, hash, match, elapsedMillis(started),
-                    "schema=" + marker.schemaVersion() + "; no USB writes; no Player/tempo/transport commands")));
-            if (!match) System.exit(1);
+                    "schema=" + marker.schemaVersion() + "; no USB writes; no Player/tempo/transport commands",
+                    marker.mediaId(), marker.sourceId())));
+            if (!markerOnly && !match) System.exit(1);
         } catch (Exception failure) {
             String code = failure instanceof ProbeFailure known ? known.code
                     : failure instanceof OncRpcTimeoutException ? "rpc_timeout" : "rpc_or_io_failure";
             System.out.println(JSON.writeValueAsString(new Result(code, "", MOUNT, "/" + FILE,
-                    0, "", false, elapsedMillis(started), failure.getMessage())));
+                    0, "", false, elapsedMillis(started), failure.getMessage(), null, null)));
             System.exit(2);
         }
     }
@@ -189,7 +192,8 @@ public final class MediaIdentityProbeMain {
 
     record Marker(int schemaVersion, String mediaId, String sourceId) {}
     record Result(String outcome, String playerAddress, String mount, String path, int bytes,
-                  String sha256, boolean exactLocalMatch, double elapsedMillis, String detail) {}
+                  String sha256, boolean exactLocalMatch, double elapsedMillis, String detail,
+                  String mediaId, String sourceId) {}
     record RemoteFile(FHandle handle, FAttr attributes) {}
     record Piece(FAttr attributes, byte[] bytes) {}
     interface Transport { RemoteFile lookup() throws Exception; Piece read(RemoteFile file, int offset, int count) throws Exception; }

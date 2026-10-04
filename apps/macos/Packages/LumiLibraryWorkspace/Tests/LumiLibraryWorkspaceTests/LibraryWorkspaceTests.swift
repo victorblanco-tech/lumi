@@ -524,7 +524,14 @@ struct LibraryWorkspaceTests {
                         .object([
                             "playerNumber": .number(1),
                             "name": .string("CDJ-1500X"),
-                            "address": .string("192.168.1.50")
+                            "address": .string("192.168.1.50"),
+                            "usbMedia": .object([
+                                "state": .string("trusted"),
+                                "sourceName": .string("DJ VIC GRAY"),
+                                "generation": .number(3),
+                                "lastVerifiedUnixMillis": .number(1_790_000_000_000),
+                                "detail": .string("Trusted USB identified")
+                            ])
                         ])
                     ]),
                     "lastError": .null
@@ -535,6 +542,9 @@ struct LibraryWorkspaceTests {
         #expect(input.isProDJLink)
         #expect(input.discoveredPlayers.first?.name == "CDJ-1500X")
         #expect(input.discoveredPlayers.first?.address == "192.168.1.50")
+        #expect(input.discoveredPlayers.first?.usbMedia?.state == "trusted")
+        #expect(input.discoveredPlayers.first?.usbMedia?.sourceName == "DJ VIC GRAY")
+        #expect(input.discoveredPlayers.first?.usbMedia?.generation == 3)
         #expect(input.recoveryPending == false)
         #expect(input.restartCount == 2)
         #expect(input.ingressQueueCapacity == 512)

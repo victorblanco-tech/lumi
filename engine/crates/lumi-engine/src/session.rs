@@ -365,6 +365,7 @@ struct EngineRuntime {
     deck_source: SimulatorDeckSourceProvider<ManualClock>,
     local_deck_source: LocalPlaybackDeckSourceProvider,
     direct_deck_source: ProLinkDeckSourceProvider,
+    media_resolver: crate::media_resolver::MediaResolver,
     #[cfg(not(test))]
     prolink_bridge: Option<BridgeProcessSupervisor>,
     prolink_start_error: Option<String>,
@@ -819,12 +820,25 @@ fn initialized_runtime_for_mode(
             }
         }
     }
+    #[cfg(not(test))]
+    let media_resolver = prolink_bridge_configuration()
+        .and_then(|configuration| configuration.java_runtime_paths())
+        .zip(crate::service::configured_database_path().ok().flatten())
+        .map_or_else(
+            crate::media_resolver::MediaResolver::disabled,
+            |((java, jar), database)| {
+                crate::media_resolver::MediaResolver::new(java, jar, database)
+            },
+        );
+    #[cfg(test)]
+    let media_resolver = crate::media_resolver::MediaResolver::disabled();
     Ok(EngineRuntime {
         state: runtime,
         clock,
         deck_source,
         local_deck_source,
         direct_deck_source,
+        media_resolver,
         #[cfg(not(test))]
         prolink_bridge,
         prolink_start_error,
@@ -3021,6 +3035,7 @@ fn transport_ack_envelope(
 
 fn process_deck_input_messages(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
     runtime.timing_preferences.poll();
+    runtime.media_resolver.poll(Instant::now());
     if runtime.deck_source_mode != DeckSourceMode::ConnectedDecks {
         #[cfg(not(test))]
         maintain_direct_prolink_bridge(runtime)?;
@@ -3096,6 +3111,9 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
 
     let at = runtime.clock.now();
     for message in messages {
+        runtime
+            .media_resolver
+            .observe(&message.event, Instant::now());
         if let Err(error) = runtime.direct_deck_source.ingest(message, at) {
             fail_direct_prolink_bridge(runtime, error.to_string());
             return Ok(());
@@ -3190,6 +3208,7 @@ fn forward_direct_prolink_clock(runtime: &mut EngineRuntime) {
 
 #[cfg(not(test))]
 fn fail_direct_prolink_bridge(runtime: &mut EngineRuntime, message: String) {
+    runtime.media_resolver.clear();
     let actionable = format!("{message}; Lumi will retry the Pro DJ Link bridge automatically");
     eprintln!("Direct Pro DJ Link failure: {actionable}");
     runtime.prolink_start_error = Some(actionable.clone());
@@ -4857,6 +4876,7 @@ fn snapshot_envelope_internal(
                     "playerNumber": number,
                     "name": device.name,
                     "address": device.address,
+                    "usbMedia": runtime.media_resolver.status(*number),
                 }))
                 .collect::<Vec<_>>(),
             "lastError": diagnostics.last_error

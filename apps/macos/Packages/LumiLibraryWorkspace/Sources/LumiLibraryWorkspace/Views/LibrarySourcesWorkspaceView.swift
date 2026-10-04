@@ -1429,7 +1429,8 @@ public struct LibrarySourcesWorkspaceView: View {
             options: [.skipHiddenVolumes]
         )?.first { url in
             if let marker = mediaIdentities[url.path] {
-                return volumeSourceID(url) == marker.sourceId && marker.sourceId == device.sourceID
+                return volumeSourceID(url) == marker.sourceId
+                    && registeredSourceID(for: url, marker: marker) == device.sourceID
             }
             return USBSourceIdentityResolver.mountedVolume(
                 mountedIdentity(url),
@@ -1654,7 +1655,7 @@ public struct LibrarySourcesWorkspaceView: View {
                 usbSelectionFeedback = "Duplicate Lumi USB identity detected. Reconnect only the intended USB before scanning or syncing. Nothing was merged."
                 return nil
             }
-            return marker.sourceId
+            return registeredSourceID(for: url, marker: marker)
         }
         let displayName = volumeDisplayName(url)
         let collisionSafePreferredID = preferredSourceID.flatMap { sourceID in
@@ -1669,6 +1670,21 @@ public struct LibrarySourcesWorkspaceView: View {
                 : nil
         }
         return collisionSafePreferredID ?? USBLocalSourceIdentity.generated()
+    }
+
+    private func registeredSourceID(for url: URL, marker: USBMediaIdentity) -> String {
+        let uuid = try? url.resourceValues(forKeys: [.volumeUUIDStringKey]).volumeUUIDString
+        let physicalID = USBStableSourceIdentity.sourceID(
+            fileSystemUUID: uuid,
+            displayName: volumeDisplayName(url),
+            hardwareSerial: USBStableSourceIdentity.hardwareSerial(for: url)
+        )
+        return USBSourceIdentityResolver.registeredSourceID(
+            markerSourceID: marker.sourceId,
+            physicalSourceID: physicalID,
+            displayName: volumeDisplayName(url),
+            devices: visibleUSBDevices
+        )
     }
 
     private func mountedRekordboxUSBs() -> [URL] {

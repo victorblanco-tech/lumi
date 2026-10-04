@@ -90,7 +90,8 @@ public struct ProDJLinkIntegrationView: View {
             if let players = integration?.discoveredPlayers, !players.isEmpty {
                 ForEach(players) { player in
                     LumiPanel {
-                        HStack(spacing: LumiSpacing.large) {
+                        VStack(alignment: .leading, spacing: LumiSpacing.small) {
+                            HStack(spacing: LumiSpacing.large) {
                             DeckPlayerStatusIcon()
                                 .foregroundStyle(LumiColor.accent)
                                 .frame(width: 38, height: 38)
@@ -106,6 +107,15 @@ public struct ProDJLinkIntegrationView: View {
                                 Text(player.address ?? "Address unavailable")
                                     .font(LumiTypography.technical)
                                     .foregroundStyle(LumiColor.textSecondary)
+                            }
+                            }
+                            if (1...4).contains(player.playerNumber) {
+                                Label(usbDescription(player.usbMedia), systemImage: "externaldrive")
+                                    .font(LumiTypography.caption)
+                                    .foregroundStyle(usbColor(player.usbMedia))
+                                    .lineLimit(1)
+                                    .frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
+                                    .help(usbDetail(player.usbMedia))
                             }
                         }
                     }
@@ -134,12 +144,37 @@ public struct ProDJLinkIntegrationView: View {
                 capability("Device discovery", true)
                 capability("Play, pause, position and BPM", integration?.isReceiving == true)
                 capability("Master and on-air state", integration?.isReceiving == true)
-                capability("USB track identity and safe library matching", integration?.isReceiving == true)
+                capability("Trusted USB identity", integration?.discoveredPlayers.contains { $0.usbMedia?.state == "trusted" } == true)
                 Label("Compatibility is capability-based. Unknown models remain safely detected without Lumi guessing unsupported metadata.", systemImage: "info.circle")
                     .font(LumiTypography.caption)
                     .foregroundStyle(LumiColor.textSecondary)
             }
         }
+    }
+
+    private func usbDescription(_ media: ProDJLinkUSBMediaState?) -> String {
+        switch media?.state {
+        case "trusted": "USB · \(media?.sourceName ?? "Trusted source") · identified"
+        case "unknown": "USB · connect to Mac and scan in Import & Sources"
+        case "conflict": "USB · identity conflict — review local source"
+        case "unavailable": "USB · identity unavailable"
+        default: "USB · identifying source…"
+        }
+    }
+
+    private func usbColor(_ media: ProDJLinkUSBMediaState?) -> Color {
+        switch media?.state {
+        case "trusted": LumiColor.success
+        case "conflict", "unknown": LumiColor.warning
+        default: LumiColor.textSecondary
+        }
+    }
+
+    private func usbDetail(_ media: ProDJLinkUSBMediaState?) -> String {
+        guard let media else { return "Waiting for USB identity resolution" }
+        guard let verified = media.lastVerifiedUnixMillis else { return media.detail }
+        let date = Date(timeIntervalSince1970: Double(verified) / 1_000)
+        return "\(media.detail). Last verified: \(date.formatted(date: .omitted, time: .standard))"
     }
 
     private func statusRow(_ title: String, _ value: String) -> some View {

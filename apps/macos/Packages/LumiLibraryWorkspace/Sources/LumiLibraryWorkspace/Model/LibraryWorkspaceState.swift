@@ -858,8 +858,24 @@ public struct ProDJLinkDeviceState: Equatable, Sendable, Identifiable {
     public let playerNumber: UInt64
     public let name: String
     public let address: String?
+    public let usbMedia: ProDJLinkUSBMediaState?
+
+    public init(playerNumber: UInt64, name: String, address: String?, usbMedia: ProDJLinkUSBMediaState? = nil) {
+        self.playerNumber = playerNumber
+        self.name = name
+        self.address = address
+        self.usbMedia = usbMedia
+    }
 
     public var id: UInt64 { playerNumber }
+}
+
+public struct ProDJLinkUSBMediaState: Equatable, Sendable {
+    public let state: String
+    public let sourceName: String?
+    public let generation: UInt64
+    public let lastVerifiedUnixMillis: UInt64?
+    public let detail: String
 }
 
 public struct DeckInputIntegrationState: Equatable, Sendable {

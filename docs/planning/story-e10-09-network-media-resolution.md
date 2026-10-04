@@ -1,8 +1,9 @@
 # E10-09 Automatic USB identification on live Players
 
 Status: In progress on 2026-10-04. Phase 1 physical marker retrieval passed for
-both independent USBs and after swapping Players. Production integration and
-end-to-end acceptance remain open.
+both independent USBs and after swapping Players. Phase 2 is implemented in
+0.6.4-dev-1 with local regressions; native acceptance is in progress. Source-scoped
+live hydration and end-to-end acceptance remain open.
 Depends on E10-08 and ADR 0045.
 
 Lumi must automatically associate a live track with the correct trusted USB,
@@ -111,7 +112,8 @@ working around them.
 ## Physical evidence from 2026 10 04
 
 The opt-in `MediaIdentityProbeMain` entry point was added to the Java bridge
-module. Neither BridgeMain nor the engine starts it. It uses pinned Crate Digger
+module for the Phase 1 POC. Neither BridgeMain nor the engine started it in that
+phase. It uses pinned Crate Digger
 0.2.1 RPC records and Remote Tea 1.1.4 to perform bounded UDP portmapper, mount,
 LOOKUP and READ calls. It never starts a VirtualCdj or a metadata finder. The
 root USB mount is `/C/`; the only filename is `.lumi-media.json`.
@@ -168,6 +170,69 @@ Results:
   cause. Never auto-register a network marker or merge these keys by guesswork;
   preserve local authorization, aliases and edited phrases in migration tests.
 
-Pending: production swap/reinsert invalidation, cross-Player loading, physical failure
-cases, isolated production resolver, UI matching acceptance and timing comparison.
-The simulator remains unchanged and deliberately has no NFS/media server.
+## Phase 2 implementation and evidence from 2026 10 04
+
+The engine now has a separate USB identity worker. The realtime pump only polls
+bounded completion and job queues; it performs no NFS, process startup, JSON
+parsing or SQLite work for this resolver. One read runs at a time, with four
+Player slots, device generations, cancellation, capped retry backoff and a
+15-second successful-identity recheck. A direct Java worker has a five-second
+RPC budget and an eight-second Rust supervisor deadline. Its bounded stdout is
+read and the process is killed/reaped on cancellation or expiry. It starts no
+VirtualCdj, metadata finder or nested Java process.
+
+Unlike the exact-reference Phase 1 POC, this worker reads a validated marker
+without a supplied local SHA. That is not authorization: schema 19 separately
+stores the marker-to-existing-source binding established by a local USB scan or
+sync. The network reader opens SQLite read-only, cannot create a trusted source
+and reports unknown/conflict instead of registering or guessing. Local binding
+preserves legacy canonical source keys and their existing aliases and phrases;
+conflicting local physical evidence is sticky rather than rewriting the binding.
+
+Evidence so far:
+
+- Rust engine tests: 123 library tests passed, four intentionally ignored;
+  process and safe network acceptance tests passed. SQLite: 23 unit and 30
+  integration tests passed, one performance test intentionally ignored. Pro DJ
+  Link regression suites passed. Strict Clippy passed for all three crates.
+- Seven resolver regressions cover delayed replies after reconnect, repeated
+  discovery coalescing, deadline/shutdown cleanup, invalid addresses/replies,
+  the real Java response contract, copied trusted markers on two Players and a
+  slow worker while the pump continues. The debug component test completed
+  100,000 non-blocking polls in 7,588 microseconds. This is not an end-to-end
+  output latency measurement or the final performance gate.
+- SQLite regressions prove that a network marker cannot authorize itself,
+  legacy binding does not replace the canonical source, copied local identities
+  conflict, older databases remain read-only and colliding track IDs resolve
+  only within the specified source. The runtime does not yet use that new track
+  lookup; Phase 3 is still required.
+- All 63 Swift Library regressions passed, including the new marker/legacy
+  registration test. Native Dev build, package audit and strict ad-hoc signature
+  verification passed. This is a local test package, not a public release.
+- Desktop testing found that the UI preferred CHRM's marker key over its existing
+  legacy registration. The fix retains the legacy key only when the marker agrees
+  with the current physical fingerprint and there is exactly one matching legacy
+  registration. Modern sources, ambiguous legacy names and foreign markers are
+  not rebound. The regression covers those cases.
+- Real Player 1 returned GRAY's valid 125-byte marker through the packaged reader
+  in 59.212 ms. The background worker recovered from unavailable to unknown,
+  correctly asking for local registration. Player 2 without a mounted USB remained
+  unavailable; neither condition restarted the healthy three-device bridge.
+- The corrected native scan showed CHRM CONNECTED under the same legacy source,
+  GRAY OFFLINE and the two previously selected playlists remembered. Schema 19
+  now binds CHRM's existing marker to that canonical source with no conflict.
+  Its marker SHA stayed identical to the Phase 1 reference. No USB write, Sync
+  action or phrase/MIDI edit was performed.
+- The Dev library retained 114 tracks and 264 timeline revisions. All 42 tables
+  common to the pre-migration backup and current database had identical row
+  fingerprints after the scan; SQLite integrity returned `ok`. Only the new
+  authorization table was populated. Production data is unchanged.
+
+Pending: native acceptance of CHRM's automatic network recognition after returning
+it to Player 2, robust mount/media epochs for live lookup, cross-Player loading,
+physical failure cases, Remote presentation and end-to-end timing comparison.
+Periodic identity revalidation alone is not sufficient to authorize a newly
+loaded track after a USB swap. Phase 3 must reject stale media and track-load
+results before consuming a source binding. No full live recognition or lighting
+acceptance is claimed by this phase. The simulator remains unchanged and has no
+NFS/media server.

@@ -32,7 +32,9 @@ use rusqlite::{
 };
 use thiserror::Error;
 
-const SCHEMA_VERSION: u32 = 18;
+const SCHEMA_VERSION: u32 = 19;
+mod network_media;
+pub use network_media::{TrustedUsbMedia, UsbMediaTrust};
 const DEFAULTS_VERSION_KEY: &str = "phrase-role-defaults-version";
 const CATALOG_REVISION_KEY: &str = "phrase-role-catalog-revision";
 const AUTOLOOP_DEFAULTS_VERSION_KEY: &str = "autoloop-catalog-defaults-version";
@@ -3745,6 +3747,22 @@ impl SqliteLibraryRepository {
             } else {
                 "PRAGMA user_version = 18;"
             })?;
+            current = 18;
+        }
+        if current == 18 {
+            self.connection.execute_batch(
+                "BEGIN IMMEDIATE;
+                 CREATE TABLE IF NOT EXISTS usb_media_bindings (
+                    media_id TEXT PRIMARY KEY,
+                    marker_source_id TEXT NOT NULL,
+                    source_id TEXT NOT NULL REFERENCES device_library_sources(source_id) ON DELETE CASCADE,
+                    physical_source_id TEXT NOT NULL,
+                    conflicted INTEGER NOT NULL DEFAULT 0 CHECK(conflicted IN (0,1)),
+                    verified_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+                 );
+                 PRAGMA user_version = 19;
+                 COMMIT;",
+            )?;
         }
         Ok(())
     }

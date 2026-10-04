@@ -1545,6 +1545,13 @@ final class EngineStatusModel: ObservableObject {
                     detail: sourceImportFeedback ?? "Safe track identities are now available."
                 )
             }
+            if case let .string(warning)? = envelope.payload["usbIdentityWarning"] {
+                sourceImportFeedback = "USB sync completed. Automatic USB identification needs attention: \(warning)"
+                usbSourceOperation = USBSourceOperationState(
+                    phase: .completed, title: "USB sync complete",
+                    detail: sourceImportFeedback ?? "USB identity registration needs attention."
+                )
+            }
         } catch {
             sourceImportFeedback = (error as? LocalizedError)?.errorDescription
                 ?? "The USB source could not be synchronized."

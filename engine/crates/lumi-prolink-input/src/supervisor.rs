@@ -133,6 +133,12 @@ pub struct BridgeLaunchConfiguration {
 }
 
 impl BridgeLaunchConfiguration {
+    /// Reuses the packaged runtime without starting a second VirtualCdj.
+    #[must_use]
+    pub fn java_runtime_paths(&self) -> Option<(PathBuf, PathBuf)> {
+        (self.arguments.len() == 3 && self.arguments[1] == "-jar")
+            .then(|| (self.executable.clone(), PathBuf::from(&self.arguments[2])))
+    }
     #[must_use]
     pub fn java_jar(java_executable: impl Into<PathBuf>, bridge_jar: impl AsRef<Path>) -> Self {
         Self {

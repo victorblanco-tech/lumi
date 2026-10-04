@@ -4,6 +4,26 @@ import Testing
 
 @Suite("USB source identity")
 struct USBSourceIdentityResolverTests {
+    @Test("A physically verified marker retains the unique legacy registration")
+    func markerLegacyRegistration() {
+        let legacy = device(sourceID: "usb-fs:hardware-old", displayName: "CHRM")
+        let modern = device(sourceID: "usb-fs:v2-modern", displayName: "CHRM")
+        func resolve(_ physical: String?, _ devices: [RekordboxDeviceState]) -> String {
+            USBSourceIdentityResolver.registeredSourceID(
+                markerSourceID: "usb-fs:v2-marker", physicalSourceID: physical,
+                displayName: "CHRM", devices: devices
+            )
+        }
+        #expect(resolve("usb-fs:v2-marker", [legacy]) == legacy.sourceID)
+        #expect(resolve("usb-fs:v2-other", [legacy]) == "usb-fs:v2-marker")
+        #expect(resolve(nil, [legacy]) == "usb-fs:v2-marker")
+        #expect(resolve("usb-fs:v2-marker", [modern]) == "usb-fs:v2-marker")
+        let second = device(sourceID: "usb-fs:hardware-second", displayName: "CHRM")
+        #expect(resolve("usb-fs:v2-marker", [legacy, second]) == "usb-fs:v2-marker")
+        let exact = device(sourceID: "usb-fs:v2-marker", displayName: "CHRM")
+        #expect(resolve("usb-fs:v2-marker", [legacy, exact]) == exact.sourceID)
+    }
+
     @Test("Media marker preserves the registered identity and rejects malformed files")
     func mediaMarkerValidation() throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

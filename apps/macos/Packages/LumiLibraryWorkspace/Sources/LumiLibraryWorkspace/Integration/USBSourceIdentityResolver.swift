@@ -94,6 +94,25 @@ struct MountedUSBIdentity: Equatable, Sendable {
 }
 
 enum USBSourceIdentityResolver {
+    /// Preserve a locally registered legacy key only when the marker agrees
+    /// with the current physical fingerprint. A matching name alone must not
+    /// authorize a foreign/copied marker or merge modern sources.
+    static func registeredSourceID(
+        markerSourceID: String,
+        physicalSourceID: String?,
+        displayName: String,
+        devices: [RekordboxDeviceState]
+    ) -> String {
+        if devices.contains(where: { $0.sourceID == markerSourceID }) {
+            return markerSourceID
+        }
+        guard markerSourceID == physicalSourceID else { return markerSourceID }
+        let legacy = devices.filter {
+            isMigratableLegacy($0.sourceID) && namesMatch($0.displayName, displayName)
+        }
+        return legacy.count == 1 ? legacy[0].sourceID : markerSourceID
+    }
+
     /// Returns whether an *actively mounted* volume represents this trusted
     /// source. A security-scoped bookmark is only an authorization grant and
     /// must never be treated as physical-presence evidence: macOS can resolve

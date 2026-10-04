@@ -438,10 +438,29 @@ public struct LibrarySnapshotDecoder: Sendable {
                 guard case let .object(player) = value else {
                     throw LibrarySnapshotError.invalidObject
                 }
+                let usbMedia: ProDJLinkUSBMediaState?
+                if case let .object(media)? = player["usbMedia"] {
+                    let state = try string(media, "state")
+                    let detail = try string(media, "detail")
+                    let name = try strictOptionalString(media, "sourceName")
+                    guard ["resolving", "trusted", "unknown", "conflict", "unavailable"].contains(state),
+                          detail.count <= 512, (name?.count ?? 0) <= 512 else {
+                        throw LibrarySnapshotError.invalidObject
+                    }
+                    usbMedia = ProDJLinkUSBMediaState(
+                        state: state, sourceName: name,
+                        generation: try unsigned(media, "generation"),
+                        lastVerifiedUnixMillis: try strictOptionalUnsigned(media, "lastVerifiedUnixMillis"),
+                        detail: detail
+                    )
+                } else {
+                    usbMedia = nil
+                }
                 return ProDJLinkDeviceState(
                     playerNumber: try unsigned(player, "playerNumber"),
                     name: try string(player, "name"),
-                    address: optionalString(player, "address")
+                    address: optionalString(player, "address"),
+                    usbMedia: usbMedia
                 )
             }
         } else {

@@ -2,8 +2,10 @@
 
 Status: Direction accepted on 2026-10-04. Production implementation depends on
 the physical NFS proof of concept in E10-09. That fixed-file gate passed for
-CHRM and GRAY on both Players, including a safe physical swap. Production
-resolution, cache invalidation and end-to-end acceptance remain open.
+CHRM and GRAY on both Players, including a safe physical swap. The isolated
+identity worker and local authorization registry are implemented in 0.6.4-dev-1.
+Source-scoped runtime hydration, mount invalidation and end-to-end acceptance
+remain open.
 
 ## Context
 
@@ -76,6 +78,31 @@ refresh notifications for already loaded Players and durable audio fingerprints
 independent of current USB aliases. Prepare those results off the show pump.
 Changed prepared data is adopted under a documented safe policy, not by replacing
 the active plan midway through a phrase or replaying an executed AutoLoop.
+
+## Phase 2 implementation boundaries
+
+One bounded worker owns NFS reads and a read-only SQLite connection. The engine
+pump sends at most one job and consumes at most four replies per poll. Device
+loss/reconnect cancels the old job; generation checks discard its delayed reply.
+Successful identities are revalidated every 15 seconds, and failures back off to
+30 seconds. A failed reader changes only that Player's USB diagnostic state.
+
+Schema 19 records an existing local trusted source, marker UUID/source key and
+physical fingerprint. Local scan/sync creates this binding; a network reply
+cannot. Legacy canonical source IDs are retained instead of migrating track or
+phrase ownership. Conflicting physical bindings and duplicate trusted markers
+remain conflicts. The physical fingerprint includes the label, so a rename may
+require explicit local reauthorization; automatic rename migration is not claimed.
+
+The resolver calls the reader directly with an eight-second process supervisor
+and bounded response, avoiding nested workers and orphan processes. The standalone
+exact-SHA POC mode remains available separately. Both use the same fixed-file
+bounded RPC transport. Marker identity is not cryptographic authentication.
+
+This phase adds diagnostics only. It does not replace the old runtime track
+lookup yet. Phase 3 must carry source Player/slot and track-load identity, detect
+mount changes and reject stale bindings before source-scoped hydration. A cached
+15-second identity is not by itself enough to match a newly loaded track safely.
 
 ## Evidence required
 
