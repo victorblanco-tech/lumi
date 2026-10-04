@@ -2,7 +2,8 @@
 
 Status: In progress on 2026-10-04. Phase 1 physical marker retrieval passed for
 both independent USBs and after swapping Players. Phase 2 is implemented in
-0.6.4-dev-1 with local regressions; native acceptance is in progress. Source-scoped
+0.6.4-dev-1 with local regressions; CHRM's native network recognition passed,
+while GRAY's local enrollment and two-trusted-source acceptance remain open. Source-scoped
 live hydration and end-to-end acceptance remain open.
 Depends on E10-08 and ADR 0045.
 
@@ -227,9 +228,17 @@ Evidence so far:
   common to the pre-migration backup and current database had identical row
   fingerprints after the scan; SQLite integrity returned `ok`. Only the new
   authorization table was populated. Production data is unchanged.
+- After the owner safely returned CHRM to real Player 2 and loaded a track,
+  the running Dev UI changed its USB line from unavailable to green
+  `DJ VIC CHRM · identified` without restarting Lumi or the bridge. Pro DJ Link
+  and exact position authority remained READY, with both Players and the DJM
+  detected and continuing bridge/position traffic. Player 1's GRAY remained
+  unknown and separately requested local enrollment; it was not mislabeled CHRM.
+  The CHRM binding remained non-conflicted and track/timeline counts remained
+  114/264. No transport or output controls were used for this check.
 
-Pending: native acceptance of CHRM's automatic network recognition after returning
-it to Player 2, robust mount/media epochs for live lookup, cross-Player loading,
+Pending: GRAY's local enrollment and two-trusted-source native acceptance,
+robust mount/media epochs for live lookup, cross-Player loading,
 physical failure cases, Remote presentation and end-to-end timing comparison.
 Periodic identity revalidation alone is not sufficient to authorize a newly
 loaded track after a USB swap. Phase 3 must reject stale media and track-load
