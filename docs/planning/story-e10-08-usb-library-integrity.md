@@ -96,3 +96,36 @@ Evidence:
 - Legacy tracks without stored complete audio fingerprints require migration
   evidence; exact pre-sync audio matching needs an explicit preflight stage if
   final counts must be known before the Sync action.
+
+## 2026-10-04 Reproduced gaps and approved next work
+
+Review used actual USB workers with temporary encrypted OneLibrary fixtures and
+temporary Lumi databases. 199 existing local tests passed; four engine tests
+were intentionally ignored. Ten repeated syncs retained the same row counts. A
+50 ms grid shift was imported exactly and a manually edited Lumi phrase role
+survived. No physical USB was mounted, so this is not hardware acceptance and
+does not establish the cause of the owner's previous failed show test.
+
+The owner approved repairing the following four boundaries:
+
+1. Source-blind live lookup can be ambiguous or wrong for colliding USB track IDs.
+   The owner chose automatic identification, not manual Player assignments.
+   [E10-09](story-e10-09-network-media-resolution.md) prepares an isolated NFS POC;
+   [ADR 0045](../architecture/adr/0045-automatic-network-media-resolution.md)
+   defines the hardware gate before production integration.
+2. A track without source phrases can sync with no timeline, then fail live
+   hydration and trigger global bridge recovery. Introduce per-track preparation
+   outcomes; an unavailable plan must not reset healthy Players or Link.
+3. A Player loaded before sync receives no new load event when the same identity
+   remains loaded. Notify/revalidate after committed library changes off the show
+   pump and adopt prepared changes safely without replaying a cue.
+4. Replacing the same source/track alias overwrites its old audio fingerprint.
+   A later import of the original prepared audio can become a new canonical row.
+   Preserve fingerprints independently of aliases and choose only compatible
+   audio locations. Existing edited tracks and user configuration must survive.
+
+These are prepared requirements, not completed fixes. Additional review findings
+about missing unrelated files, missing key metadata, incomplete metadata updates,
+duplicate editions and durable sync reports remain tracked separately from the
+four approved repairs. The production application has not been changed by this
+preparation task.
