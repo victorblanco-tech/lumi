@@ -1,7 +1,8 @@
 # E10-09 Automatic USB identification on live Players
 
-Status: In progress on 2026-10-04. First physical marker retrieval passed;
-two-stick/swap acceptance and production integration remain open.
+Status: In progress on 2026-10-04. Phase 1 physical marker retrieval passed for
+both independent USBs and after swapping Players. Production integration and
+end-to-end acceptance remain open.
 Depends on E10-08 and ADR 0045.
 
 Lumi must automatically associate a live track with the correct trusted USB,
@@ -132,6 +133,16 @@ Results:
   DJM-V5. Two isolated requests returned CHRM's exact local bytes via NFS:
   `verified_exact_bytes`, 94.092 ms and 75.716 ms worker elapsed time. These are
   two file-read samples, not a latency distribution or a lighting benchmark.
+- Owner moved GRAY to physical Player 2, loaded a local track and left it paused.
+  Two requests returned all 125 local marker bytes exactly: 280.498 ms and
+  83.018 ms. A deliberate comparison of GRAY's remote marker with CHRM's local
+  reference returned `reference_mismatch` (exit 1), not a successful identity.
+- Owner paused both Players, safely ejected the sticks, swapped them and loaded
+  local tracks while keeping both paused. Player 1 then returned GRAY's exact
+  125 bytes in 445.038 ms; Player 2 returned CHRM's exact 108 bytes in 85.922 ms.
+  The identity followed the medium rather than the device number. This passes
+  the Phase 1 fixed-file gate on these CDJ-1500X units and media, not the full
+  production-cache/media-generation or cross-Player acceptance gate.
 - All 17 Java regressions pass: five existing bridge tests plus twelve new
   marker, chunk-limit, XDR-bound, media-change, schema, address, deadline and
   child-cleanup tests. Missing-file behavior uses an injected transport; no real
@@ -143,7 +154,20 @@ Results:
   continuing bridge traffic. Exact position authority remained WAITING, as it
   was before the probe. Lumi stayed Off. This does not prove live matching or
   output correctness; the approved source-scoped hydration fixes are still open.
+- After GRAY was loaded on Player 2, native diagnostics also showed exact
+  position authority READY. The existing installed app was not replaced.
+- After the swap, native Overview still showed READY and all three devices.
+  Live retained Player 1's prepared 90s Bitch plan; Player 2 showed external
+  track 1012 with AUTO HELD. This records the current app's unresolved matching,
+  not a failure of the fixed-file probe and not a completed recognition fix.
+  Lumi was left open on Live in Off mode; no timing/control setting was changed.
+- Read-only registry inspection found GRAY registered in the Production
+  library, but no CHRM device-source row there. Dev contains GRAY and an older
+  CHRM source key that differs from CHRM's current marker. This is relevant to
+  migration/unknown-source handling, not proof of the earlier failed show's
+  cause. Never auto-register a network marker or merge these keys by guesswork;
+  preserve local authorization, aliases and edited phrases in migration tests.
 
-Pending: GRAY in Player 2, swaps/reinsert, cross-Player loading, physical failure
+Pending: production swap/reinsert invalidation, cross-Player loading, physical failure
 cases, isolated production resolver, UI matching acceptance and timing comparison.
 The simulator remains unchanged and deliberately has no NFS/media server.

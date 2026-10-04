@@ -1,8 +1,9 @@
 # ADR 0045 Automatic network media resolution
 
 Status: Direction accepted on 2026-10-04. Production implementation depends on
-the full physical NFS proof of concept in E10-09. CHRM access on Player 1 is
-physically verified; two-stick and swap tests remain open.
+the physical NFS proof of concept in E10-09. That fixed-file gate passed for
+CHRM and GRAY on both Players, including a safe physical swap. Production
+resolution, cache invalidation and end-to-end acceptance remain open.
 
 ## Context
 
