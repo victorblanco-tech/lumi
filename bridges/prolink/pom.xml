@@ -33,6 +33,17 @@
             <artifactId>beat-link</artifactId>
             <version>${beat-link.version}</version>
         </dependency>
+        <!-- Explicit dependencies for the standalone read-only media probe. -->
+        <dependency>
+            <groupId>org.deepsymmetry</groupId>
+            <artifactId>crate-digger</artifactId>
+            <version>0.2.1</version>
+        </dependency>
+        <dependency>
+            <groupId>org.acplt.remotetea</groupId>
+            <artifactId>remotetea-oncrpc</artifactId>
+            <version>1.1.4</version>
+        </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>
             <artifactId>jackson-databind</artifactId>

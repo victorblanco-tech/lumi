@@ -1,7 +1,8 @@
 # ADR 0045 Automatic network media resolution
 
 Status: Direction accepted on 2026-10-04. Production implementation depends on
-the physical NFS proof of concept in E10-09.
+the full physical NFS proof of concept in E10-09. CHRM access on Player 1 is
+physically verified; two-stick and swap tests remain open.
 
 ## Context
 
@@ -22,6 +23,8 @@ First test read-only retrieval of the existing `.lumi-media.json` from a physica
 Player. Do not enable MetadataFinder, SignatureFinder, new dbserver queries or a
 second VirtualCdj merely to perform this test. Keep the accepted timing bridge,
 Ableton Link tempo relay and AutoLoop executor unchanged during the POC.
+Test actual CDJs before adding simulator media behavior; simulator changes must
+follow captured hardware observations rather than define the expected protocol.
 
 If the hardware gate passes, build a supervised, low-priority media resolver.
 Its inputs are discovered device addresses and the source Player/slot reported

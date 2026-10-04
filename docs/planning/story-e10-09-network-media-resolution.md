@@ -1,6 +1,7 @@
 # E10-09 Automatic USB identification on live Players
 
-Status: Prepared on 2026-10-04. No NFS POC or production implementation completed.
+Status: In progress on 2026-10-04. First physical marker retrieval passed;
+two-stick/swap acceptance and production integration remain open.
 Depends on E10-08 and ADR 0045.
 
 Lumi must automatically associate a live track with the correct trusted USB,
@@ -22,8 +23,8 @@ deadline expiry and child-process cleanup. No admin rights or system NFS server
 configuration should be required. FileFetcher needs a verified download/deadline
 bound, not only an after-download size check.
 
-Physical gate: retrieve the same marker read locally from GRAY in Player 1 and
-CHRM in Player 2; repeat after swapping the sticks. Do not call this supported
+Physical gate: retrieve the same marker read locally from CHRM in Player 1 and
+GRAY in Player 2; repeat after swapping the sticks. Do not call this supported
 until actual CDJ-1500X tests pass. If either export path or firmware rejects the
 file, record that fact and discuss the next identity strategy before expanding.
 
@@ -35,7 +36,8 @@ file I/O, parsing and SQLite preparation outside the realtime pump. Resolve only
 known trusted markers. Expose source name, resolution state, last verified time
 and actionable failure in existing Pro DJ Link diagnostics.
 
-Use fixture transports for automated fault tests. The current simulator provides
+The owner explicitly requires real CDJs first, then simulator behavior based on
+those observations. Use fixture transports for automated fault tests. The current simulator provides
 status, tempo and position but no NFS/media server. A fixture or HTTP simulator
 response is not evidence that a real NFS request works. Add only the simulator
 support necessary to exercise media swaps and cross-Player sources; do not build
@@ -105,12 +107,43 @@ is explicitly approved. Physical compatibility cannot be declared solely from
 headless or headed simulation. Stop and report permission failures rather than
 working around them.
 
-## Current evidence and limits
+## Physical evidence from 2026 10 04
 
-- Source audit and test plan prepared; no app-code/runtime changes in this task.
-- The current simulator deliberately does not serve files over NFS.
-- Pinned Crate Digger 0.2.1 FileFetcher is available in the local dependency
-  cache; a local Java 21 packaging toolchain is available. Hardware reachability
-  and arbitrary marker access have not been tested.
-- At preparation time no removable USB was mounted on the MacBook. Hardware
-  setup, physical POC, headed acceptance and timing evidence remain pending.
+The opt-in `MediaIdentityProbeMain` entry point was added to the Java bridge
+module. Neither BridgeMain nor the engine starts it. It uses pinned Crate Digger
+0.2.1 RPC records and Remote Tea 1.1.4 to perform bounded UDP portmapper, mount,
+LOOKUP and READ calls. It never starts a VirtualCdj or a metadata finder. The
+root USB mount is `/C/`; the only filename is `.lumi-media.json`.
+
+The reader rejects non-regular files and sizes outside 1..4096 before READ. Its
+custom READ decoder rejects an oversized XDR payload before allocation, using
+at most 1024 bytes per chunk. File handle and modification identity are checked
+again after reading. RPCs have at most 1200 ms each within a five-second monotonic
+budget; a separate parent kills and reaps a worker exceeding eight seconds.
+An exact local SHA-256 reference is mandatory. This POC validates access only;
+it does not register sources or trust network data as authenticated evidence.
+
+Results:
+
+- Local CHRM marker: valid schema 1, 108 bytes. Local GRAY marker: valid schema 1,
+  125 bytes, distinct media and source IDs. Neither marker was changed.
+- Owner moved CHRM to the physical CDJ-1500X Player 1 and left it in a playing
+  loop. Lumi's native Pro DJ Link page identified both CDJ-1500X Players and the
+  DJM-V5. Two isolated requests returned CHRM's exact local bytes via NFS:
+  `verified_exact_bytes`, 94.092 ms and 75.716 ms worker elapsed time. These are
+  two file-read samples, not a latency distribution or a lighting benchmark.
+- All 17 Java regressions pass: five existing bridge tests plus twelve new
+  marker, chunk-limit, XDR-bound, media-change, schema, address, deadline and
+  child-cleanup tests. Missing-file behavior uses an injected transport; no real
+  missing-file or unreachable-server acceptance is claimed.
+- The sandbox initially rejected networking with `Operation not permitted`.
+  The same authorized read-only request outside that sandbox succeeded. This
+  was an execution-permission failure, not CDJ rejection.
+- Native UI after both reads still reported connection READY, three devices and
+  continuing bridge traffic. Exact position authority remained WAITING, as it
+  was before the probe. Lumi stayed Off. This does not prove live matching or
+  output correctness; the approved source-scoped hydration fixes are still open.
+
+Pending: GRAY in Player 2, swaps/reinsert, cross-Player loading, physical failure
+cases, isolated production resolver, UI matching acceptance and timing comparison.
+The simulator remains unchanged and deliberately has no NFS/media server.

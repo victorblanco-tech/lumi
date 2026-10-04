@@ -19,7 +19,7 @@ must remain unchanged unless a specific regression proves a change necessary.
 | E10-06 | In progress | Correct benchmark/app-build/visual gates; simulator user guide and real HQ screenshots; final regression, performance, security and UI evidence. |
 | [E10-07](story-e10-07-stable-remote-controller.md) | Complete; automated and native UI verified | Durable single-Controller ownership; two-client reconnect/transfer regression tests; separate connection/role presentation and client versions. |
 | [E10-08](story-e10-08-usb-library-integrity.md) | In progress | USB identity, revision-safe sync, audio/track matching and per-source UI acceptance; preserve existing Library and show availability. |
-| [E10-09](story-e10-09-network-media-resolution.md) | Prepared; physical POC pending | Automatic source identity through isolated read-only NFS; source-scoped live matching and multi-stick acceptance without realtime regressions. |
+| [E10-09](story-e10-09-network-media-resolution.md) | In progress; CHRM hardware read verified | Automatic source identity through isolated read-only NFS; source-scoped live matching and multi-stick acceptance without realtime regressions. |
 
 ## Delivery rules
 
