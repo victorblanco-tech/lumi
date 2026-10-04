@@ -2,9 +2,10 @@
 
 Status: In progress on 2026-10-04. Phase 1 physical marker retrieval passed for
 both independent USBs and after swapping Players. Phase 2 is implemented in
-0.6.4-dev-1 with local regressions; CHRM's native network recognition passed,
-while GRAY's local enrollment and two-trusted-source acceptance remain open. Source-scoped
-live hydration and end-to-end acceptance remain open.
+0.6.4-dev-1 with local regressions. Basic native identity acceptance passed after
+local enrollment: GRAY and CHRM are simultaneously identified on their respective
+real Players without restarting Lumi. Source-scoped live hydration and end-to-end
+acceptance remain open.
 Depends on E10-08 and ADR 0045.
 
 Lumi must automatically associate a live track with the correct trusted USB,
@@ -237,8 +238,21 @@ Evidence so far:
   The CHRM binding remained non-conflicted and track/timeline counts remained
   114/264. No transport or output controls were used for this check.
 
-Pending: GRAY's local enrollment and two-trusted-source native acceptance,
-robust mount/media epochs for live lookup, cross-Player loading,
+- The owner then connected GRAY locally. The native read-only scan indexed 86
+  playlists and 1,205 tracks, remembered its selected playlist and retained the
+  existing canonical GRAY source. Its existing 125-byte marker SHA remained
+  unchanged. The new authorization binding is distinct from CHRM's and both
+  bindings are non-conflicted. No Sync action or review override was performed;
+  the library still contained 114 tracks and 264 timeline revisions.
+- After GRAY was safely returned to Player 1 with a track loaded, the native
+  Pro DJ Link page simultaneously showed green `DJ VIC GRAY · identified` on
+  Player 1 and `DJ VIC CHRM · identified` on Player 2. Both CDJ-1500X Players and
+  the DJM-V5 remained detected, with Pro DJ Link and exact position authority
+  READY and continuing event/position traffic. No app or bridge restart, transport
+  change or output trigger was needed. This passes basic two-source identity
+  acceptance, not source-scoped live track or physical lighting acceptance.
+
+Pending: robust mount/media epochs for live lookup, cross-Player loading,
 physical failure cases, Remote presentation and end-to-end timing comparison.
 Periodic identity revalidation alone is not sufficient to authorize a newly
 loaded track after a USB swap. Phase 3 must reject stale media and track-load

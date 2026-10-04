@@ -4,6 +4,8 @@ Status: Direction accepted on 2026-10-04. Production implementation depends on
 the physical NFS proof of concept in E10-09. That fixed-file gate passed for
 CHRM and GRAY on both Players, including a safe physical swap. The isolated
 identity worker and local authorization registry are implemented in 0.6.4-dev-1.
+Basic native identity acceptance passed: after local enrollment, GRAY on Player 1
+and CHRM on Player 2 were simultaneously identified without restarting Lumi.
 Source-scoped runtime hydration, mount invalidation and end-to-end acceptance
 remain open.
 
@@ -103,6 +105,12 @@ This phase adds diagnostics only. It does not replace the old runtime track
 lookup yet. Phase 3 must carry source Player/slot and track-load identity, detect
 mount changes and reject stale bindings before source-scoped hydration. A cached
 15-second identity is not by itself enough to match a newly loaded track safely.
+
+Native acceptance used the existing markers without modifying either USB. Both
+local authorizations remain distinct and non-conflicted; no Sync action was
+needed. The real-Player check kept device discovery and position authority READY.
+It does not yet prove safe source-scoped runtime matching across media swaps or
+tracks loaded from another Player.
 
 ## Evidence required
 
