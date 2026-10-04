@@ -277,6 +277,25 @@ list. This addition does not change transport, planning or MIDI decisions.
 Implementation: Lumi 0.6.4-dev-2 and Lumi Remote 0.1.3-dev-1. Native UI and
 real-CDJ color acceptance must be recorded before declaring this increment done.
 
+Validation on 2026-10-04:
+
+- Local Rust, Java and Swift regression suites passed, including native color
+  decoding, trusted-only labels, loss/reconnect invalidation, Remote projection
+  privacy and preservation of USB information through transport-anchor updates.
+  Strict Clippy, both native builds and the signed Mac installer audit passed.
+- The packaged Dev app was installed in `/Applications/Lumi/Dev` and opened.
+  Its service reported 0.6.4-dev-2, build 356. Only that Dev engine and bridge
+  were running; Production and both databases were left unchanged.
+- Native Mac Live showed the reserved USB rows for both empty Players. The
+  connected iPhone Simulator showed the same neutral unidentified state in
+  portrait and landscape, with the integration statuses remaining visible.
+  The existing view-only role was preserved; no controller access was granted.
+- Real hardware was not reachable during this UI check: the bridge discovered
+  zero devices, and one ping to each previously observed Player address received
+  no reply. This is not evidence of a new discovery defect or of correct native
+  color reception. The final loaded-Player UI check with GRAY Blue and CHRM Pink
+  remains pending. The physical iPhone was not available for installation.
+
 Pending: robust mount/media epochs for live lookup, cross-Player loading,
 physical failure cases and end-to-end timing comparison.
 Periodic identity revalidation alone is not sufficient to authorize a newly
