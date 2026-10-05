@@ -32,7 +32,7 @@ use rusqlite::{
 };
 use thiserror::Error;
 
-const SCHEMA_VERSION: u32 = 19;
+const SCHEMA_VERSION: u32 = 20;
 mod network_media;
 pub use network_media::{TrustedUsbMedia, UsbMediaTrust};
 const DEFAULTS_VERSION_KEY: &str = "phrase-role-defaults-version";
@@ -1284,6 +1284,10 @@ impl SqliteLibraryRepository {
                  ON a.source_id = l.source_id
                 AND a.device_track_id = l.device_track_id
               WHERE l.canonical_track_id = ?1 AND a.archived = 0
+                AND a.canonical_track_id = l.canonical_track_id
+                AND (NOT EXISTS (SELECT 1 FROM track_audio_fingerprints f WHERE f.track_id = ?1)
+                     OR EXISTS (SELECT 1 FROM track_audio_fingerprints f
+                         WHERE f.track_id = ?1 AND f.audio_signature = a.audio_signature))
               ORDER BY s.synced_at DESC, l.source_id, l.device_track_id",
         )?;
         let rows = statement.query_map([to_i64(track_id.value())?], |row| row.get(0))?;
@@ -1296,10 +1300,9 @@ impl SqliteLibraryRepository {
     pub fn device_audio_signatures(
         &self,
     ) -> Result<BTreeMap<TrackId, BTreeSet<String>>, SqliteLibraryError> {
-        let mut statement = self.connection.prepare(
-            "SELECT canonical_track_id, audio_signature FROM device_library_track_aliases
-             WHERE canonical_track_id IS NOT NULL AND audio_signature LIKE 'audio-full-v1:%'",
-        )?;
+        let mut statement = self
+            .connection
+            .prepare("SELECT track_id, audio_signature FROM track_audio_fingerprints")?;
         let rows = statement.query_map([], |row| {
             Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?))
         })?;
@@ -1312,6 +1315,17 @@ impl SqliteLibraryRepository {
                 .insert(signature);
         }
         Ok(signatures)
+    }
+
+    pub fn has_verified_audio_identity(
+        &self,
+        track_id: TrackId,
+    ) -> Result<bool, SqliteLibraryError> {
+        Ok(self.connection.query_row(
+            "SELECT EXISTS(SELECT 1 FROM track_audio_fingerprints WHERE track_id = ?1)",
+            [to_i64(track_id.value())?],
+            |row| row.get(0),
+        )?)
     }
 
     // The four synchronized collections form one atomic device snapshot. A
@@ -1631,6 +1645,18 @@ impl SqliteLibraryRepository {
             ])?;
         }
         drop(statement);
+
+        for alias in aliases.iter() {
+            if let Some(track_id) = alias.canonical_track_id
+                && alias.audio_signature.starts_with("audio-full-v1:")
+            {
+                transaction.execute(
+                    "INSERT OR IGNORE INTO track_audio_fingerprints
+                        (track_id, audio_signature) VALUES (?1, ?2)",
+                    params![to_i64(track_id.value())?, alias.audio_signature],
+                )?;
+            }
+        }
 
         let mut statement = transaction.prepare(
             "INSERT INTO device_track_audio_locations
@@ -3763,6 +3789,30 @@ impl SqliteLibraryRepository {
                  PRAGMA user_version = 19;
                  COMMIT;",
             )?;
+            current = 19;
+        }
+        if current == 19 {
+            self.connection
+                .execute_batch(if self.table_exists("tracks")? {
+                    "BEGIN IMMEDIATE;
+                 CREATE TABLE track_audio_fingerprints (
+                    track_id INTEGER NOT NULL REFERENCES tracks(id) ON DELETE CASCADE,
+                    audio_signature TEXT NOT NULL CHECK(audio_signature LIKE 'audio-full-v1:%'),
+                    PRIMARY KEY(track_id, audio_signature)
+                 );
+                 INSERT OR IGNORE INTO track_audio_fingerprints
+                    SELECT canonical_track_id, audio_signature
+                    FROM device_library_track_aliases
+                    WHERE canonical_track_id IS NOT NULL
+                      AND audio_signature LIKE 'audio-full-v1:%';
+                 PRAGMA user_version = 20;
+                 COMMIT;"
+                } else {
+                    // Minimal historical fixtures have no canonical tracks. Their
+                    // migration must retain timeline/catalog history without
+                    // attempting a fingerprint backfill against missing tables.
+                    "PRAGMA user_version = 20;"
+                })?;
         }
         Ok(())
     }
@@ -6861,3 +6911,5 @@ fn version_candidate_predicate_sql() -> String {
 #[cfg(test)]
 #[path = "fault_tests.rs"]
 mod fault_tests;
+#[cfg(test)]
+mod identity_regression_tests;

@@ -36,7 +36,7 @@ pub enum RuntimeHealth {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DeckState {
-    metadata: TrackMetadata,
+    pub(crate) metadata: TrackMetadata,
     track_load_id: TrackLoadId,
     pub(crate) beat: u32,
     pub(crate) effective_bpm_milli: u32,

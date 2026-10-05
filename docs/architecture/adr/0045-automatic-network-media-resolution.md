@@ -6,8 +6,9 @@ CHRM and GRAY on both Players, including a safe physical swap. The isolated
 identity worker and local authorization registry are implemented in 0.6.4-dev-1.
 Basic native identity acceptance passed: after local enrollment, GRAY on Player 1
 and CHRM on Player 2 were simultaneously identified without restarting Lumi.
-Source-scoped runtime hydration, mount invalidation and end-to-end acceptance
-remain open.
+Source-scoped runtime hydration and mount invalidation are implemented in
+0.6.4-dev-3. Local regression evidence is separate from the remaining physical
+cross-Player and lighting acceptance.
 
 ## Context
 
@@ -101,7 +102,7 @@ and bounded response, avoiding nested workers and orphan processes. The standalo
 exact-SHA POC mode remains available separately. Both use the same fixed-file
 bounded RPC transport. Marker identity is not cryptographic authentication.
 
-This phase adds diagnostics only. It does not replace the old runtime track
+Phase 2 added diagnostics only. It did not replace the old runtime track
 lookup yet. Phase 3 must carry source Player/slot and track-load identity, detect
 mount changes and reject stale bindings before source-scoped hydration. A cached
 15-second identity is not by itself enough to match a newly loaded track safely.
@@ -111,6 +112,48 @@ local authorizations remain distinct and non-conflicted; no Sync action was
 needed. The real-Player check kept device discovery and position authority READY.
 It does not yet prove safe source-scoped runtime matching across media swaps or
 tracks loaded from another Player.
+
+## Phase 3 preparation and adoption policy
+
+A newly loaded USB track requests a fresh fixed-file verification of its source
+Player. Verification request tokens cancel stale replies; the media epoch changes
+only when the actual medium changes. Matching requires `USB_SLOT`, a locally
+trusted source, that epoch, the exact Rekordbox ID and the current track-load ID.
+No title, color, numeric-ID-only or cross-source fallback is used automatically.
+An observed medium change revokes only the loads that use that source, including
+loads from another Player, without restarting the bridge or tempo relay.
+
+The separate `lumi-live-library` thread owns a bounded read-only SQLite connection.
+Alias, track analysis, phrase timeline and mapping catalog are read within one
+consistent snapshot. It never checks removable audio paths or modifies the
+database. The show pump polls bounded queues without waiting for that reader.
+Connection-local `data_version` detects commits from the separate USB worker;
+unresolved loaded tracks are reconsidered once per second without a new load.
+
+Metadata hydration preserves physical playstatus, pitch-adjusted BPM, position,
+load ID and cue history. It is not a seek or a musical boundary. A missing alias,
+missing phrase timeline or unavailable library remains a per-track preparation
+state, not a Pro DJ Link failure. The next authoritative position activates any
+newly prepared phrase plan through the existing output path.
+
+Prepared data is retained for the current load if a later sync changes analysis,
+phrases, metadata or catalog revision. The Mac shows a pending update on the
+existing USB row; a real track reload adopts the new preparation. A refresh alone
+does not replay a cue or change beat coordinates. Pending adoption must not be
+interpreted as accepting the incoming edition or automatically rebasing authored
+Lumi phrases.
+
+Schema 20 retains full audio fingerprints per canonical track independently of
+the current USB aliases. Migration backfills fingerprints still available in
+schema 19; previously overwritten fingerprints cannot be reconstructed. Playback
+uses only a current non-archived alias associated with that canonical identity.
+This proves compatibility at the last verified sync, not a fresh full-file hash
+on every playback. Legacy tracks without full fingerprints retain their previous
+path selection until a verified sync supplies that evidence.
+
+Remote static publication includes USB resolution state, verified name, native
+color and media epoch. A media-only change therefore reaches the iPhone without
+waiting for a different track or lighting plan. No internal USB ID is exposed.
 
 ## Evidence required
 

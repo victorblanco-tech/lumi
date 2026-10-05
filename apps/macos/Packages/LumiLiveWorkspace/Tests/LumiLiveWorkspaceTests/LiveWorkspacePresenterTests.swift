@@ -104,6 +104,7 @@ struct LiveWorkspacePresenterTests {
             return
         }
         playerOne["hardwareModel"] = .string("CDJ-1500X")
+        playerOne["libraryUpdatePending"] = .boolean(true)
         decks[0] = .object(playerOne)
         payload["decks"] = .array(decks)
 
@@ -123,6 +124,8 @@ struct LiveWorkspacePresenterTests {
 
         #expect(snapshot.decks[0].deckID == 1)
         #expect(snapshot.decks[0].hardwareModel == "CDJ-1500X")
+        #expect(snapshot.decks[0].libraryUpdatePending)
+        #expect(!snapshot.decks[1].libraryUpdatePending)
         #expect(snapshot.decks[1].hardwareModel == nil)
     }
 

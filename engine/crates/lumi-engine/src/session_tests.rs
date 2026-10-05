@@ -10,6 +10,185 @@ use lumi_remote_protocol::{
 use lumi_simulator::{SimulationControl, SimulationSpeed};
 
 #[test]
+fn live_loaded_track_is_prepared_asynchronously_without_transport_reset()
+-> Result<(), Box<dyn std::error::Error>> {
+    use lumi_library::{LibraryRepository, TrackPageRequest};
+    use lumi_library_sqlite::{DeviceAliasUpsert, SqliteLibraryRepository};
+    let directory = std::env::temp_dir().join(format!(
+        "lumi-live-runtime-{}-{}",
+        std::process::id(),
+        unix_time_millis()
+    ));
+    std::fs::create_dir_all(&directory)?;
+    let database = directory.join("library.sqlite");
+    let initial = LibraryWorker::demo_at(&database)?;
+    let mut writer = SqliteLibraryRepository::open(&database)?;
+    let track = writer
+        .page_tracks(TrackPageRequest::try_new(0, 1)?)?
+        .tracks()[0]
+        .id();
+    let mut runtime = initialized_product_runtime()?;
+    runtime.deck_source_mode = DeckSourceMode::ConnectedDecks;
+    runtime.live_library_resolver =
+        crate::live_library_resolver::LiveLibraryResolver::new(database);
+    let mut decoder = lumi_prolink_input::BridgeDecoder::new();
+    for (sequence, kind, payload) in [
+        (
+            1,
+            "hello",
+            json!({"bridgeVersion":"fixture","beatLinkVersion":"8.0.0","readOnly":true}),
+        ),
+        (
+            2,
+            "sourceStatus",
+            json!({"status":"ready","detail":"fixture"}),
+        ),
+        (
+            3,
+            "deviceFound",
+            json!({"deviceNumber":1,"deviceName":"CDJ-1500X","address":"192.168.1.1"}),
+        ),
+        (
+            4,
+            "deckStatus",
+            json!({"deviceNumber":1,"deviceName":"CDJ-1500X","playing":true,
+            "paused":false,"cued":false,"tempoMaster":true,"onAir":true,"sourcePlayer":1,
+            "sourceSlot":"USB_SLOT","trackType":"REKORDBOX","rekordboxId":42,
+            "trackBpm":140.0,"effectiveBpm":142.5,"beatNumber":17,"beatWithinBar":1,"rawPitch":1048576}),
+        ),
+    ] {
+        let line = json!({"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":sequence,
+            "observedAtNanos":sequence*1000,"type":kind,"payload":payload})
+        .to_string();
+        runtime
+            .direct_deck_source
+            .ingest(decoder.decode_line(&line)?, MonotonicTime::new(sequence))?;
+    }
+    assert!(runtime.clock.advance(10).is_some());
+    process_pending_source_events(&mut runtime)?;
+    runtime.media_resolver =
+        crate::media_resolver::MediaResolver::verified_fixture(1, "usb-fs:test", "GRAY", 7);
+    let load = runtime
+        .state
+        .state()
+        .deck(lumi_domain::DeckId::new(1))
+        .ok_or("missing Player")?
+        .track_load_id();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !runtime.live_library_status.contains_key(&load) && Instant::now() < deadline {
+        process_live_library_preparation(&mut runtime)?;
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(
+        runtime.live_library_status.get(&load).map(|v| v.0),
+        Some("not-synced")
+    );
+    assert_eq!(
+        runtime.direct_deck_source.diagnostics().source_status,
+        DeckSourceStatus::Ready
+    );
+    let mut alias = DeviceAliasUpsert {
+        device_track_id: 42,
+        simulator_signature: 0,
+        audio_signature: "audio-full-v1:fixture".into(),
+        canonical_track_id: Some(track),
+        match_kind: "fixture".into(),
+        title: "Prepared".into(),
+        artist: "Lumi".into(),
+        bpm_milli: 140_000,
+        duration_millis: 100_000,
+        file_size: 10,
+        audio_uri: "file://localhost/missing.mp3".into(),
+        metadata_revision: "v1".into(),
+        color_rgb: None,
+        master_database_id: 1,
+        master_content_id: 1,
+        information_update_count: 1,
+        analysis_revision: "v1".into(),
+        analyzed_at: "2026-10-05".into(),
+        sync_disposition: "current".into(),
+    };
+    writer.sync_device_aliases(
+        "usb-fs:test",
+        "GRAY",
+        "v1",
+        std::slice::from_mut(&mut alias),
+        &[],
+        &[],
+        &[],
+        &[],
+    )?;
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while runtime.planning_worker.library_context(load).is_none() && Instant::now() < deadline {
+        process_live_library_preparation(&mut runtime)?;
+        process_pending_source_events(&mut runtime)?;
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let player = runtime
+        .state
+        .state()
+        .deck(lumi_domain::DeckId::new(1))
+        .ok_or("Player was cleared")?;
+    assert_eq!(player.track_load_id(), load);
+    assert_eq!(player.track_id(), track);
+    assert_eq!(player.beat(), 16);
+    assert_eq!(player.effective_bpm_milli(), 142_500);
+    assert!(player.is_playing());
+    assert!(runtime.planning_worker.library_context(load).is_some());
+    assert_eq!(
+        runtime.direct_deck_source.diagnostics().source_status,
+        DeckSourceStatus::Ready
+    );
+    let before = remote_static_key(&runtime);
+    let timeline = writer.timeline_head(track)?.ok_or("prepared timeline")?;
+    let first = timeline.phrases().first().ok_or("prepared phrase")?;
+    let edited = timeline.edit(lumi_library::TimelineEditCommand::Split {
+        phrase_index: first.index(),
+        at_beat: first.start_beat() + 1,
+    })?;
+    writer.append_timeline_revision(&edited, Some(timeline.revision()))?;
+    let records = runtime.output_worker.provider.records().count();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while runtime.live_library_status.get(&load).map(|v| v.0) != Some("update-on-next-load")
+        && Instant::now() < deadline
+    {
+        process_live_library_preparation(&mut runtime)?;
+        process_pending_source_events(&mut runtime)?;
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(
+        runtime.live_library_status.get(&load).map(|v| v.0),
+        Some("update-on-next-load")
+    );
+    assert_eq!(runtime.output_worker.provider.records().count(), records);
+    assert_eq!(
+        runtime
+            .planning_worker
+            .library_context(load)
+            .ok_or("context lost")?
+            .timeline_revision(),
+        timeline.revision().value()
+    );
+    assert_eq!(
+        runtime
+            .state
+            .state()
+            .deck(lumi_domain::DeckId::new(1))
+            .ok_or("Player lost")?
+            .beat(),
+        16
+    );
+    runtime.media_resolver =
+        crate::media_resolver::MediaResolver::verified_fixture(1, "usb-fs:test", "CHRM", 6);
+    assert_ne!(before, remote_static_key(&runtime));
+    drop(runtime);
+    drop(writer);
+    drop(initial);
+    std::fs::remove_dir_all(directory)?;
+    Ok(())
+}
+
+#[test]
 fn expired_or_abandoned_remote_commands_cannot_mutate_the_show()
 -> Result<(), Box<dyn std::error::Error>> {
     let mut runtime = initialized_runtime()?;

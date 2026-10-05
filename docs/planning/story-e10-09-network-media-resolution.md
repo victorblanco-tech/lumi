@@ -4,8 +4,9 @@ Status: In progress on 2026-10-04. Phase 1 physical marker retrieval passed for
 both independent USBs and after swapping Players. Phase 2 is implemented in
 0.6.4-dev-1 with local regressions. Basic native identity acceptance passed after
 local enrollment: GRAY and CHRM are simultaneously identified on their respective
-real Players without restarting Lumi. Source-scoped live hydration and end-to-end
-acceptance remain open.
+real Players without restarting Lumi. Source-scoped live hydration is implemented
+in 0.6.4-dev-3 with local regression coverage. Physical cross-Player matching and
+end-to-end lighting acceptance remain open.
 Depends on E10-08 and ADR 0045.
 
 Lumi must automatically associate a live track with the correct trusted USB,

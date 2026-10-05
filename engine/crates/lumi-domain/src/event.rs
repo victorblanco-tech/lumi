@@ -14,6 +14,12 @@ pub enum DeckObservation {
         metadata: TrackMetadata,
         track_load_id: TrackLoadId,
     },
+    /// Prepared Library metadata for this exact load, without a new transport.
+    TrackMetadataHydrated {
+        deck_id: DeckId,
+        metadata: TrackMetadata,
+        track_load_id: TrackLoadId,
+    },
     PlaybackPosition {
         deck_id: DeckId,
         track_load_id: TrackLoadId,

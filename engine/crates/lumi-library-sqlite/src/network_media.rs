@@ -16,6 +16,29 @@ pub enum UsbMediaTrust {
 }
 
 impl SqliteLibraryRepository {
+    pub fn with_consistent_read<T, E: From<SqliteLibraryError>>(
+        &self,
+        read: impl FnOnce() -> Result<T, E>,
+    ) -> Result<T, E> {
+        let transaction = self
+            .connection
+            .unchecked_transaction()
+            .map_err(SqliteLibraryError::from)?;
+        let result = read();
+        // rusqlite also rolls back on Drop if a parser panics; another Player
+        // can then prepare rather than inheriting a stranded transaction.
+        transaction.rollback().map_err(SqliteLibraryError::from)?;
+        result
+    }
+    /// Connection-local counter for commits made by other Library workers.
+    pub fn data_version(&self) -> Result<u64, SqliteLibraryError> {
+        from_nonnegative_i64(
+            self.connection
+                .query_row("PRAGMA data_version", [], |row| row.get(0))?,
+            "data version",
+        )
+    }
+
     /// Separate bounded reader; no migrations, seeding, journal changes or writes.
     pub fn open_read_only(path: impl AsRef<Path>) -> Result<Self, SqliteLibraryError> {
         let connection = Connection::open_with_flags(
@@ -148,6 +171,63 @@ mod tests {
     }
 
     #[test]
+    fn reader_snapshot_does_not_mix_a_concurrent_sync_and_is_released_on_failure()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let root =
+            std::env::temp_dir().join(format!("lumi-consistent-read-{}", std::process::id()));
+        std::fs::create_dir_all(&root)?;
+        let path = root.join("library.sqlite");
+        let writer = SqliteLibraryRepository::open(&path)?;
+        source(&writer, LEGACY)?;
+        let reader = SqliteLibraryRepository::open_read_only(&path)?;
+        let version = reader.data_version()?;
+        reader.with_consistent_read(|| -> Result<(), SqliteLibraryError> {
+            let name: String = reader.connection.query_row(
+                "SELECT display_name FROM device_library_sources",
+                [],
+                |r| r.get(0),
+            )?;
+            writer.connection.execute(
+                "UPDATE device_library_sources SET display_name='Changed'",
+                [],
+            )?;
+            let within: String = reader.connection.query_row(
+                "SELECT display_name FROM device_library_sources",
+                [],
+                |r| r.get(0),
+            )?;
+            assert_eq!(within, name);
+            Ok(())
+        })?;
+        assert!(reader.data_version()? > version);
+        let failed = reader.with_consistent_read(|| -> Result<(), SqliteLibraryError> {
+            Err(SqliteLibraryError::CorruptData(
+                "injected read fault".into(),
+            ))
+        });
+        assert!(failed.is_err());
+        let panic = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            reader.with_consistent_read(|| -> Result<(), SqliteLibraryError> {
+                panic!("injected parser fault");
+            })
+        }));
+        assert!(panic.is_err());
+        reader.with_consistent_read(|| -> Result<(), SqliteLibraryError> {
+            let name: String = reader.connection.query_row(
+                "SELECT display_name FROM device_library_sources",
+                [],
+                |r| r.get(0),
+            )?;
+            assert_eq!(name, "Changed");
+            Ok(())
+        })?;
+        drop(reader);
+        drop(writer);
+        std::fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
     fn network_marker_cannot_authorize_a_source() -> Result<(), SqliteLibraryError> {
         let mut repository = SqliteLibraryRepository::in_memory()?;
         assert_eq!(
@@ -215,7 +295,7 @@ mod tests {
             drop(reader);
             repository
                 .connection
-                .execute_batch("DROP TABLE usb_media_bindings; PRAGMA user_version=18;")?;
+                .execute_batch("DROP TABLE usb_media_bindings; DROP TABLE track_audio_fingerprints; PRAGMA user_version=18;")?;
         }
         {
             let reader = SqliteLibraryRepository::open_read_only(&path)?;
@@ -225,7 +305,7 @@ mod tests {
                 UsbMediaTrust::Unknown
             );
         }
-        assert_eq!(SqliteLibraryRepository::open(&path)?.schema_version()?, 19);
+        assert_eq!(SqliteLibraryRepository::open(&path)?.schema_version()?, 20);
         std::fs::remove_dir_all(root)?;
         Ok(())
     }

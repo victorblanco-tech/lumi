@@ -998,6 +998,7 @@ public struct EngineSnapshotDecoder: Sendable {
             hotCues: hotCues,
             planEligibility: planEligibility,
             planHoldReason: planHoldReason,
+            libraryUpdatePending: deck["libraryUpdatePending"] == .boolean(true),
             localPlayback: localPlayback
         )
     }

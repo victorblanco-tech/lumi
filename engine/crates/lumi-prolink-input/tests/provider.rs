@@ -13,6 +13,55 @@ const BEAT: &str = r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"seq
 const REPLACEMENT_AT_PRE_ROLL: &str = r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":4,"observedAtNanos":40,"type":"deckStatus","payload":{"deviceNumber":1,"deviceName":"LUMI-SIM","playing":false,"paused":true,"cued":false,"tempoMaster":true,"onAir":true,"sourcePlayer":1,"sourceSlot":"USB_SLOT","trackType":"REKORDBOX","rekordboxId":1247,"trackBpm":150.0,"effectiveBpm":150.0,"beatNumber":0,"beatWithinBar":0,"rawPitch":1048576}}"#;
 
 #[test]
+fn library_hydration_preserves_physical_transport_and_source_invalidation_is_scoped()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut decoder = BridgeDecoder::new();
+    let mut provider = ProLinkDeckSourceProvider::new(MonotonicTime::new(0))?;
+    for (line, time) in [(HELLO, 1), (READY, 2), (STATUS, 3)] {
+        provider.ingest(decoder.decode_line(line)?, MonotonicTime::new(time))?;
+    }
+    let second = STATUS
+        .replace("\"sequence\":3", "\"sequence\":4")
+        .replace("\"deviceNumber\":1", "\"deviceNumber\":2")
+        .replace("\"sourcePlayer\":1", "\"sourcePlayer\":2");
+    provider.ingest(decoder.decode_line(&second)?, MonotonicTime::new(4))?;
+    let _ = provider.drain_events()?;
+    let load = lumi_domain::TrackLoadId::new(1);
+    let before = provider.transport(load).ok_or("missing first transport")?;
+    let metadata = TrackMetadata::try_new(
+        TrackId::new(99),
+        "Prepared".into(),
+        "Lumi".into(),
+        155_000,
+        MusicalKey::new(PitchClass::C, KeyMode::Minor),
+        256,
+        vec![TrackPhrase::new(0, 0, 256, PhraseKind::Intro)],
+    )?;
+    assert!(provider.publish_hydrated_track(load, metadata, MonotonicTime::new(5))?);
+    let after = provider.transport(load).ok_or("transport was lost")?;
+    assert_eq!(after.beat, before.beat);
+    assert_eq!(after.playing, before.playing);
+    assert_eq!(after.effective_bpm_milli, before.effective_bpm_milli);
+    assert_eq!(after.discontinuity_revision, before.discontinuity_revision);
+    let events = provider.drain_events()?;
+    assert_eq!(events.len(), 1);
+    assert!(matches!(&events[0], DomainEvent::Observation(envelope)
+        if matches!(envelope.observation, DeckObservation::TrackMetadataHydrated { .. })));
+    provider.invalidate_source_media(1, MonotonicTime::new(6))?;
+    assert!(provider.transport(load).is_none());
+    assert!(
+        provider
+            .transport(lumi_domain::TrackLoadId::new(2))
+            .is_some()
+    );
+    assert_eq!(
+        provider.diagnostics().source_status,
+        DeckSourceStatus::Ready
+    );
+    Ok(())
+}
+
+#[test]
 fn announced_hardware_model_is_presentation_metadata_for_the_same_player_number() {
     let mut decoder = BridgeDecoder::new();
     let mut provider = ProLinkDeckSourceProvider::new(MonotonicTime::new(0))

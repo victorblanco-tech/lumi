@@ -526,6 +526,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
     public let hotCues: [DeckHotCueSnapshot]
     public let planEligibility: DeckPlanEligibility
     public let planHoldReason: String?
+    public let libraryUpdatePending: Bool
     public let localPlayback: LocalPlaybackTrackSnapshot?
 
     public var id: UInt64 { deckID }
@@ -554,6 +555,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
         hotCues: [DeckHotCueSnapshot] = [],
         planEligibility: DeckPlanEligibility = .autoHeld,
         planHoldReason: String? = nil,
+        libraryUpdatePending: Bool = false,
         localPlayback: LocalPlaybackTrackSnapshot? = nil
     ) {
         self.deckID = deckID
@@ -579,6 +581,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
         self.hotCues = hotCues
         self.planEligibility = planEligibility
         self.planHoldReason = planHoldReason
+        self.libraryUpdatePending = libraryUpdatePending
         self.localPlayback = localPlayback
     }
 }

@@ -577,6 +577,55 @@ impl ProLinkDeckSourceProvider {
         true
     }
 
+    /// Metadata readiness is not a new load, seek or playback command.
+    pub fn publish_hydrated_track(
+        &mut self,
+        track_load_id: TrackLoadId,
+        metadata: TrackMetadata,
+        at: MonotonicTime,
+    ) -> Result<bool, ProLinkProviderError> {
+        let Some(deck_id) = self
+            .decks
+            .iter()
+            .find_map(|(id, deck)| (deck.track_load_id == track_load_id).then_some(*id))
+        else {
+            return Ok(false);
+        };
+        let _ = self.hydrate_track_metadata(track_load_id, metadata.clone());
+        self.emit(
+            at,
+            DeckObservation::TrackMetadataHydrated {
+                deck_id,
+                metadata,
+                track_load_id,
+            },
+        )?;
+        Ok(true)
+    }
+
+    /// Revoke only loads using a medium whose verified identity changed.
+    /// The next physical status packet creates fresh load IDs, even when the
+    /// numeric Rekordbox ID happens to collide with the removed medium.
+    pub fn invalidate_source_media(
+        &mut self,
+        source_player: u8,
+        at: MonotonicTime,
+    ) -> Result<(), ProLinkProviderError> {
+        let decks = self
+            .decks
+            .iter()
+            .filter_map(|(deck, loaded)| {
+                (loaded.identity.source_player == source_player
+                    && loaded.identity.source_slot == "USB_SLOT")
+                    .then_some(*deck)
+            })
+            .collect::<Vec<_>>();
+        for deck in decks {
+            self.unload_deck(deck, at)?;
+        }
+        Ok(())
+    }
+
     #[must_use]
     pub fn diagnostics(&self) -> ProLinkDeckSourceDiagnostics {
         ProLinkDeckSourceDiagnostics {

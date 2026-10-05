@@ -366,6 +366,9 @@ struct EngineRuntime {
     local_deck_source: LocalPlaybackDeckSourceProvider,
     direct_deck_source: ProLinkDeckSourceProvider,
     media_resolver: crate::media_resolver::MediaResolver,
+    live_library_resolver: crate::live_library_resolver::LiveLibraryResolver,
+    live_library_status: BTreeMap<TrackLoadId, (&'static str, u64)>,
+    live_library_bindings: BTreeMap<TrackLoadId, crate::live_library_resolver::LookupKey>,
     #[cfg(not(test))]
     prolink_bridge: Option<BridgeProcessSupervisor>,
     prolink_start_error: Option<String>,
@@ -489,6 +492,7 @@ struct RemoteStaticKey {
     plans: Vec<(u8, u64, u64)>,
     library_revision: u64,
     source_status: DeckSourceStatus,
+    player_media: Vec<RemotePlayerMediaKey>,
     midi_state: MidiSourceState,
     link_state: TimingOutputState,
     link_enabled: bool,
@@ -496,6 +500,8 @@ struct RemoteStaticKey {
     timing_offset_millis: i16,
     pending_timing_offset_millis: Option<i16>,
 }
+
+type RemotePlayerMediaKey = (u8, Option<String>, Option<String>, Option<u8>, u64);
 
 struct RemoteProjectionPublisher {
     latest_projection: watch::Sender<Option<RemoteLiveProjection>>,
@@ -662,6 +668,22 @@ fn remote_static_key(runtime: &EngineRuntime) -> RemoteStaticKey {
         plans,
         library_revision: runtime.library_revision,
         source_status: runtime.direct_deck_source.diagnostics().source_status,
+        player_media: runtime
+            .direct_deck_source
+            .diagnostics()
+            .discovered_devices
+            .keys()
+            .map(|number| {
+                let media = runtime.media_resolver.status(*number);
+                (
+                    *number,
+                    media.map(|m| m.state.to_owned()),
+                    media.and_then(|m| m.source_name.clone()),
+                    media.and_then(|m| m.color_id),
+                    media.map_or(0, |m| m.generation),
+                )
+            })
+            .collect(),
         midi_state: runtime.output_worker.midi_status().state,
         link_state: link.state,
         link_enabled: runtime.link_relay.enabled(),
@@ -832,6 +854,13 @@ fn initialized_runtime_for_mode(
         );
     #[cfg(test)]
     let media_resolver = crate::media_resolver::MediaResolver::disabled();
+    let live_library_resolver = crate::service::configured_database_path()
+        .ok()
+        .flatten()
+        .map_or_else(
+            crate::live_library_resolver::LiveLibraryResolver::disabled,
+            crate::live_library_resolver::LiveLibraryResolver::new,
+        );
     Ok(EngineRuntime {
         state: runtime,
         clock,
@@ -839,6 +868,9 @@ fn initialized_runtime_for_mode(
         local_deck_source,
         direct_deck_source,
         media_resolver,
+        live_library_resolver,
+        live_library_status: BTreeMap::new(),
+        live_library_bindings: BTreeMap::new(),
         #[cfg(not(test))]
         prolink_bridge,
         prolink_start_error,
@@ -990,7 +1022,14 @@ fn process_pending_source_events(runtime: &mut EngineRuntime) -> Result<(), Engi
     match runtime.deck_source_mode {
         DeckSourceMode::ConnectedDecks => {
             for event in runtime.direct_deck_source.drain_events()? {
-                let event = hydrate_direct_library_event(runtime, event)?;
+                if let DomainEvent::Observation(envelope) = &event
+                    && let DeckObservation::TrackLoaded { track_load_id, .. } = envelope.observation
+                    && let Some(identity) = runtime.direct_deck_source.track_identity(track_load_id)
+                {
+                    runtime
+                        .media_resolver
+                        .request_verification(identity.source_player, Instant::now());
+                }
                 runtime.planning_worker.process_source_event(
                     &mut runtime.state,
                     &mut runtime.output_worker,
@@ -1021,45 +1060,6 @@ fn process_pending_source_events(runtime: &mut EngineRuntime) -> Result<(), Engi
         }
     }
     Ok(())
-}
-
-fn hydrate_direct_library_event(
-    runtime: &mut EngineRuntime,
-    event: DomainEvent,
-) -> Result<DomainEvent, EngineError> {
-    let DomainEvent::Observation(mut envelope) = event else {
-        return Ok(event);
-    };
-    let DeckObservation::TrackLoaded {
-        deck_id,
-        track_load_id,
-        ..
-    } = envelope.observation
-    else {
-        return Ok(DomainEvent::Observation(envelope));
-    };
-    let Some(identity) = runtime.direct_deck_source.track_identity(track_load_id) else {
-        return Ok(DomainEvent::Observation(envelope));
-    };
-    let Some(connected) = runtime
-        .library_worker
-        .connected_track(identity.rekordbox_id, 0)?
-    else {
-        return Ok(DomainEvent::Observation(envelope));
-    };
-    let (metadata, context) = connected.prepared.into_parts();
-    let _ = runtime
-        .direct_deck_source
-        .hydrate_track_metadata(track_load_id, metadata.clone());
-    runtime
-        .planning_worker
-        .register_library_context(track_load_id, context);
-    envelope.observation = DeckObservation::TrackLoaded {
-        deck_id,
-        metadata,
-        track_load_id,
-    };
-    Ok(DomainEvent::Observation(envelope))
 }
 
 struct PlanningWorker {
@@ -1448,6 +1448,11 @@ impl PlanningWorker {
         let planning_input = match &event {
             DomainEvent::Observation(observation) => match &observation.observation {
                 DeckObservation::TrackLoaded {
+                    deck_id,
+                    metadata,
+                    track_load_id,
+                }
+                | DeckObservation::TrackMetadataHydrated {
                     deck_id,
                     metadata,
                     track_load_id,
@@ -3044,6 +3049,115 @@ fn process_deck_input_messages(runtime: &mut EngineRuntime) -> Result<(), Engine
     #[cfg(not(test))]
     maintain_direct_prolink_bridge(runtime)?;
     process_pending_source_events(runtime)?;
+    process_live_library_preparation(runtime)?;
+    process_pending_source_events(runtime)?;
+    Ok(())
+}
+
+fn process_live_library_preparation(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
+    use crate::live_library_resolver::{LookupKey, Preparation};
+    let changed_sources = runtime
+        .live_library_bindings
+        .values()
+        .filter_map(|binding| {
+            let media = runtime.media_resolver.status(binding.source_player)?;
+            (media.state == "trusted"
+                && (media.generation != binding.media_generation
+                    || media.source_id.as_ref() != Some(&binding.source_id)))
+            .then_some(binding.source_player)
+        })
+        .collect::<std::collections::BTreeSet<_>>();
+    for source in changed_sources {
+        runtime
+            .direct_deck_source
+            .invalidate_source_media(source, runtime.clock.now())?;
+    }
+    let keys = runtime
+        .state
+        .state()
+        .decks()
+        .filter_map(|(deck, state)| {
+            let identity = runtime
+                .direct_deck_source
+                .track_identity(state.track_load_id())?;
+            if identity.source_slot != "USB_SLOT" {
+                return None;
+            }
+            let media = runtime.media_resolver.status(identity.source_player)?;
+            if media.state != "trusted" || media.last_verified_unix_millis.is_none() {
+                return None;
+            }
+            Some(LookupKey {
+                deck,
+                load: state.track_load_id(),
+                source_player: identity.source_player,
+                source_id: media.source_id.clone()?,
+                media_generation: media.generation,
+                rekordbox_id: identity.rekordbox_id,
+                library_revision: runtime.library_revision,
+            })
+        })
+        .collect::<Vec<_>>();
+    runtime.live_library_bindings.retain(|load, _| {
+        runtime
+            .state
+            .state()
+            .decks()
+            .any(|(_, deck)| deck.track_load_id() == *load)
+            && runtime.direct_deck_source.track_identity(*load).is_some()
+    });
+    runtime.live_library_status.retain(|load, _| {
+        runtime
+            .state
+            .state()
+            .decks()
+            .any(|(_, deck)| deck.track_load_id() == *load)
+            && runtime.direct_deck_source.track_identity(*load).is_some()
+    });
+    for completion in runtime.live_library_resolver.poll(keys, Instant::now()) {
+        let load = completion.key.load;
+        let status = match completion.prepared {
+            Preparation::Unchanged => continue,
+            Preparation::Unknown => "not-synced",
+            Preparation::Unprepared => "phrases-required",
+            Preparation::Unavailable => "library-unavailable",
+            Preparation::Ready(connected) => {
+                let (metadata, context) = connected.prepared.into_parts();
+                if let Some(current) = runtime.planning_worker.library_context(load) {
+                    // No implicit replacement of prepared data during a show.
+                    // Preserve the exact beat coordinates and existing cue history.
+                    if current.has_same_prepared_revision(&context)
+                        && runtime
+                            .state
+                            .state()
+                            .deck(completion.key.deck)
+                            .is_some_and(|deck| deck.metadata() == &metadata)
+                    {
+                        "ready"
+                    } else {
+                        "update-on-next-load"
+                    }
+                } else {
+                    if runtime.direct_deck_source.publish_hydrated_track(
+                        load,
+                        metadata,
+                        runtime.clock.now(),
+                    )? {
+                        runtime
+                            .planning_worker
+                            .register_library_context(load, context);
+                        runtime
+                            .live_library_bindings
+                            .insert(load, completion.key.clone());
+                    }
+                    "ready"
+                }
+            }
+        };
+        runtime
+            .live_library_status
+            .insert(load, (status, completion.elapsed_micros));
+    }
     Ok(())
 }
 
@@ -3139,11 +3253,31 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
         .direct_deck_source
         .drain_precise_position_observations();
     for position in precise_positions {
+        let binding_valid = runtime
+            .live_library_bindings
+            .get(&position.track_load_id)
+            .is_some_and(|binding| {
+                runtime
+                    .media_resolver
+                    .status(binding.source_player)
+                    .is_some_and(|media| {
+                        media.generation == binding.media_generation
+                            && media.source_id.as_ref() == Some(&binding.source_id)
+                    })
+            });
+        if !binding_valid {
+            if runtime.state.state().leader_deck() == Some(position.deck_id) {
+                runtime.output_worker.invalidate_autoloop_deadline();
+            }
+            continue;
+        }
         let Some(context) = runtime
             .planning_worker
             .library_context(position.track_load_id)
         else {
-            runtime.output_worker.invalidate_autoloop_deadline();
+            if runtime.state.state().leader_deck() == Some(position.deck_id) {
+                runtime.output_worker.invalidate_autoloop_deadline();
+            }
             continue;
         };
         let absolute_beat = context.beat_at_millis(position.playback_position_millis);
@@ -4944,9 +5078,15 @@ fn snapshot_envelope_internal(
             } else {
                 "autoHeld"
             };
+            let preparation = runtime.live_library_status.get(&deck.track_load_id());
             let plan_hold_reason = library_context.filter(|_| !has_plan).map(|context| {
                 library_plan_hold_reason(context, &runtime.planning_worker.light_policy)
-            });
+            }).or_else(|| (!has_plan).then(|| match preparation.map(|entry| entry.0) {
+                Some("not-synced") => "Sync this track from the Player's USB in Import & Sources.",
+                Some("phrases-required") => "Prepare the Lumi phrases for this track in Library.",
+                Some("library-unavailable") => "Library preparation is unavailable; Pro DJ Link remains connected.",
+                _ => "Identifying the USB and preparing this track independently of playback.",
+            }.to_owned()).filter(|_| runtime.deck_source_mode == DeckSourceMode::ConnectedDecks));
             json!({
                 "deckId": deck_id.value(),
                 "hardwareModel": if runtime.deck_source_mode == DeckSourceMode::ConnectedDecks {
@@ -4964,6 +5104,9 @@ fn snapshot_envelope_internal(
                 "phraseIndex": deck.phrase_index(),
                 "planEligibility": plan_eligibility,
                 "planHoldReason": plan_hold_reason,
+                "libraryPreparation": preparation.map(|entry| entry.0),
+                "libraryPreparationMicros": preparation.map(|entry| entry.1),
+                "libraryUpdatePending": preparation.is_some_and(|entry| entry.0 == "update-on-next-load"),
                 "localPlayback": local_playback,
                 "track": {
                     "id": metadata.id().value(),
@@ -5525,6 +5668,7 @@ const fn decision_reason_name(reason: DecisionReason) -> &'static str {
         DecisionReason::RuntimeInitialized => "runtimeInitialized",
         DecisionReason::SourceStatusAccepted => "sourceStatusAccepted",
         DecisionReason::TrackLoadAccepted => "trackLoadAccepted",
+        DecisionReason::TrackMetadataHydrated => "trackMetadataHydrated",
         DecisionReason::PositionAdvanced => "positionAdvanced",
         DecisionReason::PositionSeeked => "positionSeeked",
         DecisionReason::PlaybackTempoChanged => "playbackTempoChanged",

@@ -129,3 +129,20 @@ about missing unrelated files, missing key metadata, incomplete metadata updates
 duplicate editions and durable sync reports remain tracked separately from the
 four approved repairs. The production application has not been changed by this
 preparation task.
+
+## 2026 10 05 implementation
+
+The four approved repairs are implemented in 0.6.4-dev-3: exact trusted-source
+lookup, per-track preparation outcomes, read-only revalidation after committed
+sync, and schema 20 fingerprint history. Pro DJ Link source Player/slot and load
+identity are retained through preparation. An unresolved loaded track can become
+ready without a reload; already prepared tracks retain their plan and defer new
+data until a real reload. Compatible audio selection rejects stale aliases rather
+than using an old path that now belongs to another edit.
+
+Regression coverage includes colliding IDs, alias replacement, fingerprint
+migration, concurrent snapshot reads, commit after load, preserved playback/BPM,
+stale completion rejection, reader faults, source-specific invalidation and a
+deferred timeline update without an additional lighting dispatch. Local fault
+fixtures do not replace real USB/CDJ or light-output acceptance. Physical testing
+is scheduled with the owner after the autonomous implementation.

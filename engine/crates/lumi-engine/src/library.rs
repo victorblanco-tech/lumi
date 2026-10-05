@@ -262,6 +262,11 @@ pub struct LocalPlaybackClockAnchor {
 }
 
 impl LibraryPlanContext {
+    pub(crate) fn has_same_prepared_revision(&self, other: &Self) -> bool {
+        self.analysis_revision == other.analysis_revision
+            && self.timeline_revision == other.timeline_revision
+            && self.catalog_revision() == other.catalog_revision()
+    }
     #[must_use]
     pub const fn timeline_revision(&self) -> u64 {
         self.timeline_revision
@@ -955,6 +960,65 @@ pub enum AutoloopCatalogMutation {
 }
 
 impl LibraryWorker {
+    /// Live preparation reads an already initialized database only. No seeding,
+    /// migrations, timeline creation or removable-media scanning is permitted.
+    pub(crate) fn live_reader(path: &std::path::Path) -> Result<Self, LibraryWorkerError> {
+        let repository = SqliteLibraryRepository::open_read_only(path)?;
+        let baseline = DemoLibrarySourceProvider::curated().load_baseline()?;
+        let source = repository
+            .library_source(&lumi_library::LibrarySourceId::try_new(
+                REKORDBOX_CANONICAL_SOURCE_ID,
+            )?)?
+            .or(repository.library_source(baseline.source_id())?)
+            .ok_or(LibraryWorkerError::MissingLibrarySource)?;
+        Ok(Self {
+            repository,
+            database_path: Some(path.to_path_buf()),
+            source_id: source.id().as_str().to_owned(),
+            source_kind: source.kind().to_owned(),
+            source_name: source.display_name().to_owned(),
+            source_revision: source.revision().as_str().to_owned(),
+            search: String::new(),
+            playlist_id: None,
+            workflow_filter: None,
+            workflow_step_id: None,
+            offset: 0,
+            limit: DEFAULT_PAGE_LIMIT,
+            sort: LibraryTrackSort::default(),
+            editor_track_id: None,
+            pending_source_refresh: None,
+            pending_device_inspection: None,
+            device_review_comparisons_by_source: BTreeMap::new(),
+            pending_library_reset: None,
+            pending_light_plan_preview: None,
+        })
+    }
+
+    pub(crate) fn data_version(&self) -> Result<u64, LibraryWorkerError> {
+        Ok(self.repository.data_version()?)
+    }
+
+    pub(crate) fn connected_track_for_source(
+        &self,
+        source_id: &str,
+        device_track_id: u32,
+    ) -> Result<Option<ConnectedLibraryTrack>, LibraryWorkerError> {
+        self.repository.with_consistent_read(|| {
+            let Some(alias) = self
+                .repository
+                .resolve_device_alias_for_source(source_id, device_track_id)?
+            else {
+                return Ok(None);
+            };
+            let Some(timeline) = self.repository.timeline_head(alias.canonical_track_id)? else {
+                return Err(LibraryWorkerError::MissingTimeline);
+            };
+            Ok(Some(ConnectedLibraryTrack {
+                prepared: self.playback_track_for_timeline_mode(&timeline, false)?,
+            }))
+        })
+    }
+
     pub fn demo() -> Result<Self, LibraryWorkerError> {
         let database_path = crate::service::configured_database_path()
             .map_err(|error| LibraryWorkerError::Configuration(error.to_string()))?;
@@ -2271,6 +2335,7 @@ impl LibraryWorker {
         Ok(comparisons)
     }
 
+    #[cfg(test)]
     pub fn connected_track(
         &mut self,
         device_track_id: u32,
@@ -2339,6 +2404,14 @@ impl LibraryWorker {
         &self,
         timeline: &LumiPhraseTimeline,
     ) -> Result<LibraryLocalPlaybackTrack, LibraryWorkerError> {
+        self.playback_track_for_timeline_mode(timeline, true)
+    }
+
+    fn playback_track_for_timeline_mode(
+        &self,
+        timeline: &LumiPhraseTimeline,
+        resolve_local_audio: bool,
+    ) -> Result<LibraryLocalPlaybackTrack, LibraryWorkerError> {
         let track_id = timeline.track_id();
         let track = self
             .repository
@@ -2384,7 +2457,13 @@ impl LibraryWorker {
             source_track_id: track.summary().source_track_id().as_str().to_owned(),
             analysis_revision: track.summary().source_revision().as_str().to_owned(),
             timeline_revision: timeline.revision().value(),
-            audio_uri: self.resolved_audio_uri(&track)?,
+            // Live Players supply transport/audio themselves. Never touch a
+            // potentially unavailable removable filesystem in this reader.
+            audio_uri: if resolve_local_audio {
+                self.resolved_audio_uri(&track)?
+            } else {
+                String::new()
+            },
             duration_millis: track.summary().duration_millis(),
             beat_grid: track.beat_grid().clone(),
             waveform: track.waveform().to_vec(),
@@ -3786,7 +3865,18 @@ impl LibraryWorker {
         track: &lumi_library::StoredTrack,
     ) -> Result<String, LibraryWorkerError> {
         let candidates = self.repository.device_audio_uris(track.summary().id())?;
-        Ok(first_available_audio_uri(track.audio_uri(), &candidates))
+        // An old durable URI may now point at a different edit after USB sync.
+        // Once complete fingerprints exist, only aliases still proving that
+        // canonical audio identity may supply a playback location.
+        let fallback = if self
+            .repository
+            .has_verified_audio_identity(track.summary().id())?
+        {
+            ""
+        } else {
+            track.audio_uri()
+        };
+        Ok(first_available_audio_uri(fallback, &candidates))
     }
 
     fn source_reconciliation_json(

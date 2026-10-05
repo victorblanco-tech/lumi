@@ -83,6 +83,27 @@ pub(crate) struct MediaResolver {
 }
 
 impl MediaResolver {
+    #[cfg(test)]
+    pub(crate) fn verified_fixture(player: u8, source: &str, name: &str, color: u8) -> Self {
+        let mut resolver = Self::disabled();
+        resolver.observe(
+            &BridgeEvent::DeviceFound(lumi_prolink_input::Device {
+                device_number: player,
+                device_name: "CDJ-1500X".into(),
+                address: "192.168.1.1".into(),
+            }),
+            Instant::now(),
+        );
+        if let Some(slot) = resolver.slots.get_mut(&player) {
+            slot.status.state = "trusted";
+            slot.status.source_id = Some(source.into());
+            slot.status.source_name = Some(name.into());
+            slot.status.color_id = Some(color);
+            slot.status.last_verified_unix_millis = Some(1);
+        }
+        resolver
+    }
+
     pub fn disabled() -> Self {
         let (_, results) = mpsc::sync_channel(4);
         Self {
@@ -226,6 +247,20 @@ impl MediaResolver {
 
     pub fn status(&self, player: u8) -> Option<&MediaStatus> {
         self.slots.get(&player).map(|slot| &slot.status)
+    }
+
+    /// New loads cannot use marker evidence from before that load. Cancelling
+    /// an older read does not change a playing track's media epoch by itself.
+    pub fn request_verification(&mut self, player: u8, now: Instant) {
+        let Some(slot) = self.slots.get_mut(&player) else {
+            return;
+        };
+        slot.cancel.store(true, Ordering::Release);
+        slot.cancel = Arc::new(AtomicBool::new(false));
+        self.next_generation = self.next_generation.saturating_add(1);
+        slot.generation = self.next_generation;
+        slot.status.last_verified_unix_millis = None;
+        slot.next_attempt = now;
     }
 
     /// Bounded, non-blocking pump access: at most four replies and one send.
@@ -524,6 +559,50 @@ mod tests {
             thread::sleep(Duration::from_millis(2));
         }
     }
+    #[test]
+    fn load_reverification_preserves_epoch_until_the_physical_medium_changes()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let mut resolver = MediaResolver::spawn(move |_, _| {
+            let calls = calls.fetch_add(1, Ordering::Relaxed) + 1;
+            let name = if calls <= 2 { "GRAY" } else { "CHRM" };
+            Outcome::Trusted {
+                media_id: name.into(),
+                source_id: format!("usb-fs:{name}"),
+                name: name.into(),
+                elapsed: 1,
+            }
+        });
+        resolver.observe(&found(1, "192.168.1.1"), Instant::now());
+        poll_until(&mut resolver, |r| {
+            r.status(1).is_some_and(|s| s.state == "trusted")
+        });
+        let first = resolver.status(1).ok_or("missing Player")?.generation;
+        resolver.request_verification(1, Instant::now());
+        assert!(
+            resolver
+                .status(1)
+                .ok_or("missing Player")?
+                .last_verified_unix_millis
+                .is_none()
+        );
+        poll_until(&mut resolver, |r| {
+            r.status(1)
+                .is_some_and(|s| s.last_verified_unix_millis.is_some())
+        });
+        assert_eq!(
+            resolver.status(1).ok_or("missing Player")?.generation,
+            first
+        );
+        resolver.request_verification(1, Instant::now());
+        poll_until(&mut resolver, |r| {
+            r.status(1)
+                .is_some_and(|s| s.source_name.as_deref() == Some("CHRM"))
+        });
+        assert!(resolver.status(1).ok_or("missing Player")?.generation > first);
+        Ok(())
+    }
+
     #[test]
     fn native_usb_color_is_display_only_and_cleared_on_device_loss()
     -> Result<(), Box<dyn std::error::Error>> {

@@ -1588,6 +1588,6 @@ fn light_planning_policy_is_revisioned_and_persistent() -> Result<(), Box<dyn st
     let schema: u32 = repository
         .connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    assert_eq!(schema, 19);
+    assert_eq!(schema, 20);
     Ok(())
 }

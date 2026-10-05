@@ -187,11 +187,19 @@ struct LiveDeckSurface<Details: View>: View {
                         .lineLimit(1)
                 }
                 if !isLocalPlayback {
-                    LumiPlayerUSBBadge(
-                        state: playerUSB?.state ?? "unavailable",
-                        sourceName: playerUSB?.sourceName,
-                        colorID: playerUSB?.colorID
-                    )
+                    HStack(spacing: 4) {
+                        LumiPlayerUSBBadge(
+                            state: playerUSB?.state ?? "unavailable",
+                            sourceName: playerUSB?.sourceName,
+                            colorID: playerUSB?.colorID
+                        )
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .foregroundStyle(LumiColor.warning)
+                            .opacity(deck.libraryUpdatePending ? 1 : 0)
+                            .help("Library updated. The current plan is preserved; reload this track to apply the update.")
+                            .accessibilityLabel("Library update pending until track reload")
+                            .accessibilityHidden(!deck.libraryUpdatePending)
+                    }
                     .accessibilityIdentifier("lumi.live.player.\(deck.deckID).usb")
                     .frame(height: 16)
                 }
