@@ -7,7 +7,7 @@ identity worker and local authorization registry are implemented in 0.6.4-dev-1.
 Basic native identity acceptance passed: after local enrollment, GRAY on Player 1
 and CHRM on Player 2 were simultaneously identified without restarting Lumi.
 Source-scoped runtime hydration and mount invalidation are implemented in
-0.6.4-dev-3. Local regression evidence is separate from the remaining physical
+0.6.4-dev-4. Local regression evidence is separate from the remaining physical
 cross-Player and lighting acceptance.
 
 ## Context
@@ -142,6 +142,11 @@ existing USB row; a real track reload adopts the new preparation. A refresh alon
 does not replay a cue or change beat coordinates. Pending adoption must not be
 interpreted as accepting the incoming edition or automatically rebasing authored
 Lumi phrases.
+
+An offline verified USB is represented to the editor and Local Playback with an
+explicit non-file `lumi-unavailable` audio URI. This preserves the existing
+nonempty-URI contract and access to stored waveform/phrases, without playing demo
+audio or accepting the canonical track's old mutable path as a substitute.
 
 Schema 20 retains full audio fingerprints per canonical track independently of
 the current USB aliases. Migration backfills fingerprints still available in

@@ -9,6 +9,49 @@ in 0.6.4-dev-3 with local regression coverage. Physical cross-Player matching an
 end-to-end lighting acceptance remain open.
 Depends on E10-08 and ADR 0045.
 
+## Autonomous hardening evidence from 2026-10-05
+
+Phase 3 now prepares a source-scoped track on a read-only library worker rather
+than querying SQLite in the realtime pump. Requests carry the track load, source
+Player, verified USB identity and media generation. Tests reject stale replies
+after a new load or media swap and retain the physical source when a different
+Player loads over Link. An unresolved track is rechecked after a committed sync;
+an active prepared track keeps its current analysis and plan until an explicit
+reload. A deferred update is shown in the existing Mac USB status line.
+
+Local evidence before physical acceptance:
+
+- Full portable Rust validation passed for dev-3: strict Clippy, workspace tests,
+  canonical transcript, process checks and release-mode planner/library budgets.
+  The combined run reported 458 passing tests and 14 intentionally ignored tests;
+  ignored hardware tests are not hardware acceptance.
+- Full Apple validation passed with exclusive Dev MIDI ownership: 7 protocol,
+  25 engine-client, 17 design-system, 58 Live, 63 Library, 35 Remote-client and
+  14 Remote-feature tests, plus native Mac/iOS builds and signing checks.
+- With a deliberately blocked library worker, 10,000 release-mode pump polls
+  measured p95 250 ns, p99 292 ns and maximum 128,125 ns on this Mac. A separate
+  80 ms injected reader delay did not block polling. These are component timings,
+  not end-to-end MIDI or observed lighting latency.
+- Schema 20 migration retained all 114 tracks, 264 timeline revisions and both
+  media bindings. Every row in the 43 existing tables matched the pre-migration
+  backup in both directions; `quick_check` returned `ok`. The only addition was
+  68 retained full-audio identity records. Production data was not changed.
+- Native desktop checks showed CHRM and GRAY as two separate offline sources,
+  with their own remembered playlist subscriptions and the existing GRAY review.
+  Live Decks remained selected with two waiting Players while hardware was off.
+- The desktop check found an offline-audio contract regression: a verified USB
+  without an available file returned an empty audio URI, which the editor rejected.
+  Dev-4 represents this explicitly with a non-file `lumi-unavailable` URI. Rust
+  regression covers editor, Local Playback and connected-player preparation;
+  a Swift decoder regression preserves waveform and phrase access without demo
+  audio or fallback to an unverified old path.
+
+Still required: actual local and cross-Player loads on both USBs, native RB media
+colors, cue/start/pause/master changes, updated-track adoption and lighting timing
+with the real CDJs. The iPhone simulator could not be opened through desktop
+automation during this check; package/client tests are not a substitute for that
+native Remote acceptance. No general simulator NFS emulation is claimed.
+
 Lumi must automatically associate a live track with the correct trusted USB,
 including two independent equal-model sticks and tracks loaded over Link. The
 owner does not want manual USB-to-Player assignments. Media access must not delay

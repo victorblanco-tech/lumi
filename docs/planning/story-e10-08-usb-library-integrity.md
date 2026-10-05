@@ -132,7 +132,7 @@ preparation task.
 
 ## 2026 10 05 implementation
 
-The four approved repairs are implemented in 0.6.4-dev-3: exact trusted-source
+The four approved repairs are implemented in 0.6.4-dev-4: exact trusted-source
 lookup, per-track preparation outcomes, read-only revalidation after committed
 sync, and schema 20 fingerprint history. Pro DJ Link source Player/slot and load
 identity are retained through preparation. An unresolved loaded track can become
@@ -146,3 +146,10 @@ stale completion rejection, reader faults, source-specific invalidation and a
 deferred timeline update without an additional lighting dispatch. Local fault
 fixtures do not replace real USB/CDJ or light-output acceptance. Physical testing
 is scheduled with the owner after the autonomous implementation.
+
+Native testing caught an offline-USB editor contract failure in dev-3 before
+handoff. Dev-4 uses an explicit non-file unavailable audio URI instead of an
+empty value; stored phrases/waveform remain editable without a mounted stick.
+Playback must report unavailable, never synthesize music or fall back to a stale
+unverified path. Rust and Swift regressions cover this boundary. Detailed local
+test evidence and the remaining physical gates are recorded in E10-09.

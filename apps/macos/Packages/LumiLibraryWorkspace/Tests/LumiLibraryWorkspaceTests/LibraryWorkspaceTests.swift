@@ -1208,6 +1208,22 @@ struct LibraryWorkspaceTests {
         }
     }
 
+    @Test("An offline verified USB keeps the editor decodable without demo audio")
+    func offlineVerifiedUSBEditorContract() throws {
+        guard case var .object(editorObject) = editorValue() else {
+            Issue.record("Editor fixture must be an object")
+            return
+        }
+        editorObject["audioUri"] = .string("lumi-unavailable://track/42")
+        let state = try LibrarySnapshotDecoder().decode(
+            envelope(trackValues: [trackValue()], editorValue: .object(editorObject))
+        )
+        let editor = try #require(state.editor)
+        #expect(editor.audioURI == "lumi-unavailable://track/42")
+        #expect(editor.waveform.count == 3)
+        #expect(editor.phrases.count == 2)
+    }
+
     @Test("Incomplete bars are rejected before the editor can render")
     func rejectsIncompleteBeatGrid() {
         var editor = editorValue()

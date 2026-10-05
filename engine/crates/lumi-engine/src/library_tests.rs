@@ -878,6 +878,70 @@ fn phrase_loop_strategy_is_role_safe_revisioned_and_restart_persistent()
 }
 
 #[test]
+fn offline_verified_audio_keeps_editor_and_local_playback_contract_valid()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut worker = LibraryWorker::demo()?;
+    let track_id = worker.snapshot_json()?["page"]["tracks"][0]["id"]
+        .as_u64()
+        .ok_or("missing track")?;
+    let mut aliases = [lumi_library_sqlite::DeviceAliasUpsert {
+        device_track_id: 42,
+        simulator_signature: 0,
+        canonical_track_id: Some(TrackId::new(track_id)),
+        match_kind: "verified-audio".into(),
+        title: "Track".into(),
+        artist: "Artist".into(),
+        bpm_milli: 140_000,
+        duration_millis: 100_000,
+        file_size: 123,
+        audio_uri: "file://localhost/Volumes/Lumi-absent-regression/Track.mp3".into(),
+        metadata_revision: "metadata-1".into(),
+        color_rgb: None,
+        master_database_id: 1,
+        master_content_id: 42,
+        information_update_count: 1,
+        analysis_revision: "analysis-1".into(),
+        audio_signature: "audio-full-v1:verified".into(),
+        analyzed_at: "2026-10-05".into(),
+        sync_disposition: "current".into(),
+    }];
+    worker.repository.sync_device_aliases(
+        "usb:test",
+        "Test",
+        "db-1",
+        &mut aliases,
+        &[],
+        &[],
+        &[],
+        &[],
+    )?;
+    worker.open_editor(track_id)?;
+    let opened = worker.snapshot_json()?;
+    let unavailable = format!("lumi-unavailable://track/{track_id}");
+    assert_eq!(opened["editor"]["audioUri"], unavailable);
+    assert!(
+        !opened["editor"]["waveform"]
+            .as_array()
+            .ok_or("waveform")?
+            .is_empty()
+    );
+    let revision = opened["editor"]["timeline"]["revision"]
+        .as_u64()
+        .ok_or("revision")?;
+    let (_, context) = worker
+        .local_playback_track(track_id, revision)?
+        .into_parts();
+    assert_eq!(context.audio_uri, unavailable);
+    // Connected Players never need local audio, even when the same USB is offline.
+    let connected = worker
+        .connected_track_for_source("usb:test", 42)?
+        .ok_or("alias")?;
+    let (_, context) = connected.prepared.into_parts();
+    assert!(context.audio_uri.is_empty());
+    Ok(())
+}
+
+#[test]
 fn editor_snapshot_exposes_read_only_analysis_and_closes_cleanly()
 -> Result<(), Box<dyn std::error::Error>> {
     let mut worker = LibraryWorker::demo()?;

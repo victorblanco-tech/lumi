@@ -3876,7 +3876,15 @@ impl LibraryWorker {
         } else {
             track.audio_uri()
         };
-        Ok(first_available_audio_uri(fallback, &candidates))
+        let uri = first_available_audio_uri(fallback, &candidates);
+        // The UI requires an explicit URI even when a verified USB is absent.
+        // Never substitute the old mutable path (or synthetic demo audio): this
+        // non-file URI keeps the editor usable while playback reports unavailable.
+        Ok(if uri.is_empty() {
+            format!("lumi-unavailable://track/{}", track.summary().id().value())
+        } else {
+            uri
+        })
     }
 
     fn source_reconciliation_json(
