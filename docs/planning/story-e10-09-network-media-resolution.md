@@ -1,11 +1,11 @@
 # E10-09 Automatic USB identification on live Players
 
-Status: In progress on 2026-10-04. Phase 1 physical marker retrieval passed for
+Status: In progress on 2026-10-05. Phase 1 physical marker retrieval passed for
 both independent USBs and after swapping Players. Phase 2 is implemented in
 0.6.4-dev-1 with local regressions. Basic native identity acceptance passed after
 local enrollment: GRAY and CHRM are simultaneously identified on their respective
 real Players without restarting Lumi. Source-scoped live hydration is implemented
-in 0.6.4-dev-3 with local regression coverage. Physical cross-Player matching and
+in 0.6.4-dev-4 with local regression coverage. Physical cross-Player matching and
 end-to-end lighting acceptance remain open.
 Depends on E10-08 and ADR 0045.
 
@@ -45,6 +45,17 @@ Local evidence before physical acceptance:
   regression covers editor, Local Playback and connected-player preparation;
   a Swift decoder regression preserves waveform and phrase access without demo
   audio or fallback to an unverified old path.
+- Final dev-4 validation passed: 459 Rust tests in the full portable gate, with
+  the same 14 deliberate ignores, and the complete safe Apple gate including
+  64 Library tests and native Mac/iOS builds. The installer audit passed for the
+  clean code revision `bb7f778a9b2d`, build 359, installed in the Dev channel only.
+- The installed dev-4 desktop opened 90s Bitch at R38 with protection enabled
+  and Ready for Show retained; My Favourite Regrets opened at R49. Search and
+  Clear worked, stored waveform colors/phrases rendered, and neither selection
+  produced the editor failure. Audio remained explicitly unavailable while the
+  USBs were offline. The database still contained 114 tracks, 264 revisions and
+  68 audio-identity records with `quick_check` returning `ok`. Dev-4 was left
+  open on Live Decks in Off mode, waiting for the physical Players.
 
 Still required: actual local and cross-Player loads on both USBs, native RB media
 colors, cue/start/pause/master changes, updated-track adoption and lighting timing
