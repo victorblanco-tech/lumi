@@ -147,6 +147,65 @@ Later reopening retained both verified plans. The ad-hoc-signed Dev update is
 not evidence of a fully reliable first-launch installer. The Dev database was
 backed up and was not reset; production data and USB files were unchanged.
 
+## Event driven mounts and cached track origin
+
+The owner requested this refinement on 2026-10-06. Lumi 0.6.4-dev-9 and Remote
+0.1.3-dev-5 separate a Player's current USB mount from each loaded track's
+verified source. Mount changes come from the native CDJ USB status. After a
+successful identity read, stable status and track changes on the same mount
+perform no further USB reads. Initial failures retry independently; insertion,
+discovery and recovery after a status interruption request verification.
+
+Eject or replacement clears only the current mount's authorization. Existing
+verified tracks keep their origin, exact local beatgrid, Lumi phrases and plan,
+including cached tracks loaded over LINK. A different new load uses the newly
+verified mount. A load awaiting its first verification cannot adopt a USB
+inserted after that load. No fallback matching, waveform change or tempo-relay
+redesign is part of this refinement.
+
+Acceptance requires regressions for no repeated reads, ordered mount events,
+cancelled old reads, local and linked cached tracks surviving removal, and new
+loads using the new source. Native Mac/Remote empty-mount presentation and real
+CDJ status behavior remain required before completion.
+
+### System crash during development
+
+At approximately 22:14 on 2026-10-06, macOS panicked after repeated crashes of
+AppleBCMWLAN. Separate driver reports earlier that evening identify the WLAN
+deadlock watchdog; they do not attribute the trigger to a specific app. Dev-9
+was not installed or running. This does not exclude existing Lumi network
+traffic as a trigger and does not establish a fix for the operating-system
+failure. Both databases passed SQLite quick-check after the reboot.
+
+Production and Dev engine/gateway services restarted at login under their
+existing RunAtLoad/KeepAlive configuration. Both were explicitly stopped with
+owner approval before further local checks; no Java or Link helper remained.
+Subsequent gates must not start the live network implicitly. Physical timing
+and first-launch acceptance are separate from local compilation and regression
+results.
+
+### Local validation of the event driven refactor
+
+Dev-9 passed the complete portable Rust gate with tests executed serially,
+strict Clippy, Java bridge verification (20 tests), the full Apple gate,
+25 native engine-client tests, both native app builds and documentation checks.
+The new regressions cover stable mounts with 10,000 ticks and only one read,
+ordered eject/insertion events, cancelled replies, local and LINK cached tracks
+retaining their source and plan, and an unverified load refusing a later mount.
+The native client gate no longer supplies the live bridge to standalone process
+tests; joining the real DJ network remains an explicit acceptance step.
+
+One parallel debug-suite run exceeded the existing 25 ms snapshot budget
+(p95 57.922 ms). The complete serial repeat passed without changing that budget.
+An isolated 250-sample release run measured full snapshot p95 1.441 ms and
+Live projection p95 0.292 ms. These measurements do not establish physical
+MIDI or DMX latency. The pre-install Dev library backup passed SQLite
+quick-check. No library reset, USB write or production database change occurred.
+
+Real CDJ mount-transition, native Mac/Remote presentation and continuous Start
+acceptance for Dev-9 remain pending. The prior Dev-8 hardware observations do
+not substitute for those tests, and this refactor is not a Wi-Fi-driver fix.
+
 ## Autonomous hardening evidence from 2026-10-05
 
 Phase 3 now prepares a source-scoped track on a read-only library worker rather

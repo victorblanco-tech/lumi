@@ -19,6 +19,8 @@ final class BeatLinkRuntime implements AutoCloseable {
     private final AtomicBoolean started = new AtomicBoolean();
     private final AtomicBoolean sessionStarting = new AtomicBoolean();
     private final Map<Integer, TransportFingerprint> transportFingerprints = new ConcurrentHashMap<>();
+    private final Map<Integer, String> usbMountStates = new ConcurrentHashMap<>();
+    private final Map<Integer, Long> usbStatusTimes = new ConcurrentHashMap<>();
     private final ExecutorService lifecycleExecutor = Executors.newSingleThreadExecutor(
             Thread.ofPlatform().name("lumi-prolink-lifecycle-", 0).factory()
     );
@@ -26,6 +28,8 @@ final class BeatLinkRuntime implements AutoCloseable {
     private final DeviceAnnouncementListener deviceListener = new DeviceAnnouncementListener() {
         @Override
         public void deviceFound(DeviceAnnouncement announcement) {
+            usbMountStates.remove(announcement.getDeviceNumber());
+            usbStatusTimes.remove(announcement.getDeviceNumber());
             publishDevice("deviceFound", announcement);
             ensureFullSession();
         }
@@ -33,6 +37,8 @@ final class BeatLinkRuntime implements AutoCloseable {
         @Override
         public void deviceLost(DeviceAnnouncement announcement) {
             transportFingerprints.remove(announcement.getDeviceNumber());
+            usbMountStates.remove(announcement.getDeviceNumber());
+            usbStatusTimes.remove(announcement.getDeviceNumber());
             publishDevice("deviceLost", announcement);
         }
     };
@@ -167,6 +173,24 @@ final class BeatLinkRuntime implements AutoCloseable {
         if (!(update instanceof CdjStatus status)) {
             return;
         }
+        // Mount transitions are critical facts, not coalescible display data.
+        // Publish even while no track is loaded or its tempo is warming up.
+        int player = status.getDeviceNumber();
+        if (player >= 1 && player <= 6) {
+            long now = System.nanoTime();
+            Long previousTime = usbStatusTimes.put(player, now);
+            String mount = usbMountState(status.isLocalUsbLoaded(),
+                    status.isLocalUsbUnloading(), status.isLocalUsbEmpty());
+            if (mountContinuityLost(previousTime, now)) {
+                // A real status gap can hide an eject/insertion. Reacquire
+                // only the current mount; already-bound cached tracks persist.
+                usbMountStates.remove(player);
+                publisher.publishCritical("usbMount", new BridgePayloads.USBMount(player, "unknown"));
+            }
+            if (!mount.equals(usbMountStates.put(player, mount))) {
+                publisher.publishCritical("usbMount", new BridgePayloads.USBMount(player, mount));
+            }
+        }
         ResolvedTrackIdentity trackIdentity = resolveTrackIdentity(status);
         // A player that has only just joined the network briefly reports the
         // Beat Link sentinel values (no BPM/beat yet). Those frames describe
@@ -285,6 +309,17 @@ final class BeatLinkRuntime implements AutoCloseable {
                 && effectiveTempo <= 300.0
                 && beatWithinBar >= 0
                 && beatWithinBar <= 4;
+    }
+
+    static String usbMountState(boolean loaded, boolean unloading, boolean empty) {
+        if (unloading) return "unloading";
+        if (empty) return "empty";
+        if (loaded) return "loaded";
+        return "unknown";
+    }
+
+    static boolean mountContinuityLost(Long previousNanos, long nowNanos) {
+        return previousNanos != null && nowNanos - previousNanos > 3_000_000_000L;
     }
 
     static boolean hasExactBeat(double effectiveTempo, int beatWithinBar) {

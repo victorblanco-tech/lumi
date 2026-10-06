@@ -19,6 +19,32 @@ final class BridgePublisherTest {
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Test
+    void nativeUsbMountStatesAreIndependentOfLoadedTrackAndTempo() {
+        assertEquals("loaded", BeatLinkRuntime.usbMountState(true, false, false));
+        assertEquals("unloading", BeatLinkRuntime.usbMountState(false, true, false));
+        assertEquals("empty", BeatLinkRuntime.usbMountState(false, false, true));
+        assertEquals("unknown", BeatLinkRuntime.usbMountState(false, false, false));
+        assertFalse(BeatLinkRuntime.mountContinuityLost(null, 10_000_000_000L));
+        assertFalse(BeatLinkRuntime.mountContinuityLost(1_000L, 500_001_000L));
+        assertTrue(BeatLinkRuntime.mountContinuityLost(1_000L, 3_000_001_001L));
+    }
+
+    @Test
+    void ejectAndInsertionCannotBeCoalescedIntoOnlyTheLatestMount() throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        BridgePublisher publisher = new BridgePublisher(output, mapper);
+        for (String state : new String[]{"loaded", "unloading", "empty", "loaded"}) {
+            assertTrue(publisher.publishCritical("usbMount", new BridgePayloads.USBMount(1, state)));
+        }
+        publisher.close();
+        String[] lines = output.toString(StandardCharsets.UTF_8).strip().split("\\R");
+        assertEquals(4, lines.length);
+        assertEquals("unloading", mapper.readTree(lines[1]).get("payload").get("state").asText());
+        assertEquals("empty", mapper.readTree(lines[2]).get("payload").get("state").asText());
+        assertEquals("critical", mapper.readTree(lines[3]).get("trafficClass").asText());
+    }
+
+    @Test
     void rejectsTransientPlayerWarmupTempoWithoutRejectingValidDeckTempo() {
         assertFalse(BeatLinkRuntime.hasRealtimeTempo(-0.01, 0));
         assertFalse(BeatLinkRuntime.hasRealtimeTempo(0.0, 0));

@@ -164,3 +164,27 @@ fn accepts_physical_cdj_unloaded_sentinel_observed_on_the_wire() {
     assert_eq!(status.track_bpm, 655.35);
     assert_eq!(status.effective_bpm, 655.35);
 }
+#[test]
+fn usb_mount_protocol_rejects_unknown_states_and_invalid_players() {
+    for (player, state, valid) in [
+        (1, "loaded", true),
+        (2, "empty", true),
+        (1, "unloading", true),
+        (1, "unknown", true),
+        (0, "loaded", false),
+        (7, "loaded", false),
+        (1, "invented", false),
+    ] {
+        let line = serde_json::json!({"protocol":"lumi-prolink-bridge","protocolVersion":1,
+            "sequence":2,"observedAtNanos":2,"type":"usbMount","trafficClass":"critical",
+            "payload":{"deviceNumber":player,"state":state}})
+        .to_string();
+        let mut decoder = lumi_prolink_input::BridgeDecoder::new();
+        let hello = serde_json::json!({"protocol":"lumi-prolink-bridge","protocolVersion":1,
+            "sequence":1,"observedAtNanos":1,"type":"hello","payload":{
+            "bridgeVersion":"fixture","beatLinkVersion":"8.0.0","readOnly":true}})
+        .to_string();
+        assert!(decoder.decode_line(&hello).is_ok());
+        assert_eq!(decoder.decode_line(&line).is_ok(), valid);
+    }
+}

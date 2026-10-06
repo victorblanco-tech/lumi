@@ -484,8 +484,16 @@ impl RemoteLiveProjection {
         for usb in &self.player_usbs {
             if !(1..=6).contains(&usb.player_number)
                 || !usb_players.insert(usb.player_number)
-                || !["trusted", "unknown", "conflict", "unavailable", "resolving"]
-                    .contains(&usb.state.as_str())
+                || ![
+                    "trusted",
+                    "unknown",
+                    "conflict",
+                    "unavailable",
+                    "resolving",
+                    "empty",
+                    "unloading",
+                ]
+                .contains(&usb.state.as_str())
                 || usb.color_id.is_some_and(|id| id > 8)
                 || (usb.state != "trusted" && (usb.source_name.is_some() || usb.color_id.is_some()))
             {

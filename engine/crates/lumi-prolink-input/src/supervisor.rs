@@ -249,6 +249,7 @@ fn coalescing_key(message: &BridgeMessage) -> Option<CoalescingKey> {
         | BridgeEvent::SourceStatus(_)
         | BridgeEvent::DeviceFound(_)
         | BridgeEvent::DeviceLost(_)
+        | BridgeEvent::USBMount(_)
         | BridgeEvent::Beat(_)
         | BridgeEvent::Error(_) => None,
     }

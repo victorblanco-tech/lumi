@@ -158,6 +158,8 @@ public struct ProDJLinkIntegrationView: View {
         case "unknown": "USB · connect to Mac and scan in Import & Sources"
         case "conflict": "USB · identity conflict — review local source"
         case "unavailable": "USB · identity unavailable"
+        case "empty": "USB · not inserted"
+        case "unloading": "USB · ejecting — loaded tracks remain recognized"
         default: "USB · identifying source…"
         }
     }

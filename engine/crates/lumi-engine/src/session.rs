@@ -368,7 +368,8 @@ struct EngineRuntime {
     media_resolver: crate::media_resolver::MediaResolver,
     live_library_resolver: crate::live_library_resolver::LiveLibraryResolver,
     live_library_status: BTreeMap<TrackLoadId, (&'static str, u64)>,
-    live_library_bindings: BTreeMap<TrackLoadId, crate::live_library_resolver::LookupKey>,
+    live_library_bindings: BTreeMap<TrackLoadId, LiveTrackBinding>,
+    live_load_media_generations: BTreeMap<TrackLoadId, u64>,
     #[cfg(not(test))]
     prolink_bridge: Option<BridgeProcessSupervisor>,
     prolink_start_error: Option<String>,
@@ -638,6 +639,12 @@ impl RemoteProjectionPublisher {
 
 /// Read the already-resolved source for this load. This is display-only:
 /// no media probes, Library queries or transport/output changes are performed.
+#[derive(Clone)]
+struct LiveTrackBinding {
+    key: crate::live_library_resolver::LookupKey,
+    source: lumi_remote_protocol::RemoteTrackSource,
+}
+
 fn track_source_display(
     runtime: &EngineRuntime,
     load: lumi_domain::TrackLoadId,
@@ -646,23 +653,45 @@ fn track_source_display(
         return None;
     }
     let identity = runtime.direct_deck_source.track_identity(load)?;
+    if let Some(binding) = runtime.live_library_bindings.get(&load) {
+        return Some(binding.source.clone());
+    }
     let media = (identity.source_slot == "USB_SLOT")
         .then(|| runtime.media_resolver.status(identity.source_player))
         .flatten();
-    let trusted = media.is_some_and(|status| status.state == "trusted");
     Some(lumi_remote_protocol::RemoteTrackSource {
         player_number: (1..=6)
             .contains(&identity.source_player)
             .then_some(identity.source_player),
         slot: identity.source_slot.clone(),
         state: media
-            .map_or("unavailable", |status| status.state)
+            .map_or("unavailable", |status| {
+                if matches!(status.state, "empty" | "unloading" | "trusted") {
+                    "unavailable"
+                } else {
+                    status.state
+                }
+            })
             .to_owned(),
-        source_name: media
-            .filter(|_| trusted)
-            .and_then(|status| status.source_name.clone()),
-        color_id: media.filter(|_| trusted).and_then(|status| status.color_id),
+        source_name: None,
+        color_id: None,
     })
+}
+
+fn live_track_binding_valid(runtime: &EngineRuntime, load: TrackLoadId) -> bool {
+    runtime
+        .live_library_bindings
+        .get(&load)
+        .is_some_and(|binding| {
+            runtime
+                .direct_deck_source
+                .track_identity(load)
+                .is_some_and(|identity| {
+                    identity.source_player == binding.key.source_player
+                        && identity.rekordbox_id == binding.key.rekordbox_id
+                        && identity.source_slot == "USB_SLOT"
+                })
+        })
 }
 
 fn remote_static_key(runtime: &EngineRuntime) -> RemoteStaticKey {
@@ -914,6 +943,7 @@ fn initialized_runtime_for_mode(
         live_library_resolver,
         live_library_status: BTreeMap::new(),
         live_library_bindings: BTreeMap::new(),
+        live_load_media_generations: BTreeMap::new(),
         #[cfg(not(test))]
         prolink_bridge,
         prolink_start_error,
@@ -1069,6 +1099,11 @@ fn process_pending_source_events(runtime: &mut EngineRuntime) -> Result<(), Engi
                     && let DeckObservation::TrackLoaded { track_load_id, .. } = envelope.observation
                     && let Some(identity) = runtime.direct_deck_source.track_identity(track_load_id)
                 {
+                    if let Some(media) = runtime.media_resolver.status(identity.source_player) {
+                        runtime
+                            .live_load_media_generations
+                            .insert(track_load_id, media.generation);
+                    }
                     runtime
                         .media_resolver
                         .request_verification(identity.source_player, Instant::now());
@@ -3099,48 +3134,66 @@ fn process_deck_input_messages(runtime: &mut EngineRuntime) -> Result<(), Engine
 
 fn process_live_library_preparation(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
     use crate::live_library_resolver::{LookupKey, Preparation};
-    let changed_sources = runtime
-        .live_library_bindings
-        .values()
-        .filter_map(|binding| {
-            let media = runtime.media_resolver.status(binding.source_player)?;
-            (media.state == "trusted"
-                && (media.generation != binding.media_generation
-                    || media.source_id.as_ref() != Some(&binding.source_id)))
-            .then_some(binding.source_player)
-        })
-        .collect::<std::collections::BTreeSet<_>>();
-    for source in changed_sources {
-        runtime
-            .direct_deck_source
-            .invalidate_source_media(source, runtime.clock.now())?;
-    }
-    let keys = runtime
+    // A mount authorizes a load once. After that, cached audio, exact timing,
+    // prepared phrases and track origin belong to the load, not the current
+    // contents of its source Player's USB slot.
+    let loads = runtime
         .state
         .state()
         .decks()
-        .filter_map(|(deck, state)| {
-            let identity = runtime
-                .direct_deck_source
-                .track_identity(state.track_load_id())?;
+        .map(|(deck, state)| (deck, state.track_load_id()))
+        .collect::<Vec<_>>();
+    let keys = loads
+        .iter()
+        .filter_map(|(deck, load)| {
+            if let Some(binding) = runtime.live_library_bindings.get(load) {
+                let mut key = binding.key.clone();
+                key.library_revision = runtime.library_revision;
+                return Some(key);
+            }
+            let identity = runtime.direct_deck_source.track_identity(*load)?;
             if identity.source_slot != "USB_SLOT" {
                 return None;
             }
             let media = runtime.media_resolver.status(identity.source_player)?;
-            if media.state != "trusted" || media.last_verified_unix_millis.is_none() {
+            let expected_generation = runtime
+                .live_load_media_generations
+                .entry(*load)
+                .or_insert(media.generation);
+            if media.state != "trusted"
+                || media.last_verified_unix_millis.is_none()
+                || *expected_generation != media.generation
+            {
                 return None;
             }
-            Some(LookupKey {
-                deck,
-                load: state.track_load_id(),
+            let key = LookupKey {
+                deck: *deck,
+                load: *load,
                 source_player: identity.source_player,
                 source_id: media.source_id.clone()?,
                 media_generation: media.generation,
                 rekordbox_id: identity.rekordbox_id,
                 library_revision: runtime.library_revision,
-            })
+            };
+            runtime.live_library_bindings.insert(
+                *load,
+                LiveTrackBinding {
+                    key: key.clone(),
+                    source: lumi_remote_protocol::RemoteTrackSource {
+                        player_number: Some(identity.source_player),
+                        slot: identity.source_slot.clone(),
+                        state: "trusted".into(),
+                        source_name: media.source_name.clone(),
+                        color_id: media.color_id,
+                    },
+                },
+            );
+            Some(key)
         })
         .collect::<Vec<_>>();
+    runtime
+        .live_load_media_generations
+        .retain(|load, _| loads.iter().any(|(_, current)| current == load));
     runtime.live_library_bindings.retain(|load, _| {
         runtime
             .state
@@ -3189,9 +3242,6 @@ fn process_live_library_preparation(runtime: &mut EngineRuntime) -> Result<(), E
                         runtime
                             .planning_worker
                             .register_library_context(load, context);
-                        runtime
-                            .live_library_bindings
-                            .insert(load, completion.key.clone());
                     }
                     "ready"
                 }
@@ -3296,18 +3346,7 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
         .direct_deck_source
         .drain_precise_position_observations();
     for position in precise_positions {
-        let binding_valid = runtime
-            .live_library_bindings
-            .get(&position.track_load_id)
-            .is_some_and(|binding| {
-                runtime
-                    .media_resolver
-                    .status(binding.source_player)
-                    .is_some_and(|media| {
-                        media.generation == binding.media_generation
-                            && media.source_id.as_ref() == Some(&binding.source_id)
-                    })
-            });
+        let binding_valid = live_track_binding_valid(runtime, position.track_load_id);
         if !binding_valid {
             if runtime.state.state().leader_deck() == Some(position.deck_id) {
                 runtime.output_worker.invalidate_autoloop_deadline();

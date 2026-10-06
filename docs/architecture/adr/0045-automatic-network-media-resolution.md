@@ -43,11 +43,26 @@ validated marker, existing trusted Lumi source, source-scoped track alias, then
 the compatible library analysis and Lumi phrase timeline. A Player loading from
 another Player uses the source Player's slot, not its own USB slot.
 
-Invalidate results on device loss, media removal or replacement. Results carry
-the requested device/media generation and track-load identity, so a delayed read
-cannot attach the previous USB or previous track to the current Player. Design
-mount evidence and periodic bounded revalidation before accepting a persistent
-cache; do not assume that every physical swap produces an observed empty frame.
+The owner revised the lifecycle on 2026-10-06: track source and current USB mount
+are independent identities. Passive CDJ USB-status transitions drive mount
+resolution; a healthy unchanged mount has no periodic fixed-file reads. First
+discovery, insertion and recovery after a status interruption verify the mount.
+Failed initial reads retry with bounded backoff, but successful reads stop.
+
+Eject, removal and replacement cancel pending mount reads and advance the mount
+epoch. They do not revoke an already verified load: modern Players may continue
+cached playback after removal, including tracks loaded over LINK. Each verified
+load retains its source, prepared analysis and phrase plan until that load is
+actually replaced or unloaded. A new unresolved load cannot adopt a subsequent
+mount's identity. Delayed worker replies carry their original epoch and cannot
+authorize the newly inserted USB.
+
+USB transitions use the critical bridge lane so an eject/insertion pair cannot
+collapse into only its final state. A gap longer than three seconds between CDJ
+status observations invalidates current mount continuity and requests fresh
+verification when status resumes. This is not proof that every swap can be
+observed: a short unobserved removal/reinsertion remains a hardware acceptance
+case, especially if the Player also reuses the same loaded-track numeric ID.
 
 ## Trust and failure boundaries
 
@@ -87,19 +102,21 @@ the active plan midway through a phrase or replaying an executed AutoLoop.
 One bounded worker owns NFS reads and a read-only SQLite connection. The engine
 pump sends at most one job and consumes at most four replies per poll. Device
 loss/reconnect cancels the old job; generation checks discard its delayed reply.
-Successful identities are revalidated every 15 seconds, and failures back off to
+Before Dev-9, successful identities were revalidated every 15 seconds. The
+event-driven refactor removes that timer; failed unresolved reads back off to
 30 seconds. A failed reader changes only that Player's USB diagnostic detail.
 For an already verified medium, unsuccessful rechecks retain the source ID,
 name, native color and media epoch. A timeout is not evidence of replacement
 and must not invalidate an existing track binding or AutoLoop deadline. Retries
-continue in the background, including after repeated failures. Device loss,
-explicit unknown/conflicting identity and a confirmed different marker still
-revoke the binding.
+continue in the background for unresolved mounts. Device loss, explicit
+unknown/conflicting identity and a confirmed different marker revoke only
+authorization for future loads from that mount. Existing verified cached loads
+retain their own bindings while their transport remains authoritative.
 
-New track loads remain stricter: they clear the verification timestamp and
-cannot use an old read to authorize new library preparation. A failed read
-does not restore that timestamp. Other tracks already using that source keep
-their existing bindings. Cross-source fallback remains outside this change.
+New track loads may reuse the verified identity of an unchanged mount. They
+capture its epoch before asynchronous preparation; an intervening removal or
+replacement cannot authorize that load from a different mount. Cross-source
+fallback remains outside this change.
 
 Schema 19 records an existing local trusted source, marker UUID/source key and
 physical fingerprint. Local scan/sync creates this binding; a network reply
@@ -126,13 +143,17 @@ tracks loaded from another Player.
 
 ## Phase 3 preparation and adoption policy
 
-A newly loaded USB track requests a fresh fixed-file verification of its source
-Player. Verification request tokens cancel stale replies; the media epoch changes
-only when the actual medium changes. Matching requires `USB_SLOT`, a locally
-trusted source, that epoch, the exact Rekordbox ID and the current track-load ID.
+A newly loaded USB track captures its source Player's current mount epoch and
+uses its verified identity without another read when mount continuity is intact.
+Unresolved identity is prepared independently. Mount changes cancel stale
+replies. Matching requires `USB_SLOT`, a locally trusted source, the captured
+epoch, the exact Rekordbox ID and the current track-load ID.
 No title, color, numeric-ID-only or cross-source fallback is used automatically.
-An observed medium change revokes only the loads that use that source, including
-loads from another Player, without restarting the bridge or tempo relay.
+An observed medium change affects future source authorization, not verified
+cached loads on this or another Player. Their immutable load binding also owns
+the source name and native color displayed in the track header. Current mount
+state is shown separately as identified, empty or ejecting. No mount event
+restarts the bridge or tempo relay, seeks a track or replays an AutoLoop.
 
 The separate `lumi-live-library` thread owns a bounded read-only SQLite connection.
 Alias, track analysis, phrase timeline and mapping catalog are read within one

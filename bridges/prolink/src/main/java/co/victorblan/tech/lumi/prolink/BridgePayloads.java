@@ -2,6 +2,7 @@ package co.victorblan.tech.lumi.prolink;
 
 final class BridgePayloads {
     record USBMedia(int deviceNumber, Integer colorId) {}
+    record USBMount(int deviceNumber, String state) {}
     record Hello(String bridgeVersion, String beatLinkVersion, boolean readOnly) {
     }
 

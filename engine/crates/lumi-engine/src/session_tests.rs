@@ -61,6 +61,7 @@ fn linked_track_source_projects_origin_not_destination_usb_without_output()
     let outputs = runtime.output_worker.provider.records().count();
     runtime.media_resolver =
         crate::media_resolver::MediaResolver::verified_fixture(1, "usb-fs:chrm", "CHRM", 1);
+    process_live_library_preparation(&mut runtime)?;
     let source = track_source_display(&runtime, load).ok_or("missing source")?;
     assert_eq!(source.source_name.as_deref(), Some("CHRM"));
     assert_eq!(source.color_id, Some(1));
@@ -75,9 +76,136 @@ fn linked_track_source_projects_origin_not_destination_usb_without_output()
     assert_eq!(projection.players[0].track_source.as_ref(), Some(&source));
     let encoded = serde_json::to_string(&projection)?;
     assert!(!encoded.contains("usb-fs:chrm"));
+    // The source row belongs to the cached track, not the current mount.
+    runtime.media_resolver.observe(
+        &lumi_prolink_input::BridgeEvent::USBMount(lumi_prolink_input::USBMount {
+            device_number: 1,
+            state: lumi_prolink_input::USBMountState::Empty,
+        }),
+        Instant::now(),
+    );
+    process_live_library_preparation(&mut runtime)?;
+    assert_eq!(track_source_display(&runtime, load), Some(source.clone()));
+    assert!(live_track_binding_valid(&runtime, load));
+    runtime.media_resolver =
+        crate::media_resolver::MediaResolver::verified_fixture(1, "usb-fs:gray", "GRAY", 7);
+    process_live_library_preparation(&mut runtime)?;
+    assert_eq!(track_source_display(&runtime, load), Some(source));
+    assert!(live_track_binding_valid(&runtime, load));
+    // A genuinely different track gets the newly verified mount, never the
+    // previous track's frozen origin.
+    let line = json!({"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":5,
+        "observedAtNanos":5000,"type":"deckStatus","payload":{
+        "deviceNumber":2,"deviceName":"CDJ-1500X","playing":false,"paused":true,
+        "cued":false,"tempoMaster":true,"onAir":true,"sourcePlayer":1,
+        "sourceSlot":"USB_SLOT","trackType":"REKORDBOX","rekordboxId":43,
+        "trackBpm":140.0,"effectiveBpm":140.0,"beatNumber":1,"beatWithinBar":1,"rawPitch":1048576}})
+    .to_string();
+    runtime
+        .direct_deck_source
+        .ingest(decoder.decode_line(&line)?, MonotonicTime::new(5))?;
+    process_pending_source_events(&mut runtime)?;
+    process_live_library_preparation(&mut runtime)?;
+    let new_load = runtime
+        .state
+        .state()
+        .deck(lumi_domain::DeckId::new(2))
+        .ok_or("missing new load")?
+        .track_load_id();
+    assert_ne!(new_load, load);
+    assert!(!live_track_binding_valid(&runtime, load));
+    assert_eq!(
+        track_source_display(&runtime, new_load)
+            .ok_or("missing new source")?
+            .source_name
+            .as_deref(),
+        Some("GRAY")
+    );
     assert_eq!(outputs, runtime.output_worker.provider.records().count());
     runtime.deck_source_mode = DeckSourceMode::LocalPlayback;
-    assert!(track_source_display(&runtime, load).is_none());
+    assert!(track_source_display(&runtime, new_load).is_none());
+    Ok(())
+}
+
+#[test]
+fn unverified_loaded_track_cannot_adopt_a_usb_inserted_after_that_load()
+-> Result<(), Box<dyn std::error::Error>> {
+    use lumi_prolink_input::{BridgeEvent, Device, USBMount, USBMountState};
+    let mut runtime = initialized_product_runtime()?;
+    runtime.deck_source_mode = DeckSourceMode::ConnectedDecks;
+    let found = BridgeEvent::DeviceFound(Device {
+        device_number: 1,
+        device_name: "CDJ-1500X".into(),
+        address: "192.168.1.1".into(),
+    });
+    runtime.media_resolver.observe(&found, Instant::now());
+    let mut decoder = lumi_prolink_input::BridgeDecoder::new();
+    for (sequence, kind, payload) in [
+        (
+            1,
+            "hello",
+            json!({"bridgeVersion":"fixture","beatLinkVersion":"8.0.0","readOnly":true}),
+        ),
+        (
+            2,
+            "deckStatus",
+            json!({"deviceNumber":1,"deviceName":"CDJ-1500X","playing":true,
+            "paused":false,"cued":false,"tempoMaster":true,"onAir":true,"sourcePlayer":1,
+            "sourceSlot":"USB_SLOT","trackType":"REKORDBOX","rekordboxId":42,
+            "trackBpm":140.0,"effectiveBpm":140.0,"beatNumber":17,"beatWithinBar":1,"rawPitch":1048576}),
+        ),
+    ] {
+        let line = json!({"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":sequence,
+            "observedAtNanos":sequence*1000,"type":kind,"payload":payload})
+        .to_string();
+        runtime
+            .direct_deck_source
+            .ingest(decoder.decode_line(&line)?, MonotonicTime::new(sequence))?;
+    }
+    process_pending_source_events(&mut runtime)?;
+    let load = runtime
+        .state
+        .state()
+        .deck(lumi_domain::DeckId::new(1))
+        .ok_or("missing load")?
+        .track_load_id();
+    process_live_library_preparation(&mut runtime)?;
+    assert!(!live_track_binding_valid(&runtime, load));
+    for state in [USBMountState::Empty, USBMountState::Loaded] {
+        runtime.media_resolver.observe(
+            &BridgeEvent::USBMount(USBMount {
+                device_number: 1,
+                state,
+            }),
+            Instant::now(),
+        );
+    }
+    let generation = runtime
+        .media_resolver
+        .status(1)
+        .ok_or("missing mount")?
+        .generation;
+    runtime.media_resolver =
+        crate::media_resolver::MediaResolver::verified_fixture(1, "usb-fs:new", "NEW USB", 7)
+            .with_fixture_generation(generation);
+    process_live_library_preparation(&mut runtime)?;
+    assert!(!live_track_binding_valid(&runtime, load));
+    assert!(runtime.planning_worker.library_context(load).is_none());
+    assert!(
+        track_source_display(&runtime, load)
+            .ok_or("missing source")?
+            .source_name
+            .is_none()
+    );
+    assert_eq!(
+        runtime
+            .state
+            .state()
+            .deck(lumi_domain::DeckId::new(1))
+            .ok_or("cached load lost")?
+            .track_load_id(),
+        load
+    );
     Ok(())
 }
 
@@ -253,6 +381,51 @@ fn live_loaded_track_is_prepared_asynchronously_without_transport_reset()
     runtime.media_resolver =
         crate::media_resolver::MediaResolver::verified_fixture(1, "usb-fs:test", "CHRM", 6);
     assert_ne!(before, remote_static_key(&runtime));
+    let origin = track_source_display(&runtime, load).ok_or("missing verified origin")?;
+    let context_revision = runtime
+        .planning_worker
+        .library_context(load)
+        .ok_or("missing cached context")?
+        .timeline_revision();
+    for mount in [
+        lumi_prolink_input::USBMountState::Unloading,
+        lumi_prolink_input::USBMountState::Empty,
+    ] {
+        runtime.media_resolver.observe(
+            &lumi_prolink_input::BridgeEvent::USBMount(lumi_prolink_input::USBMount {
+                device_number: 1,
+                state: mount,
+            }),
+            Instant::now(),
+        );
+        process_live_library_preparation(&mut runtime)?;
+        process_pending_source_events(&mut runtime)?;
+        assert!(live_track_binding_valid(&runtime, load));
+        assert_eq!(track_source_display(&runtime, load), Some(origin.clone()));
+        let cached = runtime
+            .state
+            .state()
+            .deck(lumi_domain::DeckId::new(1))
+            .ok_or("cached Player lost")?;
+        assert_eq!(cached.track_load_id(), load);
+        assert!(cached.is_playing());
+        assert_eq!(cached.beat(), 16);
+        assert_eq!(
+            runtime
+                .planning_worker
+                .library_context(load)
+                .ok_or("cached phrases lost")?
+                .timeline_revision(),
+            context_revision
+        );
+    }
+    runtime.media_resolver =
+        crate::media_resolver::MediaResolver::verified_fixture(1, "usb-fs:different", "NEW USB", 7);
+    process_live_library_preparation(&mut runtime)?;
+    process_pending_source_events(&mut runtime)?;
+    assert_eq!(track_source_display(&runtime, load), Some(origin));
+    assert!(live_track_binding_valid(&runtime, load));
+    assert_eq!(runtime.output_worker.provider.records().count(), records);
     drop(runtime);
     drop(writer);
     drop(initial);

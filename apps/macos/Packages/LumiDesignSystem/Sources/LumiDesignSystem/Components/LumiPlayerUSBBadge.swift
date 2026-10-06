@@ -18,6 +18,8 @@ public struct LumiPlayerUSBBadge: View {
         case "unknown": "USB · Unknown source"
         case "conflict": "USB · Identity conflict"
         case "unavailable": "USB · Not identified"
+        case "empty": "USB · Not inserted"
+        case "unloading": "USB · Ejecting…"
         default: "USB · Identifying…"
         }
     }
@@ -59,7 +61,7 @@ public struct LumiPlayerUSBBadge: View {
                 .foregroundStyle(state == "trusted" ? LumiColor.textSecondary : statusTint)
                 .lineLimit(1)
                 .truncationMode(.middle)
-            Image(systemName: state == "trusted" ? "checkmark.circle.fill" : "questionmark.circle")
+            Image(systemName: state == "trusted" ? "checkmark.circle.fill" : state == "empty" ? "minus.circle" : "questionmark.circle")
                 .foregroundStyle(statusTint)
         }
             .font(LumiTypography.caption)

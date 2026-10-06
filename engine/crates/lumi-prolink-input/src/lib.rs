@@ -53,6 +53,7 @@ pub enum BridgeEvent {
     DeviceFound(Device),
     DeviceLost(Device),
     USBMedia(USBMedia),
+    USBMount(USBMount),
     DeckStatus(DeckStatus),
     Beat(Beat),
     TempoStatus(TempoStatus),
@@ -100,6 +101,22 @@ pub struct Device {
 pub struct USBMedia {
     pub device_number: u8,
     pub color_id: Option<u8>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum USBMountState {
+    Loaded,
+    Unloading,
+    Empty,
+    Unknown,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct USBMount {
+    pub device_number: u8,
+    pub state: USBMountState,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -274,6 +291,7 @@ fn decode_event(message_type: &str, payload: Value) -> Result<BridgeEvent, Bridg
         "deviceFound" => decode_payload(payload).map(BridgeEvent::DeviceFound),
         "deviceLost" => decode_payload(payload).map(BridgeEvent::DeviceLost),
         "usbMedia" => decode_payload(payload).map(BridgeEvent::USBMedia),
+        "usbMount" => decode_payload(payload).map(BridgeEvent::USBMount),
         "deckStatus" => decode_payload(payload).map(BridgeEvent::DeckStatus),
         "transportStatus" => decode_payload(payload).map(BridgeEvent::DeckStatus),
         "beat" => decode_payload(payload).map(BridgeEvent::Beat),
@@ -306,6 +324,11 @@ fn validate_event(event: &BridgeEvent) -> Result<(), BridgeDecodeError> {
         BridgeEvent::USBMedia(media) => {
             if !(1..=6).contains(&media.device_number) || media.color_id.is_some_and(|id| id > 8) {
                 return Err(BridgeDecodeError::InvalidPayload("usbMedia"));
+            }
+        }
+        BridgeEvent::USBMount(mount) => {
+            if !(1..=6).contains(&mount.device_number) {
+                return Err(BridgeDecodeError::InvalidPayload("usbMount"));
             }
         }
         BridgeEvent::DeckStatus(status) => {

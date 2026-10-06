@@ -16,10 +16,9 @@ use std::{
 };
 
 use lumi_library_sqlite::{SqliteLibraryRepository, UsbMediaTrust};
-use lumi_prolink_input::{BridgeEvent, SourceCondition};
+use lumi_prolink_input::{BridgeEvent, SourceCondition, USBMountState};
 use serde::{Deserialize, Serialize};
 
-const RECHECK: Duration = Duration::from_secs(15);
 const PROCESS_LIMIT: Duration = Duration::from_secs(8);
 const MAX_OUTPUT: u64 = 16_384;
 
@@ -44,6 +43,8 @@ struct Slot {
     cancel: Arc<AtomicBool>,
     status: MediaStatus,
     media_id: Option<String>,
+    mount_state: Option<USBMountState>,
+    read_needed: bool,
 }
 
 struct Job {
@@ -100,8 +101,19 @@ impl MediaResolver {
             slot.status.source_name = Some(name.into());
             slot.status.color_id = Some(color);
             slot.status.last_verified_unix_millis = Some(1);
+            slot.read_needed = false;
         }
         resolver
+    }
+
+    #[cfg(test)]
+    pub(crate) fn with_fixture_generation(mut self, generation: u64) -> Self {
+        self.next_generation = generation;
+        for slot in self.slots.values_mut() {
+            slot.generation = generation;
+            slot.status.generation = generation;
+        }
+        self
     }
 
     pub fn disabled() -> Self {
@@ -181,6 +193,9 @@ impl MediaResolver {
     /// bridge batch. Looking only at a final device map would miss that reset.
     pub fn observe(&mut self, event: &BridgeEvent, now: Instant) {
         match event {
+            BridgeEvent::USBMount(mount) => {
+                self.observe_mount(mount.device_number, mount.state, now);
+            }
             BridgeEvent::USBMedia(media) => {
                 if let Some(slot) = self.slots.get_mut(&media.device_number) {
                     slot.status.color_id = media.color_id;
@@ -225,6 +240,8 @@ impl MediaResolver {
                             detail: "Reading USB identity independently of show output".to_owned(),
                         },
                         media_id: None,
+                        mount_state: None,
+                        read_needed: true,
                     },
                 );
             }
@@ -249,18 +266,66 @@ impl MediaResolver {
         self.slots.get(&player).map(|slot| &slot.status)
     }
 
-    /// New loads cannot use marker evidence from before that load. Cancelling
-    /// an older read does not change a playing track's media epoch by itself.
+    /// A healthy, unchanged mount can authorize subsequent loads without
+    /// another network read. Only an unresolved mount needs work; track loads
+    /// never invalidate identity belonging to other cached tracks.
     pub fn request_verification(&mut self, player: u8, now: Instant) {
         let Some(slot) = self.slots.get_mut(&player) else {
             return;
         };
+        if slot.status.state != "trusted"
+            && !matches!(
+                slot.mount_state,
+                Some(USBMountState::Empty | USBMountState::Unloading)
+            )
+            && !slot.read_needed
+            && !matches!(slot.status.state, "unknown" | "conflict")
+        {
+            slot.read_needed = true;
+            slot.next_attempt = now;
+        }
+    }
+
+    fn observe_mount(&mut self, player: u8, state: USBMountState, now: Instant) {
+        let Some(slot) = self.slots.get_mut(&player) else {
+            return;
+        };
+        if slot.mount_state == Some(state) {
+            return;
+        }
+        let first_loaded = slot.mount_state.is_none() && state == USBMountState::Loaded;
+        slot.mount_state = Some(state);
+        if first_loaded {
+            // Device discovery may already have started the first bounded
+            // read. The first Loaded status confirms that same mount.
+            return;
+        }
         slot.cancel.store(true, Ordering::Release);
         slot.cancel = Arc::new(AtomicBool::new(false));
         self.next_generation = self.next_generation.saturating_add(1);
         slot.generation = self.next_generation;
+        slot.status.generation = slot.generation;
+        slot.status.source_id = None;
+        slot.status.source_name = None;
+        slot.status.color_id = None;
         slot.status.last_verified_unix_millis = None;
+        slot.status.elapsed_millis = None;
+        slot.media_id = None;
+        slot.failures = 0;
         slot.next_attempt = now;
+        slot.read_needed = matches!(state, USBMountState::Loaded | USBMountState::Unknown);
+        (slot.status.state, slot.status.detail) = match state {
+            USBMountState::Empty => ("empty", "No USB is mounted in this Player".into()),
+            USBMountState::Unloading => (
+                "unloading",
+                "USB is being ejected; loaded tracks retain their origin".into(),
+            ),
+            USBMountState::Loaded => ("resolving", "Identifying the newly mounted USB".into()),
+            USBMountState::Unknown => (
+                "resolving",
+                "USB mount state is unknown; verifying identity once".into(),
+            ),
+        };
     }
 
     /// Bounded, non-blocking pump access: at most four replies and one send.
@@ -334,6 +399,7 @@ impl MediaResolver {
                     slot.status.elapsed_millis = Some(elapsed);
                     slot.status.last_verified_unix_millis = Some(unix_millis());
                     slot.failures = 0;
+                    slot.read_needed = false;
                     ("trusted", "Trusted USB identified".to_owned())
                 }
                 Outcome::Unknown => (
@@ -353,12 +419,10 @@ impl MediaResolver {
                 slot.status.last_verified_unix_millis = None;
                 slot.failures = slot.failures.saturating_add(1);
             }
-            let backoff = if state == "trusted" {
-                RECHECK
-            } else {
-                retry_backoff(slot.failures)
-            };
-            slot.next_attempt = now + backoff;
+            if matches!(state, "unknown" | "conflict") {
+                slot.read_needed = false;
+            }
+            slot.next_attempt = now + retry_backoff(slot.failures);
             if let Some(other) = duplicate {
                 for player in [result.player, other] {
                     if let Some(slot) = self.slots.get_mut(&player) {
@@ -378,7 +442,7 @@ impl MediaResolver {
         let Some((&player, slot)) = self
             .slots
             .iter_mut()
-            .filter(|(_, slot)| slot.next_attempt <= now)
+            .filter(|(_, slot)| slot.read_needed && slot.next_attempt <= now)
             .min_by_key(|(_, slot)| slot.next_attempt)
         else {
             return;
@@ -641,8 +705,100 @@ mod tests {
         }
     }
 
+    fn force_read(resolver: &mut MediaResolver) {
+        if let Some(slot) = resolver.slots.get_mut(&1) {
+            slot.next_attempt = Instant::now();
+            slot.read_needed = true;
+        }
+    }
+
+    fn mount(player: u8, state: USBMountState) -> BridgeEvent {
+        BridgeEvent::USBMount(lumi_prolink_input::USBMount {
+            device_number: player,
+            state,
+        })
+    }
+
     #[test]
-    fn failed_periodic_rechecks_retain_identity_and_back_off_until_recovery()
+    fn healthy_mount_and_track_changes_do_not_repeat_network_reads()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let reads = calls.clone();
+        let mut resolver = MediaResolver::spawn(move |_, _| {
+            reads.fetch_add(1, Ordering::Relaxed);
+            verified_reply("CHRM")
+        });
+        let now = Instant::now();
+        resolver.observe(&found(1, "192.168.1.1"), now);
+        resolver.observe(&mount(1, USBMountState::Loaded), now);
+        poll_until(&mut resolver, |r| {
+            r.status(1).is_some_and(|s| s.state == "trusted")
+        });
+        let initial = resolver.status(1).ok_or("missing status")?.clone();
+        for second in 1..=10_000 {
+            let later = now + Duration::from_secs(second);
+            resolver.observe(&mount(1, USBMountState::Loaded), later);
+            resolver.request_verification(1, later);
+            resolver.poll(later);
+        }
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(
+            resolver.status(1).ok_or("missing status")?.generation,
+            initial.generation
+        );
+        assert_eq!(
+            resolver
+                .status(1)
+                .ok_or("missing status")?
+                .last_verified_unix_millis,
+            initial.last_verified_unix_millis
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn empty_mount_stops_reads_and_insertion_resolves_only_the_new_epoch()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let calls = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let reads = calls.clone();
+        let mut resolver = MediaResolver::spawn(move |_, _| {
+            let call = reads.fetch_add(1, Ordering::Relaxed);
+            verified_reply(if call == 0 { "CHRM" } else { "GRAY" })
+        });
+        resolver.observe(&found(1, "192.168.1.1"), Instant::now());
+        resolver.observe(&mount(1, USBMountState::Loaded), Instant::now());
+        poll_until(&mut resolver, |r| {
+            r.status(1).is_some_and(|s| s.state == "trusted")
+        });
+        let old = resolver.status(1).ok_or("missing status")?.generation;
+        resolver.observe(&mount(1, USBMountState::Unloading), Instant::now());
+        resolver.observe(&mount(1, USBMountState::Empty), Instant::now());
+        for _ in 0..100 {
+            resolver.request_verification(1, Instant::now());
+            resolver.poll(Instant::now() + Duration::from_secs(3600));
+        }
+        assert_eq!(calls.load(Ordering::Relaxed), 1);
+        assert_eq!(resolver.status(1).ok_or("missing status")?.state, "empty");
+        assert!(
+            resolver
+                .status(1)
+                .ok_or("missing status")?
+                .source_id
+                .is_none()
+        );
+        resolver.observe(&mount(1, USBMountState::Loaded), Instant::now());
+        poll_until(&mut resolver, |r| {
+            r.status(1).is_some_and(|s| s.state == "trusted")
+        });
+        assert_eq!(calls.load(Ordering::Relaxed), 2);
+        let current = resolver.status(1).ok_or("missing status")?;
+        assert!(current.generation > old);
+        assert_eq!(current.source_name.as_deref(), Some("GRAY"));
+        Ok(())
+    }
+
+    #[test]
+    fn explicitly_requested_failed_reads_retain_identity_and_back_off_until_recovery()
     -> Result<(), Box<dyn std::error::Error>> {
         let calls = std::sync::atomic::AtomicUsize::new(0);
         let mut resolver = MediaResolver::spawn(move |_, _| {
@@ -666,6 +822,7 @@ mod tests {
         let verified = resolver.status(1).ok_or("missing status")?.clone();
         for failure in 1..=8 {
             let now = Instant::now();
+            force_read(&mut resolver);
             resolver
                 .slots
                 .get_mut(&1)
@@ -696,6 +853,7 @@ mod tests {
             .get_mut(&1)
             .ok_or("missing slot")?
             .next_attempt = Instant::now();
+        force_read(&mut resolver);
         poll_until(&mut resolver, |r| {
             r.slots.get(&1).is_some_and(|s| s.failures == 0)
         });
@@ -707,7 +865,7 @@ mod tests {
     }
 
     #[test]
-    fn failed_new_load_reverification_does_not_authorize_new_loads()
+    fn failed_new_mount_verification_does_not_authorize_new_loads()
     -> Result<(), Box<dyn std::error::Error>> {
         let calls = std::sync::atomic::AtomicUsize::new(0);
         let mut resolver = MediaResolver::spawn(move |_, _| {
@@ -723,16 +881,17 @@ mod tests {
             r.status(1).is_some_and(|s| s.state == "trusted")
         });
         let epoch = resolver.status(1).ok_or("missing status")?.generation;
-        resolver.request_verification(1, Instant::now());
+        resolver.observe(&mount(1, USBMountState::Empty), Instant::now());
+        resolver.observe(&mount(1, USBMountState::Loaded), Instant::now());
         poll_until(&mut resolver, |r| {
             r.slots.get(&1).is_some_and(|s| s.failures == 1)
         });
         let status = resolver.status(1).ok_or("missing status")?;
-        assert_eq!(status.state, "trusted");
-        assert_eq!(status.generation, epoch);
-        assert_eq!(status.source_id.as_deref(), Some("usb-fs:CHRM"));
-        // Existing bindings remain valid, but preparation of a new load
-        // requires this timestamp and must not reuse the previous read.
+        assert_eq!(status.state, "unavailable");
+        assert!(status.generation > epoch);
+        assert!(status.source_id.is_none());
+        // The old load's frozen binding is separate; this mount cannot
+        // authorize new loads until its own successful read.
         assert!(status.last_verified_unix_millis.is_none());
         resolver
             .slots
@@ -743,10 +902,7 @@ mod tests {
             r.status(1)
                 .is_some_and(|s| s.last_verified_unix_millis.is_some())
         });
-        assert_eq!(
-            resolver.status(1).ok_or("missing status")?.generation,
-            epoch
-        );
+        assert!(resolver.status(1).ok_or("missing status")?.generation > epoch);
         Ok(())
     }
 
@@ -769,6 +925,7 @@ mod tests {
             r.status(1).is_some_and(|s| s.state == "trusted")
         });
         let epoch = resolver.status(1).ok_or("missing status")?.generation;
+        force_read(&mut resolver);
         resolver
             .slots
             .get_mut(&1)
@@ -777,6 +934,7 @@ mod tests {
         poll_until(&mut resolver, |r| {
             r.slots.get(&1).is_some_and(|s| s.failures == 1)
         });
+        force_read(&mut resolver);
         resolver
             .slots
             .get_mut(&1)
@@ -785,6 +943,7 @@ mod tests {
         poll_until(&mut resolver, |r| {
             r.status(1).is_some_and(|s| s.state == "unknown")
         });
+        force_read(&mut resolver);
         assert!(
             resolver
                 .status(1)
@@ -802,6 +961,7 @@ mod tests {
                 .is_some_and(|s| s.source_name.as_deref() == Some("GRAY"))
         });
         assert!(resolver.status(1).ok_or("missing status")?.generation > epoch);
+        force_read(&mut resolver);
         resolver
             .slots
             .get_mut(&1)
@@ -820,12 +980,12 @@ mod tests {
         Ok(())
     }
     #[test]
-    fn load_reverification_preserves_epoch_until_the_physical_medium_changes()
+    fn load_verification_reuses_identity_until_the_physical_mount_changes()
     -> Result<(), Box<dyn std::error::Error>> {
         let calls = std::sync::atomic::AtomicUsize::new(0);
         let mut resolver = MediaResolver::spawn(move |_, _| {
             let calls = calls.fetch_add(1, Ordering::Relaxed) + 1;
-            let name = if calls <= 2 { "GRAY" } else { "CHRM" };
+            let name = if calls == 1 { "GRAY" } else { "CHRM" };
             Outcome::Trusted {
                 media_id: name.into(),
                 source_id: format!("usb-fs:{name}"),
@@ -844,7 +1004,7 @@ mod tests {
                 .status(1)
                 .ok_or("missing Player")?
                 .last_verified_unix_millis
-                .is_none()
+                .is_some()
         );
         poll_until(&mut resolver, |r| {
             r.status(1)
@@ -854,7 +1014,8 @@ mod tests {
             resolver.status(1).ok_or("missing Player")?.generation,
             first
         );
-        resolver.request_verification(1, Instant::now());
+        resolver.observe(&mount(1, USBMountState::Empty), Instant::now());
+        resolver.observe(&mount(1, USBMountState::Loaded), Instant::now());
         poll_until(&mut resolver, |r| {
             r.status(1)
                 .is_some_and(|s| s.source_name.as_deref() == Some("CHRM"))
