@@ -104,6 +104,23 @@ identified for follow-up regression review, not changed speculatively here.
 Further continuous Start/Link and physical DMX acceptance is still required
 before declaring this build ready for a show.
 
+### Retain established bindings during failed background rechecks
+
+The owner clarified on 2026-10-06 that a timeout, including repeated timeouts,
+must never revoke an already verified playing track's USB binding or cause a
+show error. Dev-8 retains the verified identity, color, name and epoch on failed
+reads, records the delay as resolver detail and retries with bounded backoff.
+It does not fabricate a fresh verification time. Newly loaded tracks still
+wait for their own successful verification. Explicit unknown/conflicting media,
+device loss and a confirmed different marker keep their invalidation behavior.
+Cross-source matching fallback is deferred.
+
+Thirteen resolver tests passed, including eight consecutive failed rechecks,
+same-medium recovery, withheld authorization of new loads, and explicit media
+change/conflict after a timeout. UI and continuous hardware acceptance of the
+installed Dev-8 build remain required; the earlier network and Link observations
+are not declared fixed by this narrowly scoped change.
+
 ## Autonomous hardening evidence from 2026-10-05
 
 Phase 3 now prepares a source-scoped track on a read-only library worker rather

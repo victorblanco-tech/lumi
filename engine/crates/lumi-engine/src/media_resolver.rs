@@ -297,6 +297,21 @@ impl MediaResolver {
             else {
                 continue;
             };
+            // A failed read is not evidence of a different medium. Retain the
+            // established epoch for already-bound loads; a new load still
+            // waits because request_verification clears its verification time.
+            // Explicit Unknown/Conflict, device loss and a different marker
+            // below continue to revoke trust rather than guessing.
+            if let Outcome::Failed(detail) = &result.outcome
+                && slot.status.state == "trusted"
+                && slot.status.source_id.is_some()
+            {
+                slot.failures = slot.failures.saturating_add(1);
+                slot.status.detail =
+                    format!("USB recheck delayed; last verified identity retained: {detail}");
+                slot.next_attempt = now + retry_backoff(slot.failures);
+                continue;
+            }
             slot.status.source_id = None;
             slot.status.source_name = None;
             slot.status.elapsed_millis = None;
@@ -341,7 +356,7 @@ impl MediaResolver {
             let backoff = if state == "trusted" {
                 RECHECK
             } else {
-                Duration::from_secs(2_u64.saturating_pow(slot.failures.min(5)).min(30))
+                retry_backoff(slot.failures)
             };
             slot.next_attempt = now + backoff;
             if let Some(other) = duplicate {
@@ -384,6 +399,10 @@ impl MediaResolver {
             self.inflight = Some((player, slot.generation));
         }
     }
+}
+
+fn retry_backoff(failures: u32) -> Duration {
+    Duration::from_secs(2_u64.saturating_pow(failures.min(5)).min(30))
 }
 
 impl Drop for MediaResolver {
@@ -612,6 +631,193 @@ mod tests {
             resolver.poll(Instant::now());
             thread::sleep(Duration::from_millis(2));
         }
+    }
+    fn verified_reply(name: &str) -> Outcome {
+        Outcome::Trusted {
+            media_id: name.into(),
+            source_id: format!("usb-fs:{name}"),
+            name: name.into(),
+            elapsed: 1,
+        }
+    }
+
+    #[test]
+    fn failed_periodic_rechecks_retain_identity_and_back_off_until_recovery()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let mut resolver = MediaResolver::spawn(move |_, _| {
+            let call = calls.fetch_add(1, Ordering::Relaxed) + 1;
+            if (2..=9).contains(&call) {
+                Outcome::Failed("ONC/RPC call timed out".into())
+            } else {
+                verified_reply("CHRM")
+            }
+        });
+        resolver.observe(&found(1, "192.168.1.1"), Instant::now());
+        poll_until(&mut resolver, |r| {
+            r.status(1).is_some_and(|s| s.state == "trusted")
+        });
+        resolver
+            .slots
+            .get_mut(&1)
+            .ok_or("missing slot")?
+            .status
+            .color_id = Some(1);
+        let verified = resolver.status(1).ok_or("missing status")?.clone();
+        for failure in 1..=8 {
+            let now = Instant::now();
+            resolver
+                .slots
+                .get_mut(&1)
+                .ok_or("missing slot")?
+                .next_attempt = now;
+            poll_until(&mut resolver, |r| {
+                r.slots.get(&1).is_some_and(|s| s.failures == failure)
+            });
+            let slot = resolver.slots.get(&1).ok_or("missing slot")?;
+            assert_eq!(slot.status.state, "trusted");
+            assert_eq!(slot.status.source_id, verified.source_id);
+            assert_eq!(slot.status.source_name, verified.source_name);
+            assert_eq!(slot.status.color_id, verified.color_id);
+            assert_eq!(slot.status.generation, verified.generation);
+            assert_eq!(
+                slot.status.last_verified_unix_millis,
+                verified.last_verified_unix_millis
+            );
+            assert!(slot.next_attempt >= now + retry_backoff(failure));
+            assert!(
+                slot.status
+                    .detail
+                    .contains("last verified identity retained")
+            );
+        }
+        resolver
+            .slots
+            .get_mut(&1)
+            .ok_or("missing slot")?
+            .next_attempt = Instant::now();
+        poll_until(&mut resolver, |r| {
+            r.slots.get(&1).is_some_and(|s| s.failures == 0)
+        });
+        let recovered = resolver.status(1).ok_or("missing status")?;
+        assert_eq!(recovered.generation, verified.generation);
+        assert_eq!(recovered.source_id, verified.source_id);
+        assert_eq!(recovered.detail, "Trusted USB identified");
+        Ok(())
+    }
+
+    #[test]
+    fn failed_new_load_reverification_does_not_authorize_new_loads()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let mut resolver = MediaResolver::spawn(move |_, _| {
+            let call = calls.fetch_add(1, Ordering::Relaxed) + 1;
+            if call == 2 {
+                Outcome::Failed("timeout".into())
+            } else {
+                verified_reply("CHRM")
+            }
+        });
+        resolver.observe(&found(1, "192.168.1.1"), Instant::now());
+        poll_until(&mut resolver, |r| {
+            r.status(1).is_some_and(|s| s.state == "trusted")
+        });
+        let epoch = resolver.status(1).ok_or("missing status")?.generation;
+        resolver.request_verification(1, Instant::now());
+        poll_until(&mut resolver, |r| {
+            r.slots.get(&1).is_some_and(|s| s.failures == 1)
+        });
+        let status = resolver.status(1).ok_or("missing status")?;
+        assert_eq!(status.state, "trusted");
+        assert_eq!(status.generation, epoch);
+        assert_eq!(status.source_id.as_deref(), Some("usb-fs:CHRM"));
+        // Existing bindings remain valid, but preparation of a new load
+        // requires this timestamp and must not reuse the previous read.
+        assert!(status.last_verified_unix_millis.is_none());
+        resolver
+            .slots
+            .get_mut(&1)
+            .ok_or("missing slot")?
+            .next_attempt = Instant::now();
+        poll_until(&mut resolver, |r| {
+            r.status(1)
+                .is_some_and(|s| s.last_verified_unix_millis.is_some())
+        });
+        assert_eq!(
+            resolver.status(1).ok_or("missing status")?.generation,
+            epoch
+        );
+        Ok(())
+    }
+
+    #[test]
+    fn explicit_marker_change_or_conflict_revokes_identity_after_a_timeout()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let calls = std::sync::atomic::AtomicUsize::new(0);
+        let mut resolver = MediaResolver::spawn(move |_, _| {
+            let call = calls.fetch_add(1, Ordering::Relaxed) + 1;
+            match call {
+                1 => verified_reply("CHRM"),
+                2 => Outcome::Failed("timeout".into()),
+                3 => Outcome::Unknown,
+                4 => verified_reply("GRAY"),
+                _ => Outcome::Conflict,
+            }
+        });
+        resolver.observe(&found(1, "192.168.1.1"), Instant::now());
+        poll_until(&mut resolver, |r| {
+            r.status(1).is_some_and(|s| s.state == "trusted")
+        });
+        let epoch = resolver.status(1).ok_or("missing status")?.generation;
+        resolver
+            .slots
+            .get_mut(&1)
+            .ok_or("missing slot")?
+            .next_attempt = Instant::now();
+        poll_until(&mut resolver, |r| {
+            r.slots.get(&1).is_some_and(|s| s.failures == 1)
+        });
+        resolver
+            .slots
+            .get_mut(&1)
+            .ok_or("missing slot")?
+            .next_attempt = Instant::now();
+        poll_until(&mut resolver, |r| {
+            r.status(1).is_some_and(|s| s.state == "unknown")
+        });
+        assert!(
+            resolver
+                .status(1)
+                .ok_or("missing status")?
+                .source_id
+                .is_none()
+        );
+        resolver
+            .slots
+            .get_mut(&1)
+            .ok_or("missing slot")?
+            .next_attempt = Instant::now();
+        poll_until(&mut resolver, |r| {
+            r.status(1)
+                .is_some_and(|s| s.source_name.as_deref() == Some("GRAY"))
+        });
+        assert!(resolver.status(1).ok_or("missing status")?.generation > epoch);
+        resolver
+            .slots
+            .get_mut(&1)
+            .ok_or("missing slot")?
+            .next_attempt = Instant::now();
+        poll_until(&mut resolver, |r| {
+            r.status(1).is_some_and(|s| s.state == "conflict")
+        });
+        assert!(
+            resolver
+                .status(1)
+                .ok_or("missing status")?
+                .source_id
+                .is_none()
+        );
+        Ok(())
     }
     #[test]
     fn load_reverification_preserves_epoch_until_the_physical_medium_changes()

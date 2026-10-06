@@ -88,7 +88,18 @@ One bounded worker owns NFS reads and a read-only SQLite connection. The engine
 pump sends at most one job and consumes at most four replies per poll. Device
 loss/reconnect cancels the old job; generation checks discard its delayed reply.
 Successful identities are revalidated every 15 seconds, and failures back off to
-30 seconds. A failed reader changes only that Player's USB diagnostic state.
+30 seconds. A failed reader changes only that Player's USB diagnostic detail.
+For an already verified medium, unsuccessful rechecks retain the source ID,
+name, native color and media epoch. A timeout is not evidence of replacement
+and must not invalidate an existing track binding or AutoLoop deadline. Retries
+continue in the background, including after repeated failures. Device loss,
+explicit unknown/conflicting identity and a confirmed different marker still
+revoke the binding.
+
+New track loads remain stricter: they clear the verification timestamp and
+cannot use an old read to authorize new library preparation. A failed read
+does not restore that timestamp. Other tracks already using that source keep
+their existing bindings. Cross-source fallback remains outside this change.
 
 Schema 19 records an existing local trusted source, marker UUID/source key and
 physical fingerprint. Local scan/sync creates this binding; a network reply
