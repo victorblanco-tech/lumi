@@ -11,7 +11,7 @@ Depends on E10-08 and ADR 0045.
 
 ## Loaded track origin in Mac Live and Remote
 
-Lumi 0.6.4-dev-5 and Remote 0.1.3-dev-2 distinguish the USB mounted in a Player
+Lumi 0.6.4-dev-6 and Remote 0.1.3-dev-3 distinguish the USB mounted in a Player
 from the USB supplying its loaded track. The mounted USB remains in the Player
 identity card. A separate compact Source row beside the track shows the verified
 name and native media color, plus local or via Player N / LINK. Unidentified
@@ -29,6 +29,13 @@ produced its prepared 17-phrase plan without a bridge restart. The explicit orig
 row and performance check are validated separately below once the new build is
 installed. Fresh local sync and physical media replacement remain acceptance
 steps, not implied by successful linked loading.
+
+The installed dev-5 check exposed an unavailable isolated reader after the
+service upgrade, despite a standalone fixed-file read succeeding in 78 ms.
+Dev-6 retains a bounded, control-character-free diagnostic for recognized
+reader failures and the child exit status. A non-zero child is never treated
+as a successful marker read. Failure detail stays on the Mac; Remote receives
+only resolution state. Physical acceptance of the new build remains required.
 
 ## Autonomous hardening evidence from 2026-10-05
 

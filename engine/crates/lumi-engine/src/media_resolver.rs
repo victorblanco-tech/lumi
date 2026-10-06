@@ -69,7 +69,7 @@ enum Outcome {
     },
     Unknown,
     Conflict,
-    Failed(&'static str),
+    Failed(String),
 }
 
 pub(crate) struct MediaResolver {
@@ -319,15 +319,15 @@ impl MediaResolver {
                     slot.status.elapsed_millis = Some(elapsed);
                     slot.status.last_verified_unix_millis = Some(unix_millis());
                     slot.failures = 0;
-                    ("trusted", "Trusted USB identified")
+                    ("trusted", "Trusted USB identified".to_owned())
                 }
                 Outcome::Unknown => (
                     "unknown",
-                    "Connect this USB to the Mac and scan it in Import & Sources",
+                    "Connect this USB to the Mac and scan it in Import & Sources".to_owned(),
                 ),
                 Outcome::Conflict => (
                     "conflict",
-                    "USB identity conflicts with its local registration; review the source on the Mac",
+                    "USB identity conflicts with its local registration; review the source on the Mac".to_owned(),
                 ),
                 Outcome::Failed(detail) => ("unavailable", detail),
             };
@@ -407,12 +407,12 @@ fn read_process(
     job: &Job,
     shutdown: &AtomicBool,
     limit: Duration,
-) -> Result<Vec<u8>, &'static str> {
+) -> Result<Vec<u8>, String> {
     if !private_player_address(&job.address) {
-        return Err("Only a discovered private IPv4 Player address is allowed");
+        return Err("Only a discovered private IPv4 Player address is allowed".into());
     }
     if job.cancel.load(Ordering::Acquire) || shutdown.load(Ordering::Acquire) {
-        return Err("USB identity request cancelled");
+        return Err("USB identity request cancelled".into());
     }
     let mut child = Command::new(&command.executable)
         .args(&command.arguments)
@@ -424,7 +424,7 @@ fn read_process(
     let Some(stdout) = child.stdout.take() else {
         let _ = child.kill();
         let _ = child.wait();
-        return Err("USB identity reader has no response channel");
+        return Err("USB identity reader has no response channel".into());
     };
     let reader = thread::spawn(move || {
         let mut bytes = Vec::new();
@@ -436,21 +436,17 @@ fn read_process(
     let deadline = Instant::now() + limit;
     let outcome = loop {
         if job.cancel.load(Ordering::Acquire) || shutdown.load(Ordering::Acquire) {
-            break Err("USB identity request cancelled");
+            break Err("USB identity request cancelled".to_owned());
         }
         if Instant::now() >= deadline {
-            break Err("USB identity reader timed out; show output continues");
+            break Err("USB identity reader timed out; show output continues".to_owned());
         }
         match child.try_wait() {
             Ok(Some(status)) => {
-                break if status.success() {
-                    Ok(())
-                } else {
-                    Err("USB identity unavailable; check the Player's USB and local registration")
-                };
+                break Ok(status);
             }
             Ok(None) => thread::sleep(Duration::from_millis(20)),
-            Err(_) => break Err("USB identity reader stopped unexpectedly"),
+            Err(_) => break Err("USB identity reader stopped unexpectedly".to_owned()),
         }
     };
     // Direct --worker-marker starts no children. Closing/reaping it also closes
@@ -463,11 +459,55 @@ fn read_process(
         .join()
         .map_err(|_| "USB identity response reader failed")?
         .map_err(|_| "USB identity response could not be read")?;
-    outcome?;
+    let status = outcome?;
     if bytes.len() as u64 > MAX_OUTPUT {
-        return Err("USB identity response exceeded its size limit");
+        return Err("USB identity response exceeded its size limit".into());
+    }
+    if !status.success() {
+        return Err(format!("{} ({status})", reader_failure_detail(&bytes)));
     }
     Ok(bytes)
+}
+
+fn reader_failure_detail(bytes: &[u8]) -> String {
+    let reply = serde_json::from_slice::<serde_json::Value>(bytes).ok();
+    let detail = reply
+        .as_ref()
+        .and_then(|value| value.get("detail"))
+        .and_then(serde_json::Value::as_str);
+    let known_failure = reply
+        .as_ref()
+        .and_then(|value| value.get("outcome"))
+        .and_then(serde_json::Value::as_str)
+        .is_some_and(|code| {
+            matches!(
+                code,
+                "rpc_timeout"
+                    | "rpc_or_io_failure"
+                    | "file_unavailable"
+                    | "service_unavailable"
+                    | "size_rejected"
+                    | "not_regular_file"
+                    | "truncated_read"
+                    | "response_size_rejected"
+                    | "deadline"
+                    | "media_changed"
+                    | "invalid_marker"
+                    | "invalid_arguments"
+                    | "process_deadline"
+            )
+        });
+    if known_failure && let Some(detail) = detail {
+        let bounded: String = detail
+            .chars()
+            .filter(|character| !character.is_control())
+            .take(256)
+            .collect();
+        if !bounded.is_empty() {
+            return format!("USB identity reader: {bounded}");
+        }
+    }
+    "USB identity unavailable; check the Player's USB and local registration".into()
 }
 
 fn private_player_address(value: &str) -> bool {
@@ -493,7 +533,7 @@ struct MarkerReply {
 
 fn resolve_reply(bytes: &[u8], address: &str, database: &std::path::Path) -> Outcome {
     let Ok(reply) = serde_json::from_slice::<MarkerReply>(bytes) else {
-        return Outcome::Failed("Invalid USB identity response");
+        return Outcome::Failed("Invalid USB identity response".into());
     };
     let marker = crate::usb_media_identity::MediaIdentity {
         schema_version: 1,
@@ -511,7 +551,7 @@ fn resolve_reply(bytes: &[u8], address: &str, database: &std::path::Path) -> Out
         || !reply.elapsed_millis.is_finite()
         || !(0.0..=8000.0).contains(&reply.elapsed_millis)
     {
-        return Outcome::Failed("Invalid USB identity response");
+        return Outcome::Failed("Invalid USB identity response".into());
     }
     let trust = SqliteLibraryRepository::open_read_only(database)
         .and_then(|reader| reader.trusted_usb_media(&marker.media_id, &marker.source_id));
@@ -524,9 +564,9 @@ fn resolve_reply(bytes: &[u8], address: &str, database: &std::path::Path) -> Out
         },
         Ok(UsbMediaTrust::Unknown) => Outcome::Unknown,
         Ok(UsbMediaTrust::Conflict) => Outcome::Conflict,
-        Err(_) => {
-            Outcome::Failed("Local USB registration could not be read; retrying independently")
-        }
+        Err(_) => Outcome::Failed(
+            "Local USB registration could not be read; retrying independently".into(),
+        ),
     }
 }
 
@@ -542,6 +582,20 @@ fn unix_millis() -> u64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn child_failure_diagnostic_is_bounded_and_never_accepts_marker_success() {
+        let detail = super::reader_failure_detail(
+            br#"{"outcome":"rpc_or_io_failure","detail":"Network\n denied"}"#,
+        );
+        assert_eq!(detail, "USB identity reader: Network denied");
+        let oversized =
+            serde_json::json!({"outcome":"rpc_timeout", "detail":"x".repeat(4096)}).to_string();
+        assert!(super::reader_failure_detail(oversized.as_bytes()).len() < 300);
+        assert!(
+            !super::reader_failure_detail(br#"{"outcome":"marker_read","detail":"UNTRUSTED"}"#)
+                .contains("UNTRUSTED")
+        );
+    }
     use super::*;
     use lumi_prolink_input::Device;
     fn found(number: u8, address: &str) -> BridgeEvent {

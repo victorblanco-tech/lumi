@@ -767,6 +767,7 @@ private struct RemotePlayerSurface: View {
                         .foregroundStyle(LumiColor.textSecondary)
                 }
             }
+            trackSourceBadge
         }
     }
 
@@ -798,7 +799,6 @@ private struct RemotePlayerSurface: View {
                     .foregroundStyle(LumiColor.textSecondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
-                if !isLandscape { trackSourceBadge }
             }
         }
     }
