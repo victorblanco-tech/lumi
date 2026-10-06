@@ -391,9 +391,17 @@ hotcue-to-output latency. Pro DJ Link, Light Output and Ableton Link remained
 Ready. At 47,064 bridge events, output diagnostics recorded 58 MIDI pulses,
 p95 5.1 ms and zero late dispatches.
 
+The owner subsequently loaded My Favourite Regrets (Vic DJ Edit) directly from
+GRAY on Player 2 and left it paused. The Mac UI replaced the old CHRM / LINK
+origin with GRAY local, displayed the new track's RGB waveform and prepared its
+33-phrase plan. Player 1 retained its cached CHRM track and 17-phrase plan in
+Start throughout. The final status check recorded 59,718 bridge events, 77 MIDI
+pulses, output p95 5.1 ms and zero late dispatches, with all three integrations
+Ready. This passes the distinct fresh-load check on the owner's two Players.
+
 These are software dispatch measurements; SoundSwitch's lighting hardware
-interface was disconnected. Fresh loading from the other USB, refreshed-track
-sync and physical DMX acceptance remain separate checks. The cached-origin
+interface was disconnected. Refreshed-track sync and physical DMX acceptance
+remain separate checks. The cached-origin
 exception is scoped to the observed CDJ-1500X 1.10 packet layout, not a general
 USB-ID collision or post-restart source recovery guarantee.
 
