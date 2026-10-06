@@ -737,10 +737,8 @@ private struct RemotePlayerSurface: View {
                     .frame(width: 62, alignment: .trailing)
             }
             .frame(height: 38)
-            HStack(spacing: LumiSpacing.small) {
-                usbBadge
-                trackSourceBadge
-            }
+            usbBadge
+            trackSourceBadge
         } else {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {

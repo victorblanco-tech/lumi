@@ -5,13 +5,14 @@ both independent USBs and after swapping Players. Phase 2 is implemented in
 0.6.4-dev-1 with local regressions. Basic native identity acceptance passed after
 local enrollment: GRAY and CHRM are simultaneously identified on their respective
 real Players without restarting Lumi. Source-scoped live hydration is implemented
-in 0.6.4-dev-4 with local regression coverage. Physical cross-Player matching and
-end-to-end lighting acceptance remain open.
+in 0.6.4-dev-4 with local regression coverage. Native cross-Player matching and
+the separate track-origin display passed on 2026-10-06. Updated-track sync,
+physical media replacement and end-to-end DMX acceptance remain open.
 Depends on E10-08 and ADR 0045.
 
 ## Loaded track origin in Mac Live and Remote
 
-Lumi 0.6.4-dev-7 and Remote 0.1.3-dev-3 distinguish the USB mounted in a Player
+Lumi 0.6.4-dev-7 and Remote 0.1.3-dev-4 distinguish the USB mounted in a Player
 from the USB supplying its loaded track. The mounted USB remains in the Player
 identity card. A separate compact Source row beside the track shows the verified
 name and native media color, plus local or via Player N / LINK. Unidentified
@@ -41,18 +42,67 @@ Dev-7 preserves the underlying failure of the same read-only RPC GETPORT query
 instead of the dependency's generic portmap error. Java regression coverage
 confirms GETPORT-only behavior and retention of the original exception. The
 installed background service reports `No route to host` for both real Players;
-the identical packaged reader started directly reads the Player 1 marker in
-65 ms and the Player 2 marker in 56 ms. This points to a service-attributed
-local-network permission issue, but is not confirmed: computer-use access to
-System Settings was denied. No permission was changed or bypassed. Final native
-origin, playing waveform and lighting/performance acceptance is blocked until
-the service's network permission can be checked. Dev-7 is not show acceptance.
+the identical packaged reader started directly read the Player 1 marker in
+65 ms and the Player 2 marker in 56 ms. After the owner changed macOS
+permissions, the same running Dev-7 service recovered without a restart or
+database changes. Its readers identified CHRM in 60 ms and GRAY in 206 ms.
+No permission was changed or bypassed by the automated test.
 
 Before that blocker, the complete Dev-6 portable Rust and safe Apple gates
 passed, including source projection, Remote anchors and native builds. With
 compiler load removed, 250 snapshot samples measured full snapshot p95 9.112 ms
 and live snapshot p95 2.477 ms. These are component measurements, not a claim
 about MIDI-to-light timing or successful playback with the new resolver.
+
+Native acceptance after permission recovery:
+
+- Mac Live shows CHRM physically in Player 1, with track source CHRM local.
+  Player 2 shows GRAY physically mounted but track source CHRM via Player 1 /
+  LINK. Both players have the prepared 17-phrase 90s Bitch plan.
+- Arm, Start, Pause and resumed Start preserve those identities. Navigating
+  through Integrations and returning to Live retains playback, prepared plans
+  and the correct origin. Pro DJ Link recorded zero automatic restarts.
+- Remote 0.1.3-dev-4 in the iPhone 17 Pro simulator remains connected in View
+  only without changing the physical iPhone's Controller assignment. Portrait
+  and landscape both show the full linked-source name. Landscape gives the
+  origin its own fixed-height row; rotation retains the fixed live playhead.
+- During Start with the real Player 1 loop, Pro DJ Link ingress measured p95
+  10.0 ms, zero critical saturation and an empty queue. AutoLoop output measured
+  p95 4.7 ms, zero late dispatches and zero saturation. SoundSwitch displayed
+  155 BPM with one Link peer and received AutoLoop selections. Its hardware
+  interface was disconnected, so this is not measured DMX/light latency.
+- Neither Player supplied native USB color information in this session.
+  Names remain correct and icons stay neutral; no guessed Pink/Blue values
+  are stored. Native color after a fresh media broadcast remains an acceptance
+  step. The shared color mapping and source projection have regression tests.
+
+The waveform renderer and integration scheduling code were not changed for
+the origin display. Safe Apple regression tests and both native app builds
+passed for the final Remote layout.
+
+The final Dev-7 portable Rust gate also passed, including strict Clippy,
+workspace regressions, process tests and release-mode planner/library budgets
+(`build/track-source-dev7-rust-recheck.log`, local ignored evidence). An earlier
+run failed local fake-Carabiner connection tests; an isolated rerun and the
+complete repeat passed without code changes or relaxed assertions.
+
+### Extended hardware test is not a show-readiness sign-off
+
+The longer session exposed intermittent RPC timeouts during marker rechecks
+and a recurring Link stale-clock hold. A bounded 24-snapshot read-only capture
+showed both USB identities recovering with unchanged IDs and generations,
+but temporary unavailable states remained. Exact-position readiness also
+briefly dropped. The origin display correctly reflected those states; this
+does not establish stable continuous show output.
+
+Independent 20-packet reachability checks observed Player 1 at 0% loss with
+3–151 ms round trips, and Player 2 at 30% loss with replies up to 2474 ms.
+These checks demonstrate network instability during this session, not its
+cause or proof that every timing issue is network-related. No network settings
+were changed. The existing identical-prepared-context binding path was also
+identified for follow-up regression review, not changed speculatively here.
+Further continuous Start/Link and physical DMX acceptance is still required
+before declaring this build ready for a show.
 
 ## Autonomous hardening evidence from 2026-10-05
 
