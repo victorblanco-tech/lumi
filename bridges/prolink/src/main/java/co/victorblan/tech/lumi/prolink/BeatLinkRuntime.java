@@ -21,7 +21,7 @@ final class BeatLinkRuntime implements AutoCloseable {
     private final Map<Integer, TransportFingerprint> transportFingerprints = new ConcurrentHashMap<>();
     private final Map<Integer, String> usbMountStates = new ConcurrentHashMap<>();
     private final Map<Integer, Long> usbStatusTimes = new ConcurrentHashMap<>();
-    private final Map<Integer, ResolvedTrackIdentity> loadedTrackIdentities = new ConcurrentHashMap<>();
+    private final LoadedTrackOriginTracker loadedTrackOrigins = new LoadedTrackOriginTracker();
     private final ExecutorService lifecycleExecutor = Executors.newSingleThreadExecutor(
             Thread.ofPlatform().name("lumi-prolink-lifecycle-", 0).factory()
     );
@@ -29,7 +29,7 @@ final class BeatLinkRuntime implements AutoCloseable {
     private final DeviceAnnouncementListener deviceListener = new DeviceAnnouncementListener() {
         @Override
         public void deviceFound(DeviceAnnouncement announcement) {
-            loadedTrackIdentities.remove(announcement.getDeviceNumber());
+            loadedTrackOrigins.forget(announcement.getDeviceNumber());
             usbMountStates.remove(announcement.getDeviceNumber());
             usbStatusTimes.remove(announcement.getDeviceNumber());
             publishDevice("deviceFound", announcement);
@@ -38,7 +38,7 @@ final class BeatLinkRuntime implements AutoCloseable {
 
         @Override
         public void deviceLost(DeviceAnnouncement announcement) {
-            loadedTrackIdentities.remove(announcement.getDeviceNumber());
+            loadedTrackOrigins.forget(announcement.getDeviceNumber());
             transportFingerprints.remove(announcement.getDeviceNumber());
             usbMountStates.remove(announcement.getDeviceNumber());
             usbStatusTimes.remove(announcement.getDeviceNumber());
@@ -172,7 +172,7 @@ final class BeatLinkRuntime implements AutoCloseable {
         ));
     }
 
-    private void receivedDeviceUpdate(DeviceUpdate update) {
+    void receivedDeviceUpdate(DeviceUpdate update) {
         if (!(update instanceof CdjStatus status)) {
             return;
         }
@@ -194,8 +194,14 @@ final class BeatLinkRuntime implements AutoCloseable {
                 publisher.publishCritical("usbMount", new BridgePayloads.USBMount(player, mount));
             }
         }
-        ResolvedTrackIdentity trackIdentity = resolveTrackIdentity(
-                status, loadedTrackIdentities.get(player));
+        ResolvedTrackIdentity trackIdentity = loadedTrackOrigins.observe(
+                status.getDeviceName(), status.getFirmwareVersion(), player,
+                Byte.toUnsignedInt(status.getPlayState1().protocolValue), status.getPacketBytes(),
+                new ResolvedTrackIdentity(status.getTrackSourcePlayer(), status.getTrackSourceSlot().name(),
+                        status.getTrackType().name(), status.getRekordboxId()),
+                status.getBeatNumber() >= 0
+                        && hasRealtimeTempo(status.getBpm() / 100.0, status.getBeatWithinBar())
+                        && hasRealtimeTempo(status.getEffectiveTempo(), status.getBeatWithinBar()));
         // A player that has only just joined the network briefly reports the
         // Beat Link sentinel values (no BPM/beat yet). Those frames describe
         // normal device warm-up, not a bridge protocol failure. Wait for one
@@ -203,11 +209,6 @@ final class BeatLinkRuntime implements AutoCloseable {
         // allowing a real unloaded status to clear an existing deck.
         if (trackIdentity.rekordboxId() != 0 && !hasCoherentLoadedTrack(status, trackIdentity)) {
             return;
-        }
-        if (trackIdentity.rekordboxId() == 0) {
-            loadedTrackIdentities.remove(player);
-        } else {
-            loadedTrackIdentities.put(player, trackIdentity);
         }
         BridgePayloads.DeckStatus payload = new BridgePayloads.DeckStatus(
                 status.getDeviceNumber(),
@@ -262,29 +263,6 @@ final class BeatLinkRuntime implements AutoCloseable {
                 && status.getBeatNumber() >= 0
                 && hasRealtimeTempo(status.getBpm() / 100.0, status.getBeatWithinBar())
                 && hasRealtimeTempo(status.getEffectiveTempo(), status.getBeatWithinBar());
-    }
-
-    /**
-     * The CDJ-1500X status packet currently has a 512-byte extended layout.
-     * Beat Link 8.0 understands its transport fields but reads the legacy
-     * track-identity offsets, which remain zero while a loaded paused/cued
-     * track is reported at the extended Rekordbox ID offset. Decode only this
-     * exact, observed layout and otherwise retain Beat Link's interpretation.
-     */
-    static ResolvedTrackIdentity resolveTrackIdentity(CdjStatus status, ResolvedTrackIdentity previous) {
-        ResolvedTrackIdentity beatLinkIdentity = new ResolvedTrackIdentity(
-                status.getTrackSourcePlayer(),
-                status.getTrackSourceSlot().name(),
-                status.getTrackType().name(),
-                status.getRekordboxId()
-        );
-        if (beatLinkIdentity.rekordboxId() != 0) return beatLinkIdentity;
-        ResolvedTrackIdentity extended = resolveCdj1500xExtendedTrackIdentity(
-                status.getDeviceName(),
-                status.getDeviceNumber(),
-                status.getPacketBytes()
-        );
-        return resolveLoadedTrackIdentity(beatLinkIdentity, extended, previous);
     }
 
     static ResolvedTrackIdentity resolveLoadedTrackIdentity(

@@ -292,6 +292,25 @@ the numeric track ID is unchanged could misidentify a real load from another
 USB with colliding IDs. The raw capture remains local under ignored `build`;
 no network addresses or packet dump are published with this result.
 
+The second owner-run eight-packet capture, after restoring CHRM and reloading
+Player 2 over LINK, confirms source Player 1, USB slot 3, track ID 1031 and
+beat 64 in the same 1152-byte layout. Compared with the post-eject capture,
+the bounded extended track block `0x170..0x1af` is byte-identical. Source at
+`0x28` changes from one to two, `0xbb` from two to zero and `0x125` from zero
+to four. Packet counter differences are not treated as track changes. These
+are two stable-state measurements, not a capture of all intermediate packets.
+The owner explicitly unloaded Player 2 before that fresh LINK load. The equal
+extended block therefore also occurs across reloads of the same content; it
+cannot be interpreted as a unique load-instance token.
+
+Dev-11 implements the exact-layout cached ownership exception in ADR 0045.
+It retains only an already observed LINK load, never matches a new track across
+USBs. Tests exercise the captured fields through Beat Link's native decoder
+and bridge publication, 10,000 repeated cached statuses, loading before coherent
+tempo, unload/loss, changed ID/block, another source and unsupported firmware
+or layouts. The unknown extended block is not claimed to be a durable unique
+identity. Physical repeated eject and fresh-load acceptance remain pending.
+
 ## Autonomous hardening evidence from 2026-10-05
 
 Phase 3 now prepares a source-scoped track on a read-only library worker rather

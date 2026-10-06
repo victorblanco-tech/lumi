@@ -232,6 +232,35 @@ transport anchors retain this data without reconstructing it. No additional
 polling, NFS requests, SQLite reads, tempo corrections or AutoLoop commands are
 introduced. Source rows reserve their height while identity resolves.
 
+## Cached LINK ownership on CDJ-1500X
+
+Two owner-run status captures on 2026-10-06 establish an exception to treating
+every native source-Player change as a new load. In the CDJ-1500X firmware 1.10,
+1152-byte subtype-8 layout, ejecting Player 1's USB changes Player 2's legacy
+source field from Player 1 to Player 2 while its loaded ID and extended block
+remain unchanged. The observed byte at `0x125` changes from zero to four.
+Neither the source field alone nor the numeric track ID alone identifies a
+new load in this state.
+
+Dev-11 retains an already observed LINK origin only for this exact model,
+firmware, length and subtype, with a local USB/Rekordbox ownership report,
+the same numeric ID, an identical bounded opaque block at `0x170..0x1af`,
+matching extended ID and the observed `0x125 == 4` state. A native loading
+observation resets origin before tempo filtering; unload, device rediscovery,
+changed ID or block, another remote source and unsupported layouts do not
+use this exception. Mount events remain independent and perform no additional
+reads. Timing, tempo, position and MIDI facts are not modified.
+
+The opaque block is continuity evidence for an existing load, not a documented
+content hash, a globally unique identity or authorization for a new track.
+It remained equal even after the owner unloaded and reloaded the same track
+between captures, so it is not a unique load-instance token either. Its unknown
+fields are not interpreted. An unobserved reload with completely
+identical evidence remains a hardware acceptance limitation; this exception
+does not prove general collision resistance or source recovery after restarting
+Lumi with an already detached cached track. Physical eject and subsequent
+fresh-load acceptance are required before show-readiness sign-off.
+
 ## References
 
 - [Crate Digger FileFetcher](https://deepsymmetry.org/cratedigger/apidocs/org/deepsymmetry/cratedigger/FileFetcher.html)
