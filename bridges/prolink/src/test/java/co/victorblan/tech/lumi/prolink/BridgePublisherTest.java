@@ -98,6 +98,22 @@ final class BridgePublisherTest {
     }
 
     @Test
+    void extendedCachedTrackKeepsConfirmedLinkOriginAfterSourceUsbEject() {
+        var noTrack = BeatLinkRuntime.ResolvedTrackIdentity.noTrack();
+        var linked = new BeatLinkRuntime.ResolvedTrackIdentity(1, "USB_SLOT", "REKORDBOX", 1031);
+        var inferredLocal = new BeatLinkRuntime.ResolvedTrackIdentity(2, "USB_SLOT", "REKORDBOX", 1031);
+        assertEquals(linked, BeatLinkRuntime.resolveLoadedTrackIdentity(noTrack, inferredLocal, linked));
+        assertEquals(inferredLocal, BeatLinkRuntime.resolveLoadedTrackIdentity(noTrack, inferredLocal, null));
+        // A native source change is explicit evidence even if numeric IDs collide.
+        assertEquals(inferredLocal, BeatLinkRuntime.resolveLoadedTrackIdentity(inferredLocal, inferredLocal, linked));
+        var newTrack = new BeatLinkRuntime.ResolvedTrackIdentity(2, "USB_SLOT", "REKORDBOX", 2048);
+        assertEquals(newTrack, BeatLinkRuntime.resolveLoadedTrackIdentity(noTrack, newTrack, linked));
+        assertEquals(noTrack, BeatLinkRuntime.resolveLoadedTrackIdentity(noTrack, noTrack, linked));
+        // Once unloaded, a later track must not inherit the previous LINK source.
+        assertEquals(inferredLocal, BeatLinkRuntime.resolveLoadedTrackIdentity(noTrack, inferredLocal, noTrack));
+    }
+
+    @Test
     void publishesVersionedMonotoneNdjsonWithoutDroppedEvents() throws Exception {
         ByteArrayOutputStream output = new ByteArrayOutputStream();
         BridgePublisher publisher = new BridgePublisher(output, mapper);

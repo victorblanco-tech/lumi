@@ -21,6 +21,7 @@ final class BeatLinkRuntime implements AutoCloseable {
     private final Map<Integer, TransportFingerprint> transportFingerprints = new ConcurrentHashMap<>();
     private final Map<Integer, String> usbMountStates = new ConcurrentHashMap<>();
     private final Map<Integer, Long> usbStatusTimes = new ConcurrentHashMap<>();
+    private final Map<Integer, ResolvedTrackIdentity> loadedTrackIdentities = new ConcurrentHashMap<>();
     private final ExecutorService lifecycleExecutor = Executors.newSingleThreadExecutor(
             Thread.ofPlatform().name("lumi-prolink-lifecycle-", 0).factory()
     );
@@ -28,6 +29,7 @@ final class BeatLinkRuntime implements AutoCloseable {
     private final DeviceAnnouncementListener deviceListener = new DeviceAnnouncementListener() {
         @Override
         public void deviceFound(DeviceAnnouncement announcement) {
+            loadedTrackIdentities.remove(announcement.getDeviceNumber());
             usbMountStates.remove(announcement.getDeviceNumber());
             usbStatusTimes.remove(announcement.getDeviceNumber());
             publishDevice("deviceFound", announcement);
@@ -36,6 +38,7 @@ final class BeatLinkRuntime implements AutoCloseable {
 
         @Override
         public void deviceLost(DeviceAnnouncement announcement) {
+            loadedTrackIdentities.remove(announcement.getDeviceNumber());
             transportFingerprints.remove(announcement.getDeviceNumber());
             usbMountStates.remove(announcement.getDeviceNumber());
             usbStatusTimes.remove(announcement.getDeviceNumber());
@@ -191,7 +194,8 @@ final class BeatLinkRuntime implements AutoCloseable {
                 publisher.publishCritical("usbMount", new BridgePayloads.USBMount(player, mount));
             }
         }
-        ResolvedTrackIdentity trackIdentity = resolveTrackIdentity(status);
+        ResolvedTrackIdentity trackIdentity = resolveTrackIdentity(
+                status, loadedTrackIdentities.get(player));
         // A player that has only just joined the network briefly reports the
         // Beat Link sentinel values (no BPM/beat yet). Those frames describe
         // normal device warm-up, not a bridge protocol failure. Wait for one
@@ -199,6 +203,11 @@ final class BeatLinkRuntime implements AutoCloseable {
         // allowing a real unloaded status to clear an existing deck.
         if (trackIdentity.rekordboxId() != 0 && !hasCoherentLoadedTrack(status, trackIdentity)) {
             return;
+        }
+        if (trackIdentity.rekordboxId() == 0) {
+            loadedTrackIdentities.remove(player);
+        } else {
+            loadedTrackIdentities.put(player, trackIdentity);
         }
         BridgePayloads.DeckStatus payload = new BridgePayloads.DeckStatus(
                 status.getDeviceNumber(),
@@ -262,21 +271,36 @@ final class BeatLinkRuntime implements AutoCloseable {
      * track is reported at the extended Rekordbox ID offset. Decode only this
      * exact, observed layout and otherwise retain Beat Link's interpretation.
      */
-    static ResolvedTrackIdentity resolveTrackIdentity(CdjStatus status) {
+    static ResolvedTrackIdentity resolveTrackIdentity(CdjStatus status, ResolvedTrackIdentity previous) {
         ResolvedTrackIdentity beatLinkIdentity = new ResolvedTrackIdentity(
                 status.getTrackSourcePlayer(),
                 status.getTrackSourceSlot().name(),
                 status.getTrackType().name(),
                 status.getRekordboxId()
         );
-        if (beatLinkIdentity.rekordboxId() != 0) {
-            return beatLinkIdentity;
-        }
-        return resolveCdj1500xExtendedTrackIdentity(
+        if (beatLinkIdentity.rekordboxId() != 0) return beatLinkIdentity;
+        ResolvedTrackIdentity extended = resolveCdj1500xExtendedTrackIdentity(
                 status.getDeviceName(),
                 status.getDeviceNumber(),
                 status.getPacketBytes()
         );
+        return resolveLoadedTrackIdentity(beatLinkIdentity, extended, previous);
+    }
+
+    static ResolvedTrackIdentity resolveLoadedTrackIdentity(
+            ResolvedTrackIdentity reported, ResolvedTrackIdentity extended,
+            ResolvedTrackIdentity previous
+    ) {
+        if (reported.rekordboxId() != 0) return reported;
+        if (extended.rekordboxId() == 0) return ResolvedTrackIdentity.noTrack();
+        // The extended ID confirms the cached track, but contains no source
+        // Player. Ejecting its remote USB must not turn that known LINK load
+        // into a newly inferred local load. Native identity, a changed ID,
+        // explicit unload and device rediscovery still replace/reset the cache.
+        if (previous != null && previous.rekordboxId() == extended.rekordboxId()) {
+            return previous;
+        }
+        return extended;
     }
 
     static ResolvedTrackIdentity resolveCdj1500xExtendedTrackIdentity(

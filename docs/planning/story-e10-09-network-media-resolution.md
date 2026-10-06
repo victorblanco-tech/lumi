@@ -245,6 +245,24 @@ substitute for those tests. No second kernel panic was observed during this
 bounded session, but Dev-9 is not established as a Wi-Fi-driver fix or a full
 show-readiness sign-off.
 
+### Physical eject exposed a linked track decoder defect
+
+The owner safely ejected CHRM from Player 1 without changing Player 2.
+Dev-9 correctly displayed Player 1's empty mount while its local cached track
+kept CHRM as source, its 17-phrase plan and live playback. Player 2 instead
+changed from CHRM / LINK to an inferred GRAY local source and lost preparation.
+Returning CHRM restored the mounted identity but not Player 2's track origin.
+The linked cached-track physical acceptance therefore failed in Dev-9.
+
+The CDJ-1500X extended-ID decoder inferred the local Player when Beat Link's
+legacy identity was absent. Dev-10 retains the last confirmed loaded origin
+when the same extended track ID remains and native identity is absent. Native
+identity overrides that cache, including an explicit source change with a
+colliding numeric ID. A changed ID, true unload, device loss or rediscovery
+clears or replaces the old identity. This does not add source-agnostic matching
+or network probes. The bridge suite passed 21 tests with a regression for these
+cases; physical eject acceptance must be repeated with Dev-10.
+
 ## Autonomous hardening evidence from 2026-10-05
 
 Phase 3 now prepares a source-scoped track on a read-only library worker rather
