@@ -254,14 +254,30 @@ changed from CHRM / LINK to an inferred GRAY local source and lost preparation.
 Returning CHRM restored the mounted identity but not Player 2's track origin.
 The linked cached-track physical acceptance therefore failed in Dev-9.
 
-The CDJ-1500X extended-ID decoder inferred the local Player when Beat Link's
-legacy identity was absent. Dev-10 retains the last confirmed loaded origin
+The CDJ-1500X extended-ID decoder has a local-Player inference when Beat Link's
+legacy identity is absent. Dev-10 retains the last confirmed loaded origin
 when the same extended track ID remains and native identity is absent. Native
 identity overrides that cache, including an explicit source change with a
 colliding numeric ID. A changed ID, true unload, device loss or rediscovery
 clears or replaces the old identity. This does not add source-agnostic matching
 or network probes. The bridge suite passed 21 tests with a regression for these
 cases; physical eject acceptance must be repeated with Dev-10.
+
+The complete portable Rust and safe Apple gates, native builds and signed
+installer audit passed for Dev-10 (build 370, source `c35d48c9832b`). Its
+installed bridge JAR hash matched the tested artifact. Both Players again
+had the correct CHRM source and 17-phrase plans before the second eject.
+The physical repetition still failed: Player 1 retained its cached local plan,
+but Player 2 again changed to inferred GRAY/local and lost preparation.
+The owner changed only CHRM's mount. The narrow decoder regression is therefore
+insufficient to cover the actual status transition; Dev-10 is not accepted for
+cached LINK playback after eject.
+
+The next step is capturing the actual identity/unload sequence, not another
+speculative retention change. A passive capture restricted to Player 2 UDP
+port 50002 was denied by macOS BPF permissions. No privilege or permission was
+bypassed. A one-shot administrator-approved packet capture or bounded logging
+inside Lumi requires an explicit choice from the owner.
 
 ## Autonomous hardening evidence from 2026-10-05
 
