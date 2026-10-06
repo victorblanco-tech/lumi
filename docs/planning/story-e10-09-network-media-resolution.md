@@ -11,7 +11,7 @@ Depends on E10-08 and ADR 0045.
 
 ## Loaded track origin in Mac Live and Remote
 
-Lumi 0.6.4-dev-6 and Remote 0.1.3-dev-3 distinguish the USB mounted in a Player
+Lumi 0.6.4-dev-7 and Remote 0.1.3-dev-3 distinguish the USB mounted in a Player
 from the USB supplying its loaded track. The mounted USB remains in the Player
 identity card. A separate compact Source row beside the track shows the verified
 name and native media color, plus local or via Player N / LINK. Unidentified
@@ -36,6 +36,23 @@ Dev-6 retains a bounded, control-character-free diagnostic for recognized
 reader failures and the child exit status. A non-zero child is never treated
 as a successful marker read. Failure detail stays on the Mac; Remote receives
 only resolution state. Physical acceptance of the new build remains required.
+
+Dev-7 preserves the underlying failure of the same read-only RPC GETPORT query
+instead of the dependency's generic portmap error. Java regression coverage
+confirms GETPORT-only behavior and retention of the original exception. The
+installed background service reports `No route to host` for both real Players;
+the identical packaged reader started directly reads the Player 1 marker in
+65 ms and the Player 2 marker in 56 ms. This points to a service-attributed
+local-network permission issue, but is not confirmed: computer-use access to
+System Settings was denied. No permission was changed or bypassed. Final native
+origin, playing waveform and lighting/performance acceptance is blocked until
+the service's network permission can be checked. Dev-7 is not show acceptance.
+
+Before that blocker, the complete Dev-6 portable Rust and safe Apple gates
+passed, including source projection, Remote anchors and native builds. With
+compiler load removed, 250 snapshot samples measured full snapshot p95 9.112 ms
+and live snapshot p95 2.477 ms. These are component measurements, not a claim
+about MIDI-to-light timing or successful playback with the new resolver.
 
 ## Autonomous hardening evidence from 2026-10-05
 
