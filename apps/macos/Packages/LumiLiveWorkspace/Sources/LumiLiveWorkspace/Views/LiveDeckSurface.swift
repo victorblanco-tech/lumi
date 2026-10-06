@@ -226,6 +226,17 @@ struct LiveDeckSurface<Details: View>: View {
                     .font(LumiTypography.metadata)
                     .foregroundStyle(Color.white.opacity(0.62))
                     .lineLimit(1)
+                if !isLocalPlayback {
+                    LumiTrackSourceBadge(
+                        state: deck.trackSource?.state ?? "unavailable",
+                        sourceName: deck.trackSource?.sourceName,
+                        colorID: deck.trackSource?.colorID,
+                        sourcePlayer: deck.trackSource?.playerNumber,
+                        loadedPlayer: UInt8(clamping: deck.deckID),
+                        slot: deck.trackSource?.slot
+                    )
+                    .accessibilityIdentifier("lumi.live.player.\(deck.deckID).trackSource")
+                }
             }
             Spacer(minLength: LumiSpacing.small)
             lightingTimingBadge

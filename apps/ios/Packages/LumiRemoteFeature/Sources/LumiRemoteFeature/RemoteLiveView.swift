@@ -737,7 +737,10 @@ private struct RemotePlayerSurface: View {
                     .frame(width: 62, alignment: .trailing)
             }
             .frame(height: 38)
-            usbBadge
+            HStack(spacing: LumiSpacing.small) {
+                usbBadge
+                trackSourceBadge
+            }
         } else {
             HStack(alignment: .top) {
                 VStack(alignment: .leading, spacing: 2) {
@@ -795,8 +798,21 @@ private struct RemotePlayerSurface: View {
                     .foregroundStyle(LumiColor.textSecondary)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
+                if !isLandscape { trackSourceBadge }
             }
         }
+    }
+
+    private var trackSourceBadge: some View {
+        LumiTrackSourceBadge(
+            state: player.trackSource?.state ?? "unavailable",
+            sourceName: player.trackSource?.sourceName,
+            colorID: player.trackSource?.colorID,
+            sourcePlayer: player.trackSource?.playerNumber,
+            loadedPlayer: player.playerNumber,
+            slot: player.trackSource?.slot
+        )
+        .accessibilityIdentifier("lumi.remote.player.\(player.playerNumber).trackSource")
     }
 
     private var roleBadge: some View {

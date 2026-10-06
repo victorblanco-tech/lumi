@@ -5,6 +5,30 @@ import Testing
 
 @Suite("Live workspace presentation")
 struct LiveWorkspacePresenterTests {
+    @Test("Loaded track origin is independent of the USB mounted in its Player")
+    func linkedTrackSourceDecodesWithoutMountedUSBInference() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case let .array(decks) = payload["decks"] else { throw EngineSnapshotDecodingError.invalidSnapshot }
+        payload["decks"] = .array(decks.map { value in
+            guard case var .object(deck) = value else { return value }
+            deck["trackSource"] = .object([
+                "playerNumber": .number(1), "slot": .string("USB_SLOT"),
+                "state": .string("trusted"), "sourceName": .string("CHRM"), "colorId": .number(1)
+            ])
+            return .object(deck)
+        })
+        let envelope = MessageEnvelope(protocolVersion: recorded.protocolVersion,
+            messageType: recorded.messageType, messageId: recorded.messageId, sequence: recorded.sequence,
+            correlationId: recorded.correlationId, sentAt: recorded.sentAt, payload: payload)
+        let snapshot = try EngineSnapshotDecoder().decode(envelope, endpointDescription: "fixture", protocolVersion: 1)
+        #expect(snapshot.decks.first(where: { $0.deckID == 2 })?.trackSource?.playerNumber == 1)
+        #expect(snapshot.decks.first(where: { $0.deckID == 2 })?.trackSource?.sourceName == "CHRM")
+        #expect(snapshot.decks.first(where: { $0.deckID == 2 })?.trackSource?.colorID == 1)
+        #expect(snapshot.deckInputIntegration?.playerUSBs.isEmpty ?? true)
+        let legacy = try EngineSnapshotDecoder().decode(recorded, endpointDescription: "fixture", protocolVersion: 1)
+        #expect(legacy.decks.allSatisfy { $0.trackSource == nil })
+    }
     @Test("Mounted USB inspection snapshot preserves the live workspace")
     func mountedUSBInspectionSnapshotDecodesWhenProvided() throws {
         guard let envelopePath = ProcessInfo.processInfo.environment[

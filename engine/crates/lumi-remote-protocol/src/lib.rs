@@ -22,7 +22,7 @@ pub use projection::{
     IntegrationHealth, OperationState, ProjectionError, RemoteAutoloopChoice, RemoteBeatGrid,
     RemoteHotCue, RemoteIntegrationStatus, RemoteLightPlan, RemoteLiveProjection, RemotePhrase,
     RemotePhraseRoleOption, RemotePlanCue, RemotePlayer, RemotePlayerUSB, RemoteThemeOption,
-    RemoteTrack, RemoteTransportAnchor, RemoteWaveformPoint,
+    RemoteTrack, RemoteTrackSource, RemoteTransportAnchor, RemoteWaveformPoint,
 };
 
 #[cfg(test)]

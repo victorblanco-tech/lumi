@@ -180,6 +180,26 @@ marker access, two independent USBs, loading over Link, swaps and reconnects.
 Measure timing with and without resolver activity; do not claim that simulation
 proves CDJ filesystem support or physical lighting timing.
 
+## Mounted media and loaded track origin
+
+Mac Live and Lumi Remote show two independent facts. The Player identity card
+shows its physically mounted USB. The track header shows the source Player and
+slot reported for the current track load, with the resolved USB name and native
+media color. Player 2 may therefore show mounted GRAY while the track shows
+CHRM via Player 1 / LINK. A load from that Player's own USB is labelled local.
+
+The optional `trackSource` projection is scoped to the current load and contains
+only source Player number, slot, resolution state, verified display name and
+native color. It does not expose marker IDs, paths or addresses. An unresolved
+source is displayed as unidentified; the destination's mounted USB never supplies
+a substitute name. Local Playback does not show a Pro DJ Link media origin.
+
+Presentation reads only the existing in-memory identity and resolver state.
+The existing load and media publication keys deliver origin changes to Remote;
+transport anchors retain this data without reconstructing it. No additional
+polling, NFS requests, SQLite reads, tempo corrections or AutoLoop commands are
+introduced. Source rows reserve their height while identity resolves.
+
 ## References
 
 - [Crate Digger FileFetcher](https://deepsymmetry.org/cratedigger/apidocs/org/deepsymmetry/cratedigger/FileFetcher.html)

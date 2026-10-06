@@ -128,7 +128,8 @@ public final class RemoteSessionModel {
             hardwareModel: player.hardwareModel,
             trackLoadID: player.trackLoadID,
             transport: localizedAnchor,
-            track: player.track
+            track: player.track,
+            trackSource: player.trackSource
         )
         let integrations: RemoteIntegrationStatus
         if current.leaderPlayerNumber == playerNumber {
@@ -176,7 +177,8 @@ public final class RemoteSessionModel {
                 transport: player.transport.localized(
                     receivedAtUnixMillis: receivedAtUnixMillis
                 ),
-                track: player.track
+                track: player.track,
+                trackSource: player.trackSource
             )
         }
         sourceObservationUnixMillisByPlayer = sourceObservations

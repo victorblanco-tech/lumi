@@ -496,7 +496,16 @@ public struct DeckVisualClockSnapshot: Equatable, Sendable {
     }
 }
 
+public struct LiveTrackSourceSnapshot: Equatable, Sendable {
+    public let playerNumber: UInt8?
+    public let slot: String
+    public let state: String
+    public let sourceName: String?
+    public let colorID: UInt8?
+}
+
 public struct DeckSnapshot: Equatable, Identifiable, Sendable {
+    public let trackSource: LiveTrackSourceSnapshot?
     public let deckID: UInt64
     /// Exact model/name announced by the matching Pro DJ Link player. Local
     /// Playback and older compatible snapshots intentionally leave this nil.
@@ -556,7 +565,8 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
         planEligibility: DeckPlanEligibility = .autoHeld,
         planHoldReason: String? = nil,
         libraryUpdatePending: Bool = false,
-        localPlayback: LocalPlaybackTrackSnapshot? = nil
+        localPlayback: LocalPlaybackTrackSnapshot? = nil,
+        trackSource: LiveTrackSourceSnapshot? = nil
     ) {
         self.deckID = deckID
         self.hardwareModel = hardwareModel
@@ -583,6 +593,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
         self.planHoldReason = planHoldReason
         self.libraryUpdatePending = libraryUpdatePending
         self.localPlayback = localPlayback
+        self.trackSource = trackSource
     }
 }
 

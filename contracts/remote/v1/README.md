@@ -21,6 +21,13 @@ older snapshots mean no identity information, not a guessed source. Source names
 and colors are omitted for unknown/conflicted identities. Live transport anchors
 preserve this list rather than replacing it.
 
+Each loaded Player may also contain optional `trackSource`: source Player number,
+slot, resolution state, verified source name and native media color. This is the
+origin of that track load, not the mounted USB in the destination Player. A linked
+track can therefore originate from CHRM in Player 1 while Player 2 has GRAY mounted.
+Unresolved origins omit names and colors; older snapshots without this field show
+no origin rather than guessing. Transport anchors preserve the load's origin.
+
 The authoritative limits and allowlists are recorded in `manifest.json`.
 Fixtures are consumed by the Rust protocol tests and mirrored by the Swift
 client tests.

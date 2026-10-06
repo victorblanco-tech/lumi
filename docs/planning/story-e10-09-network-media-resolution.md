@@ -9,6 +9,27 @@ in 0.6.4-dev-4 with local regression coverage. Physical cross-Player matching an
 end-to-end lighting acceptance remain open.
 Depends on E10-08 and ADR 0045.
 
+## Loaded track origin in Mac Live and Remote
+
+Lumi 0.6.4-dev-5 and Remote 0.1.3-dev-2 distinguish the USB mounted in a Player
+from the USB supplying its loaded track. The mounted USB remains in the Player
+identity card. A separate compact Source row beside the track shows the verified
+name and native media color, plus local or via Player N / LINK. Unidentified
+origins remain explicit and never borrow the destination USB's name.
+
+Regression coverage includes linked loads, local loads, unresolved identities,
+source-only projection changes, Remote transport-anchor preservation, legacy
+snapshots without the optional field, and unchanged output record counts during
+origin projection. This is a display addition; the accepted media matching,
+waveform renderer and output timing paths remain unchanged.
+
+On 2026-10-06, real CDJ-1500X Players identified CHRM in Player 1 and GRAY in
+Player 2 simultaneously. Loading 90s Bitch on Player 2 over LINK from Player 1
+produced its prepared 17-phrase plan without a bridge restart. The explicit origin
+row and performance check are validated separately below once the new build is
+installed. Fresh local sync and physical media replacement remain acceptance
+steps, not implied by successful linked loading.
+
 ## Autonomous hardening evidence from 2026-10-05
 
 Phase 3 now prepares a source-scoped track on a read-only library worker rather

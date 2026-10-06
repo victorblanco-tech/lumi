@@ -201,6 +201,19 @@ public struct RemotePlayerUSB: Codable, Equatable, Sendable {
     }
 }
 
+public struct RemoteTrackSource: Codable, Equatable, Sendable {
+    public let playerNumber: UInt8?
+    public let slot: String
+    public let state: String
+    public let sourceName: String?
+    public let colorID: UInt8?
+
+    enum CodingKeys: String, CodingKey {
+        case playerNumber, slot, state, sourceName
+        case colorID = "colorId"
+    }
+}
+
 public struct RemotePlayer: Codable, Equatable, Identifiable, Sendable {
     public var id: UInt8 { playerNumber }
     public let playerNumber: UInt8
@@ -208,6 +221,18 @@ public struct RemotePlayer: Codable, Equatable, Identifiable, Sendable {
     public let trackLoadID: UInt64
     public let transport: RemoteTransportAnchor
     public let track: RemoteTrack
+    public let trackSource: RemoteTrackSource?
+
+    public init(playerNumber: UInt8, hardwareModel: String?, trackLoadID: UInt64,
+                transport: RemoteTransportAnchor, track: RemoteTrack,
+                trackSource: RemoteTrackSource? = nil) {
+        self.playerNumber = playerNumber
+        self.hardwareModel = hardwareModel
+        self.trackLoadID = trackLoadID
+        self.transport = transport
+        self.track = track
+        self.trackSource = trackSource
+    }
 
     enum CodingKeys: String, CodingKey {
         case playerNumber
@@ -215,6 +240,7 @@ public struct RemotePlayer: Codable, Equatable, Identifiable, Sendable {
         case trackLoadID = "trackLoadId"
         case transport
         case track
+        case trackSource
     }
 }
 

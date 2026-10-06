@@ -75,6 +75,20 @@ pub struct RemotePlayer {
     pub track_load_id: u64,
     pub transport: RemoteTransportAnchor,
     pub track: RemoteTrack,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track_source: Option<RemoteTrackSource>,
+}
+
+/// The media reported for this track load, distinct from the USB mounted in
+/// the destination Player. Contains display information only, never USB IDs.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteTrackSource {
+    pub player_number: Option<u8>,
+    pub slot: String,
+    pub state: String,
+    pub source_name: Option<String>,
+    pub color_id: Option<u8>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -414,6 +428,11 @@ impl RemoteLiveProjection {
             }
         }
         for player in &mut self.players {
+            if let Some(source) = &mut player.track_source
+                && let Some(name) = &mut source.source_name
+            {
+                *name = display_text(name, 128);
+            }
             if let Some(model) = &mut player.hardware_model {
                 *model = display_text(model, 96);
             }
@@ -526,6 +545,23 @@ impl RemotePlayer {
         }
         if let Some(model) = &self.hardware_model {
             validate_text("hardwareModel", model, 96, true)?;
+        }
+        if let Some(source) = &self.track_source {
+            if source
+                .player_number
+                .is_some_and(|number| !(1..=6).contains(&number))
+                || !["trusted", "unknown", "conflict", "unavailable", "resolving"]
+                    .contains(&source.state.as_str())
+                || source.color_id.is_some_and(|id| id > 8)
+                || (source.state != "trusted"
+                    && (source.source_name.is_some() || source.color_id.is_some()))
+            {
+                return Err(ProjectionError::InvalidPlayerIdentity);
+            }
+            validate_text("trackSourceSlot", &source.slot, 32, false)?;
+            if let Some(name) = &source.source_name {
+                validate_text("trackSourceName", name, 128, false)?;
+            }
         }
         self.track.validate()
     }
@@ -728,6 +764,7 @@ struct EngineDeckWire {
     playback_position_observed_at_unix_millis: Option<u64>,
     transport_revision: Option<u64>,
     track: EngineTrackWire,
+    track_source: Option<RemoteTrackSource>,
 }
 
 impl EngineDeckWire {
@@ -751,6 +788,7 @@ impl EngineDeckWire {
                 published_at_unix_millis: Some(observed_at_unix_millis),
             },
             track: self.track.into_remote()?,
+            track_source: self.track_source,
         })
     }
 }
@@ -1093,6 +1131,7 @@ mod tests {
                 pending_timing_offset_millis: None,
             },
             players: vec![RemotePlayer {
+                track_source: None,
                 player_number: 1,
                 hardware_model: Some("CDJ-1500X".to_owned()),
                 track_load_id: 99,
@@ -1125,6 +1164,42 @@ mod tests {
             theme_options: Vec::new(),
             phrase_role_options: Vec::new(),
         }
+    }
+
+    #[test]
+    fn track_origin_is_additive_bounded_and_never_exposes_untrusted_media()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut projection = projection();
+        projection.players[0].track_source = Some(super::RemoteTrackSource {
+            player_number: Some(2),
+            slot: "USB_SLOT".into(),
+            state: "trusted".into(),
+            source_name: Some("CHRM".into()),
+            color_id: Some(1),
+        });
+        assert!(projection.validate().is_ok());
+        let source = projection.players[0]
+            .track_source
+            .as_mut()
+            .ok_or("test origin")?;
+        source.state = "unknown".into();
+        assert_eq!(
+            projection.validate(),
+            Err(ProjectionError::InvalidPlayerIdentity)
+        );
+        let source = projection.players[0]
+            .track_source
+            .as_mut()
+            .ok_or("test origin")?;
+        source.source_name = None;
+        source.color_id = None;
+        assert!(projection.validate().is_ok());
+        projection.players[0].track_source = None;
+        let encoded = serde_json::to_value(&projection)?;
+        assert!(encoded["players"][0].get("trackSource").is_none());
+        let decoded: RemoteLiveProjection = serde_json::from_value(encoded)?;
+        assert!(decoded.players[0].track_source.is_none());
+        Ok(())
     }
 
     #[test]

@@ -999,8 +999,30 @@ public struct EngineSnapshotDecoder: Sendable {
             planEligibility: planEligibility,
             planHoldReason: planHoldReason,
             libraryUpdatePending: deck["libraryUpdatePending"] == .boolean(true),
-            localPlayback: localPlayback
+            localPlayback: localPlayback,
+            trackSource: try decodeTrackSource(deck["trackSource"])
         )
+    }
+
+    private func decodeTrackSource(_ value: JSONValue?) throws -> LiveTrackSourceSnapshot? {
+        guard let value, value != .null else { return nil }
+        guard case let .object(fields) = value,
+              case let .string(slot) = fields["slot"], !slot.isEmpty, slot.utf8.count <= 32,
+              case let .string(state) = fields["state"],
+              ["trusted", "unknown", "conflict", "unavailable", "resolving"].contains(state) else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        let player = unsignedInteger(fields["playerNumber"])
+        let color = unsignedInteger(fields["colorId"])
+        let name = try optionalString(fields["sourceName"])
+        guard player.map({ (1...6).contains($0) }) ?? true,
+              color.map({ $0 <= 8 }) ?? true,
+              name.map({ !$0.isEmpty && $0.utf8.count <= 128 }) ?? true,
+              state == "trusted" || (name == nil && color == nil) else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        return .init(playerNumber: player.flatMap(UInt8.init(exactly:)), slot: slot,
+                     state: state, sourceName: name, colorID: color.flatMap(UInt8.init(exactly:)))
     }
 
     private func decodeHotCues(

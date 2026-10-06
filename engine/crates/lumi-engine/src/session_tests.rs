@@ -10,6 +10,78 @@ use lumi_remote_protocol::{
 use lumi_simulator::{SimulationControl, SimulationSpeed};
 
 #[test]
+fn linked_track_source_projects_origin_not_destination_usb_without_output()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut runtime = initialized_product_runtime()?;
+    runtime.deck_source_mode = DeckSourceMode::ConnectedDecks;
+    let mut decoder = lumi_prolink_input::BridgeDecoder::new();
+    for (sequence, kind, payload) in [
+        (
+            1,
+            "hello",
+            json!({"bridgeVersion":"fixture","beatLinkVersion":"8.0.0","readOnly":true}),
+        ),
+        (
+            2,
+            "sourceStatus",
+            json!({"status":"ready","detail":"fixture"}),
+        ),
+        (
+            3,
+            "deviceFound",
+            json!({"deviceNumber":2,"deviceName":"CDJ-1500X","address":"192.168.1.2"}),
+        ),
+        (
+            4,
+            "deckStatus",
+            json!({"deviceNumber":2,"deviceName":"CDJ-1500X","playing":false,
+            "paused":true,"cued":false,"tempoMaster":true,"onAir":true,"sourcePlayer":1,
+            "sourceSlot":"USB_SLOT","trackType":"REKORDBOX","rekordboxId":42,
+            "trackBpm":140.0,"effectiveBpm":140.0,"beatNumber":17,"beatWithinBar":1,"rawPitch":1048576}),
+        ),
+    ] {
+        let line = json!({"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":sequence,
+            "observedAtNanos":sequence*1000,"type":kind,"payload":payload})
+        .to_string();
+        runtime
+            .direct_deck_source
+            .ingest(decoder.decode_line(&line)?, MonotonicTime::new(sequence))?;
+    }
+    process_pending_source_events(&mut runtime)?;
+    let load = runtime
+        .state
+        .state()
+        .deck(lumi_domain::DeckId::new(2))
+        .ok_or("missing Player 2")?
+        .track_load_id();
+    let unknown = track_source_display(&runtime, load).ok_or("missing source")?;
+    assert_eq!(unknown.player_number, Some(1));
+    assert_eq!(unknown.source_name, None);
+    let before = remote_static_key(&runtime);
+    let outputs = runtime.output_worker.provider.records().count();
+    runtime.media_resolver =
+        crate::media_resolver::MediaResolver::verified_fixture(1, "usb-fs:chrm", "CHRM", 1);
+    let source = track_source_display(&runtime, load).ok_or("missing source")?;
+    assert_eq!(source.source_name.as_deref(), Some("CHRM"));
+    assert_eq!(source.color_id, Some(1));
+    assert_ne!(before, remote_static_key(&runtime));
+    let snapshot = snapshot_envelope_for_remote(&runtime, 1, "source-contract")?;
+    let projection = RemoteLiveProjection::from_engine_snapshot_payload(
+        &snapshot.payload,
+        1,
+        unix_time_millis(),
+    )?;
+    assert_eq!(projection.players[0].player_number, 2);
+    assert_eq!(projection.players[0].track_source.as_ref(), Some(&source));
+    let encoded = serde_json::to_string(&projection)?;
+    assert!(!encoded.contains("usb-fs:chrm"));
+    assert_eq!(outputs, runtime.output_worker.provider.records().count());
+    runtime.deck_source_mode = DeckSourceMode::LocalPlayback;
+    assert!(track_source_display(&runtime, load).is_none());
+    Ok(())
+}
+
+#[test]
 fn live_loaded_track_is_prepared_asynchronously_without_transport_reset()
 -> Result<(), Box<dyn std::error::Error>> {
     use lumi_library::{LibraryRepository, TrackPageRequest};

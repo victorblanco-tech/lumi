@@ -636,6 +636,35 @@ impl RemoteProjectionPublisher {
     }
 }
 
+/// Read the already-resolved source for this load. This is display-only:
+/// no media probes, Library queries or transport/output changes are performed.
+fn track_source_display(
+    runtime: &EngineRuntime,
+    load: lumi_domain::TrackLoadId,
+) -> Option<lumi_remote_protocol::RemoteTrackSource> {
+    if runtime.deck_source_mode != DeckSourceMode::ConnectedDecks {
+        return None;
+    }
+    let identity = runtime.direct_deck_source.track_identity(load)?;
+    let media = (identity.source_slot == "USB_SLOT")
+        .then(|| runtime.media_resolver.status(identity.source_player))
+        .flatten();
+    let trusted = media.is_some_and(|status| status.state == "trusted");
+    Some(lumi_remote_protocol::RemoteTrackSource {
+        player_number: (1..=6)
+            .contains(&identity.source_player)
+            .then_some(identity.source_player),
+        slot: identity.source_slot.clone(),
+        state: media
+            .map_or("unavailable", |status| status.state)
+            .to_owned(),
+        source_name: media
+            .filter(|_| trusted)
+            .and_then(|status| status.source_name.clone()),
+        color_id: media.filter(|_| trusted).and_then(|status| status.color_id),
+    })
+}
+
 fn remote_static_key(runtime: &EngineRuntime) -> RemoteStaticKey {
     let state = runtime.state.state();
     let loaded_players = state
@@ -661,22 +690,36 @@ fn remote_static_key(runtime: &EngineRuntime) -> RemoteStaticKey {
         })
         .collect();
     let link = runtime.link_relay.status();
+    let diagnostics = runtime.direct_deck_source.diagnostics();
     RemoteStaticKey {
         operation: state.operation(),
         leader_player: state.leader_deck().map(lumi_domain::DeckId::value),
         loaded_players,
         plans,
         library_revision: runtime.library_revision,
-        source_status: runtime.direct_deck_source.diagnostics().source_status,
-        player_media: runtime
-            .direct_deck_source
-            .diagnostics()
+        source_status: diagnostics.source_status,
+        player_media: diagnostics
             .discovered_devices
             .keys()
+            .copied()
+            // A linked load can report its source before discovery has
+            // published that source Player. Media-only changes must still
+            // refresh the origin row without a new track load.
+            .chain(
+                state
+                    .decks()
+                    .filter_map(|(_, deck)| {
+                        runtime
+                            .direct_deck_source
+                            .track_identity(deck.track_load_id())
+                            .map(|identity| identity.source_player)
+                    })
+                    .filter(|number| !diagnostics.discovered_devices.contains_key(number)),
+            )
             .map(|number| {
-                let media = runtime.media_resolver.status(*number);
+                let media = runtime.media_resolver.status(number);
                 (
-                    *number,
+                    number,
                     media.map(|m| m.state.to_owned()),
                     media.and_then(|m| m.source_name.clone()),
                     media.and_then(|m| m.color_id),
@@ -5095,6 +5138,7 @@ fn snapshot_envelope_internal(
                     None
                 },
                 "trackLoadId": deck.track_load_id().value(),
+                "trackSource": track_source_display(runtime, deck.track_load_id()),
                 "beat": deck.beat(),
                 "effectiveBpmMilli": deck.effective_bpm_milli(),
                 "playing": deck.is_playing(),
