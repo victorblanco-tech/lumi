@@ -117,9 +117,35 @@ Cross-source matching fallback is deferred.
 
 Thirteen resolver tests passed, including eight consecutive failed rechecks,
 same-medium recovery, withheld authorization of new loads, and explicit media
-change/conflict after a timeout. UI and continuous hardware acceptance of the
-installed Dev-8 build remain required; the earlier network and Link observations
-are not declared fixed by this narrowly scoped change.
+change/conflict after a timeout. The complete portable Rust gate passed,
+including strict Clippy, process/network regressions and release performance
+budgets. The 250-sample release snapshot benchmark measured full projection
+p95 at 1.804 ms and live projection p95 at 0.364 ms.
+
+The installed Dev-8 app was tested through the native UI with the real Players
+and DJM. Arm and Start succeeded; both 17-phrase plans were present. Player 1
+displayed mounted CHRM and a local CHRM track, while Player 2 displayed mounted
+GRAY and its CHRM track loaded through Player 1 / LINK. SoundSwitch showed
+155 BPM, one Link peer and the selected AutoLoop. During the observed Start
+interval, diagnostics recorded seven MIDI pulses, output p95 of 5 ms, no late
+output, no queue saturation and no timing safety holds. These are software
+dispatch measurements, not physical light latency: SoundSwitch's hardware
+interface was disconnected.
+
+A separate 46-second read-only background capture contained 24 samples. Both
+USB identities and their epochs stayed trusted, both track preparations stayed
+ready, and each Player completed four distinct successful verifications. No
+read timeout occurred in that bounded capture; repeated failure preservation
+is covered by the injected regressions rather than claimed as an observed
+hardware failure. One sample lacked exact position authority before recovery.
+The earlier network and Link observations therefore remain separate follow-up
+items, not declared fixed by this narrowly scoped change.
+
+The first local package launch encountered a macOS launch-constraint rejection;
+the service subsequently started and reopening Lumi attached successfully.
+Later reopening retained both verified plans. The ad-hoc-signed Dev update is
+not evidence of a fully reliable first-launch installer. The Dev database was
+backed up and was not reset; production data and USB files were unchanged.
 
 ## Autonomous hardening evidence from 2026-10-05
 
