@@ -311,6 +311,22 @@ tempo, unload/loss, changed ID/block, another source and unsupported firmware
 or layouts. The unknown extended block is not claimed to be a durable unique
 identity. Physical repeated eject and fresh-load acceptance remain pending.
 
+Dev-11 passed 30 Java tests, the complete portable Rust gate (serial execution,
+strict Clippy and release performance checks), the safe Apple gate, both native
+builds and the signed installer audit. Build 373, source `851576b8f7c0`, was
+installed under the Dev channel; the installed bridge SHA matched the tested
+JAR. The database passed quick-check and retained 114 tracks and 264 timeline
+revisions. Production and USB contents were not modified.
+
+Before the repeated eject, native Mac Arm and Start succeeded with both
+17-phrase plans. Player 2 showed mounted GRAY and track origin CHRM via Player
+1 / LINK. Lumi Remote's existing view-only simulator showed the same distinct
+source rows and live Start state without changing controller assignment.
+The Mac status popover reported all three integrations ready, four MIDI pulses,
+realtime output p95 2.7 ms and zero late dispatches. SoundSwitch showed one Link
+peer at 155 BPM and bank 3 selected. Its hardware interface remained disconnected;
+these checks do not establish physical DMX timing or post-eject acceptance.
+
 ## Autonomous hardening evidence from 2026-10-05
 
 Phase 3 now prepares a source-scoped track on a read-only library worker rather
