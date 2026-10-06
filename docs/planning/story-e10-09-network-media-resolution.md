@@ -202,9 +202,48 @@ Live projection p95 0.292 ms. These measurements do not establish physical
 MIDI or DMX latency. The pre-install Dev library backup passed SQLite
 quick-check. No library reset, USB write or production database change occurred.
 
-Real CDJ mount-transition, native Mac/Remote presentation and continuous Start
-acceptance for Dev-9 remain pending. The prior Dev-8 hardware observations do
-not substitute for those tests, and this refactor is not a Wi-Fi-driver fix.
+### Native validation of Dev 9
+
+The signed installer passed the fixed-path, payload and signature audit on
+its second build attempt. The first stopped during the quiet DMG stage without
+a diagnostic; no packaging assertion was bypassed. Build 368, source
+`addbd85e2a1f`, was installed under `/Applications/Lumi/Dev` with the existing
+Dev database. Only that channel's engine, bridge and gateway were running.
+
+The real CDJ-1500X Players and DJM-V5 were discovered. Both 17-phrase plans
+loaded in the Mac UI: Player 1 mounted CHRM and loaded locally; Player 2 mounted
+GRAY but retained its CHRM track source via Player 1 / LINK. Arm, Start, Pause,
+resumed Start and navigation through Integrations kept those plans and sources.
+During the observed Start interval, output p95 was 5.1 ms with no late dispatch,
+saturation, fail-closed hold or provider failure. Pro DJ Link ingress p95 was
+10.0 ms with zero critical saturation and zero automatic restarts. These are
+internal measurements; SoundSwitch's hardware interface was disconnected.
+
+SoundSwitch showed 155 BPM, one Link peer and bank 3 selection after Lumi
+started. Its MIDI mapping view remained usable without editing mappings.
+Normal Lumi quit stopped Carabiner and removed the peer from SoundSwitch.
+The stable CoreMIDI engine and Pro DJ Link bridge remained under the existing
+service policy. Reopening Lumi retained the same loaded plans and sources;
+Arm and Start succeeded again.
+
+A separate 24-snapshot read-only capture over 46 seconds with the desktop closed
+showed unchanged verified USB timestamps and generations (CHRM 2, GRAY 1),
+both prepared load IDs unchanged, exact position READY in every sample and
+bridge traffic advancing from 25,737 to 29,907 events with zero restarts.
+The first attempt while the Mac UI was attached timed out because the desktop
+endpoint serves one UI at a time; it is not a parallel monitor endpoint.
+
+Remote 0.1.3-dev-5 was installed in the previously paired iPhone 17 Pro
+simulator. Portrait and landscape retained the mounted USB and distinct LINK
+track-source labels, fixed live playhead and live Start state. Its View only
+role and the physical iPhone's Controller assignment were not changed. Neither
+Player supplied a native media color in this session; icons remain neutral.
+
+Physical eject/replacement while a cached track continues, refreshed-track
+acceptance and actual DMX latency remain open. Local regressions do not
+substitute for those tests. No second kernel panic was observed during this
+bounded session, but Dev-9 is not established as a Wi-Fi-driver fix or a full
+show-readiness sign-off.
 
 ## Autonomous hardening evidence from 2026-10-05
 
