@@ -273,11 +273,24 @@ The owner changed only CHRM's mount. The narrow decoder regression is therefore
 insufficient to cover the actual status transition; Dev-10 is not accepted for
 cached LINK playback after eject.
 
-The next step is capturing the actual identity/unload sequence, not another
-speculative retention change. A passive capture restricted to Player 2 UDP
-port 50002 was denied by macOS BPF permissions. No privilege or permission was
-bypassed. A one-shot administrator-approved packet capture or bounded logging
-inside Lumi requires an explicit choice from the owner.
+The owner authorized and ran a passive capture restricted to eight Player 2
+UDP status packets on destination port 50002. The post-eject capture contains
+1152-byte UDP payloads, with their first 726 bytes retained by the 768-byte
+frame capture limit. All eight captured status headers report Player 2 as the
+track source, USB slot 3, Rekordbox track type 1 and ID 1031. The extended ID
+at `0x194` also remains 1031; play state is cued and beat number is 64.
+The field offsets agree with Beat Link 8.0's `CdjStatus` implementation and
+[Deep Symmetry's status analysis](https://djl-analysis.deepsymmetry.org/djl-analysis/vcdj.html).
+
+This disproves the narrower assumption that only a missing legacy identity
+caused the failed acceptance: these post-eject packets contain a nonzero
+legacy identity, which Dev-10 accepts as a source change. The capture covers
+the stable state after removal, not the transition or the preceding LINK
+state. A before/after comparison is required before interpreting additional
+extended fields as a durable load identity. Retaining an origin solely because
+the numeric track ID is unchanged could misidentify a real load from another
+USB with colliding IDs. The raw capture remains local under ignored `build`;
+no network addresses or packet dump are published with this result.
 
 ## Autonomous hardening evidence from 2026-10-05
 
