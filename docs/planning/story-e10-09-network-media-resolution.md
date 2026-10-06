@@ -327,6 +327,15 @@ realtime output p95 2.7 ms and zero late dispatches. SoundSwitch showed one Link
 peer at 155 BPM and bank 3 selected. Its hardware interface remained disconnected;
 these checks do not establish physical DMX timing or post-eject acceptance.
 
+The owner repeated the safe CHRM eject on Dev-11 without changing Player 2.
+Player 1 retained its local source, waveform, 17-phrase plan and playing state;
+Player 2 again changed to GRAY/local, lost preparation and showed External track
+1031. The exact-layout retention therefore also fails physical LINK acceptance.
+The stable before/after fixtures do not cover the intervening status sequence.
+No further retention change is accepted until that sequence establishes whether
+loading, unload, packet-layout or extended-block transitions reset the origin.
+Dev-11 is not signed off for a show requiring cached LINK continuity after eject.
+
 ## Autonomous hardening evidence from 2026-10-05
 
 Phase 3 now prepares a source-scoped track on a read-only library worker rather
