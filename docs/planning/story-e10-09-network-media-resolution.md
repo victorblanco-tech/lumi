@@ -336,6 +336,26 @@ No further retention change is accepted until that sequence establishes whether
 loading, unload, packet-layout or extended-block transitions reset the origin.
 Dev-11 is not signed off for a show requiring cached LINK continuity after eject.
 
+### Beat Link receive boundary
+
+The subsequent 128-packet capture covers 25.469 seconds and contains only
+the stable post-eject ownership state: source Player 2, ID 1031, cued beat 64,
+unchanged extended block and `0x125 == 4`. It does not show the intermediate
+transition. Inspection of the pinned Beat Link 8.0 source identifies a separate
+deterministic defect: `VirtualCdj.createStatusReceiver` uses a 512-byte UDP
+buffer, so the full-length-only Dev-11 guard can never recognize the real
+1152-byte status received through that path.
+
+A loopback UDP test sends the constructed native status through that same
+512-byte receive boundary, then feeds Beat Link's decoder and Lumi's publisher.
+It fails on Dev-11 with source Player 2 instead of Player 1; the existing
+direct-constructor tests passed because they bypassed truncation. Dev-12 checks
+the declared wire size and accepts the captured prefix without enlarging the
+receive buffer, forking Beat Link, adding sockets to the live network or changing
+transport/MIDI decisions. New loading, unload/loss, unsupported wire lengths
+and changed content keep their previous invalidation rules. Physical acceptance
+must still be repeated; the local reproduction is not a show-readiness sign-off.
+
 ## Autonomous hardening evidence from 2026-10-05
 
 Phase 3 now prepares a source-scoped track on a read-only library worker rather

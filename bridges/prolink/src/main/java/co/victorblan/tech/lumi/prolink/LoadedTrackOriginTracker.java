@@ -43,6 +43,8 @@ final class LoadedTrackOriginTracker {
             // Hardware captures: 1.10/1152-byte/subtype-8 status retains the
             // exact extended track block after remote USB Stop, but rebases
             // legacy source ownership to this Player and sets 0x125 to 4.
+            // Beat Link 8.0 supplies only its first 512 bytes; the declared
+            // wire length still identifies this specific supported layout.
             // This is continuity evidence for an existing LINK load ONLY:
             // never a global track ID, content hash or a new matching method.
             identity = previous.origin();
@@ -62,7 +64,10 @@ final class LoadedTrackOriginTracker {
 
     private static byte[] contentWitness(String model, String firmware, byte[] packet, int id) {
         if (!"CDJ-1500X".equals(model) || !"1.10".equals(firmware)
-                || packet.length != 1152 || packet[0x20] != 8) return null;
+                || (packet.length != 512 && packet.length != 1152)
+                || packet[0x20] != 8) return null;
+        int declaredLength = ((packet[0x22] & 0xff) << 8 | (packet[0x23] & 0xff)) + 0x24;
+        if (declaredLength != 1152) return null;
         int extendedId = ((packet[0x194] & 0xff) << 24)
                 | ((packet[0x195] & 0xff) << 16)
                 | ((packet[0x196] & 0xff) << 8) | (packet[0x197] & 0xff);

@@ -242,14 +242,23 @@ remain unchanged. The observed byte at `0x125` changes from zero to four.
 Neither the source field alone nor the numeric track ID alone identifies a
 new load in this state.
 
-Dev-11 retains an already observed LINK origin only for this exact model,
-firmware, length and subtype, with a local USB/Rekordbox ownership report,
+The cached-origin guard retains an already observed LINK origin only for this exact model,
+firmware, declared wire length and subtype, with a local USB/Rekordbox ownership report,
 the same numeric ID, an identical bounded opaque block at `0x170..0x1af`,
 matching extended ID and the observed `0x125 == 4` state. A native loading
 observation resets origin before tempo filtering; unload, device rediscovery,
 changed ID or block, another remote source and unsupported layouts do not
 use this exception. Mount events remain independent and perform no additional
 reads. Timing, tempo, position and MIDI facts are not modified.
+
+Dev-11's full-length-only guard failed physical acceptance because Beat Link
+8.0's `VirtualCdj.createStatusReceiver` allocates a 512-byte datagram buffer.
+The 1152-byte native status is truncated before Lumi's update listener receives
+it. Dev-12 accepts either the full 1152-byte form or that 512-byte prefix only
+when the header declares 1152 bytes (`0x22..0x23` plus `0x24`) and all other
+model, firmware and subtype gates agree. Every field used by the guard lies
+within the received prefix. The pinned library and its receive buffer remain
+unchanged; a loopback UDP regression exercises the actual truncation boundary.
 
 The opaque block is continuity evidence for an existing load, not a documented
 content hash, a globally unique identity or authorization for a new track.

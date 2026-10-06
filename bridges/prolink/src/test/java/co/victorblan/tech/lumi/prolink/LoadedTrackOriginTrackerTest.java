@@ -5,6 +5,7 @@ import org.deepsymmetry.beatlink.CdjStatus;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import java.io.ByteArrayOutputStream;
 import java.net.DatagramPacket;
+import java.net.DatagramSocket;
 import java.net.InetAddress;
 import java.nio.charset.StandardCharsets;
 import java.util.HexFormat;
@@ -19,6 +20,8 @@ final class LoadedTrackOriginTrackerTest {
     private static byte[] packet(boolean cached) {
         byte[] packet = new byte[1152];
         packet[0x20] = 8;
+        packet[0x22] = 4;
+        packet[0x23] = 0x5c;
         packet[0x125] = (byte)(cached ? 4 : 0);
         byte[] block = HexFormat.of().parseHex(
                 "010000ff00000000017aefc600000000000000000100010000000001010200020001"
@@ -105,6 +108,12 @@ final class LoadedTrackOriginTrackerTest {
         otherSubtype[0x20] = 7;
         assertEquals(LOCAL, observe(tracker, otherSubtype, 6, LOCAL));
         assertEquals(LOCAL, tracker.observe("CDJ-3000", "1.10", 2, 6, packet(true), LOCAL, true));
+        tracker = new LoadedTrackOriginTracker();
+        observe(tracker, packet(false), 6, LINK);
+        byte[] wrongDeclaredLength = packet(true);
+        wrongDeclaredLength[0x22] = 1;
+        wrongDeclaredLength[0x23] = (byte)0xdc;
+        assertEquals(LOCAL, observe(tracker, wrongDeclaredLength, 6, LOCAL));
     }
 
     @Test void transientIncoherentIdentityDoesNotReplaceConfirmedOrigin() {
@@ -147,6 +156,55 @@ final class LoadedTrackOriginTrackerTest {
         bytes[0xa3] = 64;
         bytes[0xa6] = 4;
         return new CdjStatus(new DatagramPacket(bytes, bytes.length, InetAddress.getLoopbackAddress(), 50002));
+    }
+
+    private static CdjStatus receivedLikeBeatLink(CdjStatus sent) throws Exception {
+        // VirtualCdj 8.0 receiveLoop allocates exactly 512 bytes. Exercise
+        // actual UDP truncation rather than a directly constructed full frame.
+        var loopback = InetAddress.getLoopbackAddress();
+        try (var receiver = new DatagramSocket(0, loopback);
+             var sender = new DatagramSocket(0, loopback)) {
+            receiver.setSoTimeout(1000);
+            byte[] bytes = sent.getPacketBytes();
+            sender.send(new DatagramPacket(bytes, bytes.length, loopback, receiver.getLocalPort()));
+            var packet = new DatagramPacket(new byte[512], 512);
+            receiver.receive(packet);
+            assertEquals(512, packet.getLength());
+            return new CdjStatus(packet);
+        }
+    }
+
+    @Test void beatLink512ByteReceiveBufferMustNotDisableCachedLinkContinuity() throws Exception {
+        var output = new ByteArrayOutputStream();
+        var publisher = new BridgePublisher(output, new ObjectMapper());
+        var runtime = new BeatLinkRuntime(publisher);
+        runtime.receivedDeviceUpdate(receivedLikeBeatLink(nativeStatus(false, 6, 1, true)));
+        for (int i = 0; i < 8; i++) {
+            runtime.receivedDeviceUpdate(receivedLikeBeatLink(nativeStatus(true, 6, 2, true)));
+        }
+        publisher.close();
+        int statuses = 0;
+        for (String line : output.toString(StandardCharsets.UTF_8).strip().split("\\R")) {
+            var message = new ObjectMapper().readTree(line);
+            if (message.get("payload").has("rekordboxId")) {
+                assertEquals(1, message.get("payload").get("sourcePlayer").asInt());
+                statuses++;
+            }
+        }
+        org.junit.jupiter.api.Assertions.assertTrue(statuses > 0);
+    }
+
+    @Test void truncatedFreshLoadStillDiscardsConfirmedRemoteOrigin() throws Exception {
+        var tracker = new LoadedTrackOriginTracker();
+        byte[] before = receivedLikeBeatLink(nativeStatus(false, 6, 1, true)).getPacketBytes();
+        byte[] after = receivedLikeBeatLink(nativeStatus(true, 6, 2, true)).getPacketBytes();
+        assertEquals(LINK, observe(tracker, before, 6, LINK));
+        assertEquals(LINK, observe(tracker, after, 6, LOCAL));
+        tracker.observe("CDJ-1500X", "1.10", 2, 2, after, LOCAL, false);
+        assertEquals(LOCAL, observe(tracker, after, 6, LOCAL));
+        observe(tracker, before, 6, LINK);
+        tracker.forget(2);
+        assertEquals(LOCAL, observe(tracker, after, 6, LOCAL));
     }
 
     @Test void nativeDecoderAndPublishedFactsKeepOriginThenHonorRealReload() throws Exception {
