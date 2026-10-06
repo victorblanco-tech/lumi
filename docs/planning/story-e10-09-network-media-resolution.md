@@ -356,6 +356,21 @@ transport/MIDI decisions. New loading, unload/loss, unsupported wire lengths
 and changed content keep their previous invalidation rules. Physical acceptance
 must still be repeated; the local reproduction is not a show-readiness sign-off.
 
+Dev-12 passed all 32 Java tests after the receive-boundary correction. The
+complete portable Rust gate, strict Clippy, release performance checks, safe
+Apple gate and both native builds passed. The signed installer audit passed
+for build 376, source `dd6bc09286ca`; the installed bridge JAR matched the tested
+artifact. Only the Dev service chain was replaced. Its service record confirms
+the Dev-12 executable and build identity; the library still passes quick-check
+with 114 tracks and 264 timeline revisions. Physical repeated eject remains
+the acceptance gate, with the owner restoring the original LINK load first.
+
+Native Dev-12 Arm and Start then succeeded with both 17-phrase plans and Player
+2's confirmed CHRM / Player 1 / LINK origin. Before eject, the status popover
+reported exact position ready, 7,884 bridge events, five MIDI pulses, output
+p95 4.8 ms and zero late dispatches. All three integration statuses were ready.
+These are internal pre-eject measurements, not hardware DMX timing.
+
 ## Autonomous hardening evidence from 2026-10-05
 
 Phase 3 now prepares a source-scoped track on a read-only library worker rather
