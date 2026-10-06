@@ -1,12 +1,13 @@
 # E10-09 Automatic USB identification on live Players
 
-Status: In progress on 2026-10-05. Phase 1 physical marker retrieval passed for
+Status: In progress on 2026-10-07. Phase 1 physical marker retrieval passed for
 both independent USBs and after swapping Players. Phase 2 is implemented in
 0.6.4-dev-1 with local regressions. Basic native identity acceptance passed after
 local enrollment: GRAY and CHRM are simultaneously identified on their respective
 real Players without restarting Lumi. Source-scoped live hydration is implemented
 in 0.6.4-dev-4 with local regression coverage. Native cross-Player matching and
-the separate track-origin display passed on 2026-10-06. Updated-track sync,
+the separate track-origin display passed on 2026-10-06. Dev-12 passes the real
+cached local and LINK-track eject test on this CDJ-1500X setup. Updated-track sync,
 physical media replacement and end-to-end DMX acceptance remain open.
 Depends on E10-08 and ADR 0045.
 
@@ -370,6 +371,31 @@ Native Dev-12 Arm and Start then succeeded with both 17-phrase plans and Player
 reported exact position ready, 7,884 bridge events, five MIDI pulses, output
 p95 4.8 ms and zero late dispatches. All three integration statuses were ready.
 These are internal pre-eject measurements, not hardware DMX timing.
+
+### Physical cached track acceptance of Dev 12
+
+The owner safely ejected only CHRM from Player 1, without reloading or changing
+Player 2. The running Dev-12 Mac UI changed Player 1's mounted USB to Not inserted
+while retaining its local CHRM track, waveform and 17-phrase plan. Player 2 kept
+GRAY as its mounted USB and CHRM via Player 1 / LINK as its loaded track source,
+with the same waveform and 17-phrase plan. Player 1 continued playing through
+phrase changes and loop wraps after removal. No restart or fresh marker read
+was required to retain these already verified loads.
+
+The owner then played Player 2 and used Hotcue A with CHRM still absent and
+Player 1 still master. The subsequent native UI observation showed Player 2
+playing at beat 322, with its CHRM / LINK origin and all 17 phrases intact;
+a later observation advanced to beat 455. This verifies retained provenance
+after the reported hotcue action and during continuing playback, not a measured
+hotcue-to-output latency. Pro DJ Link, Light Output and Ableton Link remained
+Ready. At 47,064 bridge events, output diagnostics recorded 58 MIDI pulses,
+p95 5.1 ms and zero late dispatches.
+
+These are software dispatch measurements; SoundSwitch's lighting hardware
+interface was disconnected. Fresh loading from the other USB, refreshed-track
+sync and physical DMX acceptance remain separate checks. The cached-origin
+exception is scoped to the observed CDJ-1500X 1.10 packet layout, not a general
+USB-ID collision or post-restart source recovery guarantee.
 
 ## Autonomous hardening evidence from 2026-10-05
 
