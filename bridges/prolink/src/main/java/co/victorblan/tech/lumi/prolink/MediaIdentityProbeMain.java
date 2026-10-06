@@ -213,6 +213,14 @@ public final class MediaIdentityProbeMain {
         }
     }
 
+    interface PortQuery { void call(int procedure, XdrAble request, XdrAble result) throws OncRpcException; }
+
+    static int queryPort(PortQuery query, int program, int version) throws OncRpcException {
+        OncRpcGetPortResult result = new OncRpcGetPortResult();
+        query.call(3, new OncRpcServerIdent(program, version, OncRpcProtocols.ONCRPC_UDP, 0), result);
+        return result.port;
+    }
+
     static final class RpcTransport implements Transport, AutoCloseable {
         private final InetAddress address;
         private final Deadline deadline;
@@ -243,7 +251,11 @@ public final class MediaIdentityProbeMain {
             int port;
             try {
                 prepare((OncRpcUdpClient) portmap.getOncRpcClient());
-                port = portmap.getPort(program, version, OncRpcProtocols.ONCRPC_UDP);
+                // getPort() replaces every RPC exception with the generic
+                // "portmap failure", losing timeout/access-denied evidence.
+                // Send the identical read-only GETPORT call while retaining
+                // its actual cause for the bounded worker diagnostic.
+                port = queryPort(portmap.getOncRpcClient()::call, program, version);
             } finally {
                 portmap.close();
             }

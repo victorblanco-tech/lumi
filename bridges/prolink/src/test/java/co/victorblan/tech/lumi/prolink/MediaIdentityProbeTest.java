@@ -18,6 +18,18 @@ final class MediaIdentityProbeTest {
     private static final byte[] VALID = ("{\"schemaVersion\":1,\"mediaId\":\"00000000-0000-0000-0000-000000000001\","
             + "\"sourceId\":\"usb-fs:v2-fixture\"}").getBytes(StandardCharsets.UTF_8);
 
+    @Test void portLookupUsesOnlyGetPortAndPreservesTheUnderlyingRpcFailure() throws Exception {
+        assertEquals(2049, queryPort((procedure, request, result) -> {
+            assertEquals(3, procedure);
+            assertInstanceOf(org.acplt.oncrpc.OncRpcServerIdent.class, request);
+            ((org.acplt.oncrpc.OncRpcGetPortResult) result).port = 2049;
+        }, nfs.NFS_PROGRAM, nfs.NFS_VERSION));
+        var timeout = new org.acplt.oncrpc.OncRpcTimeoutException();
+        assertSame(timeout, assertThrows(org.acplt.oncrpc.OncRpcTimeoutException.class,
+                () -> queryPort((procedure, request, result) -> { throw timeout; },
+                        mount.MOUNTPROG, mount.MOUNTVERS)));
+    }
+
     @Test void readsExactMarkerAndRechecksRemoteVersion() throws Exception {
         FakeTransport transport = new FakeTransport(VALID);
         assertArrayEquals(VALID, readMarker(transport));
