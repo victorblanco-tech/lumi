@@ -264,3 +264,9 @@ Short Same/Update/Held/Review/New labels retain their existing meanings;
 tooltips clarify that Update does not prove newer audio. Adaptive status rows
 and single-line intrinsic-size badges prevent narrow columns from stretching
 capsules vertically. Selection, synchronization and integration lanes unchanged.
+
+Validation: 69 Swift regression tests passed; audited installer build 387.
+Actual desktop GRAY scan and Trancendence 2 browsing confirmed readable
+single-line badges, including a playlist with four statuses which wraps into
+two compact badge rows. Six saved playlist selections retained. No Sync action
+performed during this presentation test. Dev-16 left open on the tested set.
