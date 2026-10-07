@@ -153,3 +153,30 @@ empty value; stored phrases/waveform remain editable without a mounted stick.
 Playback must report unavailable, never synthesize music or fall back to a stale
 unverified path. Rust and Swift regressions cover this boundary. Detailed local
 test evidence and the remaining physical gates are recorded in E10-09.
+
+## Follow up for the next release
+
+On 2026-10-07, the owner deferred the misleading USB source `CURRENT` badge
+to the next release. It is not a blocker for the planned 0.6.4 release; no
+runtime or sync behavior is changed by this follow-up.
+
+Reproduction on 0.6.4-dev-12: connected CHRM showed green `CURRENT` from its
+previous sync before a fresh inspection. A read-only scan then reported 71
+unique tracks in the two selected playlists: 9 new, 29 possible updates,
+27 current and 6 for review. No Sync action was performed, but the source badge
+still showed `CURRENT` and the inspector mixed previous-sync counters with
+the current inspection.
+
+Acceptance for the follow-up:
+
+- Before a fresh comparison, show that the connected USB has not yet been
+  checked rather than claiming it is current.
+- After inspection, summarize the current differences in the source row;
+  use wording such as `Updated tracks` when updates are present, with distinct
+  new-track and review counts where relevant. Do not imply they were imported.
+- Mark retained sync counters and their date as results of the last sync,
+  separate from the current scan and selected-playlist impact.
+- Show a current/in-sync state only for the scope actually compared. Preserve
+  per-source identity, remembered selections, fixed layout and isolated sync.
+- Test initial state, changed and unchanged scans, source switching and sync
+  completion without altering live timing or lighting output.
