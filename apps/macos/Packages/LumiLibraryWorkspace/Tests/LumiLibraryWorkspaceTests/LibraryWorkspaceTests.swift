@@ -445,6 +445,11 @@ struct LibraryWorkspaceTests {
                 "conflictTracks": .number(1),
                 "beatGridRefresh": .boolean(true),
                 "cueRevisionTracked": .boolean(true),
+                "skippedTracks": .array([.object([
+                    "deviceTrackId": .number(1283),
+                    "title": .string("Our Origin (Extended Mix)"),
+                    "reason": .string("beat marker times must increase strictly")
+                ])]),
                 "reviewTracks": .array([
                     .object([
                         "deviceTrackId": .number(1_031),
@@ -472,6 +477,8 @@ struct LibraryWorkspaceTests {
 
         let device = try #require(state.rekordboxDevices.first)
         #expect(device.displayName == "DJ USB")
+        #expect(device.skippedTracks.first?.title == "Our Origin (Extended Mix)")
+        #expect(device.skippedTracks.first?.deviceTrackID == 1283)
         #expect(device.matchedTracks == 43)
         #expect(device.unmatchedTracks == 1_095)
         #expect(device.protectedTracks == 1)

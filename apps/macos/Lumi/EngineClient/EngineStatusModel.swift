@@ -1553,6 +1553,14 @@ final class EngineStatusModel: ObservableObject {
                     detail: sourceImportFeedback ?? "USB identity registration needs attention."
                 )
             }
+            if let device, !device.skippedTracks.isEmpty {
+                let names = device.skippedTracks.prefix(3).map(\.title).joined(separator: ", ")
+                usbSourceOperation = USBSourceOperationState(
+                    phase: .completed, title: "USB sync complete",
+                    detail: "Sync complete · \(device.skippedTracks.count) skipped: \(names). Existing Lumi versions retained; fix their beatgrid in Rekordbox.",
+                    sourceID: resolvedSourceID
+                )
+            }
         } catch {
             sourceImportFeedback = (error as? LocalizedError)?.errorDescription
                 ?? "The USB source could not be synchronized."

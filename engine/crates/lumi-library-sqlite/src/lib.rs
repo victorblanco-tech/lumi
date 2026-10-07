@@ -34,7 +34,7 @@ use thiserror::Error;
 
 const SCHEMA_VERSION: u32 = 21;
 mod network_media;
-pub use network_media::{TrustedUsbMedia, UsbMediaTrust};
+pub use network_media::{DeviceInvalidAnalysisTrack, TrustedUsbMedia, UsbMediaTrust};
 const DEFAULTS_VERSION_KEY: &str = "phrase-role-defaults-version";
 const CATALOG_REVISION_KEY: &str = "phrase-role-catalog-revision";
 const AUTOLOOP_DEFAULTS_VERSION_KEY: &str = "autoloop-catalog-defaults-version";
@@ -1541,6 +1541,9 @@ impl SqliteLibraryRepository {
         // provenance lane so an older backup USB cannot undo a newer
         // Rekordbox color while information-only changes still resync.
         for alias in aliases.iter() {
+            if alias.sync_disposition.starts_with("held-invalid:") {
+                continue;
+            }
             let Some(canonical_track_id) = alias.canonical_track_id else {
                 continue;
             };

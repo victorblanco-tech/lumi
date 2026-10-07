@@ -383,6 +383,15 @@ public struct LibrarySnapshotDecoder: Sendable {
                         name: try string(playlist, "name"),
                         trackCount: try unsigned(playlist, "trackCount")
                     )
+                },
+                skippedTracks: try optionalArray(device, "skippedTracks").map { value in
+                    guard case let .object(track) = value else { throw LibrarySnapshotError.invalidObject }
+                    return RekordboxDeviceSkippedTrackState(
+                        deviceTrackID: try UInt32(exactly: unsigned(track, "deviceTrackId"))
+                            .required(.invalidNumber("skipped track id")),
+                        title: try string(track, "title"),
+                        reason: try string(track, "reason")
+                    )
                 }
             )
         }

@@ -751,8 +751,16 @@ public struct RekordboxDeviceState: Equatable, Sendable, Identifiable {
     public let cueRevisionTracked: Bool
     public let reviewTracks: [RekordboxDeviceReviewTrackState]
     public let playlists: [RekordboxDeviceSyncedPlaylistState]
+    public var skippedTracks: [RekordboxDeviceSkippedTrackState] = []
 
     public var id: String { sourceID }
+}
+
+public struct RekordboxDeviceSkippedTrackState: Equatable, Sendable, Identifiable {
+    public let deviceTrackID: UInt32
+    public let title: String
+    public let reason: String
+    public var id: UInt32 { deviceTrackID }
 }
 
 public struct RekordboxDeviceReviewTrackState: Equatable, Sendable, Identifiable {

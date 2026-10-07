@@ -15,7 +15,48 @@ pub enum UsbMediaTrust {
     Conflict,
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DeviceInvalidAnalysisTrack {
+    pub device_track_id: u32,
+    pub title: String,
+    pub reason: String,
+}
+
 impl SqliteLibraryRepository {
+    /// Durable, source-specific exclusions. They remain visible after restart
+    /// and disappear only when a subsequent valid sync replaces the alias.
+    pub fn device_invalid_analysis_tracks(
+        &self,
+    ) -> Result<BTreeMap<String, Vec<DeviceInvalidAnalysisTrack>>, SqliteLibraryError> {
+        let mut statement = self.connection.prepare(
+            "SELECT source_id,device_track_id,title,sync_disposition
+             FROM device_library_track_aliases
+             WHERE archived=0 AND sync_disposition LIKE 'held-invalid:%'
+             ORDER BY source_id,device_track_id",
+        )?;
+        let rows = statement.query_map([], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, u32>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, String>(3)?,
+            ))
+        })?;
+        let mut result = BTreeMap::<String, Vec<DeviceInvalidAnalysisTrack>>::new();
+        for row in rows {
+            let (source, id, title, disposition) = row?;
+            result
+                .entry(source)
+                .or_default()
+                .push(DeviceInvalidAnalysisTrack {
+                    device_track_id: id,
+                    title,
+                    reason: disposition.trim_start_matches("held-invalid:").to_owned(),
+                });
+        }
+        Ok(result)
+    }
+
     pub fn with_consistent_read<T, E: From<SqliteLibraryError>>(
         &self,
         read: impl FnOnce() -> Result<T, E>,

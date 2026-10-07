@@ -205,7 +205,10 @@ fn duplicate_rekordbox_beat_times_are_not_silently_repaired() {
         canonical_beat_grid(&analysis),
         Err(LibraryWorkerError::InvalidRekordboxBeatGrid(_))
     ));
-    assert_eq!(analysis.beat_grid[2].time_millis, analysis.beat_grid[1].time_millis);
+    assert_eq!(
+        analysis.beat_grid[2].time_millis,
+        analysis.beat_grid[1].time_millis
+    );
 }
 
 #[test]
@@ -949,6 +952,78 @@ fn offline_verified_audio_keeps_editor_and_local_playback_contract_valid()
         .ok_or("alias")?;
     let (_, context) = connected.prepared.into_parts();
     assert!(context.audio_uri.is_empty());
+    Ok(())
+}
+
+#[test]
+fn invalid_usb_analysis_retains_existing_track_and_persists_source_warning()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut worker = LibraryWorker::demo()?;
+    let id = TrackId::new(
+        worker.snapshot_json()?["page"]["tracks"][0]["id"]
+            .as_u64()
+            .ok_or("missing track")?,
+    );
+    let before = worker.repository.track(id)?.ok_or("missing track")?;
+    let timeline = worker.repository.timeline_head(id)?;
+    let mut aliases = [lumi_library_sqlite::DeviceAliasUpsert {
+        device_track_id: 42,
+        simulator_signature: 0,
+        canonical_track_id: Some(id),
+        match_kind: "verified-existing-alias".into(),
+        title: "Invalid Track".into(),
+        artist: "Artist".into(),
+        bpm_milli: 140_000,
+        duration_millis: 100_000,
+        file_size: 123,
+        audio_uri: "file://localhost/Volumes/Test/Track.mp3".into(),
+        metadata_revision: "new-metadata".into(),
+        color_rgb: Some(0xff0000),
+        master_database_id: 1,
+        master_content_id: 42,
+        information_update_count: 99,
+        analysis_revision: "invalid-grid-1".into(),
+        audio_signature: "audio-full-v1:verified".into(),
+        analyzed_at: "2026-10-07".into(),
+        sync_disposition: "held-invalid:beat marker times must increase strictly".into(),
+    }];
+    worker.repository.sync_device_aliases(
+        "usb:test",
+        "Test",
+        "db-1",
+        &mut aliases,
+        &[],
+        &[],
+        &[],
+        &[],
+    )?;
+    assert_eq!(worker.repository.track(id)?.ok_or("missing track")?, before);
+    assert_eq!(worker.repository.timeline_head(id)?, timeline);
+    let skipped = worker.repository.device_invalid_analysis_tracks()?;
+    assert_eq!(skipped["usb:test"][0].device_track_id, 42);
+    assert_eq!(skipped["usb:test"][0].title, "Invalid Track");
+    let snapshot = worker.snapshot_json()?;
+    assert_eq!(
+        snapshot["rekordboxDevices"][0]["skippedTracks"][0]["title"],
+        "Invalid Track"
+    );
+    aliases[0].sync_disposition = "current".into();
+    worker.repository.sync_device_aliases(
+        "usb:test",
+        "Test",
+        "db-2",
+        &mut aliases,
+        &[],
+        &[],
+        &[],
+        &[],
+    )?;
+    assert!(
+        worker
+            .repository
+            .device_invalid_analysis_tracks()?
+            .is_empty()
+    );
     Ok(())
 }
 

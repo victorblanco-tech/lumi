@@ -1706,12 +1706,12 @@ impl LibraryWorker {
             .and_then(Path::parent)
             .ok_or(LibraryWorkerError::InvalidRekordboxDeviceRoot)?
             .join("USBANLZ");
-        let promotable_tracks = matched_tracks
+        let mut promotable_tracks = matched_tracks
             .iter()
             .filter(|(_, (_, decision))| decision.promotes())
             .map(|(track_id, (track, _))| (*track_id, *track))
             .collect::<BTreeMap<_, _>>();
-        let promotable_hot_cues = matched_hot_cues
+        let mut promotable_hot_cues = matched_hot_cues
             .iter()
             .filter(|(track_id, (_, decision))| {
                 decision.promotes() && !promotable_tracks.contains_key(track_id)
@@ -1748,10 +1748,23 @@ impl LibraryWorker {
             )?;
             snapshot_resolved_analysis_data(&request)?.tracks
         };
+        let mut invalid_tracks = BTreeMap::<u32, String>::new();
+        for (id, track) in &analysis_tracks {
+            if let Some(parsed) = parsed_analyses.get(&id.value().to_string())
+                && let Err(error) = canonical_beat_grid(parsed)
+            {
+                invalid_tracks.insert(track.device_track_id, error.to_string());
+            }
+        }
+        promotable_tracks.retain(|_, track| !invalid_tracks.contains_key(&track.device_track_id));
+        promotable_hot_cues.retain(|_, track| !invalid_tracks.contains_key(&track.device_track_id));
         // A container hash can change while every imported component remains
         // identical. This is equality, not evidence that either revision is
         // newer: retain the active provenance and do not create a false review.
         for (id, (track, decision)) in &mut matched_tracks {
+            if invalid_tracks.contains_key(&track.device_track_id) {
+                continue;
+            }
             if !matches!(
                 decision,
                 lumi_library_sqlite::DeviceAnalysisDecision::HoldConflict
@@ -1849,7 +1862,13 @@ impl LibraryWorker {
                                 device_track.device_track_id.to_string(),
                             )
                         })?;
-                    let canonical_grid = device_canonical_beat_grid(device_track, analysis)?;
+                    let canonical_grid = match canonical_beat_grid(analysis) {
+                        Ok(grid) => grid,
+                        Err(error) => {
+                            invalid_tracks.insert(device_track.device_track_id, error.to_string());
+                            return Ok(None);
+                        }
+                    };
                     let beat_grid = canonical_grid.beat_grid;
                     let total_beats = u32::try_from(beat_grid.markers().len())
                         .map_err(|_| LibraryWorkerError::RekordboxImportOverflow)?;
@@ -1898,15 +1917,23 @@ impl LibraryWorker {
                         )?,
                     )?
                     .with_hot_cues(canonical_hot_cues(analysis, duration_millis)?)?;
-                    Ok(DeviceTrackImport {
+                    Ok(Some(DeviceTrackImport {
                         device_track_id: device_track.device_track_id,
                         source_analysis_revision: device_track.analysis_revision.clone(),
                         analyzed_at: device_track.analyzed_at.clone(),
                         analysis: imported,
-                    })
+                    }))
                 })
                 .collect::<Result<Vec<_>, LibraryWorkerError>>()?
+                .into_iter()
+                .flatten()
+                .collect()
         };
+        for alias in &mut aliases {
+            if let Some(reason) = invalid_tracks.get(&alias.device_track_id) {
+                alias.sync_disposition = format!("held-invalid:{reason}");
+            }
+        }
         progress("Rechecking USB contents before saving", total, total);
         snapshot.verify_unchanged()?;
         progress(
@@ -2084,7 +2111,14 @@ impl LibraryWorker {
         let mut tracks = BTreeMap::new();
         for track in snapshot.tracks.values() {
             let state = if let Some(previous) = stored.get(&track.device_track_id) {
-                if previous.canonical_track_id.is_none() {
+                if previous.sync_disposition.starts_with("held-invalid:")
+                    && previous.analysis_revision == track.analysis_revision
+                {
+                    DeviceInspectionTrack {
+                        status: "conflict",
+                        detail: "Skipped: invalid beatgrid. Fix this track in Rekordbox and sync again; existing Lumi data was retained.".to_owned(),
+                    }
+                } else if previous.canonical_track_id.is_none() {
                     DeviceInspectionTrack {
                         status: "not-in-lumi",
                         detail: "This USB track was not matched to a Lumi track during the previous sync."
@@ -2222,6 +2256,14 @@ impl LibraryWorker {
     ) -> Result<BTreeMap<u32, DeviceReviewComparison>, LibraryWorkerError> {
         let mut conflicts = Vec::new();
         for (device_track_id, alias) in stored {
+            if alias.sync_disposition.starts_with("held-invalid:")
+                && snapshot
+                    .tracks
+                    .get(device_track_id)
+                    .is_some_and(|track| track.analysis_revision == alias.analysis_revision)
+            {
+                continue;
+            }
             let (Some(id), Some(track)) = (
                 alias.canonical_track_id,
                 snapshot.tracks.get(device_track_id),
@@ -3353,6 +3395,7 @@ impl LibraryWorker {
             .page_playlists(TrackPageRequest::try_new(0, 200)?)?;
         let device_sources = self.repository.device_source_summaries()?;
         let device_review_tracks = self.repository.device_review_tracks()?;
+        let invalid_analysis_tracks = self.repository.device_invalid_analysis_tracks()?;
         let stored_device_playlists = self.repository.stored_device_playlists()?;
         let data_summary = self.repository.data_summary()?;
         let reset_candidates = self.repository.reset_preservable_tracks()?;
@@ -3421,6 +3464,10 @@ impl LibraryWorker {
                     "promotedTracks": source.promoted_tracks,
                     "protectedTracks": source.protected_tracks,
                     "conflictTracks": review_tracks.len(),
+                    "skippedTracks": invalid_analysis_tracks.get(&source.source_id)
+                        .into_iter().flatten().map(|track| json!({
+                            "deviceTrackId": track.device_track_id, "title": track.title, "reason": track.reason
+                        })).collect::<Vec<_>>(),
                     "beatGridRefresh": true,
                     "cueRevisionTracked": true,
                     "reviewTracks": review_tracks.iter().take(200).map(|track| {
@@ -5029,7 +5076,9 @@ pub enum LibraryWorkerError {
     IncompleteRekordboxPhrases,
     #[error("Rekordbox beatgrid is invalid: {0}")]
     InvalidRekordboxBeatGrid(#[from] lumi_library::BeatGridValidationError),
-    #[error("Sync stopped at track '{title}' (USB track {device_track_id}): {detail}. No playlist or track changes were saved.")]
+    #[error(
+        "Sync stopped at track '{title}' (USB track {device_track_id}): {detail}. No playlist or track changes were saved."
+    )]
     DeviceTrackAnalysis {
         title: String,
         device_track_id: u32,

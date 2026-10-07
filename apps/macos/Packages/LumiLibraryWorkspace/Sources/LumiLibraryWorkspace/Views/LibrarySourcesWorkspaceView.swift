@@ -455,6 +455,21 @@ public struct LibrarySourcesWorkspaceView: View {
                             .font(LumiTypography.caption)
                             .foregroundStyle(LumiColor.success)
                     }
+                    if !device.skippedTracks.isEmpty {
+                        VStack(alignment: .leading, spacing: LumiSpacing.small) {
+                            Label("\(device.skippedTracks.count) skipped · other tracks synchronized",
+                                  systemImage: "exclamationmark.triangle.fill")
+                                .font(LumiTypography.caption.weight(.semibold))
+                                .foregroundStyle(LumiColor.warning)
+                            ForEach(device.skippedTracks) { track in
+                                Text("\(track.title) · Invalid beatgrid. Fix in Rekordbox and sync again. Existing Lumi version retained, if available.")
+                                    .font(LumiTypography.caption)
+                                    .foregroundStyle(LumiColor.textSecondary)
+                                    .help(track.reason)
+                            }
+                        }
+                        .accessibilityIdentifier("lumi.library.sources.usb.skippedTracks")
+                    }
                     HStack(spacing: LumiSpacing.large) {
                         sourceSettingRow(title: "Database revision", detail: shortRevision(device.databaseRevision), systemImage: "cylinder")
                         sourceSettingRow(title: "Version policy", detail: "Newer promotes · older/unknown holds", systemImage: "arrow.up.arrow.down")
@@ -1550,12 +1565,13 @@ public struct LibrarySourcesWorkspaceView: View {
     }
 
     private func deviceSyncState(_ device: RekordboxDeviceState) -> LumiComponentState {
-        if device.conflictTracks > 0 { return .degraded }
+        if device.conflictTracks > 0 || !device.skippedTracks.isEmpty { return .degraded }
         if device.protectedTracks > 0 { return .stale }
         return .ready
     }
 
     private func deviceSyncLabel(_ device: RekordboxDeviceState) -> String {
+        if !device.skippedTracks.isEmpty { return "\(device.skippedTracks.count) SKIPPED" }
         if device.conflictTracks > 0 { return "\(device.conflictTracks) REVIEW" }
         if device.protectedTracks > 0 { return "\(device.protectedTracks) OLDER HELD" }
         return "CURRENT"

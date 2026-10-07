@@ -2,6 +2,23 @@
 
 Status: In progress. Extends E10-03; no production release without acceptance.
 
+## Dev-18 — isolate invalid beatgrids within a sync
+
+- Explicit user-approved policy: an invalid beatgrid does not abort otherwise
+  valid selected playlist tracks. Never synthesize or silently reorder beats.
+- Validate parsed incoming grids before promotion/import. Exclude invalid tracks
+  from analysis, cue and metadata promotion; retain a verified existing canonical
+  match and its timeline when available. A new invalid track is not imported.
+- Persist an exact source/track warning on the alias (`held-invalid:`). Display
+  names/reasons under that USB and a skipped count, including after app restart.
+  Retrying a valid repaired revision clears the warning through normal sync.
+- Playlist structure and valid memberships commit together in the existing
+  transaction. Unchanged-file verification and rollback protections remain.
+- Scope: non-increasing/inconsistent/incomplete beatgrids detected after parsing;
+  unreadable media, changed source snapshots and unparseable containers remain
+  safe operation failures rather than being silently accepted.
+- Automated and native GRAY six-playlist acceptance results to be recorded below.
+
 ## Dev-17 — sync failure visibility and confirmed local GRAY recovery
 
 - A failed sync retains its source ID and shows an actionable explanation in the
