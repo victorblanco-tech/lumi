@@ -327,3 +327,11 @@ Actual desktop GRAY scan and Trancendence 2 browsing confirmed readable
 single-line badges, including a playlist with four statuses which wraps into
 two compact badge rows. Six saved playlist selections retained. No Sync action
 performed during this presentation test. Dev-16 left open on the tested set.
+## Dev-19 — bulk review
+
+- Per-track selection and source-scoped Select all/Clear in Tracks to review.
+- Keep Lumi persists the existing exact-revision decision; Use USB Version requires a count/component confirmation.
+- Sequential processing reuses the isolated worker and its incoming/active revision validation, stops on the first failure, and does not roll back earlier successful choices.
+- Existing Lumi-authored phrases and AutoLoop choices remain protected. No changes to USB age ordering, waveform rendering, or realtime integration lanes.
+- GRAY investigation: eight reviews in the Dev-18 sync differed only in hot cues; beatgrid, RGB waveform, metadata and raw RB phrases were identical. Actual GRAY cueUpdateCount was NULL (the importer currently represents this as zero), analysisDataUpdateCount was 2. dateCreated/dateAdded exist but there is no per-cue modification date in the exported schema; do not infer cue freshness from those dates.
+- Regression: queue preserves order and exact revisions; failure clears pending requests. Native desktop acceptance recorded separately after testing.

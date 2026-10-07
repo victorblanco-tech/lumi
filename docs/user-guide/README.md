@@ -302,3 +302,9 @@ SoundSwitch projects, tokens or other private data to a public issue.
 
 Report reproducible problems through
 [GitHub Issues](https://github.com/victorblanco-tech/lumi/issues).
+
+## Bulk USB review
+
+In a USB source's **Tracks to review** section, select individual tracks or choose **Select all**. **Keep Lumi** saves that decision for each exact USB revision; a later change can appear for review again. **Use USB Version…** asks for confirmation before replacing imported Rekordbox components. Lumi-authored phrases and AutoLoop choices remain protected.
+
+Reviews are processed one at a time with the existing revision checks. If a track fails validation, processing stops; already completed choices remain saved and remaining items can be reviewed again.

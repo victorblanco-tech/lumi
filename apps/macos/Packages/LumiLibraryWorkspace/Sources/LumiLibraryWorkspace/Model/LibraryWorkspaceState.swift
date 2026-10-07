@@ -803,6 +803,19 @@ public enum USBConflictResolutionChoice: String, Sendable {
     case useUSB = "use-usb"
 }
 
+public struct USBReviewQueue: Sendable {
+    private var requests: [USBConflictResolutionRequest] = []
+    public var isEmpty: Bool { requests.isEmpty }
+    public var count: Int { requests.count }
+    public init() {}
+    public mutating func start(_ requests: [USBConflictResolutionRequest]) { self.requests = requests }
+    public mutating func stop() { requests.removeAll() }
+    public mutating func next() -> USBConflictResolutionRequest? {
+        guard !requests.isEmpty else { return nil }
+        return requests.removeFirst()
+    }
+}
+
 public struct USBConflictResolutionRequest: Sendable {
     public let root: String
     public let sourceID: String

@@ -75,6 +75,9 @@ public struct LibrarySourcesWorkspaceView: View {
     @State private var usbSelectionFeedback: String?
     @State private var ignoredUSBReviews: Set<String> = []
     @State private var pendingUSBVersionRequest: USBConflictResolutionRequest?
+    @State private var selectedUSBReviewKeys: Set<String> = []
+    @State private var queuedUSBReviews = USBReviewQueue()
+    @State private var pendingBulkUSBReviews: [USBConflictResolutionRequest] = []
     @State private var resolvingUSBReviewKey: String?
     @State private var failedUSBReviewKey: String?
 
@@ -133,8 +136,8 @@ public struct LibrarySourcesWorkspaceView: View {
         .confirmationDialog(
             "Use the USB version?",
             isPresented: Binding(
-                get: { pendingUSBVersionRequest != nil },
-                set: { if !$0 { pendingUSBVersionRequest = nil } }
+                get: { pendingUSBVersionRequest != nil || !pendingBulkUSBReviews.isEmpty },
+                set: { if !$0 { pendingUSBVersionRequest = nil; pendingBulkUSBReviews = [] } }
             ),
             titleVisibility: .visible
         ) {
@@ -142,11 +145,16 @@ public struct LibrarySourcesWorkspaceView: View {
                 if let request = pendingUSBVersionRequest {
                     onDeviceConflictResolution(request)
                 }
+                if !pendingBulkUSBReviews.isEmpty {
+                    queuedUSBReviews.start(pendingBulkUSBReviews)
+                    startNextUSBReview()
+                }
                 pendingUSBVersionRequest = nil
+                pendingBulkUSBReviews = []
             }
-            Button("Cancel", role: .cancel) { pendingUSBVersionRequest = nil }
+            Button("Cancel", role: .cancel) { pendingUSBVersionRequest = nil; pendingBulkUSBReviews = [] }
         } message: {
-            Text("This replaces the imported Rekordbox beatgrid, waveform, cue points and raw Rekordbox phrases. Lumi-authored phrases and AutoLoop choices are preserved.")
+            Text("Replace the imported Rekordbox data for \(pendingBulkUSBReviews.isEmpty ? 1 : pendingBulkUSBReviews.count) track(s): beatgrid, waveform, cue points and raw Rekordbox phrases. Lumi-authored phrases and AutoLoop choices are preserved. Each track is revalidated; processing stops on failure.")
         }
         .onChange(of: settings?.revision) { _, _ in synchronizeProvider() }
         .onChange(of: library.rekordboxDevices) { _, devices in
@@ -175,13 +183,16 @@ public struct LibrarySourcesWorkspaceView: View {
         .onChange(of: usbOperation.phase) { _, phase in
             if phase == .failed {
                 failedUSBReviewKey = resolvingUSBReviewKey
+                queuedUSBReviews.stop()
             } else if phase == .completed {
                 failedUSBReviewKey = nil
+                if let key = resolvingUSBReviewKey { selectedUSBReviewKeys.remove(key) }
             }
             if phase == .completed || phase == .failed || phase == .idle {
                 resolvingUSBReviewKey = nil
                 refreshMediaIdentities()
             }
+            if phase == .completed { startNextUSBReview() }
         }
         .onAppear {
             guard !didInitializeSource else { return }
@@ -638,10 +649,39 @@ public struct LibrarySourcesWorkspaceView: View {
             Text("Lumi kept its version. Check the differences before choosing a replacement.")
                 .font(LumiTypography.caption)
                 .foregroundStyle(LumiColor.textSecondary)
+            HStack {
+                Button("Select all") {
+                    selectedUSBReviewKeys.formUnion(visibleTracks.map { reviewKey(device, $0) })
+                }
+                Button("Clear") { selectedUSBReviewKeys.removeAll() }
+                let selected = visibleTracks.filter { selectedUSBReviewKeys.contains(reviewKey(device, $0)) }
+                Text("\(selected.count) selected")
+                if !queuedUSBReviews.isEmpty {
+                    Text("\(queuedUSBReviews.count) remaining")
+                        .foregroundStyle(LumiColor.accent)
+                }
+                Spacer()
+                Button("Keep Lumi") { prepareBulkUSBReviews(device, selected, .keepLumi) }
+                    .disabled(selected.isEmpty || mountedURL(for: device) == nil || selected.contains { $0.activeAnalysisRevision == nil })
+                Button("Use USB Version…") { prepareBulkUSBReviews(device, selected, .useUSB) }
+                    .disabled(selected.isEmpty || mountedURL(for: device) == nil || selected.contains { $0.activeAnalysisRevision == nil || $0.components == nil })
+            }
+            .buttonStyle(.bordered)
+            .disabled(usbOperation.isActive || !queuedUSBReviews.isEmpty || !rendersInteractiveControls)
             VStack(spacing: LumiSpacing.xSmall) {
                 ForEach(visibleTracks) { track in
                     VStack(alignment: .leading, spacing: LumiSpacing.medium) {
                         HStack(alignment: .top, spacing: LumiSpacing.medium) {
+                            Toggle("Select \(track.title)", isOn: Binding(
+                                get: { selectedUSBReviewKeys.contains(reviewKey(device, track)) },
+                                set: { selected in
+                                    let key = reviewKey(device, track)
+                                    if selected { selectedUSBReviewKeys.insert(key) } else { selectedUSBReviewKeys.remove(key) }
+                                }
+                            ))
+                            .labelsHidden()
+                            .toggleStyle(.checkbox)
+                            .disabled(usbOperation.isActive || !queuedUSBReviews.isEmpty)
                             VStack(alignment: .leading, spacing: 3) {
                             Text(track.title)
                                 .font(LumiTypography.body.weight(.semibold))
@@ -789,6 +829,28 @@ public struct LibrarySourcesWorkspaceView: View {
                 }
             }
         }
+    }
+
+    private func prepareBulkUSBReviews(
+        _ device: RekordboxDeviceState,
+        _ tracks: [RekordboxDeviceReviewTrackState],
+        _ choice: USBConflictResolutionChoice
+    ) {
+        guard let root = mountedURL(for: device)?.path else { return }
+        let requests = tracks.compactMap { track -> USBConflictResolutionRequest? in
+            guard let revision = track.activeAnalysisRevision else { return nil }
+            return conflictRequest(root: root, device: device, track: track, activeRevision: revision, choice: choice)
+        }
+        if choice == .useUSB { pendingBulkUSBReviews = requests }
+        else { queuedUSBReviews.start(requests); startNextUSBReview() }
+    }
+
+    private func startNextUSBReview() {
+        guard let request = queuedUSBReviews.next() else { return }
+        failedUSBReviewKey = nil
+        let key = "\(request.sourceID):\(request.deviceTrackID):\(request.expectedIncomingRevision)"
+        resolvingUSBReviewKey = key
+        onDeviceConflictResolution(request)
     }
 
     private func compactReviewDifferences(_ components: RekordboxDeviceReviewComponentsState) -> String {
