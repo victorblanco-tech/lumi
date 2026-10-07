@@ -256,3 +256,11 @@ and Use USB Version disabled before verification. Opening and closing Details
 works. After scanning GRAY, both the stale card and its orange review count
 disappear. No Sync or overwrite action taken. SQLite quick_check remains OK;
 120 tracks, 278 timeline revisions and 139 playlist memberships preserved.
+# Dev-16 — available width and compact playlist statuses
+
+Import & Sources uses the available content width rather than a 980-point
+maximum. Playlist title/count and status badges occupy separate lines.
+Short Same/Update/Held/Review/New labels retain their existing meanings;
+tooltips clarify that Update does not prove newer audio. Adaptive status rows
+and single-line intrinsic-size badges prevent narrow columns from stretching
+capsules vertically. Selection, synchronization and integration lanes unchanged.

@@ -114,7 +114,7 @@ public struct LibrarySourcesWorkspaceView: View {
                 sourceMappings
             }
             .padding(LumiSpacing.xLarge)
-            .frame(maxWidth: 980, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(LumiColor.canvas)
         .accessibilityIdentifier("lumi.library.sources")
@@ -1064,6 +1064,7 @@ public struct LibrarySourcesWorkspaceView: View {
                         expandedUSBPlaylistIDs.insert(playlist.id)
                     }
                 } label: {
+                    VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
                     HStack(spacing: LumiSpacing.small) {
                         Image(systemName: "music.note.list")
                             .foregroundStyle(LumiColor.textSecondary)
@@ -1078,13 +1079,15 @@ public struct LibrarySourcesWorkspaceView: View {
                                 .foregroundStyle(LumiColor.accent)
                         }
                         Spacer()
-                        playlistStatusSummary(playlist.statusCounts)
                         Text("\(playlist.trackCount)")
                             .font(LumiTypography.technical)
                             .foregroundStyle(LumiColor.textSecondary)
                         Image(systemName: expandedUSBPlaylistIDs.contains(playlist.id) ? "chevron.down" : "chevron.right")
                             .foregroundStyle(LumiColor.textSecondary)
                     }
+                    playlistStatusSummary(playlist.statusCounts)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -1175,12 +1178,12 @@ public struct LibrarySourcesWorkspaceView: View {
     private func playlistStatusSummary(
         _ counts: RekordboxDeviceStatusCounts
     ) -> some View {
-        HStack(spacing: LumiSpacing.small) {
-            if counts.current > 0 { compactStatus("\(counts.current) CURRENT", .ready) }
-            if counts.usbNewer > 0 { compactStatus("\(counts.usbNewer) USB NEWER", .ready) }
-            if counts.usbOutdated > 0 { compactStatus("\(counts.usbOutdated) USB OUTDATED", .stale) }
-            if counts.conflict > 0 { compactStatus("\(counts.conflict) REVIEW", .degraded) }
-            if counts.notInLumi > 0 { compactStatus("\(counts.notInLumi) NEW", .empty) }
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 90), spacing: LumiSpacing.xSmall)], alignment: .leading, spacing: LumiSpacing.xSmall) {
+            if counts.current > 0 { compactStatus("\(counts.current) Same", .ready).help("Imported analysis is current or explicitly retained in Lumi") }
+            if counts.usbNewer > 0 { compactStatus("\(counts.usbNewer) Update", .ready).help("Potential data updates; does not establish audio-file age") }
+            if counts.usbOutdated > 0 { compactStatus("\(counts.usbOutdated) Held", .stale).help("Older USB analysis is protected against replacing Lumi") }
+            if counts.conflict > 0 { compactStatus("\(counts.conflict) Review", .degraded) }
+            if counts.notInLumi > 0 { compactStatus("\(counts.notInLumi) New", .empty) }
         }
     }
 
@@ -1559,13 +1562,14 @@ public struct LibrarySourcesWorkspaceView: View {
     private func compactStatus(_ label: String, _ state: LumiComponentState) -> some View {
         HStack(spacing: 6) {
             Circle().fill(state.color).frame(width: 7, height: 7)
-            Text(label).font(LumiTypography.technical)
+            Text(label).font(LumiTypography.technical).lineLimit(1)
         }
         .foregroundStyle(state.color)
         .padding(.horizontal, 9)
         .padding(.vertical, 5)
         .background(state.color.opacity(0.1))
         .clipShape(Capsule())
+        .fixedSize(horizontal: true, vertical: true)
     }
 
     private func metric(_ title: String, _ value: UInt64) -> some View {
