@@ -3,6 +3,12 @@ import Testing
 
 @Suite("Synced library playlist tree")
 struct LibraryPlaylistTreeTests {
+    @Test("Saved USB selection is intent, not completed sync membership")
+    func selectionIntent() {
+        #expect(restoredUSBPlaylistSelection(saved: [], synchronized: [1, 2], available: [1, 2]).isEmpty)
+        #expect(restoredUSBPlaylistSelection(saved: [2, 3], synchronized: [1], available: [1, 2]) == [2])
+        #expect(restoredUSBPlaylistSelection(saved: nil, synchronized: [1, 2], available: [2]) == [2])
+    }
     @Test("Folders are collapsed until expanded; leaf IDs retain query identity")
     func nesting() {
         let playlists = [

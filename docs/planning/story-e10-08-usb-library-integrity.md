@@ -212,3 +212,17 @@ Acceptance for the follow-up:
   per-source identity, remembered selections, fixed layout and isolated sync.
 - Test initial state, changed and unchanged scans, source switching and sync
   completion without altering live timing or lighting output.
+# Dev-14 — source and destination sync workspace
+
+The USB playlist picker now presents two independent, fixed-height trees:
+USB source and saved selection on the left; actual synchronized playlists for
+that trusted USB in the Lumi Library on the right. Folder checkboxes support
+none/partial/all selection. Saved user selection takes precedence over the
+last completed sync, including an intentionally empty selection. Deselecting
+never deletes library data. Destination membership comes from persisted
+source-specific playlist relations, not from the current checkboxes.
+
+Scope: presentation and selection restoration only. No live scheduling,
+waveform rendering, MIDI, USB writes, track import or schema changes.
+Automated and desktop validation are recorded separately; do not treat a
+successful build as completed hardware acceptance.

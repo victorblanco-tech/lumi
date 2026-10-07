@@ -835,7 +835,7 @@ public struct LibrarySourcesWorkspaceView: View {
         VStack(alignment: .leading, spacing: LumiSpacing.medium) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Playlists to load into Lumi").font(LumiTypography.cardTitle)
+                    Text("USB → Lumi Library").font(LumiTypography.cardTitle)
                     Text("\(inspection.playlistCount) available · \(inspection.trackCount) tracks on USB · \(selectedUSBPlaylistIDs.count) selected")
                         .font(LumiTypography.technical)
                         .foregroundStyle(LumiColor.textSecondary)
@@ -857,6 +857,12 @@ public struct LibrarySourcesWorkspaceView: View {
                 .textFieldStyle(.roundedBorder)
                 .accessibilityIdentifier("lumi.library.sources.usb.playlistSearch")
             selectionImpact(inspection)
+            HStack(alignment: .top, spacing: LumiSpacing.medium) {
+            VStack(alignment: .leading, spacing: LumiSpacing.small) {
+            Text("USB · \(inspection.displayName)")
+                .font(LumiTypography.body.weight(.semibold))
+            Text("Checked playlists will be synchronized")
+                .font(LumiTypography.caption).foregroundStyle(LumiColor.textSecondary)
             ScrollView {
                 LazyVStack(spacing: LumiSpacing.xSmall) {
                     ForEach(
@@ -880,14 +886,41 @@ public struct LibrarySourcesWorkspaceView: View {
                         case let .playlist(playlist):
                             usbPlaylistRow(
                                 playlist,
-                                previouslySynchronized: inspection.selectedPlaylistIDs.contains(playlist.id),
+                                previouslySynchronized: selectedUSBSource?.playlists.contains(where: { $0.id == playlist.id }) == true,
                                 depth: row.depth
                             )
                         }
                     }
                 }
             }
-            .frame(minHeight: 160, maxHeight: 360)
+            .frame(height: 360)
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            Divider().frame(height: 412)
+            VStack(alignment: .leading, spacing: LumiSpacing.small) {
+                Text("Lumi Library")
+                    .font(LumiTypography.body.weight(.semibold))
+                Text("Already synchronized from this USB")
+                    .font(LumiTypography.caption).foregroundStyle(LumiColor.textSecondary)
+                ScrollView {
+                    LibraryPlaylistTreeView(
+                        playlists: synchronizedLibraryPlaylists,
+                        selectedPlaylistID: nil,
+                        accessibilityPrefix: "lumi.library.sources.usb.destination",
+                        onSelect: { _ in }
+                    )
+                    if synchronizedLibraryPlaylists.isEmpty {
+                        Text("No playlists synchronized from this USB yet.")
+                            .font(LumiTypography.caption)
+                            .foregroundStyle(LumiColor.textSecondary)
+                            .padding(LumiSpacing.medium)
+                    }
+                }
+                .frame(height: 360)
+                .accessibilityIdentifier("lumi.library.sources.usb.destination")
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
             if usbPlaylistOutlineRows(
                 playlists: inspection.playlists,
                 expandedFolderPaths: expandedUSBPlaylistFolderPaths,
@@ -897,10 +930,15 @@ public struct LibrarySourcesWorkspaceView: View {
                     .font(LumiTypography.caption)
                     .foregroundStyle(LumiColor.textSecondary)
             }
-            Text("Browse playlists and track status before sync. Only selected playlists are synchronized; duplicate tracks are processed once.")
+            Text("Selection is remembered for this USB. Unchecking a playlist does not remove it from Lumi. Browse track changes before synchronizing.")
                 .font(LumiTypography.caption)
                 .foregroundStyle(LumiColor.textSecondary)
         }
+    }
+
+    private var synchronizedLibraryPlaylists: [LibraryPlaylist] {
+        let ids = Set(selectedUSBSource?.playlists.map(\.libraryPlaylistID) ?? [])
+        return library.playlists.filter { ids.contains($0.id) }
     }
 
     private func usbPlaylistFolderRow(
@@ -912,7 +950,26 @@ public struct LibrarySourcesWorkspaceView: View {
         forceExpanded: Bool
     ) -> some View {
         let expanded = forceExpanded || expandedUSBPlaylistFolderPaths.contains(path)
-        return Button {
+        let descendants = activeDeviceInspection?.playlists.filter { $0.path.hasPrefix(path + "/") } ?? []
+        let ids = Set(descendants.map(\.id))
+        let selectedCount = ids.intersection(selectedUSBPlaylistIDs).count
+        return HStack(spacing: LumiSpacing.xSmall) {
+        Button {
+            if selectedCount == ids.count {
+                selectedUSBPlaylistIDs.subtract(ids)
+            } else {
+                selectedUSBPlaylistIDs.formUnion(ids)
+            }
+            persistDevicePlaylistSelection()
+        } label: {
+            Image(systemName: selectedCount == 0 ? "square" : selectedCount == ids.count ? "checkmark.square.fill" : "minus.square.fill")
+                .foregroundStyle(selectedCount == 0 ? LumiColor.textSecondary : LumiColor.accent)
+                .frame(width: 28, height: 36)
+        }
+        .buttonStyle(.plain)
+        .help("Select or deselect all playlists in this folder. Does not delete Lumi data.")
+        .accessibilityLabel("Select folder \(name), \(selectedCount) of \(ids.count) selected")
+        Button {
             if expandedUSBPlaylistFolderPaths.contains(path) {
                 expandedUSBPlaylistFolderPaths.remove(path)
             } else {
@@ -933,7 +990,7 @@ public struct LibrarySourcesWorkspaceView: View {
                     .font(LumiTypography.technical)
                     .foregroundStyle(LumiColor.textSecondary)
             }
-            .padding(.leading, CGFloat(depth) * 20 + LumiSpacing.medium)
+            .padding(.leading, LumiSpacing.xSmall)
             .padding(.trailing, LumiSpacing.medium)
             .frame(minHeight: 38)
             .background(LumiColor.surface)
@@ -943,6 +1000,8 @@ public struct LibrarySourcesWorkspaceView: View {
         .buttonStyle(.plain)
         .help(path)
         .accessibilityIdentifier("lumi.library.sources.usb.folder.\(path)")
+        }
+        .padding(.leading, CGFloat(depth) * 20 + LumiSpacing.medium)
     }
 
     private func usbPlaylistRow(
@@ -1349,10 +1408,14 @@ public struct LibrarySourcesWorkspaceView: View {
             return
         }
         let storedSelections = decodedDevicePlaylistSelections()[sourceID]
-        let stored = activeDeviceInspection?.selectedPlaylistIDs ?? storedSelections ?? []
+        let stored = storedSelections ?? activeDeviceInspection?.selectedPlaylistIDs ?? []
         if let inspection = activeDeviceInspection {
             let available = Set(inspection.playlists.map(\.id))
-            selectedUSBPlaylistIDs = Set(stored).intersection(available)
+            selectedUSBPlaylistIDs = restoredUSBPlaylistSelection(
+                saved: storedSelections,
+                synchronized: activeDeviceInspection?.selectedPlaylistIDs ?? [],
+                available: available
+            )
             if selectedUSBPlaylistIDs.isEmpty, storedSelections?.isEmpty == false {
                 usbSelectionFeedback = "The export's playlist IDs or folders changed. Choose the playlists to sync; your Lumi tracks and phrases are unchanged."
             }
