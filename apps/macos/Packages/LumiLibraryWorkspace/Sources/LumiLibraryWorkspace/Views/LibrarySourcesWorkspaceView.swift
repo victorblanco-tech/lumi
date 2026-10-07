@@ -950,7 +950,12 @@ public struct LibrarySourcesWorkspaceView: View {
         forceExpanded: Bool
     ) -> some View {
         let expanded = forceExpanded || expandedUSBPlaylistFolderPaths.contains(path)
-        let descendants = activeDeviceInspection?.playlists.filter { $0.path.hasPrefix(path + "/") } ?? []
+        let query = usbPlaylistSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        let descendants = activeDeviceInspection?.playlists.filter {
+            $0.path.hasPrefix(path + "/") && (query.isEmpty
+                || $0.path.localizedCaseInsensitiveContains(query)
+                || $0.name.localizedCaseInsensitiveContains(query))
+        } ?? []
         let ids = Set(descendants.map(\.id))
         let selectedCount = ids.intersection(selectedUSBPlaylistIDs).count
         return HStack(spacing: LumiSpacing.xSmall) {
@@ -1082,18 +1087,6 @@ public struct LibrarySourcesWorkspaceView: View {
 
     @ViewBuilder
     private func selectionImpact(_ inspection: RekordboxDeviceInspectionState) -> some View {
-        if selectedUSBPlaylistIDs.isEmpty {
-            Label(
-                "Select one or more playlists to calculate their impact before synchronization.",
-                systemImage: "checklist"
-            )
-            .font(LumiTypography.caption)
-            .foregroundStyle(LumiColor.textSecondary)
-            .padding(LumiSpacing.medium)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(LumiColor.surfaceElevated)
-            .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
-        } else {
             let impact = USBPlaylistSelectionImpact(
                 inspection: inspection,
                 selectedPlaylistIDs: selectedUSBPlaylistIDs
@@ -1130,7 +1123,6 @@ public struct LibrarySourcesWorkspaceView: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
             .accessibilityIdentifier("lumi.library.sources.usb.selectionImpact")
-        }
     }
 
     private func impactMetric(

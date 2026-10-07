@@ -226,3 +226,12 @@ Scope: presentation and selection restoration only. No live scheduling,
 waveform rendering, MIDI, USB writes, track import or schema changes.
 Automated and desktop validation are recorded separately; do not treat a
 successful build as completed hardware acceptance.
+
+Desktop evidence (CHRM, 2026-10-07): expanded destination shows the exact two
+stored playlists (15 and 56 tracks). Clearing source selection disables Sync
+but leaves both destination playlists intact. Original two selections restored
+without importing tracks. The UI check exposed an empty-selection height jump;
+the impact metrics now remain present at zero instead of replacing the panel.
+Folder selection respects visible search results. Local Swift regression suite:
+69 tests. Waveform and integration lanes are unchanged; physical light output
+is not covered by this UI test.
