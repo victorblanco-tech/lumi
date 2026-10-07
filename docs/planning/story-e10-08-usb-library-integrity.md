@@ -248,3 +248,11 @@ fingerprints are in collapsed Details; neither establishes audio-file age.
 The current File Data comparison is metadata, not verified audio freshness.
 Use USB Version requires a fresh component comparison and retains the existing
 confirmation and revision guards. No live lane or waveform changes.
+
+Validation 2026-10-07: 143 engine tests passed (4 ignored), 69 Swift tests
+passed, strict engine Clippy passed, installer build 385 audited. In the actual
+desktop app, the stored GRAY/Doo Pah card renders compactly with Details closed
+and Use USB Version disabled before verification. Opening and closing Details
+works. After scanning GRAY, both the stale card and its orange review count
+disappear. No Sync or overwrite action taken. SQLite quick_check remains OK;
+120 tracks, 278 timeline revisions and 139 playlist memberships preserved.
