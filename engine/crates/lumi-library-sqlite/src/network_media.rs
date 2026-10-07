@@ -305,7 +305,7 @@ mod tests {
                 UsbMediaTrust::Unknown
             );
         }
-        assert_eq!(SqliteLibraryRepository::open(&path)?.schema_version()?, 20);
+        assert_eq!(SqliteLibraryRepository::open(&path)?.schema_version()?, 21);
         std::fs::remove_dir_all(root)?;
         Ok(())
     }

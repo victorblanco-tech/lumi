@@ -871,6 +871,7 @@ fn device_alias_resolves_real_and_simulated_identity_and_archives_on_resync()
         &[DevicePlaylistUpsert {
             device_playlist_id: 77,
             path: "Sets/90s Dance/90s Club".to_owned(),
+            folder_names: Some(vec!["Sets".to_owned(), "90s Dance".to_owned()]),
             device_track_ids: vec![1_256],
         }],
     )?;
@@ -1043,6 +1044,7 @@ fn device_sync_imports_new_tracks_and_playlist_membership_atomically()
         &[DevicePlaylistUpsert {
             device_playlist_id: 77,
             path: "MainStage 140+".to_owned(),
+            folder_names: Some(vec![]),
             device_track_ids: vec![9_001],
         }],
     )?;
@@ -1104,6 +1106,7 @@ fn device_sync_imports_new_tracks_and_playlist_membership_atomically()
         &[DevicePlaylistUpsert {
             device_playlist_id: 77,
             path: "MainStage 140+".to_owned(),
+            folder_names: Some(vec![]),
             device_track_ids: vec![9_001],
         }],
     )?;
@@ -1184,6 +1187,7 @@ fn identical_playlists_from_two_usb_sources_are_presented_once()
     let playlist = DevicePlaylistUpsert {
         device_playlist_id: 77,
         path: "Genre 5 Stars/MainStage 140+".to_owned(),
+        folder_names: Some(vec!["Genre 5 Stars".to_owned()]),
         device_track_ids: vec![90, 91],
     };
     for (source_id, display_name) in [
@@ -1332,6 +1336,7 @@ fn stable_filesystem_identity_replaces_ephemeral_mount_records_atomically()
     let playlist = DevicePlaylistUpsert {
         device_playlist_id: 24,
         path: "Genre 5 Stars/MainStage 140+".to_owned(),
+        folder_names: Some(vec!["Genre 5 Stars".to_owned()]),
         device_track_ids: vec![88],
     };
     let mut legacy_aliases = vec![alias.clone()];
@@ -1588,6 +1593,95 @@ fn light_planning_policy_is_revisioned_and_persistent() -> Result<(), Box<dyn st
     let schema: u32 = repository
         .connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    assert_eq!(schema, 20);
+    assert_eq!(schema, 21);
+    Ok(())
+}
+#[test]
+fn native_playlist_folders_enrich_only_the_same_source_and_path()
+-> Result<(), Box<dyn std::error::Error>> {
+    use lumi_library::{LibraryRepository, TrackPageRequest};
+    let repository = SqliteLibraryRepository::in_memory()?;
+    let legacy = DevicePlaylistUpsert {
+        device_playlist_id: 77,
+        path: "Sets/Psy/Tech Trance".to_owned(),
+        folder_names: None,
+        device_track_ids: vec![],
+    };
+    let mut repository = repository;
+    repository.sync_device_aliases(
+        "usb-fs:test",
+        "Test",
+        "v1",
+        &mut [],
+        &[],
+        &[],
+        &[],
+        std::slice::from_ref(&legacy),
+    )?;
+    let original = repository
+        .page_playlists(TrackPageRequest::try_new(0, 10)?)?
+        .playlists()[0]
+        .clone();
+    assert_eq!(original.folder_names(), None);
+    let native = DevicePlaylistUpsert {
+        folder_names: Some(vec!["Sets".to_owned()]),
+        ..legacy
+    };
+    repository.remember_device_playlist_folders("usb-fs:other", std::slice::from_ref(&native))?;
+    assert_eq!(
+        repository
+            .page_playlists(TrackPageRequest::try_new(0, 10)?)?
+            .playlists()[0]
+            .folder_names(),
+        None
+    );
+    repository.remember_device_playlist_folders("usb-fs:test", std::slice::from_ref(&native))?;
+    let enriched = repository
+        .page_playlists(TrackPageRequest::try_new(0, 10)?)?
+        .playlists()[0]
+        .clone();
+    assert_eq!(enriched.id(), original.id());
+    assert_eq!(enriched.name(), original.name());
+    assert_eq!(enriched.track_count(), original.track_count());
+    assert_eq!(
+        enriched.folder_names(),
+        Some(["Sets".to_owned()].as_slice())
+    );
+    let moved = DevicePlaylistUpsert {
+        path: "Elsewhere/Psy/Tech Trance".to_owned(),
+        folder_names: Some(vec!["Elsewhere".to_owned()]),
+        ..native
+    };
+    repository.remember_device_playlist_folders("usb-fs:test", &[moved])?;
+    assert_eq!(
+        repository
+            .page_playlists(TrackPageRequest::try_new(0, 10)?)?
+            .playlists()[0],
+        enriched
+    );
+    Ok(())
+}
+
+#[test]
+fn schema20_playlist_migration_preserves_existing_memberships()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut repository = SqliteLibraryRepository::in_memory()?;
+    let baseline = DemoLibrarySourceProvider::curated().load_baseline()?;
+    repository.import_baseline(&baseline)?;
+    let before_tracks = repository.page_tracks(TrackPageRequest::try_new(0, 200)?)?;
+    let before_playlists = repository.page_playlists(TrackPageRequest::try_new(0, 200)?)?;
+    repository.connection.execute_batch(
+        "ALTER TABLE playlists DROP COLUMN folder_names_json; PRAGMA user_version=20;",
+    )?;
+    repository.migrate()?;
+    assert_eq!(repository.schema_version()?, 21);
+    assert_eq!(
+        repository.page_tracks(TrackPageRequest::try_new(0, 200)?)?,
+        before_tracks
+    );
+    assert_eq!(
+        repository.page_playlists(TrackPageRequest::try_new(0, 200)?)?,
+        before_playlists
+    );
     Ok(())
 }

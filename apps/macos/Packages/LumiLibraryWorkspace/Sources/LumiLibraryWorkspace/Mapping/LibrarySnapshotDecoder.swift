@@ -1316,7 +1316,9 @@ public struct LibrarySnapshotDecoder: Sendable {
             id: try unsigned(object, "id"),
             sourcePlaylistID: try string(object, "sourcePlaylistId"),
             name: try string(object, "name"),
-            trackCount: try unsigned(object, "trackCount")
+            trackCount: try unsigned(object, "trackCount"),
+            folderNames: object["folderNames"] == nil || object["folderNames"] == .null
+                ? nil : try stringArray(object, "folderNames")
         )
     }
 

@@ -154,6 +154,25 @@ Playback must report unavailable, never synthesize music or fall back to a stale
 unverified path. Rust and Swift regressions cover this boundary. Detailed local
 test evidence and the remaining physical gates are recorded in E10-09.
 
+## Playlist hierarchy release blocker from 2026 10 07
+
+The owner requires an expandable playlist tree in Tracks/Editor before 0.6.4.
+The old browser rendered the correct full stored paths as one flat list. The
+same presentation defect existed in the Local Playback library browser.
+
+Dev-13 adds one shared renderer, separate native folder metadata in schema 21,
+and source/ID/path-scoped enrichment during a scan. A legacy USB needs one scan
+to recover its exact native folders; no track sync is needed for enrichment.
+Unknown legacy names are not split speculatively, avoiding synthetic folders
+when a name itself contains `/`. Active selection reveals its parents; collapsing
+a folder does not change the track query or start playback.
+
+Local tests cover nested/collapsed folders, retained leaf IDs, duplicate leaf
+names, literal slashes, invalid/unknown legacy metadata, exact-source enrichment
+and schema-20 migration preserving tracks and playlists. Native desktop
+acceptance and final gate results are recorded after installation, not inferred
+from these tests. Network/timing and waveform code are unchanged.
+
 ## Follow up for the next release
 
 On 2026-10-07, the owner deferred the misleading USB source `CURRENT` badge

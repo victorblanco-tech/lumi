@@ -1921,6 +1921,7 @@ impl LibraryWorker {
                 .map(|playlist| DevicePlaylistUpsert {
                     device_playlist_id: playlist.device_playlist_id,
                     path: playlist.path.clone(),
+                    folder_names: Some(playlist.folder_names.clone()),
                     device_track_ids: playlist.track_ids.clone(),
                 })
                 .collect::<Vec<_>>(),
@@ -2056,6 +2057,21 @@ impl LibraryWorker {
         &self,
         snapshot: DeviceLibrarySnapshot,
     ) -> Result<DeviceInspection, LibraryWorkerError> {
+        // Enrich only already-synced, source/path-matching playlist metadata.
+        // A scan does not import tracks or change memberships or phrase data.
+        self.repository.remember_device_playlist_folders(
+            &snapshot.source_id,
+            &snapshot
+                .playlists
+                .iter()
+                .map(|playlist| DevicePlaylistUpsert {
+                    device_playlist_id: playlist.device_playlist_id,
+                    path: playlist.path.clone(),
+                    folder_names: Some(playlist.folder_names.clone()),
+                    device_track_ids: Vec::new(),
+                })
+                .collect::<Vec<_>>(),
+        )?;
         let stored = self.repository.device_alias_states(&snapshot.source_id)?;
         let candidates = self.repository.device_match_candidates()?;
         let mut tracks = BTreeMap::new();
@@ -3535,6 +3551,7 @@ impl LibraryWorker {
                 "id": playlist.id().value(),
                 "sourcePlaylistId": playlist.source_playlist_id().as_str(),
                 "name": playlist.name(),
+                "folderNames": playlist.folder_names(),
                 "trackCount": playlist.track_count(),
             })).collect::<Vec<_>>(),
             "page": {

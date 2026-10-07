@@ -32,7 +32,7 @@ use rusqlite::{
 };
 use thiserror::Error;
 
-const SCHEMA_VERSION: u32 = 20;
+const SCHEMA_VERSION: u32 = 21;
 mod network_media;
 pub use network_media::{TrustedUsbMedia, UsbMediaTrust};
 const DEFAULTS_VERSION_KEY: &str = "phrase-role-defaults-version";
@@ -103,6 +103,7 @@ pub struct DeviceAliasUpsert {
 pub struct DevicePlaylistUpsert {
     pub device_playlist_id: u32,
     pub path: String,
+    pub folder_names: Option<Vec<String>>,
     pub device_track_ids: Vec<u32>,
 }
 
@@ -1328,6 +1329,45 @@ impl SqliteLibraryRepository {
         )?)
     }
 
+    pub fn remember_device_playlist_folders(
+        &self,
+        source_id: &str,
+        playlists: &[DevicePlaylistUpsert],
+    ) -> Result<(), SqliteLibraryError> {
+        let transaction = self.connection.unchecked_transaction()?;
+        for playlist in playlists {
+            let Some(folders) = &playlist.folder_names else {
+                continue;
+            };
+            let prefix = if folders.is_empty() {
+                String::new()
+            } else {
+                format!("{}/", folders.join("/"))
+            };
+            if folders.len() > 32
+                || folders.iter().any(|name| name.is_empty())
+                || !playlist.path.starts_with(&prefix)
+                || playlist.path.len() <= prefix.len()
+            {
+                continue;
+            }
+            transaction.execute(
+                "UPDATE playlists SET folder_names_json = ?1
+                 WHERE source_id = ?2 AND source_playlist_id = ?3 AND name = ?4
+                   AND EXISTS (SELECT 1 FROM device_library_sources WHERE source_id = ?2)
+                   AND folder_names_json IS NOT ?1",
+                params![
+                    serde_json::to_string(folders)?,
+                    source_id,
+                    format!("onelibrary:{}", playlist.device_playlist_id),
+                    playlist.path
+                ],
+            )?;
+        }
+        transaction.commit()?;
+        Ok(())
+    }
+
     // The four synchronized collections form one atomic device snapshot. A
     // request object would only move these explicit transaction inputs around.
     #[allow(clippy::too_many_arguments)]
@@ -1708,9 +1748,18 @@ impl SqliteLibraryRepository {
         for playlist in playlists {
             let source_playlist_id = format!("onelibrary:{}", playlist.device_playlist_id);
             transaction.execute(
-                "INSERT INTO playlists(source_id, source_playlist_id, name)
-                 VALUES (?1, ?2, ?3)",
-                params![source_id, source_playlist_id, playlist.path],
+                "INSERT INTO playlists(source_id, source_playlist_id, name, folder_names_json)
+                 VALUES (?1, ?2, ?3, ?4)",
+                params![
+                    source_id,
+                    source_playlist_id,
+                    playlist.path,
+                    playlist
+                        .folder_names
+                        .as_ref()
+                        .map(serde_json::to_string)
+                        .transpose()?
+                ],
             )?;
             let playlist_id = transaction.last_insert_rowid();
             let mut position = 0_i64;
@@ -3813,6 +3862,23 @@ impl SqliteLibraryRepository {
                     // attempting a fingerprint backfill against missing tables.
                     "PRAGMA user_version = 20;"
                 })?;
+            current = 20;
+        }
+        if current == 20 {
+            let has_folders: bool = self.connection.query_row(
+                "SELECT EXISTS(SELECT 1 FROM pragma_table_info('playlists') WHERE name = 'folder_names_json')",
+                [], |row| row.get(0),
+            )?;
+            if self.table_exists("playlists")? && !has_folders {
+                self.connection.execute_batch(
+                    "BEGIN IMMEDIATE;
+                     ALTER TABLE playlists ADD COLUMN folder_names_json TEXT;
+                     PRAGMA user_version = 21;
+                     COMMIT;",
+                )?;
+            } else {
+                self.connection.execute_batch("PRAGMA user_version = 21;")?;
+            }
         }
         Ok(())
     }
@@ -4740,7 +4806,9 @@ impl LibraryRepository for SqliteLibraryRepository {
         )?;
         let mut statement = self.connection.prepare(
             "SELECT MIN(p.id), MIN(p.source_playlist_id), MIN(p.name),
-                    COUNT(DISTINCT pt.track_id)
+                    COUNT(DISTINCT pt.track_id),
+                    CASE WHEN COUNT(DISTINCT p.folder_names_json) = 1
+                         THEN MIN(p.folder_names_json) ELSE NULL END
              FROM playlists p
              LEFT JOIN playlist_tracks pt ON pt.playlist_id = p.id
              GROUP BY LOWER(TRIM(p.name))
@@ -4753,12 +4821,19 @@ impl LibraryRepository for SqliteLibraryRepository {
         ])?;
         let mut playlists = Vec::with_capacity(usize::from(request.limit()));
         while let Some(row) = rows.next()? {
-            playlists.push(PlaylistSummary::new(
-                PlaylistId::new(from_positive_i64(row.get(0)?, "playlist id")?),
-                SourcePlaylistId::try_new(row.get::<_, String>(1)?)?,
-                row.get(2)?,
-                from_nonnegative_i64(row.get(3)?, "playlist track count")?,
-            ));
+            let folders = row
+                .get::<_, Option<String>>(4)?
+                .map(|value| serde_json::from_str::<Vec<String>>(&value))
+                .transpose()?;
+            playlists.push(
+                PlaylistSummary::new(
+                    PlaylistId::new(from_positive_i64(row.get(0)?, "playlist id")?),
+                    SourcePlaylistId::try_new(row.get::<_, String>(1)?)?,
+                    row.get(2)?,
+                    from_nonnegative_i64(row.get(3)?, "playlist track count")?,
+                )
+                .with_folder_names(folders),
+            );
         }
         Ok(PlaylistPage::new(
             from_nonnegative_i64(total, "playlist count")?,

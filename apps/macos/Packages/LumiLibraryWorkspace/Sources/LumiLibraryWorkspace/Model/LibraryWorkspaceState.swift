@@ -208,12 +208,14 @@ public struct LibraryPlaylist: Identifiable, Equatable, Sendable {
     public let sourcePlaylistID: String
     public let name: String
     public let trackCount: UInt64
+    public let folderNames: [String]?
 
-    public init(id: UInt64, sourcePlaylistID: String, name: String, trackCount: UInt64) {
+    public init(id: UInt64, sourcePlaylistID: String, name: String, trackCount: UInt64, folderNames: [String]? = nil) {
         self.id = id
         self.sourcePlaylistID = sourcePlaylistID
         self.name = name
         self.trackCount = trackCount
+        self.folderNames = folderNames
     }
 }
 

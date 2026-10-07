@@ -335,22 +335,13 @@ public struct LibraryWorkspaceView: View {
                 .font(LumiTypography.sectionTitle)
                 .padding(.top, LumiSpacing.small)
             ScrollView(.vertical) {
-                LazyVStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-                    ForEach(state.playlists) { playlist in
-                        Button { selectPlaylist(playlist.id) } label: {
-                            navigationLabel(
-                                playlist.name,
-                                count: playlist.trackCount,
-                                systemImage: "music.note",
-                                selected: selectedPlaylistID == playlist.id
-                                    && state.query.workflowFilter == nil,
-                                subtitle: playlistSourceLabel(playlist)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("lumi.library.playlist.\(playlist.id)")
-                    }
-                }
+                LibraryPlaylistTreeView(
+                    playlists: state.playlists,
+                    selectedPlaylistID: state.query.workflowFilter == nil ? selectedPlaylistID : nil,
+                    accessibilityPrefix: "lumi.library",
+                    sourceLabels: Dictionary(uniqueKeysWithValues: state.playlists.map { ($0.id, playlistSourceLabel($0)) }),
+                    onSelect: { selectPlaylist($0) }
+                )
             }
             .scrollIndicators(.automatic)
             .frame(maxHeight: .infinity)

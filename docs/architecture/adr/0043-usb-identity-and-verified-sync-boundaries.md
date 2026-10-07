@@ -34,6 +34,32 @@ track progress in a reserved per-source UI area; no success until commit. Rebuil
 playlist selection from stored full paths, not recyclable USB numeric IDs. Moved
 playlists require explicit reselection rather than guessing from a leaf name.
 
+## Synced playlist hierarchy
+
+Lumi 0.6.4-dev-13 retains the native OneLibrary folder components separately
+from each synced playlist's full display path. SQLite schema 21 adds the nullable
+`playlists.folder_names_json` column; existing tracks, memberships, IDs, phrases
+and output settings are not rewritten by the migration. New syncs preserve the
+components in the existing playlist transaction.
+
+A source scan can enrich an already synced playlist only when its trusted source,
+numeric playlist ID and full stored path all match. This updates folder metadata
+on the Library worker, not track data, selection or live preparation. Unknown old
+paths remain literal until that USB is scanned; splitting on `/` is unsafe because
+both folder and playlist names can contain it. Conflicting native hierarchies for
+a logically grouped path remain unknown rather than selecting one arbitrarily.
+
+Mac Tracks/Editor and Local Playback share one collapsible hierarchy renderer.
+Folder actions change expansion only; leaf selection retains the authoritative
+playlist ID and existing query/load commands. The active playlist's ancestors
+are revealed, while other folders begin collapsed. No live timing, MIDI, waveform
+or Remote rendering code changes are required.
+
+Before migration, retain a checked database backup. Older binaries that reject
+schema 21 require that pre-upgrade backup for rollback; do not point them at the
+upgraded file. After one scan, native folders remain available offline and after
+restart without further USB reads.
+
 ## Consequences and remaining boundaries
 
 Full hashing costs USB I/O and must never run on the realtime or UI thread. A

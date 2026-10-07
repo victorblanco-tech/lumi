@@ -74,6 +74,13 @@ fresh scan. Wait for the source's completion report before ejecting the USB.
 If a playlist was moved to another folder in rekordbox, select its new location
 again rather than assuming the old numeric playlist ID still identifies it.
 
+In Tracks/Editor and the Local Playback library, open folders to browse your
+synced playlists. Selecting a playlist filters the track list; opening or closing
+a folder does not change the selected tracks. Only synced playlists appear here.
+For USBs synced by an older Lumi version, scan each USB once to restore its exact
+folder structure. That scan does not import tracks; the structure is then kept
+when the USB is disconnected. A `/` inside a name is not treated as a new folder.
+
 When a track differs from the Lumi copy, the review view shows the evidence Lumi
 can compare: file data, beatgrid, waveform, Hot Cues and source phrases. Choose
 whether to ignore that revision, keep it out of Lumi or replace the Lumi source

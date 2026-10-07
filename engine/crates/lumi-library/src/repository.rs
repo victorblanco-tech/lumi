@@ -356,6 +356,7 @@ pub struct PlaylistSummary {
     source_playlist_id: SourcePlaylistId,
     name: String,
     track_count: u64,
+    folder_names: Option<Vec<String>>,
 }
 
 impl PlaylistSummary {
@@ -371,6 +372,7 @@ impl PlaylistSummary {
             source_playlist_id,
             name,
             track_count,
+            folder_names: None,
         }
     }
 
@@ -392,6 +394,17 @@ impl PlaylistSummary {
     #[must_use]
     pub const fn track_count(&self) -> u64 {
         self.track_count
+    }
+
+    #[must_use]
+    pub fn with_folder_names(mut self, names: Option<Vec<String>>) -> Self {
+        self.folder_names = names;
+        self
+    }
+
+    #[must_use]
+    pub fn folder_names(&self) -> Option<&[String]> {
+        self.folder_names.as_deref()
     }
 }
 
