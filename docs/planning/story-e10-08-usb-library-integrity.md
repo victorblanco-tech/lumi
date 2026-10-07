@@ -176,6 +176,19 @@ Acceptance for the follow-up:
   new-track and review counts where relevant. Do not imply they were imported.
 - Mark retained sync counters and their date as results of the last sync,
   separate from the current scan and selected-playlist impact.
+- Before Sync, expose a browsable list of every new or potentially updated
+  track, with its title, artist, change status and full USB playlist path
+  including parent folders. Expand the aggregate New/Update counts into these
+  records; provide a changes-only filter so the owner need not search every
+  folder to discover what Sync will affect.
+- For an update, explain which compared components differ (audio/file identity,
+  beatgrid, cues, source phrases or metadata, including track color) using the
+  available evidence. Distinguish unknown or unverified differences from a
+  confirmed newer version; do not label every difference as newer.
+- Show all relevant playlist memberships when a changed track occurs in more
+  than one playlist, but retain unique-track totals and one import per track.
+  Make the selected sync scope explicit. Pre-sync inspection must not perform
+  an import or discard existing Lumi phrases.
 - Show a current/in-sync state only for the scope actually compared. Preserve
   per-source identity, remembered selections, fixed layout and isolated sync.
 - Test initial state, changed and unchanged scans, source switching and sync
