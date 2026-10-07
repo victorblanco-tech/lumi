@@ -17,7 +17,20 @@ Status: In progress. Extends E10-03; no production release without acceptance.
 - Scope: non-increasing/inconsistent/incomplete beatgrids detected after parsing;
   unreadable media, changed source snapshots and unparseable containers remain
   safe operation failures rather than being silently accepted.
-- Automated and native GRAY six-playlist acceptance results to be recorded below.
+- Acceptance: replay against a database copy succeeded; native Dev-18 build 391
+  repeated the exact six user-selected GRAY playlists successfully with visible
+  32/149 progress and completion. Result: 149 selected, 148 available, only
+  `Our Origin (Extended Mix)` excluded; 8 incomparable revisions retained for
+  review. All six stored playlist paths were present in the replay result.
+- Post-sync live database quick_check OK, 154 tracks. Compared every previously
+  active phrase point (beat, role and loop strategy) and all AutoLoop variants
+  with the pre-sync backup: zero differences. A source-reconcile revision on
+  one existing mashup retained identical phrase points.
+- Actual quit/reopen preserved GRAY's `1 SKIPPED` and `148/149 matched` without
+  requiring a fresh scan. Newest Dev-18 remains open in Import & Sources.
+- Tests: 145 engine tests passed, 4 ignored; 69 Swift Testing + 2 XCTest passed;
+  strict Clippy and package/installer checks passed. No physical light-output
+  acceptance is claimed for this USB-only test.
 
 ## Dev-17 — sync failure visibility and confirmed local GRAY recovery
 

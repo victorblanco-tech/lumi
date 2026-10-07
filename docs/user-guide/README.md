@@ -86,6 +86,12 @@ can compare: file data, beatgrid, waveform, Hot Cues and source phrases. Choose
 whether to ignore that revision, keep it out of Lumi or replace the Lumi source
 data. Lumi-owned phrases remain separate from source phrases.
 
+If a track has an invalid beatgrid, Lumi skips that track and synchronizes the
+other valid tracks. The USB source lists the skipped track by name. An existing
+Lumi version is retained; a new track without a valid grid is not imported.
+Repair its beatgrid in rekordbox, export to USB and sync again. Lumi never
+invents beats to work around invalid source data.
+
 > A USB beatgrid or audio revision can invalidate earlier phrase alignment.
 > Review changed tracks before a show.
 
