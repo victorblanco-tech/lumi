@@ -235,3 +235,16 @@ the impact metrics now remain present at zero instead of replacing the panel.
 Folder selection respects visible search results. Local Swift regression suite:
 69 tests. Waveform and integration lanes are unchanged; physical light output
 is not covered by this UI test.
+# Dev-15 — current, decision-oriented USB review
+
+Completed source scans are authoritative for review visibility and review
+counts. Historical conflict rows no longer appear when the fresh comparison
+is absent or all imported components are equal. Stored records are preserved;
+a scan does not resolve a conflict by overwriting tracks.
+
+Review cards show an honest uncertainty headline, conservative Keep Lumi
+recommendation and only changed component names. Export dates and revision
+fingerprints are in collapsed Details; neither establishes audio-file age.
+The current File Data comparison is metadata, not verified audio freshness.
+Use USB Version requires a fresh component comparison and retains the existing
+confirmation and revision guards. No live lane or waveform changes.

@@ -163,6 +163,13 @@ impl DeviceReviewComparison {
     }
 }
 
+fn current_review_visible(
+    comparisons: Option<&BTreeMap<u32, DeviceReviewComparison>>,
+    id: u32,
+) -> bool {
+    comparisons.is_none_or(|items| items.get(&id).is_some_and(|item| !item.is_unchanged()))
+}
+
 #[derive(Clone, Debug)]
 pub struct LibraryLocalPlaybackTrack {
     metadata: TrackMetadata,
@@ -3395,6 +3402,12 @@ impl LibraryWorker {
                 let review_comparisons = self
                     .device_review_comparisons_by_source
                     .get(&source.source_id);
+                // A completed scan is authoritative for review visibility.
+                // Historical sync dispositions must not resurrect a conflict
+                // that is now current, older/newer, absent, or component-equal.
+                let review_tracks = review_tracks.iter().filter(|track| {
+                    current_review_visible(review_comparisons, track.device_track_id)
+                }).collect::<Vec<_>>();
                 json!({
                     "sourceId": source.source_id,
                     "displayName": source.display_name,
@@ -3407,7 +3420,7 @@ impl LibraryWorker {
                     "currentTracks": source.current_tracks,
                     "promotedTracks": source.promoted_tracks,
                     "protectedTracks": source.protected_tracks,
-                    "conflictTracks": source.conflict_tracks,
+                    "conflictTracks": review_tracks.len(),
                     "beatGridRefresh": true,
                     "cueRevisionTracked": true,
                     "reviewTracks": review_tracks.iter().take(200).map(|track| {

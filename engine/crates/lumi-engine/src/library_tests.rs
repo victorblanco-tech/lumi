@@ -1701,3 +1701,27 @@ fn creative_timeline_reuse_is_revisioned_and_exact_beat_safe()
     );
     Ok(())
 }
+#[test]
+fn fresh_review_visibility_does_not_resurrect_historical_conflicts() {
+    let mut comparisons = std::collections::BTreeMap::new();
+    assert!(super::current_review_visible(None, 7));
+    assert!(!super::current_review_visible(Some(&comparisons), 7));
+    let mut item = super::DeviceReviewComparison {
+        beat_grid_changed: false,
+        hot_cues_changed: false,
+        file_data_changed: false,
+        raw_phrases_changed: false,
+        waveform_changed: false,
+        beat_grid_detail: String::new(),
+        hot_cues_detail: String::new(),
+        raw_phrases_detail: String::new(),
+        waveform_detail: String::new(),
+        file_detail: String::new(),
+    };
+    comparisons.insert(7, item.clone());
+    assert!(!super::current_review_visible(Some(&comparisons), 7));
+    item.hot_cues_changed = true;
+    comparisons.insert(7, item);
+    assert!(super::current_review_visible(Some(&comparisons), 7));
+    assert!(!super::current_review_visible(Some(&comparisons), 8));
+}

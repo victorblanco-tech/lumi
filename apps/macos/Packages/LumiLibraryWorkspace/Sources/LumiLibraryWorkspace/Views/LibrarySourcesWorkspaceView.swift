@@ -618,7 +618,7 @@ public struct LibrarySourcesWorkspaceView: View {
                 Spacer()
                 compactStatus("\(visibleTracks.count) REVIEW", visibleTracks.isEmpty ? .ready : .degraded)
             }
-            Text("Lumi did not overwrite these tracks. Compare each imported Rekordbox component, then choose what should happen with this exact USB revision.")
+            Text("Lumi kept its version. Check the differences before choosing a replacement.")
                 .font(LumiTypography.caption)
                 .foregroundStyle(LumiColor.textSecondary)
             VStack(spacing: LumiSpacing.xSmall) {
@@ -632,10 +632,6 @@ public struct LibrarySourcesWorkspaceView: View {
                             Text(track.artist.isEmpty ? "Unknown artist" : track.artist)
                                 .font(LumiTypography.caption)
                                 .foregroundStyle(LumiColor.textSecondary)
-                            Text(track.reason)
-                                .font(LumiTypography.caption)
-                                .foregroundStyle(LumiColor.textSecondary)
-                                .fixedSize(horizontal: false, vertical: true)
                             }
                             Spacer(minLength: LumiSpacing.medium)
                             Text(String(format: "%.2f BPM", Double(track.bpmMilli) / 1_000))
@@ -643,6 +639,25 @@ public struct LibrarySourcesWorkspaceView: View {
                                 .foregroundStyle(LumiColor.textSecondary)
                             compactStatus("REVIEW", .degraded)
                         }
+                        Text("USB versus Lumi: age cannot be established")
+                            .font(LumiTypography.body.weight(.semibold))
+                            .foregroundStyle(LumiColor.warning)
+                        Text("Recommended: keep Lumi. Audio-file age is not verified; export dates and metadata differences do not prove a newer audio version.")
+                            .font(LumiTypography.caption)
+                            .foregroundStyle(LumiColor.textSecondary)
+                        if let components = track.components {
+                            Text(compactReviewDifferences(components))
+                                .font(LumiTypography.caption.weight(.semibold))
+                                .foregroundStyle(LumiColor.textPrimary)
+                        } else {
+                            Text("Differences not verified yet. Refresh this USB before deciding.")
+                                .font(LumiTypography.caption)
+                                .foregroundStyle(LumiColor.warning)
+                        }
+                        DisclosureGroup("Details") {
+                        Text(track.reason)
+                            .font(LumiTypography.caption)
+                            .foregroundStyle(LumiColor.textSecondary)
                         HStack(spacing: LumiSpacing.large) {
                             reviewFact("USB source date", formattedReviewDate(track.incomingAnalyzedAt))
                             reviewFact("Active Lumi source", track.activeSourceName ?? "Unknown source")
@@ -660,7 +675,7 @@ public struct LibrarySourcesWorkspaceView: View {
                             ) {
                                 reviewComponent("Beatgrid", components.beatGrid, "metronome")
                                 reviewComponent("Cue Points", components.cuePoints, "mappin")
-                                reviewComponent("File Data", components.fileData, "doc.fill")
+                                reviewComponent("Track Metadata", components.fileData, "doc.fill")
                                 reviewComponent("RB Phrases", components.rekordboxPhrases, "rectangle.split.3x1")
                                 reviewComponent("Waveform", components.waveform, "waveform")
                             }
@@ -668,6 +683,7 @@ public struct LibrarySourcesWorkspaceView: View {
                             Label("Reconnect or refresh this USB to calculate the component-level differences.", systemImage: "arrow.clockwise")
                                 .font(LumiTypography.caption)
                                 .foregroundStyle(LumiColor.textSecondary)
+                        }
                         }
                         reviewActions(device: device, track: track)
                     }
@@ -705,7 +721,7 @@ public struct LibrarySourcesWorkspaceView: View {
         } else {
             VStack(alignment: .leading, spacing: LumiSpacing.small) {
                 HStack(spacing: LumiSpacing.small) {
-                    Button("Ignore This Time") {
+                    Button("Later") {
                         failedUSBReviewKey = nil
                         ignoredUSBReviews.insert(key)
                     }
@@ -713,7 +729,7 @@ public struct LibrarySourcesWorkspaceView: View {
                     .help("Hide this item until you reopen this screen. Nothing is saved or synchronized.")
                     if let root = mountedURL(for: device)?.path,
                        let activeRevision = track.activeAnalysisRevision {
-                        Button("Do Not Sync to Lumi") {
+                        Button("Keep Lumi") {
                             failedUSBReviewKey = nil
                             resolvingUSBReviewKey = key
                             onDeviceConflictResolution(
@@ -729,7 +745,7 @@ public struct LibrarySourcesWorkspaceView: View {
                         .buttonStyle(.bordered)
                         .disabled(usbOperation.isActive || !rendersInteractiveControls)
                         .help("Permanently keep Lumi for this exact USB analysis revision. A later USB change will be reviewed again.")
-                        Button("Sync to Lumi & Overwrite") {
+                        Button("Use USB Version") {
                             failedUSBReviewKey = nil
                             pendingUSBVersionRequest = conflictRequest(
                                 root: root,
@@ -739,8 +755,8 @@ public struct LibrarySourcesWorkspaceView: View {
                                 choice: .useUSB
                             )
                         }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(usbOperation.isActive || !rendersInteractiveControls)
+                        .buttonStyle(.bordered)
+                        .disabled(usbOperation.isActive || !rendersInteractiveControls || track.components == nil)
                         .help("Replace the imported Rekordbox projection after a final revision check. Lumi phrases and AutoLoops stay intact.")
                     } else {
                         Text("Connect and refresh this USB to apply a saved choice.")
@@ -756,6 +772,17 @@ public struct LibrarySourcesWorkspaceView: View {
                 }
             }
         }
+    }
+
+    private func compactReviewDifferences(_ components: RekordboxDeviceReviewComponentsState) -> String {
+        let changed = [
+            ("Beatgrid", components.beatGrid.changed),
+            ("Cue points", components.cuePoints.changed),
+            ("Track metadata", components.fileData.changed),
+            ("RB phrases", components.rekordboxPhrases.changed),
+            ("Waveform", components.waveform.changed)
+        ].filter { $0.1 }.map { $0.0 }
+        return changed.isEmpty ? "Imported components are identical." : "Changed: " + changed.joined(separator: " · ")
     }
 
     private func reviewKey(
