@@ -16,7 +16,17 @@ Status: In progress. Extends E10-03; no production release without acceptance.
 - The actual selected six-playlist sync then showed track/audio progress, but
   failed on a non-increasing Rekordbox beatgrid. Add the failing track name and
   USB track ID to the error; retain strict validation rather than inventing beats.
-  Further diagnosis is required before declaring the six-playlist sync successful.
+  Diagnostic replay against a separate database copy identified `Our Origin
+  (Extended Mix)` (USB track 1283). Independent read-only PQTZ decoding confirmed
+  source beat index 890 goes from 404463 ms back to 404082 ms. This is not a
+  rendering or invented-grid issue. User decision requested: retain/exclude the
+  invalid track and sync valid tracks, or first repair its Rekordbox analysis.
+- Evidence: 69 Swift Testing tests plus 2 XCTest feedback tests passed; 143 engine
+  tests passed (4 ignored), a separate duplicate-time regression passed, strict
+  engine Clippy passed. Package/installer checks passed, build 389. Actual native
+  six-playlist sync showed 17/149 progress, then rejected the malformed source;
+  this is explicitly not a successful full-sync acceptance. Live database remains
+  120 tracks, 278 timeline revisions, 139 playlist memberships; quick_check is OK.
 - No waveform, live timing, phrase ownership, MIDI or Remote behavior changes.
 
 ## User contract
