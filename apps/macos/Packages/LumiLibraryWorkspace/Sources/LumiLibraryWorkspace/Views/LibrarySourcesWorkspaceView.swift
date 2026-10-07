@@ -384,6 +384,7 @@ public struct LibrarySourcesWorkspaceView: View {
     private func selectedUSBInspector(device: RekordboxDeviceState?) -> some View {
         if let device {
             let sourceIsBusy = usbOperation.isActive && usbOperation.sourceID == device.sourceID
+            let failedMessage = usbOperation.failedMessage(for: device.sourceID)
             let displayName = USBSourceIdentityResolver.displayName(
                 for: device,
                 inspection: activeDeviceInspection
@@ -414,10 +415,11 @@ public struct LibrarySourcesWorkspaceView: View {
                         }
                     }
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(sourceIsBusy ? usbOperation.detail : "Sync preserves Lumi phrases and keeps older or uncertain analysis for review.")
+                        Text(failedMessage ?? (sourceIsBusy ? usbOperation.detail : "Sync preserves Lumi phrases and keeps older or uncertain analysis for review."))
                             .font(LumiTypography.caption)
-                            .foregroundStyle(LumiColor.textSecondary)
+                            .foregroundStyle(failedMessage == nil ? LumiColor.textSecondary : LumiColor.warning)
                             .lineLimit(1)
+                            .help(failedMessage == nil ? "" : usbOperation.detail)
                         ProgressView(value: sourceIsBusy ? Double(usbOperation.completedTracks ?? 0) : 0,
                                      total: Double(max(usbOperation.totalTracks ?? 1, 1)))
                             .opacity(sourceIsBusy ? 1 : 0)

@@ -854,6 +854,14 @@ public struct USBSourceOperationState: Equatable, Sendable {
 
     public static let idle = Self(phase: .idle, title: "", detail: "")
     public var isActive: Bool { phase == .reading || phase == .synchronizing }
+
+    public func failedMessage(for source: String) -> String? {
+        guard phase == .failed, sourceID == source else { return nil }
+        if detail.contains("USB identity conflicts") {
+            return "Sync stopped: USB identity needs confirmation. No tracks were imported."
+        }
+        return detail
+    }
 }
 
 public struct ProDJLinkDeviceState: Equatable, Sendable, Identifiable {

@@ -1502,7 +1502,8 @@ final class EngineStatusModel: ObservableObject {
             usbSourceOperation = USBSourceOperationState(
                 phase: .failed,
                 title: "USB sync could not start",
-                detail: sourceImportFeedback ?? "The local engine is not ready."
+                detail: sourceImportFeedback ?? "The local engine is not ready.",
+                sourceID: sourceID
             )
             return
         }
@@ -1559,7 +1560,8 @@ final class EngineStatusModel: ObservableObject {
             usbSourceOperation = USBSourceOperationState(
                 phase: .failed,
                 title: "USB sync failed",
-                detail: sourceImportFeedback ?? "The USB source could not be synchronized."
+                detail: sourceImportFeedback ?? "The USB source could not be synchronized.",
+                sourceID: sourceID
             )
         }
     }

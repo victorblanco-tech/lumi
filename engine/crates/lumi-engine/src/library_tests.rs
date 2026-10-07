@@ -198,6 +198,17 @@ fn inconsistent_rekordbox_beat_phase_fails_closed() {
 }
 
 #[test]
+fn duplicate_rekordbox_beat_times_are_not_silently_repaired() {
+    let mut analysis = resolved_analysis_with_grid(&[1, 2, 3, 4]);
+    analysis.beat_grid[2].time_millis = analysis.beat_grid[1].time_millis;
+    assert!(matches!(
+        canonical_beat_grid(&analysis),
+        Err(LibraryWorkerError::InvalidRekordboxBeatGrid(_))
+    ));
+    assert_eq!(analysis.beat_grid[2].time_millis, analysis.beat_grid[1].time_millis);
+}
+
+#[test]
 #[ignore = "requires LUMI_REKORDBOX_ANALYSIS_DAT"]
 fn mounted_rekordbox_analysis_preserves_every_retained_source_beat()
 -> Result<(), Box<dyn std::error::Error>> {

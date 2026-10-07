@@ -2,6 +2,23 @@
 
 Status: In progress. Extends E10-03; no production release without acceptance.
 
+## Dev-17 — sync failure visibility and confirmed local GRAY recovery
+
+- A failed sync retains its source ID and shows an actionable explanation in the
+  existing fixed-height progress area of that USB. It is no longer tooltip-only;
+  other source lanes do not inherit the error and the page does not grow/shrink.
+- Native GRAY sync reproduced a sticky identity conflict before import. Its
+  marker and filesystem UUID matched the known GRAY, but the current hardware
+  fingerprint differed from its earlier binding. After explicit user approval,
+  backed up the database and re-confirmed only that exact local binding. No
+  automatic weakening of copied-marker rejection is introduced. The cause of
+  the historical fingerprint difference is not yet established.
+- The actual selected six-playlist sync then showed track/audio progress, but
+  failed on a non-increasing Rekordbox beatgrid. Add the failing track name and
+  USB track ID to the error; retain strict validation rather than inventing beats.
+  Further diagnosis is required before declaring the six-playlist sync successful.
+- No waveform, live timing, phrase ownership, MIDI or Remote behavior changes.
+
 ## User contract
 
 Independent USB media retain independent identities and subscriptions, including

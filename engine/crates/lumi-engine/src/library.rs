@@ -1849,7 +1849,7 @@ impl LibraryWorker {
                                 device_track.device_track_id.to_string(),
                             )
                         })?;
-                    let canonical_grid = canonical_beat_grid(analysis)?;
+                    let canonical_grid = device_canonical_beat_grid(device_track, analysis)?;
                     let beat_grid = canonical_grid.beat_grid;
                     let total_beats = u32::try_from(beat_grid.markers().len())
                         .map_err(|_| LibraryWorkerError::RekordboxImportOverflow)?;
@@ -4375,13 +4375,24 @@ fn canonical_beat_grid(
     })
 }
 
+fn device_canonical_beat_grid(
+    track: &DeviceTrack,
+    analysis: &ResolvedTrackAnalysis,
+) -> Result<CanonicalBeatGrid, LibraryWorkerError> {
+    canonical_beat_grid(analysis).map_err(|error| LibraryWorkerError::DeviceTrackAnalysis {
+        title: track.title.clone(),
+        device_track_id: track.device_track_id,
+        detail: error.to_string(),
+    })
+}
+
 fn device_analysis_upsert(
     source_id: &str,
     track_id: TrackId,
     device_track: &DeviceTrack,
     analysis: &ResolvedTrackAnalysis,
 ) -> Result<DeviceAnalysisUpsert, LibraryWorkerError> {
-    let canonical_grid = canonical_beat_grid(analysis)?;
+    let canonical_grid = device_canonical_beat_grid(device_track, analysis)?;
     let duration_millis = waveform_duration_millis(analysis)
         .or_else(|| {
             (device_track.duration_millis > 0).then_some(u64::from(device_track.duration_millis))
@@ -5018,6 +5029,12 @@ pub enum LibraryWorkerError {
     IncompleteRekordboxPhrases,
     #[error("Rekordbox beatgrid is invalid: {0}")]
     InvalidRekordboxBeatGrid(#[from] lumi_library::BeatGridValidationError),
+    #[error("Sync stopped at track '{title}' (USB track {device_track_id}): {detail}. No playlist or track changes were saved.")]
+    DeviceTrackAnalysis {
+        title: String,
+        device_track_id: u32,
+        detail: String,
+    },
     #[error("Rekordbox track is invalid: {0}")]
     InvalidRekordboxTrack(#[from] lumi_library::TrackValidationError),
     #[error("library query is invalid: {0}")]
