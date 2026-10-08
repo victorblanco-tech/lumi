@@ -1,6 +1,6 @@
 # Live-show reliability recovery proposal
 
-Status: proposal, not implemented or accepted. Hardware acceptance on 2026-10-08 failed. Dev-19 is not show-ready. No new release until the gates below pass.
+Status: implementation and autonomous testing authorized on 2026-10-08; not implemented by this document. Hardware acceptance failed. Dev-19 is not show-ready. No new release until the gates below pass. [Epic 11](epic-11-show-readiness-recovery.md) consolidates the findings, simulator-first execution order and the subsequently requested phrase-start run-in behavior.
 
 ## Evidence and limits
 
