@@ -38,14 +38,21 @@ no export/analysis date is invented as a cue/grid revision timestamp.
 
 ## E11-01 — hardware-derived simulator and repeatable scenarios
 
-Start here. Repository simulator is 0.4.1-dev-2; the owner-supplied Mac mini
-endpoint currently reports 0.4.0-dev-56. Both Players were empty/paused, and the
-status retained a `No route to host` error; endpoint reachability does not prove
-successful Pro DJ Link delivery. No Player control was changed for this check.
+Start here. Repository simulator is now 0.4.1-dev-3. Its DMG was built,
+checksum-verified, and the packaged desktop UI was opened and inspected. No
+Rekordbox USB was attached to this Mac, so no local simulator session was
+started. The owner-supplied Mac mini still runs 0.4.0-dev-56; its control page is
+reachable, but that older installation cannot verify the new media-slot and
+eject behavior. No Mac-mini controls or production Lumi state were changed.
 
-Current gaps: one UsbLibrary for both Players, loads always report local origin,
-no mount/eject state, no identity-file service, and export.pdb rather than
-OneLibrary import. Do not call this an adequate source-matching regression rig.
+Implemented in 0.4.1-dev-3: independent USB libraries per Player, retained
+source-Player identity for LINK-loaded tracks, mounted-versus-loaded source
+state, cached source retention after eject, OneLibrary import, remote insert/eject
+controls, and source-aware playlist Auto Mix. Unit and package verification pass.
+Still open: test the new build on the Mac mini with two distinct USB exports,
+verify its packets against new captures, and resolve production NFS source
+addressing. The simulator does not yet model the CDJ's real USB identity RPC or
+serve NFS media, so it is not full USB-source acceptance evidence.
 
 Acceptance and implementation tasks:
 

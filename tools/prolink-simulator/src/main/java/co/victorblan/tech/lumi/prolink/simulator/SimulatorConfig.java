@@ -6,6 +6,7 @@ import java.util.Base64;
 
 record SimulatorConfig(
         Path usbRoot,
+        Path secondUsbRoot,
         String networkInterface,
         int playerNumber,
         int secondPlayerNumber,
@@ -18,6 +19,7 @@ record SimulatorConfig(
 
     static SimulatorConfig parse(String[] arguments) {
         Path usbRoot = null;
+        Path secondUsbRoot = null;
         String networkInterface = null;
         int playerNumber = 1;
         int secondPlayerNumber = 2;
@@ -30,6 +32,7 @@ record SimulatorConfig(
             String argument = arguments[index];
             switch (argument) {
                 case "--usb" -> usbRoot = Path.of(requiredValue(arguments, ++index, argument));
+                case "--usb-player-2" -> secondUsbRoot = Path.of(requiredValue(arguments, ++index, argument));
                 case "--interface" -> networkInterface = requiredValue(arguments, ++index, argument);
                 case "--player" -> playerNumber = Integer.parseInt(requiredValue(arguments, ++index, argument));
                 case "--second-player" -> secondPlayerNumber = Integer.parseInt(
@@ -68,7 +71,9 @@ record SimulatorConfig(
             throw new IllegalArgumentException("Control token must contain at least 16 characters");
         }
         return new SimulatorConfig(
-                usbRoot.toAbsolutePath().normalize(), networkInterface, playerNumber, secondPlayerNumber,
+                usbRoot.toAbsolutePath().normalize(),
+                secondUsbRoot == null ? null : secondUsbRoot.toAbsolutePath().normalize(),
+                networkInterface, playerNumber, secondPlayerNumber,
                 bindAddress, controlPort, controlToken, trafficProfile
         );
     }
@@ -81,6 +86,8 @@ record SimulatorConfig(
                   java -jar lumi-prolink-simulator.jar --usb /Volumes/REKORDBOX [options]
 
                 Options:
+                  --usb-player-2 /Volumes/SECOND_USB
+                                      Optional distinct USB inserted in Player 2
                   --interface en0     Network interface used for Pro DJ Link broadcasts
                   --player 1          First simulated player number (1-4, default 1)
                   --second-player 2   Second simulated player number (1-4, default 2)

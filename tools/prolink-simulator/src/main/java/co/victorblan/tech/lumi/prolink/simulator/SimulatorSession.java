@@ -34,10 +34,15 @@ final class SimulatorSession implements AutoCloseable {
 
     static SimulatorSession start(SimulatorConfig config) throws IOException {
         UsbLibrary library = UsbLibrary.open(config.usbRoot());
+        UsbLibrary secondLibrary = config.secondUsbRoot() == null
+                ? null
+                : UsbLibrary.open(config.secondUsbRoot());
         List<PlayerState> players = List.of(
                 new PlayerState(config.playerNumber()),
                 new PlayerState(config.secondPlayerNumber())
         );
+        players.getFirst().configureUsb(library);
+        if (secondLibrary != null) players.get(1).configureUsb(secondLibrary);
         AutoMixController autoMix = new AutoMixController(players, library);
         TrafficFaultController faults = new TrafficFaultController(players, autoMix);
         ProLinkBroadcaster broadcaster;

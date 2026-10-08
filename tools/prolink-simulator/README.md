@@ -11,6 +11,12 @@ by Lumi:
 
 - device discovery;
 - loaded Rekordbox USB track identity;
+- independent USB media libraries assigned to Player 1 and Player 2, including
+  overlapping track IDs resolved from the selected source Player;
+- the distinction between a USB physically inserted in a Player and a loaded
+  track obtained from another Player over LINK;
+- cached loaded-track origin retained after an eject, while new loads from that
+  ejected source are rejected;
 - play/pause, pitch, master and on-air state;
 - beat number and beat within bar;
 - an independent playback loop on either player;
@@ -93,6 +99,25 @@ production DMG.
      --traffic-profile cdj-1500x
    ```
 
+   To model two independent Rekordbox USBs, add the second root:
+
+   ```bash
+   ./lumi-prolink-simulator/bin/lumi-prolink-simulator \
+     --usb '/Volumes/DJ VIC CHRM' \
+     --usb-player-2 '/Volumes/DJ VIC GRAY' \
+     --interface en0
+   ```
+
+   Player 2 can also be left without its own USB and load a track from Player 1
+   over LINK. In the controls, each search result identifies its media Player;
+   “Load P2 ← P1” means Player 2 loads that track from Player 1's USB. The status
+   separately shows the USB inserted in each Player and the source of its loaded
+   track. Ejecting a USB clears only the inserted-media status; an already loaded
+   track retains its verified source and keeps playing, marked as cached after
+   eject. Reinsert is available for the configured same USB. This simulates the
+   Pro DJ Link track-source fields; it does not serve CDJ NFS media or claim to
+   reproduce the CDJ's real USB identity RPC.
+
 6. Open the printed control URL on the MacBook or iPhone. The token is removed
    from the address bar and retained only in that browser tab's session storage.
 7. Start Lumi's Direct Pro DJ Link input on the MacBook. Beat Link Trigger must
@@ -112,6 +137,9 @@ GET  /api/v1/status
 GET  /api/v1/tracks?q=90s%20Bitch&limit=100
 GET  /api/v1/playlists
 POST /api/v1/control/load       {"playerNumber":1,"trackId":1256}
+POST /api/v1/control/load       {"playerNumber":2,"mediaPlayerNumber":1,"trackId":1256}
+POST /api/v1/control/eject-usb  {"playerNumber":1}
+POST /api/v1/control/insert-usb {"playerNumber":1}
 POST /api/v1/control/play       {"playerNumber":1}
 POST /api/v1/control/pause      {"playerNumber":1}
 POST /api/v1/control/seek       {"playerNumber":1,"positionMillis":64000}
@@ -166,7 +194,8 @@ The packet tests parse generated announcements, status, beat and modern-player
 precise-position packets back through beat-link itself. Deterministic state
 tests verify loop wrapping, USB-grid beat jumps, deterministic fault expiry,
 exclusive-master Auto Mix handoffs and the complete Recovery Soak sequence.
-The status endpoint exposes both players, loop, Auto Mix and active fault state,
+The status endpoint exposes both players, inserted-media state, track-source
+player and cached-after-eject state, loop, Auto Mix and active fault state,
 per-packet and suppressed-packet counters, profile, cadence, burst count and the last traffic error. The simulator also
 fails closed when the USB database, analysis files, player numbers or requested
 network interface are invalid.

@@ -28,7 +28,9 @@ final class SimulatorControls {
     void apply(String action, JsonNode body) {
         PlayerState state = requiresPlayer(action) ? player(body) : null;
         switch (action) {
-            case "load" -> state.load(library.requireTrack(requiredInt(body, "trackId")));
+            case "load" -> load(state, body);
+            case "eject-usb" -> state.usb().eject();
+            case "insert-usb" -> state.usb().reinsert();
             case "play" -> state.play();
             case "pause" -> state.pause();
             case "seek" -> state.seek(requiredLong(body, "positionMillis"));
@@ -70,6 +72,26 @@ final class SimulatorControls {
             );
             default -> throw new UnknownActionException(action);
         }
+    }
+
+    private void load(PlayerState destination, JsonNode body) {
+        JsonNode requestedSource = body.get("mediaPlayerNumber");
+        PlayerState source = requestedSource == null
+                ? (destination.usb().current() != null ? destination
+                    : players.stream().filter(player -> player.usb().current() != null).findFirst().orElse(destination))
+                : playerNumber(requiredInt(body, "mediaPlayerNumber"));
+        if (source.usb().current() == null && requestedSource == null
+                && players.stream().noneMatch(player -> player.usb().configured())) {
+            destination.load(library.requireTrack(requiredInt(body, "trackId")));
+            return;
+        }
+        destination.loadFrom(source.usb(), requiredInt(body, "trackId"));
+    }
+
+    private PlayerState playerNumber(int number) {
+        return players.stream()
+                .filter(player -> player.snapshot().playerNumber() == number)
+                .findFirst().orElseThrow(() -> new IllegalArgumentException("Unknown media Player " + number));
     }
 
     private PlayerState player(JsonNode body) {

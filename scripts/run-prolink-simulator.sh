@@ -4,6 +4,10 @@ set -euo pipefail
 
 script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 repository_root="$(dirname "$script_dir")"
+cargo_bin_directory="${CARGO_HOME:-${HOME}/.cargo}/bin"
+if [[ -d "$cargo_bin_directory" ]]; then
+  export PATH="$cargo_bin_directory:$PATH"
+fi
 
 if [[ -z "${JAVA_HOME:-}" ]]; then
   for java_candidate in \
@@ -33,6 +37,8 @@ mvn \
   --file "$repository_root/tools/prolink-simulator/pom.xml" \
   package
 
+cargo build --release --manifest-path "$repository_root/Cargo.toml" --bin lumi-simulator-media
+export LUMI_SIM_MEDIA_READER="$repository_root/target/release/lumi-simulator-media"
 exec "$JAVA_HOME/bin/java" \
   -jar "$repository_root/tools/prolink-simulator/target/lumi-prolink-simulator.jar" \
   "$@"

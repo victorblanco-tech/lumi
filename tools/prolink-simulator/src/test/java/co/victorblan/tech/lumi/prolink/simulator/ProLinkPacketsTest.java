@@ -61,6 +61,54 @@ class ProLinkPacketsTest {
     }
 
     @Test
+    void linkLoadedTrackKeepsSourcePlayerAfterUsbEject() throws Exception {
+        UsbLibrary library = UsbLibrary.forTesting(Path.of("/tmp/CHRM"), List.of(
+                new UsbLibrary.Track(1256, "CHRM version", "Victor", 12_800, 120_000,
+                        Path.of("/tmp/CHRM/ANLZ.DAT"), true, List.of(
+                        new UsbLibrary.BeatPoint(1, 1, 12_800, 0),
+                        new UsbLibrary.BeatPoint(2, 2, 12_800, 500)))
+        ));
+        PlayerState source = new PlayerState(1);
+        PlayerState receiver = new PlayerState(2);
+        source.configureUsb(library);
+        receiver.loadFrom(source.usb(), 1256);
+        source.usb().eject();
+
+        PlayerState.Snapshot snapshot = receiver.snapshot();
+        assertEquals(1, snapshot.sourcePlayerNumber());
+        assertTrue(snapshot.cachedAfterEject());
+        assertEquals("CHRM", snapshot.loadedFrom().library().displayName());
+        DatagramPacket packet = ProLinkPackets.status("LUMI-SIM-2", snapshot, 43);
+        packet.setAddress(InetAddress.getByName("192.168.10.20"));
+        CdjStatus status = new CdjStatus(packet);
+        assertEquals(2, status.getDeviceNumber());
+        assertEquals(1, status.getTrackSourcePlayer());
+        assertEquals(1256, status.getRekordboxId());
+    }
+
+    @Test
+    void sameTrackIdCanResolveFromIndependentUsbSlots() {
+        PlayerState player = new PlayerState(2);
+        UsbLibrary blue = UsbLibrary.forTesting(Path.of("/tmp/GRAY"), List.of(
+                new UsbLibrary.Track(1256, "GRAY version", "Victor", 12_800, 120_000,
+                        Path.of("/tmp/GRAY/ANLZ.DAT"), false, List.of())
+        ));
+        UsbLibrary pink = UsbLibrary.forTesting(Path.of("/tmp/CHRM"), List.of(
+                new UsbLibrary.Track(1256, "CHRM version", "Victor", 14_000, 120_000,
+                        Path.of("/tmp/CHRM/ANLZ.DAT"), false, List.of())
+        ));
+        MediaSlot source = new MediaSlot(2);
+        source.insert(blue);
+        player.loadFrom(source, 1256);
+        assertEquals("GRAY version", player.snapshot().track().title());
+        source.eject();
+        source.insert(pink);
+        player.loadFrom(source, 1256);
+        assertEquals("CHRM version", player.snapshot().track().title());
+        assertTrue(player.snapshot().cachedAfterEject() == false);
+    }
+
+    @Test
     void beatCarriesGridPositionAndEffectiveTempo() throws Exception {
         PlayerState state = loadedState();
         state.seek(500);

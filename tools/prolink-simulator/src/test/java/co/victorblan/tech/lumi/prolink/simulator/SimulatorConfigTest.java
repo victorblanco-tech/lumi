@@ -39,6 +39,15 @@ class SimulatorConfigTest {
     }
 
     @Test
+    void acceptsAnIndependentSecondPlayerUsbSource() {
+        SimulatorConfig config = SimulatorConfig.parse(new String[]{
+                "--usb", "/Volumes/CHRM", "--usb-player-2", "/Volumes/GRAY"
+        });
+        assertEquals("CHRM", config.usbRoot().getFileName().toString());
+        assertEquals("GRAY", config.secondUsbRoot().getFileName().toString());
+    }
+
+    @Test
     void rejectsNonPlayerNumbers() {
         assertThrows(IllegalArgumentException.class, () -> SimulatorConfig.parse(new String[]{
                 "--usb", "/Volumes/USB", "--player", "7"

@@ -4,6 +4,10 @@ set -euo pipefail
 
 script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 repository_root="$(dirname "$script_dir")"
+cargo_bin_directory="${CARGO_HOME:-${HOME}/.cargo}/bin"
+if [[ -d "$cargo_bin_directory" ]]; then
+  export PATH="$cargo_bin_directory:$PATH"
+fi
 distribution_root="$repository_root/build/prolink-simulator-app"
 app_name="Lumi Pro DJ Link Simulator"
 release_version="$(tr -d '[:space:]' < "$repository_root/tools/prolink-simulator/VERSION")"
@@ -74,6 +78,8 @@ icon_output="$staging_root/icon-output"
 mkdir -p "$input_root" "$icon_output"
 
 cp "$repository_root/tools/prolink-simulator/target/lumi-prolink-simulator.jar" "$input_root/"
+cargo build --release --manifest-path "$repository_root/Cargo.toml" --bin lumi-simulator-media
+cp "$repository_root/target/release/lumi-simulator-media" "$input_root/"
 
 xcrun actool "$repository_root/apps/macos/Lumi/Resources/Assets.xcassets" \
   --compile "$icon_output" \

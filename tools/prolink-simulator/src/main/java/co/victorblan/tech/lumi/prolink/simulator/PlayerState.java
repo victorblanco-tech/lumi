@@ -6,6 +6,9 @@ import java.util.function.LongSupplier;
 final class PlayerState {
     private final int playerNumber;
     private final LongSupplier nanoTime;
+    private final MediaSlot usb;
+    private MediaSlot loadedSlot;
+    private MediaSlot.Mount loadedMount;
     private UsbLibrary.Track track;
     private boolean playing;
     private boolean master;
@@ -25,11 +28,49 @@ final class PlayerState {
 
     PlayerState(int playerNumber, LongSupplier nanoTime) {
         this.playerNumber = playerNumber;
+        usb = new MediaSlot(playerNumber);
         this.nanoTime = Objects.requireNonNull(nanoTime, "nanoTime");
         anchorNanos = nanoTime.getAsLong();
     }
 
     synchronized void load(UsbLibrary.Track nextTrack) {
+        loadedSlot = null;
+        loadedMount = null;
+        if (usb.current() != null) {
+            MediaSlot.Mount mount = usb.requireMounted();
+            if (mount.library().requireTrack(nextTrack.id()) != nextTrack) {
+                throw new IllegalArgumentException("Track does not belong to this USB");
+            }
+            loadedSlot = usb;
+            loadedMount = mount;
+        }
+        resetTrack(nextTrack);
+    }
+
+    MediaSlot usb() { return usb; }
+
+    void configureUsb(UsbLibrary library) { usb.configure(library); }
+
+    synchronized void loadFrom(MediaSlot source, int trackId) {
+        MediaSlot.Mount mount = source.requireMounted();
+        UsbLibrary.Track next = mount.library().requireTrack(trackId);
+        loadedSlot = source;
+        loadedMount = mount;
+        resetTrack(next);
+    }
+
+    synchronized void unload() {
+        track = null;
+        loadedSlot = null;
+        loadedMount = null;
+        playing = false;
+        loopEnabled = false;
+        anchoredPositionMillis = 0;
+        anchorNanos = nanoTime.getAsLong();
+        revision++;
+    }
+
+    private void resetTrack(UsbLibrary.Track nextTrack) {
         track = Objects.requireNonNull(nextTrack, "nextTrack");
         playing = false;
         pitchPercent = 0.0;
@@ -157,7 +198,8 @@ final class PlayerState {
         return new Snapshot(
                 playerNumber, track, playing, master, onAir, pitchPercent, position,
                 beatIndex, beat, tempo, loopEnabled, loopStartMillis, loopEndMillis,
-                loopWrapCount, revision
+                loopWrapCount, revision, usb.current(), loadedMount,
+                loadedMount != null && !loadedSlot.stillPresent(loadedMount)
         );
     }
 
@@ -199,8 +241,15 @@ final class PlayerState {
             long loopStartMillis,
             long loopEndMillis,
             long loopWrapCount,
-            long revision
+            long revision,
+            MediaSlot.Mount insertedUsb,
+            MediaSlot.Mount loadedFrom,
+            boolean cachedAfterEject
     ) {
+        int sourcePlayerNumber() {
+            return loadedFrom == null ? playerNumber : loadedFrom.playerNumber();
+        }
+
         double effectiveBpm() {
             return originalTempoCentiBpm / 100.0 * (1.0 + pitchPercent / 100.0);
         }

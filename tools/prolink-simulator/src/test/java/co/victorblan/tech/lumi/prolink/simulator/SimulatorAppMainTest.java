@@ -12,10 +12,12 @@ class SimulatorAppMainTest {
     @Test
     void findsOnlyVolumesWithARekordboxDatabase(@TempDir Path volumes) throws Exception {
         Path first = Files.createDirectories(volumes.resolve("USB B/PIONEER/rekordbox"));
-        Files.createFile(first.resolve("export.pdb"));
+        Files.createFile(first.resolve("exportLibrary.db"));
         Files.createDirectories(volumes.resolve("NOT A DJ USB"));
         Path second = Files.createDirectories(volumes.resolve("USB A/PIONEER/rekordbox"));
-        Files.createFile(second.resolve("export.pdb"));
+        Files.createFile(second.resolve("exportLibrary.db"));
+        Path legacy = Files.createDirectories(volumes.resolve("LEGACY/PIONEER/rekordbox"));
+        Files.createFile(legacy.resolve("export.pdb"));
 
         assertEquals(
                 java.util.List.of(volumes.resolve("USB A"), volumes.resolve("USB B")),

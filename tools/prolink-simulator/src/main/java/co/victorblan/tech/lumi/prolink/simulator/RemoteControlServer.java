@@ -75,7 +75,7 @@ final class RemoteControlServer implements AutoCloseable {
         sendJson(exchange, 200, Map.of(
                 "status", "ready",
                 "service", "lumi-prolink-simulator",
-                "version", "0.4.1-dev-2"
+                "version", "0.4.1-dev-3"
         ));
     }
 
@@ -93,7 +93,21 @@ final class RemoteControlServer implements AutoCloseable {
         Map<String, String> query = query(exchange.getRequestURI().getRawQuery());
         String search = query.getOrDefault("q", "");
         int limit = parseInteger(query.getOrDefault("limit", "100"), "limit");
-        List<UsbLibrary.TrackSummary> tracks = library.search(search, limit);
+        Integer selectedSource = query.containsKey("sourcePlayerNumber")
+                ? parseInteger(query.get("sourcePlayerNumber"), "sourcePlayerNumber") : null;
+        List<Map<String, Object>> tracks = players.stream()
+                .filter(player -> selectedSource == null || player.snapshot().playerNumber() == selectedSource)
+                .filter(player -> player.usb().configured())
+                .flatMap(player -> player.usb().configuredLibrary().search(search, limit).stream()
+                        .map(track -> Map.<String, Object>of(
+                                "mediaPlayerNumber", player.snapshot().playerNumber(),
+                                "mediaName", player.usb().configuredLibrary().displayName(),
+                                "trackId", track.trackId(), "title", track.title(), "artist", track.artist(),
+                                "bpm", track.bpm(), "durationMillis", track.durationMillis(),
+                                "exactBeatGrid", track.exactBeatGrid()
+                        )))
+                .limit(limit)
+                .toList();
         sendJson(exchange, 200, Map.of("tracks", tracks, "count", tracks.size()));
     }
 
@@ -213,6 +227,22 @@ final class RemoteControlServer implements AutoCloseable {
         payload.put("loopEndMillis", snapshot.loopEndMillis());
         payload.put("loopWrapCount", snapshot.loopWrapCount());
         payload.put("track", snapshot.track() == null ? null : UsbLibrary.TrackSummary.from(snapshot.track()));
+        payload.put("configuredUsb", players.stream()
+                .filter(player -> player.snapshot().playerNumber() == snapshot.playerNumber())
+                .findFirst().map(player -> player.usb().configured()).orElse(false));
+        payload.put("usb", snapshot.insertedUsb() == null ? null : Map.of(
+                "playerNumber", snapshot.insertedUsb().playerNumber(),
+                "generation", snapshot.insertedUsb().generation(),
+                "name", snapshot.insertedUsb().library().displayName(),
+                "trackCount", snapshot.insertedUsb().library().size(),
+                "playlistCount", snapshot.insertedUsb().library().playlistCount()
+        ));
+        payload.put("loadedFrom", snapshot.loadedFrom() == null ? null : Map.of(
+                "playerNumber", snapshot.loadedFrom().playerNumber(),
+                "generation", snapshot.loadedFrom().generation(),
+                "name", snapshot.loadedFrom().library().displayName(),
+                "cachedAfterEject", snapshot.cachedAfterEject()
+        ));
         return payload;
     }
 

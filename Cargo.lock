@@ -606,6 +606,7 @@ name = "lumi-rekordbox-device"
 version = "0.6.4-dev-19"
 dependencies = [
  "rusqlite",
+ "serde_json",
  "sha2",
  "thiserror",
 ]

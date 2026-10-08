@@ -6,8 +6,10 @@ import javax.swing.BoxLayout;
 import javax.swing.JButton;
 import javax.swing.JCheckBox;
 import javax.swing.JComboBox;
+import javax.swing.DefaultListCellRenderer;
 import javax.swing.JFrame;
 import javax.swing.JLabel;
+import javax.swing.JList;
 import javax.swing.JOptionPane;
 import javax.swing.JPanel;
 import javax.swing.JSpinner;
@@ -84,7 +86,7 @@ public final class SimulatorAppMain {
         try (var entries = Files.list(volumesRoot)) {
             return entries
                     .filter(Files::isDirectory)
-                    .filter(path -> Files.isRegularFile(path.resolve("PIONEER/rekordbox/export.pdb")))
+                    .filter(path -> Files.isRegularFile(path.resolve("PIONEER/rekordbox/exportLibrary.db")))
                     .sorted(Comparator.comparing(path -> path.getFileName().toString(), String.CASE_INSENSITIVE_ORDER))
                     .toList();
         }
@@ -159,6 +161,7 @@ public final class SimulatorAppMain {
 
         private final JFrame frame = new JFrame(APP_NAME);
         private final JComboBox<Path> usbVolumes = new JComboBox<>();
+        private final JComboBox<Path> secondUsbVolumes = new JComboBox<>();
         private final JSpinner firstPlayerNumber = new JSpinner(new SpinnerNumberModel(1, 1, 4, 1));
         private final JSpinner secondPlayerNumber = new JSpinner(new SpinnerNumberModel(2, 1, 4, 1));
         private final JCheckBox autoStart = new JCheckBox("Start automatically when a Rekordbox USB is found", true);
@@ -216,13 +219,13 @@ public final class SimulatorAppMain {
             title.setFont(title.getFont().deriveFont(Font.BOLD, 24f));
             title.setAlignmentX(0f);
             root.add(title);
-            JLabel subtitle = new JLabel("Two USB-backed development players for Lumi");
+            JLabel subtitle = new JLabel("0.4.1-dev-3 · Two independent USB sources, LINK loading and cached-track eject tests");
             subtitle.setForeground(MUTED);
             subtitle.setAlignmentX(0f);
             root.add(subtitle);
             root.add(Box.createVerticalStrut(24));
 
-            root.add(row("Rekordbox USB", usbVolumes, refresh));
+            root.add(row("USB per Player", new JLabel("P1"), usbVolumes, new JLabel("P2"), secondUsbVolumes, refresh));
             root.add(Box.createVerticalStrut(10));
             root.add(row(
                     "Player numbers",
@@ -278,8 +281,8 @@ public final class SimulatorAppMain {
             row.add(label, BorderLayout.WEST);
             JPanel fields = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
             for (java.awt.Component control : controls) {
-                if (control == usbVolumes) {
-                    control.setPreferredSize(new Dimension(300, 30));
+                if (control == usbVolumes || control == secondUsbVolumes) {
+                    control.setPreferredSize(new Dimension(190, 30));
                 }
                 fields.add(control);
             }
@@ -290,6 +293,8 @@ public final class SimulatorAppMain {
         }
 
         private void bindActions() {
+            usbVolumes.setRenderer(volumeRenderer(false));
+            secondUsbVolumes.setRenderer(volumeRenderer(true));
             refresh.addActionListener(event -> refreshVolumes(false));
             startStop.addActionListener(event -> {
                 if (session == null) {
@@ -309,6 +314,23 @@ public final class SimulatorAppMain {
             });
         }
 
+        private DefaultListCellRenderer volumeRenderer(boolean allowEmpty) {
+            return new DefaultListCellRenderer() {
+                @Override
+                public java.awt.Component getListCellRendererComponent(
+                        JList<?> list, Object value, int index, boolean isSelected, boolean cellHasFocus
+                ) {
+                    JLabel label = (JLabel) super.getListCellRendererComponent(
+                            list, value, index, isSelected, cellHasFocus
+                    );
+                    label.setText(value instanceof Path path
+                            ? path.getFileName().toString()
+                            : allowEmpty ? "No USB · load over LINK" : "Select a Rekordbox USB");
+                    return label;
+                }
+            };
+        }
+
         private void refreshVolumes(boolean startWhenReady) {
             if (busy || session != null) {
                 return;
@@ -323,6 +345,9 @@ public final class SimulatorAppMain {
                     SwingUtilities.invokeLater(() -> {
                         usbVolumes.removeAllItems();
                         volumes.forEach(usbVolumes::addItem);
+                        secondUsbVolumes.removeAllItems();
+                        secondUsbVolumes.addItem(null);
+                        volumes.forEach(secondUsbVolumes::addItem);
                         selectPreferredVolume();
                         busy = false;
                         if (volumes.isEmpty()) {
@@ -331,7 +356,7 @@ public final class SimulatorAppMain {
                             startStop.setEnabled(false);
                         } else {
                             status.setText(volumes.size() == 1 ? "Rekordbox USB ready" : volumes.size() + " Rekordbox USBs found");
-                            detail.setText("Select the device that this simulated deck should load tracks from.");
+                            detail.setText("Select the USB in each Player. Leave P2 empty to load its tracks over LINK from P1.");
                             startStop.setEnabled(true);
                             if (startWhenReady && autoStart.isSelected()) {
                                 startSession();
@@ -350,6 +375,7 @@ public final class SimulatorAppMain {
 
         private void startSession() {
             Path usb = (Path) usbVolumes.getSelectedItem();
+            Path secondUsb = (Path) secondUsbVolumes.getSelectedItem();
             if (usb == null || busy) {
                 return;
             }
@@ -361,13 +387,18 @@ public final class SimulatorAppMain {
             int secondPlayer = (Integer) secondPlayerNumber.getValue();
             Thread.startVirtualThread(() -> {
                 try {
-                    SimulatorConfig config = SimulatorConfig.parse(new String[]{
+                    List<String> arguments = new java.util.ArrayList<>(List.of(
                             "--usb", usb.toString(),
                             "--player", Integer.toString(firstPlayer),
                             "--second-player", Integer.toString(secondPlayer)
-                    });
+                    ));
+                    if (secondUsb != null) {
+                        arguments.add("--usb-player-2");
+                        arguments.add(secondUsb.toString());
+                    }
+                    SimulatorConfig config = SimulatorConfig.parse(arguments.toArray(String[]::new));
                     SimulatorSession started = SimulatorSession.start(config);
-                    appendLog("Simulator session started for " + usb + " with "
+                    appendLog("Simulator session started for " + usb + " and " + secondUsb + " with "
                             + started.library().size() + " tracks and "
                             + started.library().playlistCount() + " playlists", null);
                     session = started;
@@ -375,8 +406,9 @@ public final class SimulatorAppMain {
                         busy = false;
                         status.setForeground(READY);
                         status.setText("Simulator running · Players " + firstPlayer + " & " + secondPlayer);
-                        detail.setText(started.library().size() + " tracks · "
-                                + started.library().playlistCount() + " playlists · "
+                        detail.setText(started.library().size() + " tracks in P1" + (secondUsb == null
+                                ? " · P2 can load from P1 over LINK"
+                                : " · " + started.players().get(1).usb().configuredLibrary().size() + " tracks in P2") + " · "
                                 + started.networkSummary());
                         remoteUrl.setText(started.remoteUrl());
                         remoteUrl.setVisible(true);
@@ -418,6 +450,7 @@ public final class SimulatorAppMain {
 
         private void setControlsEnabled(boolean enabled) {
             usbVolumes.setEnabled(enabled);
+            secondUsbVolumes.setEnabled(enabled);
             firstPlayerNumber.setEnabled(enabled);
             secondPlayerNumber.setEnabled(enabled);
             refresh.setEnabled(enabled);
@@ -442,6 +475,14 @@ public final class SimulatorAppMain {
             for (int index = 0; index < usbVolumes.getItemCount(); index++) {
                 if (usbVolumes.getItemAt(index).toString().equals(preferred)) {
                     usbVolumes.setSelectedIndex(index);
+                    break;
+                }
+            }
+            String preferredSecond = settings.getProperty("secondUsbRoot", "");
+            for (int index = 0; index < secondUsbVolumes.getItemCount(); index++) {
+                Path candidate = secondUsbVolumes.getItemAt(index);
+                if (candidate != null && candidate.toString().equals(preferredSecond)) {
+                    secondUsbVolumes.setSelectedIndex(index);
                     return;
                 }
             }
@@ -454,6 +495,9 @@ public final class SimulatorAppMain {
                 if (usb != null) {
                     settings.setProperty("usbRoot", usb.toString());
                 }
+                Path secondUsb = (Path) secondUsbVolumes.getSelectedItem();
+                if (secondUsb == null) settings.remove("secondUsbRoot");
+                else settings.setProperty("secondUsbRoot", secondUsb.toString());
                 settings.setProperty("playerNumber", firstPlayerNumber.getValue().toString());
                 settings.setProperty("secondPlayerNumber", secondPlayerNumber.getValue().toString());
                 settings.setProperty("autoStart", Boolean.toString(autoStart.isSelected()));
