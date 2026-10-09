@@ -68,6 +68,24 @@ process check showed the app, engine, gateway, bridge and Carabiner still alive;
 process liveness alone does not establish healthy lighting output. Investigate
 UI workload and automation responsiveness separately before assigning cause.
 
+Follow-up: the owner confirmed Lumi remained responsive. Resetting only the
+computer-use session and selecting the exact Dev-25 app path restored immediate
+UI access; no Lumi/service restart was needed. Do not label that incident a
+confirmed application hang. The restored status showed continuing Pro DJ Link
+positions and 77 MIDI pulses / zero late sends, but a stale Link warning.
+`LinkRelay::synchronize` cleared its stale flag before suppressing an unchanged
+tempo/master observation, leaving the provider degraded. A failing-before /
+passing-after regression now requires one recovery observation, then resumes
+normal duplicate suppression. This source fix is not installed yet.
+
+Release gate: inspection of the existing Carabiner provider found actual
+`force-beat-at-time`, `start-playing`, `stop-playing` and start/stop-sync commands.
+Consequently earlier descriptions of the complete provider as tempo-only were
+too strong. Restoring a stale provider currently enters this alignment path;
+do not deploy the recovery fix alone or claim timeline isolation. Complete the
+owner's tempo-only contract and add wire-command assertions for first receipt,
+pause/play, gaps, master changes and recovery before packaged acceptance.
+
 | Finding since the public release / development acceptance | Story | Required evidence |
 | --- | --- | --- |
 | Approximate three-second lighting delay and slow displayed BPM changes | E11-03 | Correlated source-to-dispatch and downstream measurements under load |

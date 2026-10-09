@@ -93,7 +93,11 @@ where
             {
                 return Ok(());
             }
-            let materially_changed = self.last_prolink_bpm_milli != Some(observation.bpm_milli)
+            // Recovery must reach the provider even when the tempo and master
+            // did not change during the gap. Subsequent identical beats remain
+            // coalesced; this is not continuous Link phase correction.
+            let materially_changed = self.prolink_timing_stale
+                || self.last_prolink_bpm_milli != Some(observation.bpm_milli)
                 || self.last_prolink_playing != Some(observation.playing)
                 || self.last_prolink_deck_number != observation.deck_number;
             self.last_prolink_timing_at = Some(Instant::now());
@@ -305,5 +309,25 @@ mod tests {
         let mut relay = LinkRelay::new(RecordingProvider::default());
         assert!(relay.synchronize(prolink_clock(140_000)).is_ok());
         assert!(relay.provider.calls.is_empty());
+    }
+
+    #[test]
+    fn recovered_unchanged_clock_reaches_provider_once_after_stale_hold() {
+        let mut relay = LinkRelay::new(RecordingProvider::default());
+        relay.set_enabled(true).unwrap();
+        relay.synchronize(prolink_clock(155_000)).unwrap();
+        relay.fail_closed("test timing gap").unwrap();
+        relay.provider.calls.clear();
+
+        let mut recovered = prolink_clock(155_000);
+        recovered.observed_at_micros = Some(2_000_000);
+        relay.synchronize(recovered).unwrap();
+        let mut next = recovered;
+        next.observed_at_micros = Some(2_500_000);
+        next.beat_within_bar = 2;
+        relay.synchronize(next).unwrap();
+
+        assert_eq!(relay.provider.calls, vec![Call::Synchronize(recovered)]);
+        assert!(!relay.prolink_timing_stale);
     }
 }
