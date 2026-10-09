@@ -48,6 +48,12 @@ timeout recovery. Local browser acceptance uses explicitly synthetic sources.
 Mac mini installation, real exports across its two physical interfaces and Lumi
 show acceptance are still required; do not mark the complete epic done.
 
+2026-10-09 cross-Mac checkpoint: dev-5 is running on the owner's Mac mini.
+Primary Ethernet and secondary Wi-Fi addresses were discovered automatically.
+The production reader on the MacBook read the existing CHRM marker over actual
+RPC/NFS in approximately 62 ms. Player 2 has no independent USB; therefore two
+independent physical media are not yet validated in this setup.
+
 Historical checkpoint (superseded by the update above): simulator 0.4.1-dev-3 was built,
 checksum-verified, and the packaged desktop UI was opened and inspected. No
 Rekordbox USB was attached to this Mac, so no local simulator session was
@@ -96,6 +102,50 @@ Acceptance and implementation tasks:
   dev version. Do not claim Mac mini installation until verified remotely.
 
 ## E11-02 — usable service lifecycle
+
+Owner requirements confirmed 2026-10-09: explicit Quit must stop every owned
+channel service, not detach and leave the engine/gateway running. The app stays
+open in a visible Stopping state until termination is verified. Bounded graceful
+shutdown may escalate only against verified owned processes; failure remains
+visible and must not report success. Repeated Quit must not bypass shutdown.
+Provide compact Settings service rows with real response-based state and
+Start/Stop/Restart, expandable process/version details, and a warning before
+interrupting an active show. Remote-enabled preference survives a normal Quit.
+Test rapid relaunch, frozen/crashed services, stale records, and channel isolation.
+
+Implementation checkpoint (not completion): dev-20 provides Settings controls,
+process details, explicit unregister/verified engine termination, a Quit wait
+state and shutdown error reporting. Two actual desktop Quit/reopen cycles left
+no engine/gateway/Carabiner processes. SoundSwitch remained interactive and its
+Link peer disappeared. Its hardware interface is currently disconnected, so
+this is not the physical Control One reset-deadlock acceptance. Real-process
+client suite: 26 tests passed. Additional TERM-ignoring child shutdown regression
+passed. Startup cancellation and full managed-service fault cases still need
+desktop acceptance.
+
+Cross-Mac UI testing also exposed a concrete regression: LibrarySnapshotDecoder
+rejected valid USB `empty` and `unloading` states, invalidating otherwise usable
+snapshots. Decoder repaired with all seven mount-state cases passing. Repaired
+desktop build now shows both tracks with 17-phrase plans, CHRM in Player 1 and
+CHRM via Player 1/LINK as Player 2's loaded source while its own slot is empty.
+The launchd-owned reader initially reported `No route to host`; after the owner
+granted normal macOS consent it resolved CHRM without a code or permission reset.
+Permission settings remain owner-managed, not agent-managed.
+
+Live desktop checkpoint: Off → Arm → Start while paused, followed by simulator
+Play on Player 1, showed SoundSwitch at 155 BPM with Intro Blue Red 2 active.
+This is selection/connectivity evidence, not a measured first-beat latency pass.
+The subsequent Settings Stop confirmation test was interrupted by macOS
+ScreenCaptureKit error -3812; stop/start/restart UI acceptance is still open.
+Normal and TERM-ignoring child shutdown/relaunch regression cases pass, including
+an ownership recheck before forced termination. A Library query failure that
+silently retained the old playlist's rows now has a preserving-navigation error
+state and a passing regression; desktop error/recovery acceptance remains open.
+The full Library package suite passed (70 Swift Testing tests and four XCTest
+feedback tests), as did 15 media-resolver regressions and the macOS app build.
+These automated passes do not replace the interrupted desktop acceptance.
+Engine unit regression also passed: 145 passed, four explicitly ignored; the
+canonical scenario differs only in its expected product version (dev-20).
 
 Reproduce the unavailable Dev attachment before repair. Verify service record,
 process/build identity, authentication and command responsiveness separately.

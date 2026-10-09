@@ -452,7 +452,7 @@ public struct LibrarySnapshotDecoder: Sendable {
                     let state = try string(media, "state")
                     let detail = try string(media, "detail")
                     let name = try strictOptionalString(media, "sourceName")
-                    guard ["resolving", "trusted", "unknown", "conflict", "unavailable"].contains(state),
+                    guard ["resolving", "trusted", "unknown", "conflict", "unavailable", "empty", "unloading"].contains(state),
                           detail.count <= 512, (name?.count ?? 0) <= 512 else {
                         throw LibrarySnapshotError.invalidObject
                     }

@@ -14,6 +14,7 @@ struct LumiApp: App {
         _engineStatus = StateObject(wrappedValue: engineStatus)
         applicationDelegate.shutdown = {
             await engineStatus.stop()
+            return engineStatus.serviceShutdownError == nil
         }
     }
 
@@ -67,7 +68,7 @@ struct LumiApp: App {
 
 @MainActor
 final class LumiApplicationDelegate: NSObject, NSApplicationDelegate {
-    var shutdown: (() async -> Void)?
+    var shutdown: (() async -> Bool)?
     private var terminationInProgress = false
 
     func applicationShouldTerminateAfterLastWindowClosed(_ sender: NSApplication) -> Bool {
@@ -75,13 +76,19 @@ final class LumiApplicationDelegate: NSObject, NSApplicationDelegate {
     }
 
     func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
-        guard !terminationInProgress, let shutdown else {
-            return .terminateNow
-        }
+        guard !terminationInProgress else { return .terminateLater }
+        guard let shutdown else { return .terminateNow }
         terminationInProgress = true
         Task { @MainActor in
-            await shutdown()
-            sender.reply(toApplicationShouldTerminate: true)
+            let stopped = await shutdown()
+            terminationInProgress = false
+            sender.reply(toApplicationShouldTerminate: stopped)
+            if !stopped {
+                let alert = NSAlert()
+                alert.messageText = "Lumi could not stop all services"
+                alert.informativeText = "Lumi has stayed open. Check Services in Settings and retry stopping before quitting."
+                alert.runModal()
+            }
         }
         return .terminateLater
     }

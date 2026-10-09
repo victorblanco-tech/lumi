@@ -2,6 +2,7 @@ import Foundation
 import LumiProtocol
 @preconcurrency import Network
 import ServiceManagement
+import Darwin
 
 public actor RemoteGatewaySupervisor {
     private let launchAgentPlistName: String?
@@ -147,8 +148,19 @@ public actor RemoteGatewaySupervisor {
         await adminTransport.close()
         let service = service ?? SMAppService.agent(plistName: launchAgentPlistName)
         self.service = service
+        let processID = try? readRecord(at: recordURL).processID
         if service.status == .enabled {
             try await service.unregister()
+        }
+        if let processID {
+            let clock = ContinuousClock()
+            let deadline = clock.now.advanced(by: .seconds(8))
+            while Darwin.kill(processID, 0) == 0, clock.now < deadline {
+                try await Task.sleep(for: .milliseconds(50))
+            }
+            guard Darwin.kill(processID, 0) != 0, errno == ESRCH else {
+                throw RemoteGatewayClientError.rejected("gatewayShutdownTimedOut")
+            }
         }
         try? FileManager.default.removeItem(at: recordURL)
         hasAttemptedServiceRecovery = false
@@ -157,6 +169,14 @@ public actor RemoteGatewaySupervisor {
 
     public func disconnect() async {
         await adminTransport.close()
+    }
+
+    public func processDetails(recordURL: URL) -> String {
+        guard let record = try? readRecord(at: recordURL),
+              let path = ProcessExecutableIdentity.path(processID: record.processID) else {
+            return "No verified Remote process"
+        }
+        return "lumi-remote-gateway · PID \(record.processID)\n\(path)\nVersion \(record.productVersion)"
     }
 
     public func createInvitation(recordURL: URL) async throws -> RemoteGatewayManagementSnapshot {

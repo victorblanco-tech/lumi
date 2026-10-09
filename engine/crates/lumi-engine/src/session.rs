@@ -405,6 +405,9 @@ struct IntegrationPumpMetrics {
     tick_count: u64,
     starvation_count: u64,
     max_lateness_micros: u64,
+    command_count: u64,
+    last_command_micros: u64,
+    max_command_micros: u64,
 }
 
 impl IntegrationPumpMetrics {
@@ -414,6 +417,9 @@ impl IntegrationPumpMetrics {
             tick_count: 0,
             starvation_count: 0,
             max_lateness_micros: 0,
+            command_count: 0,
+            last_command_micros: 0,
+            max_command_micros: 0,
         }
     }
 
@@ -430,6 +436,12 @@ impl IntegrationPumpMetrics {
             }
         }
         self.last_tick = Some(now);
+    }
+
+    fn record_command(&mut self, elapsed: Duration) {
+        self.command_count = self.command_count.saturating_add(1);
+        self.last_command_micros = u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX);
+        self.max_command_micros = self.max_command_micros.max(self.last_command_micros);
     }
 }
 
@@ -2827,6 +2839,18 @@ fn handle_command(
     envelope: &MessageEnvelope,
     response_sequence: u64,
 ) -> Result<MessageEnvelope, EngineError> {
+    let started = Instant::now();
+    let result = handle_command_inner(runtime, command_ids, envelope, response_sequence);
+    runtime.integration_pump_metrics.record_command(started.elapsed());
+    result
+}
+
+fn handle_command_inner(
+    runtime: &mut EngineRuntime,
+    command_ids: &mut CommandIdCache,
+    envelope: &MessageEnvelope,
+    response_sequence: u64,
+) -> Result<MessageEnvelope, EngineError> {
     process_deck_input_messages(runtime)?;
     let command = match decode_command(envelope) {
         Ok(command) => command,
@@ -4941,7 +4965,7 @@ fn snapshot_envelope_internal(
         "cancelledCount": runtime.output_worker.autoloop_executor.cancelled_count(),
         "rescheduledCount": runtime.output_worker.autoloop_executor.rescheduled_count(),
         "failedCount": runtime.output_worker.autoloop_executor.failed_count(),
-        "lateCount": 0,
+        "lateCount": realtime_midi.late_dispatch_count,
         "beatFallbackCount": 0,
         "lane": realtime_lane,
     });
@@ -5035,6 +5059,9 @@ fn snapshot_envelope_internal(
             "enginePumpCount": runtime.integration_pump_metrics.tick_count,
             "enginePumpStarvationCount": runtime.integration_pump_metrics.starvation_count,
             "enginePumpMaxLatenessMicros": runtime.integration_pump_metrics.max_lateness_micros,
+            "engineCommandCount": runtime.integration_pump_metrics.command_count,
+            "engineLastCommandMicros": runtime.integration_pump_metrics.last_command_micros,
+            "engineMaxCommandMicros": runtime.integration_pump_metrics.max_command_micros,
             "lastReanchor": link_timing.last_reanchor.map(|reason| match reason {
                 TimingDiscontinuity::Continuous => "continuous",
                 TimingDiscontinuity::Started => "started",

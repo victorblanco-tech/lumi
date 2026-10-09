@@ -7,6 +7,22 @@ import Testing
 
 @Suite("Library workspace")
 struct LibraryWorkspaceTests {
+    @Test("A failed playlist query clears stale rows without losing navigation or editor data")
+    func failedPlaylistQueryPreservesNavigation() throws {
+        let original = try LibrarySnapshotDecoder().decode(envelope(trackValues: [trackValue()]))
+        let request = LibraryQueryRequest(search: "new selection", playlistID: 99, offset: 0)
+        let failed = original.failingQuery(request, message: "Could not load playlist")
+        #expect(failed.condition == .error)
+        #expect(failed.query.playlistID == 99)
+        #expect(failed.query.search == "new selection")
+        #expect(failed.page.tracks.isEmpty)
+        #expect(failed.page.total == 0)
+        #expect(failed.playlists == original.playlists)
+        #expect(failed.editor == original.editor)
+        #expect(failed.rekordboxDevices == original.rekordboxDevices)
+        #expect(failed.diagnostic == "Could not load playlist")
+    }
+
     @Test("Editor height migrates the user's divider and ignores automatic frame changes")
     func editorHeightMigration() throws {
         let suite = "lumi.editor-height-test.\(UUID().uuidString)"
@@ -491,8 +507,8 @@ struct LibraryWorkspaceTests {
         #expect(device.cueRevisionTracked)
     }
 
-    @Test("Pro DJ Link diagnostics decode discovered equipment and bridge state")
-    func decodesProDJLinkIntegration() throws {
+    @Test("Pro DJ Link diagnostics accept every USB mount lifecycle state", arguments: ["trusted", "resolving", "unknown", "conflict", "unavailable", "empty", "unloading"])
+    func decodesProDJLinkIntegration(mediaState: String) throws {
         let state = try LibrarySnapshotDecoder().decode(
             envelope(
                 trackValues: [trackValue()],
@@ -533,7 +549,7 @@ struct LibraryWorkspaceTests {
                             "name": .string("CDJ-1500X"),
                             "address": .string("192.168.1.50"),
                             "usbMedia": .object([
-                                "state": .string("trusted"),
+                                "state": .string(mediaState),
                                 "sourceName": .string("DJ VIC GRAY"),
                                 "generation": .number(3),
                                 "lastVerifiedUnixMillis": .number(1_790_000_000_000),
@@ -549,7 +565,7 @@ struct LibraryWorkspaceTests {
         #expect(input.isProDJLink)
         #expect(input.discoveredPlayers.first?.name == "CDJ-1500X")
         #expect(input.discoveredPlayers.first?.address == "192.168.1.50")
-        #expect(input.discoveredPlayers.first?.usbMedia?.state == "trusted")
+        #expect(input.discoveredPlayers.first?.usbMedia?.state == mediaState)
         #expect(input.discoveredPlayers.first?.usbMedia?.sourceName == "DJ VIC GRAY")
         #expect(input.discoveredPlayers.first?.usbMedia?.generation == 3)
         #expect(input.recoveryPending == false)

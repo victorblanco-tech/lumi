@@ -675,6 +675,26 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
         placeholder(.error, diagnostic: message)
     }
 
+    /// A failed selection must never show the previous playlist's rows under
+    /// the new selection. Keep navigation and prepared editor data available.
+    public func failingQuery(_ request: LibraryQueryRequest, message: String) -> Self {
+        Self(
+            condition: .error, providerKind: providerKind, source: source,
+            capabilities: capabilities, collectionTotal: collectionTotal, playlists: playlists,
+            query: LibraryQuery(search: request.search, playlistID: request.playlistID,
+                                offset: request.offset, limit: request.limit,
+                                sortBy: request.sortBy, sortDirection: request.sortDirection,
+                                workflowFilter: request.workflowFilter, workflowStepID: request.workflowStepID),
+            page: LibraryPage(total: 0, offset: request.offset, tracks: []),
+            workflow: workflow, workflowCatalog: workflowCatalog, editor: editor,
+            phraseRoleSettings: phraseRoleSettings, autoloopCatalog: autoloopCatalog,
+            midiIntegration: midiIntegration, midiClockIntegration: midiClockIntegration,
+            abletonLinkIntegration: abletonLinkIntegration, deckInputIntegration: deckInputIntegration,
+            rekordboxDevices: rekordboxDevices, rekordboxDeviceInspection: rekordboxDeviceInspection,
+            dataManagement: dataManagement, diagnostic: message
+        )
+    }
+
     public static func placeholder(
         _ condition: LibraryCondition,
         diagnostic: String? = nil

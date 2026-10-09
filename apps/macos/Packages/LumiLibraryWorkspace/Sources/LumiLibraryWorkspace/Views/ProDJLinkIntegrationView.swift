@@ -116,6 +116,12 @@ public struct ProDJLinkIntegrationView: View {
                                     .lineLimit(1)
                                     .frame(maxWidth: .infinity, minHeight: 20, alignment: .leading)
                                     .help(usbDetail(player.usbMedia))
+                                if let media = player.usbMedia, media.state == "unavailable" {
+                                    Text(media.detail)
+                                        .font(LumiTypography.caption)
+                                        .foregroundStyle(LumiColor.textSecondary)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
                             }
                         }
                     }

@@ -118,11 +118,39 @@ final class EngineStatusModel: ObservableObject {
     @Published private(set) var dataManagementOperation = DataManagementOperationState.idle
     @Published private(set) var backupRecords: [LibraryBackupRecord] = []
     @Published private(set) var remoteGatewayState = RemoteGatewayManagementSnapshot.disabled
+    @Published private(set) var serviceShutdownError: String?
+    @Published private(set) var servicesStopping = false
+    @Published private(set) var engineProcessDetails = "No running engine process"
+    @Published private(set) var remoteProcessDetails = "No verified Remote process"
+    var remoteServiceStatus: String { String(describing: remoteGatewayState.serviceState) }
+    private static let remoteEnabledPreference = "lumi.services.remote.enabled"
+    private var serviceStartupTask: Task<Void, Never>?
+    private var serviceShutdownTask: Task<Void, Never>?
+    var servicesAreReady: Bool { lifecycle == .ready && !servicesStopping }
+    var servicesStatus: String {
+        if servicesStopping { return "Stopping services…" }
+        if serviceShutdownError != nil { return "Shutdown needs attention" }
+        switch lifecycle {
+        case .stopped: return "Stopped"
+        case .starting, .connecting: return "Starting services…"
+        case .stopping: return "Stopping services…"
+        case .ready: return "Engine responding"
+        case .disconnected: return "Connection lost"
+        case .failed: return "Service needs attention"
+        }
+    }
+
+    func restartServices() async {
+        await stop()
+        guard serviceShutdownError == nil else { return }
+        await start()
+    }
 
     private enum Lifecycle: Equatable {
         case stopped
         case starting
         case connecting
+        case stopping
         case ready
         case disconnected
         case failed
@@ -170,11 +198,24 @@ final class EngineStatusModel: ObservableObject {
     }
 
     func start() async {
+        guard !servicesStopping, serviceShutdownTask == nil else { return }
+        if let serviceStartupTask {
+            await serviceStartupTask.value
+            return
+        }
+        let task = Task { await self.startServices() }
+        serviceStartupTask = task
+        await task.value
+        serviceStartupTask = nil
+    }
+
+    private func startServices() async {
         guard [.stopped, .disconnected, .failed].contains(lifecycle) else {
             return
         }
 
         monitoringTask?.cancel()
+        serviceShutdownError = nil
         lifecycle = .starting
         workspaceState = LiveWorkspacePresenter.starting()
         libraryState = .importing()
@@ -198,6 +239,7 @@ final class EngineStatusModel: ObservableObject {
                 engineExecutable: executable,
                 libraryDatabaseURL: try libraryDatabaseURL()
             )
+            try Task.checkCancellation()
             let endpointDescription = "\(endpoint.host):\(endpoint.port)"
             self.endpointDescription = endpointDescription
             protocolVersion = endpoint.protocolVersion
@@ -205,6 +247,7 @@ final class EngineStatusModel: ObservableObject {
             workspaceState = LiveWorkspacePresenter.connecting(to: endpointDescription)
 
             var envelope = try await supervisor.connect(to: endpoint)
+            try Task.checkCancellation()
             var snapshot = try snapshotDecoder.decode(
                 envelope,
                 endpointDescription: endpointDescription,
@@ -237,12 +280,20 @@ final class EngineStatusModel: ObservableObject {
             libraryState = try decodeLibraryState(envelope)
             lastLibraryRevision = libraryRevision(in: envelope)
             lifecycle = .ready
+            engineProcessDetails = await supervisor.processDetails()
             latestSnapshot = snapshot
             workspaceState = LiveWorkspacePresenter.ready(snapshot)
             startMonitoring()
             synchronizeLocalAudio(with: snapshot)
             refreshBackupRecords()
-            await refreshRemoteGateway()
+            if UserDefaults.standard.bool(forKey: Self.remoteEnabledPreference) {
+                await setRemoteGatewayEnabled(true)
+            } else {
+                await refreshRemoteGateway()
+                if remoteGatewayState.serviceState == .ready {
+                    UserDefaults.standard.set(true, forKey: Self.remoteEnabledPreference)
+                }
+            }
             startRemoteGatewayMonitoring()
         } catch {
             await supervisor.stop()
@@ -255,10 +306,13 @@ final class EngineStatusModel: ObservableObject {
     }
 
     func refreshRemoteGateway() async {
+        guard !servicesStopping, !Task.isCancelled else { return }
         do {
             let refreshed = await remoteGatewaySupervisor.refresh(
                 recordURL: try remoteGatewayRecordURL()
             )
+            guard !servicesStopping, !Task.isCancelled else { return }
+            remoteProcessDetails = await remoteGatewaySupervisor.processDetails(recordURL: try remoteGatewayRecordURL())
             let currentInvitation = remoteGatewayState.invitation.flatMap { invitation in
                 invitation.expiresAtUnixMillis > UInt64(Date().timeIntervalSince1970 * 1_000)
                     ? invitation
@@ -279,6 +333,8 @@ final class EngineStatusModel: ObservableObject {
     }
 
     func setRemoteGatewayEnabled(_ enabled: Bool) async {
+        guard !servicesStopping else { return }
+        UserDefaults.standard.set(enabled, forKey: Self.remoteEnabledPreference)
         do {
             let recordURL = try remoteGatewayRecordURL()
             remoteGatewayState = enabled
@@ -762,6 +818,24 @@ final class EngineStatusModel: ObservableObject {
     }
 
     func stop() async {
+        if let serviceShutdownTask {
+            await serviceShutdownTask.value
+            return
+        }
+        let task = Task { await self.stopServices() }
+        serviceShutdownTask = task
+        await task.value
+        serviceShutdownTask = nil
+    }
+
+    private func stopServices() async {
+        let canRequestGracefulOff = lifecycle == .ready
+        servicesStopping = true
+        serviceStartupTask?.cancel()
+        await serviceStartupTask?.value
+        lifecycle = .stopping
+        serviceShutdownError = nil
+        defer { servicesStopping = false }
         monitoringTask?.cancel()
         monitoringTask = nil
         engineRecoveryTask?.cancel()
@@ -779,8 +853,7 @@ final class EngineStatusModel: ObservableObject {
         localAudioControllers.removeAll()
         deckVisualClocks = [:]
         isExchangingCommand = false
-        let canParkService = lifecycle == .ready
-        if canParkService, let snapshot = latestSnapshot {
+        if canRequestGracefulOff, let snapshot = latestSnapshot {
             do {
                 _ = try await supervisor.send(
                     .setOperationState(
@@ -797,7 +870,7 @@ final class EngineStatusModel: ObservableObject {
                 )
             }
         }
-        if canParkService,
+        if canRequestGracefulOff,
            latestSnapshot?.abletonLinkIntegration?.enabled == true {
             do {
                 _ = try await supervisor.send(.setAbletonLinkEnabled(false))
@@ -811,13 +884,28 @@ final class EngineStatusModel: ObservableObject {
                 )
             }
         }
-        if canParkService {
-            await supervisor.detachKeepingServiceAlive()
-        } else {
-            await supervisor.stop()
+        var shutdownFailures: [String] = []
+        do {
+            remoteGatewayState = try await remoteGatewaySupervisor.disable(
+                recordURL: try remoteGatewayRecordURL()
+            )
+        } catch {
+            shutdownFailures.append("Remote: \(error.localizedDescription)")
         }
-        await remoteGatewaySupervisor.disconnect()
+        do {
+            try await supervisor.shutdown()
+        } catch {
+            shutdownFailures.append("Engine: \(error.localizedDescription)")
+        }
+        if !shutdownFailures.isEmpty {
+            serviceShutdownError = shutdownFailures.joined(separator: "\n")
+            lifecycle = .failed
+            workspaceState = LiveWorkspacePresenter.failed(serviceShutdownError!)
+            return
+        }
         lifecycle = .stopped
+        engineProcessDetails = "No running engine process"
+        remoteProcessDetails = "No verified Remote process"
         latestSnapshot = nil
         lastLibraryRevision = nil
         endpointDescription = nil
@@ -876,8 +964,8 @@ final class EngineStatusModel: ObservableObject {
                 )
             )
             if let failure = EngineCommandFailure(envelope) {
-                if generation == libraryQueryGeneration, libraryState.condition == .importing {
-                    libraryState = .failed(failure.message)
+                if generation == libraryQueryGeneration {
+                    libraryState = libraryState.failingQuery(request, message: failure.message)
                 }
                 return
             }
@@ -910,12 +998,10 @@ final class EngineStatusModel: ObservableObject {
             )
         } catch {
             guard generation == libraryQueryGeneration else { return }
-            if libraryState.condition == .importing {
-                libraryState = .failed(
-                    (error as? LocalizedError)?.errorDescription
-                        ?? "The library query could not be completed."
-                )
-            }
+            libraryState = libraryState.failingQuery(
+                request, message: (error as? LocalizedError)?.errorDescription
+                    ?? "The library query could not be completed. Select the playlist again to retry."
+            )
         }
     }
 
@@ -3017,6 +3103,7 @@ final class EngineStatusModel: ObservableObject {
     }
 
     private func scheduleEngineReconnection() {
+        guard !servicesStopping, !Task.isCancelled else { return }
         guard lifecycle == .ready else { return }
         lifecycle = .disconnected
         workspaceState = LiveWorkspacePresenter.disconnected()

@@ -7,6 +7,34 @@ import Testing
 
 @Suite("Engine safety boundaries")
 struct EngineSafetyBoundaryTests {
+    @Test("Explicit shutdown terminates an owned process, including ignored TERM, and permits relaunch", arguments: [false, true])
+    func explicitShutdownDoesNotParkProcess(ignoresTermination: Bool) async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let executable = directory.appendingPathComponent("fake-engine")
+        let script = """
+        #!/bin/sh
+        \(ignoresTermination ? "trap '' TERM" : "")
+        printf '%s\\n' '{"recordType":"engineReady","host":"127.0.0.1","port":54321,"protocolVersion":\(WireProtocol.version)}'
+        exec sleep 30
+        """
+        try Data(script.utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+        let supervisor = EngineProcessSupervisor(launchAgentPlistName: nil)
+        _ = try await supervisor.launch(engineExecutable: executable, automaticallyPublishesMidi: false)
+        #expect(await supervisor.isRunning())
+        let started = ContinuousClock.now
+        try await supervisor.shutdown()
+        #expect(started.duration(to: .now) < .seconds(9))
+        #expect(await !supervisor.isRunning())
+        try await supervisor.shutdown()
+        _ = try await supervisor.launch(engineExecutable: executable, automaticallyPublishesMidi: false)
+        #expect(await supervisor.isRunning())
+        try await supervisor.shutdown()
+        #expect(await !supervisor.isRunning())
+    }
+
     @Test("A silent transport operation reaches its bounded deadline")
     func transportDeadlineFails() async {
         let started = ContinuousClock.now
