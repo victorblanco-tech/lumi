@@ -35,3 +35,19 @@ be lost. No mappings, OS permissions or network settings were changed.
   this by restarting SoundSwitch automatically or changing its mappings.
 - Keep E11 integrated acceptance open until actual SoundSwitch playback and
   responsiveness pass.
+
+## Authorized recovery
+
+The owner approved a forced restart. The exact hung process was stopped and
+SoundSwitch reopened the existing project without changing mappings. Its UI
+responded again and showed Control One Connected. Enabling Link showed one
+peer at 155.0 BPM; simulator pitch -2% produced 151.9 BPM in SoundSwitch, then
+restoring pitch produced 155.0 BPM. These UI observations establish correct
+tempo values, not a measured end-to-end latency bound.
+
+A normal Lumi Dev-25 quit left no engine, bridge, gateway or Carabiner process;
+SoundSwitch remained responsive and its Link peer disappeared. The application
+was then reopened: SoundSwitch stayed responsive and showed one Link peer at
+155.0 BPM again. The venue-selection screen requires
+the owner's choice between Woonkamer v001 and v002 before playback acceptance;
+no venue or fixture configuration was guessed.
