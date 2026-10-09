@@ -324,6 +324,7 @@ public struct LiveWorkspaceView: View {
                     .foregroundStyle(timingConfirmationColor)
                 if let launch = state.content?.initialLaunch, launch.policy == "onPhraseStart" {
                     Text(launch.label).font(LumiTypography.technical).lineLimit(1)
+                        .frame(width: 165, alignment: .leading).help(launch.label)
                 }
             }
             .font(LumiTypography.metadata.weight(.semibold))

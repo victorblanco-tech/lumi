@@ -1,7 +1,7 @@
 # Epic 11 — reliable preparation and Live performance
 
 Status: implementation and autonomous testing authorized on 2026-10-08.
-Baseline: public Lumi v0.6.3; development candidate 0.6.4-dev-24.
+Baseline: public Lumi v0.6.3; development candidate 0.6.4-dev-25.
 Products: Lumi, Lumi Remote and the independently versioned Pro DJ Link Simulator.
 Execution order: simulator fidelity first, then recovery and measured timing, preparation workflow, launch policy, integrated acceptance.
 
@@ -10,6 +10,24 @@ defines the timing investigation. This epic is the consolidated acceptance ledge
 Existing story completion and previous component measurements do not close a
 newly reproduced regression. Every row needs a failing reproduction, repair,
 automated regression and actual application acceptance where applicable.
+
+Dev-25 / Remote dev-7 follow-up: desktop acceptance found that the launch
+setting save status and countdown were omitted from the immediate presentation
+refresh comparison. Include launch state changes and reserve stable header
+space on both platforms. Mac presentation tests (63) and Remote feature tests
+(14) pass. The new ignored simulator/MIDI acceptance exercises initial launch
+at -250/0/+250 ms and rejects duplicate boundary sends. SoundSwitch downstream
+acceptance remains open due to the independently sampled
+[Control One lifecycle hang](soundswitch-control-one-hang-2026-10-09.md).
+
+Actual simulator/MIDI run: all three signed-offset cases passed in 156.67 s.
+Each selected phrase index 1, completed exactly one AutoLoop, sent two pulses
+(bank + AutoLoop), reported zero failures and zero late sends, and remained at
+one completion after the normal phrase boundary. Evidence:
+`build/phrase-launch-network-acceptance.log`. This measured the real MIDI lane,
+not SoundSwitch's visible response or physical lights. The harness initially
+reused a command ID and was correctly deduplicated; the successful run uses
+unique IDs. Clippy passes after adding a bounded disconnect shutdown check.
 
 ## Findings and ownership
 

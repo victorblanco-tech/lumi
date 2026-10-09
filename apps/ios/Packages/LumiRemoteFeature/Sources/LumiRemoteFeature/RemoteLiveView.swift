@@ -505,6 +505,7 @@ private struct RemoteTopBar: View {
                     }
                     if let launch = integrations.launch, launch.version == 1, launch.policy == .onPhraseStart {
                         Text(launch.label).font(.system(size: 9, weight: .semibold)).lineLimit(2)
+                            .frame(width: 92, height: 24)
                     }
                 }
                 .frame(minWidth: 54, minHeight: 44)
@@ -513,7 +514,8 @@ private struct RemoteTopBar: View {
             .buttonStyle(.plain)
             .disabled(!model.controlsEnabled)
             .accessibilityLabel("Lighting timing offset")
-            .accessibilityValue(offsetLabel(integrations.pendingTimingOffsetMillis ?? integrations.timingOffsetMillis))
+            .accessibilityValue(offsetLabel(integrations.pendingTimingOffsetMillis ?? integrations.timingOffsetMillis)
+                + (integrations.launch.map { ", \($0.label)" } ?? ""))
             .accessibilityHint(integrations.pendingTimingOffsetMillis == nil
                 ? "Double tap to adjust lighting timing"
                 : "Applies at the next phrase. Double tap to adjust.")

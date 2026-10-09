@@ -940,6 +940,153 @@ fn assert_midi_dispatch_evidence(midi: &serde_json::Map<String, Value>, baseline
     );
 }
 
+/// Uses the real simulator packets, marker reader, copied library and MIDI lane.
+/// Run exclusively, with the desktop app closed and SoundSwitch available.
+#[test]
+#[ignore = "set LUMI_RUN_PHRASE_LAUNCH_ACCEPTANCE=1 with the authorized simulator"]
+fn phrase_launch_emits_once_for_each_signed_offset() {
+    if std::env::var("LUMI_RUN_PHRASE_LAUNCH_ACCEPTANCE").as_deref() != Ok("1") {
+        return;
+    }
+    struct OwnedEngine(Child);
+    impl Drop for OwnedEngine {
+        fn drop(&mut self) {
+            let _ = self.0.kill();
+            let _ = self.0.wait();
+        }
+    }
+    for offset in [-250, 0, 250] {
+        simulator_control("pause", None);
+        simulator_control("seek", Some("5000"));
+        simulator_control("master", Some("on"));
+        simulator_control("pitch", Some("0"));
+        let database = temporary_database_path();
+        seed_network_database(&database);
+        let mut child = OwnedEngine(start_engine(&database));
+        let mut connection = connect_and_authenticate(&mut child.0);
+        let initial = read_response(&mut connection);
+        let mut sequence = 0_u64;
+        let mut send = |payload| {
+            sequence += 1;
+            let result = exchange(
+                &mut connection,
+                &command(&format!("phrase-launch-{sequence}"), sequence, payload),
+            );
+            assert_eq!(
+                result.message_type,
+                MessageType::Snapshot,
+                "command must succeed: {:?}",
+                result.payload
+            );
+            result
+        };
+        let mut snapshot = send(
+            json!({"kind":"selectDeckSourceMode", "mode":"connectedDecks",
+            "expectedStateRevision":required_u64(&initial.payload, "stateRevision")}),
+        );
+        let ready_deadline = Instant::now() + Duration::from_secs(30);
+        while !snapshot
+            .payload
+            .get("livePlan")
+            .is_some_and(Value::is_object)
+        {
+            assert!(
+                Instant::now() < ready_deadline,
+                "exact verified plan unavailable"
+            );
+            thread::sleep(Duration::from_millis(100));
+            snapshot = send(json!({"kind":"getSnapshot", "includeLibrary":false}));
+        }
+        send(
+            json!({"kind":"setLaunchPolicy", "policy":"onPhraseStart", "expectedPolicy":"immediate"}),
+        );
+        send(json!({"kind":"setOutputTimingOffset", "millis":offset}));
+        snapshot = send(json!({"kind":"publishMidiSource"}));
+        let baseline_pulses = required_u64(
+            required_object(&snapshot.payload, "midiIntegration"),
+            "sentPulseCount",
+        );
+        for state in ["armed", "live"] {
+            snapshot = send(json!({"kind":"setOperationState", "operationState":state,
+                "expectedStateRevision":required_u64(&snapshot.payload, "stateRevision")}));
+        }
+        let midi = required_object(&snapshot.payload, "midiIntegration");
+        assert_eq!(required_u64(midi, "sentPulseCount"), baseline_pulses);
+        assert_eq!(
+            required_nested_object(midi, "launch")
+                .get("status")
+                .and_then(Value::as_str),
+            Some("waitingForPlayback")
+        );
+        simulator_control("play", None);
+        let deadline = Instant::now() + Duration::from_secs(90);
+        let mut saw_waiting = false;
+        let mut target_phrase = None;
+        loop {
+            assert!(Instant::now() < deadline, "initial phrase launch timed out");
+            thread::sleep(Duration::from_millis(40));
+            snapshot = send(json!({"kind":"getSnapshot", "includeLibrary":false}));
+            let midi = required_object(&snapshot.payload, "midiIntegration");
+            let launch = required_nested_object(midi, "launch");
+            let scheduler = required_nested_object(midi, "realtimeScheduler");
+            match launch.get("status").and_then(Value::as_str) {
+                Some("waitingForPhrase") => {
+                    saw_waiting = true;
+                    target_phrase = launch.get("targetPhraseIndex").and_then(Value::as_u64);
+                    assert_eq!(required_u64(scheduler, "completedCount"), 0);
+                }
+                Some("launched") => {
+                    assert!(
+                        saw_waiting,
+                        "fixture must exercise run-in, not an immediate boundary"
+                    );
+                    assert_eq!(required_u64(scheduler, "completedCount"), 1);
+                    assert_eq!(required_u64(scheduler, "failedCount"), 0);
+                    assert_midi_dispatch_evidence(midi, baseline_pulses);
+                    break;
+                }
+                Some("noUpcomingPhrase") => panic!("fixture needs an upcoming executable phrase"),
+                _ => {}
+            }
+        }
+        // Covers the negative-offset send followed by its ordinary boundary event.
+        thread::sleep(Duration::from_millis(600));
+        snapshot = send(json!({"kind":"getSnapshot", "includeLibrary":false}));
+        let midi = required_object(&snapshot.payload, "midiIntegration");
+        let scheduler = required_nested_object(midi, "realtimeScheduler");
+        assert_eq!(
+            required_u64(scheduler, "completedCount"),
+            1,
+            "boundary re-triggered the initial AutoLoop"
+        );
+        assert_eq!(required_u64(scheduler, "failedCount"), 0);
+        println!(
+            "phrase launch offset={offset}ms target={target_phrase:?} completed=1 failed=0 pulses={} late={}",
+            required_u64(midi, "sentPulseCount") - baseline_pulses,
+            required_u64(scheduler, "lateCount")
+        );
+        simulator_control("pause", None);
+        drop(connection);
+        let shutdown_deadline = Instant::now() + Duration::from_secs(10);
+        loop {
+            if let Some(status) = child
+                .0
+                .try_wait()
+                .unwrap_or_else(|error| panic!("shutdown status should be readable: {error}"))
+            {
+                assert!(status.success(), "engine shutdown failed: {status}");
+                break;
+            }
+            assert!(
+                Instant::now() < shutdown_deadline,
+                "engine did not stop after disconnect"
+            );
+            thread::sleep(Duration::from_millis(25));
+        }
+        remove_database(&database);
+    }
+}
+
 #[test]
 fn midi_acceptance_rejects_empty_dispatch_and_latency_counters() {
     let valid = json!({

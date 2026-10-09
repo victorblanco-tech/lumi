@@ -3179,6 +3179,7 @@ final class EngineStatusModel: ObservableObject {
                 || old.savedTimingOffsetMillis != new.savedTimingOffsetMillis
                 || old.timingSavePending != new.timingSavePending
                 || old.timingSaveError != new.timingSaveError
+                || old.launch != new.launch
                 || old.bankPreRollMillis != new.bankPreRollMillis
                 || old.realtimeLane?.isHealthy != new.realtimeLane?.isHealthy
                 || old.realtimeLane?.saturationCount
