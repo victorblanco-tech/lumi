@@ -169,6 +169,8 @@ public final class SimulatorAppMain {
         private final JButton refresh = new JButton("Refresh USBs");
         private final JLabel status = new JLabel("Looking for a Rekordbox USB…");
         private final JLabel detail = new JLabel(" ");
+        private final JLabel network = new JLabel("Network: Automatic · detecting connections…");
+        private boolean independentNetwork;
         private final JTextField remoteUrl = new JTextField();
         private final JButton copyUrl = new JButton("Copy URL");
         private final JButton openUrl = new JButton("Open controls");
@@ -219,11 +221,17 @@ public final class SimulatorAppMain {
             title.setFont(title.getFont().deriveFont(Font.BOLD, 24f));
             title.setAlignmentX(0f);
             root.add(title);
-            JLabel subtitle = new JLabel("0.4.1-dev-4 · Two independent USB sources, LINK loading and cached-track eject tests");
+            JLabel subtitle = new JLabel("0.4.1-dev-5 · Automatic network · read-only USB identity over Pro DJ Link");
             subtitle.setForeground(MUTED);
             subtitle.setAlignmentX(0f);
             root.add(subtitle);
             root.add(Box.createVerticalStrut(24));
+
+            network.setAlignmentX(0f);
+            network.setPreferredSize(new Dimension(680, 48));
+            network.setMaximumSize(new Dimension(Integer.MAX_VALUE, 48));
+            root.add(network);
+            root.add(Box.createVerticalStrut(10));
 
             root.add(row("USB per Player", new JLabel("P1"), usbVolumes, new JLabel("P2"), secondUsbVolumes, refresh));
             root.add(Box.createVerticalStrut(10));
@@ -341,6 +349,8 @@ public final class SimulatorAppMain {
             Thread.startVirtualThread(() -> {
                 try {
                     List<Path> volumes = findRekordboxVolumes(Path.of("/Volumes"));
+                    ProLinkBroadcaster.Endpoint primary = ProLinkBroadcaster.selectEndpoint(null);
+                    ProLinkBroadcaster.Endpoint secondary = ProLinkBroadcaster.secondaryEndpoint(primary);
                     appendLog("Rekordbox USB scan found " + volumes.size() + " volume(s)", null);
                     SwingUtilities.invokeLater(() -> {
                         usbVolumes.removeAllItems();
@@ -349,6 +359,13 @@ public final class SimulatorAppMain {
                         secondUsbVolumes.addItem(null);
                         volumes.forEach(secondUsbVolumes::addItem);
                         selectPreferredVolume();
+                        independentNetwork = secondary != null;
+                        secondUsbVolumes.setEnabled(independentNetwork);
+                        if (!independentNetwork) secondUsbVolumes.setSelectedItem(null);
+                        network.setText("<html>Network: Automatic · " + (independentNetwork ? "Independent USBs available" : "Shared USB over LINK")
+                                + "<br>P1: " + primary.interfaceName() + " · " + primary.localAddressText()
+                                + " — P2: " + (secondary == null ? "same address; loads from P1" : secondary.interfaceName() + " · " + secondary.localAddressText()) + "</html>");
+                        secondUsbVolumes.setToolTipText(independentNetwork ? "Optional USB in Player 2" : "A second independent USB needs a second active connection on the same LAN");
                         busy = false;
                         if (volumes.isEmpty()) {
                             status.setText("No Rekordbox USB found");
@@ -466,7 +483,7 @@ public final class SimulatorAppMain {
 
         private void setControlsEnabled(boolean enabled) {
             usbVolumes.setEnabled(enabled);
-            secondUsbVolumes.setEnabled(enabled);
+            secondUsbVolumes.setEnabled(enabled && independentNetwork);
             firstPlayerNumber.setEnabled(enabled);
             secondPlayerNumber.setEnabled(enabled);
             refresh.setEnabled(enabled);

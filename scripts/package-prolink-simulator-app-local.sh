@@ -80,6 +80,8 @@ mkdir -p "$input_root" "$icon_output"
 cp "$repository_root/tools/prolink-simulator/target/lumi-prolink-simulator.jar" "$input_root/"
 cargo build --release --manifest-path "$repository_root/Cargo.toml" --bin lumi-simulator-media
 cp "$repository_root/target/release/lumi-simulator-media" "$input_root/"
+xcrun clang -std=c11 -Wall -Wextra -Werror -O2 \
+  "$repository_root/tools/prolink-simulator/native/media_rpc.c" -o "$input_root/lumi-simulator-rpc"
 
 xcrun actool "$repository_root/apps/macos/Lumi/Resources/Assets.xcassets" \
   --compile "$icon_output" \

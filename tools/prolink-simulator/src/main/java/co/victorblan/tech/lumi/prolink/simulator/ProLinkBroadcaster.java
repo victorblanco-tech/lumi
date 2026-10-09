@@ -34,6 +34,17 @@ final class ProLinkBroadcaster implements AutoCloseable, SimulatorTransport {
     private final TrafficFaultController faults;
     private final Endpoint endpoint;
     private final DatagramSocket socket;
+    private final java.util.Map<Integer, Endpoint> playerEndpoints = new java.util.HashMap<>();
+    private final java.util.Map<Integer, DatagramSocket> playerSockets = new java.util.HashMap<>();
+    private final java.util.Set<Integer> unavailable = java.util.concurrent.ConcurrentHashMap.newKeySet();
+    private volatile MediaRpcService media;
+    void attachMedia(MediaRpcService service) { media = service; }
+    @Override public String mediaStatus() { return media == null ? "Not running" : media.status(); }
+    @Override public void clearMediaFaults() { if (media != null) media.clearFaults(); }
+    @Override public void mediaFault(int player, String kind, int durationMillis) {
+        if (media == null) throw new IllegalStateException("Media service not running");
+        media.fault(player, kind, durationMillis);
+    }
     private final DatagramSocket announcementSocket;
     private final ProLinkPeerRegistry peers = new ProLinkPeerRegistry(PEER_LEASE_NANOS);
     private final Thread peerDiscoveryThread;
@@ -69,11 +80,28 @@ final class ProLinkBroadcaster implements AutoCloseable, SimulatorTransport {
         java.util.Arrays.fill(lastRevision, Long.MIN_VALUE);
         this.endpoint = selectEndpoint(requestedInterface);
         this.socket = new DatagramSocket(new InetSocketAddress(endpoint.localAddress(), 0));
-        socket.setBroadcast(true);
         this.announcementSocket = new DatagramSocket(null);
+        try {
+        socket.setBroadcast(true);
+        Endpoint secondary = secondaryEndpoint(endpoint);
+        for (int i = 0; i < states.size(); i++) {
+            int player = states.get(i).snapshot().playerNumber();
+            Endpoint selected = i == 1 && secondary != null ? secondary : endpoint;
+            playerEndpoints.put(player, selected);
+            if (selected.equals(endpoint)) playerSockets.put(player, socket);
+            else {
+                DatagramSocket additional = new DatagramSocket(new InetSocketAddress(selected.localAddress(), 0));
+                additional.setBroadcast(true);
+                playerSockets.put(player, additional);
+            }
+        }
         announcementSocket.setReuseAddress(true);
         announcementSocket.bind(new InetSocketAddress(ANNOUNCEMENT_PORT));
         announcementSocket.setBroadcast(true);
+        } catch (IOException | RuntimeException failure) {
+            socket.close(); announcementSocket.close(); playerSockets.values().forEach(DatagramSocket::close);
+            scheduler.shutdownNow(); throw failure;
+        }
         this.peerDiscoveryThread = Thread.ofPlatform()
                 .name("lumi-prolink-simulator-peer-discovery")
                 .daemon(true)
@@ -119,10 +147,21 @@ final class ProLinkBroadcaster implements AutoCloseable, SimulatorTransport {
         return endpoint;
     }
 
+    @Override public Endpoint endpointForPlayer(int player) { return playerEndpoints.getOrDefault(player, endpoint); }
+
+    boolean independentSources() { return playerEndpoints.values().stream().map(Endpoint::localAddressText).distinct().count() > 1; }
+
     private void sendAnnouncementSafely() {
         try {
             for (PlayerState state : states) {
                 PlayerState.Snapshot snapshot = state.snapshot();
+                int number = snapshot.playerNumber();
+                if (NetworkInterface.getByInetAddress(endpointForPlayer(number).localAddress()) == null) {
+                    unavailable.add(number);
+                    lastTrafficError.set("Player " + number + " address unavailable; restart simulator if the address changed");
+                    continue;
+                }
+                unavailable.remove(number);
                 if (!faults.permit(
                         snapshot.playerNumber(), TrafficFaultController.Lane.ANNOUNCEMENT
                 )) {
@@ -130,10 +169,10 @@ final class ProLinkBroadcaster implements AutoCloseable, SimulatorTransport {
                 }
                 DatagramPacket packet = ProLinkPackets.announcement(
                         deviceName(snapshot.playerNumber()), snapshot.playerNumber(),
-                        hardwareAddress(snapshot.playerNumber()), endpoint.localAddress(),
+                        hardwareAddress(snapshot.playerNumber()), endpointForPlayer(snapshot.playerNumber()).localAddress(),
                         states.size() + peers.size(System.nanoTime())
                 );
-                send(packet, ANNOUNCEMENT_PORT);
+                send(packet, ANNOUNCEMENT_PORT, snapshot.playerNumber());
                 announcementPacketCount.incrementAndGet();
             }
         } catch (Exception failure) {
@@ -151,8 +190,8 @@ final class ProLinkBroadcaster implements AutoCloseable, SimulatorTransport {
                 DatagramPacket packet = ProLinkPackets.status(
                         deviceName(snapshot.playerNumber()), snapshot, packetCounter.incrementAndGet()
                 );
-                send(packet, STATUS_PORT);
-                sendStatusToPeers(packet);
+                send(packet, STATUS_PORT, snapshot.playerNumber());
+                sendStatusToPeers(packet, snapshot.playerNumber());
                 statusPacketCount.incrementAndGet();
             }
         } catch (Exception failure) {
@@ -179,7 +218,7 @@ final class ProLinkBroadcaster implements AutoCloseable, SimulatorTransport {
                     if (!faults.permit(player, TrafficFaultController.Lane.BEAT)) {
                         continue;
                     }
-                    send(ProLinkPackets.beat(deviceName(player), snapshot), BEAT_PORT);
+                    send(ProLinkPackets.beat(deviceName(player), snapshot), BEAT_PORT, player);
                     beatPacketCount.incrementAndGet();
                 }
             }
@@ -204,7 +243,7 @@ final class ProLinkBroadcaster implements AutoCloseable, SimulatorTransport {
                         ProLinkPackets.precisePosition(
                                 deviceName(snapshot.playerNumber()), snapshot, snapshot.positionMillis()
                         ),
-                        BEAT_PORT
+                        BEAT_PORT, snapshot.playerNumber()
                 );
                 precisePositionPacketCount.incrementAndGet();
             }
@@ -263,7 +302,7 @@ final class ProLinkBroadcaster implements AutoCloseable, SimulatorTransport {
             if (faults.permit(
                     snapshot.playerNumber(), TrafficFaultController.Lane.PRECISE_POSITION
             )) {
-                send(ProLinkPackets.precisePosition(deviceName, snapshot, position), BEAT_PORT);
+                send(ProLinkPackets.precisePosition(deviceName, snapshot, position), BEAT_PORT, snapshot.playerNumber());
                 precisePositionPacketCount.incrementAndGet();
             }
         }
@@ -274,26 +313,28 @@ final class ProLinkBroadcaster implements AutoCloseable, SimulatorTransport {
         )) {
             send(
                     ProLinkPackets.precisePosition(deviceName, snapshot, snapshot.positionMillis()),
-                    BEAT_PORT
+                    BEAT_PORT, snapshot.playerNumber()
             );
             precisePositionPacketCount.incrementAndGet();
         }
         preciseBurstCount.incrementAndGet();
     }
 
-    private void send(DatagramPacket packet, int port) throws IOException {
-        send(packet, endpoint.broadcastAddress(), port);
+    private void send(DatagramPacket packet, int port, int player) throws IOException {
+        send(packet, endpointForPlayer(player).broadcastAddress(), port, player);
     }
 
-    private void send(DatagramPacket packet, InetAddress address, int port) throws IOException {
-        socket.send(new DatagramPacket(
+    private void send(DatagramPacket packet, InetAddress address, int port, int player) throws IOException {
+        // Never silently move a Player to another address while a USB identity is cached.
+        if (unavailable.contains(player)) return;
+        playerSockets.get(player).send(new DatagramPacket(
                 packet.getData(), packet.getOffset(), packet.getLength(), address, port
         ));
     }
 
-    private void sendStatusToPeers(DatagramPacket packet) throws IOException {
+    private void sendStatusToPeers(DatagramPacket packet, int player) throws IOException {
         for (InetAddress peer : peers.active(System.nanoTime())) {
-            send(packet, peer, STATUS_PORT);
+            send(packet, peer, STATUS_PORT, player);
         }
     }
 
@@ -305,7 +346,7 @@ final class ProLinkBroadcaster implements AutoCloseable, SimulatorTransport {
                 packet.setLength(buffer.length);
                 announcementSocket.receive(packet);
                 if (ProLinkPackets.hasMagicHeader(packet)
-                        && !packet.getAddress().equals(endpoint.localAddress())) {
+                        && playerEndpoints.values().stream().noneMatch(e -> e.localAddress().equals(packet.getAddress()))) {
                     peers.observe(packet.getAddress(), System.nanoTime());
                 }
             } catch (IOException failure) {
@@ -336,7 +377,7 @@ final class ProLinkBroadcaster implements AutoCloseable, SimulatorTransport {
         );
     }
 
-    private static Endpoint selectEndpoint(String requestedName) throws SocketException {
+    static List<Endpoint> availableEndpoints() throws SocketException {
         List<Endpoint> candidates = new ArrayList<>();
         Enumeration<NetworkInterface> interfaces = NetworkInterface.getNetworkInterfaces();
         while (interfaces.hasMoreElements()) {
@@ -350,7 +391,8 @@ final class ProLinkBroadcaster implements AutoCloseable, SimulatorTransport {
             }
             for (InterfaceAddress interfaceAddress : networkInterface.getInterfaceAddresses()) {
                 if (!(interfaceAddress.getAddress() instanceof Inet4Address local)
-                        || !(interfaceAddress.getBroadcast() instanceof Inet4Address broadcast)) {
+                        || !(interfaceAddress.getBroadcast() instanceof Inet4Address broadcast)
+                        || !(local.isSiteLocalAddress() || local.isLinkLocalAddress())) {
                     continue;
                 }
                 candidates.add(new Endpoint(
@@ -358,6 +400,11 @@ final class ProLinkBroadcaster implements AutoCloseable, SimulatorTransport {
                 ));
             }
         }
+        return candidates;
+    }
+
+    static Endpoint selectEndpoint(String requestedName) throws SocketException {
+        List<Endpoint> candidates = availableEndpoints();
         if (requestedName != null) {
             return candidates.stream()
                     .filter(candidate -> candidate.interfaceName().equals(requestedName))
@@ -366,11 +413,36 @@ final class ProLinkBroadcaster implements AutoCloseable, SimulatorTransport {
                             "No active IPv4 broadcast address found on interface " + requestedName
                     ));
         }
+        String preferred = defaultInterface();
         return candidates.stream()
-                .sorted(Comparator.comparing((Endpoint endpoint) -> !endpoint.interfaceName().startsWith("en"))
+                .sorted(Comparator.comparing((Endpoint endpoint) -> !endpoint.interfaceName().equals(preferred))
                         .thenComparing(Endpoint::interfaceName))
                 .findFirst()
                 .orElseThrow(() -> new SocketException("No active IPv4 broadcast network interface found"));
+    }
+
+    static Endpoint secondaryEndpoint(Endpoint primary) throws SocketException {
+        return availableEndpoints().stream().filter(e -> suitableSecondary(primary, e))
+                .sorted(Comparator.comparing(Endpoint::interfaceName)).findFirst().orElse(null);
+    }
+
+    static boolean suitableSecondary(Endpoint primary, Endpoint candidate) {
+        return !primary.interfaceName().equals(candidate.interfaceName())
+                && !primary.localAddress().equals(candidate.localAddress())
+                && primary.broadcastAddress().equals(candidate.broadcastAddress());
+    }
+
+    private static String defaultInterface() {
+        Process process = null;
+        try {
+            process = new ProcessBuilder("/sbin/route", "-n", "get", "default").redirectErrorStream(true).start();
+            if (!process.waitFor(2, TimeUnit.SECONDS)) return "";
+            String text = new String(process.getInputStream().readNBytes(8192), java.nio.charset.StandardCharsets.UTF_8);
+            for (String line : text.split("\\n")) if (line.trim().startsWith("interface:")) return line.split(":", 2)[1].trim();
+        } catch (IOException ignored) {
+        } catch (InterruptedException interrupted) { Thread.currentThread().interrupt();
+        } finally { if (process != null && process.isAlive()) process.destroyForcibly(); }
+        return "";
     }
 
     private void report(String packetType, Exception failure) {
@@ -383,7 +455,7 @@ final class ProLinkBroadcaster implements AutoCloseable, SimulatorTransport {
     }
 
     private byte[] hardwareAddress(int playerNumber) {
-        byte[] address = endpoint.hardwareAddress();
+        byte[] address = endpointForPlayer(playerNumber).hardwareAddress();
         address[address.length - 1] = (byte) (address[address.length - 1] ^ playerNumber);
         return address;
     }
@@ -397,6 +469,7 @@ final class ProLinkBroadcaster implements AutoCloseable, SimulatorTransport {
         scheduler.shutdownNow();
         announcementSocket.close();
         socket.close();
+        playerSockets.values().forEach(DatagramSocket::close);
     }
 
     record Endpoint(

@@ -38,7 +38,17 @@ no export/analysis date is invented as a cue/grid revision timestamp.
 
 ## E11-01 — hardware-derived simulator and repeatable scenarios
 
-Start here. Repository simulator is now 0.4.1-dev-3. Its DMG was built,
+2026-10-09 update, simulator 0.4.1-dev-5: real destination-aware, unprivileged
+RPC/MOUNT/NFS marker reads implemented (ADR 0046). Automatic one/two-interface
+selection, independent source addresses, USB-status packet fields, bounded
+media faults and visible network mode added. Native acceptance includes exact
+SHA-256 through the unchanged production reader on port 111, source-address
+verification, stale handles, eject, missing/oversize/symlink protection and
+timeout recovery. Local browser acceptance uses explicitly synthetic sources.
+Mac mini installation, real exports across its two physical interfaces and Lumi
+show acceptance are still required; do not mark the complete epic done.
+
+Historical checkpoint (superseded by the update above): simulator 0.4.1-dev-3 was built,
 checksum-verified, and the packaged desktop UI was opened and inspected. No
 Rekordbox USB was attached to this Mac, so no local simulator session was
 started. The owner-supplied Mac mini still runs 0.4.0-dev-56; its control page is

@@ -71,8 +71,14 @@ class ProLinkPacketsTest {
         PlayerState source = new PlayerState(1);
         PlayerState receiver = new PlayerState(2);
         source.configureUsb(library);
+        DatagramPacket mountedPacket = ProLinkPackets.status("LUMI-SIM-1",source.snapshot(),1);
+        mountedPacket.setAddress(InetAddress.getByName("192.168.10.20"));
+        assertTrue(new CdjStatus(mountedPacket).isLocalUsbLoaded());
         receiver.loadFrom(source.usb(), 1256);
         source.usb().eject();
+        DatagramPacket emptyPacket = ProLinkPackets.status("LUMI-SIM-1",source.snapshot(),2);
+        emptyPacket.setAddress(InetAddress.getByName("192.168.10.20"));
+        assertTrue(new CdjStatus(emptyPacket).isLocalUsbEmpty());
 
         PlayerState.Snapshot snapshot = receiver.snapshot();
         assertEquals(1, snapshot.sourcePlayerNumber());

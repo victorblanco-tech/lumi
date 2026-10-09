@@ -75,7 +75,7 @@ final class RemoteControlServer implements AutoCloseable {
         sendJson(exchange, 200, Map.of(
                 "status", "ready",
                 "service", "lumi-prolink-simulator",
-                "version", "0.4.1-dev-4"
+                "version", "0.4.1-dev-5"
         ));
     }
 
@@ -194,6 +194,9 @@ final class RemoteControlServer implements AutoCloseable {
         ProLinkBroadcaster.Endpoint networkEndpoint = broadcaster.endpoint();
         payload.put("networkInterface", networkEndpoint.interfaceName());
         payload.put("networkAddress", networkEndpoint.localAddressText());
+        payload.put("mediaService", broadcaster.mediaStatus());
+        payload.put("networkMode", players.stream().map(p -> broadcaster.endpointForPlayer(p.snapshot().playerNumber()).localAddressText()).distinct().count() > 1
+                ? "Independent network addresses" : "Shared USB over LINK");
         payload.put("broadcastAddress", networkEndpoint.broadcastAddressText());
         payload.put("proLinkPeerCount", broadcaster.peerCount());
         ProLinkBroadcaster.TrafficDiagnostics traffic = broadcaster.trafficDiagnostics();
@@ -217,6 +220,8 @@ final class RemoteControlServer implements AutoCloseable {
     private LinkedHashMap<String, Object> playerPayload(PlayerState.Snapshot snapshot) {
         LinkedHashMap<String, Object> payload = new LinkedHashMap<>();
         payload.put("playerNumber", snapshot.playerNumber());
+        payload.put("networkAddress", broadcaster.endpointForPlayer(snapshot.playerNumber()).localAddressText());
+        payload.put("networkInterface", broadcaster.endpointForPlayer(snapshot.playerNumber()).interfaceName());
         payload.put("playing", snapshot.playing());
         payload.put("master", snapshot.master());
         payload.put("onAir", snapshot.onAir());

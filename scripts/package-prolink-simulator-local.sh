@@ -47,6 +47,8 @@ cp "$repository_root/tools/prolink-simulator/target/lumi-prolink-simulator.jar" 
   "$bundle_root/lib/lumi-prolink-simulator.jar"
 cargo build --release --manifest-path "$repository_root/Cargo.toml" --bin lumi-simulator-media
 cp "$repository_root/target/release/lumi-simulator-media" "$bundle_root/lib/"
+xcrun clang -std=c11 -Wall -Wextra -Werror -O2 \
+  "$repository_root/tools/prolink-simulator/native/media_rpc.c" -o "$bundle_root/lib/lumi-simulator-rpc"
 cp "$repository_root/tools/prolink-simulator/bin/lumi-prolink-simulator" \
   "$bundle_root/bin/lumi-prolink-simulator"
 cp "$repository_root/tools/prolink-simulator/README.md" "$bundle_root/README.md"

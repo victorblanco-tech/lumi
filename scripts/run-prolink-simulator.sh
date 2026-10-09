@@ -39,6 +39,9 @@ mvn \
 
 cargo build --release --manifest-path "$repository_root/Cargo.toml" --bin lumi-simulator-media
 export LUMI_SIM_MEDIA_READER="$repository_root/target/release/lumi-simulator-media"
+xcrun clang -std=c11 -Wall -Wextra -Werror -O2 \
+  "$repository_root/tools/prolink-simulator/native/media_rpc.c" \
+  -o "$repository_root/tools/prolink-simulator/target/lumi-simulator-rpc"
 exec "$JAVA_HOME/bin/java" \
   -jar "$repository_root/tools/prolink-simulator/target/lumi-prolink-simulator.jar" \
   "$@"

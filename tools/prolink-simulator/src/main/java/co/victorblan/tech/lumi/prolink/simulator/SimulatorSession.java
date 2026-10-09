@@ -13,6 +13,7 @@ final class SimulatorSession implements AutoCloseable {
     private final RemoteControlServer remote;
     private final SimulatorConfig config;
     private final AtomicBoolean closed = new AtomicBoolean();
+    private MediaRpcService media;
 
     private SimulatorSession(
             UsbLibrary library,
@@ -37,6 +38,8 @@ final class SimulatorSession implements AutoCloseable {
         UsbLibrary secondLibrary = config.secondUsbRoot() == null
                 ? null
                 : UsbLibrary.open(config.secondUsbRoot());
+        if (secondLibrary != null && secondLibrary.root().equals(library.root()))
+            throw new IOException("The same USB cannot occupy both Players. Leave Player 2's USB empty and load it over LINK from Player 1.");
         List<PlayerState> players = List.of(
                 new PlayerState(config.playerNumber()),
                 new PlayerState(config.secondPlayerNumber())
@@ -55,16 +58,24 @@ final class SimulatorSession implements AutoCloseable {
             autoMix.close();
             throw failure;
         }
+        MediaRpcService media = null;
         try {
+            if (secondLibrary != null && !broadcaster.independentSources())
+                throw new IOException("Only one network address available. Use one USB in Player 1; Player 2 loads over LINK. A second independent USB needs a second active connection on the same LAN.");
+            media = MediaRpcService.start(players, broadcaster);
+            broadcaster.attachMedia(media);
             RemoteControlServer remote = new RemoteControlServer(
                     library, players, autoMix, broadcaster, faults, config.bindAddress(),
                     config.controlPort(), config.controlToken()
             );
             broadcaster.start();
             remote.start();
-            return new SimulatorSession(library, players, autoMix, faults, broadcaster, remote, config);
+            SimulatorSession session = new SimulatorSession(library, players, autoMix, faults, broadcaster, remote, config);
+            session.media = media;
+            return session;
         } catch (IOException | RuntimeException failure) {
             broadcaster.close();
+            if (media != null) media.close();
             faults.close();
             autoMix.close();
             throw failure;
@@ -79,9 +90,10 @@ final class SimulatorSession implements AutoCloseable {
     }
 
     String networkSummary() {
-        return broadcaster.endpoint().interfaceName() + " · "
-                + broadcaster.endpoint().localAddressText() + " · "
-                + config.trafficProfile().externalName();
+        return players.stream().map(p -> "P" + p.snapshot().playerNumber() + " "
+                + broadcaster.endpointForPlayer(p.snapshot().playerNumber()).interfaceName() + " "
+                + broadcaster.endpointForPlayer(p.snapshot().playerNumber()).localAddressText())
+                .collect(java.util.stream.Collectors.joining(" · "));
     }
 
     UsbLibrary library() {
@@ -99,6 +111,7 @@ final class SimulatorSession implements AutoCloseable {
         }
         remote.close();
         broadcaster.close();
+        if (media != null) media.close();
         faults.close();
         autoMix.close();
     }

@@ -31,6 +31,7 @@ final class SimulatorControls {
             case "load" -> load(state, body);
             case "eject-usb" -> state.usb().eject();
             case "insert-usb" -> state.usb().reinsert();
+            case "fault-media" -> transport.mediaFault(state.snapshot().playerNumber(), requiredText(body,"kind"), requiredInt(body,"durationMillis"));
             case "play" -> state.play();
             case "pause" -> state.pause();
             case "seek" -> state.seek(requiredLong(body, "positionMillis"));
@@ -59,7 +60,7 @@ final class SimulatorControls {
                     requiredInt(body, "everyN"),
                     requiredInt(body, "durationMillis")
             );
-            case "clear-faults" -> faults.clearFaults();
+            case "clear-faults" -> { faults.clearFaults(); transport.clearMediaFaults(); }
             case "master-handover" -> autoMix.transitionNowForTesting();
             case "recovery-soak" -> faults.setRecoverySoak(
                     requiredBoolean(body, "enabled"), requiredInt(body, "intervalSeconds")

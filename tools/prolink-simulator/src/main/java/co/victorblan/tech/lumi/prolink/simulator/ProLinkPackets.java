@@ -72,6 +72,9 @@ final class ProLinkPackets {
         payload[8] = state.playing() ? (byte) 1 : 0;
 
         boolean loaded = state.track() != null;
+        // Beat Link offsets include the 31-byte packet header; this is the payload.
+        payload[CdjStatus.LOCAL_USB_STATE - 31] = state.insertedUsb() == null ? (byte) 4 : 0;
+        payload[CdjStatus.LOCAL_SD_STATE - 31] = 4;
         payload[STATUS_SOURCE_PLAYER] = loaded ? (byte) state.sourcePlayerNumber() : 0;
         payload[STATUS_SOURCE_SLOT] = loaded ? CdjStatus.TrackSourceSlot.USB_SLOT.protocolValue : 0;
         payload[STATUS_TRACK_TYPE] = loaded ? CdjStatus.TrackType.REKORDBOX.protocolValue : 0;
