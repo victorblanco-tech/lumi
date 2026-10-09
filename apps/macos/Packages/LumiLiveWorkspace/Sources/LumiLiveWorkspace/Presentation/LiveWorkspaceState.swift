@@ -602,7 +602,7 @@ public enum LiveWorkspacePresenter {
                !snapshot.decks.isEmpty,
                snapshot.operationState == "live",
                snapshot.deckInputIntegration?.positionAuthorityReady != true {
-                return "Exact CDJ position is unavailable. Automatic light output is held to prevent a wrong AutoLoop."
+                return "Fresh CDJ position data is unavailable. Live timing is recovering."
             }
             if let error = snapshot.midiIntegration?.lastError {
                 return "Light Output needs attention: \(error)"

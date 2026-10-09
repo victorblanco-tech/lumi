@@ -90,6 +90,8 @@ struct LoadedDeck {
     last_status_discontinuity: Option<StatusDiscontinuity>,
     phrase_index: Option<u16>,
     precise_position_seen: bool,
+    last_precise_position_received_at: Option<Instant>,
+    last_exact_beat_received_at: Option<Instant>,
     last_precise_position_millis: Option<u64>,
     last_precise_position_observed_at_nanos: Option<u64>,
     pending_precise_discontinuity: Option<PendingPreciseDiscontinuity>,
@@ -160,7 +162,6 @@ pub struct ProLinkDeckSourceProvider {
     precise_position_message_count: u64,
     authoritative_position_count: u64,
     position_discontinuity_count: u64,
-    last_precise_position_received_at: Option<Instant>,
     timing_generation: u64,
     timing_observations: Vec<ProLinkTimingObservation>,
     precise_position_observations: Vec<ProLinkPrecisePositionObservation>,
@@ -197,7 +198,6 @@ impl ProLinkDeckSourceProvider {
             precise_position_message_count: 0,
             authoritative_position_count: 0,
             position_discontinuity_count: 0,
-            last_precise_position_received_at: None,
             timing_generation: 0,
             timing_observations: Vec::new(),
             precise_position_observations: Vec::new(),
@@ -285,7 +285,6 @@ impl ProLinkDeckSourceProvider {
         self.bridge_version = None;
         self.beat_link_version = None;
         self.last_error = None;
-        self.last_precise_position_received_at = None;
         self.timing_observations.clear();
         self.precise_position_observations.clear();
         self.update_source_status(DeckSourceStatus::Starting, at)
@@ -653,12 +652,26 @@ impl ProLinkDeckSourceProvider {
             position_authority_ready: self
                 .leader_deck_id
                 .and_then(|deck_id| self.decks.get(&deck_id))
-                .is_some_and(|deck| deck.precise_position_seen)
-                && self
-                    .last_precise_position_received_at
-                    .is_some_and(|received| {
-                        received.elapsed() <= POSITION_AUTHORITY_DIAGNOSTIC_MAX_AGE
-                    }),
+                .is_some_and(|deck| {
+                    // Status + exact Beat packets anchor continuous playback.
+                    // Diagnostics must not require the optional precise lane
+                    // while that authority is healthy, nor borrow freshness
+                    // from another Player or a previous track load.
+                    let beat_max_age = Duration::from_millis(
+                        (120_000_000 / u64::from(deck.effective_bpm_milli.max(1)))
+                            .clamp(500, 3_000),
+                    );
+                    (deck.playing
+                        && deck
+                            .last_exact_beat_received_at
+                            .is_some_and(|received| received.elapsed() <= beat_max_age))
+                        || (deck.precise_position_seen
+                            && deck
+                                .last_precise_position_received_at
+                                .is_some_and(|received| {
+                                    received.elapsed() <= POSITION_AUTHORITY_DIAGNOSTIC_MAX_AGE
+                                }))
+                }),
         }
     }
 
@@ -760,6 +773,8 @@ impl ProLinkDeckSourceProvider {
                     last_status_discontinuity: None,
                     phrase_index: None,
                     precise_position_seen: false,
+                    last_precise_position_received_at: None,
+                    last_exact_beat_received_at: None,
                     last_precise_position_millis: None,
                     last_precise_position_observed_at_nanos: None,
                     pending_precise_discontinuity: None,
@@ -1010,7 +1025,9 @@ impl ProLinkDeckSourceProvider {
             return Ok(());
         };
         self.precise_position_message_count = self.precise_position_message_count.saturating_add(1);
-        self.last_precise_position_received_at = Some(Instant::now());
+        if let Some(deck) = self.decks.get_mut(&deck_id) {
+            deck.last_precise_position_received_at = Some(Instant::now());
+        }
         self.precise_position_observations
             .push(ProLinkPrecisePositionObservation {
                 deck_id,
@@ -1101,6 +1118,7 @@ impl ProLinkDeckSourceProvider {
             deck.beat = absolute_beat;
             deck.phrase_index = phrase_index.or(previous.phrase_index);
             deck.transport_anchor_observed_at = Instant::now();
+            deck.last_exact_beat_received_at = Some(Instant::now());
             deck.last_position_observed_at_nanos = observed_at_nanos;
             if seeked {
                 deck.pending_precise_discontinuity = None;

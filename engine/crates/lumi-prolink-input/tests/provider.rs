@@ -13,6 +13,55 @@ const BEAT: &str = r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"seq
 const REPLACEMENT_AT_PRE_ROLL: &str = r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":4,"observedAtNanos":40,"type":"deckStatus","payload":{"deviceNumber":1,"deviceName":"LUMI-SIM","playing":false,"paused":true,"cued":false,"tempoMaster":true,"onAir":true,"sourcePlayer":1,"sourceSlot":"USB_SLOT","trackType":"REKORDBOX","rekordboxId":1247,"trackBpm":150.0,"effectiveBpm":150.0,"beatNumber":0,"beatWithinBar":0,"rawPitch":1048576}}"#;
 
 #[test]
+fn exact_beat_authority_recovers_without_precise_packets_and_is_load_scoped()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut decoder = BridgeDecoder::new();
+    let mut provider = ProLinkDeckSourceProvider::new(MonotonicTime::new(0))?;
+    for (line, time) in [(HELLO, 1), (READY, 2), (STATUS, 3)] {
+        provider.ingest(decoder.decode_line(line)?, MonotonicTime::new(time))?;
+    }
+    assert!(!provider.diagnostics().position_authority_ready);
+    provider.ingest(decoder.decode_line(BEAT)?, MonotonicTime::new(4))?;
+    assert!(provider.diagnostics().position_authority_ready);
+    std::thread::sleep(std::time::Duration::from_millis(850));
+    assert!(!provider.diagnostics().position_authority_ready);
+    provider.ingest(
+        decoder.decode_line(&BEAT.replace("\"sequence\":4", "\"sequence\":5"))?,
+        MonotonicTime::new(5),
+    )?;
+    assert!(provider.diagnostics().position_authority_ready);
+    provider.ingest(
+        decoder
+            .decode_line(&REPLACEMENT_AT_PRE_ROLL.replace("\"sequence\":4", "\"sequence\":6"))?,
+        MonotonicTime::new(6),
+    )?;
+    assert!(!provider.diagnostics().position_authority_ready);
+    Ok(())
+}
+
+#[test]
+fn master_handover_does_not_borrow_previous_players_beat_freshness()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut decoder = BridgeDecoder::new();
+    let mut provider = ProLinkDeckSourceProvider::new(MonotonicTime::new(0))?;
+    for (line, time) in [(HELLO, 1), (READY, 2), (STATUS, 3), (BEAT, 4)] {
+        provider.ingest(decoder.decode_line(line)?, MonotonicTime::new(time))?;
+    }
+    assert!(provider.diagnostics().position_authority_ready);
+    let next_master = STATUS
+        .replace("\"sequence\":3", "\"sequence\":5")
+        .replace("\"deviceNumber\":1", "\"deviceNumber\":2");
+    provider.ingest(decoder.decode_line(&next_master)?, MonotonicTime::new(5))?;
+    assert!(!provider.diagnostics().position_authority_ready);
+    let next_beat = BEAT
+        .replace("\"sequence\":4", "\"sequence\":6")
+        .replace("\"deviceNumber\":1", "\"deviceNumber\":2");
+    provider.ingest(decoder.decode_line(&next_beat)?, MonotonicTime::new(6))?;
+    assert!(provider.diagnostics().position_authority_ready);
+    Ok(())
+}
+
+#[test]
 fn library_hydration_preserves_physical_transport_and_source_invalidation_is_scoped()
 -> Result<(), Box<dyn std::error::Error>> {
     let mut decoder = BridgeDecoder::new();

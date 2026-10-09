@@ -1,7 +1,7 @@
 # Epic 11 — reliable preparation and Live performance
 
 Status: implementation and autonomous testing authorized on 2026-10-08.
-Baseline: public Lumi v0.6.3; development candidate 0.6.4-dev-26.
+Baseline: public Lumi v0.6.3; development candidate 0.6.4-dev-27.
 Products: Lumi, Lumi Remote and the independently versioned Pro DJ Link Simulator.
 Execution order: simulator fidelity first, then recovery and measured timing, preparation workflow, launch policy, integrated acceptance.
 
@@ -47,6 +47,37 @@ weakening macOS security checks. SoundSwitch restart approval is still needed
 for downstream playback acceptance; Lumi is left open in Off.
 
 ## Findings and ownership
+
+Dev-27 follow-up in progress: installed Dev-26 survived bounded 15/30-second
+Player-1 disconnects. SoundSwitch retained one peer and its last tempo during
+the gap; unchanged-tempo recovery returned Link to Ready without toggling it.
+Master handover to Player 2 changed Lumi and SoundSwitch to 155 BPM and selected
+bank 2; the MIDI diagnostic reported nine pulses, zero late sends, p95 5.1 ms.
+The remaining intermittent position warning was traced to a diagnostic that
+required only the precise-position lane, ignoring the existing exact-Beat
+authority. The repair tracks freshness per loaded Player and accepts fresh
+exact Beats during playback. Regression coverage includes expiry/recovery,
+track replacement and master handover without borrowing another Player's
+freshness. This changes diagnostics, not timeline or output scheduling.
+
+Actual Library UI acceptance on Dev-26: expanded Sets / Trancendence /
+Trancendence 2, selected Part 1 (15 tracks), then Part 2 (56 tracks with distinct
+membership). Opened 90s Bitch by double-click: revision 38, protected phrases,
+Ready for Show and editing controls correctly disabled. No phrases changed.
+Audio preview remains unavailable for that source on this Mac without local
+media; this is not evidence of successful offline audio caching.
+
+Dev-26 installed acceptance (build 418 / e79eb09): normal Dev-25 Quit removed
+engine, bridge, gateway and Carabiner. Two real-helper lifecycle tests passed
+against SoundSwitch, then the verified Dev-26 installer payload was installed
+without touching either database. The isolated USB reader initially reported
+No route to host; normal macOS consent by the owner restored CHRM/local and
+CHRM-via-Player-1 matching without restarting Lumi. No permission workaround.
+Simulator +4.2% pitch displayed 161.510 BPM in Lumi and 161.5 in SoundSwitch,
+with one Link peer. Actual UI Arm/Start with On phrase start counted down from
+75 through 28 beats; at phrase 2 Lumi reported Show running and exactly two
+MIDI pulses, bank 3, zero late sends. SoundSwitch visibly changed bank 2 to bank
+3. This proves visible bank selection, not yet sub-beat downstream alignment.
 
 Dev-26 provider repair: the new localhost wire-level regression failed on the
 old provider, recording enable-start-stop-sync, force-beat-at-time and transport
