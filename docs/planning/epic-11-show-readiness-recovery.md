@@ -75,11 +75,40 @@ reproduction context, not proof of which individual MIDI notification is causal.
 The owner was asked for a bounded comparison with Control One disconnected;
 do not repeatedly reset SoundSwitch or leave hidden services running as a fix.
 
+Dev-29 controlled comparison: after the owner disconnected Control One and
+restarted SoundSwitch, its UI reported Hardware Interface Not Connected / 0.
+A focused read-only USB inventory also found no Control One. Three consecutive
+Settings Restart cycles then completed with Engine responding and Remote ready;
+SoundSwitch remained interactive, including successful bank 1/2 selection after
+each cycle. Link returned with one peer at 155 BPM. The final Live view retained
+both named tracks, their 17/33-phrase plans, and the distinct inserted-USB versus
+LINK-loaded-track provenance. Lighting remained Off throughout this comparison.
+This supports the Control One device-reset path as a relevant condition, but
+three passes without hardware do not establish a permanent fix or prove the
+exact triggering notification. A matched comparison after reconnecting Control
+One was requested. Do not ship hardware disconnection as the solution.
+
+Post-restart Library UI check: expanding Sets / Trancendence 2 and selecting
+Mashup ToDo changed the table from the 154-track collection to seven tracks;
+selecting Part 1 - 138+ Trance changed it to its 14 tracks. Double-clicking
+Aurora Sky opened that track's actual editor, grid and R1 timeline. No phrases
+or mappings were changed. Audio was explicitly unavailable for this disconnected
+USB-backed source, so this is not an audio or local-USB synchronization pass.
+Development CI for commits 6c08d8a and 863c954 completed successfully. A focused
+process inventory after the three cycles showed one engine and one Carabiner,
+not duplicate instances.
+
 The installed Dev-29 USB reader also reports No route to host despite normal
 Player/BPM reception. macOS's existing local-network logs attribute these reads
 to co.victorblan.tech.lumi.dev.engine. This does not itself prove authorization
 denial; no privacy settings were changed. Track matching and downstream playback
 are not accepted for this launch. Latest Dev is left open in Off.
+
+Later in the same installed Dev-29 session, before the above three restarts,
+Pro DJ Link showed CHRM identified. All three restarts restored matching in the
+Live UI without a system-settings change. The initial No route to host remains
+an unresolved intermittent startup finding; later recovery is not evidence that
+the original failure has been repaired.
 
 The combined soak report now records pump counters before playback, plus the
 subsequent starvation delta and whether the cumulative maximum increased. This
