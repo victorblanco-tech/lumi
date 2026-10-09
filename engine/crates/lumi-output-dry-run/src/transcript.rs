@@ -147,5 +147,6 @@ const fn result_reason_name(reason: OutputEffectReason) -> &'static str {
         OutputEffectReason::PhraseBoundary => "phraseBoundary",
         OutputEffectReason::ProviderRejected => "providerRejected",
         OutputEffectReason::StaleExecutionContext => "staleExecutionContext",
+        OutputEffectReason::InitialLaunchDeferred => "initialLaunchDeferred",
     }
 }

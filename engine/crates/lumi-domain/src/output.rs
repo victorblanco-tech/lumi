@@ -100,6 +100,7 @@ pub enum OutputEffectReason {
     PhraseBoundary,
     ProviderRejected,
     StaleExecutionContext,
+    InitialLaunchDeferred,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

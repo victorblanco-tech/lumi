@@ -103,6 +103,21 @@ Acceptance and implementation tasks:
 
 ## E11-02 — usable service lifecycle
 
+2026-10-09 Control One checkpoint, installed dev-23: SoundSwitch visibly reports
+CONTROL ONE Connected. Quit through the desktop UI removed all matching Lumi
+engine/gateway/bridge/Carabiner processes and removed the Lumi Link peer from
+SoundSwitch, while Control One remained connected. Normal app restart recovered
+both CHRM tracks (local Player 1 and LINK Player 2), one Link peer, and Arm → Start.
+After restart the Live status reported eight MIDI pulses, zero late dispatches
+and p95 4.6 ms; both applications followed the simulator pitch reset to 155 BPM.
+These are software status observations, not a physical-light or first-beat
+alignment measurement. No mappings or macOS privacy settings were changed.
+
+Dev-22's earlier packaged USB failure recovered before installing dev-23; it is
+not evidence that the new usage-description declaration fixed that failure.
+The successful dev-23 warm restart does not close the complete startup/fault
+matrix. Keep the intermittent initial marker-read failure under investigation.
+
 Dev-23 preparation: the engine's embedded service Info.plist now includes the
 local-network usage description, as the main app and Remote gateway already do.
 Packaging rejects its absence. This is a declaration, not a consent grant and
@@ -296,6 +311,14 @@ edit/save/reopen and protected phrases after successful and rejected sync, with
 the actual desktop app. Validate offline stored data as well as connected media.
 
 ## E11-05 — Arm preparation and phrase-start run-in
+
+2026-10-09 implementation checkpoint: ADR 0049 and a pure initial-launch gate
+are implemented in source, with seven state-machine tests and a runtime test
+which suppresses mid-phrase output and admits the next exact-grid boundary.
+The installed dev-23 app still uses Immediate; no selectable policy or persisted
+Mac/Remote controls are shipped yet. Negative-offset deduplication, MIDI failure,
+late planning, UI projection and representative network acceptance remain open.
+Do not present this groundwork as completed user functionality.
 
 Arm preloads current/next phrase plans and prepares commands; preselect a bank
 only if its documented/tested behavior cannot disturb existing output.

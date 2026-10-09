@@ -73,6 +73,7 @@ use crate::autoloop_executor::{
     AutoloopCueExecutor, AutoloopExecutionIdentity, AutoloopExecutorState, AutoloopTarget,
 };
 use crate::commands::{DeckSourceSelection, PlanCommandContext, SessionCommand, decode_command};
+use crate::launch_policy::{LaunchBoundary, LaunchContext, LaunchGate, LaunchPolicy};
 use crate::library::{LibraryPlanContext, LibraryWorker, LibraryWorkerError, ResolvedLibraryCue};
 use crate::link_relay::LinkRelay;
 #[cfg(test)]
@@ -308,8 +309,8 @@ async fn serve_authenticated_client(
                         let mut response = handle_command_with_library_policy(
                             runtime, &mut command_ids, &envelope, response_sequence, deferred,
                         )?;
-                        if deferred && response.message_type == MessageType::Snapshot {
-                            if let Some(job) = runtime.library_worker.status_projection_job() {
+                        if deferred && response.message_type == MessageType::Snapshot
+                            && let Some(job) = runtime.library_worker.status_projection_job() {
                                 let library_revision = runtime.library_revision;
                                 let mut projection = tokio::task::spawn_blocking(job);
                                 loop {
@@ -355,7 +356,6 @@ async fn serve_authenticated_client(
                                         }
                                     }
                                 }
-                            }
                         }
                         response
                     }
@@ -2040,6 +2040,8 @@ const fn track_color_from_rgb(rgb: u32) -> TrackColor {
 }
 
 struct OutputWorker {
+    launch_policy: LaunchPolicy,
+    launch_gate: LaunchGate,
     provider: DryRunLightingOutputProvider,
     midi_output: RealtimeMidiController<CoreMidiSourceProvider>,
     midi_clock: MidiClockController<CoreMidiSourceProvider>,
@@ -2122,6 +2124,8 @@ struct ScheduledFutureAutoloop {
 impl OutputWorker {
     fn new() -> Self {
         Self {
+            launch_policy: LaunchPolicy::default(),
+            launch_gate: LaunchGate::default(),
             provider: DryRunLightingOutputProvider::default(),
             midi_output: RealtimeMidiController::new(CoreMidiSourceProvider::new),
             midi_clock: MidiClockController::new(CoreMidiSourceProvider::new),
@@ -2274,6 +2278,70 @@ impl OutputWorker {
     fn service_pending_autoloop(&mut self) {
         self.autoloop_executor
             .complete_if_emitted(self.midi_output.status().emitted_count);
+        if let AutoloopExecutorState::Completed { identity, .. } = self.autoloop_executor.state() {
+            self.launch_gate.did_launch(
+                self.launch_policy,
+                LaunchContext {
+                    deck: identity.deck_id,
+                    load: identity.track_load_id,
+                    revision: identity.plan_revision,
+                    epoch: identity.execution_epoch,
+                },
+                identity.phrase_index,
+            );
+        }
+    }
+
+    fn update_initial_launch(&mut self, state: &lumi_domain::RuntimeState) {
+        if self.launch_policy == LaunchPolicy::Immediate {
+            return;
+        }
+        let Some(deck_id) = state.leader_deck() else {
+            self.launch_gate.cancel_pending();
+            return;
+        };
+        let Some(deck) = state.deck(deck_id) else {
+            self.launch_gate.cancel_pending();
+            return;
+        };
+        let Some(plan) = state
+            .active_plan()
+            .filter(|p| p.deck_id() == deck_id && p.track_load_id() == deck.track_load_id())
+        else {
+            self.launch_gate.cancel_pending();
+            return;
+        };
+        self.launch_gate.observe(
+            self.launch_policy,
+            LaunchContext {
+                deck: deck_id,
+                load: plan.track_load_id(),
+                revision: plan.revision(),
+                epoch: self.autoloop_executor.execution_epoch(),
+            },
+            state.operation() == OperationState::Live && deck.is_playing(),
+            deck.beat(),
+            plan.cues()
+                .iter()
+                .filter(|cue| matches!(automatic_midi_target(cue.action()), Ok(Some(_))))
+                .map(|cue| LaunchBoundary {
+                    phrase: cue.phrase_index(),
+                    beat: cue.start_beat(),
+                }),
+        );
+    }
+
+    fn initial_launch_allows(&self, identity: AutoloopExecutionIdentity) -> bool {
+        self.launch_gate.allows(
+            self.launch_policy,
+            LaunchContext {
+                deck: identity.deck_id,
+                load: identity.track_load_id,
+                revision: identity.plan_revision,
+                epoch: identity.execution_epoch,
+            },
+            identity.phrase_index,
+        )
     }
 
     fn begin_autoloop_execution_epoch(
@@ -2369,6 +2437,7 @@ impl OutputWorker {
         deck_id: lumi_domain::DeckId,
         absolute_beat: u32,
     ) {
+        self.update_initial_launch(state);
         self.autoloop_executor
             .complete_if_emitted(self.midi_output.status().emitted_count);
         let offset_millis = self.scheduling_timing_offset_millis();
@@ -2417,6 +2486,9 @@ impl OutputWorker {
             plan_revision: plan.revision(),
             phrase_index: cue.phrase_index(),
         };
+        if !self.initial_launch_allows(identity) {
+            return;
+        }
         let deadline = Instant::now() + trigger_delay;
         if let Some(existing) = self.scheduled_future_autoloop
             && existing.identity == identity
@@ -2520,7 +2592,13 @@ impl OutputWorker {
                 }
                 lumi_domain::Effect::ExecuteCue(request) => {
                     let is_current = execution_context_is_current(runtime.state(), &request);
-                    let result = if is_current {
+                    self.update_initial_launch(runtime.state());
+                    let launch_allowed =
+                        self.initial_launch_allows(AutoloopExecutionIdentity::from_request(
+                            &request,
+                            self.autoloop_executor.execution_epoch(),
+                        ));
+                    let result = if is_current && launch_allowed {
                         let result = self.provider.execute(&request, request.scheduled_at())?;
                         if let Some((bank_number, autoloop_number)) =
                             automatic_midi_target(request.action())?
@@ -2539,7 +2617,11 @@ impl OutputWorker {
                             request.clone(),
                             request.scheduled_at(),
                             OutputEffectStatus::Skipped,
-                            OutputEffectReason::StaleExecutionContext,
+                            if is_current {
+                                OutputEffectReason::InitialLaunchDeferred
+                            } else {
+                                OutputEffectReason::StaleExecutionContext
+                            },
                         )
                     };
                     let completed_at = result.actual_at();
@@ -4506,6 +4588,11 @@ fn apply_operation_command(
         .operation_sequence
         .checked_add(1)
         .ok_or(CommandApplicationError::OperationSequenceOverflow)?;
+    match command {
+        OperationCommand::Arm | OperationCommand::Off => runtime.output_worker.launch_gate.arm(),
+        OperationCommand::Pause => runtime.output_worker.launch_gate.cancel_pending(),
+        OperationCommand::Start => {}
+    }
     if command == OperationCommand::Start {
         runtime
             .output_worker
@@ -5758,6 +5845,7 @@ const fn output_effect_reason_name(reason: OutputEffectReason) -> &'static str {
         OutputEffectReason::PhraseBoundary => "phraseBoundary",
         OutputEffectReason::ProviderRejected => "providerRejected",
         OutputEffectReason::StaleExecutionContext => "staleExecutionContext",
+        OutputEffectReason::InitialLaunchDeferred => "initialLaunchDeferred",
     }
 }
 

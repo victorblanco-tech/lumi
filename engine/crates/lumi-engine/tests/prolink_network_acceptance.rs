@@ -713,7 +713,7 @@ fn combined_lanes_remain_bounded_and_emit_release_evidence() {
                 &command(
                     &format!("soak-library-{library_query_count}"),
                     sequence,
-                    json!({ "kind": "queryLibrary", "search": if library_query_count % 2 == 0 { "90" } else { "" },
+                    json!({ "kind": "queryLibrary", "search": if library_query_count.is_multiple_of(2) { "90" } else { "" },
                             "offset": 0, "limit": 50 }),
                 ),
             );

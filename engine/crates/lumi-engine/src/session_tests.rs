@@ -866,6 +866,75 @@ fn missing_executable_theme_is_a_safe_no_plan_result() {
 }
 
 #[test]
+fn phrase_launch_waits_inside_phrase_and_admits_the_next_exact_grid_boundary()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut runtime =
+        initialized_runtime_for_mode(ManualClock::new(0), DeckSourceMode::LocalPlayback)?;
+    runtime.output_worker.launch_policy = LaunchPolicy::OnPhraseStart;
+    let deck_id = lumi_domain::DeckId::new(1);
+    apply_current_session_command(&mut runtime, |expected_state_revision| {
+        SessionCommand::LoadLibraryTrackOnLocalDeck {
+            track_id: 1,
+            deck_id,
+            expected_timeline_revision: 1,
+            expected_state_revision,
+        }
+    });
+    let track_load_id = runtime
+        .state
+        .state()
+        .deck(deck_id)
+        .ok_or("missing deck")?
+        .track_load_id();
+    for command in [OperationCommand::Arm, OperationCommand::Start] {
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::SetOperationState {
+                expected_revision,
+                command,
+            }
+        });
+    }
+    assert_eq!(runtime.output_worker.provider.records().count(), 0);
+    apply_session_command(
+        &mut runtime,
+        SessionCommand::UpdateLocalPlaybackTransport {
+            deck_id,
+            track_load_id,
+            position_millis: 1_000,
+            playing: true,
+        },
+    );
+    assert_eq!(
+        runtime.output_worker.provider.records().count(),
+        0,
+        "mid-phrase playback must not emit an initial AutoLoop"
+    );
+    let crate::launch_policy::LaunchState::Waiting { target, .. } =
+        runtime.output_worker.launch_gate.state()
+    else {
+        panic!("initial launch must expose an explicit phrase target");
+    };
+    let snapshot = snapshot_envelope(&runtime, 1, "phrase-launch-test")?;
+    let position_millis = snapshot.payload["decks"][0]["track"]["beatGrid"]["timesMillis"]
+        [target.beat as usize]
+        .as_u64()
+        .ok_or("missing exact beat time")?;
+    apply_session_command(
+        &mut runtime,
+        SessionCommand::UpdateLocalPlaybackTransport {
+            deck_id,
+            track_load_id,
+            position_millis,
+            playing: true,
+        },
+    );
+    let records = runtime.output_worker.provider.records().collect::<Vec<_>>();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].request().phrase_index(), target.phrase);
+    Ok(())
+}
+
+#[test]
 fn first_live_output_with_a_later_mapping_gap_keeps_snapshot_and_engine_alive() {
     let mut runtime =
         initialized_runtime_for_mode(ManualClock::new(0), DeckSourceMode::LocalPlayback)

@@ -578,6 +578,10 @@ fn reader_failure_detail(bytes: &[u8]) -> String {
                     | "invalid_marker"
                     | "invalid_arguments"
                     | "process_deadline"
+                    | "marker_missing"
+                    | "access_denied"
+                    | "nfs_error"
+                    | "cleanup_failed"
             )
         });
     if known_failure && let Some(detail) = detail {
@@ -678,6 +682,22 @@ mod tests {
             !super::reader_failure_detail(br#"{"outcome":"marker_read","detail":"UNTRUSTED"}"#)
                 .contains("UNTRUSTED")
         );
+    }
+
+    #[test]
+    fn actual_nfs_failure_categories_preserve_the_bounded_diagnostic() {
+        for outcome in [
+            "marker_missing",
+            "access_denied",
+            "nfs_error",
+            "cleanup_failed",
+        ] {
+            let reply = serde_json::json!({"outcome": outcome, "detail": "USB\n read failed"});
+            assert_eq!(
+                super::reader_failure_detail(reply.to_string().as_bytes()),
+                "USB identity reader: USB read failed"
+            );
+        }
     }
     use super::*;
     use lumi_prolink_input::Device;
