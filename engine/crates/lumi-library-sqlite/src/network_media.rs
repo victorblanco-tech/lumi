@@ -88,6 +88,7 @@ impl SqliteLibraryRepository {
         )?;
         connection.busy_timeout(Duration::from_millis(100))?;
         connection.execute_batch("PRAGMA query_only = ON;")?;
+        Self::register_read_functions(&connection)?;
         Ok(Self { connection })
     }
 

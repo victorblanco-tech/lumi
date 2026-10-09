@@ -25,6 +25,79 @@ use super::{
 };
 
 #[test]
+fn detached_status_projection_preserves_query_and_editor_without_writes()
+-> Result<(), Box<dyn std::error::Error>> {
+    let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let root = std::env::temp_dir().join(format!("lumi-projection-{unique}"));
+    std::fs::create_dir_all(&root)?;
+    let path = root.join("library.sqlite");
+    {
+        let mut worker = LibraryWorker::initialize_with_repository(
+            lumi_library_sqlite::SqliteLibraryRepository::open(&path)?,
+            Some(path),
+            true,
+        )?;
+        worker.query(LibraryQueryUpdate {
+            search: "Horizon Lines".to_owned(),
+            playlist_id: None,
+            workflow_filter: None,
+            workflow_step_id: None,
+            offset: 0,
+            limit: 50,
+            sort: LibraryTrackSort::default(),
+        });
+        let selected = worker.status_snapshot_json()?;
+        let track_id = selected["page"]["tracks"][0]["id"]
+            .as_u64()
+            .ok_or("missing demo track")?;
+        worker.open_editor(track_id)?;
+        let expected = worker.status_snapshot_json()?;
+        assert_eq!(expected["page"]["total"], 1);
+        assert!(!expected["editor"].is_null());
+        let job = worker
+            .status_projection_job()
+            .ok_or("missing projection job")?;
+        // Changing the active selection after capture cannot change this job.
+        worker.search = "no matching track".to_owned();
+        let actual = std::thread::spawn(job)
+            .join()
+            .map_err(|_| "projection panicked")??;
+        assert_eq!(actual, expected);
+        assert_eq!(worker.search, "no matching track");
+        assert_eq!(worker.status_snapshot_json()?["page"]["tracks"], json!([]));
+    }
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
+fn detached_status_projection_missing_database_fails_without_recreating_it()
+-> Result<(), Box<dyn std::error::Error>> {
+    let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let root = std::env::temp_dir().join(format!("lumi-projection-missing-{unique}"));
+    std::fs::create_dir_all(&root)?;
+    let path = root.join("library.sqlite");
+    let job = {
+        let worker = LibraryWorker::initialize_with_repository(
+            lumi_library_sqlite::SqliteLibraryRepository::open(&path)?,
+            Some(path.clone()),
+            false,
+        )?;
+        worker
+            .status_projection_job()
+            .ok_or("missing projection job")?
+    };
+    std::fs::remove_file(&path)?;
+    assert!(job().is_err());
+    assert!(
+        !path.exists(),
+        "read-only projection must not create a replacement DB"
+    );
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
 fn backup_restore_prepares_state_before_activation() -> Result<(), Box<dyn std::error::Error>> {
     let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
     let root = std::env::temp_dir().join(format!("lumi-restore-boundary-{unique}"));

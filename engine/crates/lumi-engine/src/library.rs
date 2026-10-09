@@ -3345,6 +3345,62 @@ impl LibraryWorker {
         self.snapshot_json_with_device_inspection(false)
     }
 
+    pub(crate) fn database_backed(&self) -> bool {
+        self.database_path.is_some()
+    }
+
+    /// Capture presentation state, not the SQLite connection. The returned job
+    /// opens its own read-only connection and can run outside the show owner.
+    /// There is no shared mutable cache and no import, migration or seeding.
+    pub(crate) fn status_projection_job(
+        &self,
+    ) -> Option<impl FnOnce() -> Result<Value, LibraryWorkerError> + Send + 'static> {
+        let path = self.database_path.clone()?;
+        let source_id = self.source_id.clone();
+        let source_kind = self.source_kind.clone();
+        let source_name = self.source_name.clone();
+        let source_revision = self.source_revision.clone();
+        let search = self.search.clone();
+        let playlist_id = self.playlist_id;
+        let workflow_filter = self.workflow_filter;
+        let workflow_step_id = self.workflow_step_id.clone();
+        let offset = self.offset;
+        let limit = self.limit;
+        let sort = self.sort;
+        let editor_track_id = self.editor_track_id;
+        let pending_source_refresh = self.pending_source_refresh.clone();
+        let device_review_comparisons_by_source = self.device_review_comparisons_by_source.clone();
+        let pending_library_reset = self.pending_library_reset.clone();
+        let pending_light_plan_preview = self.pending_light_plan_preview.clone();
+        Some(move || {
+            let worker = Self {
+                repository: SqliteLibraryRepository::open_read_only(&path)?,
+                database_path: Some(path),
+                source_id,
+                source_kind,
+                source_name,
+                source_revision,
+                search,
+                playlist_id,
+                workflow_filter,
+                workflow_step_id,
+                offset,
+                limit,
+                sort,
+                editor_track_id,
+                pending_source_refresh,
+                // Status projections intentionally exclude an in-progress scan.
+                pending_device_inspection: None,
+                device_review_comparisons_by_source,
+                pending_library_reset,
+                pending_light_plan_preview,
+            };
+            worker
+                .repository
+                .with_consistent_read(|| worker.status_snapshot_json())
+        })
+    }
+
     fn snapshot_json_with_device_inspection(
         &self,
         include_device_inspection: bool,

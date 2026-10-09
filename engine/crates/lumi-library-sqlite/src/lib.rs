@@ -2936,6 +2936,13 @@ impl SqliteLibraryRepository {
              PRAGMA synchronous = NORMAL;
              PRAGMA wal_autocheckpoint = 1000;",
         )?;
+        Self::register_read_functions(&connection)?;
+        let mut repository = Self { connection };
+        repository.migrate()?;
+        Ok(repository)
+    }
+
+    fn register_read_functions(connection: &Connection) -> Result<(), SqliteLibraryError> {
         connection.create_scalar_function(
             "lumi_version_family",
             1,
@@ -2945,9 +2952,7 @@ impl SqliteLibraryRepository {
                 Ok(creative_version_family(&title))
             },
         )?;
-        let mut repository = Self { connection };
-        repository.migrate()?;
-        Ok(repository)
+        Ok(())
     }
 
     fn migrate(&mut self) -> Result<(), SqliteLibraryError> {

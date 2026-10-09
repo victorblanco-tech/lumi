@@ -297,7 +297,67 @@ async fn serve_authenticated_client(
                     .ok_or(EngineError::ResponseSequenceOverflow)?;
                 let response = match MessageDecoder::decode(&command_bytes) {
                     Ok(envelope) => {
-                        handle_command(runtime, &mut command_ids, &envelope, response_sequence)?
+                        // Library browsing is read-only presentation work. Keep
+                        // one request in flight while the show pump continues;
+                        // do not move the sole mutable runtime to another task.
+                        let deferred = runtime.library_worker.database_backed()
+                            && matches!(decode_command(&envelope), Ok(
+                                SessionCommand::QueryLibrary { .. }
+                                | SessionCommand::GetSnapshot { include_library: true }
+                            ));
+                        let mut response = handle_command_with_library_policy(
+                            runtime, &mut command_ids, &envelope, response_sequence, deferred,
+                        )?;
+                        if deferred && response.message_type == MessageType::Snapshot {
+                            if let Some(job) = runtime.library_worker.status_projection_job() {
+                                let library_revision = runtime.library_revision;
+                                let mut projection = tokio::task::spawn_blocking(job);
+                                loop {
+                                    tokio::select! {
+                                        biased;
+                                        _ = termination.recv() => return Ok(AuthenticatedClientExit::Shutdown),
+                                        _ = integration_pump.tick() => {
+                                            runtime.integration_pump_metrics.record(Instant::now());
+                                            process_deck_input_messages(runtime)?;
+                                            runtime.output_worker.service_pending_autoloop();
+                                            remote_publisher.publish(runtime, false);
+                                        }
+                                        request = remote_commands.recv() => {
+                                            if let Some(request) = request {
+                                                apply_remote_command_request(runtime, request);
+                                                remote_publisher.publish(runtime, true);
+                                            }
+                                        }
+                                        result = &mut projection => {
+                                            match result {
+                                                Ok(Ok(library)) if library_revision == runtime.library_revision => {
+                                                    // Return current transport state, not the
+                                                    // position from before the database read.
+                                                    response = snapshot_envelope_without_library(runtime, response_sequence, &envelope.message_id)?;
+                                                    response.payload.insert("library".to_owned(), library);
+                                                }
+                                                Ok(Ok(_)) => {
+                                                    response = error_envelope(response_sequence, &envelope.message_id,
+                                                        "libraryChanged", "libraryProjectionSuperseded",
+                                                        "The library changed while loading. Please retry.", true, None)?;
+                                                }
+                                                failure => {
+                                                    let detail = match failure {
+                                                        Ok(Err(error)) => error.to_string(),
+                                                        Err(error) => error.to_string(),
+                                                        Ok(Ok(_)) => unreachable!(),
+                                                    };
+                                                    response = error_envelope(response_sequence, &envelope.message_id,
+                                                        "libraryUnavailable", "libraryProjectionFailed", &detail, true, None)?;
+                                                }
+                                            }
+                                            break;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        response
                     }
                     Err(error) => error_envelope(
                         response_sequence,
@@ -2838,14 +2898,21 @@ fn submit_and_process(
     Ok(processed)
 }
 
-fn handle_command(
+fn handle_command_with_library_policy(
     runtime: &mut EngineRuntime,
     command_ids: &mut CommandIdCache,
     envelope: &MessageEnvelope,
     response_sequence: u64,
+    defer_library: bool,
 ) -> Result<MessageEnvelope, EngineError> {
     let started = Instant::now();
-    let result = handle_command_inner(runtime, command_ids, envelope, response_sequence);
+    let result = handle_command_inner(
+        runtime,
+        command_ids,
+        envelope,
+        response_sequence,
+        defer_library,
+    );
     // Fixed categories only: diagnostics never retain track names, searches,
     // arbitrary payload text or an unbounded command-name map.
     let category = match envelope.payload.get("kind").and_then(Value::as_str) {
@@ -2869,6 +2936,7 @@ fn handle_command_inner(
     command_ids: &mut CommandIdCache,
     envelope: &MessageEnvelope,
     response_sequence: u64,
+    defer_library: bool,
 ) -> Result<MessageEnvelope, EngineError> {
     process_deck_input_messages(runtime)?;
     let command = match decode_command(envelope) {
@@ -2896,12 +2964,13 @@ fn handle_command_inner(
         SessionCommand::GetLibraryTrackWaveform { track_id } => Some(*track_id),
         _ => None,
     };
-    let includes_library = !matches!(
-        &command,
-        SessionCommand::GetSnapshot {
-            include_library: false
-        }
-    );
+    let includes_library = !defer_library
+        && !matches!(
+            &command,
+            SessionCommand::GetSnapshot {
+                include_library: false
+            }
+        );
     if is_mutating && command_ids.contains(&envelope.message_id) {
         if is_transport_update {
             return transport_ack_envelope(runtime, response_sequence, &envelope.message_id);

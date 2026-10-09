@@ -1,7 +1,7 @@
 # Epic 11 — reliable preparation and Live performance
 
 Status: implementation and autonomous testing authorized on 2026-10-08.
-Baseline: public Lumi v0.6.3; current development build 0.6.4-dev-21.
+Baseline: public Lumi v0.6.3; current development build 0.6.4-dev-22.
 Products: Lumi, Lumi Remote and the independently versioned Pro DJ Link Simulator.
 Execution order: simulator fidelity first, then recovery and measured timing, preparation workflow, launch policy, integrated acceptance.
 
@@ -103,6 +103,13 @@ Acceptance and implementation tasks:
 
 ## E11-02 — usable service lifecycle
 
+Dev-21 desktop checkpoint: Restart replaced engine PID 81158 with 81270 and
+gateway PID 81176 with 81278, both from the expected Dev-21 bundle. Both Players
+and their local/LINK plans returned; Arm → Start remained Live with the simulator.
+Explicit Quit left no engine/gateway/Carabiner/bridge and SoundSwitch lost its
+Lumi Link peer. SoundSwitch reports no hardware interface, so physical lighting
+and Control One lifecycle acceptance remain untested.
+
 Owner requirements confirmed 2026-10-09: explicit Quit must stop every owned
 channel service, not detach and leave the engine/gateway running. The app stays
 open in a visible Stopping state until termination is verified. Bounded graceful
@@ -198,6 +205,22 @@ worker, sequential relaunch and clean helper cleanup. Separate channel databases
 and configured mappings must survive. No automatic kill of unrelated apps.
 
 ## E11-03 — measured realtime boundaries
+
+Dev-22 implementation (ADR 0048): full Library reads for browsing and snapshots
+use an independent read-only transaction while the integration pump and Remote
+commands continue. Real-database regressions cover captured query/editor state
+and failure without recreating a missing database. The SQLite read-only lane now
+registers the same pure version-family query function as the writer.
+
+Matched 120-second simulator/SoundSwitch workload, before → after this change:
+source-age p95 20 → 5 ms, p99 20 → 10 ms; pump starvation counter 2767 → 26.
+After: 59 pitch changes, 17 seeks, 10 operation cycles, 114 Library queries;
+no critical saturation or Link errors. Maximum query response grew from 21 to
+36.5 ms (now off-owner). Worst pump lateness was 60.4 ms and source-mode startup
+command 100.5 ms, so this does not close the scheduling/latency story. Evidence:
+`build/Evidence/live-integration-projection-120s.json` (tested before the version
+bump, embedded version dev-21). These are software-segment measurements, not
+physical lighting latency. Packaged Dev-22 desktop acceptance remains required.
 
 Instrument and reproduce before scheduling changes. Enforce ADR 0042's existing
 requirement that heavy DB/plan/projection work cannot hold the show owner.
