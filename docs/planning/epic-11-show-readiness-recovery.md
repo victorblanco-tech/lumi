@@ -103,6 +103,34 @@ Acceptance and implementation tasks:
 
 ## E11-02 — usable service lifecycle
 
+Post-dev-22 checkpoint (source changes, not yet packaged): Live's aggregate
+status now explicitly represents Stopped, Starting, Reconnecting and Unavailable
+instead of declaring Ready while the engine is starting. Empty optional providers
+remain informational. All 62 Live workspace tests pass. Remote process details
+now require the executable to belong to the expected installation, not merely
+a live PID from a private service record; all nine engine safety tests pass,
+including wrong-installation/PID rejection and real child termination.
+The complete macOS build also passed. The full client suite passed all 30 tests
+after quitting the installed app. An initial run alongside that app failed MIDI
+publication; it is not valid acceptance evidence. Focused reruns now use
+`bash scripts/verify-engine-client.sh`, which applies the existing exclusive
+MIDI ownership guard and serial execution from full Apple verification. The
+test reports a publication command failure directly rather than cascading
+through unrelated expectations.
+
+Packaged dev-22 remains blocked for show acceptance: Player status/BPM and a
+SoundSwitch Link peer are present, but the launch-agent USB marker reader reports
+`No route to host`. The simulator reports its RPC/NFS service ready. The earlier
+headless soak does not establish packaged network access. No privacy/network
+settings were changed; the owner manages consent. Do not mark this resolved or
+attribute the cause solely to permissions without evidence.
+
+Packaged Library desktop acceptance passed: selecting Mashup ToDo immediately
+showed seven tracks, typing Shiver without Return narrowed to two, clearing
+restored seven, and selecting Part 1 showed fourteen. Small-window layout still
+needs attention: a persisted tall editor can leave too little browser space;
+maximizing reveals it, but is not a product fix. Waveform rendering is unchanged.
+
 Dev-21 desktop checkpoint: Restart replaced engine PID 81158 with 81270 and
 gateway PID 81176 with 81278, both from the expected Dev-21 bundle. Both Players
 and their local/LINK plans returned; Arm → Start remained Live with the simulator.

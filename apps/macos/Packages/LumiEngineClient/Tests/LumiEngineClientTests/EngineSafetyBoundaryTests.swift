@@ -7,6 +7,33 @@ import Testing
 
 @Suite("Engine safety boundaries")
 struct EngineSafetyBoundaryTests {
+    @Test("Remote details reject a reused PID or a helper from another installation")
+    func remoteDetailsValidateExecutable() async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let url = directory.appendingPathComponent("gateway.json")
+        let record = RemoteGatewayServiceRecord(
+            endpointHost: "127.0.0.1", endpointPort: 12345,
+            adminToken: String(repeating: "a", count: 32), processID: getpid(),
+            productVersion: "test", installationID: String(repeating: "b", count: 32),
+            certificateFingerprintSHA256: String(repeating: "c", count: 64), lanPort: 12346
+        )
+        try JSONEncoder().encode(record).write(to: url)
+        try FileManager.default.setAttributes([.posixPermissions: 0o600], ofItemAtPath: url.path)
+        let wrong = RemoteGatewaySupervisor(
+            launchAgentPlistName: nil, expectedProductVersion: "test",
+            expectedExecutableURL: directory.appendingPathComponent("another-installation/gateway")
+        )
+        #expect(await wrong.processDetails(recordURL: url) == "No verified Remote process")
+        let actualPath = try #require(ProcessExecutableIdentity.path(processID: getpid()))
+        let matching = RemoteGatewaySupervisor(
+            launchAgentPlistName: nil, expectedProductVersion: "test",
+            expectedExecutableURL: URL(fileURLWithPath: actualPath)
+        )
+        #expect(await matching.processDetails(recordURL: url).contains("PID \(getpid())"))
+    }
+
     @Test("Cancelling or timing out an isolated worker waits until its child is gone", arguments: [false, true])
     func isolatedWorkerCleanup(cancel: Bool) async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

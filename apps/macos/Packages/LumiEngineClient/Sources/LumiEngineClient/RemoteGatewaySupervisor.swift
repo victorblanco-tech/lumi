@@ -7,6 +7,7 @@ import Darwin
 public actor RemoteGatewaySupervisor {
     private let launchAgentPlistName: String?
     private let expectedProductVersion: String?
+    private let expectedExecutableURL: URL
     private var service: SMAppService?
     private var hasAttemptedServiceRecovery = false
     private let adminTransport = GatewayAdminTransport()
@@ -19,10 +20,13 @@ public actor RemoteGatewaySupervisor {
         ) as? String,
         expectedProductVersion: String? = Bundle.main.object(
             forInfoDictionaryKey: "LumiProductVersion"
-        ) as? String
+        ) as? String,
+        expectedExecutableURL: URL = Bundle.main.bundleURL
+            .appendingPathComponent("Contents/Helpers/lumi-remote-gateway")
     ) {
         self.launchAgentPlistName = launchAgentPlistName
         self.expectedProductVersion = expectedProductVersion
+        self.expectedExecutableURL = expectedExecutableURL
     }
 
     public func refresh(recordURL: URL) async -> RemoteGatewayManagementSnapshot {
@@ -213,6 +217,9 @@ public actor RemoteGatewaySupervisor {
 
     public func processDetails(recordURL: URL) -> String {
         guard let record = try? readRecord(at: recordURL),
+              ProcessExecutableIdentity.matches(
+                processID: record.processID, expectedPath: expectedExecutableURL.path
+              ),
               let path = ProcessExecutableIdentity.path(processID: record.processID) else {
             return "No verified Remote process"
         }

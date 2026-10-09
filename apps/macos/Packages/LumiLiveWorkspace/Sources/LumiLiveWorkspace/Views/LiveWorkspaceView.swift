@@ -447,18 +447,19 @@ public struct LiveWorkspaceView: View {
         .accessibilityIdentifier("lumi.technicalStatus.popover")
     }
 
-    private var technicalHasProblem: Bool {
-        [state.source, state.lightingMidi, state.playbackClock].contains {
-            [.degraded, .error].contains($0.condition)
-        }
+    private var technicalStatus: LiveSystemStatus {
+        LiveSystemStatus(
+            engine: state.engine.condition,
+            providers: [state.source, state.lightingMidi, state.playbackClock].map(\.condition)
+        )
     }
 
     private var technicalStatusLabel: String {
-        technicalHasProblem ? "Attention" : "Ready"
+        technicalStatus.label
     }
 
     private var technicalComponentState: LumiComponentState {
-        technicalHasProblem ? .degraded : .ready
+        technicalStatus.component
     }
 
     private var deckSourceSelector: some View {

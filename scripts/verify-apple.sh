@@ -56,10 +56,7 @@ remote_info_plist="build/iOSDerivedData/Build/Products/Dev-iphonesimulator/Lumi 
 # Standalone client regressions must never join the user's real DJ network.
 # Direct Pro DJ Link is covered by protocol/provider tests and the explicit
 # hardware gate, not implicitly by this local CoreMIDI/process suite.
-env -u LUMI_PROLINK_JAVA -u LUMI_PROLINK_BRIDGE_JAR \
-  LUMI_ENGINE_TEST_EXECUTABLE="$repository_root/target/release/lumi-engine" \
-  LUMI_CARABINER_EXECUTABLE="$repository_root/build/carabiner-runtime/Carabiner" \
-  swift test --no-parallel -Xswiftc -warnings-as-errors --package-path apps/macos/Packages/LumiEngineClient
+bash "$script_dir/verify-engine-client.sh"
 
 xcodebuild \
   -project apps/macos/Lumi.xcodeproj \
