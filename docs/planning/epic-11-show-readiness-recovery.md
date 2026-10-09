@@ -1,7 +1,7 @@
 # Epic 11 — reliable preparation and Live performance
 
 Status: implementation and autonomous testing authorized on 2026-10-08.
-Baseline: public Lumi v0.6.3; development candidate 0.6.4-dev-27.
+Baseline: public Lumi v0.6.3; development candidate 0.6.4-dev-28.
 Products: Lumi, Lumi Remote and the independently versioned Pro DJ Link Simulator.
 Execution order: simulator fidelity first, then recovery and measured timing, preparation workflow, launch policy, integrated acceptance.
 
@@ -47,6 +47,18 @@ weakening macOS security checks. SoundSwitch restart approval is still needed
 for downstream playback acceptance; Lumi is left open in Off.
 
 ## Findings and ownership
+
+Dev-28 follow-up: the full workspace regression caught a real queued-clock
+recovery race after the successful shorter Dev-27 checks. Hold/FailClosed erased
+the shared latest-clock slot when the worker eventually handled the command,
+so a newer recovery clock could be lost. Source barriers now invalidate pending
+clocks at request time under the mailbox lock and advance a generation. Wakeups
+carry that generation; an older wakeup cannot consume a newer clock. The worker
+does not clear future clocks when handling an older barrier. Six recovery tests
+now pass, including twelve alternating hold/fail/recovery cycles with a delayed
+helper. Two older tests were updated to require zero phase/transport writes,
+rather than the superseded alignment behavior. Full verification and installed
+Dev-28 acceptance are required before treating this follow-up as complete.
 
 Dev-27 follow-up in progress: installed Dev-26 survived bounded 15/30-second
 Player-1 disconnects. SoundSwitch retained one peer and its last tempo during

@@ -48,7 +48,8 @@ fn stale_hold_recovers_on_the_next_authoritative_anchor_without_restarting() {
     let recovered = output.status();
     assert!(recovered.playing);
     assert_eq!(recovered.last_error, None);
-    assert_eq!(recovered.hard_reanchor_count, 2);
+    assert_eq!(recovered.hard_reanchor_count, 0);
+    assert_eq!(recovered.soft_correction_count, 0);
     assert_eq!(recovered.failure_count, 0);
     assert_eq!(
         server.connection_count(),
@@ -56,11 +57,10 @@ fn stale_hold_recovers_on_the_next_authoritative_anchor_without_restarting() {
         "recovery must reuse the session"
     );
     assert!(
-        server
-            .commands()
-            .iter()
-            .any(|command| command == "stop-playing 1000000"),
-        "fail-closed must stop shared Link transport"
+        server.commands().iter().all(|command| command == "version"
+            || command == "status"
+            || command.starts_with("bpm ")),
+        "recovery may publish tempo, never stop or rephase SoundSwitch"
     );
 }
 
@@ -129,7 +129,7 @@ fn continuous_udp_beat_jitter_never_rewinds_the_link_timeline() {
     }
 
     let status = output.status();
-    assert_eq!(status.hard_reanchor_count, 1);
+    assert_eq!(status.hard_reanchor_count, 0);
     assert_eq!(status.soft_correction_count, 0);
     let phase_commands = server
         .commands()
@@ -141,9 +141,50 @@ fn continuous_udp_beat_jitter_never_rewinds_the_link_timeline() {
         .collect::<Vec<_>>();
     assert_eq!(
         phase_commands.len(),
-        1,
-        "only the initial discontinuity may move Link phase"
+        0,
+        "neither acquisition nor later observations may move Link phase"
     );
+}
+
+#[test]
+fn queued_wakeups_cannot_consume_post_hold_recovery() {
+    let server = FakeCarabiner::start_with_response_delay(Duration::from_millis(20));
+    let mut output = CarabinerTimingOutput::new(CarabinerConfiguration {
+        executable: None,
+        port: server.port,
+        expected_version: "1.2.0".to_owned(),
+    });
+    output
+        .publish()
+        .unwrap_or_else(|error| panic!("publish: {error}"));
+    for step in 0..12 {
+        output
+            .synchronize(anchor(140_000, true))
+            .unwrap_or_else(|error| panic!("pending old clock: {error}"));
+        if step % 2 == 0 {
+            output
+                .hold()
+                .unwrap_or_else(|error| panic!("hold: {error}"));
+        } else {
+            output
+                .fail_closed("temporary gap")
+                .unwrap_or_else(|error| panic!("source gap: {error}"));
+        }
+        let target = 141_000 + step * 100;
+        output
+            .synchronize(anchor(target, true))
+            .unwrap_or_else(|error| panic!("fresh clock: {error}"));
+        wait_until(Duration::from_secs(2), || {
+            let status = output.status();
+            status.state == TimingOutputState::Running && status.bpm_milli == Some(target)
+        });
+    }
+    assert_eq!(server.connection_count(), 1);
+    assert_eq!(output.status().hard_reanchor_count, 0);
+    assert_eq!(output.status().soft_correction_count, 0);
+    assert!(server.commands().iter().all(|command| {
+        command == "version" || command == "status" || command.starts_with("bpm ")
+    }));
 }
 
 #[test]

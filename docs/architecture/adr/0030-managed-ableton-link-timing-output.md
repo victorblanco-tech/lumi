@@ -24,6 +24,14 @@ permits only `version`, `status` and changed `bpm` commands. This supersedes the
 previous initial-acquisition and handover exceptions as well as continuous
 correction. Phrase-start run-in (ADR-0049) does not relax this boundary.
 
+Source hold, failure and stop commands form ordered mailbox barriers. Each
+barrier advances an observation generation while holding the mailbox lock;
+queued synchronization wakeups may consume only observations from their own
+generation. This prevents an old wakeup from consuming a new recovery tempo
+before its barrier, or an old failure command from deleting a newer tempo.
+Recovery therefore preserves the latest source observation without introducing
+phase or transport commands.
+
 Lumi already receives read-only deck, master, effective-tempo and beat facts
 directly from Pro DJ Link through the supervised `lumi-prolink-bridge`. Local
 Playback provides the same normalized transport facts from Lumi's own player.

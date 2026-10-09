@@ -58,17 +58,23 @@ pub enum CarabinerError {
 
 enum WorkerCommand {
     Publish(Option<mpsc::Sender<Result<(), String>>>),
-    Synchronize,
+    Synchronize(u64),
     Hold,
     FailClosed(String),
     Stop(mpsc::Sender<Result<(), String>>),
     Shutdown,
 }
 
+#[derive(Default)]
+struct PendingAnchor {
+    generation: u64,
+    latest: Option<LinkClockObservation>,
+}
+
 pub struct CarabinerTimingOutput {
     configuration: CarabinerConfiguration,
     commands: mpsc::Sender<WorkerCommand>,
-    latest_anchor: Arc<Mutex<Option<LinkClockObservation>>>,
+    latest_anchor: Arc<Mutex<PendingAnchor>>,
     worker: Option<JoinHandle<()>>,
     status: Arc<Mutex<TimingOutputStatus>>,
     shutting_down: Arc<AtomicBool>,
@@ -80,7 +86,7 @@ impl CarabinerTimingOutput {
     pub fn new(configuration: CarabinerConfiguration) -> Self {
         let (commands, receiver) = mpsc::channel();
         let status = Arc::new(Mutex::new(TimingOutputStatus::default()));
-        let latest_anchor = Arc::new(Mutex::new(None));
+        let latest_anchor = Arc::new(Mutex::new(PendingAnchor::default()));
         let worker_status = Arc::clone(&status);
         let worker_anchor = Arc::clone(&latest_anchor);
         let worker_configuration = configuration.clone();
@@ -172,8 +178,21 @@ impl CarabinerTimingOutput {
     /// or helper restart. The reason remains visible until that recovery has
     /// been applied successfully.
     pub fn fail_closed(&self, reason: impl Into<String>) -> Result<(), CarabinerError> {
+        self.enqueue_source_barrier(WorkerCommand::FailClosed(reason.into()))
+    }
+
+    fn enqueue_source_barrier(&self, command: WorkerCommand) -> Result<(), CarabinerError> {
+        // Invalidate only observations that predate this request. A delayed
+        // worker must never clear a recovery observation queued after it.
+        // Tag wakeups too: an old wakeup cannot consume the new generation.
+        let mut pending = self
+            .latest_anchor
+            .lock()
+            .map_err(|_| CarabinerError::WorkerUnavailable)?;
+        pending.latest = None;
+        pending.generation = pending.generation.wrapping_add(1);
         self.commands
-            .send(WorkerCommand::FailClosed(reason.into()))
+            .send(command)
             .map_err(|_| CarabinerError::WorkerUnavailable)
     }
 }
@@ -204,11 +223,11 @@ impl TimingOutputProvider for CarabinerTimingOutput {
         let observation = observation
             .validate()
             .map_err(|error| CarabinerError::InvalidAnchor(error.to_string()))?;
-        let previous_pending = self
+        let mut pending = self
             .latest_anchor
             .lock()
-            .map_err(|_| CarabinerError::WorkerUnavailable)?
-            .replace(observation);
+            .map_err(|_| CarabinerError::WorkerUnavailable)?;
+        let previous_pending = pending.latest.replace(observation);
         update_status(&self.status, |status| {
             status.received_anchor_count = status.received_anchor_count.saturating_add(1);
             if previous_pending.is_some() {
@@ -218,16 +237,14 @@ impl TimingOutputProvider for CarabinerTimingOutput {
         let should_wake = previous_pending.is_none();
         if should_wake {
             self.commands
-                .send(WorkerCommand::Synchronize)
+                .send(WorkerCommand::Synchronize(pending.generation))
                 .map_err(|_| CarabinerError::WorkerUnavailable)?;
         }
         Ok(())
     }
 
     fn hold(&mut self) -> Result<(), Self::Error> {
-        self.commands
-            .send(WorkerCommand::Hold)
-            .map_err(|_| CarabinerError::WorkerUnavailable)
+        self.enqueue_source_barrier(WorkerCommand::Hold)
     }
 
     fn fail_closed(&mut self, reason: String) -> Result<(), Self::Error> {
@@ -236,9 +253,7 @@ impl TimingOutputProvider for CarabinerTimingOutput {
 
     fn stop(&mut self) -> Result<(), Self::Error> {
         let (reply, response) = mpsc::channel();
-        self.commands
-            .send(WorkerCommand::Stop(reply))
-            .map_err(|_| CarabinerError::WorkerUnavailable)?;
+        self.enqueue_source_barrier(WorkerCommand::Stop(reply))?;
         match response.recv_timeout(WORKER_RESPONSE_TIMEOUT) {
             Ok(result) => result.map_err(CarabinerError::Helper),
             Err(_) => {
@@ -292,7 +307,7 @@ fn run_worker(
     configuration: CarabinerConfiguration,
     receiver: mpsc::Receiver<WorkerCommand>,
     shared_status: &Arc<Mutex<TimingOutputStatus>>,
-    latest_anchor: &Arc<Mutex<Option<LinkClockObservation>>>,
+    latest_anchor: &Arc<Mutex<PendingAnchor>>,
     shutting_down: &Arc<AtomicBool>,
     owned_child: &Arc<Mutex<Option<Child>>>,
 ) {
@@ -325,8 +340,14 @@ fn run_worker(
                     let _ = reply.send(result);
                 }
             }
-            WorkerCommand::Synchronize => {
-                let anchor = latest_anchor.lock().ok().and_then(|mut value| value.take());
+            WorkerCommand::Synchronize(generation) => {
+                let anchor = latest_anchor.lock().ok().and_then(|mut value| {
+                    if value.generation == generation {
+                        value.latest.take()
+                    } else {
+                        None
+                    }
+                });
                 let Some(anchor) = anchor else { continue };
                 if recovery_requires_publish {
                     continue;
@@ -389,9 +410,6 @@ fn run_worker(
                 }
             }
             WorkerCommand::Hold => {
-                if let Ok(mut value) = latest_anchor.lock() {
-                    *value = None;
-                }
                 // Holding the source is not a request to stop other Link peers.
                 // Preserve the last published tempo; SoundSwitch owns playback.
                 update_status(shared_status, |status| {
@@ -402,9 +420,6 @@ fn run_worker(
                 });
             }
             WorkerCommand::FailClosed(reason) => {
-                if let Ok(mut value) = latest_anchor.lock() {
-                    *value = None;
-                }
                 update_status(shared_status, |status| {
                     status.state = TimingOutputState::Degraded;
                     status.playing = false;
@@ -415,9 +430,6 @@ fn run_worker(
                 });
             }
             WorkerCommand::Stop(reply) => {
-                if let Ok(mut value) = latest_anchor.lock() {
-                    *value = None;
-                }
                 session = None;
                 recovery_requires_publish = false;
                 terminate_owned_child(owned_child);
