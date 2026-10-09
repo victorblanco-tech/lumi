@@ -679,6 +679,11 @@ fn combined_lanes_remain_bounded_and_emit_release_evidence() {
         sequence = sequence.saturating_add(1);
     }
     let baseline_outputs = output_record_count(&snapshot);
+    // Keep startup out of any interpretation of steady playback. Counters are
+    // cumulative: a maximum observed at the end may have happened before Play.
+    let baseline_link = required_object(&snapshot.payload, "abletonLinkIntegration");
+    let startup_pump_starvation = required_u64(baseline_link, "enginePumpStarvationCount");
+    let startup_pump_max_lateness = required_u64(baseline_link, "enginePumpMaxLatenessMicros");
     simulator_control("play", None);
 
     let started = Instant::now();
@@ -877,6 +882,12 @@ fn combined_lanes_remain_bounded_and_emit_release_evidence() {
             "failures": required_u64(final_link, "failureCount"),
             "enginePumpStarvation": required_u64(final_link, "enginePumpStarvationCount"),
             "enginePumpMaxLatenessMicros": maximum_engine_lateness_micros,
+            "startupPumpStarvation": startup_pump_starvation,
+            "startupPumpMaxLatenessMicros": startup_pump_max_lateness,
+            "playbackPumpStarvation": required_u64(final_link, "enginePumpStarvationCount")
+                .saturating_sub(startup_pump_starvation),
+            "pumpMaximumIncreasedDuringPlayback": maximum_engine_lateness_micros
+                > startup_pump_max_lateness,
         },
         "autoLoop": {
             "outputs": output_record_count(&snapshot),

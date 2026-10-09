@@ -62,6 +62,31 @@ cover saved preference, explicit start versus recovery, and already-enabled
 state; all 21 DesignSystem tests passed. App compilation and installed Dev-29
 service-cycle acceptance remain required.
 
+Dev-29 installed follow-up: build 423 / 6c08d8af9ef0 passed packaging and deep
+signature verification and was installed from its DMG. The 23 service-contract
+tests and 63 Live presentation tests passed. Settings Restart now automatically
+restores the saved Link preference with one peer; lighting remains Off. However,
+SoundSwitch hung again immediately after this controlled restart while lighting
+was Off. A second three-second sample reproduced the same main-thread
+JLC1Storage join / worker recursive-mutex wait (local evidence:
+build/dev29-soundswitch-after-service-restart.txt). One earlier Stop/Start had
+passed, so the failure is intermittent; endpoint lifecycle is now a concrete
+reproduction context, not proof of which individual MIDI notification is causal.
+The owner was asked for a bounded comparison with Control One disconnected;
+do not repeatedly reset SoundSwitch or leave hidden services running as a fix.
+
+The installed Dev-29 USB reader also reports No route to host despite normal
+Player/BPM reception. macOS's existing local-network logs attribute these reads
+to co.victorblan.tech.lumi.dev.engine. This does not itself prove authorization
+denial; no privacy settings were changed. Track matching and downstream playback
+are not accepted for this launch. Latest Dev is left open in Off.
+
+The combined soak report now records pump counters before playback, plus the
+subsequent starvation delta and whether the cumulative maximum increased. This
+lets the next run distinguish startup from playback without weakening budgets.
+The updated release test target compiled; a new run is pending the downstream
+test setup. No one-hour or physical-light acceptance is claimed.
+
 Dev-28 follow-up: the full workspace regression caught a real queued-clock
 recovery race after the successful shorter Dev-27 checks. Hold/FailClosed erased
 the shared latest-clock slot when the worker eventually handled the command,

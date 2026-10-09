@@ -199,6 +199,21 @@ SoundSwitch should show one Ableton Link peer when Lumi's Link relay is enabled.
 Choose the Lumi MIDI source as SoundSwitch's MIDI input. Your physical Control
 One can remain connected and usable beside Lumi.
 
+### Service controls (next development release)
+
+**Settings → Services** shows whether Lumi's engine and Remote service are
+responding. Expand **Process details** to see their macOS process IDs and app
+paths. **Stop** disconnects Remote and stops Lumi's output; **Start** brings
+the services back, and **Restart** does both in order. Your library and mappings
+are preserved. The saved Ableton Link auto-start preference also applies to
+explicit service starts. Lighting still starts in **Off**: arm and start the
+show deliberately.
+
+Quitting Lumi stops its services and Link helper before the app closes. If a
+service cannot be stopped, Lumi stays open and reports the problem instead of
+silently leaving it behind. Restart interrupts lighting output, so use it only
+when it is safe to do so.
+
 ## 7. Run a show
 
 Open **Live** and choose a mode:
@@ -298,6 +313,19 @@ exactly. It does not stretch or guess phrase boundaries.
 - Test the intended Bank and AutoLoop slots from Lighting Outputs.
 - BPM and AutoLoop output are separate integrations; a green Link connection
   does not prove MIDI mapping.
+- A ready Lighting Output means Lumi's MIDI sender is available. SoundSwitch
+  does not acknowledge that an AutoLoop has actually started; verify its selected
+  loop and visible progress as part of your pre-show check.
+
+### SoundSwitch stops responding
+
+Put Lumi in **Off** and check SoundSwitch itself. A surviving Link connection
+does not prove that SoundSwitch's user interface or lighting playback is
+healthy. Avoid repeatedly restarting Lumi to force recovery. Save your work if
+SoundSwitch still permits it, then restart SoundSwitch and verify a mapped
+AutoLoop before returning to **Start**. Include whether Control One was connected
+and whether a MIDI device or service had just appeared or disappeared when
+reporting the hang.
 
 ### macOS blocks or cannot open Lumi
 

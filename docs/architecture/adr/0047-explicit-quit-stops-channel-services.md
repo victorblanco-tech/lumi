@@ -21,6 +21,13 @@ Remote enablement is an app preference independent of current registration, so
 a successful Quit does not erase the user's intention to use Remote next time.
 Pairings, databases, mappings and other channels are preserved.
 
+The saved Ableton Link auto-start preference is applied by common explicit
+service startup, including Settings Start/Restart, rather than only by the
+initial window task. It does not send a redundant enable to an already-enabled
+provider. Automatic transport reconnection is not an explicit start and must
+not re-enable a provider that the user deliberately turned off. Lighting
+operation is never automatically restored to Start after an engine replacement.
+
 ## Required validation
 
 Previous ADR 0003 evidence associated CoreMIDI endpoint recreation with a

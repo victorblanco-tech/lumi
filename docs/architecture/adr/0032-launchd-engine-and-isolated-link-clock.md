@@ -3,6 +3,10 @@
 - Status: **Accepted**
 - Date: **2026-08-17**
 - Refines: ADR-0003, ADR-0030 and ADR-0031
+- Superseded in part: ADR-0047 requires explicit Quit to stop all channel
+  services; the parked-engine behavior below applies only to a transport
+  disconnect, not Quit. ADR-0030's 2026-10-09 tempo-only contract supersedes all
+  phase-alignment exceptions below, including acquisition and handover.
 
 ## Context
 
