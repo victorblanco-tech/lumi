@@ -48,6 +48,26 @@ for downstream playback acceptance; Lumi is left open in Off.
 
 ## Findings and ownership
 
+Additional Dev-25 desktop checkpoint (2026-10-09): while the installed app was
+Live with the Mac mini simulator, Arm/Start from a paused position showed
+Waiting for playback, then Show running after Play. The status popover reported
+26 MIDI pulses, p95 5.0 ms, last 4.5 ms and zero late sends. SoundSwitch reported
+one Link peer at 155 BPM and Control One connected. These observations do not
+prove downstream AutoLoop playback: the automation view continued to expose
+the mapping screen / loading logo despite the owner's Performance-mode setup.
+No mappings were intentionally edited.
+
+Concurrent Library browsing verified Sets / Trancendence / Trancendence 2 /
+Part 1 - 138+ Trance: 15 rows; typing Shiver without Return narrowed to one;
+Clear restored 15. The subsequent Part 2 selection and two further desktop
+observations timed out, including screenshot-only observation. Do not count
+Part 2 or continued UI responsiveness as passed. A three-second process sample
+(`build/dev25-library-ui-sample.txt`) showed substantial SwiftUI transaction /
+view update work rather than a single blocked main-thread stack. A point-in-time
+process check showed the app, engine, gateway, bridge and Carabiner still alive;
+process liveness alone does not establish healthy lighting output. Investigate
+UI workload and automation responsiveness separately before assigning cause.
+
 | Finding since the public release / development acceptance | Story | Required evidence |
 | --- | --- | --- |
 | Approximate three-second lighting delay and slow displayed BPM changes | E11-03 | Correlated source-to-dispatch and downstream measurements under load |
