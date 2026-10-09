@@ -88,6 +88,21 @@ three passes without hardware do not establish a permanent fix or prove the
 exact triggering notification. A matched comparison after reconnecting Control
 One was requested. Do not ship hardware disconnection as the solution.
 
+Matched connected comparison: the owner reconnected Control One; SoundSwitch
+reported CONTROL ONE Connected / 1. Three further Settings Restart cycles also
+completed, each followed by an actual responsive bank 1/2 selection in
+SoundSwitch. Therefore this short comparison did NOT reproduce a difference
+between connected and disconnected hardware. The earlier sampled deadlocks
+remain valid and unresolved; these passes must not be described as a fix.
+Arm / Start then counted down 39 beats to phrase 16 and reached Show running.
+Lumi reported two MIDI pulses, bank 3, p95 3.7 ms / last 4.1 ms and zero late
+sends, but SoundSwitch still displayed bank 1. Its mapping screen was open.
+Leaving via Done showed only the logo; File / Switch Mode / Perform and venue
+Woonkamer v001 still did not expose the normal playback view after Done. Link
+was restored On, Lumi returned to Off, and owner help was requested for the
+normal SoundSwitch playback view. No mappings were edited. This is not an
+accepted downstream AutoLoop response, despite successful MIDI dispatch.
+
 Post-restart Library UI check: expanding Sets / Trancendence 2 and selecting
 Mashup ToDo changed the table from the 154-track collection to seven tracks;
 selecting Part 1 - 138+ Trance changed it to its 14 tracks. Double-clicking
@@ -115,6 +130,24 @@ subsequent starvation delta and whether the cumulative maximum increased. This
 lets the next run distinguish startup from playback without weakening budgets.
 The updated release test target compiled; a new run is pending the downstream
 test setup. No one-hour or physical-light acceptance is claimed.
+
+Dev-29 updated 120-second combined run subsequently passed on a copied database
+with the desktop fully closed (exclusive-process guard passed before/after).
+Evidence: build/Evidence/dev29-live-120s.json and build/dev29-live-120s.log.
+It exercised 59 pitch changes, 17 seeks, 10 Pause/Live cycles, 114 library
+queries and 2,326 snapshots. All 28 requested AutoLoops completed; 29 MIDI pulses
+(including bank selection), zero failures/saturation. MIDI lane latency p95
+26 microseconds, maximum 4.765 ms; ingress age p95/p99 10 ms, maximum 59.974 ms.
+One Link peer, zero failure/fail-closed/hard-reanchor counts. Latest-wins Link
+mailbox received 89 anchors and applied 87; do not equate these counters with
+lossless delivery of every intermediate tempo value.
+The startup/playback split exposed 25 pump-starvation observations DURING
+playback (startup: three); the maximum rose from 41.399 to 94.295 ms. This rules
+out attributing all pump delay to startup. The cumulative slowest engine command
+was sourceMode at 77.394 ms, but that alone does not identify the cause of the
+playback spikes. Further stage-level attribution is required before claiming
+the integration-pump timing issue fixed. No physical-light or downstream
+SoundSwitch playback acceptance is claimed for this run.
 
 Dev-28 follow-up: the full workspace regression caught a real queued-clock
 recovery race after the successful shorter Dev-27 checks. Hold/FailClosed erased
