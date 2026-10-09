@@ -67,6 +67,51 @@ Ready for Show and editing controls correctly disabled. No phrases changed.
 Audio preview remains unavailable for that source on this Mac without local
 media; this is not evidence of successful offline audio caching.
 
+Dev-27 verification: 160 engine unit tests, 63 Live presentation tests, 75
+Library tests and four USB-feedback XCTest cases passed. The Pro DJ Link crate
+suite and strict Clippy passed. Initial sandboxed attempts could not create
+test sockets / run Swift macros; the normal authorized runs passed without
+changing macOS privacy settings. The disposable library copy passed SQLite
+quick-check and foreign-key validation. Package build 419 / edd925b passed deep
+signature validation and was installed from the expanded DMG installer payload.
+
+The 120-second isolated Pro DJ Link run processed 7,267 messages with p95 source
+age 10 ms, maximum 33.6 ms and queue high-water 7. The 120-second real Link run
+applied 4,203 observations, one peer, zero failures and zero hard/soft phase
+corrections. The 120-second MIDI lane scheduled 4,526 commands, emitted 4,288,
+and deliberately cancelled 238; no saturation, p95 5.032 ms, maximum 5.291 ms.
+These are bounded stress checks, not the long release soak or physical-light
+alignment acceptance. GitHub's previous Rust gate failed only formatting in
+two existing files; the formatting check is repaired without behavioral changes.
+
+Combined Dev-27 run (120 s, real MIDI and SoundSwitch Link peer): 59 pitch
+changes, 17 seeks, ten lighting-mode cycles, 114 library queries and 2,305 UI
+snapshot polls; 28 completed AutoLoops, zero execution failures, zero Link
+failures and zero phase reanchors. Source-age p95/p99 10 ms, maximum 50.9 ms;
+library round-trip maximum 22.6 ms; MIDI p95 41 microseconds, maximum 5.03 ms.
+Pump lateness maximum 56.7 ms / 29 starvation observations remains an explicit
+scheduling concern, not hidden by the successful output counters. Evidence:
+`build/Evidence/dev27-live-120s.json` and `build/dev27-soak.log`.
+
+Installed Dev-27 desktop acceptance: both prepared tracks and their sources
+returned on first launch, with no new Lumi crash report observed. Arm/Start
+counted down to phrase 2, then ran. During an isolated precise-position gap,
+exact Beat messages kept status Ready and MIDI progressed through the phrase
+boundary. Virtual CHRM eject changed Player 1's slot to Not inserted while
+preserving both the local and LINK-loaded track origins and 17/33-phrase plans.
+Starting the cached Player-2 track after a seek and handing it master selected
+bank 2; status remained Ready with eight pulses and zero late sends. Restored
+the virtual USB and Player 1 master / Player 2 paused. The real USB filesystem
+was not modified or physically unmounted by this test.
+
+Dev-27 Settings Restart acceptance: the confirmation was visible and accepted;
+Engine responding / Remote ready returned. Engine PID 40636 → 40831 and gateway
+PID 40677 → 40839, both verified by the UI as belonging to the installed Dev-27
+bundle. No new Lumi crash report appeared. One initial confirmation observation
+failed with ScreenCaptureKit -3812; Escape cancelled that attempt safely and
+the subsequent normal UI attempt succeeded. Normal Quit after this test again
+passed the exclusive-service ownership guard before full Rust verification.
+
 Dev-26 installed acceptance (build 418 / e79eb09): normal Dev-25 Quit removed
 engine, bridge, gateway and Carabiner. Two real-helper lifecycle tests passed
 against SoundSwitch, then the verified Dev-26 installer payload was installed

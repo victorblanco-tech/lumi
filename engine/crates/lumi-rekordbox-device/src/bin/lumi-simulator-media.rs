@@ -30,7 +30,9 @@ fn projection(library: &DeviceLibrarySnapshot) -> Value {
 
 fn run() -> Result<(), Box<dyn std::error::Error>> {
     let mut arguments = std::env::args_os().skip(1);
-    let root = arguments.next().ok_or("A OneLibrary USB root is required")?;
+    let root = arguments
+        .next()
+        .ok_or("A OneLibrary USB root is required")?;
     if arguments.next().is_some() {
         return Err("Expected exactly one USB root".into());
     }
