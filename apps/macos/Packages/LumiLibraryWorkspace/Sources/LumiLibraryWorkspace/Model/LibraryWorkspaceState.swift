@@ -4,6 +4,7 @@ import LumiDesignSystem
 public enum LibraryCondition: String, CaseIterable, Equatable, Sendable {
     case empty
     case importing
+    case querying
     case ready
     case stale
     case degraded
@@ -12,7 +13,7 @@ public enum LibraryCondition: String, CaseIterable, Equatable, Sendable {
     public var componentState: LumiComponentState {
         switch self {
         case .empty: .empty
-        case .importing: .loading
+        case .importing, .querying: .loading
         case .ready: .ready
         case .stale: .stale
         case .degraded: .degraded
@@ -678,8 +679,16 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
     /// A failed selection must never show the previous playlist's rows under
     /// the new selection. Keep navigation and prepared editor data available.
     public func failingQuery(_ request: LibraryQueryRequest, message: String) -> Self {
+        queryState(request, condition: .error, message: message)
+    }
+
+    public func loadingQuery(_ request: LibraryQueryRequest) -> Self {
+        queryState(request, condition: .querying, message: nil)
+    }
+
+    private func queryState(_ request: LibraryQueryRequest, condition: LibraryCondition, message: String?) -> Self {
         Self(
-            condition: .error, providerKind: providerKind, source: source,
+            condition: condition, providerKind: providerKind, source: source,
             capabilities: capabilities, collectionTotal: collectionTotal, playlists: playlists,
             query: LibraryQuery(search: request.search, playlistID: request.playlistID,
                                 offset: request.offset, limit: request.limit,

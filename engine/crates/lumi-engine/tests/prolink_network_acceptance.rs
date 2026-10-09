@@ -700,9 +700,30 @@ fn combined_lanes_remain_bounded_and_emit_release_evidence() {
     let mut maximum_source_age_p95_micros = 0_u64;
     let mut maximum_engine_lateness_micros = 0_u64;
     let mut maximum_realtime_midi_p95_micros = 0_u64;
+    let mut next_library_query = started + Duration::from_secs(1);
+    let mut library_query_count = 0_u64;
+    let mut maximum_library_query_micros = 0_u64;
 
     while Instant::now() < finish {
         let now = Instant::now();
+        if now >= next_library_query {
+            let query_started = Instant::now();
+            let result = exchange(
+                &mut connection,
+                &command(
+                    &format!("soak-library-{library_query_count}"),
+                    sequence,
+                    json!({ "kind": "queryLibrary", "search": if library_query_count % 2 == 0 { "90" } else { "" },
+                            "offset": 0, "limit": 50 }),
+                ),
+            );
+            assert_eq!(result.message_type, MessageType::Snapshot);
+            maximum_library_query_micros = maximum_library_query_micros
+                .max(u64::try_from(query_started.elapsed().as_micros()).unwrap_or(u64::MAX));
+            sequence = sequence.saturating_add(1);
+            library_query_count = library_query_count.saturating_add(1);
+            next_library_query = Instant::now() + Duration::from_secs(1);
+        }
         if now >= next_pitch {
             let (pitch, _) = pitches[pitch_index % pitches.len()];
             simulator_control("pitch", Some(pitch));
@@ -822,6 +843,12 @@ fn combined_lanes_remain_bounded_and_emit_release_evidence() {
         "simulatorProfile": "cdj-1500x",
         "durationSeconds": duration_seconds,
         "uiSnapshotPolls": snapshot_polls,
+        "library": {
+            "queryCount": library_query_count,
+            "maximumQueryRoundTripMicros": maximum_library_query_micros,
+            "maximumEngineCommandMicros": required_u64(final_link, "engineMaxCommandMicros"),
+            "maximumEngineCommandKind": final_link.get("engineMaxCommandKind"),
+        },
         "actions": {
             "pitchChanges": pitch_changes,
             "seekLandings": seek_landings,

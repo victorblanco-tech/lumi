@@ -9,66 +9,6 @@ import LumiLiveWorkspace
 import LumiProtocol
 import OSLog
 
-/// Bridges Foundation's blocking process reaper into Swift concurrency without
-/// requiring a run loop on the calling task. `Process.isRunning` and
-/// `terminationHandler` can both remain stale when a child is launched from a
-/// detached worker; `waitUntilExit()` is the authoritative completion source.
-private final class IsolatedUSBProcessWaiter: @unchecked Sendable {
-    private let process: Process
-    private let lock = NSLock()
-    private var timedOut = false
-    private var finished = false
-    private var reaped = false
-
-    init(process: Process) {
-        self.process = process
-    }
-
-    func wait(timeoutSeconds: Double) async -> Int32? {
-        await withCheckedContinuation { continuation in
-            DispatchQueue.global(qos: .utility).async { [self] in
-                process.waitUntilExit()
-                let result: Int32?
-                lock.lock()
-                reaped = true
-                guard !finished else {
-                    lock.unlock()
-                    return
-                }
-                finished = true
-                result = timedOut ? nil : process.terminationStatus
-                lock.unlock()
-                continuation.resume(returning: result)
-            }
-
-            DispatchQueue.global(qos: .utility).asyncAfter(
-                deadline: .now() + timeoutSeconds
-            ) { [self] in
-                lock.lock()
-                guard !finished else {
-                    lock.unlock()
-                    return
-                }
-                timedOut = true
-                finished = true
-                lock.unlock()
-                _ = Darwin.kill(process.processIdentifier, SIGTERM)
-                continuation.resume(returning: nil)
-                DispatchQueue.global(qos: .utility).asyncAfter(
-                    deadline: .now() + .milliseconds(250)
-                ) { [self] in
-                    lock.lock()
-                    let shouldForceExit = timedOut && !reaped
-                    lock.unlock()
-                    if shouldForceExit {
-                        _ = Darwin.kill(process.processIdentifier, SIGKILL)
-                    }
-                }
-            }
-        }
-    }
-}
-
 @MainActor
 final class EngineStatusModel: ObservableObject {
     private static let logger = Logger(
@@ -165,6 +105,8 @@ final class EngineStatusModel: ObservableObject {
     private var monitoringTask: Task<Void, Never>?
     private var engineRecoveryTask: Task<Void, Never>?
     private var remoteGatewayMonitoringTask: Task<Void, Never>?
+    private var usbWorkerTask: Task<MessageEnvelope, Error>?
+    private var unresolvedUSBWorker: OwnedChildProcessWaiter?
     private var localAudioControllers: [UInt64: LocalDeckAudioController] = [:]
     private var pendingLocalTransports: [UInt64: LocalDeckTransportSnapshot] = [:]
     private var pendingLocalTransportDecks: [UInt64] = []
@@ -340,6 +282,7 @@ final class EngineStatusModel: ObservableObject {
             remoteGatewayState = enabled
                 ? try await remoteGatewaySupervisor.enable(recordURL: recordURL)
                 : try await remoteGatewaySupervisor.disable(recordURL: recordURL)
+            remoteProcessDetails = await remoteGatewaySupervisor.processDetails(recordURL: recordURL)
         } catch RemoteGatewayClientError.requiresApproval {
             remoteGatewayState = .init(
                 serviceState: .requiresApproval,
@@ -831,6 +774,15 @@ final class EngineStatusModel: ObservableObject {
     private func stopServices() async {
         let canRequestGracefulOff = lifecycle == .ready
         servicesStopping = true
+        var shutdownFailures: [String] = []
+        usbWorkerTask?.cancel()
+        do { _ = try await usbWorkerTask?.value }
+        catch let OwnedChildProcessWaiterError.terminationFailed(worker) {
+            unresolvedUSBWorker = worker
+        } catch { /* Cancellation or an already reported scan failure. */ }
+        if let worker = unresolvedUSBWorker, !worker.hasExited {
+            shutdownFailures.append("USB worker could not be stopped.")
+        } else { unresolvedUSBWorker = nil }
         serviceStartupTask?.cancel()
         await serviceStartupTask?.value
         lifecycle = .stopping
@@ -841,6 +793,7 @@ final class EngineStatusModel: ObservableObject {
         engineRecoveryTask?.cancel()
         engineRecoveryTask = nil
         remoteGatewayMonitoringTask?.cancel()
+        await remoteGatewayMonitoringTask?.value
         remoteGatewayMonitoringTask = nil
         localTransportDrainTask?.cancel()
         localTransportDrainTask = nil
@@ -884,7 +837,6 @@ final class EngineStatusModel: ObservableObject {
                 )
             }
         }
-        var shutdownFailures: [String] = []
         do {
             remoteGatewayState = try await remoteGatewaySupervisor.disable(
                 recordURL: try remoteGatewayRecordURL()
@@ -923,8 +875,15 @@ final class EngineStatusModel: ObservableObject {
     }
 
     func queryLibrary(_ request: LibraryQueryRequest) async {
+        guard lifecycle == .ready, !servicesStopping else {
+            libraryState = libraryState.failingQuery(
+                request, message: "The library service is not ready. Start Lumi services, then select the playlist again."
+            )
+            return
+        }
         libraryQueryGeneration &+= 1
         pendingLibraryQuery = (libraryQueryGeneration, request)
+        libraryState = libraryState.loadingQuery(request)
         guard !isDrainingLibraryQueries else { return }
 
         isDrainingLibraryQueries = true
@@ -950,6 +909,7 @@ final class EngineStatusModel: ObservableObject {
             return
         }
         defer { isExchangingCommand = false }
+        guard generation == libraryQueryGeneration else { return }
         do {
             let envelope = try await supervisor.send(
                 .queryLibrary(
@@ -1734,6 +1694,11 @@ final class EngineStatusModel: ObservableObject {
     private func runIsolatedUSBWorker(
         payload: [String: JSONValue]
     ) async throws -> MessageEnvelope {
+        guard !servicesStopping, usbWorkerTask == nil else { throw CancellationError() }
+        if let worker = unresolvedUSBWorker, !worker.hasExited {
+            throw OwnedChildProcessWaiterError.terminationFailed(worker)
+        }
+        unresolvedUSBWorker = nil
         let executable = try usbWorkerExecutable()
         let database = try libraryDatabaseURL()
         let protocolVersion = protocolVersion ?? 1
@@ -1763,7 +1728,8 @@ final class EngineStatusModel: ObservableObject {
             }
         }
         defer { scopedURL.stopAccessingSecurityScopedResource() }
-        return try await Task.detached(priority: .utility) {
+        let task = Task.detached(priority: .utility) {
+            try Task.checkCancellation()
             let manager = FileManager.default
             let directory = manager.temporaryDirectory.appendingPathComponent(
                 "lumi-usb-worker-\(UUID().uuidString)",
@@ -1820,16 +1786,13 @@ final class EngineStatusModel: ObservableObject {
                 }
             }
             defer { progressTask.cancel() }
-            defer {
-                if process.isRunning {
-                    _ = Darwin.kill(process.processIdentifier, SIGKILL)
-                }
-            }
-
-            guard let terminationStatus = await IsolatedUSBProcessWaiter(
-                process: process
-            ).wait(timeoutSeconds: registersIdentity ? 3 : (reportsProgress ? 300 : 75)) else {
-                throw IsolatedUSBWorkerError.timedOut
+            let timeoutSeconds = registersIdentity ? 3 : (reportsProgress ? 300 : 75)
+            let terminationStatus: Int32
+            do {
+                terminationStatus = try await OwnedChildProcessWaiter(process: process)
+                    .wait(timeout: .seconds(timeoutSeconds))
+            } catch OwnedChildProcessWaiterError.timedOut {
+                throw IsolatedUSBWorkerError.timedOut(seconds: timeoutSeconds)
             }
             try? standardError.synchronize()
             guard terminationStatus == 0 else {
@@ -1853,39 +1816,42 @@ final class EngineStatusModel: ObservableObject {
                 sentAt: Date().ISO8601Format(),
                 payload: responsePayload
             )
-        }.value
+        }
+        usbWorkerTask = task
+        defer { usbWorkerTask = nil }
+        do { return try await task.value }
+        catch let OwnedChildProcessWaiterError.terminationFailed(worker) {
+            unresolvedUSBWorker = worker
+            throw OwnedChildProcessWaiterError.terminationFailed(worker)
+        }
     }
 
     private func securityScopedUSBURL(root: String, sourceID: String) throws -> URL? {
         guard let encoded = UserDefaults.standard.string(
             forKey: LumiPreferenceKey.rekordboxDeviceBookmarks
         ), let payload = encoded.data(using: String.Encoding.utf8),
-        let bookmarks = try? JSONDecoder().decode([String: String].self, from: payload),
+        var bookmarks = try? JSONDecoder().decode([String: String].self, from: payload),
         let bookmarkString = bookmarks[sourceID],
         let bookmark = Data(base64Encoded: bookmarkString) else {
             return nil
         }
-        var stale = false
-        let resolved = try URL(
-            resolvingBookmarkData: bookmark,
-            options: [.withSecurityScope, .withoutUI],
-            relativeTo: nil,
-            bookmarkDataIsStale: &stale
-        )
-        guard !stale,
-              resolved.standardizedFileURL.path == URL(
-                fileURLWithPath: root,
-                isDirectory: true
-              ).standardizedFileURL.path else {
-            return nil
+        guard let resolution = try USBBookmarkResolver.resolve(
+            bookmark, expectedRoot: URL(fileURLWithPath: root, isDirectory: true)
+        ) else { return nil }
+        if let renewed = resolution.renewedBookmark {
+            bookmarks[sourceID] = renewed.base64EncodedString()
+            let data = try JSONEncoder().encode(bookmarks)
+            if let encoded = String(data: data, encoding: .utf8) {
+                UserDefaults.standard.set(encoded, forKey: LumiPreferenceKey.rekordboxDeviceBookmarks)
+            }
         }
-        return resolved
+        return resolution.url
     }
 
     private enum IsolatedUSBWorkerError: LocalizedError {
         case temporaryFileUnavailable
         case authorizationRequired
-        case timedOut
+        case timedOut(seconds: Int)
         case failed(String?)
         case missingResponse
 
@@ -1895,8 +1861,8 @@ final class EngineStatusModel: ObservableObject {
                 "Lumi could not create a protected temporary USB workspace."
             case .authorizationRequired:
                 "USB access needs one-time authorization. Choose this trusted source again and select its volume in the macOS dialog."
-            case .timedOut:
-                "The USB stopped responding. Lumi ended the isolated scan after 75 seconds; the realtime engine was not affected. Reconnect the disk and try again."
+            case let .timedOut(seconds):
+                "The USB stopped responding. Lumi ended the isolated operation after \(seconds) seconds; the realtime engine was not affected. Reconnect the disk and try again."
             case let .failed(detail):
                 detail?.isEmpty == false
                     ? detail
@@ -3005,6 +2971,7 @@ final class EngineStatusModel: ObservableObject {
                 let connectedDecks = self.latestSnapshot?.deckSource.mode == "connectedDecks"
                 guard connectedDecks || healthTick == 0 else { continue }
                 guard await self.acquireInteractiveExchange() else { continue }
+                let queryGeneration = self.libraryQueryGeneration
                 do {
                     var envelope = try await self.supervisor.getSnapshot(includeLibrary: false)
                     var observedLibraryRevision = self.libraryRevision(in: envelope)
@@ -3057,7 +3024,11 @@ final class EngineStatusModel: ObservableObject {
                        immediateRefreshReason != nil {
                         self.workspaceState = nextWorkspaceState
                     }
-                    if healthTick == 0 {
+                    if queryGeneration != self.libraryQueryGeneration || self.isDrainingLibraryQueries {
+                        // This snapshot predates the user's query, or the query
+                        // is still queued. It may update Live, not replace the
+                        // requested Library selection/loading state.
+                    } else if healthTick == 0 {
                         let nextLibraryState: LibraryWorkspaceState
                         if decodeLibrary, let decodedLibraryState = decoded.1 {
                             nextLibraryState = decodedLibraryState.preservingDeviceInspection(

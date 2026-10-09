@@ -184,7 +184,15 @@ public struct LocalPlaybackLibraryBrowserView: View {
             .padding(.horizontal, LumiSpacing.medium)
             .frame(height: 42)
 
-            if state.condition == .error {
+            if state.condition == .querying || state.condition == .importing {
+                VStack(spacing: LumiSpacing.medium) {
+                    ProgressView()
+                    Text("Loading tracks")
+                        .foregroundStyle(LumiColor.textSecondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityIdentifier("lumi.localPlayback.loading")
+            } else if state.condition == .error {
                 ContentUnavailableView(
                     "Library unavailable",
                     systemImage: "exclamationmark.triangle.fill",

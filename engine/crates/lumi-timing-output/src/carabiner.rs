@@ -196,6 +196,10 @@ impl TimingOutputProvider for CarabinerTimingOutput {
             .map_err(CarabinerError::Helper)
     }
 
+    fn request_publish(&mut self) -> Result<(), Self::Error> {
+        self.publish_async()
+    }
+
     fn synchronize(&mut self, observation: LinkClockObservation) -> Result<(), Self::Error> {
         let observation = observation
             .validate()
@@ -837,6 +841,25 @@ fn set_degraded(shared_status: &Arc<Mutex<TimingOutputStatus>>, error: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn requested_publish_reports_startup_failure_through_status_without_waiting() {
+        let mut output = CarabinerTimingOutput::new(CarabinerConfiguration {
+            executable: Some(PathBuf::from("/does-not-exist/lumi-test-helper")),
+            port: 17_094,
+            expected_version: "1.2.0".to_owned(),
+        });
+        let started = Instant::now();
+        assert!(output.request_publish().is_ok());
+        assert!(started.elapsed() < Duration::from_millis(100));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while output.status().state != TimingOutputState::Degraded && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(output.status().state, TimingOutputState::Degraded);
+        assert!(output.status().last_error.is_some());
+        assert_eq!(output.status().peers, 0);
+    }
 
     #[test]
     fn parses_carabiner_status() {

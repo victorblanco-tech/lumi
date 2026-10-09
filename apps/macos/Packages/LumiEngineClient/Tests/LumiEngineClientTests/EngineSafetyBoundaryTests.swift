@@ -7,6 +7,68 @@ import Testing
 
 @Suite("Engine safety boundaries")
 struct EngineSafetyBoundaryTests {
+    @Test("Cancelling or timing out an isolated worker waits until its child is gone", arguments: [false, true])
+    func isolatedWorkerCleanup(cancel: Bool) async throws {
+        let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: directory) }
+        let executable = directory.appendingPathComponent("worker")
+        try Data("#!/bin/sh\ntrap '' TERM\nexec sleep 30\n".utf8).write(to: executable)
+        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: executable.path)
+        let process = Process()
+        process.executableURL = executable
+        try process.run()
+        let waiter = OwnedChildProcessWaiter(process: process)
+        let task = Task.detached { try await waiter.wait(timeout: cancel ? .seconds(30) : .milliseconds(50)) }
+        if cancel {
+            try await Task.sleep(for: .milliseconds(50))
+            task.cancel()
+        }
+        do {
+            _ = try await task.value
+            Issue.record("Sleeping worker unexpectedly completed normally")
+        } catch is CancellationError {
+            #expect(cancel)
+        } catch OwnedChildProcessWaiterError.timedOut {
+            #expect(!cancel)
+        }
+        #expect(!process.isRunning)
+        #expect(Darwin.kill(process.processIdentifier, 0) != 0)
+        #expect(errno == ESRCH)
+    }
+
+    @Test("Cancelled Remote startup does not proceed to service registration")
+    func cancelledRemoteStartup() async {
+        let supervisor = RemoteGatewaySupervisor(launchAgentPlistName: nil)
+        let task = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            do {
+                _ = try await supervisor.enable(recordURL: URL(fileURLWithPath: "/unused"))
+                Issue.record("Cancelled startup unexpectedly succeeded")
+            } catch is CancellationError {
+                // Cancellation must win even before packaging/registration checks.
+            } catch {
+                Issue.record("Startup proceeded after cancellation: \(error)")
+            }
+            #expect(await supervisor.refresh(recordURL: URL(fileURLWithPath: "/unused")) == .disabled)
+        }
+        await task.value
+    }
+
+    @Test("Old Remote record is rejected for commands but remains readable for shutdown")
+    func oldRemoteRecordShutdownValidation() throws {
+        let record = RemoteGatewayServiceRecord(
+            endpointHost: "127.0.0.1", endpointPort: 12345,
+            adminToken: String(repeating: "a", count: 32), processID: 123,
+            productVersion: "0.6.4-dev-19", installationID: String(repeating: "b", count: 32),
+            certificateFingerprintSHA256: String(repeating: "c", count: 64), lanPort: 12346
+        )
+        #expect(throws: RemoteGatewayClientError.serviceVersionMismatch) {
+            try record.validate(expectedProductVersion: "0.6.4-dev-20")
+        }
+        try record.validate(expectedProductVersion: nil)
+    }
+
     @Test("Explicit shutdown terminates an owned process, including ignored TERM, and permits relaunch", arguments: [false, true])
     func explicitShutdownDoesNotParkProcess(ignoresTermination: Bool) async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)

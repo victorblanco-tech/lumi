@@ -1,7 +1,7 @@
 # Epic 11 — reliable preparation and Live performance
 
 Status: implementation and autonomous testing authorized on 2026-10-08.
-Baseline: public Lumi v0.6.3; current development build 0.6.4-dev-19.
+Baseline: public Lumi v0.6.3; current development build 0.6.4-dev-21.
 Products: Lumi, Lumi Remote and the independently versioned Pro DJ Link Simulator.
 Execution order: simulator fidelity first, then recovery and measured timing, preparation workflow, launch policy, integrated acceptance.
 
@@ -147,6 +147,48 @@ These automated passes do not replace the interrupted desktop acceptance.
 Engine unit regression also passed: 145 passed, four explicitly ignored; the
 canonical scenario differs only in its expected product version (dev-20).
 
+Follow-up desktop checkpoint: resuming the existing Stop confirmation succeeded.
+Settings showed Stopped and engine/gateway/Carabiner processes were absent.
+Start and confirmed Restart both returned to Engine responding / Remote ready;
+Restart replaced engine PID 34820 with 35145. A subsequent explicit Quit again
+removed owned services. The transient “No verified Remote process” detail after
+startup is repaired in dev-21 by refreshing details immediately after enablement.
+Remote startup/recovery now carries a generation through suspension points so
+an in-flight recovery cannot re-register after a concurrent stop. Shutdown reads
+the previous-version record too; version mismatch still rejects normal commands.
+Seven safety tests pass, including cancellation and old-version record validation.
+These new race guards still require packaged desktop acceptance.
+
+Library desktop checkpoint: expanding Sets → Trancendence 2 and selecting Mashup
+ToDo eventually returned the expected seven tracks, but initially retained all
+154 collection rows. Dev-21 adds an explicit pending-query state (including
+Local Playback), clears stale rows while retaining navigation/editor data, skips
+superseded queued queries and prevents an older monitor snapshot from replacing
+the pending selection. Full Library suite: 71 Swift Testing + four XCTest passes.
+The combined simulator soak now also alternates Library searches while changing
+pitch, seeking and cycling lighting modes; query round-trip and maximum engine
+command duration are recorded separately from MIDI-lane dispatch latency.
+
+Measured E11-03 checkpoint on the Mac mini simulator and real SoundSwitch peer:
+two 30-second combined runs each performed 14 pitch changes, four seeks, two
+Pause/Start cycles, 28 Library searches and seven AutoLoop executions. Query
+round trips peaked at 18.9 ms; source-age p95 was 20 ms; no MIDI failures or
+queue saturation. The diagnostic repeat attributed the worst command (92.7 ms;
+earlier unclassified run 259.9 ms) to Link enablement, not Library queries.
+The relay now queues startup on its existing timing worker instead of waiting
+for the helper. Starting/Degraded/Ready remain actual worker states; accepting
+the request does not claim readiness. Engine unit suite still 145 passed / four
+ignored; timing-output suite eight passed, including asynchronous startup failure.
+Post-change 120-second run passed with 59 pitch changes, 17 seeks, ten operation
+cycles, 115 Library queries and 27 AutoLoop executions: no Link/MIDI failures or
+queue saturation. Library maximum round trip 21.0 ms; source-age p95/p99 20 ms,
+maximum 51.8 ms; MIDI dispatch p95 52 µs, maximum 2.67 ms. Worst engine command
+was now source-mode selection (88.5 ms), not Link enablement. Pump lateness still
+peaked at 53.4 ms under aggressive full snapshots: E11-03 scheduling isolation
+is therefore not closed. These are distinct segment measurements, not a claim
+of end-to-end light latency or first-beat alignment. SoundSwitch UI remained
+responsive and showed one Link peer. Physical hardware output is untested.
+
 Reproduce the unavailable Dev attachment before repair. Verify service record,
 process/build identity, authentication and command responsiveness separately.
 Bound retries; show Starting/Recovering/Ready based on real responses. Keep the
@@ -166,6 +208,20 @@ measurement and a SoundSwitch/light observation remain separate evidence.
 Acceptance uses the proposed budgets and overload cases in the recovery plan.
 
 ## E11-04 — complete USB-to-editor workflow
+
+Dev-21 implementation checkpoint: the UI and isolated USB worker now share
+bookmark restoration. A stale bookmark resolving to the exact requested root
+is renewed only while its existing security scope remains accessible. Failed
+resolution no longer destroys the saved grant. Different or broader roots are
+rejected; this never authorizes a different device or replaces physical marker
+validation. Normal macOS selection remains the fallback when the grant cannot
+be restored. Physical unplug/replug acceptance remains open.
+The Library suite now includes four bookmark restoration-policy tests (75 Swift
+Testing + four XCTest passes). Actual macOS stale-bookmark renewal has not been
+forced in acceptance. USB-worker ownership is retained by the app; explicit
+Stop/Quit cancels and waits for that worker too. Its cancellable process waiter
+uses authoritative waitUntilExit completion, bounded TERM/KILL cleanup, and an
+accurate operation-specific timeout message rather than always reporting 75 s.
 
 Fix identity stability and durable authorization without merging independent
 sticks. Scan, pre-sync impact, selection, progress, review and completion must

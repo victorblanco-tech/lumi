@@ -408,6 +408,7 @@ struct IntegrationPumpMetrics {
     command_count: u64,
     last_command_micros: u64,
     max_command_micros: u64,
+    max_command_kind: &'static str,
 }
 
 impl IntegrationPumpMetrics {
@@ -420,6 +421,7 @@ impl IntegrationPumpMetrics {
             command_count: 0,
             last_command_micros: 0,
             max_command_micros: 0,
+            max_command_kind: "none",
         }
     }
 
@@ -438,10 +440,13 @@ impl IntegrationPumpMetrics {
         self.last_tick = Some(now);
     }
 
-    fn record_command(&mut self, elapsed: Duration) {
+    fn record_command(&mut self, elapsed: Duration, kind: &'static str) {
         self.command_count = self.command_count.saturating_add(1);
         self.last_command_micros = u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX);
-        self.max_command_micros = self.max_command_micros.max(self.last_command_micros);
+        if self.last_command_micros > self.max_command_micros {
+            self.max_command_micros = self.last_command_micros;
+            self.max_command_kind = kind;
+        }
     }
 }
 
@@ -2841,7 +2846,21 @@ fn handle_command(
 ) -> Result<MessageEnvelope, EngineError> {
     let started = Instant::now();
     let result = handle_command_inner(runtime, command_ids, envelope, response_sequence);
-    runtime.integration_pump_metrics.record_command(started.elapsed());
+    // Fixed categories only: diagnostics never retain track names, searches,
+    // arbitrary payload text or an unbounded command-name map.
+    let category = match envelope.payload.get("kind").and_then(Value::as_str) {
+        Some("getSnapshot") => "snapshot",
+        Some("queryLibrary") => "libraryQuery",
+        Some("openLibraryTrackEditor") => "openEditor",
+        Some("getLibraryTrackWaveform") => "waveform",
+        Some("selectDeckSourceMode") => "sourceMode",
+        Some("setAbletonLinkEnabled") => "linkEnablement",
+        Some("setOperationState") => "operationState",
+        _ => "other",
+    };
+    runtime
+        .integration_pump_metrics
+        .record_command(started.elapsed(), category);
     result
 }
 
@@ -5062,6 +5081,7 @@ fn snapshot_envelope_internal(
             "engineCommandCount": runtime.integration_pump_metrics.command_count,
             "engineLastCommandMicros": runtime.integration_pump_metrics.last_command_micros,
             "engineMaxCommandMicros": runtime.integration_pump_metrics.max_command_micros,
+            "engineMaxCommandKind": runtime.integration_pump_metrics.max_command_kind,
             "lastReanchor": link_timing.last_reanchor.map(|reason| match reason {
                 TimingDiscontinuity::Continuous => "continuous",
                 TimingDiscontinuity::Started => "started",

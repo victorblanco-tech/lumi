@@ -59,7 +59,9 @@ where
             return Ok(());
         }
         if enabled {
-            self.provider.publish().map_err(|error| error.to_string())?;
+            self.provider
+                .request_publish()
+                .map_err(|error| error.to_string())?;
             self.enabled = true;
         } else {
             let stop_result = self.provider.stop().map_err(|error| error.to_string());
@@ -200,6 +202,7 @@ mod tests {
     #[derive(Clone, Debug, Eq, PartialEq)]
     enum Call {
         Publish,
+        BlockingPublish,
         Synchronize(LinkClockObservation),
         Hold,
         Stop,
@@ -219,6 +222,12 @@ mod tests {
         }
 
         fn publish(&mut self) -> Result<(), Self::Error> {
+            self.calls.push(Call::BlockingPublish);
+            self.status.state = TimingOutputState::Ready;
+            Ok(())
+        }
+
+        fn request_publish(&mut self) -> Result<(), Self::Error> {
             self.calls.push(Call::Publish);
             self.status.state = TimingOutputState::Ready;
             Ok(())

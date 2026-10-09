@@ -138,6 +138,9 @@ pub trait TimingOutputProvider {
 
     fn provider_kind(&self) -> &'static str;
     fn publish(&mut self) -> Result<(), Self::Error>;
+    /// Queue startup without waiting for helper I/O. Readiness and startup
+    /// failures are observed through status(); accepted does not mean ready.
+    fn request_publish(&mut self) -> Result<(), Self::Error>;
     fn synchronize(&mut self, observation: LinkClockObservation) -> Result<(), Self::Error>;
     fn hold(&mut self) -> Result<(), Self::Error>;
     fn fail_closed(&mut self, reason: String) -> Result<(), Self::Error> {

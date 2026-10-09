@@ -501,8 +501,8 @@ public struct LibraryWorkspaceView: View {
             trackHeader
             conditionBanner
             Divider()
-            if state.condition == .importing {
-                statePlaceholder(.importing)
+            if state.condition == .importing || state.condition == .querying {
+                statePlaceholder(state.condition)
             } else if state.condition == .error {
                 statePlaceholder(.error)
             } else if visibleTracks.isEmpty {
@@ -787,7 +787,7 @@ public struct LibraryWorkspaceView: View {
                 .foregroundStyle(LumiColor.textSecondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 360)
-            if condition == .importing {
+            if condition == .importing || condition == .querying {
                 ProgressView().controlSize(.small)
             }
         }

@@ -10,6 +10,8 @@ public actor RemoteGatewaySupervisor {
     private var service: SMAppService?
     private var hasAttemptedServiceRecovery = false
     private let adminTransport = GatewayAdminTransport()
+    private var lifecycleGeneration: UInt64 = 0
+    private var isStopping = false
 
     public init(
         launchAgentPlistName: String? = Bundle.main.object(
@@ -24,6 +26,8 @@ public actor RemoteGatewaySupervisor {
     }
 
     public func refresh(recordURL: URL) async -> RemoteGatewayManagementSnapshot {
+        guard !isStopping, !Task.isCancelled else { return .disabled }
+        let generation = lifecycleGeneration
         guard let launchAgentPlistName else {
             return .init(serviceState: .unavailable, errorCode: "gatewayNotPackaged")
         }
@@ -36,13 +40,17 @@ public actor RemoteGatewaySupervisor {
             if !FileManager.default.fileExists(atPath: recordURL.path),
                !hasAttemptedServiceRecovery {
                 hasAttemptedServiceRecovery = true
-                return await reconcileEnabledService(recordURL: recordURL)
+                return await reconcileEnabledService(recordURL: recordURL, generation: generation)
             }
             do {
                 let snapshot = try await exchange(.status, recordURL: recordURL)
+                try validateStart(generation)
                 hasAttemptedServiceRecovery = false
                 return snapshot
             } catch RemoteGatewayClientError.serviceVersionMismatch {
+                guard generation == lifecycleGeneration, !isStopping, !Task.isCancelled else {
+                    return .disabled
+                }
                 // SMAppService keeps the already registered helper alive when
                 // a newer app bundle is installed at a versioned path. Reconcile
                 // it here so a normal Lumi upgrade cannot silently keep serving
@@ -50,7 +58,9 @@ public actor RemoteGatewaySupervisor {
                 // state lives beside the library database and survives this
                 // bounded unregister/register cycle.
                 hasAttemptedServiceRecovery = true
-                return await reconcileEnabledService(recordURL: recordURL)
+                return await reconcileEnabledService(recordURL: recordURL, generation: generation)
+            } catch is CancellationError {
+                return .disabled
             } catch {
                 return .init(serviceState: .starting, errorCode: "gatewayStarting")
             }
@@ -62,6 +72,8 @@ public actor RemoteGatewaySupervisor {
     }
 
     public func enable(recordURL: URL) async throws -> RemoteGatewayManagementSnapshot {
+        let generation = lifecycleGeneration
+        try validateStart(generation)
         guard let launchAgentPlistName else { throw RemoteGatewayClientError.notPackaged }
         let service = service ?? SMAppService.agent(plistName: launchAgentPlistName)
         self.service = service
@@ -70,7 +82,9 @@ public actor RemoteGatewaySupervisor {
             if let expectedProductVersion,
                (try? readRecord(at: recordURL).productVersion) != expectedProductVersion {
                 await adminTransport.close()
+                try validateStart(generation)
                 try await service.unregister()
+                try validateStart(generation)
                 try service.register()
             }
         case .notRegistered, .notFound:
@@ -84,8 +98,11 @@ public actor RemoteGatewaySupervisor {
             throw RemoteGatewayClientError.requiresApproval
         }
         do {
-            return try await waitUntilReady(recordURL: recordURL)
+            let snapshot = try await waitUntilReady(recordURL: recordURL, generation: generation)
+            try validateStart(generation)
+            return snapshot
         } catch RemoteGatewayClientError.startupTimedOut {
+            try validateStart(generation)
             // Ad-hoc signed Dev upgrades can hit the same one-shot macOS 26
             // launch-constraint cache miss as the engine service. Give BTM one
             // bounded re-registration after the rejected spawn; never leave a
@@ -94,6 +111,7 @@ public actor RemoteGatewaySupervisor {
                 try await service.unregister()
             }
             try await Task.sleep(for: .milliseconds(250))
+            try validateStart(generation)
             let retryService = SMAppService.agent(plistName: launchAgentPlistName)
             self.service = retryService
             if retryService.status == .requiresApproval {
@@ -102,20 +120,31 @@ public actor RemoteGatewaySupervisor {
             if retryService.status == .enabled {
                 try await retryService.unregister()
                 try await Task.sleep(for: .milliseconds(250))
+                try validateStart(generation)
             }
             try retryService.register()
-            return try await waitUntilReady(recordURL: recordURL)
+            let snapshot = try await waitUntilReady(recordURL: recordURL, generation: generation)
+            try validateStart(generation)
+            return snapshot
         }
+    }
+
+    private func validateStart(_ generation: UInt64) throws {
+        try Task.checkCancellation()
+        guard !isStopping, generation == lifecycleGeneration else { throw CancellationError() }
     }
 
     private func waitUntilReady(
         recordURL: URL,
+        generation: UInt64,
         timeout: Duration = .seconds(8)
     ) async throws -> RemoteGatewayManagementSnapshot {
         let clock = ContinuousClock()
         let deadline = clock.now.advanced(by: timeout)
         while clock.now < deadline {
+            try validateStart(generation)
             if let snapshot = try? await exchange(.status, recordURL: recordURL) {
+                try validateStart(generation)
                 hasAttemptedServiceRecovery = false
                 return snapshot
             }
@@ -125,11 +154,17 @@ public actor RemoteGatewaySupervisor {
     }
 
     private func reconcileEnabledService(
-        recordURL: URL
+        recordURL: URL,
+        generation: UInt64
     ) async -> RemoteGatewayManagementSnapshot {
         await adminTransport.close()
         do {
+            // Closing the transport suspends this actor. A concurrent stop may
+            // have completed meanwhile; never start a new generation for it.
+            try validateStart(generation)
             return try await enable(recordURL: recordURL)
+        } catch is CancellationError {
+            return .disabled
         } catch RemoteGatewayClientError.requiresApproval {
             return .init(
                 serviceState: .requiresApproval,
@@ -145,10 +180,15 @@ public actor RemoteGatewaySupervisor {
 
     public func disable(recordURL: URL) async throws -> RemoteGatewayManagementSnapshot {
         guard let launchAgentPlistName else { return .disabled }
+        lifecycleGeneration &+= 1
+        isStopping = true
+        defer { isStopping = false }
         await adminTransport.close()
         let service = service ?? SMAppService.agent(plistName: launchAgentPlistName)
         self.service = service
-        let processID = try? readRecord(at: recordURL).processID
+        // An upgrade must still wait for the previous version to exit. Version
+        // mismatch rejects commands, but must not skip shutdown verification.
+        let processID = try? readRecord(at: recordURL, requireCurrentVersion: false).processID
         if service.status == .enabled {
             try await service.unregister()
         }
@@ -225,7 +265,7 @@ public actor RemoteGatewaySupervisor {
         )
     }
 
-    private func readRecord(at url: URL) throws -> RemoteGatewayServiceRecord {
+    private func readRecord(at url: URL, requireCurrentVersion: Bool = true) throws -> RemoteGatewayServiceRecord {
         let values = try url.resourceValues(forKeys: [
             .isRegularFileKey,
             .isSymbolicLinkKey,
@@ -245,7 +285,7 @@ public actor RemoteGatewaySupervisor {
             RemoteGatewayServiceRecord.self,
             from: Data(contentsOf: url)
         )
-        try record.validate(expectedProductVersion: expectedProductVersion)
+        try record.validate(expectedProductVersion: requireCurrentVersion ? expectedProductVersion : nil)
         return record
     }
 }

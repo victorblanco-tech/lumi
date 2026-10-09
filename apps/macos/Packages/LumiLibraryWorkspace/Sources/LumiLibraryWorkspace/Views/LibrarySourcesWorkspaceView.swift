@@ -1741,25 +1741,18 @@ public struct LibrarySourcesWorkspaceView: View {
         var bookmarks = decodedDeviceBookmarks()
         if let encodedBookmark = bookmarks[sourceID],
            let bookmark = Data(base64Encoded: encodedBookmark) {
-            var stale = false
-            if let resolved = try? URL(
-                resolvingBookmarkData: bookmark,
-                options: [.withSecurityScope, .withoutUI],
-                relativeTo: nil,
-                bookmarkDataIsStale: &stale
-            ), !stale,
-               resolved.standardizedFileURL.path == expected.standardizedFileURL.path {
-                return resolved
+            if let resolution = try? USBBookmarkResolver.resolve(bookmark, expectedRoot: expected) {
+                if let renewed = resolution.renewedBookmark {
+                    bookmarks[sourceID] = renewed.base64EncodedString()
+                    if let data = try? JSONEncoder().encode(bookmarks),
+                       let encoded = String(data: data, encoding: .utf8) {
+                        deviceBookmarksJSON = encoded
+                    }
+                }
+                return resolution.url
             }
-
-            // A re-formatted or re-mounted USB can invalidate its bookmark.
-            // Remove the stale grant before asking for authorization again so
-            // the trusted-source row never gets trapped in a retry loop.
-            bookmarks.removeValue(forKey: sourceID)
-            if let data = try? JSONEncoder().encode(bookmarks),
-               let encoded = String(data: data, encoding: .utf8) {
-                deviceBookmarksJSON = encoded
-            }
+            // A failed resolution does not erase an existing user grant. Ask
+            // normally below; only a successfully selected source replaces it.
         }
 
         let panel = NSOpenPanel()

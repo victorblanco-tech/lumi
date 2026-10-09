@@ -7,6 +7,24 @@ import Testing
 
 @Suite("Library workspace")
 struct LibraryWorkspaceTests {
+    @Test("A pending playlist query never presents the old playlist as its result")
+    func pendingPlaylistQueryPreservesNavigation() throws {
+        let original = try LibrarySnapshotDecoder().decode(envelope(trackValues: [trackValue()]))
+        let request = LibraryQueryRequest(search: "", playlistID: 87, offset: 0)
+        let loading = original.loadingQuery(request)
+        #expect(loading.condition == .querying)
+        #expect(loading.condition.componentState == .loading)
+        #expect(loading.query.playlistID == 87)
+        #expect(loading.page.tracks.isEmpty)
+        #expect(loading.playlists == original.playlists)
+        #expect(loading.editor == original.editor)
+        #expect(loading.rekordboxDevices == original.rekordboxDevices)
+        let next = loading.loadingQuery(.init(search: "other", playlistID: 90, offset: 0))
+        #expect(next.query.playlistID == 90)
+        #expect(next.query.search == "other")
+        #expect(next.failingQuery(request, message: "Retry").condition == .error)
+    }
+
     @Test("A failed playlist query clears stale rows without losing navigation or editor data")
     func failedPlaylistQueryPreservesNavigation() throws {
         let original = try LibrarySnapshotDecoder().decode(envelope(trackValues: [trackValue()]))
