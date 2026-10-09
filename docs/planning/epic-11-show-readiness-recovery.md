@@ -29,6 +29,23 @@ not SoundSwitch's visible response or physical lights. The harness initially
 reused a command ID and was correctly deduplicated; the successful run uses
 unique IDs. Clippy passes after adding a bounded disconnect shutdown check.
 
+Packaged Dev-25 acceptance: build 413 / d79a9cc, installer signature and channel
+destination audit passed. The installed Mac app recognized both prepared tracks
+and CHRM local / CHRM via Player 1 sources. The actual Timing popover changed
+Immediate / On phrase start, cleared Saving without an unrelated action, and
+Remote dev-7 reflected the saved choice. Arm → Start while paused displayed
+Waiting for playback. Simulator playback changed the Mac countdown from 95 to
+79 beats; Remote also counted down. Returned to Off before the target boundary.
+Remote retained all three status indicators while disconnected and reconnected
+as its existing view-only role; no controller permission was changed.
+
+Upgrade follow-up remains open: macOS recorded a first gateway launch constraint
+violation at 12:48:29 before the normal service registration/retry recovered and
+Remote connected. Do not count eventual recovery as clean upgrade acceptance.
+Investigate registration ordering and installed service identity without
+weakening macOS security checks. SoundSwitch restart approval is still needed
+for downstream playback acceptance; Lumi is left open in Off.
+
 ## Findings and ownership
 
 | Finding since the public release / development acceptance | Story | Required evidence |
