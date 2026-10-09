@@ -53,9 +53,26 @@ class UsbLibraryTest {
         assertTrue(library.requireTrack(1).beatGrid().isEmpty());
     }
 
-    @Test void rejectsNonMonotonicGrid() throws Exception {
+    @Test void isolatesNonMonotonicGridWithoutInventingBeats() throws Exception {
         ObjectNode data = projection(analysis(500, 400), 1);
-        assertThrows(IOException.class, () -> UsbLibrary.fromOneLibrary(root, data));
+        UsbLibrary library = UsbLibrary.fromOneLibrary(root, data);
+        assertEquals(0, library.size());
+        assertTrue(library.requirePlaylist(7).tracks().isEmpty());
+        assertThrows(IllegalArgumentException.class, () -> library.requireTrack(1));
+        assertTrue(library.scanWarnings().getFirst().contains("time=400ms, previous=500ms"));
+    }
+
+    @Test void validTracksRemainAvailableWhenAnotherGridHasDuplicateTimes() throws Exception {
+        Path bad = Files.move(analysis(0, 0, 500), root.resolve("BAD.DAT"));
+        ObjectNode data = projection(bad, 1);
+        ObjectNode good = projection(analysis(125, 625, 1125), 2);
+        ((com.fasterxml.jackson.databind.node.ArrayNode) data.path("tracks")).add(good.path("tracks").get(0));
+        ((com.fasterxml.jackson.databind.node.ArrayNode) data.path("playlists").get(0).path("trackIds")).add(2);
+        UsbLibrary library = UsbLibrary.fromOneLibrary(root, data);
+        assertEquals(1, library.size());
+        assertEquals(2, library.requirePlaylist(7).tracks().getFirst().id());
+        assertEquals(125, library.requireTrack(2).beatGrid().getFirst().timeMillis());
+        assertEquals(1, library.scanWarnings().size());
     }
 
     @Test void rejectsEscapingAnalysisSymlink(@TempDir Path outside) throws Exception {

@@ -75,7 +75,7 @@ final class RemoteControlServer implements AutoCloseable {
         sendJson(exchange, 200, Map.of(
                 "status", "ready",
                 "service", "lumi-prolink-simulator",
-                "version", "0.4.1-dev-3"
+                "version", "0.4.1-dev-4"
         ));
     }
 
@@ -186,6 +186,10 @@ final class RemoteControlServer implements AutoCloseable {
         payload.put("revision", snapshot.revision());
         payload.put("usbRoot", library.root().toString());
         payload.put("usbTrackCount", library.size());
+        payload.put("usbScanWarnings", players.stream().filter(player -> player.usb().configured())
+                .map(player -> Map.of("playerNumber", player.snapshot().playerNumber(),
+                        "usbName", player.usb().configuredLibrary().displayName(),
+                        "warnings", player.usb().configuredLibrary().scanWarnings())).toList());
         payload.put("usbPlaylistCount", library.playlistCount());
         ProLinkBroadcaster.Endpoint networkEndpoint = broadcaster.endpoint();
         payload.put("networkInterface", networkEndpoint.interfaceName());

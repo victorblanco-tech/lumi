@@ -219,7 +219,7 @@ public final class SimulatorAppMain {
             title.setFont(title.getFont().deriveFont(Font.BOLD, 24f));
             title.setAlignmentX(0f);
             root.add(title);
-            JLabel subtitle = new JLabel("0.4.1-dev-3 · Two independent USB sources, LINK loading and cached-track eject tests");
+            JLabel subtitle = new JLabel("0.4.1-dev-4 · Two independent USB sources, LINK loading and cached-track eject tests");
             subtitle.setForeground(MUTED);
             subtitle.setAlignmentX(0f);
             root.add(subtitle);
@@ -416,6 +416,22 @@ public final class SimulatorAppMain {
                         openUrl.setVisible(true);
                         startStop.setText("Stop simulator");
                         startStop.setEnabled(true);
+                        String warnings = started.players().stream()
+                                .filter(player -> player.usb().configured())
+                                .flatMap(player -> player.usb().configuredLibrary().scanWarnings().stream()
+                                        .map(warning -> player.usb().configuredLibrary().displayName() + ": " + warning))
+                                .collect(java.util.stream.Collectors.joining("\n"));
+                        if (!warnings.isEmpty()) {
+                            status.setText("Simulator running · Some tracks skipped (invalid beat grid)");
+                            javax.swing.JTextArea report = new javax.swing.JTextArea(warnings, 12, 65);
+                            report.setEditable(false);
+                            report.setLineWrap(true);
+                            report.setWrapStyleWord(true);
+                            javax.swing.JOptionPane.showMessageDialog(frame,
+                                    new javax.swing.JScrollPane(report),
+                                    "Skipped tracks · USB unchanged · Other tracks available",
+                                    javax.swing.JOptionPane.WARNING_MESSAGE);
+                        }
                         frame.revalidate();
                         saveSettings();
                     });

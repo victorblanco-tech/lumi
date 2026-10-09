@@ -22,6 +22,9 @@ final class UsbLibrary {
     private final List<Track> sortedTracks;
     private final Map<Long, Playlist> playlists;
     private final List<PlaylistSummary> sortedPlaylists;
+    private List<String> scanWarnings = List.of();
+
+    List<String> scanWarnings() { return scanWarnings; }
 
     private UsbLibrary(Path root, Map<Integer, Track> tracks, List<Playlist> playlists) {
         this.root = root;
@@ -59,11 +62,25 @@ final class UsbLibrary {
     static UsbLibrary fromOneLibrary(Path root, JsonNode data) throws IOException {
         root = root.toRealPath();
         HashMap<Integer, Track> tracks = new HashMap<>();
+        java.util.HashSet<Integer> seenIds = new java.util.HashSet<>();
+        java.util.HashSet<Integer> skippedIds = new java.util.HashSet<>();
+        ArrayList<String> warnings = new ArrayList<>();
         for (JsonNode row : data.path("tracks")) {
                 int id = trackId(row.path("id"));
+                if (!seenIds.add(id)) throw new IOException("Duplicate Rekordbox track ID " + id);
                 Path analysisPath = Path.of(row.path("analysisPath").asText()).toRealPath();
                 if (!analysisPath.startsWith(root)) throw new IOException("Analysis path escapes USB root");
-                List<BeatPoint> beatGrid = readBeatGrid(analysisPath);
+                List<BeatPoint> beatGrid;
+                try {
+                    beatGrid = readBeatGrid(analysisPath);
+                } catch (InvalidBeatGrid failure) {
+                    skippedIds.add(id);
+                    String warning = row.path("title").asText() + " (ID "
+                            + Integer.toUnsignedString(id) + "): " + failure.getMessage();
+                    warnings.add(warning);
+                    System.err.println("USB track skipped: " + warning);
+                    continue;
+                }
                 boolean exactBeatGrid = !beatGrid.isEmpty();
                 Track track = new Track(
                         id,
@@ -86,13 +103,16 @@ final class UsbLibrary {
             path.add(row.path("name").asText());
             ArrayList<Track> members = new ArrayList<>();
             for (JsonNode id : row.path("trackIds")) {
+                if (skippedIds.contains(trackId(id))) continue;
                 Track track = tracks.get(trackId(id));
                 if (track == null) throw new IOException("Playlist references an unknown OneLibrary track");
                 members.add(track);
             }
             playlists.add(new Playlist(row.path("id").asLong(), String.join(" / ", path), members));
         }
-        return new UsbLibrary(root, tracks, playlists);
+        UsbLibrary library = new UsbLibrary(root, tracks, playlists);
+        library.scanWarnings = List.copyOf(warnings);
+        return library;
     }
 
     private static int trackId(JsonNode value) throws IOException {
@@ -186,13 +206,19 @@ final class UsbLibrary {
             for (RekordboxAnlz.BeatGridBeat beat : beatGridTag.beats()) {
                 if (beat.beatNumber() < 1 || beat.beatNumber() > 4 || beat.tempo() == 0
                         || (!points.isEmpty() && beat.time() <= points.getLast().timeMillis())) {
-                    throw new IOException("Invalid USB beat grid: " + analysisPath.getFileName());
+                    throw new InvalidBeatGrid("Beat " + index + ": bar beat=" + beat.beatNumber()
+                            + ", tempo=" + beat.tempo() + ", time=" + beat.time()
+                            + "ms, previous=" + (points.isEmpty() ? "none" : points.getLast().timeMillis() + "ms"));
                 }
                 points.add(new BeatPoint(index++, beat.beatNumber(), (int) beat.tempo(), beat.time()));
             }
             return List.copyOf(points);
         }
         return List.of();
+    }
+
+    private static final class InvalidBeatGrid extends IOException {
+        InvalidBeatGrid(String message) { super(message); }
     }
 
 

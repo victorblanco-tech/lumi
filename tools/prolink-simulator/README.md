@@ -46,6 +46,16 @@ production DMG.
 
 ## Two-Mac setup
 
+Starting with 0.4.1-dev-4, a track whose exported beat grid fails validation
+is excluded from the simulator rather than preventing the entire USB from
+loading. A startup report lists each skipped track, its Rekordbox ID and the
+exact beat values that failed validation. The report is also available in
+`GET /api/status` under `usbScanWarnings` and in the simulator log. Other
+tracks and playlists remain available; skipped tracks cannot be selected by
+Auto Mix. No replacement grid is generated and no USB data is modified.
+This isolates invalid grids; it does not establish why a particular real-world
+export failed validation. Keep the report for further diagnosis.
+
 1. Sync the Rekordbox USB into Lumi on the MacBook so its persistent device
    mirror contains the current track IDs and analysis revisions.
 2. Eject the USB and connect it to the Mac mini.
