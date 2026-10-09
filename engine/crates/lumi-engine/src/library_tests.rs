@@ -460,6 +460,43 @@ fn local_deck_preview_keeps_the_same_eight_bit_rgb_scale_as_detail()
         .into_parts();
     let preview = context.waveform_preview_json();
     let remote = context.remote_waveform_preview_json();
+    let source = worker
+        .repository
+        .track(TrackId::new(track_id))?
+        .ok_or("source track missing")?;
+    assert_eq!(
+        preview,
+        super::LibraryPlanContext::waveform_preview_value(
+            "localLibrary",
+            &deck_waveform_preview_points(
+                source.waveform(),
+                super::MAX_DECK_WAVEFORM_PREVIEW_POINTS
+            ),
+        )
+    );
+    assert_eq!(
+        remote,
+        super::LibraryPlanContext::waveform_preview_value(
+            "localLibraryDetail",
+            &deck_waveform_preview_points(
+                source.waveform(),
+                super::MAX_DECK_WAVEFORM_DETAIL_POINTS
+            ),
+        )
+    );
+    let cloned = context.clone();
+    assert!(std::sync::Arc::ptr_eq(
+        &context.waveform_preview,
+        &cloned.waveform_preview
+    ));
+    assert!(std::sync::Arc::ptr_eq(
+        &context.remote_waveform_preview,
+        &cloned.remote_waveform_preview
+    ));
+    let mut detached = context.waveform_preview_json();
+    detached["points"] = json!([]);
+    assert_eq!(context.waveform_preview_json(), preview);
+    assert_eq!(cloned.remote_waveform_preview_json(), remote);
     let maximum_channel = preview["points"]
         .as_array()
         .ok_or("preview points are missing")?

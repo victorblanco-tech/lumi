@@ -470,6 +470,7 @@ struct IntegrationPumpMetrics {
     last_command_micros: u64,
     max_command_micros: u64,
     max_command_kind: &'static str,
+    input_stage_max_micros: [u64; 5],
 }
 
 impl IntegrationPumpMetrics {
@@ -483,6 +484,7 @@ impl IntegrationPumpMetrics {
             last_command_micros: 0,
             max_command_micros: 0,
             max_command_kind: "none",
+            input_stage_max_micros: [0; 5],
         }
     }
 
@@ -508,6 +510,11 @@ impl IntegrationPumpMetrics {
             self.max_command_micros = self.last_command_micros;
             self.max_command_kind = kind;
         }
+    }
+
+    fn record_input_stage(&mut self, stage: usize, elapsed: Duration) {
+        self.input_stage_max_micros[stage] = self.input_stage_max_micros[stage]
+            .max(u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX));
     }
 }
 
@@ -3377,19 +3384,39 @@ fn transport_ack_envelope(
 }
 
 fn process_deck_input_messages(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
+    let started = Instant::now();
     runtime.timing_preferences.poll();
     runtime.launch_preferences.poll();
     runtime.media_resolver.poll(Instant::now());
+    runtime
+        .integration_pump_metrics
+        .record_input_stage(0, started.elapsed());
     if runtime.deck_source_mode != DeckSourceMode::ConnectedDecks {
         #[cfg(not(test))]
         maintain_direct_prolink_bridge(runtime)?;
         return Ok(());
     }
+    let started = Instant::now();
     #[cfg(not(test))]
     maintain_direct_prolink_bridge(runtime)?;
+    runtime
+        .integration_pump_metrics
+        .record_input_stage(1, started.elapsed());
+    let started = Instant::now();
     process_pending_source_events(runtime)?;
+    runtime
+        .integration_pump_metrics
+        .record_input_stage(2, started.elapsed());
+    let started = Instant::now();
     process_live_library_preparation(runtime)?;
+    runtime
+        .integration_pump_metrics
+        .record_input_stage(3, started.elapsed());
+    let started = Instant::now();
     process_pending_source_events(runtime)?;
+    runtime
+        .integration_pump_metrics
+        .record_input_stage(4, started.elapsed());
     Ok(())
 }
 
@@ -5373,6 +5400,13 @@ fn snapshot_envelope_internal(
             "engineLastCommandMicros": runtime.integration_pump_metrics.last_command_micros,
             "engineMaxCommandMicros": runtime.integration_pump_metrics.max_command_micros,
             "engineMaxCommandKind": runtime.integration_pump_metrics.max_command_kind,
+            "engineInputStageMaxMicros": {
+                "preferencesAndMedia": runtime.integration_pump_metrics.input_stage_max_micros[0],
+                "bridgeMaintenance": runtime.integration_pump_metrics.input_stage_max_micros[1],
+                "sourceEventsBeforePreparation": runtime.integration_pump_metrics.input_stage_max_micros[2],
+                "libraryPreparation": runtime.integration_pump_metrics.input_stage_max_micros[3],
+                "sourceEventsAfterPreparation": runtime.integration_pump_metrics.input_stage_max_micros[4],
+            },
             "lastReanchor": link_timing.last_reanchor.map(|reason| match reason {
                 TimingDiscontinuity::Continuous => "continuous",
                 TimingDiscontinuity::Started => "started",

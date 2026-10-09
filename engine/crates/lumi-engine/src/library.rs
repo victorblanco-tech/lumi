@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use lumi_domain::{
@@ -218,7 +219,10 @@ pub struct LibraryPlanContext {
     audio_uri: String,
     duration_millis: u64,
     beat_grid: lumi_library::BeatGrid,
-    waveform: Vec<lumi_library::WaveformPoint>,
+    // Immutable assets belong to this prepared track revision. Share them when
+    // plans are cloned; never downsample/rebuild RGB objects on every snapshot.
+    waveform_preview: Arc<Value>,
+    remote_waveform_preview: Arc<Value>,
     hot_cues: Vec<lumi_library::HotCue>,
     track_color: Option<TrackColor>,
     catalog: AutoloopCatalog,
@@ -416,8 +420,7 @@ impl LibraryPlanContext {
 
     #[must_use]
     pub fn waveform_preview_json(&self) -> Value {
-        let points = deck_waveform_preview_points(&self.waveform, MAX_DECK_WAVEFORM_PREVIEW_POINTS);
-        Self::waveform_preview_value("localLibrary", &points)
+        self.waveform_preview.as_ref().clone()
     }
 
     /// Returns the detailed, still bounded waveform used by the Remote static
@@ -426,8 +429,7 @@ impl LibraryPlanContext {
     /// never enters the realtime Pro DJ Link or lighting lanes.
     #[must_use]
     pub fn remote_waveform_preview_json(&self) -> Value {
-        let points = deck_waveform_preview_points(&self.waveform, MAX_DECK_WAVEFORM_DETAIL_POINTS);
-        Self::waveform_preview_value("localLibraryDetail", &points)
+        self.remote_waveform_preview.as_ref().clone()
     }
 
     fn waveform_preview_value(source: &str, points: &[[u8; 3]]) -> Value {
@@ -2531,7 +2533,14 @@ impl LibraryWorker {
             },
             duration_millis: track.summary().duration_millis(),
             beat_grid: track.beat_grid().clone(),
-            waveform: track.waveform().to_vec(),
+            waveform_preview: Arc::new(LibraryPlanContext::waveform_preview_value(
+                "localLibrary",
+                &deck_waveform_preview_points(track.waveform(), MAX_DECK_WAVEFORM_PREVIEW_POINTS),
+            )),
+            remote_waveform_preview: Arc::new(LibraryPlanContext::waveform_preview_value(
+                "localLibraryDetail",
+                &deck_waveform_preview_points(track.waveform(), MAX_DECK_WAVEFORM_DETAIL_POINTS),
+            )),
             hot_cues: track.hot_cues().to_vec(),
             track_color: track.summary().color(),
             catalog,

@@ -882,6 +882,7 @@ fn combined_lanes_remain_bounded_and_emit_release_evidence() {
             "failures": required_u64(final_link, "failureCount"),
             "enginePumpStarvation": required_u64(final_link, "enginePumpStarvationCount"),
             "enginePumpMaxLatenessMicros": maximum_engine_lateness_micros,
+            "inputStageMaxMicros": final_link.get("engineInputStageMaxMicros"),
             "startupPumpStarvation": startup_pump_starvation,
             "startupPumpMaxLatenessMicros": startup_pump_max_lateness,
             "playbackPumpStarvation": required_u64(final_link, "enginePumpStarvationCount")

@@ -1253,6 +1253,9 @@ fn integration_pump_metrics_detect_starvation_without_unbounded_samples() {
     assert_eq!(metrics.command_count, 2);
     assert_eq!(metrics.last_command_micros, 1_000);
     assert_eq!(metrics.max_command_micros, 3_000);
+    metrics.record_input_stage(3, Duration::from_millis(7));
+    metrics.record_input_stage(3, Duration::from_millis(1));
+    assert_eq!(metrics.input_stage_max_micros, [0, 0, 0, 7_000, 0]);
     assert_eq!(
         metrics.max_lateness_micros,
         u64::try_from(INTEGRATION_PUMP_INTERVAL.saturating_mul(2).as_micros()).unwrap_or(u64::MAX)

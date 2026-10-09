@@ -1,7 +1,7 @@
 # Epic 11 — reliable preparation and Live performance
 
 Status: implementation and autonomous testing authorized on 2026-10-08.
-Baseline: public Lumi v0.6.3; development candidate 0.6.4-dev-29.
+Baseline: public Lumi v0.6.3; development candidate 0.6.4-dev-30.
 Products: Lumi, Lumi Remote and the independently versioned Pro DJ Link Simulator.
 Execution order: simulator fidelity first, then recovery and measured timing, preparation workflow, launch policy, integrated acceptance.
 
@@ -47,6 +47,46 @@ weakening macOS security checks. SoundSwitch restart approval is still needed
 for downstream playback acceptance; Lumi is left open in Off.
 
 ## Findings and ownership
+
+2026-10-09 downstream follow-up: after the owner restored SoundSwitch's
+playback view, installed Dev-29 Arm/Start reached Show running and the actual
+SoundSwitch BD START RGB button showed its advancing blue progress. A simulator
+hot cue to 1,000 ms selected INTRO BLUE RED 2 with visible progress. Changing
+Player 1 pitch to +4.2% showed 161.5 BPM in both apps; reset to 155 afterward.
+The two named tracks retained their plans. These are actual desktop UI checks,
+not a frame-accurate or physical-light timing measurement. The presence of Done
+in SoundSwitch's accessibility tree alone does not mean playback is unavailable.
+
+A ten-second sample of the playing installed engine found repeated waveform
+downsampling/JSON allocation in snapshot construction (49 samples), while most
+main-thread samples were idle. Prepared track contexts now retain immutable,
+shared desktop and Remote waveform JSON. The original RGB values, point limits
+and downsampling algorithm are unchanged. Regression coverage compares complete
+cached values with the original builder and verifies clone sharing and detached
+response mutation. This is not a renderer/color change or global stale cache.
+
+The 120-second cached-waveform comparison completed all 28 AutoLoops, 29 pulses,
+59 pitch changes, 17 seeks, 10 Pause/Live cycles and 114 library queries. One
+Link peer, zero Link failures/hard reanchors, zero MIDI failure/saturation.
+Ingress p95/p99 stayed 10 ms; MIDI p95 55 microseconds, max 3.803 ms. Pump max
+was 55.619 ms versus the earlier 94.295 ms, but playback starvation count was
+26 versus 25. One run does NOT establish a repeatable timing improvement or
+close the pump-latency finding. Evidence: build/Evidence/dev29-waveform-cache-120s.json.
+Three local IPC unit tests were initially denied socket access by the sandbox;
+the authorized rerun passed all 160 engine library tests (four ignored).
+Bounded per-input-stage maxima were added to distinguish media polling, bridge
+maintenance, source-event processing and library preparation in the next run.
+
+The instrumented 120-second run also passed: 28/28 AutoLoops, no Link or MIDI
+failures, ingress p95/p99 10 ms, max 26.959 ms; MIDI p95 29 microseconds,
+max 4.735 ms. All measured input stages stayed below 0.25 ms (bridge 248 us,
+preparation 93 us, preferences/media 74 us, event stages 20/222 us). Pump max
+was 47.471 ms with 30 playback starvation observations. These input stages do
+not account for that run's long gaps; presentation work and scheduling still
+need attribution. A separate build started during this diagnostic run, so do
+not use it as a controlled performance comparison. Evidence:
+build/Evidence/dev29-stage-timing-120s.json. Dev-30 carries the unchanged-output
+waveform cache and bounded diagnostics; it is not a claim that E11 is complete.
 
 Dev-29 follow-up: after the owner restarted SoundSwitch, desktop playback
 selected bank 3 / INTRO BLUE RED 2 and showed visible progress. Pause/Start and
