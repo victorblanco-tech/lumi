@@ -5,6 +5,23 @@ import Testing
 
 @Suite("Live workspace presentation")
 struct LiveWorkspacePresenterTests {
+    @Test("Initial launch capability exposes a waiting target and keeps old snapshots compatible")
+    func initialLaunchCapability() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case var .object(midi) = payload["midiIntegration"] else { throw EngineSnapshotDecodingError.invalidSnapshot }
+        midi["launch"] = .object(["version": .number(1), "policy": .string("onPhraseStart"),
+            "status": .string("waitingForPhrase"), "targetPhraseIndex": .number(2),
+            "remainingBeats": .number(4), "savePending": .boolean(false), "saveError": .null])
+        payload["midiIntegration"] = .object(midi)
+        let envelope = MessageEnvelope(protocolVersion: recorded.protocolVersion, messageType: recorded.messageType,
+            messageId: recorded.messageId, sequence: recorded.sequence, correlationId: recorded.correlationId,
+            sentAt: recorded.sentAt, payload: payload)
+        let decoder = EngineSnapshotDecoder()
+        let snapshot = try decoder.decode(envelope, endpointDescription: "fixture", protocolVersion: 1)
+        #expect(LiveWorkspacePresenter.ready(snapshot).content?.initialLaunch?.label == "Phrase 3 · 4 beats to launch")
+        #expect(try decoder.decode(recorded, endpointDescription: "fixture", protocolVersion: 1).midiIntegration?.launch == nil)
+    }
     @Test("Loaded track origin is independent of the USB mounted in its Player")
     func linkedTrackSourceDecodesWithoutMountedUSBInference() throws {
         let recorded = try recordedEnvelope()

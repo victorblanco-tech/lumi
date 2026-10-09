@@ -36,6 +36,24 @@ pub struct RemoteIntegrationStatus {
     pub ableton_link_bpm_milli: Option<u64>,
     pub timing_offset_millis: i16,
     pub pending_timing_offset_millis: Option<i16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch: Option<RemoteInitialLaunch>,
+}
+
+/// Additive versioned capability: absent on older engines. Clients must not
+/// offer launch controls unless version 1 is present.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteInitialLaunch {
+    pub version: u8,
+    pub policy: crate::command::RemoteLaunchPolicy,
+    pub status: String,
+    pub target_phrase_index: Option<u16>,
+    pub target_beat: Option<u32>,
+    pub target_player: Option<u8>,
+    pub remaining_beats: Option<u32>,
+    pub save_pending: bool,
+    pub save_error: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -366,6 +384,10 @@ impl RemoteLiveProjection {
                     .midi_integration
                     .as_ref()
                     .and_then(|status| status.pending_timing_offset_millis),
+                launch: wire
+                    .midi_integration
+                    .as_ref()
+                    .and_then(|status| status.launch.clone()),
             },
             players,
             player_usbs: wire.deck_input_integration.map_or_else(Vec::new, |input| {
@@ -749,6 +771,7 @@ struct EngineMidiStatusWire {
     state: String,
     timing_offset_millis: i16,
     pending_timing_offset_millis: Option<i16>,
+    launch: Option<RemoteInitialLaunch>,
 }
 
 #[derive(Deserialize)]
@@ -1137,6 +1160,7 @@ mod tests {
                 ableton_link_bpm_milli: Some(140_000),
                 timing_offset_millis: -20,
                 pending_timing_offset_millis: None,
+                launch: None,
             },
             players: vec![RemotePlayer {
                 track_source: None,

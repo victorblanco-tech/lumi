@@ -235,6 +235,17 @@ locked.
 
 ### Lighting timing offset
 
+**In development: Lumi 0.6.4-dev-24 / Remote 0.1.3-dev-6.** The timing panel
+also offers **Initial show start**. **Immediate** preserves the normal behavior.
+**On phrase start** waits for the next executable phrase boundary after Start.
+Cue a few beats before that boundary to give Lumi time to prepare the bank and
+scheduled AutoLoop. The Live timing control shows the target phrase and beats
+remaining. This is only an initial run-in; subsequent phrase changes and Hot Cues
+continue normally. The choice is saved on the Mac and shared with Remote.
+Change it in **Off** or **Arm**, never during a running show. If no future phrase
+is available, Lumi says so: return to Off and choose Immediate or cue earlier.
+This does not reset Ableton Link or continuously correct SoundSwitch playback.
+
 The subtle timing control in Live compensates for a consistent delay in the
 SoundSwitch, MIDI or fixture chain:
 

@@ -58,6 +58,41 @@ public enum RemoteIntegrationHealth: String, Codable, Sendable {
     case degraded
 }
 
+public enum RemoteLaunchPolicy: String, Codable, Sendable { case immediate, onPhraseStart }
+
+public struct RemoteInitialLaunch: Codable, Equatable, Sendable {
+    public let version: UInt8
+    public let policy: RemoteLaunchPolicy
+    public let status: String
+    public let targetPhraseIndex: UInt16?
+    public let targetBeat: UInt32?
+    public let targetPlayer: UInt8?
+    public let remainingBeats: UInt32?
+    public let savePending: Bool
+    public let saveError: String?
+
+    func updatingRemaining(player: UInt8, beat: UInt64) -> Self {
+        guard status == "waitingForPhrase", targetPlayer == player, let targetBeat else { return self }
+        return Self(version: version, policy: policy, status: status, targetPhraseIndex: targetPhraseIndex,
+                    targetBeat: targetBeat, targetPlayer: targetPlayer,
+                    remainingBeats: UInt64(targetBeat) > beat ? UInt32(clamping: UInt64(targetBeat) - beat) : 0,
+                    savePending: savePending, saveError: saveError)
+    }
+
+    public var label: String {
+        if let saveError { return "Not saved: \(saveError)" }
+        if savePending { return "Saving…" }
+        guard policy == .onPhraseStart else { return "Immediate start" }
+        switch status {
+        case "waitingForPlayback": return "Waiting for playback"
+        case "waitingForPhrase": return "Phrase \(UInt32(targetPhraseIndex ?? 0) + 1) · \(remainingBeats ?? 0) beats"
+        case "noUpcomingPhrase": return "No upcoming phrase — select Off, then Immediate"
+        case "launched": return "Show running"
+        default: return "Start on phrase"
+        }
+    }
+}
+
 public struct RemoteIntegrationStatus: Codable, Equatable, Sendable {
     public let proDJLink: RemoteIntegrationHealth
     public let lightOutput: RemoteIntegrationHealth
@@ -66,6 +101,7 @@ public struct RemoteIntegrationStatus: Codable, Equatable, Sendable {
     public let abletonLinkBPMMilli: UInt64?
     public let timingOffsetMillis: Int
     public let pendingTimingOffsetMillis: Int?
+    public let launch: RemoteInitialLaunch?
 
     public init(
         proDJLink: RemoteIntegrationHealth,
@@ -74,7 +110,8 @@ public struct RemoteIntegrationStatus: Codable, Equatable, Sendable {
         abletonLinkEnabled: Bool,
         abletonLinkBPMMilli: UInt64?,
         timingOffsetMillis: Int,
-        pendingTimingOffsetMillis: Int?
+        pendingTimingOffsetMillis: Int?,
+        launch: RemoteInitialLaunch? = nil
     ) {
         self.proDJLink = proDJLink
         self.lightOutput = lightOutput
@@ -83,6 +120,7 @@ public struct RemoteIntegrationStatus: Codable, Equatable, Sendable {
         self.abletonLinkBPMMilli = abletonLinkBPMMilli
         self.timingOffsetMillis = timingOffsetMillis
         self.pendingTimingOffsetMillis = pendingTimingOffsetMillis
+        self.launch = launch
     }
 
     enum CodingKeys: String, CodingKey {
@@ -93,6 +131,7 @@ public struct RemoteIntegrationStatus: Codable, Equatable, Sendable {
         case abletonLinkBPMMilli = "abletonLinkBpmMilli"
         case timingOffsetMillis
         case pendingTimingOffsetMillis
+        case launch
     }
 }
 

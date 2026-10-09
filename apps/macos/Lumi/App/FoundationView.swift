@@ -70,6 +70,10 @@ struct FoundationView: View {
                         onSetAbletonLinkEnabled: { enabled in
                             Task { await engineStatus.setAbletonLinkEnabled(enabled) }
                         },
+                        onSetLaunchPolicy: { policy in
+                            Task { await engineStatus.setInitialLaunchPolicy(policy) }
+                        },
+                        launchFeedback: engineStatus.initialLaunchFeedback,
                         localPlaybackBrowser: AnyView(
                             LocalPlaybackLibraryBrowserView(
                                 state: engineStatus.libraryState,

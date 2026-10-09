@@ -406,6 +406,7 @@ public enum EngineCommand: Equatable, Sendable {
     case setAbletonLinkEnabled(Bool)
     case testAbletonLinkHelper
     case setOutputTimingOffset(millis: Int16)
+    case setLaunchPolicy(String, expected: String)
     case sendMidiLearnPulse
     case sendMidiAddressLearnPulse(
         targetKind: String,
@@ -646,6 +647,8 @@ public enum EngineCommand: Equatable, Sendable {
             ]
         case .testAbletonLinkHelper:
             return ["kind": .string("testAbletonLinkHelper")]
+        case let .setLaunchPolicy(policy, expected):
+            return ["kind": .string("setLaunchPolicy"), "policy": .string(policy), "expectedPolicy": .string(expected)]
         case let .setOutputTimingOffset(millis):
             return [
                 "kind": .string("setOutputTimingOffset"),

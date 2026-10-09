@@ -9,6 +9,7 @@ public struct RemoteLiveActions: Sendable {
     public let setOperationState: @MainActor @Sendable (RemoteOperationState) -> Void
     public let setAbletonLinkEnabled: @MainActor @Sendable (Bool) -> Void
     public let setTimingOffset: @MainActor @Sendable (Int) -> Void
+    public let setLaunchPolicy: @MainActor @Sendable (RemoteLaunchPolicy) -> Void
     public let changePhraseRole: @MainActor @Sendable (RemoteLightPlan, RemotePlanCue, String) -> Void
     public let selectTheme: @MainActor @Sendable (RemoteLightPlan, RemotePlanCue, UInt64) -> Void
     public let selectAutoloop: @MainActor @Sendable (RemoteLightPlan, RemotePlanCue, UInt8) -> Void
@@ -37,11 +38,13 @@ public struct RemoteLiveActions: Sendable {
             RemoteLightPlan,
             RemotePlanCue,
             Bool
-        ) -> Void
+        ) -> Void,
+        setLaunchPolicy: @escaping @MainActor @Sendable (RemoteLaunchPolicy) -> Void = { _ in }
     ) {
         self.setOperationState = setOperationState
         self.setAbletonLinkEnabled = setAbletonLinkEnabled
         self.setTimingOffset = setTimingOffset
+        self.setLaunchPolicy = setLaunchPolicy
         self.changePhraseRole = changePhraseRole
         self.selectTheme = selectTheme
         self.selectAutoloop = selectAutoloop
@@ -220,11 +223,19 @@ private struct RemoteTimingOffsetSheet: View {
     @State private var draftMillis: Int
     let controlsEnabled: Bool
     let apply: @MainActor @Sendable (Int) -> Void
+    let launch: RemoteInitialLaunch?
+    let launchEditable: Bool
+    let applyLaunch: @MainActor @Sendable (RemoteLaunchPolicy) -> Void
 
-    init(initialMillis: Int, controlsEnabled: Bool, apply: @escaping @MainActor @Sendable (Int) -> Void) {
+    init(initialMillis: Int, controlsEnabled: Bool, apply: @escaping @MainActor @Sendable (Int) -> Void,
+         launch: RemoteInitialLaunch?, launchEditable: Bool,
+         applyLaunch: @escaping @MainActor @Sendable (RemoteLaunchPolicy) -> Void) {
         _draftMillis = State(initialValue: initialMillis)
         self.controlsEnabled = controlsEnabled
         self.apply = apply
+        self.launch = launch
+        self.launchEditable = launchEditable
+        self.applyLaunch = applyLaunch
     }
 
     var body: some View {
@@ -267,6 +278,17 @@ private struct RemoteTimingOffsetSheet: View {
                     Button("Reset to 0 ms") { draftMillis = 0 }
                 } footer: {
                     Text("Negative values trigger lighting earlier; positive values trigger it later. During playback, changes apply at the next phrase without restarting the current AutoLoop.")
+                }
+                if let launch, launch.version == 1 {
+                    Section {
+                        Picker("Initial show start", selection: Binding(get: { launch.policy }, set: { value in applyLaunch(value) })) {
+                            Text("Immediate").tag(RemoteLaunchPolicy.immediate)
+                            Text("On phrase start").tag(RemoteLaunchPolicy.onPhraseStart)
+                        }.disabled(!controlsEnabled || !launchEditable)
+                        Text(launch.label).font(.caption)
+                    } footer: {
+                        Text("Saved immediately. Change in Off or Arm. Cue a few beats before the next phrase, then Start. Only the initial launch waits; normal phrase changes are unchanged.")
+                    }
                 }
                 if !controlsEnabled {
                     Text("Reconnect as Controller to apply changes.")
@@ -319,7 +341,10 @@ private struct RemoteTopBar: View {
             RemoteTimingOffsetSheet(
                 initialMillis: selection.millis,
                 controlsEnabled: model.controlsEnabled,
-                apply: actions.setTimingOffset
+                apply: actions.setTimingOffset,
+                launch: model.projection?.integrations.launch,
+                launchEditable: model.projection?.operationState == .off || model.projection?.operationState == .armed,
+                applyLaunch: actions.setLaunchPolicy
             )
             .presentationDetents([.medium, .large])
         }
@@ -477,6 +502,9 @@ private struct RemoteTopBar: View {
                         Text("NEXT PHRASE")
                             .font(.system(size: 9, weight: .semibold))
                             .foregroundStyle(LumiColor.warning)
+                    }
+                    if let launch = integrations.launch, launch.version == 1, launch.policy == .onPhraseStart {
+                        Text(launch.label).font(.system(size: 9, weight: .semibold)).lineLimit(2)
                     }
                 }
                 .frame(minWidth: 54, minHeight: 44)

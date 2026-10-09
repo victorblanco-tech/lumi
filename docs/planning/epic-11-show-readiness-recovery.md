@@ -1,7 +1,7 @@
 # Epic 11 — reliable preparation and Live performance
 
 Status: implementation and autonomous testing authorized on 2026-10-08.
-Baseline: public Lumi v0.6.3; current development build 0.6.4-dev-23.
+Baseline: public Lumi v0.6.3; development candidate 0.6.4-dev-24.
 Products: Lumi, Lumi Remote and the independently versioned Pro DJ Link Simulator.
 Execution order: simulator fidelity first, then recovery and measured timing, preparation workflow, launch policy, integrated acceptance.
 
@@ -311,6 +311,21 @@ edit/save/reopen and protected phrases after successful and rejected sync, with
 the actual desktop app. Validate offline stored data as well as connected media.
 
 ## E11-05 — Arm preparation and phrase-start run-in
+
+Dev-24 / Remote dev-6 candidate: versioned optional launch projection and guarded
+compare-and-set commands are wired through both clients. The setting uses a
+separate per-channel atomic JSON file with a bounded background writer; invalid
+storage and save failures remain visible. Off/Arm only, Immediate default, explicit
+no-upcoming-phrase state. Initial run-in pre-roll uses the existing scheduler for
+negative, zero and positive offsets. Remote countdown reuses transport anchors;
+it does not request a full waveform projection per beat. No Link phase commands.
+
+Pre-install verification: 159 engine tests, 32 gateway tests and 18 Remote protocol
+tests passed serially; 63 Mac Live tests, 36 Remote client tests, 14 Remote UI tests
+and 30 exclusive real-process/MIDI client tests passed. Both app builds passed.
+One earlier parallel run exceeded the snapshot performance budget while both apps
+were compiling; the isolated rerun passed without changing the threshold. Packaged
+UI/network launch acceptance remains required before closing this story.
 
 2026-10-09 implementation checkpoint: ADR 0049 and a pure initial-launch gate
 are implemented in source, with seven state-machine tests and a runtime test

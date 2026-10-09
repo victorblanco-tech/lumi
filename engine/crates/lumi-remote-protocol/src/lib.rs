@@ -13,16 +13,17 @@ mod projection;
 
 pub use command::{
     OperationTarget, RemoteCommand, RemoteCommandError, RemoteCommandKind, RemoteCommandResult,
-    RemoteCommandResultStatus,
+    RemoteCommandResultStatus, RemoteLaunchPolicy,
 };
 pub use frame::{
     MAX_REMOTE_FRAME_BYTES, REMOTE_PROTOCOL_VERSION, RemoteFrame, RemoteFrameError, RemoteFrameKind,
 };
 pub use projection::{
     IntegrationHealth, OperationState, ProjectionError, RemoteAutoloopChoice, RemoteBeatGrid,
-    RemoteHotCue, RemoteIntegrationStatus, RemoteLightPlan, RemoteLiveProjection, RemotePhrase,
-    RemotePhraseRoleOption, RemotePlanCue, RemotePlayer, RemotePlayerUSB, RemoteThemeOption,
-    RemoteTrack, RemoteTrackSource, RemoteTransportAnchor, RemoteWaveformPoint,
+    RemoteHotCue, RemoteInitialLaunch, RemoteIntegrationStatus, RemoteLightPlan,
+    RemoteLiveProjection, RemotePhrase, RemotePhraseRoleOption, RemotePlanCue, RemotePlayer,
+    RemotePlayerUSB, RemoteThemeOption, RemoteTrack, RemoteTrackSource, RemoteTransportAnchor,
+    RemoteWaveformPoint,
 };
 
 #[cfg(test)]

@@ -90,6 +90,7 @@ public struct LiveWorkspaceContent: Equatable, Sendable {
     public let pendingLightingTimingOffsetMillis: Int?
     public let lightingTimingSavePending: Bool
     public let lightingTimingSaveError: String?
+    public let initialLaunch: InitialLaunchSnapshot?
     public let abletonLinkEnabled: Bool
     public let abletonLinkState: String
     public let abletonLinkBPMMilli: UInt64?
@@ -113,6 +114,7 @@ public struct LiveWorkspaceContent: Equatable, Sendable {
         pendingLightingTimingOffsetMillis: Int? = nil,
         lightingTimingSavePending: Bool = false,
         lightingTimingSaveError: String? = nil,
+        initialLaunch: InitialLaunchSnapshot? = nil,
         abletonLinkEnabled: Bool = false,
         abletonLinkState: String = "stopped",
         abletonLinkBPMMilli: UInt64? = nil,
@@ -137,6 +139,7 @@ public struct LiveWorkspaceContent: Equatable, Sendable {
         self.pendingLightingTimingOffsetMillis = pendingLightingTimingOffsetMillis
         self.lightingTimingSavePending = lightingTimingSavePending
         self.lightingTimingSaveError = lightingTimingSaveError
+        self.initialLaunch = initialLaunch
         self.abletonLinkEnabled = abletonLinkEnabled
         self.abletonLinkState = abletonLinkState
         self.abletonLinkBPMMilli = abletonLinkBPMMilli
@@ -527,6 +530,7 @@ public enum LiveWorkspacePresenter {
             pendingLightingTimingOffsetMillis: snapshot.midiIntegration?.pendingTimingOffsetMillis,
             lightingTimingSavePending: snapshot.midiIntegration?.timingSavePending ?? false,
             lightingTimingSaveError: snapshot.midiIntegration?.timingSaveError,
+            initialLaunch: snapshot.midiIntegration?.launch,
             abletonLinkEnabled: snapshot.abletonLinkIntegration?.enabled ?? false,
             abletonLinkState: snapshot.abletonLinkIntegration?.state ?? "stopped",
             abletonLinkBPMMilli: snapshot.abletonLinkIntegration?.bpmMilli,

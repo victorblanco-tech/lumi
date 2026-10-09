@@ -140,7 +140,8 @@ public final class RemoteSessionModel {
                 abletonLinkEnabled: current.integrations.abletonLinkEnabled,
                 abletonLinkBPMMilli: localizedAnchor.effectiveBPMMilli,
                 timingOffsetMillis: current.integrations.timingOffsetMillis,
-                pendingTimingOffsetMillis: current.integrations.pendingTimingOffsetMillis
+                pendingTimingOffsetMillis: current.integrations.pendingTimingOffsetMillis,
+                launch: current.integrations.launch?.updatingRemaining(player: playerNumber, beat: localizedAnchor.beat)
             )
         } else {
             integrations = current.integrations

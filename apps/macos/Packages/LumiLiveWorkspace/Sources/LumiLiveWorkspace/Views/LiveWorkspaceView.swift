@@ -12,6 +12,8 @@ public struct LiveWorkspaceView: View {
     private let onSessionCommand: @MainActor (SessionCommandRequest) -> Void
     private let onLocalPlayback: @MainActor (LocalPlaybackRequest) -> Void
     private let onSetAbletonLinkEnabled: @MainActor (Bool) -> Void
+    private let onSetLaunchPolicy: @MainActor (String) -> Void
+    private let launchFeedback: String?
     private let localPlaybackBrowser: AnyView?
     private let deckVisualClocks: [UInt64: DeckVisualClockSnapshot]
     private let localPlaybackWaveforms: [UInt64: DeckWaveformPreviewSnapshot]
@@ -45,6 +47,8 @@ public struct LiveWorkspaceView: View {
         onSessionCommand: @escaping @MainActor (SessionCommandRequest) -> Void = { _ in },
         onLocalPlayback: @escaping @MainActor (LocalPlaybackRequest) -> Void = { _ in },
         onSetAbletonLinkEnabled: @escaping @MainActor (Bool) -> Void = { _ in },
+        onSetLaunchPolicy: @escaping @MainActor (String) -> Void = { _ in },
+        launchFeedback: String? = nil,
         localPlaybackBrowser: AnyView? = nil
     ) {
         self.state = state
@@ -60,6 +64,8 @@ public struct LiveWorkspaceView: View {
         self.onSessionCommand = onSessionCommand
         self.onLocalPlayback = onLocalPlayback
         self.onSetAbletonLinkEnabled = onSetAbletonLinkEnabled
+        self.onSetLaunchPolicy = onSetLaunchPolicy
+        self.launchFeedback = launchFeedback
         self.localPlaybackBrowser = localPlaybackBrowser
         _appearance = appearance
         _keyNotation = keyNotation
@@ -316,6 +322,9 @@ public struct LiveWorkspaceView: View {
                 Text(timingConfirmationLabel)
                     .font(LumiTypography.technical.weight(.semibold))
                     .foregroundStyle(timingConfirmationColor)
+                if let launch = state.content?.initialLaunch, launch.policy == "onPhraseStart" {
+                    Text(launch.label).font(LumiTypography.technical).lineLimit(1)
+                }
             }
             .font(LumiTypography.metadata.weight(.semibold))
             .padding(.horizontal, LumiSpacing.small)
@@ -354,6 +363,21 @@ public struct LiveWorkspaceView: View {
                         lightingTimingOffsetMillis = 0
                     }
                     .buttonStyle(.borderless)
+                }
+                if let launch = state.content?.initialLaunch {
+                    Divider()
+                    Picker("Initial show start", selection: Binding(
+                        get: { launch.policy }, set: { onSetLaunchPolicy($0) }
+                    )) {
+                        Text("Immediate").tag("immediate")
+                        Text("On phrase start").tag("onPhraseStart")
+                    }
+                    .disabled(!["off", "armed"].contains(state.content?.operationState ?? ""))
+                    .accessibilityIdentifier("lumi.live.initialLaunchPolicy")
+                    Text("On phrase start waits for the next phrase after Start. Cue a few beats before it. This only affects the initial launch; change it in Off or Arm.")
+                        .font(LumiTypography.metadata).foregroundStyle(LumiColor.textSecondary)
+                    Text(launch.label).font(LumiTypography.technical)
+                    if let launchFeedback { Text(launchFeedback).font(LumiTypography.technical) }
                 }
             }
             .padding(LumiSpacing.large)

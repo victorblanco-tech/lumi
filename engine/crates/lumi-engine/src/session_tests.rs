@@ -866,6 +866,101 @@ fn missing_executable_theme_is_a_safe_no_plan_result() {
 }
 
 #[test]
+fn phrase_launch_run_in_prepares_a_bank_for_all_signed_offsets() {
+    for (offset, millis) in [(-250, 750), (0, 1000), (250, 1250)] {
+        assert_eq!(
+            initial_launch_trigger_delay(2, 120_000, offset),
+            Some(Duration::from_millis(millis))
+        );
+    }
+    assert_eq!(initial_launch_trigger_delay(0, 120_000, 0), None);
+    assert_eq!(initial_launch_trigger_delay(1, 300_000, -250), None);
+    assert_eq!(initial_launch_trigger_delay(4, 0, 0), None);
+}
+
+#[test]
+fn launch_policy_is_persisted_guarded_and_projected_without_changing_tempo()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut runtime =
+        initialized_runtime_for_mode(ManualClock::new(0), DeckSourceMode::LocalPlayback)?;
+    let before = remote_static_key(&runtime);
+    apply_command(
+        &mut runtime,
+        SessionCommand::SetLaunchPolicy {
+            policy: LaunchPolicy::OnPhraseStart,
+            expected: LaunchPolicy::Immediate,
+        },
+    )?;
+    assert_ne!(before, remote_static_key(&runtime));
+    assert_eq!(
+        runtime.launch_preferences.saved,
+        Some(LaunchPolicy::OnPhraseStart)
+    );
+    assert_eq!(launch_projection(&runtime)["policy"], "onPhraseStart");
+    assert!(
+        apply_command(
+            &mut runtime,
+            SessionCommand::SetLaunchPolicy {
+                policy: LaunchPolicy::Immediate,
+                expected: LaunchPolicy::Immediate,
+            }
+        )
+        .is_err(),
+        "a stale client must not replace a newer choice"
+    );
+    apply_current_session_command(&mut runtime, |expected_revision| {
+        SessionCommand::SetOperationState {
+            expected_revision,
+            command: OperationCommand::Arm,
+        }
+    });
+    apply_current_session_command(&mut runtime, |expected_revision| {
+        SessionCommand::SetOperationState {
+            expected_revision,
+            command: OperationCommand::Start,
+        }
+    });
+    assert!(
+        apply_command(
+            &mut runtime,
+            SessionCommand::SetLaunchPolicy {
+                policy: LaunchPolicy::Immediate,
+                expected: LaunchPolicy::OnPhraseStart,
+            }
+        )
+        .is_err(),
+        "Live must reject launch-policy changes, even when decks are paused"
+    );
+    assert_eq!(
+        runtime.output_worker.launch_policy,
+        LaunchPolicy::OnPhraseStart
+    );
+    assert_eq!(
+        runtime.launch_preferences.saved,
+        Some(LaunchPolicy::OnPhraseStart)
+    );
+    runtime.deck_source_mode = DeckSourceMode::ConnectedDecks;
+    let snapshot = snapshot_envelope_for_remote(&runtime, 1, "launch-contract")?;
+    let projection = RemoteLiveProjection::from_engine_snapshot_payload(
+        &snapshot.payload,
+        1,
+        unix_time_millis(),
+    )?;
+    let launch = projection
+        .integrations
+        .launch
+        .ok_or("missing launch capability")?;
+    assert_eq!(launch.version, 1);
+    assert_eq!(
+        launch.policy,
+        lumi_remote_protocol::RemoteLaunchPolicy::OnPhraseStart
+    );
+    assert_eq!(launch.status, "waitingForPlayback");
+    assert_eq!(runtime.output_worker.provider.records().count(), 0);
+    Ok(())
+}
+
+#[test]
 fn phrase_launch_waits_inside_phrase_and_admits_the_next_exact_grid_boundary()
 -> Result<(), Box<dyn std::error::Error>> {
     let mut runtime =

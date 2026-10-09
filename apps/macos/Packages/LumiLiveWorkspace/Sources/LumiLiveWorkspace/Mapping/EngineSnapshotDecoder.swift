@@ -233,6 +233,15 @@ public struct EngineSnapshotDecoder: Sendable {
         guard pendingTimingOffsetMillis.map({ (-250...250).contains($0) }) ?? true else {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
+        let launch: InitialLaunchSnapshot?
+        if case let .object(value) = midi["launch"], unsignedInteger(value["version"]) == 1,
+           case let .string(policy) = value["policy"], ["immediate", "onPhraseStart"].contains(policy),
+           case let .string(status) = value["status"], case let .boolean(pending) = value["savePending"] {
+            launch = InitialLaunchSnapshot(policy: policy, status: status,
+                targetPhraseIndex: unsignedInteger(value["targetPhraseIndex"]),
+                remainingBeats: unsignedInteger(value["remainingBeats"]),
+                savePending: pending, saveError: try optionalString(value["saveError"]))
+        } else { launch = nil }
         return MidiOutputIntegrationSnapshot(
             state: state,
             sourceName: sourceName,
@@ -247,6 +256,7 @@ public struct EngineSnapshotDecoder: Sendable {
             savedTimingOffsetMillis: savedTimingOffsetMillis,
             timingSavePending: timingSavePending,
             timingSaveError: try optionalString(midi["timingSaveError"]),
+            launch: launch,
             bankPreRollMillis: bankPreRollMillis,
             realtimeLane: try decodeRealtimeMidiLane(midi["realtimeScheduler"])
         )

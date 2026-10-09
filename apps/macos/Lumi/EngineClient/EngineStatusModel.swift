@@ -117,6 +117,7 @@ final class EngineStatusModel: ObservableObject {
     private var libraryQueryGeneration: UInt64 = 0
     private var isDrainingLibraryQueries = false
     @Published private(set) var lightingTimingSettings: MidiOutputIntegrationSnapshot?
+    @Published private(set) var initialLaunchFeedback: String?
     private var latestSnapshot: EngineSnapshot? {
         didSet {
             let timing = latestSnapshot?.midiIntegration
@@ -125,7 +126,8 @@ final class EngineStatusModel: ObservableObject {
                 || lightingTimingSettings?.pendingTimingOffsetMillis != timing?.pendingTimingOffsetMillis
                 || lightingTimingSettings?.savedTimingOffsetMillis != timing?.savedTimingOffsetMillis
                 || lightingTimingSettings?.timingSavePending != timing?.timingSavePending
-                || lightingTimingSettings?.timingSaveError != timing?.timingSaveError {
+                || lightingTimingSettings?.timingSaveError != timing?.timingSaveError
+                || lightingTimingSettings?.launch != timing?.launch {
                 lightingTimingSettings = timing
             }
         }
@@ -2380,6 +2382,13 @@ final class EngineStatusModel: ObservableObject {
             .setOutputTimingOffset(millis: Int16(clamped)),
             success: "Lighting timing \(String(format: "%+d ms", clamped)) requested. A running change becomes active at the next phrase; negative is early and positive is late."
         )
+    }
+
+    func setInitialLaunchPolicy(_ policy: String) async {
+        guard ["immediate", "onPhraseStart"].contains(policy),
+              let expected = latestSnapshot?.midiIntegration?.launch?.policy else { return }
+        await exchangeMidiCommand(.setLaunchPolicy(policy, expected: expected), success: "Launch setting applied.")
+        initialLaunchFeedback = midiIntegrationFeedback
     }
 
     func mutatePlan(_ request: PlanMutationRequest) async {

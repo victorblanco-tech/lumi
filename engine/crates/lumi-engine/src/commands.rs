@@ -159,6 +159,10 @@ pub enum SessionCommand {
     SetOutputTimingOffset {
         millis: i16,
     },
+    SetLaunchPolicy {
+        policy: crate::launch_policy::LaunchPolicy,
+        expected: crate::launch_policy::LaunchPolicy,
+    },
     SendMidiLearnPulse,
     SendMidiAddressLearnPulse {
         address: MidiAddress,
@@ -290,6 +294,7 @@ impl SessionCommand {
             | Self::SetAbletonLinkEnabled { .. }
             | Self::TestAbletonLinkHelper
             | Self::SetOutputTimingOffset { .. }
+            | Self::SetLaunchPolicy { .. }
             | Self::SendMidiLearnPulse
             | Self::SendMidiAddressLearnPulse { .. }
             | Self::TriggerMidiAutoloop { .. }
@@ -527,6 +532,24 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
                     .map_err(|_| CommandDecodeError::InvalidField("millis"))?,
             })
         }
+        "setLaunchPolicy" => Ok(SessionCommand::SetLaunchPolicy {
+            policy: serde_json::from_value(
+                envelope
+                    .payload
+                    .get("policy")
+                    .cloned()
+                    .ok_or(CommandDecodeError::InvalidField("policy"))?,
+            )
+            .map_err(|_| CommandDecodeError::InvalidField("policy"))?,
+            expected: serde_json::from_value(
+                envelope
+                    .payload
+                    .get("expectedPolicy")
+                    .cloned()
+                    .ok_or(CommandDecodeError::InvalidField("expectedPolicy"))?,
+            )
+            .map_err(|_| CommandDecodeError::InvalidField("expectedPolicy"))?,
+        }),
         "sendMidiLearnPulse" => Ok(SessionCommand::SendMidiLearnPulse),
         "sendMidiAddressLearnPulse" => Ok(SessionCommand::SendMidiAddressLearnPulse {
             address: midi_address(&envelope.payload)?,

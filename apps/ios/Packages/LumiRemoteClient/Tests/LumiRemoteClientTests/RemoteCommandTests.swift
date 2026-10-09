@@ -4,6 +4,20 @@ import Testing
 
 @testable import LumiRemoteClient
 
+@Test("Launch policy is a guarded additive command and countdown follows anchors")
+func launchPolicyContract() throws {
+    let command = RemoteCommandPayload.setLaunchPolicy(.onPhraseStart, expectedPolicy: .immediate)
+    let bytes = try JSONEncoder().encode(command)
+    #expect(try JSONDecoder().decode(RemoteCommandPayload.self, from: bytes) == command)
+    let object = try #require(JSONSerialization.jsonObject(with: bytes) as? [String: String])
+    #expect(object["kind"] == "setLaunchPolicy")
+    #expect(object["expectedPolicy"] == "immediate")
+    let launch = try JSONDecoder().decode(RemoteInitialLaunch.self, from: Data(#"{"version":1,"policy":"onPhraseStart","status":"waitingForPhrase","targetPhraseIndex":2,"targetBeat":64,"targetPlayer":1,"remainingBeats":8,"savePending":false}"#.utf8))
+    #expect(launch.updatingRemaining(player: 1, beat: 60).label == "Phrase 3 · 4 beats")
+    #expect(launch.updatingRemaining(player: 2, beat: 60) == launch)
+    #expect(launch.updatingRemaining(player: 1, beat: 100).remainingBeats == 0)
+}
+
 @Test("Remote waveform RGB points use the compact lossless wire form")
 func compactRemoteWaveformPointRoundTripsAndReadsLegacyObjects() throws {
     let packed = try JSONDecoder().decode(

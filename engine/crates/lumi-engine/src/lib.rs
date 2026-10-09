@@ -7,6 +7,7 @@ mod autoloop_executor;
 mod commands;
 mod library;
 pub mod launch_policy;
+mod launch_preferences;
 mod link_relay;
 mod live_library_resolver;
 mod media_resolver;

@@ -108,6 +108,13 @@ later. **Apply** sends your choice; **Cancel** leaves it unchanged. During
 playback, **NEXT PHRASE** appears beside the requested value until the engine
 applies it at a phrase boundary. Incoming player updates do not reset an open
 timing editor.
+
+In development builds **Lumi 0.6.4-dev-24 / Remote 0.1.3-dev-6**, the same panel
+offers **Initial show start** when the connected Mac supports it. Choose
+**Immediate** or **On phrase start** while Off or Armed. This choice saves
+immediately, separately from the offset's Apply button. On phrase start shows
+the next target and remaining beats in the top bar. It only gates the first
+launch, not later phrase changes; Ableton Link remains tempo-only.
 With Lumi 0.6.2 / Remote 0.1.1, changes from either
 the iPhone or Mac are saved by the Mac engine and remain after restarting Lumi.
 **NEXT PHRASE** describes activation timing, not temporary storage. Mac, RC and

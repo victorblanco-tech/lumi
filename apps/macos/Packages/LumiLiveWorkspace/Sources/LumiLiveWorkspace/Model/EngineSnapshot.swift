@@ -145,6 +145,7 @@ public struct MidiOutputIntegrationSnapshot: Equatable, Sendable {
     public let savedTimingOffsetMillis: Int?
     public let timingSavePending: Bool
     public let timingSaveError: String?
+    public let launch: InitialLaunchSnapshot?
     public let bankPreRollMillis: UInt64
     public let realtimeLane: RealtimeMidiOutputLaneSnapshot?
 
@@ -162,6 +163,7 @@ public struct MidiOutputIntegrationSnapshot: Equatable, Sendable {
         savedTimingOffsetMillis: Int? = nil,
         timingSavePending: Bool = false,
         timingSaveError: String? = nil,
+        launch: InitialLaunchSnapshot? = nil,
         bankPreRollMillis: UInt64 = 50,
         realtimeLane: RealtimeMidiOutputLaneSnapshot? = nil
     ) {
@@ -178,8 +180,31 @@ public struct MidiOutputIntegrationSnapshot: Equatable, Sendable {
         self.savedTimingOffsetMillis = savedTimingOffsetMillis
         self.timingSavePending = timingSavePending
         self.timingSaveError = timingSaveError
+        self.launch = launch
         self.bankPreRollMillis = bankPreRollMillis
         self.realtimeLane = realtimeLane
+    }
+}
+
+public struct InitialLaunchSnapshot: Equatable, Sendable {
+    public let policy: String
+    public let status: String
+    public let targetPhraseIndex: UInt64?
+    public let remainingBeats: UInt64?
+    public let savePending: Bool
+    public let saveError: String?
+
+    public var label: String {
+        if let saveError { return "Not saved: \(saveError)" }
+        if savePending { return "Saving launch setting…" }
+        guard policy == "onPhraseStart" else { return "Immediate start" }
+        switch status {
+        case "waitingForPlayback": return "Waiting for playback"
+        case "waitingForPhrase": return "Phrase \((targetPhraseIndex ?? 0) + 1) · \(remainingBeats ?? 0) beats to launch"
+        case "noUpcomingPhrase": return "No upcoming phrase — return to Off and choose Immediate"
+        case "launched": return "Show running"
+        default: return "Start on phrase"
+        }
     }
 }
 

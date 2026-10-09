@@ -443,6 +443,7 @@ struct EngineRuntime {
     planning_worker: PlanningWorker,
     output_worker: OutputWorker,
     timing_preferences: crate::timing_preferences::TimingPreferences,
+    launch_preferences: crate::launch_preferences::LaunchPreferences,
     link_relay: LinkRelay,
     library_worker: LibraryWorker,
     library_revision: u64,
@@ -577,6 +578,12 @@ struct RemoteStaticKey {
     link_peers: u32,
     timing_offset_millis: i16,
     pending_timing_offset_millis: Option<i16>,
+    initial_launch: (
+        LaunchPolicy,
+        crate::launch_policy::LaunchState,
+        usize,
+        Option<String>,
+    ),
 }
 
 type RemotePlayerMediaKey = (u8, Option<String>, Option<String>, Option<u8>, u64);
@@ -839,6 +846,12 @@ fn remote_static_key(runtime: &EngineRuntime) -> RemoteStaticKey {
         link_peers: link.peers,
         timing_offset_millis: runtime.output_worker.timing_offset_millis(),
         pending_timing_offset_millis: runtime.output_worker.pending_timing_offset_millis(),
+        initial_launch: (
+            runtime.output_worker.launch_policy,
+            runtime.output_worker.launch_gate.state(),
+            runtime.launch_preferences.pending,
+            runtime.launch_preferences.error.clone(),
+        ),
     }
 }
 
@@ -941,7 +954,12 @@ fn initialized_runtime_for_mode(
             None
         };
     #[cfg(test)]
-    let timing_path = None;
+    let timing_path: Option<std::path::PathBuf> = None;
+    let launch_path = timing_path
+        .as_ref()
+        .map(|path| path.with_file_name("lighting-launch.json"));
+    let launch_preferences = crate::launch_preferences::LaunchPreferences::open(launch_path)?;
+    output_worker.launch_policy = launch_preferences.saved.unwrap_or_default();
     let timing_preferences = crate::timing_preferences::TimingPreferences::open(timing_path)?;
     if let Some(millis) = timing_preferences.saved {
         output_worker.request_timing_offset_millis(millis, false);
@@ -1034,6 +1052,7 @@ fn initialized_runtime_for_mode(
         planning_worker,
         output_worker,
         timing_preferences,
+        launch_preferences,
         link_relay,
         library_worker,
         library_revision: 1,
@@ -2387,7 +2406,12 @@ impl OutputWorker {
         let immediate_landing = self.reassert_current_on_next_cue;
         self.reassert_current_on_next_cue = false;
         self.scheduled_future_autoloop = None;
-        let configured_delay = if immediate_landing {
+        let initial_phrase_launch = self.launch_policy == LaunchPolicy::OnPhraseStart
+            && matches!(
+                self.launch_gate.state(),
+                crate::launch_policy::LaunchState::Waiting { .. }
+            );
+        let configured_delay = if immediate_landing && !initial_phrase_launch {
             Duration::ZERO
         } else {
             positive_timing_delay(self.timing_offset_millis)
@@ -2441,7 +2465,12 @@ impl OutputWorker {
         self.autoloop_executor
             .complete_if_emitted(self.midi_output.status().emitted_count);
         let offset_millis = self.scheduling_timing_offset_millis();
-        if offset_millis >= 0
+        let initial_phrase_launch = self.launch_policy == LaunchPolicy::OnPhraseStart
+            && matches!(
+                self.launch_gate.state(),
+                crate::launch_policy::LaunchState::Waiting { .. }
+            );
+        if (offset_millis >= 0 && !initial_phrase_launch)
             || state.operation() != OperationState::Live
             || state.leader_deck() != Some(deck_id)
         {
@@ -2461,6 +2490,8 @@ impl OutputWorker {
         let Some(cue) = plan.cues().iter().find(|cue| {
             cue.start_beat() > absolute_beat
                 && cue.start_beat().saturating_sub(absolute_beat) <= AUTOLOOP_FORECAST_HORIZON_BEATS
+                && (!initial_phrase_launch
+                    || matches!(automatic_midi_target(cue.action()), Ok(Some(_))))
         }) else {
             self.cancel_future_autoloop_deadline();
             return;
@@ -2470,9 +2501,11 @@ impl OutputWorker {
             return;
         };
         let beats_until = cue.start_beat().saturating_sub(absolute_beat);
-        let Some(trigger_delay) =
+        let Some(trigger_delay) = (if initial_phrase_launch {
+            initial_launch_trigger_delay(beats_until, deck.effective_bpm_milli(), offset_millis)
+        } else {
             negative_offset_trigger_delay(beats_until, deck.effective_bpm_milli(), offset_millis)
-        else {
+        }) else {
             return;
         };
         let target = AutoloopTarget {
@@ -2762,6 +2795,24 @@ fn negative_offset_trigger_delay(
     let trigger_delay = target_delay.saturating_sub(negative_timing_advance(offset_millis));
     (trigger_delay >= BANK_SETTLE_DELAY.saturating_add(INTEGRATION_PUMP_INTERVAL))
         .then_some(trigger_delay)
+}
+
+fn initial_launch_trigger_delay(
+    beats_until: u32,
+    bpm_milli: u32,
+    offset_millis: i16,
+) -> Option<Duration> {
+    if beats_until == 0 || !(20_000..=300_000).contains(&bpm_milli) {
+        return None;
+    }
+    let target = Duration::from_micros(60_000_000_000_u64 / u64::from(bpm_milli))
+        .saturating_mul(beats_until);
+    let delay = if offset_millis < 0 {
+        target.saturating_sub(negative_timing_advance(offset_millis))
+    } else {
+        target.saturating_add(positive_timing_delay(offset_millis))
+    };
+    (delay >= BANK_SETTLE_DELAY.saturating_add(INTEGRATION_PUMP_INTERVAL)).then_some(delay)
 }
 
 fn deadline_drift_exceeds_tolerance(
@@ -3177,6 +3228,21 @@ fn remote_session_command(
     command: RemoteCommandKind,
 ) -> Result<SessionCommand, CommandApplicationError> {
     match command {
+        RemoteCommandKind::SetLaunchPolicy {
+            policy,
+            expected_policy,
+        } => {
+            let convert = |value| match value {
+                lumi_remote_protocol::RemoteLaunchPolicy::Immediate => LaunchPolicy::Immediate,
+                lumi_remote_protocol::RemoteLaunchPolicy::OnPhraseStart => {
+                    LaunchPolicy::OnPhraseStart
+                }
+            };
+            Ok(SessionCommand::SetLaunchPolicy {
+                policy: convert(policy),
+                expected: convert(expected_policy),
+            })
+        }
         RemoteCommandKind::SetOperationState {
             operation_state,
             expected_state_revision,
@@ -3312,6 +3378,7 @@ fn transport_ack_envelope(
 
 fn process_deck_input_messages(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
     runtime.timing_preferences.poll();
+    runtime.launch_preferences.poll();
     runtime.media_resolver.poll(Instant::now());
     if runtime.deck_source_mode != DeckSourceMode::ConnectedDecks {
         #[cfg(not(test))]
@@ -3968,6 +4035,28 @@ fn apply_command(
                 .request_timing_offset_millis(millis, defer_until_phrase);
             return Ok(());
         }
+        SessionCommand::SetLaunchPolicy { policy, expected } => {
+            if !matches!(
+                runtime.state.state().operation(),
+                OperationState::Off | OperationState::Armed
+            ) {
+                return Err(CommandApplicationError::LaunchPolicy(
+                    "Return to Off or Arm before changing the initial launch policy.".into(),
+                ));
+            }
+            if runtime.output_worker.launch_policy != expected {
+                return Err(CommandApplicationError::LaunchPolicy(
+                    "The launch policy changed; refresh before retrying.".into(),
+                ));
+            }
+            runtime
+                .launch_preferences
+                .request(policy)
+                .map_err(CommandApplicationError::LaunchPolicy)?;
+            runtime.output_worker.launch_policy = policy;
+            runtime.output_worker.launch_gate.arm();
+            return Ok(());
+        }
         SessionCommand::SendMidiLearnPulse => {
             runtime
                 .output_worker
@@ -4328,6 +4417,7 @@ fn apply_command(
         | SessionCommand::SetAbletonLinkEnabled { .. }
         | SessionCommand::TestAbletonLinkHelper
         | SessionCommand::SetOutputTimingOffset { .. }
+        | SessionCommand::SetLaunchPolicy { .. }
         | SessionCommand::SendMidiLearnPulse
         | SessionCommand::SendMidiAddressLearnPulse { .. }
         | SessionCommand::TriggerMidiAutoloop { .. }
@@ -4614,12 +4704,54 @@ fn apply_operation_command(
     Ok(())
 }
 
+fn launch_projection(runtime: &EngineRuntime) -> serde_json::Value {
+    use crate::launch_policy::LaunchState;
+    let gate = runtime.output_worker.launch_gate.state();
+    let target = match gate {
+        LaunchState::Waiting { context, target } => Some((context, target)),
+        _ => None,
+    };
+    let status = match runtime.state.state().operation() {
+        OperationState::Off => "off",
+        OperationState::Armed => "armed",
+        OperationState::Paused => "paused",
+        OperationState::Live => match gate {
+            LaunchState::Launched => "launched",
+            LaunchState::Waiting { .. } => "waitingForPhrase",
+            LaunchState::NoUpcomingBoundary { .. } => "noUpcomingPhrase",
+            LaunchState::WaitingForPlayback => "waitingForPlayback",
+        },
+    };
+    json!({
+        "version": 1,
+        "policy": runtime.output_worker.launch_policy,
+        "status": status,
+        "targetPhraseIndex": target.map(|(_, target)| target.phrase),
+        "targetBeat": target.map(|(_, target)| target.beat),
+        "targetPlayer": target.map(|(context, _)| context.deck.value()),
+        "remainingBeats": target.and_then(|(context, target)| runtime.state.state().deck(context.deck)
+            .map(|deck| target.beat.saturating_sub(deck.beat()))),
+        "savedPolicy": runtime.launch_preferences.saved,
+        "savePending": runtime.launch_preferences.pending > 0,
+        "saveError": runtime.launch_preferences.error,
+    })
+}
+
 fn application_error_envelope(
     sequence: u64,
     correlation_id: &str,
     error: &CommandApplicationError,
 ) -> Result<MessageEnvelope, EngineError> {
     match error {
+        CommandApplicationError::LaunchPolicy(message) => error_envelope(
+            sequence,
+            correlation_id,
+            "commandRejected",
+            "launchPolicyRejected",
+            message,
+            true,
+            None,
+        ),
         CommandApplicationError::TimingSave(message) => error_envelope(
             sequence,
             correlation_id,
@@ -4918,6 +5050,8 @@ fn error_envelope(
 
 #[derive(Debug, Error)]
 enum CommandApplicationError {
+    #[error("launch policy: {0}")]
+    LaunchPolicy(String),
     #[error("lighting timing could not be saved: {0}")]
     TimingSave(String),
     #[error("lighting timing changed since this edit")]
@@ -5163,6 +5297,7 @@ fn snapshot_envelope_internal(
             "savedTimingOffsetMillis": runtime.timing_preferences.saved,
             "timingSavePending": runtime.timing_preferences.pending_writes > 0,
             "timingSaveError": runtime.timing_preferences.error,
+            "launch": launch_projection(runtime),
             "bankPreRollMillis": BANK_SETTLE_DELAY.as_millis(),
             "staticLookExecution": {
                 "mode": "exactlyOnceTransition",

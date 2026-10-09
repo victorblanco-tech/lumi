@@ -112,6 +112,15 @@ public final class RemoteConnectionController: ObservableObject {
         }
     }
 
+    public func setLaunchPolicy(_ policy: RemoteLaunchPolicy) {
+        guard let projection = model.projection,
+              let launch = projection.integrations.launch, launch.version == 1,
+              projection.operationState == .off || projection.operationState == .armed else { return }
+        submitStateCommand(target: "launchPolicy") { _ in
+            .setLaunchPolicy(policy, expectedPolicy: launch.policy)
+        }
+    }
+
     public func selectTheme(
         plan: RemoteLightPlan,
         cue: RemotePlanCue,

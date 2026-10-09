@@ -35,7 +35,8 @@ struct LumiRemoteApp: App {
                     changePhraseRole: connection.changePhraseRole,
                     selectTheme: connection.selectTheme,
                     selectAutoloop: connection.selectAutoloop,
-                    setCueLock: connection.setCueLock
+                    setCueLock: connection.setCueLock,
+                    setLaunchPolicy: connection.setLaunchPolicy
                 )
             )
             .preferredColorScheme(.dark)
