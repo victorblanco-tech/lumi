@@ -88,6 +88,25 @@ not use it as a controlled performance comparison. Evidence:
 build/Evidence/dev29-stage-timing-120s.json. Dev-30 carries the unchanged-output
 waveform cache and bounded diagnostics; it is not a claim that E11 is complete.
 
+Dev-30 packaging passed (build 427 / 7af2e5fdfc06), including the actual DMG
+installer payload and deep signature verification. The full Rust gate passed
+494 tests across 79 reported suites, strict Clippy, formatting, architecture
+and build. Its first run overlapped packaging and failed the snapshot budget
+(p95 42.106 ms versus 25 ms); the complete non-overlapping rerun passed without
+changing the threshold. The 10k library run measured import 229.6 ms, pages
+22.7 ms, search 6.4 ms and workflow 8.1 ms. Documentation validation passed.
+The installed Dev-30 cold start restored one Link peer at 155 BPM, but again
+reported No route to host in USB identification while both Players' transport
+arrived. This remains an actual installed-app blocker, not a successful Live
+acceptance or proof of missing permission. No system settings were changed.
+One actual Settings Restart completed and restored Link automatically with one
+peer; SoundSwitch stayed responsive with Control One connected. The same USB
+No route to host persisted afterward, so no Start/output acceptance was attempted
+with unresolved tracks. The installed bridge JAR matches the local tested JAR
+byte for byte. Dev-30 is left open in Off on Pro DJ Link status. OS permission
+inspection/changes remain owner-only; do not launch helpers through another
+application or modify privacy/network settings as a workaround.
+
 Dev-29 follow-up: after the owner restarted SoundSwitch, desktop playback
 selected bank 3 / INTRO BLUE RED 2 and showed visible progress. Pause/Start and
 the simulator loop wrap remained responsive. One explicit Settings Stop/Start
