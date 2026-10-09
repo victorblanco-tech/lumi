@@ -1,7 +1,7 @@
 # Epic 11 — reliable preparation and Live performance
 
 Status: implementation and autonomous testing authorized on 2026-10-08.
-Baseline: public Lumi v0.6.3; current development build 0.6.4-dev-22.
+Baseline: public Lumi v0.6.3; current development build 0.6.4-dev-23.
 Products: Lumi, Lumi Remote and the independently versioned Pro DJ Link Simulator.
 Execution order: simulator fidelity first, then recovery and measured timing, preparation workflow, launch policy, integrated acceptance.
 
@@ -102,6 +102,18 @@ Acceptance and implementation tasks:
   dev version. Do not claim Mac mini installation until verified remotely.
 
 ## E11-02 — usable service lifecycle
+
+Dev-23 preparation: the engine's embedded service Info.plist now includes the
+local-network usage description, as the main app and Remote gateway already do.
+Packaging rejects its absence. This is a declaration, not a consent grant and
+not evidence that the packaged network problem is resolved. No process launch
+or permissions workaround is introduced.
+
+The Library editor pane now scrolls vertically when the saved editor height
+cannot fit the window; the browser reserves 220 points. The editor keeps its
+existing minimum content height, waveform renderer and saved height preference.
+All 75 Library Swift tests pass (plus four XCTest feedback tests). Packaged
+small-window/divider acceptance is still required.
 
 Post-dev-22 checkpoint (source changes, not yet packaged): Live's aggregate
 status now explicitly represents Stopped, Starting, Reconnecting and Unavailable

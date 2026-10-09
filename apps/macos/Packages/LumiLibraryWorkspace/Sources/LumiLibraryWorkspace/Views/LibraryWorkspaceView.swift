@@ -152,6 +152,8 @@ public struct LibraryWorkspaceView: View {
     public var body: some View {
         VStack(spacing: 0) {
             VSplitView {
+                GeometryReader { pane in
+                    ScrollView(.vertical) {
                 Group {
                     if let analysis = editorAnalysis {
                         TrackLightingEditorView(
@@ -174,14 +176,17 @@ public struct LibraryWorkspaceView: View {
                         editorPlaceholder
                     }
                 }
-                .frame(
-                    minHeight: 620,
-                    idealHeight: LibraryWorkspaceLayout.defaultEditorHeight
-                )
+                // Keep the editor's existing waveform geometry. In a short
+                // window its pane scrolls instead of pushing the browser out
+                // of the window; the saved divider preference is unchanged.
+                .frame(minHeight: max(620, pane.size.height))
+                    }
+                }
+                .frame(minHeight: 240, idealHeight: LibraryWorkspaceLayout.defaultEditorHeight)
                 .clipped()
 
                 libraryBrowser
-                    .frame(minHeight: 130, idealHeight: 280)
+                    .frame(minHeight: 220, idealHeight: 280)
             }
             .background(
                 PersistentSplitViewConfiguration(
