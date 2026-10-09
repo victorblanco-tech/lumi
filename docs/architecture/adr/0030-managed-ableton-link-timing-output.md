@@ -9,6 +9,21 @@
 
 ## Context
 
+### 2026-10-09 superseding tempo-only contract
+
+The provider publishes effective BPM only. Historical phase/transport language
+below describes the original design, not the current contract. Initial source
+acquisition, pause/resume, master handover, missing packets and recovery never
+send phase-reset or start/stop commands. Source health and phase diagnostics are
+read-only observations. A source gap preserves the last tempo and the existing
+Link peer; explicit disable/quit terminates the owned helper without stopping
+SoundSwitch playback. AutoLoop selection remains an independent MIDI action.
+
+The Carabiner wire regression tests the entire provider worker lifecycle and
+permits only `version`, `status` and changed `bpm` commands. This supersedes the
+previous initial-acquisition and handover exceptions as well as continuous
+correction. Phrase-start run-in (ADR-0049) does not relax this boundary.
+
 Lumi already receives read-only deck, master, effective-tempo and beat facts
 directly from Pro DJ Link through the supervised `lumi-prolink-bridge`. Local
 Playback provides the same normalized transport facts from Lumi's own player.

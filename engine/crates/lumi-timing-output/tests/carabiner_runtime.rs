@@ -211,6 +211,11 @@ fn link_only_configurable_soak_keeps_one_bounded_latest_clock() {
         "each source observation must be either applied or explicitly coalesced"
     );
     assert_eq!(status.failure_count, 0);
+    assert_eq!(
+        status.hard_reanchor_count, 0,
+        "tempo relay must never move phase"
+    );
+    assert_eq!(status.soft_correction_count, 0);
     if std::env::var("LUMI_EXPECT_LINK_PEER").as_deref() == Ok("1") {
         assert_eq!(status.peers, 1, "exactly one SoundSwitch peer is expected");
     }

@@ -1,7 +1,7 @@
 # Epic 11 — reliable preparation and Live performance
 
 Status: implementation and autonomous testing authorized on 2026-10-08.
-Baseline: public Lumi v0.6.3; development candidate 0.6.4-dev-25.
+Baseline: public Lumi v0.6.3; development candidate 0.6.4-dev-26.
 Products: Lumi, Lumi Remote and the independently versioned Pro DJ Link Simulator.
 Execution order: simulator fidelity first, then recovery and measured timing, preparation workflow, launch policy, integrated acceptance.
 
@@ -47,6 +47,18 @@ weakening macOS security checks. SoundSwitch restart approval is still needed
 for downstream playback acceptance; Lumi is left open in Off.
 
 ## Findings and ownership
+
+Dev-26 provider repair: the new localhost wire-level regression failed on the
+old provider, recording enable-start-stop-sync, force-beat-at-time and transport
+commands. Those command methods are now removed. The same worker test passes
+through initial paused source, start, master handover, changed BPM, hold,
+stale-source recovery, pause and shutdown. It permits only version/status/BPM
+and requires exactly two tempo publications for the two distinct tempos.
+Hold/recovery preserve the last tempo; no phase or transport write is allowed.
+The stale-clock relay regression is included. Nine timing-output and 160 engine
+tests pass (four environment acceptance tests remain explicitly ignored).
+Actual packaged Dev-26 and SoundSwitch playback acceptance are still pending;
+this automated result alone does not close E11-05/E11-06.
 
 Additional Dev-25 desktop checkpoint (2026-10-09): while the installed app was
 Live with the Mac mini simulator, Arm/Start from a paused position showed

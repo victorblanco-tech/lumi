@@ -140,11 +140,11 @@ where
         }
         let reason = if source_ready {
             format!(
-                "Pro DJ Link timing is stale ({} ms without a clock observation); Link transport was held fail-closed",
+                "Pro DJ Link timing is stale ({} ms without a clock observation); last Link tempo preserved",
                 age.as_millis()
             )
         } else {
-            format!("Pro DJ Link source is {source_status}; Link transport was held fail-closed")
+            format!("Pro DJ Link source is {source_status}; last Link tempo preserved")
         };
         self.fail_closed(reason)
     }
@@ -314,18 +314,18 @@ mod tests {
     #[test]
     fn recovered_unchanged_clock_reaches_provider_once_after_stale_hold() {
         let mut relay = LinkRelay::new(RecordingProvider::default());
-        relay.set_enabled(true).unwrap();
-        relay.synchronize(prolink_clock(155_000)).unwrap();
-        relay.fail_closed("test timing gap").unwrap();
+        assert!(relay.set_enabled(true).is_ok());
+        assert!(relay.synchronize(prolink_clock(155_000)).is_ok());
+        assert!(relay.fail_closed("test timing gap").is_ok());
         relay.provider.calls.clear();
 
         let mut recovered = prolink_clock(155_000);
         recovered.observed_at_micros = Some(2_000_000);
-        relay.synchronize(recovered).unwrap();
+        assert!(relay.synchronize(recovered).is_ok());
         let mut next = recovered;
         next.observed_at_micros = Some(2_500_000);
         next.beat_within_bar = 2;
-        relay.synchronize(next).unwrap();
+        assert!(relay.synchronize(next).is_ok());
 
         assert_eq!(relay.provider.calls, vec![Call::Synchronize(recovered)]);
         assert!(!relay.prolink_timing_stale);
