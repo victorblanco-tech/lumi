@@ -60,6 +60,55 @@ helper. Two older tests were updated to require zero phase/transport writes,
 rather than the superseded alignment behavior. Full verification and installed
 Dev-28 acceptance are required before treating this follow-up as complete.
 
+Dev-28 portable verification passed: 494 tests across 79 reported suites,
+strict workspace Clippy, formatting, full build, the planner budget and the
+10,000-track library benchmark. The initial local attempt exhausted disk space;
+only reproducible Rust incremental cache was removed, then the complete run
+passed with incremental compilation disabled. The installer is build 421 /
+5c62f2cda01c, verified and installed from its actual DMG payload. Two real-helper
+tests passed with SoundSwitch present, including unchanged-tempo recovery after
+a source gap and owned-helper exit on drop. Desktop acceptance remains pending.
+
+GitHub's first Dev-28 Apple gate failed the isolated-worker cleanup deadline
+once. The focused local reproduction and 30 consecutive repeated invocations
+passed without changing its deadlines. The failed-jobs rerun passed all gates
+(run 37931445398); the original failure remains unexplained, not disproved.
+
+Dev-28 combined 600-second real-network/CoreMIDI/Link acceptance passed with
+299 pitch changes, 85 seek landings, 54 operation cycles, 572 library queries
+and 11,198 snapshots. Source age p95/p99 was 10 ms (maximum 53.347 ms);
+138 requested AutoLoops completed, zero failed, with 139 MIDI pulses including
+bank selection. MIDI dispatch p95 was 33 microseconds, maximum 10.022 ms.
+Link applied all 301 anchors with one peer, no failures or phase corrections.
+The engine pump still recorded 122 observations over its 10 ms starvation
+threshold and a 100.772 ms maximum; the slowest command was sourceMode at
+100.264 ms. Startup correlation is a hypothesis, not proven by these aggregate
+counters. Evidence: local build/Evidence/dev28-live-600s.json. This is not the
+one-hour release gate or proof of physical light alignment.
+
+Dev-28 desktop acceptance: a deliberately suspended owned engine was replaced
+automatically (88299 to 88502; old PID confirmed gone). Both track plans and
+CHRM local/LINK provenance returned. The initial installed launch had failed
+USB reads with No route to host; warm recovery and a subsequent complete
+Quit/relaunch both recognized the sources without privacy/settings changes.
+Cause of the first-launch difference is still unproven. Arm/Start showed a
+20-beat countdown followed by Show running; a five-second simulator master
+disconnect showed stale timing, then Ready with the same one-peer Link session.
+Normal Quit removed engine, gateway and Carabiner; cold relaunch restored both
+plans and Link. Remote reflected Start/Show running while retaining View only.
+
+Downstream UI acceptance is blocked again: SoundSwitch 2.10.3 stopped responding
+to accessibility and screen capture. A read-only three-second process sample
+at 15:14 on 2026-10-09 found all main-thread samples waiting in
+JLC1Manager::resetJLC1DeviceList -> JLC1Storage destructor -> thread::join;
+the storage worker waited for a recursive mutex in getJLC1LastExclusiveMsgID.
+This supports a Control One/MIDI device-list lockup, not a diagnosis of a Link
+phase problem. The initiating device notification and whether Lumi lifecycle
+changes triggered it are not yet established. Local evidence:
+build/dev28-soundswitch-sample.txt. Do not count successful MIDI send counters
+as SoundSwitch playback acceptance. Owner approval requested before restarting
+SoundSwitch; Lumi left Off, with no system-settings modifications.
+
 Dev-27 follow-up in progress: installed Dev-26 survived bounded 15/30-second
 Player-1 disconnects. SoundSwitch retained one peer and its last tempo during
 the gap; unchanged-tempo recovery returned Link to Ready without toggling it.
