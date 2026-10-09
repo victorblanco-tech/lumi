@@ -1,7 +1,7 @@
 # Epic 11 — reliable preparation and Live performance
 
 Status: implementation and autonomous testing authorized on 2026-10-08.
-Baseline: public Lumi v0.6.3; development candidate 0.6.4-dev-28.
+Baseline: public Lumi v0.6.3; development candidate 0.6.4-dev-29.
 Products: Lumi, Lumi Remote and the independently versioned Pro DJ Link Simulator.
 Execution order: simulator fidelity first, then recovery and measured timing, preparation workflow, launch policy, integrated acceptance.
 
@@ -47,6 +47,20 @@ weakening macOS security checks. SoundSwitch restart approval is still needed
 for downstream playback acceptance; Lumi is left open in Off.
 
 ## Findings and ownership
+
+Dev-29 follow-up: after the owner restarted SoundSwitch, desktop playback
+selected bank 3 / INTRO BLUE RED 2 and showed visible progress. Pause/Start and
+the simulator loop wrap remained responsive. One explicit Settings Stop/Start
+cycle removed all engine/gateway/Link processes, removed the SoundSwitch Link
+peer, then restored both USB-backed plans without freezing SoundSwitch. This
+does not rule out an intermittent topology-triggered SoundSwitch lockup.
+It did reproduce a Lumi bug: saved Link auto-start ran only from the window's
+initial task, not service Start/Restart. Startup preference restoration now
+belongs to the shared service startup path. Automatic socket recovery explicitly
+opts out so it cannot override a manual Link Off choice. Eight policy cases
+cover saved preference, explicit start versus recovery, and already-enabled
+state; all 21 DesignSystem tests passed. App compilation and installed Dev-29
+service-cycle acceptance remain required.
 
 Dev-28 follow-up: the full workspace regression caught a real queued-clock
 recovery race after the successful shorter Dev-27 checks. Hold/FailClosed erased

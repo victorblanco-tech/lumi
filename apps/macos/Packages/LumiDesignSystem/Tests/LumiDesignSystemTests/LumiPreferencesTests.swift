@@ -2,6 +2,22 @@ import Foundation
 import Testing
 @testable import LumiDesignSystem
 
+@Test("Link auto-start applies once to explicit service starts, never socket recovery",
+      arguments: [
+          (false, false, false, false), (false, false, true, false),
+          (false, true, false, false), (false, true, true, false),
+          (true, false, false, false), (true, false, true, false),
+          (true, true, false, true), (true, true, true, false),
+      ])
+func linkStartupRespectsUserIntent(_ input: (Bool, Bool, Bool, Bool)) {
+    let (autoStart, explicitStart, enabled, expected) = input
+    #expect(AbletonLinkStartupPolicy.shouldEnable(
+        autoStart: autoStart,
+        explicitServiceStart: explicitStart,
+        alreadyEnabled: enabled
+    ) == expected)
+}
+
 @MainActor
 @Test("First launch defaults to dark appearance, Camelot notation, and neutral lighting timing")
 func defaultsAreStable() throws {

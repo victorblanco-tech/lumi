@@ -141,19 +141,19 @@ final class EngineStatusModel: ObservableObject {
         latestSnapshot?.operationState == "off" && lifecycle == .ready
     }
 
-    func start() async {
+    func start(restoreStartupPreferences: Bool = true) async {
         guard !servicesStopping, serviceShutdownTask == nil else { return }
         if let serviceStartupTask {
             await serviceStartupTask.value
             return
         }
-        let task = Task { await self.startServices() }
+        let task = Task { await self.startServices(restoreStartupPreferences: restoreStartupPreferences) }
         serviceStartupTask = task
         await task.value
         serviceStartupTask = nil
     }
 
-    private func startServices() async {
+    private func startServices(restoreStartupPreferences: Bool) async {
         guard [.stopped, .disconnected, .failed].contains(lifecycle) else {
             return
         }
@@ -239,6 +239,18 @@ final class EngineStatusModel: ObservableObject {
                 }
             }
             startRemoteGatewayMonitoring()
+            // Explicit service Start/Restart must honor the same saved choice
+            // as opening the app. Socket reconnection is not a new user start:
+            // never turn Link back on after a deliberate manual disable.
+            if !servicesStopping,
+               lifecycle == .ready,
+               AbletonLinkStartupPolicy.shouldEnable(
+                   autoStart: UserDefaults.standard.bool(forKey: LumiPreferenceKey.abletonLinkAutoStart),
+                   explicitServiceStart: restoreStartupPreferences,
+                   alreadyEnabled: latestSnapshot?.abletonLinkIntegration?.enabled == true
+               ) {
+                await setAbletonLinkEnabled(true)
+            }
         } catch {
             await supervisor.stop()
             lifecycle = .failed
@@ -3104,7 +3116,7 @@ final class EngineStatusModel: ObservableObject {
                     return
                 }
                 guard let self, self.lifecycle != .stopped else { return }
-                await self.start()
+                await self.start(restoreStartupPreferences: false)
                 if self.lifecycle == .ready {
                     Self.logger.notice("Recovered the local Lumi engine session")
                     return

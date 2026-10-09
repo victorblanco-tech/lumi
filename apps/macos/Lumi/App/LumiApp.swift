@@ -48,9 +48,6 @@ struct LumiApp: App {
                             await engineStatus.setLightingTimingOffset(preferences.lightingTimingOffsetMillis)
                         }
                     }
-                    if preferences.abletonLinkAutoStart {
-                        await engineStatus.setAbletonLinkEnabled(true)
-                    }
                 }
         }
         .defaultSize(width: 1_280, height: 820)
