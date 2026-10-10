@@ -10,8 +10,8 @@ revision-safe set of user commands.
 
 ## Requirements
 
-- Lumi Remote 0.1.1 on an iPhone running iOS 18 or newer;
-- Lumi 0.6.2 or newer on an Apple Silicon Mac;
+- Lumi Remote 0.1.3 on an iPhone running iOS 18 or newer;
+- Lumi 0.6.4 on an Apple Silicon Mac for the complete current feature set;
 - both devices on the same local network;
 - matching Production, RC or Dev release channels.
 
@@ -32,7 +32,7 @@ Apple Developer Program membership.
    ```bash
    git clone https://github.com/victorblanco-tech/lumi.git
    cd lumi
-   git switch --detach lumi-remote-v0.1.1
+   git switch --detach lumi-remote-v0.1.3
    open apps/ios/LumiRemote.xcodeproj
    ```
 
@@ -48,7 +48,10 @@ Apple Developer Program membership.
 7. Connect and unlock the iPhone, trust the Mac when asked and enable
    **Settings → Privacy & Security → Developer Mode** on the iPhone if needed.
 8. Select that iPhone as the Xcode run destination and press **Run**.
-9. Start **Lumi 0.6.2** on the Mac, enable its Remote Gateway and follow
+9. If iOS reports an untrusted developer, open **Settings → General → VPN &
+   Device Management**, select your own developer account and trust it. The
+   iPhone needs internet for this verification; do not trust an unknown account.
+10. Start **Lumi 0.6.4** on the Mac, enable its Remote Gateway and follow
    the pairing steps below.
 
 Apple Personal Team provisioning expires after seven days. Reconnect the
@@ -109,7 +112,7 @@ playback, **NEXT PHRASE** appears beside the requested value until the engine
 applies it at a phrase boundary. Incoming player updates do not reset an open
 timing editor.
 
-In development builds **Lumi 0.6.4-dev-24 / Remote 0.1.3-dev-6**, the same panel
+With **Lumi 0.6.4 / Remote 0.1.3**, the same panel
 offers **Initial show start** when the connected Mac supports it. Choose
 **Immediate** or **On phrase start** while Off or Armed. This choice saves
 immediately, separately from the offset's Apply button. On phrase start shows
@@ -123,6 +126,24 @@ Dev installations keep their own settings. If saving fails, Mac Live shows
 
 Only one paired iPhone can be Controller at a time. Viewers see the same Live
 state but cannot mutate it. Commands are never queued while disconnected.
+
+### USB source and reconnect status
+
+Player badges show the verified USB name and native Rekordbox media color.
+The inserted USB and loaded track source are separate: a track can be loaded
+over LINK from another Player, or continue from cache after its USB was ejected.
+An unknown USB must not be presented as a verified source.
+
+USB is only needed for installing the iPhone app, not for normal use. The Mac
+may use Ethernet and the iPhone Wi-Fi, provided both can reach each other on
+the same local network. Avoid guest-network client isolation and grant the
+app Local Network permission through the normal iOS prompt.
+
+Known issue in this beta: one physical-device test required reopening Remote
+after unplugging the installation cable before network discovery recovered.
+If it remains searching, first check the shared network and Local Network
+permission, then close and reopen Remote. This recovery was confirmed by the
+owner; seamless recovery in that scenario is not claimed as fixed.
 
 With Lumi 0.6.2 / Remote 0.1.1 or newer, the connected status explicitly says
 **Controller** or **View only**. Both are healthy connections. Tap the Lumi

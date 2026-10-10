@@ -1,6 +1,6 @@
 # Changelog
 
-## Lumi 0.6.4 / Lumi Remote 0.1.3 - Unreleased
+## Lumi 0.6.4 / Lumi Remote 0.1.3 - 2026-10-10
 
 - More reliable distinct USB identity, read-only network media recognition and
   separate inserted-media / loaded-track source badges.

@@ -29,3 +29,13 @@ See the [iPhone installation guide](../user-guide/iphone-remote.md).
 
 The Mac and iPhone have independent versions and artifacts, but these releases
 form one documented update. The simulator is not promoted by this bundle.
+
+## Known limitation
+
+One physical iPhone needed Remote closed and reopened after unplugging the
+installation cable before local-network discovery recovered. The owner then
+confirmed the versions work. Automatic recovery in this case remains an open
+issue; the Mac's lighting execution does not depend on the phone connection.
+
+[Lumi 0.6.4 for Mac](https://github.com/victorblanco-tech/lumi/releases/tag/v0.6.4)
+is the matching companion release.
