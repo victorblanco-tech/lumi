@@ -261,7 +261,7 @@ locked.
 
 ### Lighting timing offset
 
-**In development: Lumi 0.6.4-dev-24 / Remote 0.1.3-dev-6.** The timing panel
+**Available in Lumi 0.6.4 (Remote controls require 0.1.3 or newer).** The timing panel
 also offers **Initial show start**. **Immediate** preserves the normal behavior.
 **On phrase start** waits for the next executable phrase boundary after Start.
 Cue a few beats before that boundary to give Lumi time to prepare the bank and

@@ -15,13 +15,21 @@ public final class OwnedChildProcessWaiter: @unchecked Sendable {
 
     public var hasExited: Bool { lock.withLock { reaped } }
 
-    public init(process: Process) { self.process = process }
+    public init(process: Process) {
+        self.process = process
+        // Foundation has already reaped the child when it reports termination.
+        // Do not add a second, run-loop-dependent waitUntilExit on a different
+        // thread: its completion can lag after the process has actually exited.
+        process.terminationHandler = { [weak self] _ in
+            guard let self else { return }
+            self.lock.withLock { self.reaped = true }
+        }
+    }
 
     public func wait(timeout: Duration) async throws -> Int32 {
-        // Foundation's run-loop notification can lag on detached workers.
-        // waitUntilExit, not isRunning, is the completion authority.
-        DispatchQueue.global(qos: .utility).async { [self] in
-            process.waitUntilExit()
+        // The child can exit before the handler is installed. Process retains
+        // its termination status, so cover that race without waiting again.
+        if !process.isRunning {
             lock.withLock { reaped = true }
         }
         let deadline = ContinuousClock.now.advanced(by: timeout)

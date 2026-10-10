@@ -64,6 +64,22 @@ struct EngineSafetyBoundaryTests {
         #expect(errno == ESRCH)
     }
 
+    @Test("An owned child that exits before its waiter is created retains its exit status")
+    func alreadyExitedWorker() async throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/bin/sh")
+        process.arguments = ["-c", "exit 7"]
+        try process.run()
+        let deadline = ContinuousClock.now.advanced(by: .seconds(3))
+        while process.isRunning, ContinuousClock.now < deadline {
+            try await Task.sleep(for: .milliseconds(10))
+        }
+        #expect(!process.isRunning)
+        let waiter = OwnedChildProcessWaiter(process: process)
+        #expect(try await waiter.wait(timeout: .seconds(1)) == 7)
+        #expect(waiter.hasExited)
+    }
+
     @Test("Cancelled Remote startup does not proceed to service registration")
     func cancelledRemoteStartup() async {
         let supervisor = RemoteGatewaySupervisor(launchAgentPlistName: nil)
