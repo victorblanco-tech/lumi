@@ -48,6 +48,59 @@ for downstream playback acceptance; Lumi is left open in Off.
 
 ## Findings and ownership
 
+### Current acceptance boundary (2026-10-10)
+
+The dated entries below are a chronological evidence ledger, not simultaneous
+current failures. In particular, the Dev-30 USB read failure recorded before
+the owner's permission grant is superseded by the successful installed UI
+test after that grant. It is not an unresolved network-routing diagnosis.
+
+| Area | Current evidence | Not yet established |
+| --- | --- | --- |
+| Installed USB identity / loaded source | Both prepared tracks and CHRM local versus LINK source restored after the owner grant | Permission retention across a different installed build; fresh physical USB sync/remount |
+| Mac Live / SoundSwitch | Arm, phrase-start countdown, visible AutoLoop selection, pitch changes and hot cue passed | Frame-accurate downstream or physical-light timing; absence of intermittent SoundSwitch deadlock |
+| Service lifecycle | Same-build Quit removed owned services and Link peer; reopen restored both plans | Every upgrade/fault path and cross-build privacy attribution |
+| Realtime software lanes | Short combined stress runs passed; bounded input-stage diagnostics available | Complete ingress-to-MIDI latency distribution; attribution of remaining pump gaps |
+| Preparation workflow | Component regressions and earlier desktop checks recorded below | Complete current-build physical USB-to-editor acceptance |
+
+The combined soak checks software health, bounded queues and actual MIDI sends.
+Its separate source-age and MIDI-lane percentiles are **not** a correlated
+source-to-light percentile. It does not inspect SoundSwitch's internal loop
+phase or prove that every scripted transition had the correct visible loop.
+Count a completed soak as sustained software-lane evidence only; retain the
+distinct UI and final physical-light gates. Never infer a passed hour from an
+in-progress process or the absence of output in its redirected log.
+
+Dev-30 one-hour combined soak completed successfully (3,608.54 seconds including
+setup/cleanup; 3,600-second workload). Evidence: `build/Evidence/dev30-live-3600s.json`
+and `build/dev30-live-3600s.log`. It exercised 1,799 pitch changes, 514 seek
+commands, 327 Pause/Live cycles, 3,430 library queries and 65,852 snapshots.
+841 AutoLoops completed; 842 MIDI pulses were emitted, with zero failures or
+saturation. The `outputs: 256` field is retained history, not total executions.
+Ingress source-age p95/p99 were 10 ms, maximum 58.400 ms; the MIDI lane measured
+p95 31 microseconds, p99 53 microseconds, maximum 256 microseconds. Link retained
+one peer, with zero failures, fail-closed events or hard reanchors.
+
+Remaining diagnostic finding: 792 playback pump starvation observations and a
+92.096 ms maximum pump lateness. Input-stage maxima were bridge 8.375 ms,
+preparation 0.453 ms, preferences/media 0.259 ms and event processing 0.011/0.201 ms.
+These maxima do not attribute the remaining longest gaps. The longest engine
+command was source-mode selection at 84.449 ms; longest library round trip
+60.001 ms. Do not interpret the successful lane budgets as closure of complete
+upstream-to-light timing. Read-only RSS checks showed the engine near 103 MiB
+from minute 22 through minute 58. This is bounded-run evidence, not a general
+proof of absence of leaks.
+
+SoundSwitch remained responsive at repeated actual UI checks with Control One
+connected; its blue AutoLoop progress was visible during the run. On completion,
+the exclusivity guard confirmed no test-conflicting Lumi processes remained,
+and SoundSwitch no longer showed a Link peer. This run did not reproduce the
+previous intermittent SoundSwitch deadlock and does not prove it eliminated.
+After restoring simulator Player 1 playback, installed Dev-30 reopened in Off,
+reached Ready, restored one 155 BPM Link peer, and showed both the 17-phrase
+local CHRM plan and 33-phrase CHRM-via-Player-1/LINK plan. No additional permission
+change was needed for that same-build restart. Latest Dev is left open.
+
 2026-10-10 permission follow-up: the owner clarified that Dev-30 had not yet
 received its normal macOS permissions during the previous acceptance attempt,
 then granted them. Without changing code or OS settings, the installed app now
@@ -69,6 +122,27 @@ USB-backed plans and one 155 BPM Link peer without another permission change;
 SoundSwitch remained responsive with Control One connected. Leave Dev-30 open
 in Off. This is one successful lifecycle cycle, not closure of the intermittent
 SoundSwitch deadlock or the outstanding sustained/performance acceptance gates.
+
+### Follow-up: stable identity across installed updates
+
+Owner report (2026-10-10): every new installation requests permissions again.
+The current packaging script signs the app and nested Mach-O files ad hoc.
+Apple's [TN3179](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy)
+recommends an Apple-issued signing identity for reliable tracking of macOS
+local-network privacy and documents helper attribution and multiple-installed-
+version caveats. This makes signing/installation identity a concrete candidate,
+not proof that all prompts share one cause. Normal same-build restart passed.
+
+Prepare a separately scoped signing/upgrade change: stable per-channel app and
+helper identifiers, inside-out signing preserving each helper's entitlements,
+one managed installed app per channel, and explicit signed versus ad-hoc build
+metadata. Keep user-selected Dev/RC/Prod data isolation. Distribution signing
+and notarization need the owner's configured Apple identity and authorization;
+do not create certificates, change account access, reset privacy databases or
+weaken designated requirements automatically. Acceptance must compare two real
+consecutive installed builds after a single owner grant, verify both initial
+denial and later grant recovery, and retain complete service shutdown. Never
+promise that signing removes the first legitimate permission request.
 
 2026-10-09 downstream follow-up: after the owner restored SoundSwitch's
 playback view, installed Dev-29 Arm/Start reached Show running and the actual
