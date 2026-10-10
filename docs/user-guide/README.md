@@ -16,6 +16,17 @@ You need:
 Local Playback, Track Editor and Light Plan preview work without players. Lumi
 runs locally and does not need internet access during normal use.
 
+### Live-show network limitation in 0.6.4
+
+The validated reference setup uses Ethernet, Wi-Fi off and the macOS application
+firewall temporarily off. Firewall-enabled reception showed timing delays on
+the reference Mac; Wi-Fi and firewall-on timing are not yet accepted for shows.
+This is a temporary limitation, not a general claim that firewalls cannot handle
+DJ traffic. Only choose the workaround on a trusted, preferably isolated DJ
+network, never a public/untrusted network. An uplink means the network is not
+isolated. Restore the firewall after the show. Lumi never changes it for you.
+See the [0.6.4 release notes](../release/0.6.4-release-notes.md).
+
 To exercise Live Decks without physical players, use the separate
 [Pro DJ Link Simulator](pro-dj-link-simulator.md) on another Mac. It supports
 two Players, track loops and playlist-driven Auto Mix for longer tests.
