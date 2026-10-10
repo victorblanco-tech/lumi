@@ -24,6 +24,23 @@ def analyze(document):
         for key in ("bridgeQueueAgeMicros", "ingressQueueAgeMicros")
         for values in ([e[key] / 1000 for e in events if key in e],)
     }
+    receive_samples = [
+        (e["bridgeObservedNanos"] - e["packetOrigin"]["receivedAtNanos"]) / 1000
+        for e in events if e.get("packetOrigin") and "bridgeObservedNanos" in e
+        and e["bridgeObservedNanos"] >= e["packetOrigin"]["receivedAtNanos"]
+    ]
+    report["receiveToPublicationMilliseconds"] = {
+        "samples": len(receive_samples),
+        "p95": percentile([v / 1000 for v in receive_samples], .95),
+        "max": max((v / 1000 for v in receive_samples), default=None),
+        "scope": "Beat Link object construction to publication; excludes kernel/socket delay",
+    }
+    report["packetSourcesByDeck"] = {
+        str(deck): sorted({e["packetOrigin"]["address"] for e in events
+                           if e.get("packetOrigin") and e.get("input", {}).get("deck") == deck})
+        for deck in sorted({e["input"]["deck"] for e in events
+                            if e.get("packetOrigin") and "deck" in e.get("input", {})})
+    }
     sends = []
     for schedule in (e for e in events if e["stage"] == "schedule"):
         dispatched = next((e for e in events if e["stage"] == "midiDispatch"
