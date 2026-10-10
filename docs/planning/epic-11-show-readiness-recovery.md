@@ -48,6 +48,28 @@ for downstream playback acceptance; Lumi is left open in Off.
 
 ## Findings and ownership
 
+2026-10-10 permission follow-up: the owner clarified that Dev-30 had not yet
+received its normal macOS permissions during the previous acceptance attempt,
+then granted them. Without changing code or OS settings, the installed app now
+identified CHRM and prepared 90s Bitch (17 phrases) locally and My Favourite
+Regrets (33 phrases) via Player 1/LINK; Player 2's USB slot remained empty.
+This resolves the observed blocked-read scenario after owner authorization,
+not the recurring need to authorize each new build. Investigate stable signing
+and helper attribution separately; never bypass the owner's privacy decisions.
+
+Actual Dev-30 UI: Arm -> Start counted down to phrase 16 and reached Show
+running. SoundSwitch visibly selected INTRO BLUE RED 2 with blue progress.
+Simulator pitch +4.2% yielded 161.5 BPM in both apps; reset to zero restored
+155 BPM. Hot cue to 1,000 ms returned the playhead/phrase to Intro with both
+plans intact. Desktop waveform red/pink detail was visibly retained. These
+observations do not establish a frame-accurate or physical-light latency bound.
+Off -> normal Quit left no Lumi-owned test-conflicting processes and removed
+SoundSwitch's Link peer. Reopening the exact same installed build restored both
+USB-backed plans and one 155 BPM Link peer without another permission change;
+SoundSwitch remained responsive with Control One connected. Leave Dev-30 open
+in Off. This is one successful lifecycle cycle, not closure of the intermittent
+SoundSwitch deadlock or the outstanding sustained/performance acceptance gates.
+
 2026-10-09 downstream follow-up: after the owner restored SoundSwitch's
 playback view, installed Dev-29 Arm/Start reached Show running and the actual
 SoundSwitch BD START RGB button showed its advancing blue progress. A simulator
