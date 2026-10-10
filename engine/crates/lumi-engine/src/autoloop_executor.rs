@@ -145,16 +145,14 @@ impl AutoloopCueExecutor {
         })
     }
 
-    /// Replaces an unsent deadline for the same musical cue without creating
-    /// a new execution epoch. This is used only when a CDJ pitch change moves
-    /// a future negative-offset deadline. A completed cue is immutable.
-    pub(crate) fn replace_pending_deadline(&mut self, identity: AutoloopExecutionIdentity) -> bool {
+    /// Record an in-place deadline update. Keep the trigger identity and
+    /// completion watermark: retiming must never authorize a second send.
+    pub(crate) fn record_pending_retime(&mut self, identity: AutoloopExecutionIdentity) -> bool {
         if self.state.identity() != Some(identity)
             || matches!(self.state, AutoloopExecutorState::Completed { .. })
         {
             return false;
         }
-        self.state = AutoloopExecutorState::Idle;
         self.rescheduled_count = self.rescheduled_count.saturating_add(1);
         true
     }
@@ -396,22 +394,11 @@ mod tests {
             .unwrap_or_else(|| panic!("future cue must schedule"));
         executor.mark_bank_prepared(schedule);
         executor.mark_triggered(schedule, 1);
-        assert!(executor.replace_pending_deadline(schedule.identity));
+        assert!(executor.record_pending_retime(schedule.identity));
         assert_eq!(executor.rescheduled_count(), 1);
-        assert!(executor.schedule(&request, target, Some(1)).is_some());
-
-        let replacement = match executor.state() {
-            AutoloopExecutorState::Scheduled { identity, target } => super::AutoloopSchedule {
-                identity,
-                target,
-                select_bank: false,
-            },
-            state => panic!("replacement must be scheduled, found {state:?}"),
-        };
-        executor.mark_bank_prepared(replacement);
-        executor.mark_triggered(replacement, 2);
-        executor.complete_if_emitted(2);
-        assert!(!executor.replace_pending_deadline(replacement.identity));
+        assert!(executor.schedule(&request, target, Some(1)).is_none());
+        executor.complete_if_emitted(1);
+        assert!(!executor.record_pending_retime(schedule.identity));
         assert_eq!(executor.rescheduled_count(), 1);
     }
 

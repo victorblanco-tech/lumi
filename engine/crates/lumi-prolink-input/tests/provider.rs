@@ -13,6 +13,60 @@ const BEAT: &str = r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"seq
 const REPLACEMENT_AT_PRE_ROLL: &str = r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":4,"observedAtNanos":40,"type":"deckStatus","payload":{"deviceNumber":1,"deviceName":"LUMI-SIM","playing":false,"paused":true,"cued":false,"tempoMaster":true,"onAir":true,"sourcePlayer":1,"sourceSlot":"USB_SLOT","trackType":"REKORDBOX","rekordboxId":1247,"trackBpm":150.0,"effectiveBpm":150.0,"beatNumber":0,"beatWithinBar":0,"rawPitch":1048576}}"#;
 
 #[test]
+fn hardware_receive_gap_and_reordered_beat_do_not_create_a_seek()
+-> Result<(), Box<dyn std::error::Error>> {
+    // Reduced, anonymous replay of the actual Dev-33 hardware trace. After a
+    // 1.75 s receive gap, status advances slowly and an old bar-beat 4 arrives
+    // after bar-beat 1. This is not a DJ seek and must not retrigger a phrase.
+    let trace = [
+        (0_u64, "status", 184_u32, 4_u8),
+        (1_754_810, "beat", 0, 1),
+        (1_869_793, "status", 185, 1),
+        (2_014_822, "beat", 0, 4),
+        (2_044_797, "status", 185, 1),
+        (2_179_564, "status", 186, 2),
+        (2_270_154, "beat", 0, 2),
+    ];
+    let mut decoder = BridgeDecoder::new();
+    let mut provider = ProLinkDeckSourceProvider::new(MonotonicTime::new(0))?;
+    provider.ingest(decoder.decode_line(HELLO)?, MonotonicTime::new(0))?;
+    let mut previous = 183;
+    for (index, (micros, kind, number, bar)) in trace.into_iter().enumerate() {
+        let mut wire: serde_json::Value =
+            serde_json::from_str(if kind == "status" { STATUS } else { BEAT })?;
+        wire["sequence"] = serde_json::json!(index + 2);
+        wire["observedAtNanos"] = serde_json::json!(1_000_000_000 + micros * 1000);
+        wire["payload"]["effectiveBpm"] = serde_json::json!(155.0);
+        wire["payload"]["beatWithinBar"] = serde_json::json!(bar);
+        if kind == "status" {
+            wire["payload"]["beatNumber"] = serde_json::json!(number);
+        }
+        provider.ingest(
+            decoder.decode_line(&wire.to_string())?,
+            MonotonicTime::new(micros + 1),
+        )?;
+        let transport = provider
+            .transport(lumi_domain::TrackLoadId::new(1))
+            .ok_or("transport missing")?;
+        assert!(
+            transport.beat >= previous,
+            "reordered beat rewound {previous} to {}",
+            transport.beat
+        );
+        previous = transport.beat;
+        for event in provider.drain_events()? {
+            assert!(
+                !matches!(event, DomainEvent::Observation(ref envelope)
+                if matches!(envelope.observation, DeckObservation::PlaybackPositionSeeked { .. })),
+                "receive delay was incorrectly classified as a seek: {event:?}"
+            );
+        }
+    }
+    assert_eq!(previous, 185);
+    Ok(())
+}
+
+#[test]
 fn exact_beat_authority_recovers_without_precise_packets_and_is_load_scoped()
 -> Result<(), Box<dyn std::error::Error>> {
     let mut decoder = BridgeDecoder::new();

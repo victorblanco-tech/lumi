@@ -1585,13 +1585,15 @@ impl PlanningWorker {
                     deck_id,
                     track_load_id,
                     beat,
-                }
-                | DeckObservation::PlaybackPositionSeeked {
+                } => Some(
+                    json!({"deck":deck_id.value(),"load":track_load_id.value(),"beat":beat,"kind":"position"}),
+                ),
+                DeckObservation::PlaybackPositionSeeked {
                     deck_id,
                     track_load_id,
                     beat,
                 } => Some(
-                    json!({"deck":deck_id.value(),"load":track_load_id.value(),"beat":beat,"kind":"position"}),
+                    json!({"deck":deck_id.value(),"load":track_load_id.value(),"beat":beat,"kind":"seek"}),
                 ),
                 DeckObservation::PlaybackStateChanged {
                     deck_id,
@@ -2193,6 +2195,7 @@ impl TransportEpochCause {
 
 #[derive(Clone, Copy, Debug)]
 struct ScheduledFutureAutoloop {
+    generation: u64,
     identity: AutoloopExecutionIdentity,
     target: AutoloopTarget,
     deadline: Instant,
@@ -2590,11 +2593,20 @@ impl OutputWorker {
             && matches!(self.autoloop_executor.state(),
                 AutoloopExecutorState::Triggered { identity, .. }
                 if identity == scheduled.identity)
-            && plan.cues().iter().any(|cue| {
+            && let Some(cue) = plan.cues().iter().find(|cue| {
                 cue.phrase_index() == scheduled.identity.phrase_index
                     && cue.start_beat() <= absolute_beat
             })
         {
+            if cue.start_beat() == absolute_beat {
+                let deadline = Instant::now() + Duration::from_millis(offset_millis.max(0) as u64);
+                self.retime_future_autoloop(
+                    scheduled,
+                    deadline,
+                    absolute_beat,
+                    deck.effective_bpm_milli(),
+                );
+            }
             return;
         }
         let Some(cue) = plan.cues().iter().find(|cue| {
@@ -2640,18 +2652,21 @@ impl OutputWorker {
             ) {
                 return;
             }
-            let bpm_changed = existing.effective_bpm_milli != deck.effective_bpm_milli();
             let moved = deadline_drift_exceeds_tolerance(
                 existing.deadline,
                 deadline,
                 AUTOLOOP_DEADLINE_REPLACEMENT_TOLERANCE,
             );
-            if !bpm_changed || !moved {
+            if !moved {
                 return;
             }
-            if !self.autoloop_executor.replace_pending_deadline(identity) {
-                return;
-            }
+            self.retime_future_autoloop(
+                existing,
+                deadline,
+                absolute_beat,
+                deck.effective_bpm_milli(),
+            );
+            return;
         }
         let lane_before = self.midi_output.status();
         let Some(schedule) = self.autoloop_executor.schedule_identity(
@@ -2696,6 +2711,7 @@ impl OutputWorker {
             lane_before.emitted_count.saturating_add(scheduled_actions),
         );
         self.scheduled_future_autoloop = Some(ScheduledFutureAutoloop {
+            generation,
             identity,
             target,
             deadline,
@@ -2710,6 +2726,38 @@ impl OutputWorker {
             deadline,
             offset_millis,
         });
+    }
+
+    fn retime_future_autoloop(
+        &mut self,
+        mut scheduled: ScheduledFutureAutoloop,
+        deadline: Instant,
+        beat: u32,
+        bpm: u32,
+    ) {
+        if !deadline_drift_exceeds_tolerance(
+            scheduled.deadline,
+            deadline,
+            AUTOLOOP_DEADLINE_REPLACEMENT_TOLERANCE,
+        ) {
+            return;
+        }
+        let bank_deadline = deadline
+            .checked_sub(BANK_SETTLE_DELAY)
+            .unwrap_or_else(Instant::now);
+        if self
+            .midi_output
+            .retime_pending(scheduled.generation, deadline, bank_deadline)
+            .is_ok()
+        {
+            scheduled.deadline = deadline;
+            scheduled.effective_bpm_milli = bpm;
+            self.autoloop_executor
+                .record_pending_retime(scheduled.identity);
+            self.scheduled_future_autoloop = Some(scheduled);
+            self.timing_diagnostics.record(json!({"stage":"scheduleRetimed","generation":scheduled.generation,
+                "observedBeat":beat,"leadMicros":deadline.saturating_duration_since(Instant::now()).as_micros() as u64}));
+        }
     }
 
     fn record_autoloop_schedule(&mut self, record: AutoloopScheduleRecord) {

@@ -1090,6 +1090,13 @@ impl ProLinkDeckSourceProvider {
         let status_seek_matches_continuous_transport =
             status_seek.is_some() && absolute_beat.abs_diff(previous.beat) <= 1;
         let seeked = status_seek.is_some() && absolute_beat.abs_diff(previous.beat) > 1;
+        // An out-of-order bar-beat packet is not permission to rewind. A
+        // genuine backward jump must first pass the independent status/Hot
+        // Cue discontinuity path. Do not refresh anchors or publish timing
+        // observations for a rejected stale beat either.
+        if !seeked && absolute_beat < previous.beat {
+            return Ok(());
+        }
         if seeked {
             self.advance_timing_generation()?;
             self.position_discontinuity_count = self.position_discontinuity_count.saturating_add(1);
@@ -1374,7 +1381,11 @@ fn position_is_discontinuous(
     let expected_progress =
         elapsed_nanos as f64 * f64::from(effective_bpm_milli) / 1_000.0 / 60_000_000_000.0;
     let expected_beat = f64::from(previous_beat) + expected_progress;
-    (f64::from(candidate_beat) - expected_beat).abs() > POSITION_CONTINUITY_TOLERANCE_BEATS
+    // Receipt can stall and then deliver an advancing but late status stream.
+    // Falling behind a wall-clock prediction is not a seek. Only a real
+    // backward movement or progress ahead of elapsed time is a candidate.
+    f64::from(candidate_beat) + POSITION_CONTINUITY_TOLERANCE_BEATS < f64::from(previous_beat)
+        || f64::from(candidate_beat) > expected_beat + POSITION_CONTINUITY_TOLERANCE_BEATS
 }
 
 fn position_millis_is_discontinuous(
@@ -1568,6 +1579,16 @@ mod timing_tests {
 
     #[test]
     fn delayed_status_progress_is_not_misclassified_as_a_seek() {
+        // Real hardware receive gap: one beat of progress over 1.87 s.
+        // Delayed forward data must not establish seek corroboration.
+        assert!(!position_is_discontinuous(
+            183,
+            184,
+            1_000_000_000,
+            2_869_793_000,
+            155_000,
+            true,
+        ));
         assert!(!position_is_discontinuous(
             17,
             23,

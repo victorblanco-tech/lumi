@@ -665,6 +665,11 @@ enum RealtimeMidiCommand {
     ToggleStaticLook(u8, mpsc::Sender<Result<(), String>>),
     SetGeneration(u64),
     Schedule(ScheduledRealtimeMidiAction),
+    RetimePending {
+        generation: u64,
+        deadline: Instant,
+        bank_deadline: Instant,
+    },
     CancelAll,
     Shutdown,
 }
@@ -793,6 +798,22 @@ where
 
     pub fn cancel_all(&self) -> Result<(), RealtimeMidiError> {
         self.try_send(RealtimeMidiCommand::CancelAll)
+    }
+
+    /// Move only work still owned by the lane. If the pulse has already been
+    /// sent (including a race with this command), this is a no-op, never a
+    /// second trigger or a new generation.
+    pub fn retime_pending(
+        &self,
+        generation: u64,
+        deadline: Instant,
+        bank_deadline: Instant,
+    ) -> Result<(), RealtimeMidiError> {
+        self.try_send(RealtimeMidiCommand::RetimePending {
+            generation,
+            deadline,
+            bank_deadline,
+        })
     }
 
     pub fn status(&self) -> RealtimeMidiStatus {
@@ -1218,6 +1239,31 @@ fn run_realtime_midi_worker<P>(
                             });
                         }
                     }
+                    RealtimeMidiCommand::RetimePending {
+                        generation: requested,
+                        deadline,
+                        bank_deadline,
+                    } => {
+                        if requested == generation
+                            && scheduled.iter().any(|item| {
+                                item.generation == requested
+                                    && matches!(
+                                        item.action,
+                                        RealtimeMidiAction::TriggerAutoloop { .. }
+                                    )
+                            })
+                        {
+                            for item in scheduled
+                                .iter_mut()
+                                .filter(|item| item.generation == requested)
+                            {
+                                item.deadline = match item.action {
+                                    RealtimeMidiAction::SelectBank(_) => bank_deadline,
+                                    RealtimeMidiAction::TriggerAutoloop { .. } => deadline,
+                                };
+                            }
+                        }
+                    }
                     RealtimeMidiCommand::CancelAll => {
                         let cancelled = scheduled.len() as u64;
                         scheduled.clear();
@@ -1574,6 +1620,33 @@ mod tests {
         assert!(dispatch.succeeded);
         assert!(dispatch.started_at >= dispatch.deadline);
         assert!(dispatch.completed_at >= dispatch.started_at);
+    }
+
+    #[test]
+    fn retiming_pending_work_never_recreates_an_emitted_pulse() {
+        let lane = RealtimeMidiController::new(RecordingProvider::default);
+        assert!(lane.publish().is_ok());
+        assert!(lane.set_generation(42).is_ok());
+        let later = Instant::now() + Duration::from_secs(3);
+        assert!(lane.schedule_bank(42, 2, later).is_ok());
+        assert!(lane.schedule_autoloop(42, 2, 9, later).is_ok());
+        let sooner = Instant::now() + Duration::from_millis(60);
+        assert!(lane.retime_pending(42, sooner, Instant::now()).is_ok());
+        let until = Instant::now() + Duration::from_secs(1);
+        while lane.status().emitted_count < 2 && Instant::now() < until {
+            thread::sleep(Duration::from_millis(2));
+        }
+        assert_eq!(lane.status().emitted_count, 2);
+        assert_eq!(lane.status().source.active_bank, Some(2));
+        for _ in 0..20 {
+            assert!(
+                lane.retime_pending(42, Instant::now(), Instant::now())
+                    .is_ok()
+            );
+        }
+        // Synchronous command is a fence after the retime requests, with no pulse.
+        assert!(lane.publish().is_ok());
+        assert_eq!(lane.status().emitted_count, 2);
     }
 
     #[test]

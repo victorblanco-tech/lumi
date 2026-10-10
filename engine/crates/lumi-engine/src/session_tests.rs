@@ -1023,6 +1023,22 @@ fn ordinary_phrase_forecast_is_independent_of_offset_and_survives_boundary()
             .scheduled_future_autoloop
             .ok_or("not preplanned")?;
         assert_eq!(runtime.output_worker.launch_policy, LaunchPolicy::Immediate);
+        // A fresher beat can arrive earlier than the original forecast even
+        // at unchanged BPM (recorded after a real receive stall). Retime in
+        // place, without cancelling or authorizing a duplicate pulse.
+        runtime
+            .output_worker
+            .observe_exact_live_beat(runtime.state.state(), deck_id, beat - 1);
+        let retimed = runtime
+            .output_worker
+            .scheduled_future_autoloop
+            .ok_or("retime lost cue")?;
+        assert_eq!(retimed.generation, scheduled.generation);
+        assert!(retimed.deadline < scheduled.deadline);
+        assert_eq!(
+            runtime.output_worker.autoloop_executor.rescheduled_count(),
+            1
+        );
         // Observe the musical boundary before the worker deadline elapses. A
         // positive offset must keep the already admitted send rather than
         // cancelling it because the next phrase lies outside the horizon.
