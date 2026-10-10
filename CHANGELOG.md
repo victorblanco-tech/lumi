@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.6.4 - Unreleased
+## Lumi 0.6.4 / Lumi Remote 0.1.3 - Unreleased
 
 - More reliable distinct USB identity, read-only network media recognition and
   separate inserted-media / loaded-track source badges.
@@ -10,6 +10,8 @@
   recovery and protection against repeated cues and accumulated beat lead.
 - Clearer service lifecycle and improved tempo-only Link recovery.
 - Jackson and rustls security patches.
+- Companion iPhone update with verified USB/track-origin badges, shared saved
+  timing and initial phrase-start controls, and isolated production QR pairing.
 - Known live-show limitation: the accepted reference setup uses Ethernet,
   Wi-Fi off and the application firewall temporarily off on a trusted DJ network.
   See [release notes](docs/release/0.6.4-release-notes.md) for precautions and scope.
