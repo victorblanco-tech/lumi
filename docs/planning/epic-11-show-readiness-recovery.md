@@ -87,7 +87,20 @@ All checked sends had >50 ms scheduling lead and <20 ms dispatch lateness.
 Evidence: `build/phrase-timing-dev32-correlated.log`. This run did not enable
 the Link helper. The repeat on Dev-32 with Link active also passed (124.37 s,
 12 starts and three ordinary transitions, same timing assertions). Evidence:
-`build/phrase-timing-dev32-link.log`. Installed desktop acceptance is pending.
+`build/phrase-timing-dev32-link.log`.
+
+Installed Dev-32 (434 / 75e6862) desktop checks: two repeat Off/Arm/Start
+cycles showed Waiting for playback → Show running on Intro. SoundSwitch
+displayed mapped Intro selection/progress and subsequent loop changes.
+Both apps reflected 155 → 158.1 → 155 BPM. Quit removed all owned services
+and SW's Link peer; reopen restored both plans and CHRM via LINK on Player 2.
+Player 2's initial hot join was not reflected until restart: retain this as
+a separate recovery finding, not a passed hot-join check. UI observations
+are sampled, not frame-accurate phase/DMX measurements.
+The reported Bridge Fade → BD Start → BD Chorus sequence was also replayed
+uninterrupted from beat 364: corresponding loop selection/progress was visible
+in SW. Exact switch-time attribution still relies on software traces, not the
+sampling cadence of desktop screenshots.
 
 ### Current acceptance boundary (2026-10-10)
 
