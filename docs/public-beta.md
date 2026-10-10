@@ -53,6 +53,13 @@ private vulnerability report as described in [SECURITY.md](../SECURITY.md).
 
 ## Support boundary
 
+For the Lumi 0.6.4 / Remote 0.1.3 bundle, review the
+[live-show network limitation](user-guide/README.md#live-show-network-limitation-in-064)
+before field testing. The accepted Ethernet baseline temporarily disables the
+Mac application firewall on a trusted DJ network; this reduces protection and
+is not suitable for public or untrusted networks. Lumi does not change these
+settings for you. Wi-Fi/firewall-on timing is not yet validated.
+
 The current supported baseline is Apple Silicon, macOS 15 or newer, rekordbox
 OneLibrary USB media and the integrations listed in the user guide. Compatibility
 with other combinations is learned through the beta; it is not implied merely
