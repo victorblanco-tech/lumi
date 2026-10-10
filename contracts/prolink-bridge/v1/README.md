@@ -22,6 +22,15 @@ valid only with Rekordbox ID zero and must never restart the bridge.
 `observedAtNanos` is helper-process monotonic evidence. It is used for ordering
 and latency diagnostics, not as a wall-clock timestamp.
 
+Dev-36 adds optional envelope `packetOrigin` evidence for status, tempo, beat
+and precise-position events: `address` is the actual packet source IP and
+`receivedAtNanos` is Beat Link's DeviceUpdate construction timestamp in the same
+Java monotonic clock. It precedes Lumi publication but is **not** a hardware or
+kernel receive timestamp. Missing/null evidence remains accepted for older
+fixtures. This evidence is diagnostic only and never changes track identity or
+output scheduling. Use it to distinguish sources sharing a Player number and
+callback delay from publisher/engine queue residence.
+
 `usbMedia` is a replaceable display event from passive USB-slot `MediaDetails`
 observations. It contains `deviceNumber` (1...6) and nullable `colorId` (0...8):
 Default, Pink, Red, Orange, Yellow, Green, Aqua, Blue, Purple. It never changes

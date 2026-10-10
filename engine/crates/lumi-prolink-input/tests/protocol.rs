@@ -9,6 +9,24 @@ const PRECISE_POSITION: &str =
     include_str!("../../../../contracts/prolink-bridge/v1/fixtures/precise-position.json");
 
 #[test]
+fn optional_packet_origin_preserves_receive_clock_and_validates_address()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut decoder = BridgeDecoder::new();
+    decoder.decode_line(HELLO)?;
+    let mut event: serde_json::Value = serde_json::from_str(PRECISE_POSITION)?;
+    event["sequence"] = 2.into();
+    event["packetOrigin"] = serde_json::json!({"address":"192.0.2.1", "receivedAtNanos":1234});
+    let parsed = decoder.decode_line(&event.to_string())?;
+    let origin = parsed.packet_origin.ok_or("missing packet origin")?;
+    assert_eq!(origin.address.to_string(), "192.0.2.1");
+    assert_eq!(origin.received_at_nanos, 1234);
+    event["sequence"] = 3.into();
+    event["packetOrigin"]["address"] = "not an IP".into();
+    assert!(decoder.decode_line(&event.to_string()).is_err());
+    Ok(())
+}
+
+#[test]
 fn usb_media_color_decodes_as_display_evidence_only() -> Result<(), Box<dyn std::error::Error>> {
     for (number, color, valid) in [(1, 7, true), (2, 1, true), (33, 7, false), (1, 9, false)] {
         let mut decoder = BridgeDecoder::new();

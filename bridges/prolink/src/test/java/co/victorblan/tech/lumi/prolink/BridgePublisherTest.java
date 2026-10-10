@@ -19,6 +19,19 @@ final class BridgePublisherTest {
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Test
+    void preservesReceiveOriginSeparatelyFromPublicationTime() throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        PacketOrigin origin = new PacketOrigin("192.0.2.1", 1234L);
+        try (BridgePublisher publisher = new BridgePublisher(output, mapper)) {
+            publisher.publishCritical("beat", new BridgePayloads.Beat(1, "CDJ", 128, 1, true), origin);
+        }
+        JsonNode event = mapper.readTree(output.toString(StandardCharsets.UTF_8));
+        assertEquals("192.0.2.1", event.path("packetOrigin").path("address").asText());
+        assertEquals(1234L, event.path("packetOrigin").path("receivedAtNanos").asLong());
+        assertTrue(event.path("observedAtNanos").asLong() > 1234L);
+    }
+
+    @Test
     void nativeUsbMountStatesAreIndependentOfLoadedTrackAndTempo() {
         assertEquals("loaded", BeatLinkRuntime.usbMountState(true, false, false));
         assertEquals("unloading", BeatLinkRuntime.usbMountState(false, true, false));

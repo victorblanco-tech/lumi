@@ -577,6 +577,7 @@ mod tests {
 
     fn deck_status_message(sequence: u64, device_number: u8, beat_number: i64) -> BridgeMessage {
         BridgeMessage {
+            packet_origin: None,
             sequence,
             observed_at_nanos: sequence,
             traffic_class: crate::BridgeTrafficClass::Transport,
@@ -605,6 +606,7 @@ mod tests {
 
     fn beat_message(sequence: u64) -> BridgeMessage {
         BridgeMessage {
+            packet_origin: None,
             sequence,
             observed_at_nanos: sequence,
             traffic_class: crate::BridgeTrafficClass::Critical,

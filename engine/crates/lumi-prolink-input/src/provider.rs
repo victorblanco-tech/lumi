@@ -939,11 +939,14 @@ impl ProLinkDeckSourceProvider {
                     deck.last_status_observed_at_nanos = observed_at_nanos;
                     deck.pending_status_discontinuity = None;
                     deck.last_status_discontinuity =
-                        previous.last_status_discontinuity.filter(|candidate| {
-                            status_discontinuity_is_still_supported(
-                                *candidate,
+                        previous.last_status_discontinuity.and_then(|candidate| {
+                            advance_confirmed_status_landing(
+                                candidate,
+                                previous.last_status_beat,
+                                previous.last_status_observed_at_nanos,
                                 beat,
                                 observed_at_nanos,
+                                effective_bpm_milli,
                             )
                         });
                 }
@@ -1509,6 +1512,44 @@ fn status_discontinuity_is_still_supported(
             <= STATUS_DISCONTINUITY_MAX_AGE_NANOS
 }
 
+fn advance_confirmed_status_landing(
+    candidate: StatusDiscontinuity,
+    previous_beat: u32,
+    previous_observed_at_nanos: u64,
+    beat: u32,
+    observed_at_nanos: u64,
+    bpm_milli: u32,
+) -> Option<StatusDiscontinuity> {
+    // A confirmed landing may advance normally before the next exact beat
+    // arrives. Follow that progression, but keep the ORIGINAL expiry: delayed
+    // packets cannot extend a stale jump indefinitely or return to the old
+    // timeline under its authority.
+    if observed_at_nanos < previous_observed_at_nanos
+        || !status_discontinuity_is_still_supported(
+            candidate,
+            previous_beat,
+            previous_observed_at_nanos,
+        )
+        || observed_at_nanos.abs_diff(candidate.observed_at_nanos)
+            > STATUS_DISCONTINUITY_MAX_AGE_NANOS
+        || beat < previous_beat
+        || position_is_discontinuous(
+            previous_beat,
+            beat,
+            previous_observed_at_nanos,
+            observed_at_nanos,
+            bpm_milli,
+            true,
+        )
+    {
+        return None;
+    }
+    Some(StatusDiscontinuity {
+        absolute_beat: beat,
+        ..candidate
+    })
+}
+
 fn confirmed_status_discontinuity(
     pending: Option<PendingStatusDiscontinuity>,
     absolute_beat: u32,
@@ -1700,6 +1741,58 @@ mod timing_tests {
             70,
             1_100_000_000
         ));
+    }
+
+    #[test]
+    fn confirmed_landing_advances_without_extending_expiry_or_accepting_old_timeline() {
+        let jump = StatusDiscontinuity {
+            absolute_beat: 358,
+            observed_at_nanos: 1_000_000_000,
+        };
+        let advanced = super::advance_confirmed_status_landing(
+            jump,
+            358,
+            1_000_000_000,
+            360,
+            1_575_000_000,
+            155_000,
+        )
+        .unwrap_or_else(|| panic!("normal two-beat advance should retain confirmed jump"));
+        assert_eq!(advanced.absolute_beat, 360);
+        assert_eq!(advanced.observed_at_nanos, jump.observed_at_nanos);
+        assert!(
+            super::advance_confirmed_status_landing(
+                advanced,
+                360,
+                1_575_000_000,
+                616,
+                1_600_000_000,
+                155_000
+            )
+            .is_none()
+        );
+        assert!(
+            super::advance_confirmed_status_landing(
+                advanced,
+                360,
+                1_575_000_000,
+                359,
+                1_600_000_000,
+                155_000
+            )
+            .is_none()
+        );
+        assert!(
+            super::advance_confirmed_status_landing(
+                advanced,
+                360,
+                1_575_000_000,
+                362,
+                2_000_000_001,
+                155_000
+            )
+            .is_none()
+        );
     }
 
     #[test]

@@ -7,6 +7,7 @@ record BridgeEnvelope(
         long observedAtNanos,
         String trafficClass,
         long bridgeQueueAgeMicros,
+        PacketOrigin packetOrigin,
         String type,
         Object payload
 ) {

@@ -83,7 +83,7 @@ final class BeatLinkRuntime implements AutoCloseable {
                             beat.getEffectiveTempo(),
                             beat.getBeatWithinBar(),
                             beat.isTempoMaster()
-                    )
+                    ), PacketOrigin.from(beat)
             );
         });
         // Modern players such as the CDJ-1500X publish their exact transport
@@ -111,7 +111,7 @@ final class BeatLinkRuntime implements AutoCloseable {
                             position.getEffectiveTempo(),
                             beatWithinBar,
                             position.isTempoMaster()
-                    )
+                    ), PacketOrigin.from(position)
             );
         });
         DeviceFinder.getInstance().start();
@@ -231,13 +231,13 @@ final class BeatLinkRuntime implements AutoCloseable {
         TransportFingerprint fingerprint = TransportFingerprint.from(payload);
         TransportFingerprint previous = transportFingerprints.put(status.getDeviceNumber(), fingerprint);
         if (!fingerprint.equals(previous)) {
-            publisher.publishCritical("transportStatus", payload);
+            publisher.publishCritical("transportStatus", payload, PacketOrigin.from(status));
         } else {
             publisher.publishLatest(
                     BridgeTrafficClass.TRANSPORT,
                     status.getDeviceNumber(),
                     "deckStatus",
-                    payload
+                    payload, PacketOrigin.from(status)
             );
         }
         if (hasRealtimeTempo(status.getEffectiveTempo(), status.getBeatWithinBar())) {
@@ -252,7 +252,7 @@ final class BeatLinkRuntime implements AutoCloseable {
                             status.getBeatWithinBar(),
                             status.isTempoMaster(),
                             status.isPlaying()
-                    )
+                    ), PacketOrigin.from(status)
             );
         }
     }

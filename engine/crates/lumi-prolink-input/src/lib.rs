@@ -29,6 +29,7 @@ pub const PROTOCOL_VERSION: u16 = 1;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct BridgeMessage {
+    pub packet_origin: Option<PacketOrigin>,
     pub sequence: u64,
     pub observed_at_nanos: u64,
     pub traffic_class: BridgeTrafficClass,
@@ -36,6 +37,14 @@ pub struct BridgeMessage {
     /// Local receive-queue residence, measured on drain (not a wire field).
     pub ingress_queue_age_micros: u64,
     pub event: BridgeEvent,
+}
+
+/// Receive timestamp is the Java monotonic clock, not a device send clock.
+#[derive(Clone, Debug, Deserialize, serde::Serialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PacketOrigin {
+    pub address: std::net::IpAddr,
+    pub received_at_nanos: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
@@ -256,6 +265,7 @@ impl BridgeDecoder {
         }
         self.last_sequence = Some(envelope.sequence);
         Ok(BridgeMessage {
+            packet_origin: envelope.packet_origin,
             sequence: envelope.sequence,
             observed_at_nanos: envelope.observed_at_nanos,
             traffic_class: envelope.traffic_class,
@@ -274,6 +284,8 @@ impl BridgeDecoder {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct WireEnvelope {
+    #[serde(default)]
+    packet_origin: Option<PacketOrigin>,
     protocol: String,
     protocol_version: u16,
     sequence: u64,

@@ -13,6 +13,51 @@ const BEAT: &str = r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"seq
 const REPLACEMENT_AT_PRE_ROLL: &str = r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":4,"observedAtNanos":40,"type":"deckStatus","payload":{"deviceNumber":1,"deviceName":"LUMI-SIM","playing":false,"paused":true,"cued":false,"tempoMaster":true,"onAir":true,"sourcePlayer":1,"sourceSlot":"USB_SLOT","trackType":"REKORDBOX","rekordboxId":1247,"trackBpm":150.0,"effectiveBpm":150.0,"beatNumber":0,"beatWithinBar":0,"rawPitch":1048576}}"#;
 
 #[test]
+fn confirmed_loop_survives_missing_beat_until_next_bar() -> Result<(), Box<dyn std::error::Error>> {
+    // Dev-36 physical trace: loop moves back 256 beats; the bar-beat 4 packet
+    // is absent after three confirming statuses. Advancing statuses must not
+    // revoke the confirmed landing before bar-beat 1 arrives.
+    let trace = [
+        (0_u64, "status", 614_u32, 2_u8),
+        (219_000, "status", 359, 3),
+        (255_000, "beat", 0, 3),
+        (385_000, "status", 359, 3),
+        (505_000, "status", 359, 3),
+        (570_000, "status", 360, 4),
+        (765_000, "status", 360, 4),
+        (950_000, "status", 361, 1),
+        (1_080_000, "beat", 0, 1),
+    ];
+    let mut decoder = BridgeDecoder::new();
+    let mut provider = ProLinkDeckSourceProvider::new(MonotonicTime::new(0))?;
+    provider.ingest(decoder.decode_line(HELLO)?, MonotonicTime::new(0))?;
+    for (index, (micros, kind, number, bar)) in trace.into_iter().enumerate() {
+        let mut wire: serde_json::Value =
+            serde_json::from_str(if kind == "status" { STATUS } else { BEAT })?;
+        wire["sequence"] = serde_json::json!(index + 2);
+        wire["observedAtNanos"] = serde_json::json!(1_000_000_000 + micros * 1000);
+        wire["payload"]["effectiveBpm"] = serde_json::json!(155.0);
+        wire["payload"]["beatWithinBar"] = serde_json::json!(bar);
+        if kind == "status" {
+            wire["payload"]["beatNumber"] = serde_json::json!(number);
+        }
+        provider.ingest(
+            decoder.decode_line(&wire.to_string())?,
+            MonotonicTime::new(micros + 1),
+        )?;
+    }
+    let transport = provider
+        .transport(lumi_domain::TrackLoadId::new(1))
+        .ok_or("transport missing")?;
+    assert_eq!(
+        transport.beat, 360,
+        "must follow new CDJ timeline, not old beat 616"
+    );
+    assert_eq!(provider.diagnostics().position_discontinuity_count, 1);
+    Ok(())
+}
+
+#[test]
 fn hardware_receive_gap_and_reordered_beat_do_not_create_a_seek()
 -> Result<(), Box<dyn std::error::Error>> {
     // Reduced, anonymous replay of the actual Dev-33 hardware trace. After a

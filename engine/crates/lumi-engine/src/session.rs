@@ -3786,7 +3786,7 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
             _ => None,
         };
         if let Some(input) = input {
-            runtime.output_worker.timing_diagnostics.record(json!({"stage":"ingress", "bridgeObservedNanos":message.observed_at_nanos,"bridgeSequence":message.sequence,"bridgeQueueAgeMicros":message.bridge_queue_age_micros,"ingressQueueAgeMicros":message.ingress_queue_age_micros,"input":input}));
+            runtime.output_worker.timing_diagnostics.record(json!({"stage":"ingress", "packetOrigin":message.packet_origin,"bridgeObservedNanos":message.observed_at_nanos,"bridgeSequence":message.sequence,"bridgeQueueAgeMicros":message.bridge_queue_age_micros,"ingressQueueAgeMicros":message.ingress_queue_age_micros,"input":input}));
         }
         runtime
             .media_resolver
