@@ -431,13 +431,14 @@ impl BridgeProcessSupervisor {
             return Err(BridgeSupervisorError::Read(message));
         }
         let mut messages: Vec<_> = output.messages.drain(..).collect();
-        for message in &messages {
+        for message in &mut messages {
             let supervisor_age = output
                 .received_at
                 .remove(&message.sequence)
                 .map_or(0, |received| {
                     u64::try_from(received.elapsed().as_micros()).unwrap_or(u64::MAX)
                 });
+            message.ingress_queue_age_micros = supervisor_age;
             output.source_age.record(
                 message
                     .bridge_queue_age_micros
@@ -580,6 +581,7 @@ mod tests {
             observed_at_nanos: sequence,
             traffic_class: crate::BridgeTrafficClass::Transport,
             bridge_queue_age_micros: 0,
+            ingress_queue_age_micros: 0,
             event: BridgeEvent::DeckStatus(crate::DeckStatus {
                 device_number,
                 device_name: format!("Player {device_number}"),
@@ -607,6 +609,7 @@ mod tests {
             observed_at_nanos: sequence,
             traffic_class: crate::BridgeTrafficClass::Critical,
             bridge_queue_age_micros: 0,
+            ingress_queue_age_micros: 0,
             event: BridgeEvent::Beat(crate::Beat {
                 device_number: 1,
                 device_name: "Player 1".to_owned(),

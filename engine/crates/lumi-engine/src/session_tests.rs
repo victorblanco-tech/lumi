@@ -1841,6 +1841,15 @@ fn started_live_phrases_are_locked_but_future_phrases_remain_editable() {
 
 #[test]
 fn future_live_theme_change_materializes_the_selected_bank_per_phrase() {
+    assert_future_live_theme_change(false);
+}
+
+#[test]
+fn theme_change_repairs_missing_mapping_without_touching_prefix() {
+    assert_future_live_theme_change(true);
+}
+
+fn assert_future_live_theme_change(with_missing_mapping: bool) {
     let mut runtime =
         initialized_runtime_for_mode(ManualClock::new(0), DeckSourceMode::LocalPlayback)
             .unwrap_or_else(|error| panic!("test engine must initialize: {error}"));
@@ -1852,13 +1861,32 @@ fn future_live_theme_change_materializes_the_selected_bank_per_phrase() {
             expected_state_revision,
         }
     });
-    let active = runtime
+    let mut active = runtime
         .state
         .state()
         .active_plan()
         .cloned()
         .unwrap_or_else(|| panic!("initial leader must have an active plan"));
     assert!(active.cues().len() > 1, "fixture needs a future phrase");
+    if with_missing_mapping {
+        let mut cues = active.cues().to_vec();
+        cues[1] = cues[1].hold_for_missing_autoloop_mapping();
+        active = active
+            .revised(cues)
+            .unwrap_or_else(|e| panic!("held plan: {e}"));
+        runtime
+            .planning_worker
+            .accept_revised_plan(&mut runtime.state, active.clone())
+            .unwrap_or_else(|e| panic!("accept held plan: {e}"));
+        assert!(
+            runtime
+                .planning_worker
+                .planner
+                .select_theme_from_phrase(&active, 1, ThemeId::new(4))
+                .is_err(),
+            "old direct mutation must reproduce the bug"
+        );
+    }
     let current_theme = active
         .theme_decision()
         .map(|decision| decision.theme_id())

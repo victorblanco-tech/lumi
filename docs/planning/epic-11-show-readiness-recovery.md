@@ -104,6 +104,21 @@ sampling cadence of desktop screenshots.
 
 ### Current acceptance boundary (2026-10-10)
 
+Dev-32 hardware retest: owner again reports BD Start very late, with BD Chorus
+better afterwards. Hardware timing acceptance has FAILED despite simulator
+dispatch assertions. Read-only observation confirms Dev-32, offset 0 ms,
+real CDJ-1500X Players, CHRM local/LINK recognition and SW Link 155 BPM.
+At inspection the owner had returned to Off/paused; this is not evidence of
+the state at the failed transition. SW currently selected GREEN PINK, whereas
+the earlier UI test used BLUE RED GREEN. Do not infer causation from that.
+The UI also displayed “a fallback plan cannot be edited”; its relation to the
+late trigger is unproven. Critical diagnostic gap: bounded timing history is
+available only via the exclusive desktop command connection; it cannot safely
+be retrieved alongside the running UI. The service's stdout/stderr are null.
+Do not disconnect the user's desktop session to retrieve history mid-test.
+Add a non-interrupting bounded diagnostic export before claiming the precise
+hardware-transition cause or complete end-to-end latency acceptance.
+
 The dated entries below are a chronological evidence ledger, not simultaneous
 current failures. In particular, the Dev-30 USB read failure recorded before
 the owner's permission grant is superseded by the successful installed UI

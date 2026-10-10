@@ -33,6 +33,8 @@ pub struct BridgeMessage {
     pub observed_at_nanos: u64,
     pub traffic_class: BridgeTrafficClass,
     pub bridge_queue_age_micros: u64,
+    /// Local receive-queue residence, measured on drain (not a wire field).
+    pub ingress_queue_age_micros: u64,
     pub event: BridgeEvent,
 }
 
@@ -258,6 +260,7 @@ impl BridgeDecoder {
             observed_at_nanos: envelope.observed_at_nanos,
             traffic_class: envelope.traffic_class,
             bridge_queue_age_micros: envelope.bridge_queue_age_micros,
+            ingress_queue_age_micros: 0,
             event,
         })
     }

@@ -132,6 +132,13 @@ pub async fn run() -> Result<(), EngineError> {
     let exit_after_client_disconnect =
         env::var(EXIT_AFTER_CLIENT_DISCONNECT_ENVIRONMENT_KEY).as_deref() == Ok("1");
     let mut runtime = initialized_product_runtime()?;
+    if let Some(parent) = service.record_path.as_ref().and_then(|path| path.parent()) {
+        runtime.output_worker.timing_diagnostics =
+            crate::timing_diagnostics::TimingDiagnostics::start(
+                parent.join("timing-diagnostics.json"),
+            )
+            .unwrap_or_default();
+    }
 
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
     let endpoint = listener.local_addr()?;
@@ -1572,6 +1579,38 @@ impl PlanningWorker {
         event: DomainEvent,
         leader_deck_id: Option<lumi_domain::DeckId>,
     ) -> Result<(), EngineError> {
+        let diagnostic_observation = match &event {
+            DomainEvent::Observation(e) => match &e.observation {
+                DeckObservation::PlaybackPosition {
+                    deck_id,
+                    track_load_id,
+                    beat,
+                }
+                | DeckObservation::PlaybackPositionSeeked {
+                    deck_id,
+                    track_load_id,
+                    beat,
+                } => Some(
+                    json!({"deck":deck_id.value(),"load":track_load_id.value(),"beat":beat,"kind":"position"}),
+                ),
+                DeckObservation::PlaybackStateChanged {
+                    deck_id,
+                    track_load_id,
+                    playing,
+                } => Some(
+                    json!({"deck":deck_id.value(),"load":track_load_id.value(),"playing":playing,"kind":"playback"}),
+                ),
+                DeckObservation::PhraseChanged {
+                    deck_id,
+                    track_load_id,
+                    phrase_index,
+                } => Some(
+                    json!({"deck":deck_id.value(),"load":track_load_id.value(),"phrase":phrase_index,"kind":"phrase"}),
+                ),
+                _ => None,
+            },
+            _ => None,
+        };
         let replaced_reservation = match &event {
             DomainEvent::Observation(lumi_domain::ObservationEnvelope {
                 observation:
@@ -1658,6 +1697,13 @@ impl PlanningWorker {
             output_worker.activate_pending_timing_offset();
         }
         process_domain_event(runtime, output_worker, event)?;
+        if let Some(observation) = diagnostic_observation {
+            let plan = runtime.state().active_plan();
+            output_worker.timing_diagnostics.record(json!({"stage":"reduced", "observation":observation,
+                "operation":format!("{:?}", runtime.state().operation()),
+                "planRevision":plan.map(|p|p.revision().value()),"planStatus":plan.map(|p|format!("{:?}",p.status())),
+                "launch":format!("{:?}",output_worker.launch_gate.state())}));
+        }
         if let Some(track_load_id) = replaced_reservation {
             let reservation_id = format!("track-load:{}", track_load_id.value());
             self.variation_history.release(&reservation_id);
@@ -1729,6 +1775,9 @@ impl PlanningWorker {
                 self.planner.generate_with_context(&input, &context)?
             };
             let plan = self.materialize_library_plan(generated)?;
+            output_worker
+                .timing_diagnostics
+                .record(plan_diagnostic(&plan, "planPrepared"));
             output_worker.synchronize_static_look_plan(
                 plan.track_load_id(),
                 self.compiled_light_plans.get(&plan.track_load_id()),
@@ -2066,6 +2115,8 @@ const fn track_color_from_rgb(rgb: u32) -> TrackColor {
 }
 
 struct OutputWorker {
+    timing_diagnostics: crate::timing_diagnostics::TimingDiagnostics,
+    last_diagnostic_dispatch: Option<Instant>,
     launch_policy: LaunchPolicy,
     launch_gate: LaunchGate,
     provider: DryRunLightingOutputProvider,
@@ -2161,6 +2212,8 @@ struct AutoloopScheduleRecord {
 impl OutputWorker {
     fn new() -> Self {
         Self {
+            timing_diagnostics: crate::timing_diagnostics::TimingDiagnostics::default(),
+            last_diagnostic_dispatch: None,
             launch_policy: LaunchPolicy::default(),
             launch_gate: LaunchGate::default(),
             provider: DryRunLightingOutputProvider::default(),
@@ -2314,6 +2367,21 @@ impl OutputWorker {
     }
 
     fn service_pending_autoloop(&mut self) {
+        let status = self.midi_output.status();
+        for record in status.recent_dispatches.iter().filter(|record| {
+            self.last_diagnostic_dispatch
+                .is_none_or(|last| record.completed_at > last)
+        }) {
+            self.timing_diagnostics.record(json!({"stage":"midiDispatch", "generation":record.generation,
+                "action":format!("{:?}", record.action),"number":record.number,
+                "completedAgeMicros":record.completed_at.elapsed().as_micros() as u64,
+                "lateMicros":record.started_at.saturating_duration_since(record.deadline).as_micros() as u64,
+                "providerMicros":record.completed_at.saturating_duration_since(record.started_at).as_micros() as u64,
+                "succeeded":record.succeeded}));
+        }
+        if let Some(record) = status.recent_dispatches.back() {
+            self.last_diagnostic_dispatch = Some(record.completed_at);
+        }
         self.autoloop_executor
             .complete_if_emitted(self.midi_output.status().emitted_count);
         if let AutoloopExecutorState::Completed { identity, .. } = self.autoloop_executor.state() {
@@ -2645,6 +2713,12 @@ impl OutputWorker {
     }
 
     fn record_autoloop_schedule(&mut self, record: AutoloopScheduleRecord) {
+        self.timing_diagnostics.record(json!({"stage":"schedule", "generation":record.generation,
+            "deck":record.identity.deck_id.value(),"load":record.identity.track_load_id.value(),
+            "planRevision":record.identity.plan_revision.value(),"epoch":record.identity.execution_epoch,
+            "phrase":record.identity.phrase_index,"observedBeat":record.observed_beat,
+            "bank":record.target.bank_number,"autoloop":record.target.autoloop_number,
+            "offsetMillis":record.offset_millis,"leadMicros":record.deadline.saturating_duration_since(record.scheduled_at).as_micros() as u64}));
         if self.recent_autoloop_schedules.len() == 128 {
             self.recent_autoloop_schedules.pop_front();
         }
@@ -3651,6 +3725,21 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
 
     let at = runtime.clock.now();
     for message in messages {
+        let input = match &message.event {
+            lumi_prolink_input::BridgeEvent::Beat(v) => Some(
+                json!({"kind":"beat", "deck":v.device_number,"barBeat":v.beat_within_bar,"bpm":v.effective_bpm,"master":v.tempo_master}),
+            ),
+            lumi_prolink_input::BridgeEvent::DeckStatus(v) => Some(
+                json!({"kind":"status", "deck":v.device_number,"beat":v.beat_number,"barBeat":v.beat_within_bar,"bpm":v.effective_bpm,"playing":v.playing,"master":v.tempo_master,"rekordboxId":v.rekordbox_id,"sourcePlayer":v.source_player}),
+            ),
+            lumi_prolink_input::BridgeEvent::PrecisePosition(v) => Some(
+                json!({"kind":"precise", "deck":v.device_number,"positionMillis":v.playback_position_millis,"barBeat":v.beat_within_bar}),
+            ),
+            _ => None,
+        };
+        if let Some(input) = input {
+            runtime.output_worker.timing_diagnostics.record(json!({"stage":"ingress", "bridgeObservedNanos":message.observed_at_nanos,"bridgeSequence":message.sequence,"bridgeQueueAgeMicros":message.bridge_queue_age_micros,"ingressQueueAgeMicros":message.ingress_queue_age_micros,"input":input}));
+        }
         runtime
             .media_resolver
             .observe(&message.event, Instant::now());
@@ -4506,10 +4595,10 @@ fn apply_command(
         | SessionCommand::AdvanceToNextTrack { .. }
         | SessionCommand::ResetDemoSession { .. } => return Ok(()),
         SessionCommand::SelectTheme { theme_id, .. } => (
-            runtime
-                .planning_worker
-                .planner
-                .select_theme(&current, theme_id)?,
+            runtime.planning_worker.planner.select_theme(
+                &theme_edit_base(&runtime.planning_worker, &current, &input, 0)?,
+                theme_id,
+            )?,
             PlanMaterializationScope::All,
             false,
             false,
@@ -4522,7 +4611,7 @@ fn apply_command(
             reject_started_live_phrase(runtime.state.state(), current.deck_id(), phrase_index)?;
             (
                 runtime.planning_worker.planner.select_theme_from_phrase(
-                    &current,
+                    &theme_edit_base(&runtime.planning_worker, &current, &input, phrase_index)?,
                     phrase_index,
                     theme_id,
                 )?,
@@ -4655,6 +4744,10 @@ fn apply_command(
         materialized.plan
     };
     let track_load_id = revised.track_load_id();
+    runtime
+        .output_worker
+        .timing_diagnostics
+        .record(plan_diagnostic(&revised, "planEdited"));
     let (candidate_state, effect_sequence) = runtime
         .planning_worker
         .prepare_revised_state(&runtime.state, revised)
@@ -4686,6 +4779,53 @@ fn apply_command(
             .get(&track_load_id),
     );
     Ok(())
+}
+
+fn plan_diagnostic(plan: &LightingPlan, stage: &str) -> Value {
+    json!({"stage":stage,"deck":plan.deck_id().value(),"load":plan.track_load_id().value(),
+        "planRevision":plan.revision().value(),"status":format!("{:?}",plan.status()),
+        "cues":plan.cues().iter().map(|cue|json!({"phrase":cue.phrase_index(),"startBeat":cue.start_beat(),"endBeat":cue.end_beat(),"reason":format!("{:?}",cue.reason()),"target":automatic_midi_target(cue.action()).ok().flatten()})).collect::<Vec<_>>()})
+}
+
+// Missing *output mappings* do not erase the prepared phrase semantics. Restore
+// only those semantic cues in the edited suffix, then let normal materialization
+// validate the selected Theme. Actual missing analysis remains non-editable.
+fn theme_edit_base(
+    worker: &PlanningWorker,
+    current: &LightingPlan,
+    input: &PlanningInput,
+    from: u16,
+) -> Result<LightingPlan, PlanMutationError> {
+    if worker.library_context(current.track_load_id()).is_none()
+        || !current.cues().iter().any(|cue| {
+            cue.phrase_index() >= from && cue.reason() == CueReason::MissingAutoloopMapping
+        })
+    {
+        return Ok(current.clone());
+    }
+    let generated = worker.planner.generate(input)?;
+    let cues = current
+        .cues()
+        .iter()
+        .map(|cue| {
+            if cue.phrase_index() < from || cue.reason() != CueReason::MissingAutoloopMapping {
+                return Ok(cue.clone());
+            }
+            let restored = generated
+                .cues()
+                .get(usize::from(cue.phrase_index()))
+                .filter(|candidate| {
+                    candidate.start_beat() == cue.start_beat()
+                        && candidate.end_beat() == cue.end_beat()
+                        && matches!(candidate.action(), SemanticLightingAction::ApplyLook(_))
+                })
+                .ok_or(PlanMutationError::FallbackPlanNotEditable)?;
+            Ok(restored.clone())
+        })
+        .collect::<Result<Vec<_>, PlanMutationError>>()?;
+    current
+        .with_materialized_cues(cues)
+        .map_err(PlanMutationError::InvalidPlan)
 }
 
 fn validate_state_revision(
@@ -4750,6 +4890,9 @@ fn apply_operation_command(
         .operation_sequence
         .checked_add(1)
         .ok_or(CommandApplicationError::OperationSequenceOverflow)?;
+    runtime.output_worker.timing_diagnostics.record(
+        json!({"stage":"operation", "from":format!("{from:?}"), "command":format!("{command:?}")}),
+    );
     match command {
         OperationCommand::Arm | OperationCommand::Off => runtime.output_worker.launch_gate.arm(),
         OperationCommand::Pause => runtime.output_worker.launch_gate.cancel_pending(),
