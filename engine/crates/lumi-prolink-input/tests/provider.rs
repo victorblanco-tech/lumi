@@ -13,6 +13,61 @@ const BEAT: &str = r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"seq
 const REPLACEMENT_AT_PRE_ROLL: &str = r#"{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":4,"observedAtNanos":40,"type":"deckStatus","payload":{"deviceNumber":1,"deviceName":"LUMI-SIM","playing":false,"paused":true,"cued":false,"tempoMaster":true,"onAir":true,"sourcePlayer":1,"sourceSlot":"USB_SLOT","trackType":"REKORDBOX","rekordboxId":1247,"trackBpm":150.0,"effectiveBpm":150.0,"beatNumber":0,"beatWithinBar":0,"rawPitch":1048576}}"#;
 
 #[test]
+fn reordered_bar_beats_cannot_promote_a_recent_status_into_the_next_bar()
+-> Result<(), Box<dyn std::error::Error>> {
+    let trace = [
+        (0_u64, "status", 101_u32, 1_u8),
+        (387_000, "beat", 0, 2),
+        (397_000, "status", 102, 2),
+        (774_000, "beat", 0, 3),
+        (784_000, "status", 103, 3),
+        // Delayed old packets cannot be interpreted as the following bar.
+        (800_000, "beat", 0, 1),
+        (810_000, "beat", 0, 2),
+        (820_000, "beat", 0, 3),
+        (1_161_000, "beat", 0, 4),
+        (1_171_000, "status", 104, 4),
+        (1_548_000, "beat", 0, 1),
+    ];
+    let mut decoder = BridgeDecoder::new();
+    let mut provider = ProLinkDeckSourceProvider::new(MonotonicTime::new(0))?;
+    provider.ingest(decoder.decode_line(HELLO)?, MonotonicTime::new(0))?;
+    for (index, (micros, kind, number, bar)) in trace.into_iter().enumerate() {
+        let mut wire: serde_json::Value =
+            serde_json::from_str(if kind == "status" { STATUS } else { BEAT })?;
+        wire["sequence"] = serde_json::json!(index + 2);
+        wire["observedAtNanos"] = serde_json::json!(1_000_000_000 + micros * 1000);
+        wire["payload"]["effectiveBpm"] = serde_json::json!(155.0);
+        wire["payload"]["beatWithinBar"] = serde_json::json!(bar);
+        if kind == "status" {
+            wire["payload"]["beatNumber"] = serde_json::json!(number);
+        }
+        provider.ingest(
+            decoder.decode_line(&wire.to_string())?,
+            MonotonicTime::new(micros + 1),
+        )?;
+        let transport = provider
+            .transport(lumi_domain::TrackLoadId::new(1))
+            .ok_or("missing transport")?;
+        let maximum = 100 + ((micros + 1_000) as f64 / (60_000_000.0 / 155.0)).floor() as u32;
+        assert!(
+            transport.beat <= maximum,
+            "at {micros}: {} ahead of {maximum}",
+            transport.beat
+        );
+    }
+    assert_eq!(
+        provider
+            .transport(lumi_domain::TrackLoadId::new(1))
+            .ok_or("missing")?
+            .beat,
+        104
+    );
+    assert_eq!(provider.diagnostics().position_discontinuity_count, 0);
+    Ok(())
+}
+
+#[test]
 fn confirmed_loop_survives_missing_beat_until_next_bar() -> Result<(), Box<dyn std::error::Error>> {
     // Dev-36 physical trace: loop moves back 256 beats; the bar-beat 4 packet
     // is absent after three confirming statuses. Advancing statuses must not
@@ -125,7 +180,12 @@ fn exact_beat_authority_recovers_without_precise_packets_and_is_load_scoped()
     std::thread::sleep(std::time::Duration::from_millis(850));
     assert!(!provider.diagnostics().position_authority_ready);
     provider.ingest(
-        decoder.decode_line(&BEAT.replace("\"sequence\":4", "\"sequence\":5"))?,
+        decoder.decode_line(
+            &BEAT
+                .replace("\"sequence\":4", "\"sequence\":5")
+                .replace("40000000", "900000000")
+                .replace("\"beatWithinBar\":2", "\"beatWithinBar\":3"),
+        )?,
         MonotonicTime::new(5),
     )?;
     assert!(provider.diagnostics().position_authority_ready);
@@ -783,7 +843,7 @@ fn sparse_status_progress_does_not_turn_the_next_exact_beat_into_a_seek() {
         let beat = decoder
             .decode_line(&format!(
                 r#"{{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":{sequence},"observedAtNanos":{},"type":"beat","payload":{{"deviceNumber":1,"deviceName":"CDJ-1500X","effectiveBpm":155.0,"beatWithinBar":{beat_within_bar},"tempoMaster":true}}}}"#,
-                sequence * 10_000_000
+                30_000_000 + u64::from(absolute_beat - 64) * 387_096_774
             ))
             .unwrap_or_else(|error| panic!("beat should decode: {error}"));
         provider
@@ -805,7 +865,7 @@ fn sparse_status_progress_does_not_turn_the_next_exact_beat_into_a_seek() {
         let status = decoder
             .decode_line(&format!(
                 r#"{{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":{sequence},"observedAtNanos":{},"type":"deckStatus","payload":{{"deviceNumber":1,"deviceName":"CDJ-1500X","playing":true,"paused":false,"cued":false,"tempoMaster":true,"onAir":true,"sourcePlayer":1,"sourceSlot":"USB_SLOT","trackType":"REKORDBOX","rekordboxId":1256,"trackBpm":155.0,"effectiveBpm":155.0,"beatNumber":129,"beatWithinBar":1,"rawPitch":1048576}}}}"#,
-                sequence * 10_000_000
+                24_610_000_000 + (sequence - 66) * 10_000_000
             ))
             .unwrap_or_else(|error| panic!("sparse status should decode: {error}"));
         provider
@@ -816,7 +876,7 @@ fn sparse_status_progress_does_not_turn_the_next_exact_beat_into_a_seek() {
     let next_beat = decoder
         .decode_line(&format!(
             r#"{{"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":{sequence},"observedAtNanos":{},"type":"beat","payload":{{"deviceNumber":1,"deviceName":"CDJ-1500X","effectiveBpm":155.0,"beatWithinBar":4,"tempoMaster":true}}}}"#,
-            sequence * 10_000_000
+            24_650_000_000_u64
         ))
         .unwrap_or_else(|error| panic!("next beat should decode: {error}"));
     provider

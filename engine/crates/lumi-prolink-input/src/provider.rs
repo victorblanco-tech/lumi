@@ -1077,6 +1077,15 @@ impl ProLinkDeckSourceProvider {
         });
         let absolute_beat = if let Some(candidate) = status_seek {
             align_beat_within_bar(candidate.absolute_beat, beat.beat_within_bar)
+        } else if observed_at_nanos.saturating_sub(previous.last_status_observed_at_nanos)
+            < 60_000_000_000_000_u64 / u64::from(previous.effective_bpm_milli.max(1))
+        {
+            // A recent absolute status disambiguates the bar. Using our own
+            // previous beat + 1 as a lower bound can promote a delayed beat
+            // from this bar into the next, then accumulate a permanent lead.
+            // Within one beat, choose the nearest status-relative boundary;
+            // the rejection below discards old boundaries without rewinding.
+            align_beat_within_bar(previous.last_status_beat, beat.beat_within_bar)
         } else {
             precise_absolute_beat(
                 previous.last_status_beat,
@@ -1097,7 +1106,11 @@ impl ProLinkDeckSourceProvider {
         // genuine backward jump must first pass the independent status/Hot
         // Cue discontinuity path. Do not refresh anchors or publish timing
         // observations for a rejected stale beat either.
-        if !seeked && absolute_beat < previous.beat {
+        if !seeked
+            && (absolute_beat < previous.beat
+                || (absolute_beat == previous.beat
+                    && previous.last_exact_beat_received_at.is_some()))
+        {
             return Ok(());
         }
         if seeked {
