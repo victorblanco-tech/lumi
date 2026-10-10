@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.6.5-dev-1 — in development
 
 - Save a whole-track Theme from Track Editor, independent of automatic color
   selection. Save a phrase AutoLoop from that Theme with a direct picker showing

@@ -11,3 +11,10 @@ continue already-authorized work. Pause when the user requests it, or when a
 real blocker requires their decision or permission. Never bypass permissions
 or expand the task's authority to avoid a pause. Report unverified scenarios
 honestly; do not call a build or automated test full UI acceptance.
+
+After a public release, new fixes belong to a new development version and the
+Dev application channel. Do not install development changes over the user's
+production app or reuse its public release version. Keep main and published
+release assets unchanged until the user explicitly requests the next release.
+Never restart or replace the user's running app while they are using it without
+their approval.
