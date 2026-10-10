@@ -141,7 +141,7 @@ fn schema19_migration_backfills_complete_fingerprints_without_changing_tracks()
         .connection
         .execute_batch("DROP TABLE track_audio_fingerprints; PRAGMA user_version = 19;")?;
     repository.migrate()?;
-    assert_eq!(repository.schema_version()?, 21);
+    assert_eq!(repository.schema_version()?, 22);
     assert_eq!(
         repository.page_tracks(TrackPageRequest::try_new(0, 25)?)?,
         before

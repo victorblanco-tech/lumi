@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+- Save a whole-track Theme from Track Editor, independent of automatic color
+  selection. Save a phrase AutoLoop from that Theme with a direct picker showing
+  actual mapping names and button numbers. Preferences survive reopening;
+  protected tracks and stale writes remain guarded. SQLite schema 22 stores the
+  separate Track Theme revision; retain the pre-upgrade database backup for rollback.
+
 - Fix AutoLoop creation being rejected with `DuplicateEntryId` after a button
   layout migration. New mappings receive an unused internal ID; editing an
   existing mapping preserves its identity and does not alter other buttons.

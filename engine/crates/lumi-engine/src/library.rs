@@ -216,6 +216,8 @@ pub struct LibraryPlanContext {
     source_track_id: String,
     analysis_revision: String,
     timeline_revision: u64,
+    track_theme_override: Option<ThemeId>,
+    track_theme_revision: u64,
     audio_uri: String,
     duration_millis: u64,
     beat_grid: lumi_library::BeatGrid,
@@ -276,6 +278,7 @@ impl LibraryPlanContext {
     pub(crate) fn has_same_prepared_revision(&self, other: &Self) -> bool {
         self.analysis_revision == other.analysis_revision
             && self.timeline_revision == other.timeline_revision
+            && self.track_theme_revision == other.track_theme_revision
             && self.catalog_revision() == other.catalog_revision()
     }
     #[must_use]
@@ -295,6 +298,21 @@ impl LibraryPlanContext {
     #[must_use]
     pub const fn catalog_revision(&self) -> u64 {
         self.catalog.revision()
+    }
+
+    pub(crate) fn theme_selection_policy(
+        &self,
+        policy: &LightPlanningPolicy,
+    ) -> LightPlanningPolicy {
+        let mut selection = policy.clone();
+        if let Some(theme) = self.track_theme_override {
+            for rule in &mut selection.theme_rules {
+                if rule.theme_id == theme.value() {
+                    rule.color_behavior = lumi_light_plans::ColorBehavior::Neutral;
+                }
+            }
+        }
+        selection
     }
 
     /// Returns every Theme that can safely start the track. Policy filtering
@@ -352,6 +370,15 @@ impl LibraryPlanContext {
         &self,
         policy: &LightPlanningPolicy,
     ) -> Vec<(ThemeId, String)> {
+        // An explicit saved choice outranks automatic color/cooldown rules,
+        // but still requires an executable opening phrase.
+        if let Some(selected) = self.track_theme_override {
+            return self
+                .startable_themes()
+                .into_iter()
+                .filter(|(id, _)| *id == selected)
+                .collect();
+        }
         let eligible = crate::session::policy_eligible_executable_themes(
             self.startable_themes(),
             self.track_color_rgb(),
@@ -1099,7 +1126,7 @@ impl LibraryWorker {
             let planner = crate::session::planner_for_executable_themes(
                 context.catalog_revision(),
                 themes,
-                policy,
+                &context.theme_selection_policy(policy),
             )
             .map_err(|error| LibraryWorkerError::Configuration(error.to_string()))?
             .ok_or_else(|| {
@@ -2517,6 +2544,8 @@ impl LibraryWorker {
             phrases,
         )?
         .with_identity_facts(identity);
+        let (track_theme_override, track_theme_revision) =
+            self.repository.track_theme_override(track_id)?;
         let context = LibraryPlanContext {
             provider_kind: self.source_kind.clone(),
             source_id: self.source_id.clone(),
@@ -2524,6 +2553,8 @@ impl LibraryWorker {
             source_track_id: track.summary().source_track_id().as_str().to_owned(),
             analysis_revision: track.summary().source_revision().as_str().to_owned(),
             timeline_revision: timeline.revision().value(),
+            track_theme_override,
+            track_theme_revision,
             // Live Players supply transport/audio themselves. Never touch a
             // potentially unavailable removable filesystem in this reader.
             audio_uri: if resolve_local_audio {
@@ -2638,6 +2669,30 @@ impl LibraryWorker {
         // No fallible hydration/planning may follow this durable commit.
         self.repository
             .append_timeline_revision(&prepared.timeline, Some(prepared.expected_revision))?;
+        Ok(())
+    }
+
+    pub fn set_track_theme_override(
+        &mut self,
+        track_id: u64,
+        theme: Option<ThemeId>,
+        expected_revision: u64,
+    ) -> Result<(), LibraryWorkerError> {
+        let track_id = TrackId::new(track_id);
+        self.require_open_track(track_id)?;
+        self.require_phrases_unlocked(track_id)?;
+        if let Some(theme) = theme
+            && !self
+                .repository
+                .autoloop_catalog()?
+                .themes()
+                .iter()
+                .any(|value| value.id() == theme)
+        {
+            return Err(AutoloopCatalogError::UnknownTheme.into());
+        }
+        self.repository
+            .set_track_theme_override(track_id, theme, expected_revision)?;
         Ok(())
     }
 
@@ -3916,7 +3971,10 @@ impl LibraryWorker {
             .timeline_revisions(track_id, TrackPageRequest::try_new(0, 200)?)?;
         let audio_uri = self.resolved_audio_uri(&track)?;
         let creative_reuse_candidates = self.repository.creative_timeline_candidates(track_id)?;
+        let (track_theme, track_theme_revision) = self.repository.track_theme_override(track_id)?;
         Ok(json!({
+            "trackThemeId": track_theme.map(ThemeId::value),
+            "trackThemeRevision": track_theme_revision,
             "track": track_json_with_device_sources(
                 track.summary(),
                 &[],

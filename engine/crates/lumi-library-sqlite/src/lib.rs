@@ -32,7 +32,7 @@ use rusqlite::{
 };
 use thiserror::Error;
 
-const SCHEMA_VERSION: u32 = 21;
+const SCHEMA_VERSION: u32 = 22;
 mod network_media;
 pub use network_media::{DeviceInvalidAnalysisTrack, TrustedUsbMedia, UsbMediaTrust};
 const DEFAULTS_VERSION_KEY: &str = "phrase-role-defaults-version";
@@ -3888,6 +3888,69 @@ impl SqliteLibraryRepository {
                 self.connection.execute_batch("PRAGMA user_version = 21;")?;
             }
         }
+        if current <= 21 {
+            self.connection.execute_batch(
+                "BEGIN IMMEDIATE;
+                 CREATE TABLE IF NOT EXISTS track_lighting_preferences (
+                    track_id INTEGER PRIMARY KEY REFERENCES tracks(id) ON DELETE CASCADE,
+                    theme_id INTEGER CHECK(theme_id > 0),
+                    revision INTEGER NOT NULL CHECK(revision > 0)
+                 );
+                 PRAGMA user_version = 22;
+                 COMMIT;",
+            )?;
+        }
+        Ok(())
+    }
+
+    pub fn track_theme_override(
+        &self,
+        track_id: TrackId,
+    ) -> Result<(Option<ThemeId>, u64), SqliteLibraryError> {
+        let row: Option<(Option<i64>, i64)> = self
+            .connection
+            .query_row(
+                "SELECT theme_id, revision FROM track_lighting_preferences WHERE track_id = ?1",
+                [to_i64(track_id.value())?],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()?;
+        match row {
+            None => Ok((None, 0)),
+            Some((theme, revision)) => Ok((
+                theme
+                    .map(|id| from_positive_i64(id, "track theme").map(ThemeId::new))
+                    .transpose()?,
+                from_positive_i64(revision, "track theme revision")?,
+            )),
+        }
+    }
+
+    pub fn set_track_theme_override(
+        &mut self,
+        track_id: TrackId,
+        theme: Option<ThemeId>,
+        expected_revision: u64,
+    ) -> Result<(), SqliteLibraryError> {
+        let revision = expected_revision
+            .checked_add(1)
+            .ok_or(SqliteLibraryError::TrackThemeRevisionConflict)?;
+        let transaction = self
+            .connection
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)?;
+        let current: Option<i64> = transaction
+            .query_row(
+                "SELECT revision FROM track_lighting_preferences WHERE track_id = ?1",
+                [to_i64(track_id.value())?],
+                |row| row.get(0),
+            )
+            .optional()?;
+        if current.unwrap_or(0) != to_i64(expected_revision)? {
+            return Err(SqliteLibraryError::TrackThemeRevisionConflict);
+        }
+        transaction.execute("INSERT INTO track_lighting_preferences(track_id, theme_id, revision) VALUES (?1, ?2, ?3) ON CONFLICT(track_id) DO UPDATE SET theme_id=excluded.theme_id, revision=excluded.revision",
+            params![to_i64(track_id.value())?, theme.map(|id| to_i64(id.value())).transpose()?, to_i64(revision)?])?;
+        transaction.commit()?;
         Ok(())
     }
 
@@ -6430,6 +6493,8 @@ fn validate_backup_connection(connection: &Connection) -> Result<(), SqliteLibra
 
 #[derive(Debug, Error)]
 pub enum SqliteLibraryError {
+    #[error("Track lighting choices changed elsewhere; reload the track and try again")]
+    TrackThemeRevisionConflict,
     #[error("SQLite library error: {0}")]
     Sqlite(#[from] rusqlite::Error),
     #[error("invalid persisted JSON: {0}")]

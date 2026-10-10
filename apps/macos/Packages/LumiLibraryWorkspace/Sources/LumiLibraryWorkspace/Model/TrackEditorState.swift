@@ -237,6 +237,7 @@ public enum TrackTimelineEditRequest: Equatable, Sendable {
     case deleteAbsorbNext(phraseIndex: UInt16)
     case changeRole(phraseIndex: UInt16, roleID: String)
     case setLoopStrategy(phraseIndex: UInt16, strategy: TrackLoopStrategyRequest)
+    case setTrackTheme(themeID: UInt64?)
 }
 
 public enum TrackLoopStrategyRequest: Equatable, Sendable {
@@ -341,6 +342,8 @@ public struct TrackEditorAnalysis: Identifiable, Equatable, Sendable {
     public var id: UInt64 { track.id }
 
     public let track: LibraryTrack
+    public let trackThemeID: UInt64?
+    public let trackThemeRevision: UInt64
     public let audioURI: String
     public let beatsPerBar: UInt8
     public let beats: [TrackEditorBeat]
@@ -365,9 +368,13 @@ public struct TrackEditorAnalysis: Identifiable, Equatable, Sendable {
         sourcePhrases: [TrackEditorSourcePhrase] = [],
         timeline: TrackEditorTimeline,
         sourceReconciliation: TrackSourceReconciliation? = nil,
-        creativeReuseCandidates: [CreativeTimelineCandidate] = []
+        creativeReuseCandidates: [CreativeTimelineCandidate] = [],
+        trackThemeID: UInt64? = nil,
+        trackThemeRevision: UInt64 = 0
     ) {
         self.track = track
+        self.trackThemeID = trackThemeID
+        self.trackThemeRevision = trackThemeRevision
         self.audioURI = audioURI
         self.beatsPerBar = beatsPerBar
         self.beats = beats

@@ -368,6 +368,7 @@ public enum EngineCommand: Equatable, Sendable {
         expectedTimelineRevision: UInt64,
         edit: EngineTimelineEdit
     )
+    case setTrackThemeOverride(trackID: UInt64, themeID: UInt64?, expectedThemeRevision: UInt64)
     case setLibraryPhraseLoopStrategy(
         trackID: UInt64,
         phraseIndex: UInt16,
@@ -577,6 +578,10 @@ public enum EngineCommand: Equatable, Sendable {
             payload["trackId"] = .number(Double(trackID))
             payload["expectedTimelineRevision"] = .number(Double(expectedRevision))
             return payload
+        case let .setTrackThemeOverride(trackID, themeID, expectedRevision):
+            return ["kind": .string("setTrackThemeOverride"), "trackId": .number(Double(trackID)),
+                    "themeId": themeID.map { .number(Double($0)) } ?? .null,
+                    "expectedThemeRevision": .number(Double(expectedRevision))]
         case let .setLibraryPhraseLoopStrategy(
             trackID,
             phraseIndex,

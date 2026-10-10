@@ -1266,6 +1266,9 @@ final class EngineStatusModel: ObservableObject {
         let command: EngineCommand
         let success: String
         switch request {
+        case let .setTrackTheme(themeID):
+            command = .setTrackThemeOverride(trackID: editor.track.id, themeID: themeID, expectedThemeRevision: editor.trackThemeRevision)
+            success = "Track Theme saved for shows."
         case let .setLoopStrategy(phraseIndex, strategy):
             guard let catalog = libraryState.autoloopCatalog else { return }
             command = .setLibraryPhraseLoopStrategy(
@@ -2177,7 +2180,7 @@ final class EngineStatusModel: ObservableObject {
             .deleteAbsorbNext(phraseIndex: phraseIndex)
         case let .changeRole(phraseIndex, roleID):
             .changeRole(phraseIndex: phraseIndex, roleID: roleID)
-        case .setLoopStrategy:
+        case .setLoopStrategy, .setTrackTheme:
             preconditionFailure("Loop strategies use their dedicated revision-safe command")
         }
     }

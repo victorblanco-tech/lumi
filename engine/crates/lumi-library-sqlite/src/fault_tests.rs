@@ -1593,7 +1593,7 @@ fn light_planning_policy_is_revisioned_and_persistent() -> Result<(), Box<dyn st
     let schema: u32 = repository
         .connection
         .query_row("PRAGMA user_version", [], |row| row.get(0))?;
-    assert_eq!(schema, 21);
+    assert_eq!(schema, 22);
     Ok(())
 }
 #[test]
@@ -1674,7 +1674,7 @@ fn schema20_playlist_migration_preserves_existing_memberships()
         "ALTER TABLE playlists DROP COLUMN folder_names_json; PRAGMA user_version=20;",
     )?;
     repository.migrate()?;
-    assert_eq!(repository.schema_version()?, 21);
+    assert_eq!(repository.schema_version()?, 22);
     assert_eq!(
         repository.page_tracks(TrackPageRequest::try_new(0, 200)?)?,
         before_tracks

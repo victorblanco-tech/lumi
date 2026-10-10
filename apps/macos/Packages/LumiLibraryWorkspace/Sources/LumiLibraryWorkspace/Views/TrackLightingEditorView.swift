@@ -98,6 +98,7 @@ public struct TrackLightingEditorView: View {
         VStack(spacing: 0) {
             header
             Divider().overlay(Color.white.opacity(0.12))
+            trackThemeEditor
             transport
             editToolbar
             workflowAttentionPanel
@@ -950,6 +951,31 @@ public struct TrackLightingEditorView: View {
         .accessibilityIdentifier("lumi.trackEditor.timeline")
     }
 
+    private var trackThemeEditor: some View {
+        HStack(spacing: 12) {
+            Text("Track Theme").font(.system(size: 12, weight: .semibold))
+            Picker("Track Theme", selection: Binding<UInt64>(
+                get: { analysis.trackThemeID ?? 0 },
+                set: { onTimelineEdit(.setTrackTheme(themeID: $0 == 0 ? nil : $0)) }
+            )) {
+                Text("Automatic · Light Plans").tag(UInt64(0))
+                ForEach(autoloopCatalog?.themes ?? []) { theme in
+                    Text(theme.name).tag(theme.id)
+                }
+            }
+            .labelsHidden()
+            .frame(width: 230)
+            .controlSize(.regular)
+            .disabled(!phrasesAreEditable || autoloopCatalog == nil)
+            .accessibilityIdentifier("lumi.trackEditor.trackTheme")
+            Text(analysis.trackThemeID == nil ? "Automatic show planning" : "Saved for shows · all phrases")
+                .font(.system(size: 11)).foregroundStyle(secondary)
+            Spacer(minLength: 0)
+        }
+        .frame(height: 38)
+        .padding(.horizontal, 20)
+    }
+
     @ViewBuilder
     private func loopStrategyEditor(_ phrase: TrackEditorPhrase) -> some View {
         let role = autoloopCatalog?.roles.first { $0.id == phrase.roleID }
@@ -969,50 +995,40 @@ public struct TrackLightingEditorView: View {
                 .font(.system(size: 11, weight: .semibold))
                 .foregroundStyle(primary)
 
-            if rendersInteractiveControls, let catalog = autoloopCatalog {
-                HStack(spacing: 6) {
-                    Button(editorCopy("editor.loopAutomatic")) {
-                        setLoopStrategy(phrase, .automatic)
-                    }
-                    .disabled(phrase.loopStrategy.kind == "auto")
-                    Menu(editorCopy("editor.lockVariant")) {
-                        ForEach(variants) { variant in
-                            Button(variant.name) {
-                                setLoopStrategy(phrase, .fixedVariant(variant.id))
+            if rendersInteractiveControls {
+                if let themeID = analysis.trackThemeID,
+                   let theme = autoloopCatalog?.themes.first(where: { $0.id == themeID }) {
+                    Picker("Phrase AutoLoop", selection: Binding<String>(
+                        get: {
+                            if phrase.loopStrategy.kind == "fixedVariant" { return phrase.loopStrategy.fixedVariantID ?? "" }
+                            return phrase.loopStrategy.themeOverrides.first { $0.themeID == themeID }?.variantID ?? ""
+                        },
+                        set: { variantID in
+                            setLoopStrategy(phrase, variantID.isEmpty ? .automatic : .themeSpecificExact([
+                                TrackEditorThemeVariantOverride(themeID: themeID, variantID: variantID)
+                            ]))
+                        }
+                    )) {
+                        Text("Automatic within \(theme.name)").tag("")
+                        ForEach(compatibleVariants(theme, variants: variants)) { variant in
+                            if let cell = variant.cells.first(where: { $0.themeID == themeID && !$0.isMissing }) {
+                                Text("\(cell.buttonNumber.map { "\($0) · " } ?? "")\(cell.name ?? variant.name)").tag(variant.id)
                             }
                         }
                     }
-                    .disabled(variants.isEmpty)
-                }
-                .buttonStyle(.bordered)
-                .controlSize(.small)
-
-                Menu {
-                    ForEach(catalog.themes) { theme in
-                        Menu(theme.name) {
-                            Button(editorCopy("editor.themeAutomatic")) {
-                                updateThemeOverride(phrase, themeID: theme.id, variantID: nil)
-                            }
-                            ForEach(compatibleVariants(theme, variants: variants)) { variant in
-                                Button(variant.name) {
-                                    updateThemeOverride(
-                                        phrase,
-                                        themeID: theme.id,
-                                        variantID: variant.id
-                                    )
-                                }
-                            }
-                        }
+                    .labelsHidden()
+                    .controlSize(.regular)
+                    .frame(maxWidth: .infinity)
+                    .disabled(!phrasesAreEditable)
+                    .accessibilityIdentifier("lumi.trackEditor.phraseAutoloop")
+                } else {
+                    Text("Choose a Track Theme above to save a specific AutoLoop for this phrase.")
+                        .font(.system(size: 11)).foregroundStyle(secondary)
+                    if phrase.loopStrategy.kind != "auto" {
+                        Button("Reset phrase to Automatic") { setLoopStrategy(phrase, .automatic) }
+                            .disabled(!phrasesAreEditable)
                     }
-                } label: {
-                    Label(
-                        "\(editorCopy("editor.themeOverrides")) · \(phrase.loopStrategy.themeOverrides.count)",
-                        systemImage: "square.grid.2x2"
-                    )
-                    .frame(maxWidth: .infinity, alignment: .leading)
                 }
-                .menuStyle(.button)
-                .controlSize(.small)
             }
 
             if phrase.loopStrategy.status != "ready" {
@@ -1044,25 +1060,6 @@ public struct TrackLightingEditorView: View {
         onTimelineEdit(.setLoopStrategy(phraseIndex: phraseIndex, strategy: strategy))
     }
 
-    private func updateThemeOverride(
-        _ phrase: TrackEditorPhrase,
-        themeID: UInt64,
-        variantID: String?
-    ) {
-        var overrides = phrase.loopStrategy.kind == "themeSpecificExact"
-            ? phrase.loopStrategy.themeOverrides
-            : []
-        overrides.removeAll { $0.themeID == themeID }
-        if let variantID {
-            overrides.append(TrackEditorThemeVariantOverride(themeID: themeID, variantID: variantID))
-        }
-        overrides.sort { $0.themeID < $1.themeID }
-        setLoopStrategy(
-            phrase,
-            overrides.isEmpty ? .automatic : .themeSpecificExact(overrides)
-        )
-    }
-
     private func loopStrategySummary(
         _ strategy: TrackEditorLoopStrategy,
         variants: [AutoloopVariantState]
@@ -1073,7 +1070,12 @@ public struct TrackLightingEditorView: View {
                 ?? strategy.fixedVariantID
                 ?? editorCopy("editor.variantUnavailable")
         case "themeSpecificExact":
-            return "\(strategy.themeOverrides.count) \(editorCopy("editor.themeOverrides").lowercased())"
+            guard let choice = strategy.themeOverrides.first(where: { $0.themeID == analysis.trackThemeID }) else {
+                return editorCopy("editor.automaticSelection")
+            }
+            return variants.first { $0.id == choice.variantID }?.cells.first {
+                $0.themeID == choice.themeID && !$0.isMissing
+            }?.name ?? editorCopy("editor.variantUnavailable")
         default:
             return editorCopy("editor.automaticSelection")
         }

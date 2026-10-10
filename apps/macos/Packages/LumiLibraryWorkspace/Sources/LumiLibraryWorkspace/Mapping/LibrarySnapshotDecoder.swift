@@ -1169,7 +1169,9 @@ public struct LibrarySnapshotDecoder: Sendable {
                     bpmDeltaMilli: Int64(try strictOptionalSigned(candidate, "bpmDeltaMilli") ?? 0),
                     durationDeltaMillis: Int64(try strictOptionalSigned(candidate, "durationDeltaMillis") ?? 0)
                 )
-            }
+            },
+            trackThemeID: optionalUnsigned(editor, "trackThemeId"),
+            trackThemeRevision: optionalUnsigned(editor, "trackThemeRevision") ?? 0
         )
     }
 

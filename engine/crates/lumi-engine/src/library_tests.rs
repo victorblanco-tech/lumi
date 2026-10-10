@@ -926,6 +926,74 @@ fn new_phrase_roles_block_preflight_until_they_have_a_variant()
 }
 
 #[test]
+fn saved_track_theme_and_phrase_choice_survive_restart_and_drive_planning()
+-> Result<(), Box<dyn std::error::Error>> {
+    let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let path = std::env::temp_dir().join(format!("lumi-saved-theme-{unique}.sqlite"));
+    let track_id;
+    {
+        let mut worker = LibraryWorker::demo_at(&path)?;
+        track_id = worker.snapshot_json()?["page"]["tracks"][0]["id"]
+            .as_u64()
+            .ok_or("track")?;
+        worker.open_editor(track_id)?;
+        worker.set_track_theme_override(track_id, Some(ThemeId::new(2)), 0)?;
+        worker.set_phrase_loop_strategy(
+            track_id,
+            1,
+            1,
+            0,
+            PhraseLoopStrategy::ThemeSpecificExact(vec![lumi_library::ThemeSpecificVariant::new(
+                ThemeId::new(2),
+                VariantId::try_new("mapping-1")?,
+            )]),
+        )?;
+    }
+    let mut worker = LibraryWorker::demo_at(&path)?;
+    worker.open_editor(track_id)?;
+    let snapshot = worker.snapshot_json()?;
+    assert_eq!(snapshot["editor"]["trackThemeId"], 2);
+    assert_eq!(snapshot["editor"]["trackThemeRevision"], 1);
+    assert!(worker.set_track_theme_override(track_id, None, 0).is_err());
+    worker.set_track_phrase_protection(track_id, 0, true)?;
+    assert!(worker.set_track_theme_override(track_id, None, 1).is_err());
+    worker.set_track_phrase_protection(track_id, 1, false)?;
+    let policy = lumi_light_plans::LightPlanningPolicy {
+        theme_rules: vec![lumi_light_plans::ThemeRule {
+            theme_id: 2,
+            enabled: true,
+            selection_weight: 1,
+            color_behavior: lumi_light_plans::ColorBehavior::Only,
+            color_rgb: vec![0xFF00FF],
+        }],
+        ..lumi_light_plans::LightPlanningPolicy::default()
+    };
+    let prepared = worker.local_playback_track(track_id, 2)?;
+    let (_, context) = prepared.into_parts();
+    assert_eq!(
+        context
+            .eligible_best_covered_themes(&policy)
+            .iter()
+            .map(|(id, _)| id.value())
+            .collect::<Vec<_>>(),
+        vec![2]
+    );
+    worker.preview_light_plan(track_id, 2, None, 42, &policy)?;
+    let preview = worker.snapshot_json()?;
+    assert_eq!(preview["lightPlanning"]["preview"]["themeId"], 2);
+    assert_eq!(
+        preview["lightPlanning"]["preview"]["phrases"][0]["variantId"],
+        "mapping-1"
+    );
+    worker.set_track_theme_override(track_id, None, 1)?;
+    assert_eq!(
+        worker.snapshot_json()?["editor"]["trackThemeId"],
+        serde_json::Value::Null
+    );
+    Ok(())
+}
+
+#[test]
 fn phrase_loop_strategy_is_role_safe_revisioned_and_restart_persistent()
 -> Result<(), Box<dyn std::error::Error>> {
     let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();

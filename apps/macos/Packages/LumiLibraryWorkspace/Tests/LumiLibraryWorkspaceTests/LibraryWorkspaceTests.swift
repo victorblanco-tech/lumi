@@ -1174,6 +1174,8 @@ struct LibraryWorkspaceTests {
         #expect(editor.phrases.map(\.role) == ["Intro", "Build"])
         #expect(editor.phrases.map(\.roleID) == ["intro-outro", "buildup-1"])
         #expect(editor.timeline.revision == 1)
+        #expect(editor.trackThemeID == nil)
+        #expect(editor.trackThemeRevision == 0)
         #expect(editor.timeline.revisions.count == 1)
         #expect(editor.sourcePhrases.first?.rawLabel == "Intro")
         #expect(editor.phrases.first?.loopStrategy.kind == "auto")
@@ -1181,6 +1183,17 @@ struct LibraryWorkspaceTests {
         #expect(editor.phrases.first?.loopStrategy.locked == false)
         #expect(!editor.timeline.canUndo)
         #expect(editor.phraseTimeRange(editor.phrases[1]) == 2_000..<4_000)
+    }
+
+    @Test("Editor decodes the persistent Track Theme independently of timeline revision")
+    func decodesSavedTrackTheme() throws {
+        guard case var .object(editor) = editorValue() else { return }
+        editor["trackThemeId"] = .number(2)
+        editor["trackThemeRevision"] = .number(7)
+        let state = try LibrarySnapshotDecoder().decode(envelope(trackValues: [trackValue()], editorValue: .object(editor)))
+        #expect(state.editor?.trackThemeID == 2)
+        #expect(state.editor?.trackThemeRevision == 7)
+        #expect(state.editor?.timeline.revision == 1)
     }
 
     @Test("Source reconciliation exposes classified changes and explicit phrase conflicts")

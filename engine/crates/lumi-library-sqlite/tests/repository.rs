@@ -21,9 +21,35 @@ use lumi_library_sqlite::{SqliteLibraryError, SqliteLibraryRepository};
 use rusqlite::Connection;
 
 #[test]
+fn track_theme_override_persists_and_rejects_stale_writes() -> Result<(), Box<dyn Error>> {
+    let path = temporary_database_path()?;
+    let mut repository = SqliteLibraryRepository::open(&path)?;
+    repository.import_baseline(&DemoLibrarySourceProvider::curated().load_baseline()?)?;
+    let id = repository
+        .page_tracks(TrackPageRequest::try_new(0, 1)?)?
+        .tracks()[0]
+        .id();
+    assert_eq!(repository.track_theme_override(id)?, (None, 0));
+    repository.set_track_theme_override(id, Some(ThemeId::new(2)), 0)?;
+    assert!(matches!(
+        repository.set_track_theme_override(id, None, 0),
+        Err(SqliteLibraryError::TrackThemeRevisionConflict)
+    ));
+    drop(repository);
+    let mut repository = SqliteLibraryRepository::open(&path)?;
+    assert_eq!(
+        repository.track_theme_override(id)?,
+        (Some(ThemeId::new(2)), 1)
+    );
+    repository.set_track_theme_override(id, None, 1)?;
+    assert_eq!(repository.track_theme_override(id)?, (None, 2));
+    Ok(())
+}
+
+#[test]
 fn migrates_an_empty_database() -> Result<(), Box<dyn Error>> {
     let repository = SqliteLibraryRepository::in_memory()?;
-    assert_eq!(repository.schema_version()?, 21);
+    assert_eq!(repository.schema_version()?, 22);
     assert_eq!(
         repository
             .page_tracks(TrackPageRequest::try_new(0, 25)?)?
@@ -88,7 +114,7 @@ fn schema_eighteen_migrates_only_the_legacy_ready_for_show_presentation()
         )?;
     }
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 21);
+    assert_eq!(repository.schema_version()?, 22);
     let catalog = repository.track_workflow_catalog()?;
     let ready = catalog
         .steps()
@@ -129,7 +155,7 @@ fn migrates_version_thirteen_device_audio_locations_atomically() -> Result<(), B
         )?;
     }
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 21);
+    assert_eq!(repository.schema_version()?, 22);
     drop(repository);
     let connection = Connection::open(&path)?;
     let table_exists: bool = connection.query_row(
@@ -263,7 +289,7 @@ fn historical_backup_is_migrated_before_activation_without_modifying_the_backup(
     let mut repository = SqliteLibraryRepository::in_memory()?;
     repository.import_baseline(&DemoLibrarySourceProvider::scaled(1)?.load_baseline()?)?;
     repository.restore_consistent_backup(&backup_path, &rollback_path)?;
-    assert_eq!(repository.schema_version()?, 21);
+    assert_eq!(repository.schema_version()?, 22);
     assert!(
         repository
             .device_audio_uris(lumi_domain::TrackId::new(1))?
@@ -312,7 +338,7 @@ fn failed_backup_migration_preserves_current_library_and_does_not_create_rollbac
             .restore_consistent_backup(&backup_path, &rollback_path)
             .is_err()
     );
-    assert_eq!(repository.schema_version()?, 21);
+    assert_eq!(repository.schema_version()?, 22);
     assert_eq!(
         repository
             .page_tracks(TrackPageRequest::try_new(0, 25)?)?
@@ -361,7 +387,7 @@ fn migrates_version_one_timeline_history_without_losing_rows() -> Result<(), Box
     }
 
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 21);
+    assert_eq!(repository.schema_version()?, 22);
     drop(repository);
     let connection = Connection::open(&path)?;
     let reason: String = connection.query_row(
@@ -418,7 +444,7 @@ fn migrates_version_two_phrase_roles_into_an_unseeded_catalog() -> Result<(), Bo
     }
 
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 21);
+    assert_eq!(repository.schema_version()?, 22);
     let catalog = repository.phrase_role_catalog()?;
     assert_eq!(catalog.revision(), 0);
     assert_eq!(catalog.defaults_version(), 0);
@@ -461,7 +487,7 @@ fn migrates_version_three_into_an_unseeded_autoloop_catalog() -> Result<(), Box<
     }
 
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.schema_version()?, 21);
+    assert_eq!(repository.schema_version()?, 22);
     let catalog = repository.autoloop_catalog()?;
     assert_eq!(catalog.revision(), 0);
     assert_eq!(catalog.defaults_version(), 0);

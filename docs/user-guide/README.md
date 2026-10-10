@@ -130,6 +130,18 @@ phrase colors are used throughout Library, Live, Light Plans and mappings.
 
 ![Lumi Phrase Model settings](../assets/screenshots/phrase-model.png)
 
+### Save lighting choices in Track Editor
+
+Choose **Track Theme** above the waveform to save a Theme for the whole track.
+Choose **Automatic · Light Plans** to return to automatic Theme selection.
+These are library preferences, not temporary live-session changes.
+
+Select a phrase and use **Phrase AutoLoop** in its inspector to save a specific
+AutoLoop. The list only contains mappings for that phrase's role within the
+selected Track Theme. Other phrases remain automatic within the same Theme.
+Changing the Track Theme does not bring AutoLoops from another Theme into it.
+Protected tracks must be unlocked before changing these choices.
+
 ## 4. Configure SoundSwitch output
 
 Open **Integrations → Lighting Outputs**.

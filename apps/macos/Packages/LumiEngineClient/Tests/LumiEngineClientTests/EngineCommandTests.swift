@@ -4,6 +4,16 @@ import Testing
 
 @Suite("Engine command encoding")
 struct EngineCommandTests {
+    @Test("Track Theme is saved with its own revision and can be reset")
+    func savedTrackThemePayload() {
+        let selected = EngineCommand.setTrackThemeOverride(trackID: 90, themeID: 2, expectedThemeRevision: 3).payload()
+        #expect(selected["kind"] == .string("setTrackThemeOverride"))
+        #expect(selected["themeId"] == .number(2))
+        #expect(selected["expectedThemeRevision"] == .number(3))
+        let reset = EngineCommand.setTrackThemeOverride(trackID: 90, themeID: nil, expectedThemeRevision: 4).payload()
+        #expect(reset["themeId"] == .null)
+    }
+
     @Test("Track workflow commands are revision-bound and queryable")
     func trackWorkflowPayloads() {
         let query = EngineCommand.queryLibrary(

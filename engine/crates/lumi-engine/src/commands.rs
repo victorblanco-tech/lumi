@@ -101,6 +101,11 @@ pub enum SessionCommand {
         expected_revision: u64,
         command: TimelineEditCommand,
     },
+    SetTrackThemeOverride {
+        track_id: u64,
+        theme_id: Option<ThemeId>,
+        expected_revision: u64,
+    },
     SetLibraryPhraseLoopStrategy {
         track_id: u64,
         expected_timeline_revision: u64,
@@ -280,6 +285,7 @@ impl SessionCommand {
             | Self::ReconcileLibrarySource { .. }
             | Self::EditLibraryTimeline { .. }
             | Self::SetLibraryPhraseLoopStrategy { .. }
+            | Self::SetTrackThemeOverride { .. }
             | Self::UndoLibraryTimeline { .. }
             | Self::RedoLibraryTimeline { .. }
             | Self::RestoreLibraryTimelineRevision { .. }
@@ -332,6 +338,7 @@ impl SessionCommand {
                 | Self::ReconcileLibrarySource { .. }
                 | Self::EditLibraryTimeline { .. }
                 | Self::SetLibraryPhraseLoopStrategy { .. }
+                | Self::SetTrackThemeOverride { .. }
                 | Self::UndoLibraryTimeline { .. }
                 | Self::RedoLibraryTimeline { .. }
                 | Self::RestoreLibraryTimelineRevision { .. }
@@ -439,6 +446,11 @@ pub fn decode_command(envelope: &MessageEnvelope) -> Result<SessionCommand, Comm
             track_id: positive_unsigned(&envelope.payload, "trackId")?,
             expected_revision: positive_unsigned(&envelope.payload, "expectedTimelineRevision")?,
             command: timeline_edit(&envelope.payload)?,
+        }),
+        "setTrackThemeOverride" => Ok(SessionCommand::SetTrackThemeOverride {
+            track_id: positive_unsigned(&envelope.payload, "trackId")?,
+            theme_id: optional_unsigned(&envelope.payload, "themeId")?.map(ThemeId::new),
+            expected_revision: unsigned(&envelope.payload, "expectedThemeRevision")?,
         }),
         "setLibraryPhraseLoopStrategy" => Ok(SessionCommand::SetLibraryPhraseLoopStrategy {
             track_id: positive_unsigned(&envelope.payload, "trackId")?,

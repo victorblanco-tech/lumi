@@ -1756,7 +1756,7 @@ impl PlanningWorker {
                 let Some(planner) = planner_for_executable_themes(
                     library_context.catalog_revision(),
                     themes,
-                    &self.light_policy,
+                    &library_context.theme_selection_policy(&self.light_policy),
                 )?
                 else {
                     // A configuration with no safe starting Theme must never take the
@@ -4099,6 +4099,18 @@ fn apply_command(
                 .edit_timeline(track_id, expected_revision, command)?;
             return Ok(());
         }
+        SessionCommand::SetTrackThemeOverride {
+            track_id,
+            theme_id,
+            expected_revision,
+        } => {
+            runtime.library_worker.set_track_theme_override(
+                track_id,
+                theme_id,
+                expected_revision,
+            )?;
+            return Ok(());
+        }
         SessionCommand::SetLibraryPhraseLoopStrategy {
             track_id,
             expected_timeline_revision,
@@ -4612,6 +4624,7 @@ fn apply_command(
         | SessionCommand::ReconcileLibrarySource { .. }
         | SessionCommand::EditLibraryTimeline { .. }
         | SessionCommand::SetLibraryPhraseLoopStrategy { .. }
+        | SessionCommand::SetTrackThemeOverride { .. }
         | SessionCommand::UndoLibraryTimeline { .. }
         | SessionCommand::RedoLibraryTimeline { .. }
         | SessionCommand::RestoreLibraryTimelineRevision { .. }
@@ -5182,6 +5195,17 @@ fn application_error_envelope(
                 .insert("actualPhraseRoleRevision".to_owned(), json!(actual));
             envelope
         }),
+        CommandApplicationError::Library(LibraryWorkerError::Persistence(
+            lumi_library_sqlite::SqliteLibraryError::TrackThemeRevisionConflict,
+        )) => error_envelope(
+            sequence,
+            correlation_id,
+            "revisionConflict",
+            "trackThemeRevisionMismatch",
+            "The Track Theme changed before this choice was saved. Reload and try again.",
+            true,
+            None,
+        ),
         CommandApplicationError::Library(LibraryWorkerError::AutoloopCatalogRevisionConflict {
             actual,
             ..
