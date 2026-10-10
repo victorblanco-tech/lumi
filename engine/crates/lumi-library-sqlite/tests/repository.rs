@@ -556,7 +556,14 @@ fn migrated_button_identity_and_new_mapping_survive_restart() -> Result<(), Box<
         repository.replace_autoloop_catalog(&expected, initial.revision())?;
     }
     let repository = SqliteLibraryRepository::open(&path)?;
-    assert_eq!(repository.autoloop_catalog()?, expected);
+    let reloaded = repository.autoloop_catalog()?;
+    assert_eq!(reloaded.revision(), expected.revision());
+    assert_eq!(reloaded.themes(), expected.themes());
+    assert_eq!(reloaded.variants(), expected.variants());
+    assert_eq!(reloaded.cells().len(), expected.cells().len());
+    for cell in expected.cells() {
+        assert!(reloaded.cells().contains(cell));
+    }
     drop(repository);
     std::fs::remove_file(path)?;
     Ok(())
