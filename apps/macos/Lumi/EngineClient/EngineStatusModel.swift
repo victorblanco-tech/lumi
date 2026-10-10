@@ -1694,12 +1694,7 @@ final class EngineStatusModel: ObservableObject {
 
     private func trustedUSBSourceID(root: String) -> String? {
         let url = URL(fileURLWithPath: root, isDirectory: true)
-        let values = try? url.resourceValues(forKeys: [.volumeUUIDStringKey, .volumeNameKey])
-        return USBStableSourceIdentity.sourceID(
-            fileSystemUUID: values?.volumeUUIDString,
-            displayName: values?.volumeName ?? url.lastPathComponent,
-            hardwareSerial: USBStableSourceIdentity.hardwareSerial(for: url)
-        )
+        return USBStableSourceIdentity.sourceID(for: url)
     }
 
     /// Runs removable-media I/O outside the channel-persistent realtime
@@ -1719,9 +1714,15 @@ final class EngineStatusModel: ObservableObject {
         var workerPayload = payload
         guard case let .string(root)? = payload["root"],
               case let .string(sourceID)? = payload["sourceId"],
-              let observedSourceID = trustedUSBSourceID(root: root),
               let scopedURL = try securityScopedUSBURL(root: root, sourceID: sourceID),
               scopedURL.startAccessingSecurityScopedResource() else {
+            throw IsolatedUSBWorkerError.authorizationRequired
+        }
+        defer { scopedURL.stopAccessingSecurityScopedResource() }
+        // Read identity only after opening the authorized scope, and from the
+        // same URL the worker will read. Missing pre-authorization metadata
+        // must not become a different persisted physical fingerprint.
+        guard let observedSourceID = trustedUSBSourceID(root: scopedURL.path) else {
             throw IsolatedUSBWorkerError.authorizationRequired
         }
         workerPayload["root"] = .string(scopedURL.path)
@@ -1741,7 +1742,6 @@ final class EngineStatusModel: ObservableObject {
                 )
             }
         }
-        defer { scopedURL.stopAccessingSecurityScopedResource() }
         let task = Task.detached(priority: .utility) {
             try Task.checkCancellation()
             let manager = FileManager.default

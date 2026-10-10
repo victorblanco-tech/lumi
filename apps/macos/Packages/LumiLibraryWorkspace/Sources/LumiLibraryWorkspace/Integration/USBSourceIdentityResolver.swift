@@ -19,6 +19,36 @@ enum USBLocalSourceIdentity {
 /// rename intentionally requires explicit re-authorization instead of silently
 /// rebinding an existing trusted source by label.
 public enum USBStableSourceIdentity {
+    /// Observe one mounted volume through Disk Arbitration. URL resource values
+    /// and a separate registry lookup must not be combined into a partial
+    /// fingerprint when access fails or the mount changes during observation.
+    public static func sourceID(for volumeURL: URL) -> String? {
+        guard let session = DASessionCreate(kCFAllocatorDefault),
+              let disk = DADiskCreateFromVolumePath(kCFAllocatorDefault, session, volumeURL as CFURL),
+              let description = DADiskCopyDescription(disk) as? [String: Any],
+              let mount = description[kDADiskDescriptionVolumePathKey as String] as? URL,
+              mount.standardizedFileURL == volumeURL.standardizedFileURL,
+              let name = description[kDADiskDescriptionVolumeNameKey as String] as? String,
+              let uuidValue = description[kDADiskDescriptionVolumeUUIDKey as String],
+              CFGetTypeID(uuidValue as CFTypeRef) == CFUUIDGetTypeID(),
+              let before = DADiskGetBSDName(disk) else { return nil }
+        let bsd = String(cString: before)
+        let uuid = CFUUIDCreateString(kCFAllocatorDefault, (uuidValue as! CFUUID)) as String
+        let serial = hardwareSerial(for: volumeURL)
+        guard bsdName(for: volumeURL) == bsd,
+              let after = DADiskCopyDescription(disk) as NSDictionary?,
+              after.isEqual(to: description) else { return nil }
+        return completeSourceID(fileSystemUUID: uuid, displayName: name, hardwareSerial: serial)
+    }
+
+    /// An unreadable volume is not a new identity. Do not persist a serial-only
+    /// fallback while filesystem evidence is temporarily unavailable.
+    static func completeSourceID(fileSystemUUID: String?, displayName: String?, hardwareSerial: String?) -> String? {
+        guard let fileSystemUUID, !fileSystemUUID.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+              let displayName, !displayName.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return nil }
+        return sourceID(fileSystemUUID: fileSystemUUID, displayName: displayName, hardwareSerial: hardwareSerial)
+    }
+
     public static func sourceID(
         fileSystemUUID: String?,
         displayName: String,

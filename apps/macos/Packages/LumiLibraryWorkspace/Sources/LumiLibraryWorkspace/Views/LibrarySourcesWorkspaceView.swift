@@ -1611,12 +1611,7 @@ public struct LibrarySourcesWorkspaceView: View {
             guard mediaIdentities.values.filter({ $0.mediaId == marker.mediaId || $0.sourceId == marker.sourceId }).count == 1 else { return nil }
             return marker.sourceId
         }
-        let stable = try? url.resourceValues(forKeys: [.volumeUUIDStringKey]).volumeUUIDString
-        return USBStableSourceIdentity.sourceID(
-            fileSystemUUID: stable,
-            displayName: volumeDisplayName(url),
-            hardwareSerial: USBStableSourceIdentity.hardwareSerial(for: url)
-        )
+        return USBStableSourceIdentity.sourceID(for: url)
     }
 
     private func mountedIdentity(_ url: URL) -> MountedUSBIdentity {
@@ -1832,12 +1827,7 @@ public struct LibrarySourcesWorkspaceView: View {
     }
 
     private func registeredSourceID(for url: URL, marker: USBMediaIdentity) -> String {
-        let uuid = try? url.resourceValues(forKeys: [.volumeUUIDStringKey]).volumeUUIDString
-        let physicalID = USBStableSourceIdentity.sourceID(
-            fileSystemUUID: uuid,
-            displayName: volumeDisplayName(url),
-            hardwareSerial: USBStableSourceIdentity.hardwareSerial(for: url)
-        )
+        let physicalID = USBStableSourceIdentity.sourceID(for: url)
         return USBSourceIdentityResolver.registeredSourceID(
             markerSourceID: marker.sourceId,
             physicalSourceID: physicalID,

@@ -2,6 +2,36 @@
 
 Status: In progress. Extends E10-03; no production release without acceptance.
 
+## Dev-31 — stable identity with duplicate FAT volume UUIDs (2026-10-10)
+
+Root cause reproduced with both independent same-model sticks attached: their
+on-disk FAT volume UUIDs are equal. Foundation's `volumeUUIDString` returned a
+different, session-specific UUID for the second mounted volume, while Disk
+Arbitration and diskutil still returned its real filesystem UUID. The old
+fingerprint persisted that session value, so the same stick conflicted on a
+later mount. A previous manual reconfirmation persisted the transient value
+instead of fixing the reader. This was not evidence of a copied marker.
+
+- Read mounted-volume UUID/name through Disk Arbitration; retain the existing
+  serial/UUID/name fingerprint format, so separate equal-model sources remain
+  separate without using the session UUID.
+- Require the actual mount root, complete filesystem evidence, and unchanged
+  disk/description during observation. Do not turn a partial read into a new
+  identity. Open the saved security scope before reading worker identity.
+- Use the same reader for UI registration/presence and isolated USB workers.
+- Keep copied-marker conflict protection intact. Do not automatically clear an
+  old conflict just because a marker or label matches.
+- User approved a narrowly scoped recovery of the affected GRAY registration
+  using its original backup fingerprint, after the code fix and a fresh backup;
+  no track, phrase, mapping or sync-selection recovery/rollback is authorized.
+
+Verification so far: 78 Library tests passed, including ten read-only GRAY
+observations. With both sticks attached, a further 15 identity tests passed,
+including ten CHRM observations matching its original stable fingerprint.
+The actual macOS application compiled successfully. Installed-app acceptance
+and the approved single-row recovery still need completion; these build/test
+results are not a completed USB sync acceptance claim.
+
 ## Dev-18 — isolate invalid beatgrids within a sync
 
 - Explicit user-approved policy: an invalid beatgrid does not abort otherwise
