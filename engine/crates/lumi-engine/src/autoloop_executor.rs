@@ -81,6 +81,9 @@ impl AutoloopExecutorState {
 #[derive(Clone, Debug)]
 pub(crate) struct AutoloopCueExecutor {
     state: AutoloopExecutorState,
+    // Independent of pending work: forecasting the next cue must not erase
+    // the completion watermark for delayed current-phrase observations.
+    completed_through: Option<AutoloopExecutionIdentity>,
     execution_epoch: u64,
     requested_count: u64,
     bank_prepared_count: u64,
@@ -96,6 +99,7 @@ impl Default for AutoloopCueExecutor {
     fn default() -> Self {
         Self {
             state: AutoloopExecutorState::Idle,
+            completed_through: None,
             execution_epoch: 0,
             requested_count: 0,
             bank_prepared_count: 0,
@@ -112,6 +116,7 @@ impl Default for AutoloopCueExecutor {
 impl AutoloopCueExecutor {
     pub(crate) fn begin_execution_epoch(&mut self) -> Option<u64> {
         self.execution_epoch = self.execution_epoch.checked_add(1)?;
+        self.completed_through = None;
         self.cancel_pending();
         Some(self.execution_epoch)
     }
@@ -133,7 +138,15 @@ impl AutoloopCueExecutor {
         active_bank: Option<u8>,
     ) -> Option<AutoloopSchedule> {
         self.requested_count = self.requested_count.saturating_add(1);
-        if self.state.identity() == Some(identity) {
+        if self.state.identity() == Some(identity)
+            || self.completed_through.is_some_and(|completed| {
+                completed.execution_epoch == identity.execution_epoch
+                    && completed.deck_id == identity.deck_id
+                    && completed.track_load_id == identity.track_load_id
+                    && completed.plan_revision == identity.plan_revision
+                    && completed.phrase_index >= identity.phrase_index
+            })
+        {
             self.duplicate_count = self.duplicate_count.saturating_add(1);
             return None;
         }
@@ -197,6 +210,7 @@ impl AutoloopCueExecutor {
             return;
         };
         if lane_emitted_count >= expected_lane_emitted_count {
+            self.completed_through = Some(identity);
             self.state = AutoloopExecutorState::Completed { identity, target };
             self.completed_count = self.completed_count.saturating_add(1);
         }
@@ -359,6 +373,84 @@ mod tests {
         assert_eq!(executor.begin_execution_epoch(), Some(2));
         assert!(executor.schedule(&request, target, Some(2)).is_some());
         assert_eq!(executor.triggered_count(), 1);
+    }
+
+    #[test]
+    fn delayed_phrase_does_not_replace_the_next_forecast() {
+        let mut executor = AutoloopCueExecutor::default();
+        executor.begin_execution_epoch();
+        let target = AutoloopTarget {
+            bank_number: 2,
+            autoloop_number: 20,
+        };
+        let sent = executor.schedule(&request(12, 2), target, Some(2)).unwrap();
+        executor.mark_triggered(sent, 1);
+        executor.complete_if_emitted(1);
+        let next = executor.schedule(&request(13, 2), target, Some(2)).unwrap();
+        executor.mark_triggered(next, 2);
+        let pending = executor.state();
+        // Hardware replay: the next forecast precedes the delayed current
+        // phrase notification by 20 us, 362 ms after the current cue sent.
+        assert!(
+            executor
+                .schedule(&request(12, 2), target, Some(2))
+                .is_none()
+        );
+        assert_eq!(executor.state(), pending);
+        executor.complete_if_emitted(2);
+        executor.cancel_pending();
+        assert!(
+            executor
+                .schedule(&request(12, 2), target, Some(2))
+                .is_none()
+        );
+        assert!(
+            executor
+                .schedule(&request(13, 2), target, Some(2))
+                .is_none()
+        );
+        executor.begin_execution_epoch();
+        assert!(
+            executor
+                .schedule(&request(12, 2), target, Some(2))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn failed_or_cancelled_unsent_cue_remains_retryable() {
+        let mut executor = AutoloopCueExecutor::default();
+        executor.begin_execution_epoch();
+        let target = AutoloopTarget {
+            bank_number: 2,
+            autoloop_number: 20,
+        };
+        let first = executor.schedule(&request(12, 2), target, Some(2)).unwrap();
+        executor.mark_triggered(first, 1);
+        executor.complete_if_emitted(1);
+        let next = executor.schedule(&request(13, 2), target, Some(2)).unwrap();
+        executor.fail(next.identity);
+        assert!(
+            executor
+                .schedule(&request(13, 2), target, Some(2))
+                .is_some()
+        );
+        executor.cancel_pending();
+        assert!(
+            executor
+                .schedule(&request(13, 2), target, Some(2))
+                .is_some()
+        );
+        assert!(
+            executor
+                .schedule(&request(12, 2), target, Some(2))
+                .is_none()
+        );
+        assert!(
+            executor
+                .schedule(&request(12, 3), target, Some(2))
+                .is_some()
+        );
     }
 
     #[test]
