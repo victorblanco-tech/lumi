@@ -28,9 +28,21 @@ instead of fixing the reader. This was not evidence of a copied marker.
 Verification so far: 78 Library tests passed, including ten read-only GRAY
 observations. With both sticks attached, a further 15 identity tests passed,
 including ten CHRM observations matching its original stable fingerprint.
-The actual macOS application compiled successfully. Installed-app acceptance
-and the approved single-row recovery still need completion; these build/test
-results are not a completed USB sync acceptance claim.
+The actual macOS application compiled successfully; five Rust network-media
+tests passed, including copied-marker conflict and source-isolated matching.
+Dev-31 (build 431, ba3ba52) was packaged, signature/installer audited and installed.
+
+Actual desktop acceptance: both sources appeared separately as connected. GRAY
+scanned without renewed authorization, restored six selections, registered its
+stable identity and completed Sync 6 Playlists with visible 18/149 progress and
+a completion report: 148 current, zero updated, one invalid-grid skip (existing
+version retained). No identity conflict recurred. The user-approved single-row
+recovery was made after a fresh backup; the entire database outside the binding
+table had an identical dump hash before/after recovery. After sync, all phrase,
+timeline, protection and source-phrase-mapping table hashes still matched the
+pre-test backup. Database quick_check passed and both binding conflict flags
+remained zero. CHRM's UI scan currently awaits the user's normal folder grant;
+its physical reader acceptance above is not a claim of completed CHRM UI sync.
 
 ## Dev-18 — isolate invalid beatgrids within a sync
 
