@@ -383,10 +383,14 @@ mod tests {
             bank_number: 2,
             autoloop_number: 20,
         };
-        let sent = executor.schedule(&request(12, 2), target, Some(2)).unwrap();
+        let sent = executor
+            .schedule(&request(12, 2), target, Some(2))
+            .unwrap_or_else(|| panic!("current cue must schedule"));
         executor.mark_triggered(sent, 1);
         executor.complete_if_emitted(1);
-        let next = executor.schedule(&request(13, 2), target, Some(2)).unwrap();
+        let next = executor
+            .schedule(&request(13, 2), target, Some(2))
+            .unwrap_or_else(|| panic!("next cue must schedule"));
         executor.mark_triggered(next, 2);
         let pending = executor.state();
         // Hardware replay: the next forecast precedes the delayed current
@@ -425,10 +429,14 @@ mod tests {
             bank_number: 2,
             autoloop_number: 20,
         };
-        let first = executor.schedule(&request(12, 2), target, Some(2)).unwrap();
+        let first = executor
+            .schedule(&request(12, 2), target, Some(2))
+            .unwrap_or_else(|| panic!("current cue must schedule"));
         executor.mark_triggered(first, 1);
         executor.complete_if_emitted(1);
-        let next = executor.schedule(&request(13, 2), target, Some(2)).unwrap();
+        let next = executor
+            .schedule(&request(13, 2), target, Some(2))
+            .unwrap_or_else(|| panic!("next cue must schedule"));
         executor.fail(next.identity);
         assert!(
             executor
