@@ -514,6 +514,55 @@ fn autoloop_catalog_mutation_and_conflict_survive_restart() -> Result<(), Box<dy
 }
 
 #[test]
+fn migrated_button_identity_and_new_mapping_survive_restart() -> Result<(), Box<dyn Error>> {
+    let path = temporary_database_path()?;
+    let role = PhraseRoleId::try_new("synth")?;
+    let expected;
+    {
+        let mut repository = SqliteLibraryRepository::open(&path)?;
+        repository.initialize_phrase_role_catalog(&PhraseRoleCatalog::try_new(
+            1,
+            PHRASE_ROLE_DEFAULTS_VERSION,
+            vec![PhraseRole::try_new(role.clone(), "Synth", 1, false)?],
+            vec![],
+        )?)?;
+        let base = test_autoloop_catalog()?;
+        let initial = AutoloopCatalog::try_new(
+            1,
+            base.defaults_version(),
+            base.themes().to_vec(),
+            vec![AutoloopVariant::try_new(
+                role.clone(),
+                VariantId::try_new("mapping-4")?,
+                "Output 4",
+                1,
+                false,
+            )?],
+            vec![AutoloopMatrixCell::try_new(
+                ThemeId::new(1),
+                role.clone(),
+                VariantId::try_new("mapping-4")?,
+                AutoloopEntryId::try_new("theme-1--mapping-13")?,
+                "Migrated button",
+            )?],
+        )?;
+        repository.initialize_autoloop_catalog(&initial)?;
+        expected = initial.set_mapping(
+            ThemeId::new(1),
+            VariantId::try_new("mapping-13")?,
+            role,
+            Some("BD CHORUS2B BLUE PINK".into()),
+        )?;
+        repository.replace_autoloop_catalog(&expected, initial.revision())?;
+    }
+    let repository = SqliteLibraryRepository::open(&path)?;
+    assert_eq!(repository.autoloop_catalog()?, expected);
+    drop(repository);
+    std::fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
 fn autoloop_catalog_replacement_persists_a_defaults_upgrade() -> Result<(), Box<dyn Error>> {
     let path = temporary_database_path()?;
     {

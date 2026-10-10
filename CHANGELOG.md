@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Fix AutoLoop creation being rejected with `DuplicateEntryId` after a button
+  layout migration. New mappings receive an unused internal ID; editing an
+  existing mapping preserves its identity and does not alter other buttons.
+
 ## Lumi 0.6.4 / Lumi Remote 0.1.3 - 2026-10-10
 
 - More reliable distinct USB identity, read-only network media recognition and

@@ -204,6 +204,83 @@ fn an_output_mapping_atomically_owns_its_entry_name_and_phrase_role()
 }
 
 #[test]
+fn migrated_entry_ids_do_not_block_new_buttons_or_change_on_edit()
+-> Result<(), Box<dyn std::error::Error>> {
+    let original = fixture()?;
+    let role = PhraseRoleId::try_new("drop")?;
+    let mut variants = original.variants().to_vec();
+    let mut cells = original.cells().to_vec();
+    // Model the persisted pre-layout-migration IDs, including a suffix clash.
+    for (button, entry, order) in [
+        (4, "theme-1--mapping-13", 1),
+        (5, "theme-1--mapping-13--1", 2),
+    ] {
+        let mapping = VariantId::try_new(format!("mapping-{button}"))?;
+        variants.push(AutoloopVariant::try_new(
+            role.clone(),
+            mapping.clone(),
+            format!("Output {button}"),
+            order,
+            false,
+        )?);
+        cells.push(AutoloopMatrixCell::try_new(
+            ThemeId::new(1),
+            role.clone(),
+            mapping,
+            AutoloopEntryId::try_new(entry)?,
+            format!("Drop {button}"),
+        )?);
+    }
+    let migrated = AutoloopCatalog::try_new(
+        original.revision(),
+        original.defaults_version(),
+        original.themes().to_vec(),
+        variants,
+        cells,
+    )?;
+    let added = migrated.set_mapping(
+        ThemeId::new(1),
+        VariantId::try_new("mapping-13")?,
+        PhraseRoleId::try_new("breakdown-1")?,
+        Some("BD CHORUS2B BLUE PINK".into()),
+    )?;
+    for old in migrated.cells() {
+        assert!(
+            added.cells().contains(old),
+            "existing entries must not change"
+        );
+    }
+    let new_entry = added
+        .cells()
+        .iter()
+        .find(|cell| cell.variant_id().as_str() == "mapping-13")
+        .ok_or("new button missing")?;
+    assert_eq!(new_entry.entry_id().as_str(), "theme-1--mapping-13--2");
+    let edited = added.set_mapping(
+        ThemeId::new(1),
+        VariantId::try_new("mapping-4")?,
+        PhraseRoleId::try_new("synth")?,
+        Some("Edited Drop".into()),
+    )?;
+    let edited_entry = edited
+        .cells()
+        .iter()
+        .find(|cell| cell.variant_id().as_str() == "mapping-4")
+        .ok_or("edited button missing")?;
+    assert_eq!(edited_entry.entry_id().as_str(), "theme-1--mapping-13");
+    assert_eq!(edited_entry.role_id().as_str(), "synth");
+    let cleared = edited.clear_mapping(ThemeId::new(1), &VariantId::try_new("mapping-13")?)?;
+    let recreated = cleared.set_mapping(
+        ThemeId::new(1),
+        VariantId::try_new("mapping-13")?,
+        role,
+        Some("Recreated".into()),
+    )?;
+    assert!(recreated.cells().contains(edited_entry));
+    Ok(())
+}
+
+#[test]
 fn clearing_one_bank_button_preserves_the_same_button_in_other_banks()
 -> Result<(), Box<dyn std::error::Error>> {
     let mapping_id = VariantId::try_new("mapping-1")?;

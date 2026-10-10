@@ -792,16 +792,17 @@ impl AutoloopCatalog {
                 false,
             )?);
         }
+        // Entry IDs survive button-layout migrations. They are identities, not
+        // addresses: an old mapping-13 entry can now belong to button 4.
+        let entry_id = match &existing_cell {
+            Some(cell) => cell.entry_id().clone(),
+            None => unused_mapping_entry_id(theme_id, &mapping_id, &cells)?,
+        };
         cells.push(AutoloopMatrixCell::try_new(
             theme_id,
             role_id,
             mapping_id.clone(),
-            AutoloopEntryId::try_new(format!(
-                "theme-{}--{}",
-                theme_id.value(),
-                mapping_id.as_str()
-            ))
-            .map_err(|_| AutoloopCatalogError::IdentifierOverflow)?,
+            entry_id,
             display_name,
         )?);
         variants = prune_unused_variants(variants, &cells)?;
@@ -1046,6 +1047,31 @@ fn sort_cells(
                     )
             })
     });
+}
+
+fn unused_mapping_entry_id(
+    theme_id: ThemeId,
+    mapping_id: &VariantId,
+    cells: &[AutoloopMatrixCell],
+) -> Result<AutoloopEntryId, AutoloopCatalogError> {
+    let base = format!("theme-{}--{}", theme_id.value(), mapping_id.as_str());
+    let used = cells
+        .iter()
+        .map(|cell| cell.entry_id().as_str())
+        .collect::<HashSet<_>>();
+    // With N occupied IDs, at least one of N+1 candidates must be free.
+    for index in 0..=cells.len() {
+        let candidate = if index == 0 {
+            base.clone()
+        } else {
+            format!("{base}--{index}")
+        };
+        if !used.contains(candidate.as_str()) {
+            return AutoloopEntryId::try_new(candidate)
+                .map_err(|_| AutoloopCatalogError::IdentifierOverflow);
+        }
+    }
+    Err(AutoloopCatalogError::IdentifierOverflow)
 }
 
 fn generated_entry_id(
