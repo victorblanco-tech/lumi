@@ -104,6 +104,15 @@ sampling cadence of desktop screenshots.
 
 ### Current acceptance boundary (2026-10-10)
 
+Dev-34 follow-up: a real receive-gap trace reproduced a canonical rewind and
+false transport epoch during unchanged playback. Late-but-forward status must
+not corroborate a seek; reordered beat packets must not rewind the timeline.
+The same trace showed an unsent forecast holding an obsolete deadline despite
+newer beats at unchanged BPM. Retiming now happens atomically within the MIDI
+lane, without re-creating a sent cue. See
+`docs/release/0.6.4-dev-34-receive-gap-timing.md` for evidence and acceptance
+limits; this does not constitute physical-light phase acceptance.
+
 Dev-32 hardware retest: owner again reports BD Start very late, with BD Chorus
 better afterwards. Hardware timing acceptance has FAILED despite simulator
 dispatch assertions. Read-only observation confirms Dev-32, offset 0 ms,
