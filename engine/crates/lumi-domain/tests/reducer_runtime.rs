@@ -10,6 +10,56 @@ use lumi_domain::{
 };
 
 #[test]
+fn late_library_metadata_preserves_transport_and_rejects_an_old_load() {
+    let mut runtime = started_runtime(16);
+    submit_and_process(&mut runtime, track_loaded(1, 10, 100, 1));
+    submit_and_process(&mut runtime, position(2, 10, 64, 2));
+    submit_and_process(&mut runtime, playback_state(3, 10, true, 3));
+    submit_and_process(
+        &mut runtime,
+        DomainEvent::Observation(ObservationEnvelope {
+            source_id: SourceId::new(1),
+            sequence: SourceSequence::new(4),
+            observed_at: MonotonicTime::new(4),
+            observation: DeckObservation::PlaybackTempoChanged {
+                deck_id: DeckId::new(1),
+                track_load_id: TrackLoadId::new(10),
+                bpm_milli: 142_500,
+            },
+        }),
+    );
+    let hydrated = |sequence, load| {
+        DomainEvent::Observation(ObservationEnvelope {
+            source_id: SourceId::new(1),
+            sequence: SourceSequence::new(sequence),
+            observed_at: MonotonicTime::new(5),
+            observation: DeckObservation::TrackMetadataHydrated {
+                deck_id: DeckId::new(1),
+                track_load_id: TrackLoadId::new(load),
+                metadata: track_metadata(200),
+            },
+        })
+    };
+    let accepted = submit_and_process(&mut runtime, hydrated(5, 10));
+    assert_eq!(accepted.decision, DecisionReason::TrackMetadataHydrated);
+    assert!(accepted.effects.is_empty());
+    let deck = runtime
+        .state()
+        .deck(DeckId::new(1))
+        .unwrap_or_else(|| panic!("loaded deck"));
+    assert_eq!(deck.track_id(), TrackId::new(200));
+    assert_eq!(deck.beat(), 64);
+    assert!(deck.is_playing());
+    assert_eq!(deck.effective_bpm_milli(), 142_500);
+    assert_eq!(deck.last_observed_at(), MonotonicTime::new(4));
+    let unchanged = runtime.state().deck(DeckId::new(1)).cloned();
+    let stale = submit_and_process(&mut runtime, hydrated(6, 9));
+    assert_eq!(stale.decision, DecisionReason::TrackLoadMismatch);
+    assert!(stale.effects.is_empty());
+    assert_eq!(runtime.state().deck(DeckId::new(1)).cloned(), unchanged);
+}
+
+#[test]
 fn operation_transition_table_is_explicit() {
     let mut runtime = started_runtime(16);
 

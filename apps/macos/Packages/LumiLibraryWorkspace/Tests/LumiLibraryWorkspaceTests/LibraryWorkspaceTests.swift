@@ -7,6 +7,40 @@ import Testing
 
 @Suite("Library workspace")
 struct LibraryWorkspaceTests {
+    @Test("A pending playlist query never presents the old playlist as its result")
+    func pendingPlaylistQueryPreservesNavigation() throws {
+        let original = try LibrarySnapshotDecoder().decode(envelope(trackValues: [trackValue()]))
+        let request = LibraryQueryRequest(search: "", playlistID: 87, offset: 0)
+        let loading = original.loadingQuery(request)
+        #expect(loading.condition == .querying)
+        #expect(loading.condition.componentState == .loading)
+        #expect(loading.query.playlistID == 87)
+        #expect(loading.page.tracks.isEmpty)
+        #expect(loading.playlists == original.playlists)
+        #expect(loading.editor == original.editor)
+        #expect(loading.rekordboxDevices == original.rekordboxDevices)
+        let next = loading.loadingQuery(.init(search: "other", playlistID: 90, offset: 0))
+        #expect(next.query.playlistID == 90)
+        #expect(next.query.search == "other")
+        #expect(next.failingQuery(request, message: "Retry").condition == .error)
+    }
+
+    @Test("A failed playlist query clears stale rows without losing navigation or editor data")
+    func failedPlaylistQueryPreservesNavigation() throws {
+        let original = try LibrarySnapshotDecoder().decode(envelope(trackValues: [trackValue()]))
+        let request = LibraryQueryRequest(search: "new selection", playlistID: 99, offset: 0)
+        let failed = original.failingQuery(request, message: "Could not load playlist")
+        #expect(failed.condition == .error)
+        #expect(failed.query.playlistID == 99)
+        #expect(failed.query.search == "new selection")
+        #expect(failed.page.tracks.isEmpty)
+        #expect(failed.page.total == 0)
+        #expect(failed.playlists == original.playlists)
+        #expect(failed.editor == original.editor)
+        #expect(failed.rekordboxDevices == original.rekordboxDevices)
+        #expect(failed.diagnostic == "Could not load playlist")
+    }
+
     @Test("Editor height migrates the user's divider and ignores automatic frame changes")
     func editorHeightMigration() throws {
         let suite = "lumi.editor-height-test.\(UUID().uuidString)"
@@ -445,6 +479,11 @@ struct LibraryWorkspaceTests {
                 "conflictTracks": .number(1),
                 "beatGridRefresh": .boolean(true),
                 "cueRevisionTracked": .boolean(true),
+                "skippedTracks": .array([.object([
+                    "deviceTrackId": .number(1283),
+                    "title": .string("Our Origin (Extended Mix)"),
+                    "reason": .string("beat marker times must increase strictly")
+                ])]),
                 "reviewTracks": .array([
                     .object([
                         "deviceTrackId": .number(1_031),
@@ -472,6 +511,8 @@ struct LibraryWorkspaceTests {
 
         let device = try #require(state.rekordboxDevices.first)
         #expect(device.displayName == "DJ USB")
+        #expect(device.skippedTracks.first?.title == "Our Origin (Extended Mix)")
+        #expect(device.skippedTracks.first?.deviceTrackID == 1283)
         #expect(device.matchedTracks == 43)
         #expect(device.unmatchedTracks == 1_095)
         #expect(device.protectedTracks == 1)
@@ -484,8 +525,8 @@ struct LibraryWorkspaceTests {
         #expect(device.cueRevisionTracked)
     }
 
-    @Test("Pro DJ Link diagnostics decode discovered equipment and bridge state")
-    func decodesProDJLinkIntegration() throws {
+    @Test("Pro DJ Link diagnostics accept every USB mount lifecycle state", arguments: ["trusted", "resolving", "unknown", "conflict", "unavailable", "empty", "unloading"])
+    func decodesProDJLinkIntegration(mediaState: String) throws {
         let state = try LibrarySnapshotDecoder().decode(
             envelope(
                 trackValues: [trackValue()],
@@ -524,7 +565,14 @@ struct LibraryWorkspaceTests {
                         .object([
                             "playerNumber": .number(1),
                             "name": .string("CDJ-1500X"),
-                            "address": .string("192.168.1.50")
+                            "address": .string("192.168.1.50"),
+                            "usbMedia": .object([
+                                "state": .string(mediaState),
+                                "sourceName": .string("DJ VIC GRAY"),
+                                "generation": .number(3),
+                                "lastVerifiedUnixMillis": .number(1_790_000_000_000),
+                                "detail": .string("Trusted USB identified")
+                            ])
                         ])
                     ]),
                     "lastError": .null
@@ -535,6 +583,9 @@ struct LibraryWorkspaceTests {
         #expect(input.isProDJLink)
         #expect(input.discoveredPlayers.first?.name == "CDJ-1500X")
         #expect(input.discoveredPlayers.first?.address == "192.168.1.50")
+        #expect(input.discoveredPlayers.first?.usbMedia?.state == mediaState)
+        #expect(input.discoveredPlayers.first?.usbMedia?.sourceName == "DJ VIC GRAY")
+        #expect(input.discoveredPlayers.first?.usbMedia?.generation == 3)
         #expect(input.recoveryPending == false)
         #expect(input.restartCount == 2)
         #expect(input.ingressQueueCapacity == 512)
@@ -1196,6 +1247,22 @@ struct LibraryWorkspaceTests {
                 envelope(trackValues: [trackValue()], editorValue: editor)
             )
         }
+    }
+
+    @Test("An offline verified USB keeps the editor decodable without demo audio")
+    func offlineVerifiedUSBEditorContract() throws {
+        guard case var .object(editorObject) = editorValue() else {
+            Issue.record("Editor fixture must be an object")
+            return
+        }
+        editorObject["audioUri"] = .string("lumi-unavailable://track/42")
+        let state = try LibrarySnapshotDecoder().decode(
+            envelope(trackValues: [trackValue()], editorValue: .object(editorObject))
+        )
+        let editor = try #require(state.editor)
+        #expect(editor.audioURI == "lumi-unavailable://track/42")
+        #expect(editor.waveform.count == 3)
+        #expect(editor.phrases.count == 2)
     }
 
     @Test("Incomplete bars are rejected before the editor can render")

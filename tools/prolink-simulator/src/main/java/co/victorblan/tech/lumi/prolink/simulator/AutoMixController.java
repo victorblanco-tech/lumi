@@ -74,8 +74,8 @@ final class AutoMixController implements AutoCloseable {
         } else {
             preparePlaylist(requestedPlaylistId, requestedShuffle);
             leader = players.getFirst();
-            leader.load(nextPlaylistTrack());
-            other(leader).load(nextPlaylistTrack());
+            loadFromPlaylist(leader, nextPlaylistTrack());
+            loadFromPlaylist(other(leader), nextPlaylistTrack());
         }
         PlayerState follower = other(leader);
         follower.pause();
@@ -160,7 +160,7 @@ final class AutoMixController implements AutoCloseable {
         outgoing.setOnAir(false);
         outgoing.pause();
         if (playlistId != null) {
-            outgoing.load(nextPlaylistTrack());
+            loadFromPlaylist(outgoing, nextPlaylistTrack());
         }
         transitionCount++;
     }
@@ -195,6 +195,16 @@ final class AutoMixController implements AutoCloseable {
         UsbLibrary.Track track = playlistOrder.get(playlistCursor++);
         lastAssignedTrackId = track.id();
         return track;
+    }
+
+    private void loadFromPlaylist(PlayerState destination, UsbLibrary.Track track) {
+        PlayerState mediaOwner = players.getFirst();
+        MediaSlot.Mount mount = mediaOwner.usb().current();
+        if (mount != null && mount.library() == library) {
+            destination.loadFrom(mediaOwner.usb(), track.id());
+        } else {
+            destination.load(track);
+        }
     }
 
     private void reshufflePlaylist() {

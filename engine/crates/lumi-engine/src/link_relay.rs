@@ -59,7 +59,9 @@ where
             return Ok(());
         }
         if enabled {
-            self.provider.publish().map_err(|error| error.to_string())?;
+            self.provider
+                .request_publish()
+                .map_err(|error| error.to_string())?;
             self.enabled = true;
         } else {
             let stop_result = self.provider.stop().map_err(|error| error.to_string());
@@ -91,7 +93,11 @@ where
             {
                 return Ok(());
             }
-            let materially_changed = self.last_prolink_bpm_milli != Some(observation.bpm_milli)
+            // Recovery must reach the provider even when the tempo and master
+            // did not change during the gap. Subsequent identical beats remain
+            // coalesced; this is not continuous Link phase correction.
+            let materially_changed = self.prolink_timing_stale
+                || self.last_prolink_bpm_milli != Some(observation.bpm_milli)
                 || self.last_prolink_playing != Some(observation.playing)
                 || self.last_prolink_deck_number != observation.deck_number;
             self.last_prolink_timing_at = Some(Instant::now());
@@ -134,11 +140,11 @@ where
         }
         let reason = if source_ready {
             format!(
-                "Pro DJ Link timing is stale ({} ms without a clock observation); Link transport was held fail-closed",
+                "Pro DJ Link timing is stale ({} ms without a clock observation); last Link tempo preserved",
                 age.as_millis()
             )
         } else {
-            format!("Pro DJ Link source is {source_status}; Link transport was held fail-closed")
+            format!("Pro DJ Link source is {source_status}; last Link tempo preserved")
         };
         self.fail_closed(reason)
     }
@@ -200,6 +206,7 @@ mod tests {
     #[derive(Clone, Debug, Eq, PartialEq)]
     enum Call {
         Publish,
+        BlockingPublish,
         Synchronize(LinkClockObservation),
         Hold,
         Stop,
@@ -219,6 +226,12 @@ mod tests {
         }
 
         fn publish(&mut self) -> Result<(), Self::Error> {
+            self.calls.push(Call::BlockingPublish);
+            self.status.state = TimingOutputState::Ready;
+            Ok(())
+        }
+
+        fn request_publish(&mut self) -> Result<(), Self::Error> {
             self.calls.push(Call::Publish);
             self.status.state = TimingOutputState::Ready;
             Ok(())
@@ -296,5 +309,25 @@ mod tests {
         let mut relay = LinkRelay::new(RecordingProvider::default());
         assert!(relay.synchronize(prolink_clock(140_000)).is_ok());
         assert!(relay.provider.calls.is_empty());
+    }
+
+    #[test]
+    fn recovered_unchanged_clock_reaches_provider_once_after_stale_hold() {
+        let mut relay = LinkRelay::new(RecordingProvider::default());
+        assert!(relay.set_enabled(true).is_ok());
+        assert!(relay.synchronize(prolink_clock(155_000)).is_ok());
+        assert!(relay.fail_closed("test timing gap").is_ok());
+        relay.provider.calls.clear();
+
+        let mut recovered = prolink_clock(155_000);
+        recovered.observed_at_micros = Some(2_000_000);
+        assert!(relay.synchronize(recovered).is_ok());
+        let mut next = recovered;
+        next.observed_at_micros = Some(2_500_000);
+        next.beat_within_bar = 2;
+        assert!(relay.synchronize(next).is_ok());
+
+        assert_eq!(relay.provider.calls, vec![Call::Synchronize(recovered)]);
+        assert!(!relay.prolink_timing_stale);
     }
 }

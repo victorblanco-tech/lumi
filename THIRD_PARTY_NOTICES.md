@@ -26,7 +26,7 @@ The bridge also contains these pinned runtime dependencies:
 - Kaitai Struct Runtime 0.10 — MIT;
 - SLF4J 1.7.36 — MIT;
 - API Guardian 1.1.2 — Apache-2.0;
-- Jackson Core, Annotations and Databind 2.18.9 — Apache-2.0.
+- Jackson Databind 2.18.11 and its Jackson Core/Annotations dependencies — Apache-2.0.
 
 ## Carabiner and Ableton Link
 

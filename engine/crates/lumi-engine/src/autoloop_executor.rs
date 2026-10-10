@@ -81,6 +81,9 @@ impl AutoloopExecutorState {
 #[derive(Clone, Debug)]
 pub(crate) struct AutoloopCueExecutor {
     state: AutoloopExecutorState,
+    // Independent of pending work: forecasting the next cue must not erase
+    // the completion watermark for delayed current-phrase observations.
+    completed_through: Option<AutoloopExecutionIdentity>,
     execution_epoch: u64,
     requested_count: u64,
     bank_prepared_count: u64,
@@ -96,6 +99,7 @@ impl Default for AutoloopCueExecutor {
     fn default() -> Self {
         Self {
             state: AutoloopExecutorState::Idle,
+            completed_through: None,
             execution_epoch: 0,
             requested_count: 0,
             bank_prepared_count: 0,
@@ -112,6 +116,7 @@ impl Default for AutoloopCueExecutor {
 impl AutoloopCueExecutor {
     pub(crate) fn begin_execution_epoch(&mut self) -> Option<u64> {
         self.execution_epoch = self.execution_epoch.checked_add(1)?;
+        self.completed_through = None;
         self.cancel_pending();
         Some(self.execution_epoch)
     }
@@ -133,7 +138,15 @@ impl AutoloopCueExecutor {
         active_bank: Option<u8>,
     ) -> Option<AutoloopSchedule> {
         self.requested_count = self.requested_count.saturating_add(1);
-        if self.state.identity() == Some(identity) {
+        if self.state.identity() == Some(identity)
+            || self.completed_through.is_some_and(|completed| {
+                completed.execution_epoch == identity.execution_epoch
+                    && completed.deck_id == identity.deck_id
+                    && completed.track_load_id == identity.track_load_id
+                    && completed.plan_revision == identity.plan_revision
+                    && completed.phrase_index >= identity.phrase_index
+            })
+        {
             self.duplicate_count = self.duplicate_count.saturating_add(1);
             return None;
         }
@@ -145,16 +158,14 @@ impl AutoloopCueExecutor {
         })
     }
 
-    /// Replaces an unsent deadline for the same musical cue without creating
-    /// a new execution epoch. This is used only when a CDJ pitch change moves
-    /// a future negative-offset deadline. A completed cue is immutable.
-    pub(crate) fn replace_pending_deadline(&mut self, identity: AutoloopExecutionIdentity) -> bool {
+    /// Record an in-place deadline update. Keep the trigger identity and
+    /// completion watermark: retiming must never authorize a second send.
+    pub(crate) fn record_pending_retime(&mut self, identity: AutoloopExecutionIdentity) -> bool {
         if self.state.identity() != Some(identity)
             || matches!(self.state, AutoloopExecutorState::Completed { .. })
         {
             return false;
         }
-        self.state = AutoloopExecutorState::Idle;
         self.rescheduled_count = self.rescheduled_count.saturating_add(1);
         true
     }
@@ -199,6 +210,7 @@ impl AutoloopCueExecutor {
             return;
         };
         if lane_emitted_count >= expected_lane_emitted_count {
+            self.completed_through = Some(identity);
             self.state = AutoloopExecutorState::Completed { identity, target };
             self.completed_count = self.completed_count.saturating_add(1);
         }
@@ -364,6 +376,92 @@ mod tests {
     }
 
     #[test]
+    fn delayed_phrase_does_not_replace_the_next_forecast() {
+        let mut executor = AutoloopCueExecutor::default();
+        executor.begin_execution_epoch();
+        let target = AutoloopTarget {
+            bank_number: 2,
+            autoloop_number: 20,
+        };
+        let sent = executor
+            .schedule(&request(12, 2), target, Some(2))
+            .unwrap_or_else(|| panic!("current cue must schedule"));
+        executor.mark_triggered(sent, 1);
+        executor.complete_if_emitted(1);
+        let next = executor
+            .schedule(&request(13, 2), target, Some(2))
+            .unwrap_or_else(|| panic!("next cue must schedule"));
+        executor.mark_triggered(next, 2);
+        let pending = executor.state();
+        // Hardware replay: the next forecast precedes the delayed current
+        // phrase notification by 20 us, 362 ms after the current cue sent.
+        assert!(
+            executor
+                .schedule(&request(12, 2), target, Some(2))
+                .is_none()
+        );
+        assert_eq!(executor.state(), pending);
+        executor.complete_if_emitted(2);
+        executor.cancel_pending();
+        assert!(
+            executor
+                .schedule(&request(12, 2), target, Some(2))
+                .is_none()
+        );
+        assert!(
+            executor
+                .schedule(&request(13, 2), target, Some(2))
+                .is_none()
+        );
+        executor.begin_execution_epoch();
+        assert!(
+            executor
+                .schedule(&request(12, 2), target, Some(2))
+                .is_some()
+        );
+    }
+
+    #[test]
+    fn failed_or_cancelled_unsent_cue_remains_retryable() {
+        let mut executor = AutoloopCueExecutor::default();
+        executor.begin_execution_epoch();
+        let target = AutoloopTarget {
+            bank_number: 2,
+            autoloop_number: 20,
+        };
+        let first = executor
+            .schedule(&request(12, 2), target, Some(2))
+            .unwrap_or_else(|| panic!("current cue must schedule"));
+        executor.mark_triggered(first, 1);
+        executor.complete_if_emitted(1);
+        let next = executor
+            .schedule(&request(13, 2), target, Some(2))
+            .unwrap_or_else(|| panic!("next cue must schedule"));
+        executor.fail(next.identity);
+        assert!(
+            executor
+                .schedule(&request(13, 2), target, Some(2))
+                .is_some()
+        );
+        executor.cancel_pending();
+        assert!(
+            executor
+                .schedule(&request(13, 2), target, Some(2))
+                .is_some()
+        );
+        assert!(
+            executor
+                .schedule(&request(12, 2), target, Some(2))
+                .is_none()
+        );
+        assert!(
+            executor
+                .schedule(&request(12, 3), target, Some(2))
+                .is_some()
+        );
+    }
+
+    #[test]
     fn phrase_and_plan_revision_create_new_identities_without_duplicates() {
         let mut executor = AutoloopCueExecutor::default();
         assert_eq!(executor.begin_execution_epoch(), Some(1));
@@ -396,22 +494,11 @@ mod tests {
             .unwrap_or_else(|| panic!("future cue must schedule"));
         executor.mark_bank_prepared(schedule);
         executor.mark_triggered(schedule, 1);
-        assert!(executor.replace_pending_deadline(schedule.identity));
+        assert!(executor.record_pending_retime(schedule.identity));
         assert_eq!(executor.rescheduled_count(), 1);
-        assert!(executor.schedule(&request, target, Some(1)).is_some());
-
-        let replacement = match executor.state() {
-            AutoloopExecutorState::Scheduled { identity, target } => super::AutoloopSchedule {
-                identity,
-                target,
-                select_bank: false,
-            },
-            state => panic!("replacement must be scheduled, found {state:?}"),
-        };
-        executor.mark_bank_prepared(replacement);
-        executor.mark_triggered(replacement, 2);
-        executor.complete_if_emitted(2);
-        assert!(!executor.replace_pending_deadline(replacement.identity));
+        assert!(executor.schedule(&request, target, Some(1)).is_none());
+        executor.complete_if_emitted(1);
+        assert!(!executor.record_pending_retime(schedule.identity));
         assert_eq!(executor.rescheduled_count(), 1);
     }
 

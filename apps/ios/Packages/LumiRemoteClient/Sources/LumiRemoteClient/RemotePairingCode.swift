@@ -1,11 +1,15 @@
 import Foundation
+import LumiProtocol
 
 public struct RemotePairingCodeCodec: Sendable {
     private static let maximumEncodedBytes = 4_096
     private let encoder = JSONEncoder()
     private let decoder = JSONDecoder()
+    private let releaseChannel: RemoteReleaseChannel
 
-    public init() {}
+    public init(releaseChannel: RemoteReleaseChannel = .production) {
+        self.releaseChannel = releaseChannel
+    }
 
     public func encode(_ invitation: RemotePairingInvitation) throws -> URL {
         let data = try encoder.encode(invitation)
@@ -16,7 +20,8 @@ public struct RemotePairingCodeCodec: Sendable {
             .replacingOccurrences(of: "+", with: "-")
             .replacingOccurrences(of: "/", with: "_")
             .replacingOccurrences(of: "=", with: "")
-        guard var components = URLComponents(string: "lumi://pair") else {
+        guard let scheme = RemotePairingRoute.scheme(for: releaseChannel.rawValue),
+              var components = URLComponents(string: "\(scheme)://pair") else {
             throw RemotePairingCodeError.invalidURL
         }
         components.queryItems = [URLQueryItem(name: "invitation", value: token)]
@@ -25,7 +30,8 @@ public struct RemotePairingCodeCodec: Sendable {
     }
 
     public func decode(_ url: URL, nowUnixMillis: UInt64) throws -> RemotePairingInvitation {
-        guard url.scheme == "lumi", url.host == "pair",
+        guard url.scheme == RemotePairingRoute.scheme(for: releaseChannel.rawValue),
+              url.host == "pair",
               let components = URLComponents(url: url, resolvingAgainstBaseURL: false),
               let encoded = components.queryItems?.first(where: {
                   $0.name == "invitation"

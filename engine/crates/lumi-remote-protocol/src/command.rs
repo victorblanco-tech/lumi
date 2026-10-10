@@ -10,6 +10,13 @@ pub enum OperationTarget {
     Paused,
 }
 
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub enum RemoteLaunchPolicy {
+    Immediate,
+    OnPhraseStart,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(
     rename_all = "camelCase",
@@ -30,6 +37,10 @@ pub enum RemoteCommandKind {
         expected_state_revision: u64,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         expected_timing_offset_millis: Option<i16>,
+    },
+    SetLaunchPolicy {
+        policy: RemoteLaunchPolicy,
+        expected_policy: RemoteLaunchPolicy,
     },
     SelectThemeFromPhrase {
         plan_id: String,

@@ -36,6 +36,24 @@ pub struct RemoteIntegrationStatus {
     pub ableton_link_bpm_milli: Option<u64>,
     pub timing_offset_millis: i16,
     pub pending_timing_offset_millis: Option<i16>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub launch: Option<RemoteInitialLaunch>,
+}
+
+/// Additive versioned capability: absent on older engines. Clients must not
+/// offer launch controls unless version 1 is present.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteInitialLaunch {
+    pub version: u8,
+    pub policy: crate::command::RemoteLaunchPolicy,
+    pub status: String,
+    pub target_phrase_index: Option<u16>,
+    pub target_beat: Option<u32>,
+    pub target_player: Option<u8>,
+    pub remaining_beats: Option<u32>,
+    pub save_pending: bool,
+    pub save_error: Option<String>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -48,10 +66,23 @@ pub struct RemoteLiveProjection {
     pub leader_player_number: Option<u8>,
     pub integrations: RemoteIntegrationStatus,
     pub players: Vec<RemotePlayer>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub player_usbs: Vec<RemotePlayerUSB>,
     pub live_plan: Option<RemoteLightPlan>,
     pub next_plan: Option<RemoteLightPlan>,
     pub theme_options: Vec<RemoteThemeOption>,
     pub phrase_role_options: Vec<RemotePhraseRoleOption>,
+}
+
+/// Mounted USB identity on the owning Player, not the source of a linked track.
+/// Deliberately excludes marker IDs, filesystem paths and network addresses.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemotePlayerUSB {
+    pub player_number: u8,
+    pub state: String,
+    pub source_name: Option<String>,
+    pub color_id: Option<u8>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -62,6 +93,20 @@ pub struct RemotePlayer {
     pub track_load_id: u64,
     pub transport: RemoteTransportAnchor,
     pub track: RemoteTrack,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub track_source: Option<RemoteTrackSource>,
+}
+
+/// The media reported for this track load, distinct from the USB mounted in
+/// the destination Player. Contains display information only, never USB IDs.
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RemoteTrackSource {
+    pub player_number: Option<u8>,
+    pub slot: String,
+    pub state: String,
+    pub source_name: Option<String>,
+    pub color_id: Option<u8>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -339,8 +384,32 @@ impl RemoteLiveProjection {
                     .midi_integration
                     .as_ref()
                     .and_then(|status| status.pending_timing_offset_millis),
+                launch: wire
+                    .midi_integration
+                    .as_ref()
+                    .and_then(|status| status.launch.clone()),
             },
             players,
+            player_usbs: wire.deck_input_integration.map_or_else(Vec::new, |input| {
+                input
+                    .discovered_players
+                    .into_iter()
+                    .filter_map(|player| {
+                        if !(1..=6).contains(&player.player_number) {
+                            return None;
+                        }
+                        player.usb_media.map(|media| {
+                            let trusted = media.state == "trusted";
+                            RemotePlayerUSB {
+                                player_number: player.player_number,
+                                state: media.state,
+                                source_name: media.source_name.filter(|_| trusted),
+                                color_id: media.color_id.filter(|_| trusted),
+                            }
+                        })
+                    })
+                    .collect()
+            }),
             live_plan: wire
                 .live_plan
                 .map(EnginePlanWire::into_remote)
@@ -375,7 +444,17 @@ impl RemoteLiveProjection {
     }
 
     fn normalize_display_text(&mut self) {
+        for usb in &mut self.player_usbs {
+            if let Some(name) = &mut usb.source_name {
+                *name = display_text(name, 128);
+            }
+        }
         for player in &mut self.players {
+            if let Some(source) = &mut player.track_source
+                && let Some(name) = &mut source.source_name
+            {
+                *name = display_text(name, 128);
+            }
             if let Some(model) = &mut player.hardware_model {
                 *model = display_text(model, 96);
             }
@@ -419,6 +498,32 @@ impl RemoteLiveProjection {
         validate_text("engineVersion", &self.engine_version, 64, false)?;
         if self.players.len() > MAX_REMOTE_PLAYERS {
             return Err(ProjectionError::TooManyPlayers);
+        }
+        if self.player_usbs.len() > 6 {
+            return Err(ProjectionError::TooManyPlayers);
+        }
+        let mut usb_players = std::collections::BTreeSet::new();
+        for usb in &self.player_usbs {
+            if !(1..=6).contains(&usb.player_number)
+                || !usb_players.insert(usb.player_number)
+                || ![
+                    "trusted",
+                    "unknown",
+                    "conflict",
+                    "unavailable",
+                    "resolving",
+                    "empty",
+                    "unloading",
+                ]
+                .contains(&usb.state.as_str())
+                || usb.color_id.is_some_and(|id| id > 8)
+                || (usb.state != "trusted" && (usb.source_name.is_some() || usb.color_id.is_some()))
+            {
+                return Err(ProjectionError::InvalidPlayerIdentity);
+            }
+            if let Some(name) = &usb.source_name {
+                validate_text("usbSourceName", name, 128, false)?;
+            }
         }
         if self.integrations.timing_offset_millis.unsigned_abs() > 250
             || self
@@ -470,6 +575,23 @@ impl RemotePlayer {
         }
         if let Some(model) = &self.hardware_model {
             validate_text("hardwareModel", model, 96, true)?;
+        }
+        if let Some(source) = &self.track_source {
+            if source
+                .player_number
+                .is_some_and(|number| !(1..=6).contains(&number))
+                || !["trusted", "unknown", "conflict", "unavailable", "resolving"]
+                    .contains(&source.state.as_str())
+                || source.color_id.is_some_and(|id| id > 8)
+                || (source.state != "trusted"
+                    && (source.source_name.is_some() || source.color_id.is_some()))
+            {
+                return Err(ProjectionError::InvalidPlayerIdentity);
+            }
+            validate_text("trackSourceSlot", &source.slot, 32, false)?;
+            if let Some(name) = &source.source_name {
+                validate_text("trackSourceName", name, 128, false)?;
+            }
         }
         self.track.validate()
     }
@@ -605,12 +727,35 @@ struct EngineSnapshotWire {
     engine_version: String,
     leader_deck_id: Option<u64>,
     deck_source: EngineDeckSourceWire,
+    deck_input_integration: Option<EngineDeckInputWire>,
     midi_integration: Option<EngineMidiStatusWire>,
     ableton_link_integration: Option<EngineLinkStatusWire>,
     decks: Vec<EngineDeckWire>,
     live_plan: Option<EnginePlanWire>,
     next_plan: Option<EnginePlanWire>,
     planning_options: EnginePlanningOptionsWire,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EngineDeckInputWire {
+    #[serde(default)]
+    discovered_players: Vec<EngineDiscoveredPlayerWire>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EngineDiscoveredPlayerWire {
+    player_number: u8,
+    usb_media: Option<EngineUSBMediaWire>,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct EngineUSBMediaWire {
+    state: String,
+    source_name: Option<String>,
+    color_id: Option<u8>,
 }
 
 #[derive(Deserialize)]
@@ -626,6 +771,7 @@ struct EngineMidiStatusWire {
     state: String,
     timing_offset_millis: i16,
     pending_timing_offset_millis: Option<i16>,
+    launch: Option<RemoteInitialLaunch>,
 }
 
 #[derive(Deserialize)]
@@ -649,6 +795,7 @@ struct EngineDeckWire {
     playback_position_observed_at_unix_millis: Option<u64>,
     transport_revision: Option<u64>,
     track: EngineTrackWire,
+    track_source: Option<RemoteTrackSource>,
 }
 
 impl EngineDeckWire {
@@ -672,6 +819,7 @@ impl EngineDeckWire {
                 published_at_unix_millis: Some(observed_at_unix_millis),
             },
             track: self.track.into_remote()?,
+            track_source: self.track_source,
         })
     }
 }
@@ -998,6 +1146,7 @@ mod tests {
 
     fn projection() -> RemoteLiveProjection {
         RemoteLiveProjection {
+            player_usbs: Vec::new(),
             projection_revision: 8,
             state_revision: 7,
             engine_version: "0.6.0-dev-4".to_owned(),
@@ -1011,8 +1160,10 @@ mod tests {
                 ableton_link_bpm_milli: Some(140_000),
                 timing_offset_millis: -20,
                 pending_timing_offset_millis: None,
+                launch: None,
             },
             players: vec![RemotePlayer {
+                track_source: None,
                 player_number: 1,
                 hardware_model: Some("CDJ-1500X".to_owned()),
                 track_load_id: 99,
@@ -1045,6 +1196,42 @@ mod tests {
             theme_options: Vec::new(),
             phrase_role_options: Vec::new(),
         }
+    }
+
+    #[test]
+    fn track_origin_is_additive_bounded_and_never_exposes_untrusted_media()
+    -> Result<(), Box<dyn std::error::Error>> {
+        let mut projection = projection();
+        projection.players[0].track_source = Some(super::RemoteTrackSource {
+            player_number: Some(2),
+            slot: "USB_SLOT".into(),
+            state: "trusted".into(),
+            source_name: Some("CHRM".into()),
+            color_id: Some(1),
+        });
+        assert!(projection.validate().is_ok());
+        let source = projection.players[0]
+            .track_source
+            .as_mut()
+            .ok_or("test origin")?;
+        source.state = "unknown".into();
+        assert_eq!(
+            projection.validate(),
+            Err(ProjectionError::InvalidPlayerIdentity)
+        );
+        let source = projection.players[0]
+            .track_source
+            .as_mut()
+            .ok_or("test origin")?;
+        source.source_name = None;
+        source.color_id = None;
+        assert!(projection.validate().is_ok());
+        projection.players[0].track_source = None;
+        let encoded = serde_json::to_value(&projection)?;
+        assert!(encoded["players"][0].get("trackSource").is_none());
+        let decoded: RemoteLiveProjection = serde_json::from_value(encoded)?;
+        assert!(decoded.players[0].track_source.is_none());
+        Ok(())
     }
 
     #[test]
@@ -1143,6 +1330,14 @@ mod tests {
             "engineVersion": "0.6.0-dev-4",
             "leaderDeckId": 1,
             "deckSource": { "mode": "connectedDecks", "status": "ready" },
+            "deckInputIntegration": { "discoveredPlayers": [
+                { "playerNumber": 1, "address": "192.168.1.189", "usbMedia": {
+                    "state": "trusted", "sourceName": "DJ VIC GRAY", "colorId": 7,
+                    "sourceId": "usb-fs:PRIVATE", "detail": "/Volumes/SECRET" } },
+                { "playerNumber": 2, "usbMedia": {
+                    "state": "conflict", "sourceName": "STALE NAME", "colorId": 1 } },
+                { "playerNumber": 33, "usbMedia": null }
+            ] },
             "midiIntegration": {
                 "state": "ready",
                 "timingOffsetMillis": -20,
@@ -1207,6 +1402,17 @@ mod tests {
         let projection = RemoteLiveProjection::from_engine_snapshot_payload(payload, 1, 10)?;
         let encoded = serde_json::to_string(&projection)?;
         assert_eq!(projection.players[0].player_number, 1);
+        assert_eq!(projection.player_usbs.len(), 2);
+        assert_eq!(
+            projection.player_usbs[0].source_name.as_deref(),
+            Some("DJ VIC GRAY")
+        );
+        assert_eq!(projection.player_usbs[0].color_id, Some(7));
+        assert!(projection.player_usbs[1].source_name.is_none());
+        assert!(projection.player_usbs[1].color_id.is_none());
+        assert!(!encoded.contains("sourceId"));
+        assert!(!encoded.contains("192.168."));
+        assert!(!encoded.contains("STALE NAME"));
         assert_eq!(
             projection.players[0].track.phrases[0].color_rgb,
             Some(0xFF_00_00)

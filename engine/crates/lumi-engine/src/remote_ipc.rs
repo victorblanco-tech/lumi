@@ -299,6 +299,7 @@ mod tests {
 
     fn projection() -> RemoteLiveProjection {
         RemoteLiveProjection {
+            player_usbs: Vec::new(),
             projection_revision: 1,
             state_revision: 7,
             engine_version: "0.6.0-dev-4".to_owned(),
@@ -312,6 +313,7 @@ mod tests {
                 ableton_link_bpm_milli: None,
                 timing_offset_millis: 0,
                 pending_timing_offset_millis: None,
+                launch: None,
             },
             players: Vec::new(),
             live_plan: None,

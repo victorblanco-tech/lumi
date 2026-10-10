@@ -2,6 +2,7 @@
   "protocolVersion": 1,
   "maximumFrameBytes": 524288,
   "maximumPlayers": 2,
+  "maximumPlayerUSBs": 6,
   "maximumWaveformPointsPerTrack": 16384,
   "maximumBeatgridBeatsPerTrack": 16384,
   "maximumHotCuesPerTrack": 16,
@@ -29,7 +30,7 @@
   ],
   "excludedData": [
     "library",
-    "usb",
+    "usbFilesAndInternalIds",
     "audioUri",
     "filesystemPath",
     "engineSessionToken",

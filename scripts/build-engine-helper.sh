@@ -43,6 +43,7 @@ plutil -create xml1 "$engine_info_plist"
 /usr/libexec/PlistBuddy -c "Add :CFBundlePackageType string BNDL" "$engine_info_plist"
 /usr/libexec/PlistBuddy -c "Add :CFBundleShortVersionString string $LUMI_PRODUCT_VERSION" "$engine_info_plist"
 /usr/libexec/PlistBuddy -c "Add :CFBundleVersion string $CURRENT_PROJECT_VERSION" "$engine_info_plist"
+/usr/libexec/PlistBuddy -c "Add :NSLocalNetworkUsageDescription string Lumi connects to DJ players on your local network and reads their USB identity to match tracks with your Lumi library." "$engine_info_plist"
 /usr/libexec/PlistBuddy -c "Add :NSRemovableVolumesUsageDescription string Lumi reads trusted Rekordbox USB media to synchronize playlists, analysis, cue points, and playable track locations. Rekordbox and USB files are never changed; source identity is stored locally in Lumi." "$engine_info_plist"
 plutil -lint "$engine_info_plist" >/dev/null
 

@@ -11,6 +11,35 @@ remain responsible for the lights.
 
 ## Set up once
 
+### Network and USB sources (0.4.1-dev-5 and later)
+
+Network selection is automatic; there are no fixed IP addresses to configure.
+With one active connection, use one USB in Player 1 and load Player 2 from it
+over LINK. Both Players, loops and Auto Mix remain available.
+
+With two active connections on the same trusted LAN (for example Ethernet and
+wifi), each Player gets its own address and can use a separate USB. The app
+shows the mode and both addresses. The second USB selector is disabled when
+only one suitable address is available. The app never enables wifi or changes
+your network or Docker configuration. A second connection is optional.
+
+Synchronize/trust each USB locally in Lumi before using it here. The simulator
+reads its existing `.lumi-media.json` over the same network protocol as a CDJ;
+it does not create or overwrite the marker. Only this small identity file is
+served, never your music or other files. No administrator service is installed.
+
+If RPC port 111 is already occupied, close the other simulator instance or
+investigate that service; the app will not stop other software automatically.
+After a network address changes, stop/start the simulator and copy its newly
+generated control URL. This build does not move live USB identities to a new
+address automatically.
+
+The control page shows inserted USB separately from the loaded track's source.
+Eject preserves cached playback, including tracks loaded via LINK. New loads
+from an ejected USB are rejected. USB timeout/missing/invalid-marker buttons
+inject a five-second failure without stopping the Player timing; **Restore all
+traffic** clears the injected failures.
+
 1. Download the **Simulator** DMG from [GitHub Releases](https://github.com/victorblanco-tech/lumi/releases).
    The simulator has its own version and installer; it is not part of the Lumi DMG.
 2. Copy the simulator app to Applications and open it. Java is included.

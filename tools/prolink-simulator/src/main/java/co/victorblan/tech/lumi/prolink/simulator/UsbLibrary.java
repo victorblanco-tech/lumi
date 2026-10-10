@@ -1,32 +1,34 @@
 package co.victorblan.tech.lumi.prolink.simulator;
 
-import org.deepsymmetry.cratedigger.Database;
+import com.fasterxml.jackson.databind.JsonNode;
 import org.deepsymmetry.cratedigger.pdb.RekordboxAnlz;
-import org.deepsymmetry.cratedigger.pdb.RekordboxPdb;
 
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.HashSet;
 import java.util.Comparator;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.Set;
 
 final class UsbLibrary {
-    private static final Path DATABASE_PATH = Path.of("PIONEER", "rekordbox", "export.pdb");
+    private static final Path DATABASE_PATH = Path.of("PIONEER", "rekordbox", "exportLibrary.db");
     private final Path root;
+    private final String displayName;
     private final Map<Integer, Track> tracks;
     private final List<Track> sortedTracks;
     private final Map<Long, Playlist> playlists;
     private final List<PlaylistSummary> sortedPlaylists;
+    private List<String> scanWarnings = List.of();
+
+    List<String> scanWarnings() { return scanWarnings; }
 
     private UsbLibrary(Path root, Map<Integer, Track> tracks, List<Playlist> playlists) {
         this.root = root;
+        this.displayName = root.getFileName() == null ? "Rekordbox USB" : root.getFileName().toString();
         this.tracks = Map.copyOf(tracks);
         this.sortedTracks = tracks.values().stream()
                 .sorted(Comparator.comparing(Track::artist, String.CASE_INSENSITIVE_ORDER)
@@ -52,29 +54,40 @@ final class UsbLibrary {
         }
         Path databasePath = checkedChild(root, DATABASE_PATH);
         if (!Files.isRegularFile(databasePath)) {
-            throw new IOException("Rekordbox DeviceSQL database not found: " + databasePath);
+            throw new IOException("Rekordbox OneLibrary database not found: " + databasePath);
         }
+        return fromOneLibrary(root, OneLibraryReader.read(root));
+    }
 
+    static UsbLibrary fromOneLibrary(Path root, JsonNode data) throws IOException {
+        root = root.toRealPath();
         HashMap<Integer, Track> tracks = new HashMap<>();
-        List<Playlist> playlists;
-        try (Database database = new Database(databasePath.toFile())) {
-            for (RekordboxPdb.TrackRow row : database.trackIndex.values()) {
-                int id = Math.toIntExact(row.id());
-                String title = Database.getText(row.title());
-                String artist = artist(database, row.artistId());
-                String analysisPathValue = Database.getText(row.analyzePath());
-                Path analysisPath = checkedDeclaredChild(root, analysisPathValue);
-                List<BeatPoint> beatGrid = readBeatGrid(analysisPath);
-                boolean exactBeatGrid = !beatGrid.isEmpty();
-                if (!exactBeatGrid) {
-                    beatGrid = syntheticBeatGrid((int) row.tempo(), row.duration());
+        java.util.HashSet<Integer> seenIds = new java.util.HashSet<>();
+        java.util.HashSet<Integer> skippedIds = new java.util.HashSet<>();
+        ArrayList<String> warnings = new ArrayList<>();
+        for (JsonNode row : data.path("tracks")) {
+                int id = trackId(row.path("id"));
+                if (!seenIds.add(id)) throw new IOException("Duplicate Rekordbox track ID " + id);
+                Path analysisPath = Path.of(row.path("analysisPath").asText()).toRealPath();
+                if (!analysisPath.startsWith(root)) throw new IOException("Analysis path escapes USB root");
+                List<BeatPoint> beatGrid;
+                try {
+                    beatGrid = readBeatGrid(analysisPath);
+                } catch (InvalidBeatGrid failure) {
+                    skippedIds.add(id);
+                    String warning = row.path("title").asText() + " (ID "
+                            + Integer.toUnsignedString(id) + "): " + failure.getMessage();
+                    warnings.add(warning);
+                    System.err.println("USB track skipped: " + warning);
+                    continue;
                 }
+                boolean exactBeatGrid = !beatGrid.isEmpty();
                 Track track = new Track(
                         id,
-                        title,
-                        artist,
-                        (int) row.tempo(),
-                        row.duration() * 1_000L,
+                        row.path("title").asText(),
+                        row.path("artist").asText(),
+                        row.path("tempoCentiBpm").asInt(),
+                        row.path("durationMillis").asLong(),
                         analysisPath,
                         exactBeatGrid,
                         beatGrid
@@ -82,10 +95,32 @@ final class UsbLibrary {
                 if (tracks.put(id, track) != null) {
                     throw new IOException("Duplicate Rekordbox track ID " + id);
                 }
-            }
-            playlists = readPlaylists(database, tracks);
         }
-        return new UsbLibrary(root, tracks, playlists);
+        ArrayList<Playlist> playlists = new ArrayList<>();
+        for (JsonNode row : data.path("playlists")) {
+            ArrayList<String> path = new ArrayList<>();
+            row.path("folders").forEach(folder -> path.add(folder.asText()));
+            path.add(row.path("name").asText());
+            ArrayList<Track> members = new ArrayList<>();
+            for (JsonNode id : row.path("trackIds")) {
+                if (skippedIds.contains(trackId(id))) continue;
+                Track track = tracks.get(trackId(id));
+                if (track == null) throw new IOException("Playlist references an unknown OneLibrary track");
+                members.add(track);
+            }
+            playlists.add(new Playlist(row.path("id").asLong(), String.join(" / ", path), members));
+        }
+        UsbLibrary library = new UsbLibrary(root, tracks, playlists);
+        library.scanWarnings = List.copyOf(warnings);
+        return library;
+    }
+
+    private static int trackId(JsonNode value) throws IOException {
+        if (!value.isIntegralNumber() || value.asLong() < 1 || value.asLong() > 0xffffffffL) {
+            throw new IOException("Invalid OneLibrary track ID");
+        }
+        // Wire IDs are unsigned 32-bit; preserve all bits in Java's signed int.
+        return (int) value.asLong();
     }
 
     static UsbLibrary forTesting(Path root, List<Track> sourceTracks) {
@@ -103,6 +138,8 @@ final class UsbLibrary {
     Path root() {
         return root;
     }
+
+    String displayName() { return displayName; }
 
     int size() {
         return tracks.size();
@@ -145,110 +182,17 @@ final class UsbLibrary {
                 .toList();
     }
 
-    private static String artist(Database database, long artistId) {
-        RekordboxPdb.ArtistRow artist = database.artistIndex.get(artistId);
-        return artist == null ? "" : Database.getText(artist.name());
-    }
-
-    private static List<Playlist> readPlaylists(Database database, Map<Integer, Track> tracks) {
-        ArrayList<Playlist> result = new ArrayList<>();
-        HashSet<Long> visitedEntries = new HashSet<>();
-        HashSet<Long> activeFolders = new HashSet<>();
-        collectPlaylistFolder(database, tracks, 0L, List.of(), visitedEntries, activeFolders, result);
-
-        // Healthy Rekordbox exports are rooted at parent 0. Retain orphaned
-        // rows as a safe fallback so a partially unusual tree is still useful
-        // for soak testing without inventing memberships.
-        for (List<Database.PlaylistFolderEntry> entries : database.playlistFolderIndex.values()) {
-            for (Database.PlaylistFolderEntry entry : entries) {
-                if (entry != null && !visitedEntries.contains(entry.id)) {
-                    collectPlaylistEntry(
-                            database, tracks, entry, List.of(), visitedEntries, activeFolders, result
-                    );
-                }
-            }
-        }
-        return List.copyOf(result);
-    }
-
-    private static void collectPlaylistFolder(
-            Database database,
-            Map<Integer, Track> tracks,
-            long folderId,
-            List<String> parentPath,
-            Set<Long> visitedEntries,
-            Set<Long> activeFolders,
-            List<Playlist> result
-    ) {
-        if (!activeFolders.add(folderId)) {
-            return;
-        }
-        try {
-            for (Database.PlaylistFolderEntry entry
-                    : database.playlistFolderIndex.getOrDefault(folderId, List.of())) {
-                if (entry != null) {
-                    collectPlaylistEntry(
-                            database, tracks, entry, parentPath, visitedEntries, activeFolders, result
-                    );
-                }
-            }
-        } finally {
-            activeFolders.remove(folderId);
-        }
-    }
-
-    private static void collectPlaylistEntry(
-            Database database,
-            Map<Integer, Track> tracks,
-            Database.PlaylistFolderEntry entry,
-            List<String> parentPath,
-            Set<Long> visitedEntries,
-            Set<Long> activeFolders,
-            List<Playlist> result
-    ) {
-        if (!visitedEntries.add(entry.id)) {
-            return;
-        }
-        ArrayList<String> path = new ArrayList<>(parentPath);
-        String name = entry.name == null || entry.name.isBlank()
-                ? "Playlist " + entry.id
-                : entry.name.trim();
-        path.add(name);
-        if (entry.isFolder) {
-            collectPlaylistFolder(database, tracks, entry.id, path, visitedEntries, activeFolders, result);
-            return;
-        }
-
-        ArrayList<Track> playlistTracks = new ArrayList<>();
-        for (Long rawTrackId : database.playlistIndex.getOrDefault(entry.id, List.of())) {
-            if (rawTrackId == null || rawTrackId == 0L) {
-                continue;
-            }
-            Track track = tracks.get(Math.toIntExact(rawTrackId));
-            if (track != null) {
-                playlistTracks.add(track);
-            }
-        }
-        result.add(new Playlist(entry.id, String.join(" / ", path), playlistTracks));
-    }
-
-    private static Path checkedDeclaredChild(Path root, String declaredPath) throws IOException {
-        String relative = declaredPath == null ? "" : declaredPath.trim().replace('\\', '/');
-        while (relative.startsWith("/")) {
-            relative = relative.substring(1);
-        }
-        if (relative.isBlank()) {
-            throw new IOException("Track has no Rekordbox analysis path");
-        }
-        return checkedChild(root, Path.of(relative));
-    }
 
     private static Path checkedChild(Path root, Path relative) throws IOException {
         Path normalized = root.resolve(relative).normalize();
         if (!normalized.startsWith(root)) {
             throw new IOException("Rekordbox path escapes USB root: " + relative);
         }
-        return normalized.toRealPath();
+        Path resolved = normalized.toRealPath();
+        if (!resolved.startsWith(root)) {
+            throw new IOException("Rekordbox symlink escapes USB root: " + relative);
+        }
+        return resolved;
     }
 
     private static List<BeatPoint> readBeatGrid(Path analysisPath) throws IOException {
@@ -260,6 +204,12 @@ final class UsbLibrary {
             ArrayList<BeatPoint> points = new ArrayList<>(beatGridTag.beats().size());
             int index = 1;
             for (RekordboxAnlz.BeatGridBeat beat : beatGridTag.beats()) {
+                if (beat.beatNumber() < 1 || beat.beatNumber() > 4 || beat.tempo() == 0
+                        || (!points.isEmpty() && beat.time() <= points.getLast().timeMillis())) {
+                    throw new InvalidBeatGrid("Beat " + index + ": bar beat=" + beat.beatNumber()
+                            + ", tempo=" + beat.tempo() + ", time=" + beat.time()
+                            + "ms, previous=" + (points.isEmpty() ? "none" : points.getLast().timeMillis() + "ms"));
+                }
                 points.add(new BeatPoint(index++, beat.beatNumber(), (int) beat.tempo(), beat.time()));
             }
             return List.copyOf(points);
@@ -267,18 +217,10 @@ final class UsbLibrary {
         return List.of();
     }
 
-    private static List<BeatPoint> syntheticBeatGrid(int tempoCentiBpm, int durationSeconds) {
-        if (tempoCentiBpm <= 0 || durationSeconds <= 0) {
-            return List.of();
-        }
-        double interval = 6_000_000.0 / tempoCentiBpm;
-        int count = Math.max(1, (int) Math.ceil(durationSeconds * 1_000.0 / interval));
-        ArrayList<BeatPoint> points = new ArrayList<>(count);
-        for (int index = 0; index < count; index++) {
-            points.add(new BeatPoint(index + 1, index % 4 + 1, tempoCentiBpm, Math.round(index * interval)));
-        }
-        return List.copyOf(points);
+    private static final class InvalidBeatGrid extends IOException {
+        InvalidBeatGrid(String message) { super(message); }
     }
+
 
     record Track(
             int id,

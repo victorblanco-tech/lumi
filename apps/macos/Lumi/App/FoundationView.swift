@@ -28,6 +28,8 @@ struct FoundationView: View {
     @Bindable var preferences: LumiPreferences
     @State private var destination: AppDestination = .live
     @State private var librarySection: LibraryHubSection = .tracks
+    @State private var pendingServiceRestart = false
+    @State private var showsServiceConfirmation = false
     @AppStorage(LumiPreferenceKey.navigationHidden)
     private var navigationIsHidden = false
 
@@ -68,6 +70,10 @@ struct FoundationView: View {
                         onSetAbletonLinkEnabled: { enabled in
                             Task { await engineStatus.setAbletonLinkEnabled(enabled) }
                         },
+                        onSetLaunchPolicy: { policy in
+                            Task { await engineStatus.setInitialLaunchPolicy(policy) }
+                        },
+                        launchFeedback: engineStatus.initialLaunchFeedback,
                         localPlaybackBrowser: AnyView(
                             LocalPlaybackLibraryBrowserView(
                                 state: engineStatus.libraryState,
@@ -254,6 +260,8 @@ struct FoundationView: View {
                         }
                     )
                 case .settings:
+                    VStack(spacing: 12) {
+                    servicesPanel
                     PhraseRoleSettingsView(
                         settings: engineStatus.libraryState.phraseRoleSettings,
                         appearance: $preferences.appearance,
@@ -289,6 +297,7 @@ struct FoundationView: View {
                             Task { await engineStatus.restoreBackup(path: path) }
                         }
                     )
+                    }
                 }
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -296,6 +305,55 @@ struct FoundationView: View {
         .background(LumiColor.canvas)
         .tint(LumiColor.accent)
         .accessibilityIdentifier("lumi.app.shell")
+        .confirmationDialog("Interrupt lighting output?", isPresented: $showsServiceConfirmation) {
+            Button(pendingServiceRestart ? "Restart services" : "Stop services", role: .destructive) {
+                Task {
+                    if pendingServiceRestart { await engineStatus.restartServices() }
+                    else { await engineStatus.stop() }
+                }
+            }
+        } message: {
+            Text("This stops Lumi’s live output and disconnects Lumi Remote. Other applications are not stopped.")
+        }
+        .overlay {
+            if engineStatus.servicesStopping {
+                VStack(spacing: 12) {
+                    ProgressView()
+                    Text("Stopping Lumi services…")
+                    Text("Waiting for the engine and Remote service to exit.").font(LumiTypography.caption)
+                }
+                .padding(24)
+                .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
+            }
+        }
+    }
+
+    private var servicesPanel: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack {
+                Label("Services", systemImage: "gearshape.2")
+                Text(engineStatus.servicesStatus).foregroundStyle(.secondary)
+                Spacer()
+                Button("Start") { Task { await engineStatus.start() } }
+                    .disabled(engineStatus.servicesAreReady || engineStatus.servicesStopping)
+                Button("Stop") { pendingServiceRestart = false; showsServiceConfirmation = true }
+                Button("Restart") { pendingServiceRestart = true; showsServiceConfirmation = true }
+            }
+            .disabled(engineStatus.servicesStopping)
+            Text("Engine: lumi-engine · Remote: Lumi Remote Gateway · Services stop when you quit Lumi.")
+                .font(LumiTypography.caption).foregroundStyle(LumiColor.textSecondary)
+            DisclosureGroup("Process details · Remote: \(engineStatus.remoteServiceStatus)") {
+                VStack(alignment: .leading, spacing: 6) {
+                    Text(engineStatus.engineProcessDetails)
+                    Text(engineStatus.remoteProcessDetails)
+                    Text("Find these process names and IDs in macOS Activity Monitor.")
+                }.font(LumiTypography.caption).textSelection(.enabled)
+            }
+            if let error = engineStatus.serviceShutdownError {
+                Text(error).font(LumiTypography.caption).foregroundStyle(LumiColor.destructive).textSelection(.enabled)
+            }
+        }
+        .padding(16)
     }
 
     private var lightingTimingBinding: Binding<Int> {

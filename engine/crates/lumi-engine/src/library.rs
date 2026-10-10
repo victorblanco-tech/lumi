@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use lumi_domain::{
@@ -163,6 +164,13 @@ impl DeviceReviewComparison {
     }
 }
 
+fn current_review_visible(
+    comparisons: Option<&BTreeMap<u32, DeviceReviewComparison>>,
+    id: u32,
+) -> bool {
+    comparisons.is_none_or(|items| items.get(&id).is_some_and(|item| !item.is_unchanged()))
+}
+
 #[derive(Clone, Debug)]
 pub struct LibraryLocalPlaybackTrack {
     metadata: TrackMetadata,
@@ -211,7 +219,10 @@ pub struct LibraryPlanContext {
     audio_uri: String,
     duration_millis: u64,
     beat_grid: lumi_library::BeatGrid,
-    waveform: Vec<lumi_library::WaveformPoint>,
+    // Immutable assets belong to this prepared track revision. Share them when
+    // plans are cloned; never downsample/rebuild RGB objects on every snapshot.
+    waveform_preview: Arc<Value>,
+    remote_waveform_preview: Arc<Value>,
     hot_cues: Vec<lumi_library::HotCue>,
     track_color: Option<TrackColor>,
     catalog: AutoloopCatalog,
@@ -262,6 +273,11 @@ pub struct LocalPlaybackClockAnchor {
 }
 
 impl LibraryPlanContext {
+    pub(crate) fn has_same_prepared_revision(&self, other: &Self) -> bool {
+        self.analysis_revision == other.analysis_revision
+            && self.timeline_revision == other.timeline_revision
+            && self.catalog_revision() == other.catalog_revision()
+    }
     #[must_use]
     pub const fn timeline_revision(&self) -> u64 {
         self.timeline_revision
@@ -404,8 +420,7 @@ impl LibraryPlanContext {
 
     #[must_use]
     pub fn waveform_preview_json(&self) -> Value {
-        let points = deck_waveform_preview_points(&self.waveform, MAX_DECK_WAVEFORM_PREVIEW_POINTS);
-        Self::waveform_preview_value("localLibrary", &points)
+        self.waveform_preview.as_ref().clone()
     }
 
     /// Returns the detailed, still bounded waveform used by the Remote static
@@ -414,8 +429,7 @@ impl LibraryPlanContext {
     /// never enters the realtime Pro DJ Link or lighting lanes.
     #[must_use]
     pub fn remote_waveform_preview_json(&self) -> Value {
-        let points = deck_waveform_preview_points(&self.waveform, MAX_DECK_WAVEFORM_DETAIL_POINTS);
-        Self::waveform_preview_value("localLibraryDetail", &points)
+        self.remote_waveform_preview.as_ref().clone()
     }
 
     fn waveform_preview_value(source: &str, points: &[[u8; 3]]) -> Value {
@@ -955,6 +969,65 @@ pub enum AutoloopCatalogMutation {
 }
 
 impl LibraryWorker {
+    /// Live preparation reads an already initialized database only. No seeding,
+    /// migrations, timeline creation or removable-media scanning is permitted.
+    pub(crate) fn live_reader(path: &std::path::Path) -> Result<Self, LibraryWorkerError> {
+        let repository = SqliteLibraryRepository::open_read_only(path)?;
+        let baseline = DemoLibrarySourceProvider::curated().load_baseline()?;
+        let source = repository
+            .library_source(&lumi_library::LibrarySourceId::try_new(
+                REKORDBOX_CANONICAL_SOURCE_ID,
+            )?)?
+            .or(repository.library_source(baseline.source_id())?)
+            .ok_or(LibraryWorkerError::MissingLibrarySource)?;
+        Ok(Self {
+            repository,
+            database_path: Some(path.to_path_buf()),
+            source_id: source.id().as_str().to_owned(),
+            source_kind: source.kind().to_owned(),
+            source_name: source.display_name().to_owned(),
+            source_revision: source.revision().as_str().to_owned(),
+            search: String::new(),
+            playlist_id: None,
+            workflow_filter: None,
+            workflow_step_id: None,
+            offset: 0,
+            limit: DEFAULT_PAGE_LIMIT,
+            sort: LibraryTrackSort::default(),
+            editor_track_id: None,
+            pending_source_refresh: None,
+            pending_device_inspection: None,
+            device_review_comparisons_by_source: BTreeMap::new(),
+            pending_library_reset: None,
+            pending_light_plan_preview: None,
+        })
+    }
+
+    pub(crate) fn data_version(&self) -> Result<u64, LibraryWorkerError> {
+        Ok(self.repository.data_version()?)
+    }
+
+    pub(crate) fn connected_track_for_source(
+        &self,
+        source_id: &str,
+        device_track_id: u32,
+    ) -> Result<Option<ConnectedLibraryTrack>, LibraryWorkerError> {
+        self.repository.with_consistent_read(|| {
+            let Some(alias) = self
+                .repository
+                .resolve_device_alias_for_source(source_id, device_track_id)?
+            else {
+                return Ok(None);
+            };
+            let Some(timeline) = self.repository.timeline_head(alias.canonical_track_id)? else {
+                return Err(LibraryWorkerError::MissingTimeline);
+            };
+            Ok(Some(ConnectedLibraryTrack {
+                prepared: self.playback_track_for_timeline_mode(&timeline, false)?,
+            }))
+        })
+    }
+
     pub fn demo() -> Result<Self, LibraryWorkerError> {
         let database_path = crate::service::configured_database_path()
             .map_err(|error| LibraryWorkerError::Configuration(error.to_string()))?;
@@ -967,6 +1040,30 @@ impl LibraryWorker {
 
     pub fn autoloop_catalog(&self) -> Result<AutoloopCatalog, LibraryWorkerError> {
         Ok(self.repository.autoloop_catalog()?)
+    }
+
+    pub(crate) fn trust_local_usb_media(
+        &mut self,
+        marker: &crate::usb_media_identity::MediaIdentity,
+        source_id: &str,
+        physical_source_id: &str,
+    ) -> Result<bool, LibraryWorkerError> {
+        let stored = self.repository.trust_local_usb_media(
+            &marker.media_id,
+            &marker.source_id,
+            source_id,
+            physical_source_id,
+        )?;
+        if self
+            .repository
+            .trusted_usb_media(&marker.media_id, &marker.source_id)?
+            == lumi_library_sqlite::UsbMediaTrust::Conflict
+        {
+            return Err(LibraryWorkerError::Configuration(
+                "USB identity conflicts with another physical source; no automatic identity was accepted".to_owned(),
+            ));
+        }
+        Ok(stored)
     }
 
     pub fn light_planning_policy(&self) -> Result<LightPlanningPolicy, LibraryWorkerError> {
@@ -1611,12 +1708,12 @@ impl LibraryWorker {
             .and_then(Path::parent)
             .ok_or(LibraryWorkerError::InvalidRekordboxDeviceRoot)?
             .join("USBANLZ");
-        let promotable_tracks = matched_tracks
+        let mut promotable_tracks = matched_tracks
             .iter()
             .filter(|(_, (_, decision))| decision.promotes())
             .map(|(track_id, (track, _))| (*track_id, *track))
             .collect::<BTreeMap<_, _>>();
-        let promotable_hot_cues = matched_hot_cues
+        let mut promotable_hot_cues = matched_hot_cues
             .iter()
             .filter(|(track_id, (_, decision))| {
                 decision.promotes() && !promotable_tracks.contains_key(track_id)
@@ -1653,10 +1750,23 @@ impl LibraryWorker {
             )?;
             snapshot_resolved_analysis_data(&request)?.tracks
         };
+        let mut invalid_tracks = BTreeMap::<u32, String>::new();
+        for (id, track) in &analysis_tracks {
+            if let Some(parsed) = parsed_analyses.get(&id.value().to_string())
+                && let Err(error) = canonical_beat_grid(parsed)
+            {
+                invalid_tracks.insert(track.device_track_id, error.to_string());
+            }
+        }
+        promotable_tracks.retain(|_, track| !invalid_tracks.contains_key(&track.device_track_id));
+        promotable_hot_cues.retain(|_, track| !invalid_tracks.contains_key(&track.device_track_id));
         // A container hash can change while every imported component remains
         // identical. This is equality, not evidence that either revision is
         // newer: retain the active provenance and do not create a false review.
         for (id, (track, decision)) in &mut matched_tracks {
+            if invalid_tracks.contains_key(&track.device_track_id) {
+                continue;
+            }
             if !matches!(
                 decision,
                 lumi_library_sqlite::DeviceAnalysisDecision::HoldConflict
@@ -1754,7 +1864,13 @@ impl LibraryWorker {
                                 device_track.device_track_id.to_string(),
                             )
                         })?;
-                    let canonical_grid = canonical_beat_grid(analysis)?;
+                    let canonical_grid = match canonical_beat_grid(analysis) {
+                        Ok(grid) => grid,
+                        Err(error) => {
+                            invalid_tracks.insert(device_track.device_track_id, error.to_string());
+                            return Ok(None);
+                        }
+                    };
                     let beat_grid = canonical_grid.beat_grid;
                     let total_beats = u32::try_from(beat_grid.markers().len())
                         .map_err(|_| LibraryWorkerError::RekordboxImportOverflow)?;
@@ -1803,15 +1919,23 @@ impl LibraryWorker {
                         )?,
                     )?
                     .with_hot_cues(canonical_hot_cues(analysis, duration_millis)?)?;
-                    Ok(DeviceTrackImport {
+                    Ok(Some(DeviceTrackImport {
                         device_track_id: device_track.device_track_id,
                         source_analysis_revision: device_track.analysis_revision.clone(),
                         analyzed_at: device_track.analyzed_at.clone(),
                         analysis: imported,
-                    })
+                    }))
                 })
                 .collect::<Result<Vec<_>, LibraryWorkerError>>()?
+                .into_iter()
+                .flatten()
+                .collect()
         };
+        for alias in &mut aliases {
+            if let Some(reason) = invalid_tracks.get(&alias.device_track_id) {
+                alias.sync_disposition = format!("held-invalid:{reason}");
+            }
+        }
         progress("Rechecking USB contents before saving", total, total);
         snapshot.verify_unchanged()?;
         progress(
@@ -1833,6 +1957,7 @@ impl LibraryWorker {
                 .map(|playlist| DevicePlaylistUpsert {
                     device_playlist_id: playlist.device_playlist_id,
                     path: playlist.path.clone(),
+                    folder_names: Some(playlist.folder_names.clone()),
                     device_track_ids: playlist.track_ids.clone(),
                 })
                 .collect::<Vec<_>>(),
@@ -1968,12 +2093,34 @@ impl LibraryWorker {
         &self,
         snapshot: DeviceLibrarySnapshot,
     ) -> Result<DeviceInspection, LibraryWorkerError> {
+        // Enrich only already-synced, source/path-matching playlist metadata.
+        // A scan does not import tracks or change memberships or phrase data.
+        self.repository.remember_device_playlist_folders(
+            &snapshot.source_id,
+            &snapshot
+                .playlists
+                .iter()
+                .map(|playlist| DevicePlaylistUpsert {
+                    device_playlist_id: playlist.device_playlist_id,
+                    path: playlist.path.clone(),
+                    folder_names: Some(playlist.folder_names.clone()),
+                    device_track_ids: Vec::new(),
+                })
+                .collect::<Vec<_>>(),
+        )?;
         let stored = self.repository.device_alias_states(&snapshot.source_id)?;
         let candidates = self.repository.device_match_candidates()?;
         let mut tracks = BTreeMap::new();
         for track in snapshot.tracks.values() {
             let state = if let Some(previous) = stored.get(&track.device_track_id) {
-                if previous.canonical_track_id.is_none() {
+                if previous.sync_disposition.starts_with("held-invalid:")
+                    && previous.analysis_revision == track.analysis_revision
+                {
+                    DeviceInspectionTrack {
+                        status: "conflict",
+                        detail: "Skipped: invalid beatgrid. Fix this track in Rekordbox and sync again; existing Lumi data was retained.".to_owned(),
+                    }
+                } else if previous.canonical_track_id.is_none() {
                     DeviceInspectionTrack {
                         status: "not-in-lumi",
                         detail: "This USB track was not matched to a Lumi track during the previous sync."
@@ -2111,6 +2258,14 @@ impl LibraryWorker {
     ) -> Result<BTreeMap<u32, DeviceReviewComparison>, LibraryWorkerError> {
         let mut conflicts = Vec::new();
         for (device_track_id, alias) in stored {
+            if alias.sync_disposition.starts_with("held-invalid:")
+                && snapshot
+                    .tracks
+                    .get(device_track_id)
+                    .is_some_and(|track| track.analysis_revision == alias.analysis_revision)
+            {
+                continue;
+            }
             let (Some(id), Some(track)) = (
                 alias.canonical_track_id,
                 snapshot.tracks.get(device_track_id),
@@ -2247,6 +2402,7 @@ impl LibraryWorker {
         Ok(comparisons)
     }
 
+    #[cfg(test)]
     pub fn connected_track(
         &mut self,
         device_track_id: u32,
@@ -2315,6 +2471,14 @@ impl LibraryWorker {
         &self,
         timeline: &LumiPhraseTimeline,
     ) -> Result<LibraryLocalPlaybackTrack, LibraryWorkerError> {
+        self.playback_track_for_timeline_mode(timeline, true)
+    }
+
+    fn playback_track_for_timeline_mode(
+        &self,
+        timeline: &LumiPhraseTimeline,
+        resolve_local_audio: bool,
+    ) -> Result<LibraryLocalPlaybackTrack, LibraryWorkerError> {
         let track_id = timeline.track_id();
         let track = self
             .repository
@@ -2360,10 +2524,23 @@ impl LibraryWorker {
             source_track_id: track.summary().source_track_id().as_str().to_owned(),
             analysis_revision: track.summary().source_revision().as_str().to_owned(),
             timeline_revision: timeline.revision().value(),
-            audio_uri: self.resolved_audio_uri(&track)?,
+            // Live Players supply transport/audio themselves. Never touch a
+            // potentially unavailable removable filesystem in this reader.
+            audio_uri: if resolve_local_audio {
+                self.resolved_audio_uri(&track)?
+            } else {
+                String::new()
+            },
             duration_millis: track.summary().duration_millis(),
             beat_grid: track.beat_grid().clone(),
-            waveform: track.waveform().to_vec(),
+            waveform_preview: Arc::new(LibraryPlanContext::waveform_preview_value(
+                "localLibrary",
+                &deck_waveform_preview_points(track.waveform(), MAX_DECK_WAVEFORM_PREVIEW_POINTS),
+            )),
+            remote_waveform_preview: Arc::new(LibraryPlanContext::waveform_preview_value(
+                "localLibraryDetail",
+                &deck_waveform_preview_points(track.waveform(), MAX_DECK_WAVEFORM_DETAIL_POINTS),
+            )),
             hot_cues: track.hot_cues().to_vec(),
             track_color: track.summary().color(),
             catalog,
@@ -3177,6 +3354,62 @@ impl LibraryWorker {
         self.snapshot_json_with_device_inspection(false)
     }
 
+    pub(crate) fn database_backed(&self) -> bool {
+        self.database_path.is_some()
+    }
+
+    /// Capture presentation state, not the SQLite connection. The returned job
+    /// opens its own read-only connection and can run outside the show owner.
+    /// There is no shared mutable cache and no import, migration or seeding.
+    pub(crate) fn status_projection_job(
+        &self,
+    ) -> Option<impl FnOnce() -> Result<Value, LibraryWorkerError> + Send + 'static> {
+        let path = self.database_path.clone()?;
+        let source_id = self.source_id.clone();
+        let source_kind = self.source_kind.clone();
+        let source_name = self.source_name.clone();
+        let source_revision = self.source_revision.clone();
+        let search = self.search.clone();
+        let playlist_id = self.playlist_id;
+        let workflow_filter = self.workflow_filter;
+        let workflow_step_id = self.workflow_step_id.clone();
+        let offset = self.offset;
+        let limit = self.limit;
+        let sort = self.sort;
+        let editor_track_id = self.editor_track_id;
+        let pending_source_refresh = self.pending_source_refresh.clone();
+        let device_review_comparisons_by_source = self.device_review_comparisons_by_source.clone();
+        let pending_library_reset = self.pending_library_reset.clone();
+        let pending_light_plan_preview = self.pending_light_plan_preview.clone();
+        Some(move || {
+            let worker = Self {
+                repository: SqliteLibraryRepository::open_read_only(&path)?,
+                database_path: Some(path),
+                source_id,
+                source_kind,
+                source_name,
+                source_revision,
+                search,
+                playlist_id,
+                workflow_filter,
+                workflow_step_id,
+                offset,
+                limit,
+                sort,
+                editor_track_id,
+                pending_source_refresh,
+                // Status projections intentionally exclude an in-progress scan.
+                pending_device_inspection: None,
+                device_review_comparisons_by_source,
+                pending_library_reset,
+                pending_light_plan_preview,
+            };
+            worker
+                .repository
+                .with_consistent_read(|| worker.status_snapshot_json())
+        })
+    }
+
     fn snapshot_json_with_device_inspection(
         &self,
         include_device_inspection: bool,
@@ -3227,6 +3460,7 @@ impl LibraryWorker {
             .page_playlists(TrackPageRequest::try_new(0, 200)?)?;
         let device_sources = self.repository.device_source_summaries()?;
         let device_review_tracks = self.repository.device_review_tracks()?;
+        let invalid_analysis_tracks = self.repository.device_invalid_analysis_tracks()?;
         let stored_device_playlists = self.repository.stored_device_playlists()?;
         let data_summary = self.repository.data_summary()?;
         let reset_candidates = self.repository.reset_preservable_tracks()?;
@@ -3276,6 +3510,12 @@ impl LibraryWorker {
                 let review_comparisons = self
                     .device_review_comparisons_by_source
                     .get(&source.source_id);
+                // A completed scan is authoritative for review visibility.
+                // Historical sync dispositions must not resurrect a conflict
+                // that is now current, older/newer, absent, or component-equal.
+                let review_tracks = review_tracks.iter().filter(|track| {
+                    current_review_visible(review_comparisons, track.device_track_id)
+                }).collect::<Vec<_>>();
                 json!({
                     "sourceId": source.source_id,
                     "displayName": source.display_name,
@@ -3288,7 +3528,11 @@ impl LibraryWorker {
                     "currentTracks": source.current_tracks,
                     "promotedTracks": source.promoted_tracks,
                     "protectedTracks": source.protected_tracks,
-                    "conflictTracks": source.conflict_tracks,
+                    "conflictTracks": review_tracks.len(),
+                    "skippedTracks": invalid_analysis_tracks.get(&source.source_id)
+                        .into_iter().flatten().map(|track| json!({
+                            "deviceTrackId": track.device_track_id, "title": track.title, "reason": track.reason
+                        })).collect::<Vec<_>>(),
                     "beatGridRefresh": true,
                     "cueRevisionTracked": true,
                     "reviewTracks": review_tracks.iter().take(200).map(|track| {
@@ -3432,6 +3676,7 @@ impl LibraryWorker {
                 "id": playlist.id().value(),
                 "sourcePlaylistId": playlist.source_playlist_id().as_str(),
                 "name": playlist.name(),
+                "folderNames": playlist.folder_names(),
                 "trackCount": playlist.track_count(),
             })).collect::<Vec<_>>(),
             "page": {
@@ -3762,7 +4007,26 @@ impl LibraryWorker {
         track: &lumi_library::StoredTrack,
     ) -> Result<String, LibraryWorkerError> {
         let candidates = self.repository.device_audio_uris(track.summary().id())?;
-        Ok(first_available_audio_uri(track.audio_uri(), &candidates))
+        // An old durable URI may now point at a different edit after USB sync.
+        // Once complete fingerprints exist, only aliases still proving that
+        // canonical audio identity may supply a playback location.
+        let fallback = if self
+            .repository
+            .has_verified_audio_identity(track.summary().id())?
+        {
+            ""
+        } else {
+            track.audio_uri()
+        };
+        let uri = first_available_audio_uri(fallback, &candidates);
+        // The UI requires an explicit URI even when a verified USB is absent.
+        // Never substitute the old mutable path (or synthetic demo audio): this
+        // non-file URI keeps the editor usable while playback reports unavailable.
+        Ok(if uri.is_empty() {
+            format!("lumi-unavailable://track/{}", track.summary().id().value())
+        } else {
+            uri
+        })
     }
 
     fn source_reconciliation_json(
@@ -4223,13 +4487,24 @@ fn canonical_beat_grid(
     })
 }
 
+fn device_canonical_beat_grid(
+    track: &DeviceTrack,
+    analysis: &ResolvedTrackAnalysis,
+) -> Result<CanonicalBeatGrid, LibraryWorkerError> {
+    canonical_beat_grid(analysis).map_err(|error| LibraryWorkerError::DeviceTrackAnalysis {
+        title: track.title.clone(),
+        device_track_id: track.device_track_id,
+        detail: error.to_string(),
+    })
+}
+
 fn device_analysis_upsert(
     source_id: &str,
     track_id: TrackId,
     device_track: &DeviceTrack,
     analysis: &ResolvedTrackAnalysis,
 ) -> Result<DeviceAnalysisUpsert, LibraryWorkerError> {
-    let canonical_grid = canonical_beat_grid(analysis)?;
+    let canonical_grid = device_canonical_beat_grid(device_track, analysis)?;
     let duration_millis = waveform_duration_millis(analysis)
         .or_else(|| {
             (device_track.duration_millis > 0).then_some(u64::from(device_track.duration_millis))
@@ -4866,6 +5141,14 @@ pub enum LibraryWorkerError {
     IncompleteRekordboxPhrases,
     #[error("Rekordbox beatgrid is invalid: {0}")]
     InvalidRekordboxBeatGrid(#[from] lumi_library::BeatGridValidationError),
+    #[error(
+        "Sync stopped at track '{title}' (USB track {device_track_id}): {detail}. No playlist or track changes were saved."
+    )]
+    DeviceTrackAnalysis {
+        title: String,
+        device_track_id: u32,
+        detail: String,
+    },
     #[error("Rekordbox track is invalid: {0}")]
     InvalidRekordboxTrack(#[from] lumi_library::TrackValidationError),
     #[error("library query is invalid: {0}")]

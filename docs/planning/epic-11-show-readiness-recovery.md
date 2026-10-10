@@ -1,0 +1,944 @@
+# Epic 11 — reliable preparation and Live performance
+
+Status: implementation and autonomous testing authorized on 2026-10-08.
+Baseline: public Lumi v0.6.3; development candidate 0.6.4-dev-30.
+Products: Lumi, Lumi Remote and the independently versioned Pro DJ Link Simulator.
+Execution order: simulator fidelity first, then recovery and measured timing, preparation workflow, launch policy, integrated acceptance.
+
+The earlier [recovery proposal](live-show-reliability-recovery-2026-10-08.md)
+defines the timing investigation. This epic is the consolidated acceptance ledger.
+Existing story completion and previous component measurements do not close a
+newly reproduced regression. Every row needs a failing reproduction, repair,
+automated regression and actual application acceptance where applicable.
+
+Dev-25 / Remote dev-7 follow-up: desktop acceptance found that the launch
+setting save status and countdown were omitted from the immediate presentation
+refresh comparison. Include launch state changes and reserve stable header
+space on both platforms. Mac presentation tests (63) and Remote feature tests
+(14) pass. The new ignored simulator/MIDI acceptance exercises initial launch
+at -250/0/+250 ms and rejects duplicate boundary sends. SoundSwitch downstream
+acceptance remains open due to the independently sampled
+[Control One lifecycle hang](soundswitch-control-one-hang-2026-10-09.md).
+
+Actual simulator/MIDI run: all three signed-offset cases passed in 156.67 s.
+Each selected phrase index 1, completed exactly one AutoLoop, sent two pulses
+(bank + AutoLoop), reported zero failures and zero late sends, and remained at
+one completion after the normal phrase boundary. Evidence:
+`build/phrase-launch-network-acceptance.log`. This measured the real MIDI lane,
+not SoundSwitch's visible response or physical lights. The harness initially
+reused a command ID and was correctly deduplicated; the successful run uses
+unique IDs. Clippy passes after adding a bounded disconnect shutdown check.
+
+Packaged Dev-25 acceptance: build 413 / d79a9cc, installer signature and channel
+destination audit passed. The installed Mac app recognized both prepared tracks
+and CHRM local / CHRM via Player 1 sources. The actual Timing popover changed
+Immediate / On phrase start, cleared Saving without an unrelated action, and
+Remote dev-7 reflected the saved choice. Arm → Start while paused displayed
+Waiting for playback. Simulator playback changed the Mac countdown from 95 to
+79 beats; Remote also counted down. Returned to Off before the target boundary.
+Remote retained all three status indicators while disconnected and reconnected
+as its existing view-only role; no controller permission was changed.
+
+Upgrade follow-up remains open: macOS recorded a first gateway launch constraint
+violation at 12:48:29 before the normal service registration/retry recovered and
+Remote connected. Do not count eventual recovery as clean upgrade acceptance.
+Investigate registration ordering and installed service identity without
+weakening macOS security checks. SoundSwitch restart approval is still needed
+for downstream playback acceptance; Lumi is left open in Off.
+
+## Findings and ownership
+
+### 2026-10-10 hardware timing regression — work in progress
+
+Owner observed late Bridge Fade → BD Start → BD Chorus on uninterrupted
+90s Bitch playback at offset zero. Repeated fresh Arm → Start with four beats
+of run-in was inconsistent (one several seconds late, another acceptable).
+No historical per-attempt timing trace exists for those hardware attempts;
+do not attribute them to SoundSwitch or claim the new scheduler proves their
+complete cause.
+
+Repair scope: offset-independent forecasting, retaining admitted positive-offset
+deadlines across the boundary, bounded correlated schedule/dispatch history,
+repeated launches in one process, normal transitions, transport cancellation,
+and real desktop/SoundSwitch acceptance. Trace history is opt-in via
+`getSnapshot` with `includeLibrary:false, includeTimingHistory:true`; ordinary
+Mac/Remote snapshots do not serialize it. MIDI records describe software
+dispatch, not downstream acknowledgement or physical beat alignment.
+
+First revised simulator run passed 12 starts (four per -250/0/+250 ms) in
+63.03 s, exactly one completion per start and no failures or duplicate sends.
+This initial run did not yet include correlated history or subsequent normal
+transitions; those additional gates remain required.
+
+One-shot phase-check research: SoundSwitch documents beat/phase controls and
+MIDI clock output, but those do not establish a selected-loop playback-phase
+feedback contract. Its documented MIDI feedback lighting excludes custom
+mappings. No blind retrigger, continuous correction, or global Link reanchor
+is authorized as a substitute. Sources:
+- https://support.soundswitch.com/en/support/solutions/articles/69000847411/
+- https://support.soundswitch.com/en/support/solutions/articles/69000847415-soundswitch-connecting-soundswitch-with-midi-sync-in-and-midi-output
+- https://support.soundswitch.com/en/support/solutions/articles/69000847096-midi-feedback-lighting
+
+Owner decision after discussing alternatives: park downstream feedback and
+automatic correction. Focus this candidate on optimal Lumi dispatch timing.
+The expanded simulator run passed in 126.41 s: 12 repeat launches plus three
+ordinary transitions, correlated by generation between schedule and dispatch.
+All checked sends had >50 ms scheduling lead and <20 ms dispatch lateness.
+Evidence: `build/phrase-timing-dev32-correlated.log`. This run did not enable
+the Link helper. The repeat on Dev-32 with Link active also passed (124.37 s,
+12 starts and three ordinary transitions, same timing assertions). Evidence:
+`build/phrase-timing-dev32-link.log`.
+
+Installed Dev-32 (434 / 75e6862) desktop checks: two repeat Off/Arm/Start
+cycles showed Waiting for playback → Show running on Intro. SoundSwitch
+displayed mapped Intro selection/progress and subsequent loop changes.
+Both apps reflected 155 → 158.1 → 155 BPM. Quit removed all owned services
+and SW's Link peer; reopen restored both plans and CHRM via LINK on Player 2.
+Player 2's initial hot join was not reflected until restart: retain this as
+a separate recovery finding, not a passed hot-join check. UI observations
+are sampled, not frame-accurate phase/DMX measurements.
+The reported Bridge Fade → BD Start → BD Chorus sequence was also replayed
+uninterrupted from beat 364: corresponding loop selection/progress was visible
+in SW. Exact switch-time attribution still relies on software traces, not the
+sampling cadence of desktop screenshots.
+
+### Current acceptance boundary (2026-10-10)
+
+Dev-34 follow-up: a real receive-gap trace reproduced a canonical rewind and
+false transport epoch during unchanged playback. Late-but-forward status must
+not corroborate a seek; reordered beat packets must not rewind the timeline.
+The same trace showed an unsent forecast holding an obsolete deadline despite
+newer beats at unchanged BPM. Retiming now happens atomically within the MIDI
+lane, without re-creating a sent cue. See
+`docs/release/0.6.4-dev-34-receive-gap-timing.md` for evidence and acceptance
+limits; this does not constitute physical-light phase acceptance.
+
+Dev-32 hardware retest: owner again reports BD Start very late, with BD Chorus
+better afterwards. Hardware timing acceptance has FAILED despite simulator
+dispatch assertions. Read-only observation confirms Dev-32, offset 0 ms,
+real CDJ-1500X Players, CHRM local/LINK recognition and SW Link 155 BPM.
+At inspection the owner had returned to Off/paused; this is not evidence of
+the state at the failed transition. SW currently selected GREEN PINK, whereas
+the earlier UI test used BLUE RED GREEN. Do not infer causation from that.
+The UI also displayed “a fallback plan cannot be edited”; its relation to the
+late trigger is unproven. Critical diagnostic gap: bounded timing history is
+available only via the exclusive desktop command connection; it cannot safely
+be retrieved alongside the running UI. The service's stdout/stderr are null.
+Do not disconnect the user's desktop session to retrieve history mid-test.
+Add a non-interrupting bounded diagnostic export before claiming the precise
+hardware-transition cause or complete end-to-end latency acceptance.
+
+The dated entries below are a chronological evidence ledger, not simultaneous
+current failures. In particular, the Dev-30 USB read failure recorded before
+the owner's permission grant is superseded by the successful installed UI
+test after that grant. It is not an unresolved network-routing diagnosis.
+
+| Area | Current evidence | Not yet established |
+| --- | --- | --- |
+| Installed USB identity / loaded source | Both prepared tracks and CHRM local versus LINK source restored after the owner grant | Permission retention across a different installed build; fresh physical USB sync/remount |
+| Mac Live / SoundSwitch | Arm, phrase-start countdown, visible AutoLoop selection, pitch changes and hot cue passed | Frame-accurate downstream or physical-light timing; absence of intermittent SoundSwitch deadlock |
+| Service lifecycle | Same-build Quit removed owned services and Link peer; reopen restored both plans | Every upgrade/fault path and cross-build privacy attribution |
+| Realtime software lanes | Short combined stress runs passed; bounded input-stage diagnostics available | Complete ingress-to-MIDI latency distribution; attribution of remaining pump gaps |
+| Preparation workflow | Component regressions and earlier desktop checks recorded below | Complete current-build physical USB-to-editor acceptance |
+
+The combined soak checks software health, bounded queues and actual MIDI sends.
+Its separate source-age and MIDI-lane percentiles are **not** a correlated
+source-to-light percentile. It does not inspect SoundSwitch's internal loop
+phase or prove that every scripted transition had the correct visible loop.
+Count a completed soak as sustained software-lane evidence only; retain the
+distinct UI and final physical-light gates. Never infer a passed hour from an
+in-progress process or the absence of output in its redirected log.
+
+Dev-30 one-hour combined soak completed successfully (3,608.54 seconds including
+setup/cleanup; 3,600-second workload). Evidence: `build/Evidence/dev30-live-3600s.json`
+and `build/dev30-live-3600s.log`. It exercised 1,799 pitch changes, 514 seek
+commands, 327 Pause/Live cycles, 3,430 library queries and 65,852 snapshots.
+841 AutoLoops completed; 842 MIDI pulses were emitted, with zero failures or
+saturation. The `outputs: 256` field is retained history, not total executions.
+Ingress source-age p95/p99 were 10 ms, maximum 58.400 ms; the MIDI lane measured
+p95 31 microseconds, p99 53 microseconds, maximum 256 microseconds. Link retained
+one peer, with zero failures, fail-closed events or hard reanchors.
+
+Remaining diagnostic finding: 792 playback pump starvation observations and a
+92.096 ms maximum pump lateness. Input-stage maxima were bridge 8.375 ms,
+preparation 0.453 ms, preferences/media 0.259 ms and event processing 0.011/0.201 ms.
+These maxima do not attribute the remaining longest gaps. The longest engine
+command was source-mode selection at 84.449 ms; longest library round trip
+60.001 ms. Do not interpret the successful lane budgets as closure of complete
+upstream-to-light timing. Read-only RSS checks showed the engine near 103 MiB
+from minute 22 through minute 58. This is bounded-run evidence, not a general
+proof of absence of leaks.
+
+SoundSwitch remained responsive at repeated actual UI checks with Control One
+connected; its blue AutoLoop progress was visible during the run. On completion,
+the exclusivity guard confirmed no test-conflicting Lumi processes remained,
+and SoundSwitch no longer showed a Link peer. This run did not reproduce the
+previous intermittent SoundSwitch deadlock and does not prove it eliminated.
+After restoring simulator Player 1 playback, installed Dev-30 reopened in Off,
+reached Ready, restored one 155 BPM Link peer, and showed both the 17-phrase
+local CHRM plan and 33-phrase CHRM-via-Player-1/LINK plan. No additional permission
+change was needed for that same-build restart. Latest Dev is left open.
+
+2026-10-10 permission follow-up: the owner clarified that Dev-30 had not yet
+received its normal macOS permissions during the previous acceptance attempt,
+then granted them. Without changing code or OS settings, the installed app now
+identified CHRM and prepared 90s Bitch (17 phrases) locally and My Favourite
+Regrets (33 phrases) via Player 1/LINK; Player 2's USB slot remained empty.
+This resolves the observed blocked-read scenario after owner authorization,
+not the recurring need to authorize each new build. Investigate stable signing
+and helper attribution separately; never bypass the owner's privacy decisions.
+
+Actual Dev-30 UI: Arm -> Start counted down to phrase 16 and reached Show
+running. SoundSwitch visibly selected INTRO BLUE RED 2 with blue progress.
+Simulator pitch +4.2% yielded 161.5 BPM in both apps; reset to zero restored
+155 BPM. Hot cue to 1,000 ms returned the playhead/phrase to Intro with both
+plans intact. Desktop waveform red/pink detail was visibly retained. These
+observations do not establish a frame-accurate or physical-light latency bound.
+Off -> normal Quit left no Lumi-owned test-conflicting processes and removed
+SoundSwitch's Link peer. Reopening the exact same installed build restored both
+USB-backed plans and one 155 BPM Link peer without another permission change;
+SoundSwitch remained responsive with Control One connected. Leave Dev-30 open
+in Off. This is one successful lifecycle cycle, not closure of the intermittent
+SoundSwitch deadlock or the outstanding sustained/performance acceptance gates.
+
+### Follow-up: stable identity across installed updates
+
+Owner report (2026-10-10): every new installation requests permissions again.
+The current packaging script signs the app and nested Mach-O files ad hoc.
+Apple's [TN3179](https://developer.apple.com/documentation/technotes/tn3179-understanding-local-network-privacy)
+recommends an Apple-issued signing identity for reliable tracking of macOS
+local-network privacy and documents helper attribution and multiple-installed-
+version caveats. This makes signing/installation identity a concrete candidate,
+not proof that all prompts share one cause. Normal same-build restart passed.
+
+Prepare a separately scoped signing/upgrade change: stable per-channel app and
+helper identifiers, inside-out signing preserving each helper's entitlements,
+one managed installed app per channel, and explicit signed versus ad-hoc build
+metadata. Keep user-selected Dev/RC/Prod data isolation. Distribution signing
+and notarization need the owner's configured Apple identity and authorization;
+do not create certificates, change account access, reset privacy databases or
+weaken designated requirements automatically. Acceptance must compare two real
+consecutive installed builds after a single owner grant, verify both initial
+denial and later grant recovery, and retain complete service shutdown. Never
+promise that signing removes the first legitimate permission request.
+
+2026-10-09 downstream follow-up: after the owner restored SoundSwitch's
+playback view, installed Dev-29 Arm/Start reached Show running and the actual
+SoundSwitch BD START RGB button showed its advancing blue progress. A simulator
+hot cue to 1,000 ms selected INTRO BLUE RED 2 with visible progress. Changing
+Player 1 pitch to +4.2% showed 161.5 BPM in both apps; reset to 155 afterward.
+The two named tracks retained their plans. These are actual desktop UI checks,
+not a frame-accurate or physical-light timing measurement. The presence of Done
+in SoundSwitch's accessibility tree alone does not mean playback is unavailable.
+
+A ten-second sample of the playing installed engine found repeated waveform
+downsampling/JSON allocation in snapshot construction (49 samples), while most
+main-thread samples were idle. Prepared track contexts now retain immutable,
+shared desktop and Remote waveform JSON. The original RGB values, point limits
+and downsampling algorithm are unchanged. Regression coverage compares complete
+cached values with the original builder and verifies clone sharing and detached
+response mutation. This is not a renderer/color change or global stale cache.
+
+The 120-second cached-waveform comparison completed all 28 AutoLoops, 29 pulses,
+59 pitch changes, 17 seeks, 10 Pause/Live cycles and 114 library queries. One
+Link peer, zero Link failures/hard reanchors, zero MIDI failure/saturation.
+Ingress p95/p99 stayed 10 ms; MIDI p95 55 microseconds, max 3.803 ms. Pump max
+was 55.619 ms versus the earlier 94.295 ms, but playback starvation count was
+26 versus 25. One run does NOT establish a repeatable timing improvement or
+close the pump-latency finding. Evidence: build/Evidence/dev29-waveform-cache-120s.json.
+Three local IPC unit tests were initially denied socket access by the sandbox;
+the authorized rerun passed all 160 engine library tests (four ignored).
+Bounded per-input-stage maxima were added to distinguish media polling, bridge
+maintenance, source-event processing and library preparation in the next run.
+
+The instrumented 120-second run also passed: 28/28 AutoLoops, no Link or MIDI
+failures, ingress p95/p99 10 ms, max 26.959 ms; MIDI p95 29 microseconds,
+max 4.735 ms. All measured input stages stayed below 0.25 ms (bridge 248 us,
+preparation 93 us, preferences/media 74 us, event stages 20/222 us). Pump max
+was 47.471 ms with 30 playback starvation observations. These input stages do
+not account for that run's long gaps; presentation work and scheduling still
+need attribution. A separate build started during this diagnostic run, so do
+not use it as a controlled performance comparison. Evidence:
+build/Evidence/dev29-stage-timing-120s.json. Dev-30 carries the unchanged-output
+waveform cache and bounded diagnostics; it is not a claim that E11 is complete.
+
+Dev-30 packaging passed (build 427 / 7af2e5fdfc06), including the actual DMG
+installer payload and deep signature verification. The full Rust gate passed
+494 tests across 79 reported suites, strict Clippy, formatting, architecture
+and build. Its first run overlapped packaging and failed the snapshot budget
+(p95 42.106 ms versus 25 ms); the complete non-overlapping rerun passed without
+changing the threshold. The 10k library run measured import 229.6 ms, pages
+22.7 ms, search 6.4 ms and workflow 8.1 ms. Documentation validation passed.
+The installed Dev-30 cold start restored one Link peer at 155 BPM, but again
+reported No route to host in USB identification while both Players' transport
+arrived. This remains an actual installed-app blocker, not a successful Live
+acceptance or proof of missing permission. No system settings were changed.
+One actual Settings Restart completed and restored Link automatically with one
+peer; SoundSwitch stayed responsive with Control One connected. The same USB
+No route to host persisted afterward, so no Start/output acceptance was attempted
+with unresolved tracks. The installed bridge JAR matches the local tested JAR
+byte for byte. Dev-30 is left open in Off on Pro DJ Link status. OS permission
+inspection/changes remain owner-only; do not launch helpers through another
+application or modify privacy/network settings as a workaround.
+
+Dev-29 follow-up: after the owner restarted SoundSwitch, desktop playback
+selected bank 3 / INTRO BLUE RED 2 and showed visible progress. Pause/Start and
+the simulator loop wrap remained responsive. One explicit Settings Stop/Start
+cycle removed all engine/gateway/Link processes, removed the SoundSwitch Link
+peer, then restored both USB-backed plans without freezing SoundSwitch. This
+does not rule out an intermittent topology-triggered SoundSwitch lockup.
+It did reproduce a Lumi bug: saved Link auto-start ran only from the window's
+initial task, not service Start/Restart. Startup preference restoration now
+belongs to the shared service startup path. Automatic socket recovery explicitly
+opts out so it cannot override a manual Link Off choice. Eight policy cases
+cover saved preference, explicit start versus recovery, and already-enabled
+state; all 21 DesignSystem tests passed. App compilation and installed Dev-29
+service-cycle acceptance remain required.
+
+Dev-29 installed follow-up: build 423 / 6c08d8af9ef0 passed packaging and deep
+signature verification and was installed from its DMG. The 23 service-contract
+tests and 63 Live presentation tests passed. Settings Restart now automatically
+restores the saved Link preference with one peer; lighting remains Off. However,
+SoundSwitch hung again immediately after this controlled restart while lighting
+was Off. A second three-second sample reproduced the same main-thread
+JLC1Storage join / worker recursive-mutex wait (local evidence:
+build/dev29-soundswitch-after-service-restart.txt). One earlier Stop/Start had
+passed, so the failure is intermittent; endpoint lifecycle is now a concrete
+reproduction context, not proof of which individual MIDI notification is causal.
+The owner was asked for a bounded comparison with Control One disconnected;
+do not repeatedly reset SoundSwitch or leave hidden services running as a fix.
+
+Dev-29 controlled comparison: after the owner disconnected Control One and
+restarted SoundSwitch, its UI reported Hardware Interface Not Connected / 0.
+A focused read-only USB inventory also found no Control One. Three consecutive
+Settings Restart cycles then completed with Engine responding and Remote ready;
+SoundSwitch remained interactive, including successful bank 1/2 selection after
+each cycle. Link returned with one peer at 155 BPM. The final Live view retained
+both named tracks, their 17/33-phrase plans, and the distinct inserted-USB versus
+LINK-loaded-track provenance. Lighting remained Off throughout this comparison.
+This supports the Control One device-reset path as a relevant condition, but
+three passes without hardware do not establish a permanent fix or prove the
+exact triggering notification. A matched comparison after reconnecting Control
+One was requested. Do not ship hardware disconnection as the solution.
+
+Matched connected comparison: the owner reconnected Control One; SoundSwitch
+reported CONTROL ONE Connected / 1. Three further Settings Restart cycles also
+completed, each followed by an actual responsive bank 1/2 selection in
+SoundSwitch. Therefore this short comparison did NOT reproduce a difference
+between connected and disconnected hardware. The earlier sampled deadlocks
+remain valid and unresolved; these passes must not be described as a fix.
+Arm / Start then counted down 39 beats to phrase 16 and reached Show running.
+Lumi reported two MIDI pulses, bank 3, p95 3.7 ms / last 4.1 ms and zero late
+sends, but SoundSwitch still displayed bank 1. Its mapping screen was open.
+Leaving via Done showed only the logo; File / Switch Mode / Perform and venue
+Woonkamer v001 still did not expose the normal playback view after Done. Link
+was restored On, Lumi returned to Off, and owner help was requested for the
+normal SoundSwitch playback view. No mappings were edited. This is not an
+accepted downstream AutoLoop response, despite successful MIDI dispatch.
+
+Post-restart Library UI check: expanding Sets / Trancendence 2 and selecting
+Mashup ToDo changed the table from the 154-track collection to seven tracks;
+selecting Part 1 - 138+ Trance changed it to its 14 tracks. Double-clicking
+Aurora Sky opened that track's actual editor, grid and R1 timeline. No phrases
+or mappings were changed. Audio was explicitly unavailable for this disconnected
+USB-backed source, so this is not an audio or local-USB synchronization pass.
+Development CI for commits 6c08d8a and 863c954 completed successfully. A focused
+process inventory after the three cycles showed one engine and one Carabiner,
+not duplicate instances.
+
+The installed Dev-29 USB reader also reports No route to host despite normal
+Player/BPM reception. macOS's existing local-network logs attribute these reads
+to co.victorblan.tech.lumi.dev.engine. This does not itself prove authorization
+denial; no privacy settings were changed. Track matching and downstream playback
+are not accepted for this launch. Latest Dev is left open in Off.
+
+Later in the same installed Dev-29 session, before the above three restarts,
+Pro DJ Link showed CHRM identified. All three restarts restored matching in the
+Live UI without a system-settings change. The initial No route to host remains
+an unresolved intermittent startup finding; later recovery is not evidence that
+the original failure has been repaired.
+
+The combined soak report now records pump counters before playback, plus the
+subsequent starvation delta and whether the cumulative maximum increased. This
+lets the next run distinguish startup from playback without weakening budgets.
+The updated release test target compiled; a new run is pending the downstream
+test setup. No one-hour or physical-light acceptance is claimed.
+
+Dev-29 updated 120-second combined run subsequently passed on a copied database
+with the desktop fully closed (exclusive-process guard passed before/after).
+Evidence: build/Evidence/dev29-live-120s.json and build/dev29-live-120s.log.
+It exercised 59 pitch changes, 17 seeks, 10 Pause/Live cycles, 114 library
+queries and 2,326 snapshots. All 28 requested AutoLoops completed; 29 MIDI pulses
+(including bank selection), zero failures/saturation. MIDI lane latency p95
+26 microseconds, maximum 4.765 ms; ingress age p95/p99 10 ms, maximum 59.974 ms.
+One Link peer, zero failure/fail-closed/hard-reanchor counts. Latest-wins Link
+mailbox received 89 anchors and applied 87; do not equate these counters with
+lossless delivery of every intermediate tempo value.
+The startup/playback split exposed 25 pump-starvation observations DURING
+playback (startup: three); the maximum rose from 41.399 to 94.295 ms. This rules
+out attributing all pump delay to startup. The cumulative slowest engine command
+was sourceMode at 77.394 ms, but that alone does not identify the cause of the
+playback spikes. Further stage-level attribution is required before claiming
+the integration-pump timing issue fixed. No physical-light or downstream
+SoundSwitch playback acceptance is claimed for this run.
+
+Dev-28 follow-up: the full workspace regression caught a real queued-clock
+recovery race after the successful shorter Dev-27 checks. Hold/FailClosed erased
+the shared latest-clock slot when the worker eventually handled the command,
+so a newer recovery clock could be lost. Source barriers now invalidate pending
+clocks at request time under the mailbox lock and advance a generation. Wakeups
+carry that generation; an older wakeup cannot consume a newer clock. The worker
+does not clear future clocks when handling an older barrier. Six recovery tests
+now pass, including twelve alternating hold/fail/recovery cycles with a delayed
+helper. Two older tests were updated to require zero phase/transport writes,
+rather than the superseded alignment behavior. Full verification and installed
+Dev-28 acceptance are required before treating this follow-up as complete.
+
+Dev-28 portable verification passed: 494 tests across 79 reported suites,
+strict workspace Clippy, formatting, full build, the planner budget and the
+10,000-track library benchmark. The initial local attempt exhausted disk space;
+only reproducible Rust incremental cache was removed, then the complete run
+passed with incremental compilation disabled. The installer is build 421 /
+5c62f2cda01c, verified and installed from its actual DMG payload. Two real-helper
+tests passed with SoundSwitch present, including unchanged-tempo recovery after
+a source gap and owned-helper exit on drop. Desktop acceptance remains pending.
+
+GitHub's first Dev-28 Apple gate failed the isolated-worker cleanup deadline
+once. The focused local reproduction and 30 consecutive repeated invocations
+passed without changing its deadlines. The failed-jobs rerun passed all gates
+(run 37931445398); the original failure remains unexplained, not disproved.
+
+Dev-28 combined 600-second real-network/CoreMIDI/Link acceptance passed with
+299 pitch changes, 85 seek landings, 54 operation cycles, 572 library queries
+and 11,198 snapshots. Source age p95/p99 was 10 ms (maximum 53.347 ms);
+138 requested AutoLoops completed, zero failed, with 139 MIDI pulses including
+bank selection. MIDI dispatch p95 was 33 microseconds, maximum 10.022 ms.
+Link applied all 301 anchors with one peer, no failures or phase corrections.
+The engine pump still recorded 122 observations over its 10 ms starvation
+threshold and a 100.772 ms maximum; the slowest command was sourceMode at
+100.264 ms. Startup correlation is a hypothesis, not proven by these aggregate
+counters. Evidence: local build/Evidence/dev28-live-600s.json. This is not the
+one-hour release gate or proof of physical light alignment.
+
+Dev-28 desktop acceptance: a deliberately suspended owned engine was replaced
+automatically (88299 to 88502; old PID confirmed gone). Both track plans and
+CHRM local/LINK provenance returned. The initial installed launch had failed
+USB reads with No route to host; warm recovery and a subsequent complete
+Quit/relaunch both recognized the sources without privacy/settings changes.
+Cause of the first-launch difference is still unproven. Arm/Start showed a
+20-beat countdown followed by Show running; a five-second simulator master
+disconnect showed stale timing, then Ready with the same one-peer Link session.
+Normal Quit removed engine, gateway and Carabiner; cold relaunch restored both
+plans and Link. Remote reflected Start/Show running while retaining View only.
+
+Downstream UI acceptance is blocked again: SoundSwitch 2.10.3 stopped responding
+to accessibility and screen capture. A read-only three-second process sample
+at 15:14 on 2026-10-09 found all main-thread samples waiting in
+JLC1Manager::resetJLC1DeviceList -> JLC1Storage destructor -> thread::join;
+the storage worker waited for a recursive mutex in getJLC1LastExclusiveMsgID.
+This supports a Control One/MIDI device-list lockup, not a diagnosis of a Link
+phase problem. The initiating device notification and whether Lumi lifecycle
+changes triggered it are not yet established. Local evidence:
+build/dev28-soundswitch-sample.txt. Do not count successful MIDI send counters
+as SoundSwitch playback acceptance. Owner approval requested before restarting
+SoundSwitch; Lumi left Off, with no system-settings modifications.
+
+Dev-27 follow-up in progress: installed Dev-26 survived bounded 15/30-second
+Player-1 disconnects. SoundSwitch retained one peer and its last tempo during
+the gap; unchanged-tempo recovery returned Link to Ready without toggling it.
+Master handover to Player 2 changed Lumi and SoundSwitch to 155 BPM and selected
+bank 2; the MIDI diagnostic reported nine pulses, zero late sends, p95 5.1 ms.
+The remaining intermittent position warning was traced to a diagnostic that
+required only the precise-position lane, ignoring the existing exact-Beat
+authority. The repair tracks freshness per loaded Player and accepts fresh
+exact Beats during playback. Regression coverage includes expiry/recovery,
+track replacement and master handover without borrowing another Player's
+freshness. This changes diagnostics, not timeline or output scheduling.
+
+Actual Library UI acceptance on Dev-26: expanded Sets / Trancendence /
+Trancendence 2, selected Part 1 (15 tracks), then Part 2 (56 tracks with distinct
+membership). Opened 90s Bitch by double-click: revision 38, protected phrases,
+Ready for Show and editing controls correctly disabled. No phrases changed.
+Audio preview remains unavailable for that source on this Mac without local
+media; this is not evidence of successful offline audio caching.
+
+Dev-27 verification: 160 engine unit tests, 63 Live presentation tests, 75
+Library tests and four USB-feedback XCTest cases passed. The Pro DJ Link crate
+suite and strict Clippy passed. Initial sandboxed attempts could not create
+test sockets / run Swift macros; the normal authorized runs passed without
+changing macOS privacy settings. The disposable library copy passed SQLite
+quick-check and foreign-key validation. Package build 419 / edd925b passed deep
+signature validation and was installed from the expanded DMG installer payload.
+
+The 120-second isolated Pro DJ Link run processed 7,267 messages with p95 source
+age 10 ms, maximum 33.6 ms and queue high-water 7. The 120-second real Link run
+applied 4,203 observations, one peer, zero failures and zero hard/soft phase
+corrections. The 120-second MIDI lane scheduled 4,526 commands, emitted 4,288,
+and deliberately cancelled 238; no saturation, p95 5.032 ms, maximum 5.291 ms.
+These are bounded stress checks, not the long release soak or physical-light
+alignment acceptance. GitHub's previous Rust gate failed only formatting in
+two existing files; the formatting check is repaired without behavioral changes.
+
+Combined Dev-27 run (120 s, real MIDI and SoundSwitch Link peer): 59 pitch
+changes, 17 seeks, ten lighting-mode cycles, 114 library queries and 2,305 UI
+snapshot polls; 28 completed AutoLoops, zero execution failures, zero Link
+failures and zero phase reanchors. Source-age p95/p99 10 ms, maximum 50.9 ms;
+library round-trip maximum 22.6 ms; MIDI p95 41 microseconds, maximum 5.03 ms.
+Pump lateness maximum 56.7 ms / 29 starvation observations remains an explicit
+scheduling concern, not hidden by the successful output counters. Evidence:
+`build/Evidence/dev27-live-120s.json` and `build/dev27-soak.log`.
+
+Installed Dev-27 desktop acceptance: both prepared tracks and their sources
+returned on first launch, with no new Lumi crash report observed. Arm/Start
+counted down to phrase 2, then ran. During an isolated precise-position gap,
+exact Beat messages kept status Ready and MIDI progressed through the phrase
+boundary. Virtual CHRM eject changed Player 1's slot to Not inserted while
+preserving both the local and LINK-loaded track origins and 17/33-phrase plans.
+Starting the cached Player-2 track after a seek and handing it master selected
+bank 2; status remained Ready with eight pulses and zero late sends. Restored
+the virtual USB and Player 1 master / Player 2 paused. The real USB filesystem
+was not modified or physically unmounted by this test.
+
+Dev-27 Settings Restart acceptance: the confirmation was visible and accepted;
+Engine responding / Remote ready returned. Engine PID 40636 → 40831 and gateway
+PID 40677 → 40839, both verified by the UI as belonging to the installed Dev-27
+bundle. No new Lumi crash report appeared. One initial confirmation observation
+failed with ScreenCaptureKit -3812; Escape cancelled that attempt safely and
+the subsequent normal UI attempt succeeded. Normal Quit after this test again
+passed the exclusive-service ownership guard before full Rust verification.
+
+Dev-26 installed acceptance (build 418 / e79eb09): normal Dev-25 Quit removed
+engine, bridge, gateway and Carabiner. Two real-helper lifecycle tests passed
+against SoundSwitch, then the verified Dev-26 installer payload was installed
+without touching either database. The isolated USB reader initially reported
+No route to host; normal macOS consent by the owner restored CHRM/local and
+CHRM-via-Player-1 matching without restarting Lumi. No permission workaround.
+Simulator +4.2% pitch displayed 161.510 BPM in Lumi and 161.5 in SoundSwitch,
+with one Link peer. Actual UI Arm/Start with On phrase start counted down from
+75 through 28 beats; at phrase 2 Lumi reported Show running and exactly two
+MIDI pulses, bank 3, zero late sends. SoundSwitch visibly changed bank 2 to bank
+3. This proves visible bank selection, not yet sub-beat downstream alignment.
+
+Dev-26 provider repair: the new localhost wire-level regression failed on the
+old provider, recording enable-start-stop-sync, force-beat-at-time and transport
+commands. Those command methods are now removed. The same worker test passes
+through initial paused source, start, master handover, changed BPM, hold,
+stale-source recovery, pause and shutdown. It permits only version/status/BPM
+and requires exactly two tempo publications for the two distinct tempos.
+Hold/recovery preserve the last tempo; no phase or transport write is allowed.
+The stale-clock relay regression is included. Nine timing-output and 160 engine
+tests pass (four environment acceptance tests remain explicitly ignored).
+Actual packaged Dev-26 and SoundSwitch playback acceptance are still pending;
+this automated result alone does not close E11-05/E11-06.
+
+Additional Dev-25 desktop checkpoint (2026-10-09): while the installed app was
+Live with the Mac mini simulator, Arm/Start from a paused position showed
+Waiting for playback, then Show running after Play. The status popover reported
+26 MIDI pulses, p95 5.0 ms, last 4.5 ms and zero late sends. SoundSwitch reported
+one Link peer at 155 BPM and Control One connected. These observations do not
+prove downstream AutoLoop playback: the automation view continued to expose
+the mapping screen / loading logo despite the owner's Performance-mode setup.
+No mappings were intentionally edited.
+
+Concurrent Library browsing verified Sets / Trancendence / Trancendence 2 /
+Part 1 - 138+ Trance: 15 rows; typing Shiver without Return narrowed to one;
+Clear restored 15. The subsequent Part 2 selection and two further desktop
+observations timed out, including screenshot-only observation. Do not count
+Part 2 or continued UI responsiveness as passed. A three-second process sample
+(`build/dev25-library-ui-sample.txt`) showed substantial SwiftUI transaction /
+view update work rather than a single blocked main-thread stack. A point-in-time
+process check showed the app, engine, gateway, bridge and Carabiner still alive;
+process liveness alone does not establish healthy lighting output. Investigate
+UI workload and automation responsiveness separately before assigning cause.
+
+Follow-up: the owner confirmed Lumi remained responsive. Resetting only the
+computer-use session and selecting the exact Dev-25 app path restored immediate
+UI access; no Lumi/service restart was needed. Do not label that incident a
+confirmed application hang. The restored status showed continuing Pro DJ Link
+positions and 77 MIDI pulses / zero late sends, but a stale Link warning.
+`LinkRelay::synchronize` cleared its stale flag before suppressing an unchanged
+tempo/master observation, leaving the provider degraded. A failing-before /
+passing-after regression now requires one recovery observation, then resumes
+normal duplicate suppression. This source fix is not installed yet.
+
+Release gate: inspection of the existing Carabiner provider found actual
+`force-beat-at-time`, `start-playing`, `stop-playing` and start/stop-sync commands.
+Consequently earlier descriptions of the complete provider as tempo-only were
+too strong. Restoring a stale provider currently enters this alignment path;
+do not deploy the recovery fix alone or claim timeline isolation. Complete the
+owner's tempo-only contract and add wire-command assertions for first receipt,
+pause/play, gaps, master changes and recovery before packaged acceptance.
+
+| Finding since the public release / development acceptance | Story | Required evidence |
+| --- | --- | --- |
+| Approximate three-second lighting delay and slow displayed BPM changes | E11-03 | Correlated source-to-dispatch and downstream measurements under load |
+| First Play/hotcue start is late and remains off-beat | E11-05 | Repeated immediate and phrase-boundary starts; exactly one launch |
+| Start/stop/reattach services unclear; Ready despite unavailable engine | E11-02 | Cold/warm start, reconnect, upgrade and shutdown UI scenarios |
+| Independent same-model USBs conflict again after local reconnection | E11-04 | Stable identity observations; copied-marker rejection retained |
+| Authorized USB asks for authorization again; scan/selection view missing | E11-04 | Bookmark lifecycle and restored selectable source tree |
+| Current/green status before a new comparison; new/changed tracks hidden | E11-04 | Scan impact by full playlist path, separate from last-sync result |
+| Sync does nothing visibly or gives configuration/init wording for identity errors | E11-04 | Immediate source-scoped progress/failure, meaningful retry |
+| Nested folders flattened or selecting a playlist leaves collection rows | E11-04 | Exact leaf membership, hierarchy, query cancellation and failures |
+| Editor stays loading after sync failure, including imported local tracks | E11-04 | Failed-sync-to-editor sequence and visible bounded failure/retry |
+| Review uncertainty and old/new semantics, bulk decisions, invalid-grid exclusion | E11-04 | Preserve accepted behavior and phrases; fresh scan and restart regressions |
+| New mashup versions and changed grid/cues/metadata need safe adoption | E11-04 | Compatible audio, alias/fingerprint history, protected phrase retention |
+| Mounted USB differs from a loaded LINK track's origin | E11-01/06 | Mac and Remote show both facts with evidence-based media colors |
+| Eject cached local/LINK tracks, timeouts and delayed replies after swaps | E11-01/06 | Hardware-derived packet sequence and generation tests |
+| UI stutter and presentation delays | E11-03/06 | No feedback into outputs; preserve waveform rendering and fixed playhead |
+| Remote control ownership, persisted offset and Prod/Dev pairing | E11-06 | Retain earlier fixes through controller, reconnect and channel regression |
+
+Detailed prior evidence remains in E10-07, E10-08 and E10-09. Cross-source matching
+without verified identity remains deferred by the owner; do not silently add it
+as a way to make simulator matching pass. Unknown track freshness remains honest;
+no export/analysis date is invented as a cue/grid revision timestamp.
+
+## E11-01 — hardware-derived simulator and repeatable scenarios
+
+2026-10-09 update, simulator 0.4.1-dev-5: real destination-aware, unprivileged
+RPC/MOUNT/NFS marker reads implemented (ADR 0046). Automatic one/two-interface
+selection, independent source addresses, USB-status packet fields, bounded
+media faults and visible network mode added. Native acceptance includes exact
+SHA-256 through the unchanged production reader on port 111, source-address
+verification, stale handles, eject, missing/oversize/symlink protection and
+timeout recovery. Local browser acceptance uses explicitly synthetic sources.
+Mac mini installation, real exports across its two physical interfaces and Lumi
+show acceptance are still required; do not mark the complete epic done.
+
+2026-10-09 cross-Mac checkpoint: dev-5 is running on the owner's Mac mini.
+Primary Ethernet and secondary Wi-Fi addresses were discovered automatically.
+The production reader on the MacBook read the existing CHRM marker over actual
+RPC/NFS in approximately 62 ms. Player 2 has no independent USB; therefore two
+independent physical media are not yet validated in this setup.
+
+Historical checkpoint (superseded by the update above): simulator 0.4.1-dev-3 was built,
+checksum-verified, and the packaged desktop UI was opened and inspected. No
+Rekordbox USB was attached to this Mac, so no local simulator session was
+started. The owner-supplied Mac mini still runs 0.4.0-dev-56; its control page is
+reachable, but that older installation cannot verify the new media-slot and
+eject behavior. No Mac-mini controls or production Lumi state were changed.
+
+Implemented in 0.4.1-dev-3: independent USB libraries per Player, retained
+source-Player identity for LINK-loaded tracks, mounted-versus-loaded source
+state, cached source retention after eject, OneLibrary import, remote insert/eject
+controls, and source-aware playlist Auto Mix. Unit and package verification pass.
+Still open: test the new build on the Mac mini with two distinct USB exports,
+verify its packets against new captures, and resolve production NFS source
+addressing. The simulator does not yet model the CDJ's real USB identity RPC or
+serve NFS media, so it is not full USB-source acceptance evidence.
+
+Acceptance and implementation tasks:
+
+- Independent mounted-media and loaded-track models per Player; source Player
+  retained across LINK loads, cached playback, eject and replacement. Two media
+  may contain the same numeric track ID with different audio/analysis.
+- Use OneLibrary data through a shared, verified importer or equivalent validated
+  reader. Reuse existing parsing where practical. Never synthesize an allegedly
+  exact beatgrid when analysis is unavailable; show that limitation explicitly.
+- Read only the real versioned identity marker, with the same size/schema bounds.
+  Network marker retrieval must exercise the production reader and its limits.
+  An HTTP identity shortcut or injected trusted result is not NFS acceptance.
+- Resolve multi-player network addressing before shipping media emulation: the
+  current two Players share one host address, whereas real NFS identifies a
+  source by host/slot. Two independent media must not collapse to a single marker.
+  Keep the simulator non-admin where possible; document any transport-specific
+  test seam and its limits instead of weakening production source verification.
+- Generate the observed CDJ-1500X status layout, mount transitions, stable
+  post-eject ownership fields, extended content witness and declared wire size.
+  Test through the actual 512-byte Beat Link receive boundary. Stable captures
+  do not prove unobserved intermediate transitions; label those synthetic cases.
+- Remote and visible controls for insert/eject, local/LINK load, unload, Play,
+  cue/seek, pitch, master handover, loop and playlist Auto Mix.
+- Deterministic faults: delayed/missing/malformed marker, stale reply after a
+  replacement, status/position gaps, reordered ordinary observations and bursts.
+  Preserve critical transitions; make all faults opt-in and bounded.
+- Scenario runner records seed, operations, expected sources and event times,
+  with clear progress/results. Include cached eject, ID collision, fresh load,
+  reconnect, first Play, phrase run-in and long mixed-playlist soak.
+- Package and validate a self-contained simulator DMG with its own incremented
+  dev version. Do not claim Mac mini installation until verified remotely.
+
+## E11-02 — usable service lifecycle
+
+2026-10-09 Control One checkpoint, installed dev-23: SoundSwitch visibly reports
+CONTROL ONE Connected. Quit through the desktop UI removed all matching Lumi
+engine/gateway/bridge/Carabiner processes and removed the Lumi Link peer from
+SoundSwitch, while Control One remained connected. Normal app restart recovered
+both CHRM tracks (local Player 1 and LINK Player 2), one Link peer, and Arm → Start.
+After restart the Live status reported eight MIDI pulses, zero late dispatches
+and p95 4.6 ms; both applications followed the simulator pitch reset to 155 BPM.
+These are software status observations, not a physical-light or first-beat
+alignment measurement. No mappings or macOS privacy settings were changed.
+
+Dev-22's earlier packaged USB failure recovered before installing dev-23; it is
+not evidence that the new usage-description declaration fixed that failure.
+The successful dev-23 warm restart does not close the complete startup/fault
+matrix. Keep the intermittent initial marker-read failure under investigation.
+
+Dev-23 preparation: the engine's embedded service Info.plist now includes the
+local-network usage description, as the main app and Remote gateway already do.
+Packaging rejects its absence. This is a declaration, not a consent grant and
+not evidence that the packaged network problem is resolved. No process launch
+or permissions workaround is introduced.
+
+The Library editor pane now scrolls vertically when the saved editor height
+cannot fit the window; the browser reserves 220 points. The editor keeps its
+existing minimum content height, waveform renderer and saved height preference.
+All 75 Library Swift tests pass (plus four XCTest feedback tests). Packaged
+small-window/divider acceptance is still required.
+
+Post-dev-22 checkpoint (source changes, not yet packaged): Live's aggregate
+status now explicitly represents Stopped, Starting, Reconnecting and Unavailable
+instead of declaring Ready while the engine is starting. Empty optional providers
+remain informational. All 62 Live workspace tests pass. Remote process details
+now require the executable to belong to the expected installation, not merely
+a live PID from a private service record; all nine engine safety tests pass,
+including wrong-installation/PID rejection and real child termination.
+The complete macOS build also passed. The full client suite passed all 30 tests
+after quitting the installed app. An initial run alongside that app failed MIDI
+publication; it is not valid acceptance evidence. Focused reruns now use
+`bash scripts/verify-engine-client.sh`, which applies the existing exclusive
+MIDI ownership guard and serial execution from full Apple verification. The
+test reports a publication command failure directly rather than cascading
+through unrelated expectations.
+
+Packaged dev-22 remains blocked for show acceptance: Player status/BPM and a
+SoundSwitch Link peer are present, but the launch-agent USB marker reader reports
+`No route to host`. The simulator reports its RPC/NFS service ready. The earlier
+headless soak does not establish packaged network access. No privacy/network
+settings were changed; the owner manages consent. Do not mark this resolved or
+attribute the cause solely to permissions without evidence.
+
+Packaged Library desktop acceptance passed: selecting Mashup ToDo immediately
+showed seven tracks, typing Shiver without Return narrowed to two, clearing
+restored seven, and selecting Part 1 showed fourteen. Small-window layout still
+needs attention: a persisted tall editor can leave too little browser space;
+maximizing reveals it, but is not a product fix. Waveform rendering is unchanged.
+
+Dev-21 desktop checkpoint: Restart replaced engine PID 81158 with 81270 and
+gateway PID 81176 with 81278, both from the expected Dev-21 bundle. Both Players
+and their local/LINK plans returned; Arm → Start remained Live with the simulator.
+Explicit Quit left no engine/gateway/Carabiner/bridge and SoundSwitch lost its
+Lumi Link peer. SoundSwitch reports no hardware interface, so physical lighting
+and Control One lifecycle acceptance remain untested.
+
+Owner requirements confirmed 2026-10-09: explicit Quit must stop every owned
+channel service, not detach and leave the engine/gateway running. The app stays
+open in a visible Stopping state until termination is verified. Bounded graceful
+shutdown may escalate only against verified owned processes; failure remains
+visible and must not report success. Repeated Quit must not bypass shutdown.
+Provide compact Settings service rows with real response-based state and
+Start/Stop/Restart, expandable process/version details, and a warning before
+interrupting an active show. Remote-enabled preference survives a normal Quit.
+Test rapid relaunch, frozen/crashed services, stale records, and channel isolation.
+
+Implementation checkpoint (not completion): dev-20 provides Settings controls,
+process details, explicit unregister/verified engine termination, a Quit wait
+state and shutdown error reporting. Two actual desktop Quit/reopen cycles left
+no engine/gateway/Carabiner processes. SoundSwitch remained interactive and its
+Link peer disappeared. Its hardware interface is currently disconnected, so
+this is not the physical Control One reset-deadlock acceptance. Real-process
+client suite: 26 tests passed. Additional TERM-ignoring child shutdown regression
+passed. Startup cancellation and full managed-service fault cases still need
+desktop acceptance.
+
+Cross-Mac UI testing also exposed a concrete regression: LibrarySnapshotDecoder
+rejected valid USB `empty` and `unloading` states, invalidating otherwise usable
+snapshots. Decoder repaired with all seven mount-state cases passing. Repaired
+desktop build now shows both tracks with 17-phrase plans, CHRM in Player 1 and
+CHRM via Player 1/LINK as Player 2's loaded source while its own slot is empty.
+The launchd-owned reader initially reported `No route to host`; after the owner
+granted normal macOS consent it resolved CHRM without a code or permission reset.
+Permission settings remain owner-managed, not agent-managed.
+
+Live desktop checkpoint: Off → Arm → Start while paused, followed by simulator
+Play on Player 1, showed SoundSwitch at 155 BPM with Intro Blue Red 2 active.
+This is selection/connectivity evidence, not a measured first-beat latency pass.
+The subsequent Settings Stop confirmation test was interrupted by macOS
+ScreenCaptureKit error -3812; stop/start/restart UI acceptance is still open.
+Normal and TERM-ignoring child shutdown/relaunch regression cases pass, including
+an ownership recheck before forced termination. A Library query failure that
+silently retained the old playlist's rows now has a preserving-navigation error
+state and a passing regression; desktop error/recovery acceptance remains open.
+The full Library package suite passed (70 Swift Testing tests and four XCTest
+feedback tests), as did 15 media-resolver regressions and the macOS app build.
+These automated passes do not replace the interrupted desktop acceptance.
+Engine unit regression also passed: 145 passed, four explicitly ignored; the
+canonical scenario differs only in its expected product version (dev-20).
+
+Follow-up desktop checkpoint: resuming the existing Stop confirmation succeeded.
+Settings showed Stopped and engine/gateway/Carabiner processes were absent.
+Start and confirmed Restart both returned to Engine responding / Remote ready;
+Restart replaced engine PID 34820 with 35145. A subsequent explicit Quit again
+removed owned services. The transient “No verified Remote process” detail after
+startup is repaired in dev-21 by refreshing details immediately after enablement.
+Remote startup/recovery now carries a generation through suspension points so
+an in-flight recovery cannot re-register after a concurrent stop. Shutdown reads
+the previous-version record too; version mismatch still rejects normal commands.
+Seven safety tests pass, including cancellation and old-version record validation.
+These new race guards still require packaged desktop acceptance.
+
+Library desktop checkpoint: expanding Sets → Trancendence 2 and selecting Mashup
+ToDo eventually returned the expected seven tracks, but initially retained all
+154 collection rows. Dev-21 adds an explicit pending-query state (including
+Local Playback), clears stale rows while retaining navigation/editor data, skips
+superseded queued queries and prevents an older monitor snapshot from replacing
+the pending selection. Full Library suite: 71 Swift Testing + four XCTest passes.
+The combined simulator soak now also alternates Library searches while changing
+pitch, seeking and cycling lighting modes; query round-trip and maximum engine
+command duration are recorded separately from MIDI-lane dispatch latency.
+
+Measured E11-03 checkpoint on the Mac mini simulator and real SoundSwitch peer:
+two 30-second combined runs each performed 14 pitch changes, four seeks, two
+Pause/Start cycles, 28 Library searches and seven AutoLoop executions. Query
+round trips peaked at 18.9 ms; source-age p95 was 20 ms; no MIDI failures or
+queue saturation. The diagnostic repeat attributed the worst command (92.7 ms;
+earlier unclassified run 259.9 ms) to Link enablement, not Library queries.
+The relay now queues startup on its existing timing worker instead of waiting
+for the helper. Starting/Degraded/Ready remain actual worker states; accepting
+the request does not claim readiness. Engine unit suite still 145 passed / four
+ignored; timing-output suite eight passed, including asynchronous startup failure.
+Post-change 120-second run passed with 59 pitch changes, 17 seeks, ten operation
+cycles, 115 Library queries and 27 AutoLoop executions: no Link/MIDI failures or
+queue saturation. Library maximum round trip 21.0 ms; source-age p95/p99 20 ms,
+maximum 51.8 ms; MIDI dispatch p95 52 µs, maximum 2.67 ms. Worst engine command
+was now source-mode selection (88.5 ms), not Link enablement. Pump lateness still
+peaked at 53.4 ms under aggressive full snapshots: E11-03 scheduling isolation
+is therefore not closed. These are distinct segment measurements, not a claim
+of end-to-end light latency or first-beat alignment. SoundSwitch UI remained
+responsive and showed one Link peer. Physical hardware output is untested.
+
+Reproduce the unavailable Dev attachment before repair. Verify service record,
+process/build identity, authentication and command responsiveness separately.
+Bound retries; show Starting/Recovering/Ready based on real responses. Keep the
+existing explicit show/quit policy while separating UI reconnection from output
+ownership. Test old helper/new app, stale record, rejected connection, failed
+worker, sequential relaunch and clean helper cleanup. Separate channel databases
+and configured mappings must survive. No automatic kill of unrelated apps.
+
+## E11-03 — measured realtime boundaries
+
+Dev-22 implementation (ADR 0048): full Library reads for browsing and snapshots
+use an independent read-only transaction while the integration pump and Remote
+commands continue. Real-database regressions cover captured query/editor state
+and failure without recreating a missing database. The SQLite read-only lane now
+registers the same pure version-family query function as the writer.
+
+Matched 120-second simulator/SoundSwitch workload, before → after this change:
+source-age p95 20 → 5 ms, p99 20 → 10 ms; pump starvation counter 2767 → 26.
+After: 59 pitch changes, 17 seeks, 10 operation cycles, 114 Library queries;
+no critical saturation or Link errors. Maximum query response grew from 21 to
+36.5 ms (now off-owner). Worst pump lateness was 60.4 ms and source-mode startup
+command 100.5 ms, so this does not close the scheduling/latency story. Evidence:
+`build/Evidence/live-integration-projection-120s.json` (tested before the version
+bump, embedded version dev-21). These are software-segment measurements, not
+physical lighting latency. Packaged Dev-22 desktop acceptance remains required.
+
+Instrument and reproduce before scheduling changes. Enforce ADR 0042's existing
+requirement that heavy DB/plan/projection work cannot hold the show owner.
+Compare a previously accepted build with current behavior using isolated data.
+Preserve the tempo-only Link relay, sparse AutoLoop lane and existing visual
+quality. Publish measured rather than hard-coded lateness. A source-to-MIDI
+measurement and a SoundSwitch/light observation remain separate evidence.
+Acceptance uses the proposed budgets and overload cases in the recovery plan.
+
+## E11-04 — complete USB-to-editor workflow
+
+Dev-21 implementation checkpoint: the UI and isolated USB worker now share
+bookmark restoration. A stale bookmark resolving to the exact requested root
+is renewed only while its existing security scope remains accessible. Failed
+resolution no longer destroys the saved grant. Different or broader roots are
+rejected; this never authorizes a different device or replaces physical marker
+validation. Normal macOS selection remains the fallback when the grant cannot
+be restored. Physical unplug/replug acceptance remains open.
+The Library suite now includes four bookmark restoration-policy tests (75 Swift
+Testing + four XCTest passes). Actual macOS stale-bookmark renewal has not been
+forced in acceptance. USB-worker ownership is retained by the app; explicit
+Stop/Quit cancels and waits for that worker too. Its cancellable process waiter
+uses authoritative waitUntilExit completion, bounded TERM/KILL cleanup, and an
+accurate operation-specific timeout message rather than always reporting 75 s.
+
+Fix identity stability and durable authorization without merging independent
+sticks. Scan, pre-sync impact, selection, progress, review and completion must
+refer to the same source and revision. Keep stored selection and actual imported
+state distinct. Validate new/changed/held tracks by complete playlist paths.
+Use temporary DBs for destructive/fault tests; preserve user phrases/mappings.
+Test nested leaf filtering, search, switching, editor/audio availability, phrase
+edit/save/reopen and protected phrases after successful and rejected sync, with
+the actual desktop app. Validate offline stored data as well as connected media.
+
+## E11-05 — Arm preparation and phrase-start run-in
+
+Dev-24 / Remote dev-6 candidate: versioned optional launch projection and guarded
+compare-and-set commands are wired through both clients. The setting uses a
+separate per-channel atomic JSON file with a bounded background writer; invalid
+storage and save failures remain visible. Off/Arm only, Immediate default, explicit
+no-upcoming-phrase state. Initial run-in pre-roll uses the existing scheduler for
+negative, zero and positive offsets. Remote countdown reuses transport anchors;
+it does not request a full waveform projection per beat. No Link phase commands.
+
+Pre-install verification: 159 engine tests, 32 gateway tests and 18 Remote protocol
+tests passed serially; 63 Mac Live tests, 36 Remote client tests, 14 Remote UI tests
+and 30 exclusive real-process/MIDI client tests passed. Both app builds passed.
+One earlier parallel run exceeded the snapshot performance budget while both apps
+were compiling; the isolated rerun passed without changing the threshold. Packaged
+UI/network launch acceptance remains required before closing this story.
+
+2026-10-09 implementation checkpoint: ADR 0049 and a pure initial-launch gate
+are implemented in source, with seven state-machine tests and a runtime test
+which suppresses mid-phrase output and admits the next exact-grid boundary.
+The installed dev-23 app still uses Immediate; no selectable policy or persisted
+Mac/Remote controls are shipped yet. Negative-offset deduplication, MIDI failure,
+late planning, UI projection and representative network acceptance remain open.
+Do not present this groundwork as completed user functionality.
+
+Arm preloads current/next phrase plans and prepares commands; preselect a bank
+only if its documented/tested behavior cannot disturb existing output.
+Immediate remains the default. Optional On phrase start selects the first
+upcoming phrase boundary when playback begins after arming. A cue several beats
+before that boundary supplies run-in. Start exactly on the boundary triggers
+immediately; absence of a usable future boundary is explicit and never silently
+waits indefinitely. Show the target phrase and beats remaining on Mac and Remote.
+
+Schedule using the authoritative beatgrid, pitch and signed output offset.
+Recalculate an unsent deadline on BPM changes, cancel stale targets on load,
+seek/master changes and deduplicate execution. An already missed deadline is an
+explicit late-start outcome; do not defer to a different phrase without intent.
+This setting controls the initial launch, not a repeated delay at every phrase.
+
+Investigate optional one-shot SoundSwitch alignment only after timing is fixed.
+Maximum one action during a maximum four-beat launch window, then no corrective
+actions until a new genuine trigger. No reliable phase feedback means no claim
+of conditional automatic correction. Keep global Link resets and continuous
+phase chasing excluded. A disruptive/unsupported proof of concept is omitted
+from the release rather than silently enabled.
+
+## E11-06 — integrated acceptance and release
+
+Run automated component, real-process, fault and sustained-load suites, then
+actual desktop Mac, iOS Simulator and simulator-control UI scenarios. Use
+90s Bitch on Player 1 and My Favourite Regrets on Player 2 where available;
+also vary tracks with playlist Auto Mix. Use read-only observations of SoundSwitch
+and controlled MIDI tests to verify visible selection/progress. No UI screenshot
+or internal latency percentile is proof of physical light timing.
+
+Publish a coverage ledger with each scenario marked reproduced, repaired,
+automated-pass, UI-pass, hardware-evidence or still-open. Simulator tests can
+replace repetitive setup; real CDJ behavior is anchored to existing captures
+and a short final physical acceptance, not claimed for every firmware/model.
+Retain actual USB permissions/filesystem testing and downstream light acceptance
+as distinct gates that synthetic fixtures cannot prove.
+
+Version and push reviewed increments to dev. Package Lumi, Remote and Simulator
+independently, document tested combinations, update user docs and HQ screenshots
+where UI changed, and prepare main only after release blockers pass. Do not bump
+production or publish an accepted release merely because a build succeeded.
+
+## Owner involvement
+
+Current control URL has been supplied and verified; never store its token here.
+Keep Mac mini simulator available. At the package gate the owner may need to
+install one new simulator DMG, since the existing HTTP controls cannot install
+software. SoundSwitch running and an unlocked Mac permit native acceptance.
+Use controlled fixture media locally while real USBs are unavailable; ask for
+one bounded physical USB check and final light acceptance only when necessary.
+No repeated CDJ play/eject/reload requests during routine regression development.

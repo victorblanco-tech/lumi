@@ -2,3 +2,4 @@
 PRODUCT_BUNDLE_IDENTIFIER = co.victorblan.tech.lumi.remote.dev
 PRODUCT_NAME = Lumi Remote Dev
 LUMI_RELEASE_CHANNEL = dev
+LUMI_PAIRING_URL_SCHEME = lumi-dev

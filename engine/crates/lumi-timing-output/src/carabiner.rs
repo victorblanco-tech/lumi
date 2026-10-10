@@ -58,17 +58,23 @@ pub enum CarabinerError {
 
 enum WorkerCommand {
     Publish(Option<mpsc::Sender<Result<(), String>>>),
-    Synchronize,
+    Synchronize(u64),
     Hold,
     FailClosed(String),
     Stop(mpsc::Sender<Result<(), String>>),
     Shutdown,
 }
 
+#[derive(Default)]
+struct PendingAnchor {
+    generation: u64,
+    latest: Option<LinkClockObservation>,
+}
+
 pub struct CarabinerTimingOutput {
     configuration: CarabinerConfiguration,
     commands: mpsc::Sender<WorkerCommand>,
-    latest_anchor: Arc<Mutex<Option<LinkClockObservation>>>,
+    latest_anchor: Arc<Mutex<PendingAnchor>>,
     worker: Option<JoinHandle<()>>,
     status: Arc<Mutex<TimingOutputStatus>>,
     shutting_down: Arc<AtomicBool>,
@@ -80,7 +86,7 @@ impl CarabinerTimingOutput {
     pub fn new(configuration: CarabinerConfiguration) -> Self {
         let (commands, receiver) = mpsc::channel();
         let status = Arc::new(Mutex::new(TimingOutputStatus::default()));
-        let latest_anchor = Arc::new(Mutex::new(None));
+        let latest_anchor = Arc::new(Mutex::new(PendingAnchor::default()));
         let worker_status = Arc::clone(&status);
         let worker_anchor = Arc::clone(&latest_anchor);
         let worker_configuration = configuration.clone();
@@ -166,14 +172,27 @@ impl CarabinerTimingOutput {
         Ok(self.configuration.expected_version.clone())
     }
 
-    /// Stops Link transport immediately while retaining the current session.
+    /// Stops accepting unsafe source timing, retaining the session and tempo.
     ///
     /// A fresh authoritative anchor can recover the same worker without an app
     /// or helper restart. The reason remains visible until that recovery has
     /// been applied successfully.
     pub fn fail_closed(&self, reason: impl Into<String>) -> Result<(), CarabinerError> {
+        self.enqueue_source_barrier(WorkerCommand::FailClosed(reason.into()))
+    }
+
+    fn enqueue_source_barrier(&self, command: WorkerCommand) -> Result<(), CarabinerError> {
+        // Invalidate only observations that predate this request. A delayed
+        // worker must never clear a recovery observation queued after it.
+        // Tag wakeups too: an old wakeup cannot consume the new generation.
+        let mut pending = self
+            .latest_anchor
+            .lock()
+            .map_err(|_| CarabinerError::WorkerUnavailable)?;
+        pending.latest = None;
+        pending.generation = pending.generation.wrapping_add(1);
         self.commands
-            .send(WorkerCommand::FailClosed(reason.into()))
+            .send(command)
             .map_err(|_| CarabinerError::WorkerUnavailable)
     }
 }
@@ -196,15 +215,19 @@ impl TimingOutputProvider for CarabinerTimingOutput {
             .map_err(CarabinerError::Helper)
     }
 
+    fn request_publish(&mut self) -> Result<(), Self::Error> {
+        self.publish_async()
+    }
+
     fn synchronize(&mut self, observation: LinkClockObservation) -> Result<(), Self::Error> {
         let observation = observation
             .validate()
             .map_err(|error| CarabinerError::InvalidAnchor(error.to_string()))?;
-        let previous_pending = self
+        let mut pending = self
             .latest_anchor
             .lock()
-            .map_err(|_| CarabinerError::WorkerUnavailable)?
-            .replace(observation);
+            .map_err(|_| CarabinerError::WorkerUnavailable)?;
+        let previous_pending = pending.latest.replace(observation);
         update_status(&self.status, |status| {
             status.received_anchor_count = status.received_anchor_count.saturating_add(1);
             if previous_pending.is_some() {
@@ -214,16 +237,14 @@ impl TimingOutputProvider for CarabinerTimingOutput {
         let should_wake = previous_pending.is_none();
         if should_wake {
             self.commands
-                .send(WorkerCommand::Synchronize)
+                .send(WorkerCommand::Synchronize(pending.generation))
                 .map_err(|_| CarabinerError::WorkerUnavailable)?;
         }
         Ok(())
     }
 
     fn hold(&mut self) -> Result<(), Self::Error> {
-        self.commands
-            .send(WorkerCommand::Hold)
-            .map_err(|_| CarabinerError::WorkerUnavailable)
+        self.enqueue_source_barrier(WorkerCommand::Hold)
     }
 
     fn fail_closed(&mut self, reason: String) -> Result<(), Self::Error> {
@@ -232,9 +253,7 @@ impl TimingOutputProvider for CarabinerTimingOutput {
 
     fn stop(&mut self) -> Result<(), Self::Error> {
         let (reply, response) = mpsc::channel();
-        self.commands
-            .send(WorkerCommand::Stop(reply))
-            .map_err(|_| CarabinerError::WorkerUnavailable)?;
+        self.enqueue_source_barrier(WorkerCommand::Stop(reply))?;
         match response.recv_timeout(WORKER_RESPONSE_TIMEOUT) {
             Ok(result) => result.map_err(CarabinerError::Helper),
             Err(_) => {
@@ -288,7 +307,7 @@ fn run_worker(
     configuration: CarabinerConfiguration,
     receiver: mpsc::Receiver<WorkerCommand>,
     shared_status: &Arc<Mutex<TimingOutputStatus>>,
-    latest_anchor: &Arc<Mutex<Option<LinkClockObservation>>>,
+    latest_anchor: &Arc<Mutex<PendingAnchor>>,
     shutting_down: &Arc<AtomicBool>,
     owned_child: &Arc<Mutex<Option<Child>>>,
 ) {
@@ -306,6 +325,7 @@ fn run_worker(
         match command {
             WorkerCommand::Publish(reply) => {
                 recovery_requires_publish = false;
+                last_anchor = None;
                 update_status(shared_status, |status| {
                     status.state = TimingOutputState::Starting;
                     status.last_event = Some("Starting managed Ableton Link output".to_owned());
@@ -320,8 +340,14 @@ fn run_worker(
                     let _ = reply.send(result);
                 }
             }
-            WorkerCommand::Synchronize => {
-                let anchor = latest_anchor.lock().ok().and_then(|mut value| value.take());
+            WorkerCommand::Synchronize(generation) => {
+                let anchor = latest_anchor.lock().ok().and_then(|mut value| {
+                    if value.generation == generation {
+                        value.latest.take()
+                    } else {
+                        None
+                    }
+                });
                 let Some(anchor) = anchor else { continue };
                 if recovery_requires_publish {
                     continue;
@@ -384,54 +410,26 @@ fn run_worker(
                 }
             }
             WorkerCommand::Hold => {
-                if let Ok(mut value) = latest_anchor.lock() {
-                    *value = None;
-                }
-                let result = session
-                    .as_mut()
-                    .map_or(Ok(()), CarabinerSession::stop_playing_now);
-                if let Err(error) = result {
-                    set_degraded(shared_status, &error);
-                    session = None;
-                    recovery_requires_publish = true;
-                } else {
-                    last_anchor = None;
-                    update_status(shared_status, |status| {
-                        status.state = TimingOutputState::Ready;
-                        status.playing = false;
-                        status.last_event = Some("Ableton Link timing held safely".to_owned());
-                    });
-                }
+                // Holding the source is not a request to stop other Link peers.
+                // Preserve the last published tempo; SoundSwitch owns playback.
+                update_status(shared_status, |status| {
+                    status.state = TimingOutputState::Ready;
+                    status.playing = false;
+                    status.last_event =
+                        Some("Ableton Link source held; tempo preserved".to_owned());
+                });
             }
             WorkerCommand::FailClosed(reason) => {
-                let result = session
-                    .as_mut()
-                    .map_or(Ok(()), CarabinerSession::stop_playing_now);
-                last_anchor = None;
-                match result {
-                    Ok(()) => update_status(shared_status, |status| {
-                        status.state = TimingOutputState::Degraded;
-                        status.playing = false;
-                        status.fail_closed_count = status.fail_closed_count.saturating_add(1);
-                        status.last_event = Some(
-                            "Ableton Link held because source timing became unsafe".to_owned(),
-                        );
-                        status.last_error = Some(reason);
-                    }),
-                    Err(error) => {
-                        set_degraded(shared_status, &error);
-                        session = None;
-                        recovery_requires_publish = true;
-                    }
-                }
+                update_status(shared_status, |status| {
+                    status.state = TimingOutputState::Degraded;
+                    status.playing = false;
+                    status.fail_closed_count = status.fail_closed_count.saturating_add(1);
+                    status.last_event =
+                        Some("Ableton Link source unavailable; last tempo preserved".to_owned());
+                    status.last_error = Some(reason);
+                });
             }
             WorkerCommand::Stop(reply) => {
-                if let Ok(mut value) = latest_anchor.lock() {
-                    *value = None;
-                }
-                let result = session
-                    .as_mut()
-                    .map_or(Ok(()), CarabinerSession::stop_playing_now);
                 session = None;
                 recovery_requires_publish = false;
                 terminate_owned_child(owned_child);
@@ -442,7 +440,7 @@ fn run_worker(
                     status.helper_version = helper_version;
                     status.last_event = Some("Ableton Link stopped safely".to_owned());
                 });
-                let _ = reply.send(result);
+                let _ = reply.send(Ok(()));
             }
             WorkerCommand::Shutdown => break,
         }
@@ -469,7 +467,8 @@ fn open_session(
             configuration.expected_version
         ));
     }
-    connected.enable_start_stop_sync()?;
+    // Never opt into transport sync. This peer publishes tempo only, including
+    // at acquisition, master handover, source recovery and shutdown.
     let snapshot = connected.status()?;
     update_status(shared_status, |status| {
         status.state = TimingOutputState::Ready;
@@ -576,10 +575,6 @@ fn apply_anchor(
         session.set_bpm(anchor.bpm_milli)?;
     }
 
-    let transport_changed = previous.is_none_or(|value| value.playing != anchor.playing);
-    let source_changed = previous.is_some_and(|value| {
-        value.source != anchor.source || value.deck_number != anchor.deck_number
-    });
     let snapshot = session.status()?;
     let target_phase = f64::from(anchor.phase_beat());
     let snapshot_time = snapshot.timeline_micros();
@@ -592,55 +587,23 @@ fn apply_anchor(
     let current_phase = positive_modulo(snapshot.beat, 4.0);
     let phase_beats = shortest_phase_delta(current_phase, expected_phase, 4.0);
     let phase_error_micros = (phase_beats * micros_per_beat).round() as i64;
-    // Beat packets reach Lumi over UDP and their receive timestamps therefore
-    // contain network and scheduler jitter. They are precise enough to launch
-    // show-critical AutoLoop deadlines, but continuously steering the shared
-    // Link phase from every receive timestamp makes the Link timeline jump
-    // backwards and forwards. SoundSwitch exposes that as an AutoLoop whose
-    // progress repeatedly scrubs across beats.
-    //
-    // Once established, Link owns its own monotonic projection. Only Link's
-    // own lifecycle can establish a new alignment: initial acquisition,
-    // explicit timing-source handover, or stopped -> playing. Track seeks,
-    // Hot Cues, phrases and AutoLoop generations are absent from this API and
-    // therefore cannot scrub SoundSwitch's Link timeline.
-    let alignment_reason = if previous.is_none() {
-        Some(TimingDiscontinuity::Started)
-    } else if source_changed {
-        Some(TimingDiscontinuity::MasterChanged)
-    } else if transport_changed && anchor.playing {
-        Some(TimingDiscontinuity::Resumed)
-    } else {
-        None
-    };
-    let should_reanchor = alignment_reason.is_some();
-
-    if should_reanchor {
-        session.force_beat_at_time(target_phase, anchor_time)?;
-    }
-
-    if transport_changed || source_changed {
-        if anchor.playing {
-            session.start_playing_now()?;
-        } else {
-            session.stop_playing_now()?;
-        }
-    }
+    // Phase error is diagnostic only. Even initial acquisition, pause/resume,
+    // master handover and stale-source recovery must not move the Link beat
+    // timeline or control another peer's transport. AutoLoops use their own
+    // isolated MIDI lane, not this tempo relay.
 
     Ok(AnchorOutcome {
         peers: snapshot.peers,
         phase_error_micros: Some(phase_error_micros),
-        reanchored: should_reanchor,
+        reanchored: false,
         corrected: false,
-        alignment_reason,
+        alignment_reason: None,
         event: if anchor.observed_at_micros.is_some() && shared_epoch_time.is_none() {
             "Ableton Link synchronized with receive-time fallback".to_owned()
-        } else if should_reanchor {
-            "Ableton Link timeline re-anchored".to_owned()
         } else if tempo_changed {
             "Ableton Link tempo updated with phase preserved".to_owned()
         } else {
-            "Ableton Link timing locked".to_owned()
+            "Ableton Link tempo unchanged".to_owned()
         },
     })
 }
@@ -718,11 +681,6 @@ impl CarabinerSession {
             .ok_or_else(|| format!("invalid version response: {response}"))
     }
 
-    fn enable_start_stop_sync(&mut self) -> Result<(), String> {
-        self.command("enable-start-stop-sync", "status ")?;
-        Ok(())
-    }
-
     fn status(&mut self) -> Result<LinkSnapshot, String> {
         let response = self.command("status", "status ")?;
         parse_status(&response)
@@ -731,32 +689,6 @@ impl CarabinerSession {
     fn set_bpm(&mut self, bpm_milli: u32) -> Result<(), String> {
         self.command(
             &format!("bpm {:.3}", f64::from(bpm_milli) / 1_000.0),
-            "status ",
-        )?;
-        Ok(())
-    }
-
-    fn force_beat_at_time(&mut self, beat: f64, when_micros: u64) -> Result<(), String> {
-        self.command(
-            &format!("force-beat-at-time {beat:.6} {when_micros} 4"),
-            "status ",
-        )?;
-        Ok(())
-    }
-
-    fn start_playing_now(&mut self) -> Result<(), String> {
-        let snapshot = self.status()?;
-        self.command(
-            &format!("start-playing {}", snapshot.timeline_micros()),
-            "status ",
-        )?;
-        Ok(())
-    }
-
-    fn stop_playing_now(&mut self) -> Result<(), String> {
-        let snapshot = self.status()?;
-        self.command(
-            &format!("stop-playing {}", snapshot.timeline_micros()),
             "status ",
         )?;
         Ok(())
@@ -837,6 +769,126 @@ fn set_degraded(shared_status: &Arc<Mutex<TimingOutputStatus>>, error: &str) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn wire_contract_is_tempo_only_across_transport_master_and_recovery()
+    -> Result<(), Box<dyn std::error::Error>> {
+        use crate::TimingSourceKind;
+        use std::net::TcpListener;
+
+        let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0))?;
+        let port = listener.local_addr()?.port();
+        let server = thread::spawn(move || -> std::io::Result<Vec<String>> {
+            let (mut socket, _) = listener.accept()?;
+            socket.set_read_timeout(Some(Duration::from_secs(5)))?;
+            let status =
+                b"status { :peers 1 :bpm 155.0 :start 1000000 :beat 12.25 :playing true }\n";
+            socket.write_all(status)?;
+            let mut reader = BufReader::new(socket.try_clone()?);
+            let mut commands = Vec::new();
+            loop {
+                let mut line = String::new();
+                if reader.read_line(&mut line)? == 0 {
+                    break;
+                }
+                commands.push(line.trim().to_owned());
+                socket.write_all(if line.trim() == "version" {
+                    b"version \"1.2.0\"\n"
+                } else {
+                    status
+                })?;
+            }
+            Ok(commands)
+        });
+        let mut output = CarabinerTimingOutput::new(CarabinerConfiguration {
+            port,
+            ..CarabinerConfiguration::default()
+        });
+        output.publish()?;
+        let mut clock = LinkClockObservation {
+            source: TimingSourceKind::ProDjLink,
+            deck_number: Some(1),
+            bpm_milli: 155_000,
+            beat_within_bar: 1,
+            playing: false,
+            observed_at_micros: None,
+        };
+        let wait = |predicate: &dyn Fn() -> bool| {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while !predicate() && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(2));
+            }
+            assert!(predicate(), "worker did not finish");
+        };
+        for step in 0..7 {
+            match step {
+                1 => clock.playing = true,
+                2 => {
+                    clock.deck_number = Some(2);
+                    clock.beat_within_bar = 3;
+                }
+                3 => clock.bpm_milli = 161_510,
+                4 => {
+                    output.hold()?;
+                    wait(&|| output.status().state == TimingOutputState::Ready);
+                }
+                5 => {
+                    output.fail_closed("temporary source gap")?;
+                    wait(&|| output.status().state == TimingOutputState::Degraded);
+                }
+                6 => clock.playing = false,
+                _ => {}
+            }
+            let before = output.status().applied_anchor_count;
+            output.synchronize(clock)?;
+            wait(&|| output.status().applied_anchor_count > before);
+        }
+        let status = output.status();
+        output.stop()?;
+        drop(output);
+        let commands = server
+            .join()
+            .unwrap_or_else(|error| panic!("test server panicked: {error:?}"))?;
+        assert!(
+            commands.iter().all(|command| command == "version"
+                || command == "status"
+                || command.starts_with("bpm ")),
+            "unexpected timeline command: {commands:?}"
+        );
+        assert!(commands.contains(&"bpm 155.000".to_owned()));
+        assert!(commands.contains(&"bpm 161.510".to_owned()));
+        assert_eq!(
+            commands
+                .iter()
+                .filter(|command| command.starts_with("bpm "))
+                .count(),
+            2,
+            "unchanged tempo must not be republished on resume, handover or recovery"
+        );
+        assert_eq!(status.hard_reanchor_count, 0);
+        assert_eq!(status.soft_correction_count, 0);
+        assert!(status.last_error.is_none());
+        Ok(())
+    }
+
+    #[test]
+    fn requested_publish_reports_startup_failure_through_status_without_waiting() {
+        let mut output = CarabinerTimingOutput::new(CarabinerConfiguration {
+            executable: Some(PathBuf::from("/does-not-exist/lumi-test-helper")),
+            port: 17_094,
+            expected_version: "1.2.0".to_owned(),
+        });
+        let started = Instant::now();
+        assert!(output.request_publish().is_ok());
+        assert!(started.elapsed() < Duration::from_millis(100));
+        let deadline = Instant::now() + Duration::from_secs(2);
+        while output.status().state != TimingOutputState::Degraded && Instant::now() < deadline {
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert_eq!(output.status().state, TimingOutputState::Degraded);
+        assert!(output.status().last_error.is_some());
+        assert_eq!(output.status().peers, 0);
+    }
 
     #[test]
     fn parses_carabiner_status() {

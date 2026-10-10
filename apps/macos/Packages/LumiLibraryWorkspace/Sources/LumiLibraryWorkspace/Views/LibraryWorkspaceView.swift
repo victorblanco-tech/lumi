@@ -152,6 +152,8 @@ public struct LibraryWorkspaceView: View {
     public var body: some View {
         VStack(spacing: 0) {
             VSplitView {
+                GeometryReader { pane in
+                    ScrollView(.vertical) {
                 Group {
                     if let analysis = editorAnalysis {
                         TrackLightingEditorView(
@@ -174,14 +176,17 @@ public struct LibraryWorkspaceView: View {
                         editorPlaceholder
                     }
                 }
-                .frame(
-                    minHeight: 620,
-                    idealHeight: LibraryWorkspaceLayout.defaultEditorHeight
-                )
+                // Keep the editor's existing waveform geometry. In a short
+                // window its pane scrolls instead of pushing the browser out
+                // of the window; the saved divider preference is unchanged.
+                .frame(minHeight: max(620, pane.size.height))
+                    }
+                }
+                .frame(minHeight: 240, idealHeight: LibraryWorkspaceLayout.defaultEditorHeight)
                 .clipped()
 
                 libraryBrowser
-                    .frame(minHeight: 130, idealHeight: 280)
+                    .frame(minHeight: 220, idealHeight: 280)
             }
             .background(
                 PersistentSplitViewConfiguration(
@@ -335,22 +340,13 @@ public struct LibraryWorkspaceView: View {
                 .font(LumiTypography.sectionTitle)
                 .padding(.top, LumiSpacing.small)
             ScrollView(.vertical) {
-                LazyVStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
-                    ForEach(state.playlists) { playlist in
-                        Button { selectPlaylist(playlist.id) } label: {
-                            navigationLabel(
-                                playlist.name,
-                                count: playlist.trackCount,
-                                systemImage: "music.note",
-                                selected: selectedPlaylistID == playlist.id
-                                    && state.query.workflowFilter == nil,
-                                subtitle: playlistSourceLabel(playlist)
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("lumi.library.playlist.\(playlist.id)")
-                    }
-                }
+                LibraryPlaylistTreeView(
+                    playlists: state.playlists,
+                    selectedPlaylistID: state.query.workflowFilter == nil ? selectedPlaylistID : nil,
+                    accessibilityPrefix: "lumi.library",
+                    sourceLabels: Dictionary(uniqueKeysWithValues: state.playlists.map { ($0.id, playlistSourceLabel($0)) }),
+                    onSelect: { selectPlaylist($0) }
+                )
             }
             .scrollIndicators(.automatic)
             .frame(maxHeight: .infinity)
@@ -510,8 +506,8 @@ public struct LibraryWorkspaceView: View {
             trackHeader
             conditionBanner
             Divider()
-            if state.condition == .importing {
-                statePlaceholder(.importing)
+            if state.condition == .importing || state.condition == .querying {
+                statePlaceholder(state.condition)
             } else if state.condition == .error {
                 statePlaceholder(.error)
             } else if visibleTracks.isEmpty {
@@ -796,7 +792,7 @@ public struct LibraryWorkspaceView: View {
                 .foregroundStyle(LumiColor.textSecondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 360)
-            if condition == .importing {
+            if condition == .importing || condition == .querying {
                 ProgressView().controlSize(.small)
             }
         }

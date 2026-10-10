@@ -221,6 +221,11 @@ if ! otool -v -s __TEXT __info_plist "$packaged_helper" \
   echo "ERROR: packaged lumi-engine helper does not explain its read-only USB access." >&2
   exit 1
 fi
+if ! otool -v -s __TEXT __info_plist "$packaged_helper" \
+  | grep -q '<key>NSLocalNetworkUsageDescription</key>'; then
+  echo "ERROR: packaged lumi-engine helper does not explain its local network access." >&2
+  exit 1
+fi
 
 # Xcode 26 emits the Dev executable together with Lumi.debug.dylib and
 # __preview.dylib. Re-sign every nested Mach-O member with the same ad-hoc

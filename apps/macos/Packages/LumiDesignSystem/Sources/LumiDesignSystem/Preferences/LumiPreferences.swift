@@ -79,6 +79,17 @@ public final class LumiPreferences {
     }
 }
 
+public enum AbletonLinkStartupPolicy {
+    /// Reattachment must not override a deliberate runtime Off choice.
+    public static func shouldEnable(
+        autoStart: Bool,
+        explicitServiceStart: Bool,
+        alreadyEnabled: Bool
+    ) -> Bool {
+        autoStart && explicitServiceStart && !alreadyEnabled
+    }
+}
+
 public enum LumiPreferenceKey {
     public static let appearance = "co.victorblan.tech.lumi.preference.appearance"
     public static let keyNotation = "co.victorblan.tech.lumi.preference.key-notation"

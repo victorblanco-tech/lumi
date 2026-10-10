@@ -18,7 +18,7 @@ pub struct MediaIdentity {
 }
 
 impl MediaIdentity {
-    fn valid(&self) -> bool {
+    pub(crate) fn valid(&self) -> bool {
         self.schema_version == 1
             && self.media_id.len() == 36
             && self.media_id.chars().enumerate().all(|(i, c)| {

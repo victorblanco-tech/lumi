@@ -10,9 +10,14 @@
   <strong>Public Beta</strong> · Field testing on different DJ and lighting setups is welcome
 </p>
 
-**Current releases:** [Lumi 0.6.3 for Mac](https://github.com/victorblanco-tech/lumi/releases/tag/v0.6.3)
-and [Lumi Remote 0.1.1 for iPhone](https://github.com/victorblanco-tech/lumi/releases/tag/lumi-remote-v0.1.1).
+**Current public-beta bundle:** [Lumi 0.6.4 for Mac](https://github.com/victorblanco-tech/lumi/releases/tag/v0.6.4)
+and [Lumi Remote 0.1.3 for iPhone](https://github.com/victorblanco-tech/lumi/releases/tag/lumi-remote-v0.1.3).
 Install the Mac DMG; install Remote through Xcode using your own Apple Account.
+
+**Before a live show:** read the [network timing limitation](docs/user-guide/README.md#live-show-network-limitation-in-064).
+The accepted reference setup uses Ethernet, Wi-Fi off and the Mac application
+firewall temporarily off on a trusted DJ network. Firewall-on/Wi-Fi timing is
+not yet validated; disabling protection is not suitable for public networks.
 
 <p align="center">
   <a href="https://github.com/victorblanco-tech/lumi/releases">Download</a>

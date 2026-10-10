@@ -12,6 +12,7 @@ pub enum DecisionReason {
     RuntimeInitialized,
     SourceStatusAccepted,
     TrackLoadAccepted,
+    TrackMetadataHydrated,
     PositionAdvanced,
     PositionSeeked,
     PlaybackTempoChanged,
@@ -203,6 +204,18 @@ fn reduce_observation(
             );
             DecisionReason::TrackLoadAccepted
         }
+        DeckObservation::TrackMetadataHydrated {
+            deck_id,
+            metadata,
+            track_load_id,
+        } => match state.decks.get_mut(deck_id) {
+            Some(deck) if deck.track_load_id() == *track_load_id => {
+                deck.metadata = metadata.clone();
+                deck.phrase_index = phrase_index_at_beat(metadata, deck.beat);
+                DecisionReason::TrackMetadataHydrated
+            }
+            _ => DecisionReason::TrackLoadMismatch,
+        },
         DeckObservation::PlaybackPosition {
             deck_id,
             track_load_id,

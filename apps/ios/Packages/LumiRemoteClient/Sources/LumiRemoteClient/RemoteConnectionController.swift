@@ -50,7 +50,7 @@ public final class RemoteConnectionController: ObservableObject {
 
     public func acceptPairingURL(_ url: URL, now: Date = .now) {
         do {
-            let invitation = try RemotePairingCodeCodec().decode(
+            let invitation = try RemotePairingCodeCodec(releaseChannel: releaseChannel).decode(
                 url,
                 nowUnixMillis: Self.unixMillis(now)
             )
@@ -109,6 +109,15 @@ public final class RemoteConnectionController: ObservableObject {
               let expected = Int16(exactly: timing.pendingTimingOffsetMillis ?? timing.timingOffsetMillis) else { return }
         submitStateCommand(target: "timingOffset") { revision in
             .setOutputTimingOffset(value, expectedStateRevision: revision, expectedTimingOffsetMillis: expected)
+        }
+    }
+
+    public func setLaunchPolicy(_ policy: RemoteLaunchPolicy) {
+        guard let projection = model.projection,
+              let launch = projection.integrations.launch, launch.version == 1,
+              projection.operationState == .off || projection.operationState == .armed else { return }
+        submitStateCommand(target: "launchPolicy") { _ in
+            .setLaunchPolicy(policy, expectedPolicy: launch.policy)
         }
     }
 

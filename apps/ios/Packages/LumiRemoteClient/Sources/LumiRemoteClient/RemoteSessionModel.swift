@@ -128,7 +128,8 @@ public final class RemoteSessionModel {
             hardwareModel: player.hardwareModel,
             trackLoadID: player.trackLoadID,
             transport: localizedAnchor,
-            track: player.track
+            track: player.track,
+            trackSource: player.trackSource
         )
         let integrations: RemoteIntegrationStatus
         if current.leaderPlayerNumber == playerNumber {
@@ -139,7 +140,8 @@ public final class RemoteSessionModel {
                 abletonLinkEnabled: current.integrations.abletonLinkEnabled,
                 abletonLinkBPMMilli: localizedAnchor.effectiveBPMMilli,
                 timingOffsetMillis: current.integrations.timingOffsetMillis,
-                pendingTimingOffsetMillis: current.integrations.pendingTimingOffsetMillis
+                pendingTimingOffsetMillis: current.integrations.pendingTimingOffsetMillis,
+                launch: current.integrations.launch?.updatingRemaining(player: playerNumber, beat: localizedAnchor.beat)
             )
         } else {
             integrations = current.integrations
@@ -155,7 +157,8 @@ public final class RemoteSessionModel {
             livePlan: current.livePlan,
             nextPlan: current.nextPlan,
             themeOptions: current.themeOptions,
-            phraseRoleOptions: current.phraseRoleOptions
+            phraseRoleOptions: current.phraseRoleOptions,
+            playerUSBs: current.playerUSBs
         )
     }
 
@@ -175,7 +178,8 @@ public final class RemoteSessionModel {
                 transport: player.transport.localized(
                     receivedAtUnixMillis: receivedAtUnixMillis
                 ),
-                track: player.track
+                track: player.track,
+                trackSource: player.trackSource
             )
         }
         sourceObservationUnixMillisByPlayer = sourceObservations
@@ -190,7 +194,8 @@ public final class RemoteSessionModel {
             livePlan: incoming.livePlan,
             nextPlan: incoming.nextPlan,
             themeOptions: incoming.themeOptions,
-            phraseRoleOptions: incoming.phraseRoleOptions
+            phraseRoleOptions: incoming.phraseRoleOptions,
+            playerUSBs: incoming.playerUSBs
         )
     }
 

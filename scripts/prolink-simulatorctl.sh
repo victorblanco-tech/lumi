@@ -12,14 +12,14 @@ fi
 simulator_url="${simulator_url%/}"
 
 request_get() {
-  curl --fail --silent --show-error \
+  curl --fail --silent --show-error --connect-timeout 3 --max-time 10 \
     -H "Authorization: Bearer $simulator_token" \
     "$simulator_url$1"
   echo
 }
 
 request_post() {
-  curl --fail --silent --show-error \
+  curl --fail --silent --show-error --connect-timeout 3 --max-time 10 \
     -H "Authorization: Bearer $simulator_token" \
     -H 'Content-Type: application/json' \
     --data "$2" \
@@ -34,7 +34,7 @@ case "$command" in
     ;;
   tracks)
     query="${2:-}"
-    curl --fail --silent --show-error --get \
+    curl --fail --silent --show-error --connect-timeout 3 --max-time 10 --get \
       -H "Authorization: Bearer $simulator_token" \
       --data-urlencode "q=$query" \
       --data-urlencode 'limit=100' \

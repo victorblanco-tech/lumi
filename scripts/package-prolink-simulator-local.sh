@@ -4,6 +4,10 @@ set -euo pipefail
 
 script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 repository_root="$(dirname "$script_dir")"
+cargo_bin_directory="${CARGO_HOME:-${HOME}/.cargo}/bin"
+if [[ -d "$cargo_bin_directory" ]]; then
+  export PATH="$cargo_bin_directory:$PATH"
+fi
 distribution_root="$repository_root/build/prolink-simulator-distribution"
 version="$(tr -d '[:space:]' < "$repository_root/tools/prolink-simulator/VERSION")"
 archive="$distribution_root/lumi-prolink-simulator-${version}-macos-$(uname -m).tar.gz"
@@ -41,6 +45,10 @@ mkdir -p "$bundle_root/bin" "$bundle_root/lib"
 
 cp "$repository_root/tools/prolink-simulator/target/lumi-prolink-simulator.jar" \
   "$bundle_root/lib/lumi-prolink-simulator.jar"
+cargo build --release --manifest-path "$repository_root/Cargo.toml" --bin lumi-simulator-media
+cp "$repository_root/target/release/lumi-simulator-media" "$bundle_root/lib/"
+xcrun clang -std=c11 -Wall -Wextra -Werror -O2 \
+  "$repository_root/tools/prolink-simulator/native/media_rpc.c" -o "$bundle_root/lib/lumi-simulator-rpc"
 cp "$repository_root/tools/prolink-simulator/bin/lumi-prolink-simulator" \
   "$bundle_root/bin/lumi-prolink-simulator"
 cp "$repository_root/tools/prolink-simulator/README.md" "$bundle_root/README.md"

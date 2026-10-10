@@ -90,6 +90,8 @@ struct LoadedDeck {
     last_status_discontinuity: Option<StatusDiscontinuity>,
     phrase_index: Option<u16>,
     precise_position_seen: bool,
+    last_precise_position_received_at: Option<Instant>,
+    last_exact_beat_received_at: Option<Instant>,
     last_precise_position_millis: Option<u64>,
     last_precise_position_observed_at_nanos: Option<u64>,
     pending_precise_discontinuity: Option<PendingPreciseDiscontinuity>,
@@ -160,7 +162,6 @@ pub struct ProLinkDeckSourceProvider {
     precise_position_message_count: u64,
     authoritative_position_count: u64,
     position_discontinuity_count: u64,
-    last_precise_position_received_at: Option<Instant>,
     timing_generation: u64,
     timing_observations: Vec<ProLinkTimingObservation>,
     precise_position_observations: Vec<ProLinkPrecisePositionObservation>,
@@ -197,7 +198,6 @@ impl ProLinkDeckSourceProvider {
             precise_position_message_count: 0,
             authoritative_position_count: 0,
             position_discontinuity_count: 0,
-            last_precise_position_received_at: None,
             timing_generation: 0,
             timing_observations: Vec::new(),
             precise_position_observations: Vec::new(),
@@ -265,7 +265,7 @@ impl ProLinkDeckSourceProvider {
             BridgeEvent::PrecisePosition(position) => {
                 self.queue_precise_position(position, observed_at_nanos)?;
             }
-            BridgeEvent::TrackMetadata(_) => {
+            BridgeEvent::TrackMetadata(_) | BridgeEvent::USBMedia(_) | BridgeEvent::USBMount(_) => {
                 // Metadata hydration is handled by Lumi's USB/library mirror.
             }
         }
@@ -285,7 +285,6 @@ impl ProLinkDeckSourceProvider {
         self.bridge_version = None;
         self.beat_link_version = None;
         self.last_error = None;
-        self.last_precise_position_received_at = None;
         self.timing_observations.clear();
         self.precise_position_observations.clear();
         self.update_source_status(DeckSourceStatus::Starting, at)
@@ -577,6 +576,55 @@ impl ProLinkDeckSourceProvider {
         true
     }
 
+    /// Metadata readiness is not a new load, seek or playback command.
+    pub fn publish_hydrated_track(
+        &mut self,
+        track_load_id: TrackLoadId,
+        metadata: TrackMetadata,
+        at: MonotonicTime,
+    ) -> Result<bool, ProLinkProviderError> {
+        let Some(deck_id) = self
+            .decks
+            .iter()
+            .find_map(|(id, deck)| (deck.track_load_id == track_load_id).then_some(*id))
+        else {
+            return Ok(false);
+        };
+        let _ = self.hydrate_track_metadata(track_load_id, metadata.clone());
+        self.emit(
+            at,
+            DeckObservation::TrackMetadataHydrated {
+                deck_id,
+                metadata,
+                track_load_id,
+            },
+        )?;
+        Ok(true)
+    }
+
+    /// Revoke only loads using a medium whose verified identity changed.
+    /// The next physical status packet creates fresh load IDs, even when the
+    /// numeric Rekordbox ID happens to collide with the removed medium.
+    pub fn invalidate_source_media(
+        &mut self,
+        source_player: u8,
+        at: MonotonicTime,
+    ) -> Result<(), ProLinkProviderError> {
+        let decks = self
+            .decks
+            .iter()
+            .filter_map(|(deck, loaded)| {
+                (loaded.identity.source_player == source_player
+                    && loaded.identity.source_slot == "USB_SLOT")
+                    .then_some(*deck)
+            })
+            .collect::<Vec<_>>();
+        for deck in decks {
+            self.unload_deck(deck, at)?;
+        }
+        Ok(())
+    }
+
     #[must_use]
     pub fn diagnostics(&self) -> ProLinkDeckSourceDiagnostics {
         ProLinkDeckSourceDiagnostics {
@@ -604,12 +652,26 @@ impl ProLinkDeckSourceProvider {
             position_authority_ready: self
                 .leader_deck_id
                 .and_then(|deck_id| self.decks.get(&deck_id))
-                .is_some_and(|deck| deck.precise_position_seen)
-                && self
-                    .last_precise_position_received_at
-                    .is_some_and(|received| {
-                        received.elapsed() <= POSITION_AUTHORITY_DIAGNOSTIC_MAX_AGE
-                    }),
+                .is_some_and(|deck| {
+                    // Status + exact Beat packets anchor continuous playback.
+                    // Diagnostics must not require the optional precise lane
+                    // while that authority is healthy, nor borrow freshness
+                    // from another Player or a previous track load.
+                    let beat_max_age = Duration::from_millis(
+                        (120_000_000 / u64::from(deck.effective_bpm_milli.max(1)))
+                            .clamp(500, 3_000),
+                    );
+                    (deck.playing
+                        && deck
+                            .last_exact_beat_received_at
+                            .is_some_and(|received| received.elapsed() <= beat_max_age))
+                        || (deck.precise_position_seen
+                            && deck
+                                .last_precise_position_received_at
+                                .is_some_and(|received| {
+                                    received.elapsed() <= POSITION_AUTHORITY_DIAGNOSTIC_MAX_AGE
+                                }))
+                }),
         }
     }
 
@@ -711,6 +773,8 @@ impl ProLinkDeckSourceProvider {
                     last_status_discontinuity: None,
                     phrase_index: None,
                     precise_position_seen: false,
+                    last_precise_position_received_at: None,
+                    last_exact_beat_received_at: None,
                     last_precise_position_millis: None,
                     last_precise_position_observed_at_nanos: None,
                     pending_precise_discontinuity: None,
@@ -875,11 +939,14 @@ impl ProLinkDeckSourceProvider {
                     deck.last_status_observed_at_nanos = observed_at_nanos;
                     deck.pending_status_discontinuity = None;
                     deck.last_status_discontinuity =
-                        previous.last_status_discontinuity.filter(|candidate| {
-                            status_discontinuity_is_still_supported(
-                                *candidate,
+                        previous.last_status_discontinuity.and_then(|candidate| {
+                            advance_confirmed_status_landing(
+                                candidate,
+                                previous.last_status_beat,
+                                previous.last_status_observed_at_nanos,
                                 beat,
                                 observed_at_nanos,
+                                effective_bpm_milli,
                             )
                         });
                 }
@@ -961,7 +1028,9 @@ impl ProLinkDeckSourceProvider {
             return Ok(());
         };
         self.precise_position_message_count = self.precise_position_message_count.saturating_add(1);
-        self.last_precise_position_received_at = Some(Instant::now());
+        if let Some(deck) = self.decks.get_mut(&deck_id) {
+            deck.last_precise_position_received_at = Some(Instant::now());
+        }
         self.precise_position_observations
             .push(ProLinkPrecisePositionObservation {
                 deck_id,
@@ -1008,6 +1077,15 @@ impl ProLinkDeckSourceProvider {
         });
         let absolute_beat = if let Some(candidate) = status_seek {
             align_beat_within_bar(candidate.absolute_beat, beat.beat_within_bar)
+        } else if observed_at_nanos.saturating_sub(previous.last_status_observed_at_nanos)
+            < 60_000_000_000_000_u64 / u64::from(previous.effective_bpm_milli.max(1))
+        {
+            // A recent absolute status disambiguates the bar. Using our own
+            // previous beat + 1 as a lower bound can promote a delayed beat
+            // from this bar into the next, then accumulate a permanent lead.
+            // Within one beat, choose the nearest status-relative boundary;
+            // the rejection below discards old boundaries without rewinding.
+            align_beat_within_bar(previous.last_status_beat, beat.beat_within_bar)
         } else {
             precise_absolute_beat(
                 previous.last_status_beat,
@@ -1024,6 +1102,17 @@ impl ProLinkDeckSourceProvider {
         let status_seek_matches_continuous_transport =
             status_seek.is_some() && absolute_beat.abs_diff(previous.beat) <= 1;
         let seeked = status_seek.is_some() && absolute_beat.abs_diff(previous.beat) > 1;
+        // An out-of-order bar-beat packet is not permission to rewind. A
+        // genuine backward jump must first pass the independent status/Hot
+        // Cue discontinuity path. Do not refresh anchors or publish timing
+        // observations for a rejected stale beat either.
+        if !seeked
+            && (absolute_beat < previous.beat
+                || (absolute_beat == previous.beat
+                    && previous.last_exact_beat_received_at.is_some()))
+        {
+            return Ok(());
+        }
         if seeked {
             self.advance_timing_generation()?;
             self.position_discontinuity_count = self.position_discontinuity_count.saturating_add(1);
@@ -1052,6 +1141,7 @@ impl ProLinkDeckSourceProvider {
             deck.beat = absolute_beat;
             deck.phrase_index = phrase_index.or(previous.phrase_index);
             deck.transport_anchor_observed_at = Instant::now();
+            deck.last_exact_beat_received_at = Some(Instant::now());
             deck.last_position_observed_at_nanos = observed_at_nanos;
             if seeked {
                 deck.pending_precise_discontinuity = None;
@@ -1307,7 +1397,11 @@ fn position_is_discontinuous(
     let expected_progress =
         elapsed_nanos as f64 * f64::from(effective_bpm_milli) / 1_000.0 / 60_000_000_000.0;
     let expected_beat = f64::from(previous_beat) + expected_progress;
-    (f64::from(candidate_beat) - expected_beat).abs() > POSITION_CONTINUITY_TOLERANCE_BEATS
+    // Receipt can stall and then deliver an advancing but late status stream.
+    // Falling behind a wall-clock prediction is not a seek. Only a real
+    // backward movement or progress ahead of elapsed time is a candidate.
+    f64::from(candidate_beat) + POSITION_CONTINUITY_TOLERANCE_BEATS < f64::from(previous_beat)
+        || f64::from(candidate_beat) > expected_beat + POSITION_CONTINUITY_TOLERANCE_BEATS
 }
 
 fn position_millis_is_discontinuous(
@@ -1431,6 +1525,44 @@ fn status_discontinuity_is_still_supported(
             <= STATUS_DISCONTINUITY_MAX_AGE_NANOS
 }
 
+fn advance_confirmed_status_landing(
+    candidate: StatusDiscontinuity,
+    previous_beat: u32,
+    previous_observed_at_nanos: u64,
+    beat: u32,
+    observed_at_nanos: u64,
+    bpm_milli: u32,
+) -> Option<StatusDiscontinuity> {
+    // A confirmed landing may advance normally before the next exact beat
+    // arrives. Follow that progression, but keep the ORIGINAL expiry: delayed
+    // packets cannot extend a stale jump indefinitely or return to the old
+    // timeline under its authority.
+    if observed_at_nanos < previous_observed_at_nanos
+        || !status_discontinuity_is_still_supported(
+            candidate,
+            previous_beat,
+            previous_observed_at_nanos,
+        )
+        || observed_at_nanos.abs_diff(candidate.observed_at_nanos)
+            > STATUS_DISCONTINUITY_MAX_AGE_NANOS
+        || beat < previous_beat
+        || position_is_discontinuous(
+            previous_beat,
+            beat,
+            previous_observed_at_nanos,
+            observed_at_nanos,
+            bpm_milli,
+            true,
+        )
+    {
+        return None;
+    }
+    Some(StatusDiscontinuity {
+        absolute_beat: beat,
+        ..candidate
+    })
+}
+
 fn confirmed_status_discontinuity(
     pending: Option<PendingStatusDiscontinuity>,
     absolute_beat: u32,
@@ -1501,6 +1633,16 @@ mod timing_tests {
 
     #[test]
     fn delayed_status_progress_is_not_misclassified_as_a_seek() {
+        // Real hardware receive gap: one beat of progress over 1.87 s.
+        // Delayed forward data must not establish seek corroboration.
+        assert!(!position_is_discontinuous(
+            183,
+            184,
+            1_000_000_000,
+            2_869_793_000,
+            155_000,
+            true,
+        ));
         assert!(!position_is_discontinuous(
             17,
             23,
@@ -1612,6 +1754,58 @@ mod timing_tests {
             70,
             1_100_000_000
         ));
+    }
+
+    #[test]
+    fn confirmed_landing_advances_without_extending_expiry_or_accepting_old_timeline() {
+        let jump = StatusDiscontinuity {
+            absolute_beat: 358,
+            observed_at_nanos: 1_000_000_000,
+        };
+        let advanced = super::advance_confirmed_status_landing(
+            jump,
+            358,
+            1_000_000_000,
+            360,
+            1_575_000_000,
+            155_000,
+        )
+        .unwrap_or_else(|| panic!("normal two-beat advance should retain confirmed jump"));
+        assert_eq!(advanced.absolute_beat, 360);
+        assert_eq!(advanced.observed_at_nanos, jump.observed_at_nanos);
+        assert!(
+            super::advance_confirmed_status_landing(
+                advanced,
+                360,
+                1_575_000_000,
+                616,
+                1_600_000_000,
+                155_000
+            )
+            .is_none()
+        );
+        assert!(
+            super::advance_confirmed_status_landing(
+                advanced,
+                360,
+                1_575_000_000,
+                359,
+                1_600_000_000,
+                155_000
+            )
+            .is_none()
+        );
+        assert!(
+            super::advance_confirmed_status_landing(
+                advanced,
+                360,
+                1_575_000_000,
+                362,
+                2_000_000_001,
+                155_000
+            )
+            .is_none()
+        );
     }
 
     #[test]

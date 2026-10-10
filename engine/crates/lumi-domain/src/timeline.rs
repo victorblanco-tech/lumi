@@ -39,6 +39,7 @@ impl TimelineEntry {
                 match &observation.observation {
                     crate::DeckObservation::SourceStatusChanged { .. } => "sourceStatusChanged",
                     crate::DeckObservation::TrackLoaded { .. } => "trackLoaded",
+                    crate::DeckObservation::TrackMetadataHydrated { .. } => "trackMetadataHydrated",
                     crate::DeckObservation::PlaybackPosition { .. } => "playbackPosition",
                     crate::DeckObservation::PlaybackPositionSeeked { .. } => {
                         "playbackPositionSeeked"

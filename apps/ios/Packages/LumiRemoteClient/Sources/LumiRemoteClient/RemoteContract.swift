@@ -58,6 +58,41 @@ public enum RemoteIntegrationHealth: String, Codable, Sendable {
     case degraded
 }
 
+public enum RemoteLaunchPolicy: String, Codable, Sendable { case immediate, onPhraseStart }
+
+public struct RemoteInitialLaunch: Codable, Equatable, Sendable {
+    public let version: UInt8
+    public let policy: RemoteLaunchPolicy
+    public let status: String
+    public let targetPhraseIndex: UInt16?
+    public let targetBeat: UInt32?
+    public let targetPlayer: UInt8?
+    public let remainingBeats: UInt32?
+    public let savePending: Bool
+    public let saveError: String?
+
+    func updatingRemaining(player: UInt8, beat: UInt64) -> Self {
+        guard status == "waitingForPhrase", targetPlayer == player, let targetBeat else { return self }
+        return Self(version: version, policy: policy, status: status, targetPhraseIndex: targetPhraseIndex,
+                    targetBeat: targetBeat, targetPlayer: targetPlayer,
+                    remainingBeats: UInt64(targetBeat) > beat ? UInt32(clamping: UInt64(targetBeat) - beat) : 0,
+                    savePending: savePending, saveError: saveError)
+    }
+
+    public var label: String {
+        if let saveError { return "Not saved: \(saveError)" }
+        if savePending { return "Saving…" }
+        guard policy == .onPhraseStart else { return "Immediate start" }
+        switch status {
+        case "waitingForPlayback": return "Waiting for playback"
+        case "waitingForPhrase": return "Phrase \(UInt32(targetPhraseIndex ?? 0) + 1) · \(remainingBeats ?? 0) beats"
+        case "noUpcomingPhrase": return "No upcoming phrase — select Off, then Immediate"
+        case "launched": return "Show running"
+        default: return "Start on phrase"
+        }
+    }
+}
+
 public struct RemoteIntegrationStatus: Codable, Equatable, Sendable {
     public let proDJLink: RemoteIntegrationHealth
     public let lightOutput: RemoteIntegrationHealth
@@ -66,6 +101,7 @@ public struct RemoteIntegrationStatus: Codable, Equatable, Sendable {
     public let abletonLinkBPMMilli: UInt64?
     public let timingOffsetMillis: Int
     public let pendingTimingOffsetMillis: Int?
+    public let launch: RemoteInitialLaunch?
 
     public init(
         proDJLink: RemoteIntegrationHealth,
@@ -74,7 +110,8 @@ public struct RemoteIntegrationStatus: Codable, Equatable, Sendable {
         abletonLinkEnabled: Bool,
         abletonLinkBPMMilli: UInt64?,
         timingOffsetMillis: Int,
-        pendingTimingOffsetMillis: Int?
+        pendingTimingOffsetMillis: Int?,
+        launch: RemoteInitialLaunch? = nil
     ) {
         self.proDJLink = proDJLink
         self.lightOutput = lightOutput
@@ -83,6 +120,7 @@ public struct RemoteIntegrationStatus: Codable, Equatable, Sendable {
         self.abletonLinkBPMMilli = abletonLinkBPMMilli
         self.timingOffsetMillis = timingOffsetMillis
         self.pendingTimingOffsetMillis = pendingTimingOffsetMillis
+        self.launch = launch
     }
 
     enum CodingKeys: String, CodingKey {
@@ -93,10 +131,12 @@ public struct RemoteIntegrationStatus: Codable, Equatable, Sendable {
         case abletonLinkBPMMilli = "abletonLinkBpmMilli"
         case timingOffsetMillis
         case pendingTimingOffsetMillis
+        case launch
     }
 }
 
 public struct RemoteLiveProjection: Codable, Equatable, Sendable {
+    public let playerUSBs: [RemotePlayerUSB]
     public let projectionRevision: UInt64
     public let stateRevision: UInt64
     public let engineVersion: String
@@ -120,9 +160,11 @@ public struct RemoteLiveProjection: Codable, Equatable, Sendable {
         livePlan: RemoteLightPlan?,
         nextPlan: RemoteLightPlan?,
         themeOptions: [RemoteThemeOption],
-        phraseRoleOptions: [RemotePhraseRoleOption] = []
+        phraseRoleOptions: [RemotePhraseRoleOption] = [],
+        playerUSBs: [RemotePlayerUSB] = []
     ) {
         self.projectionRevision = projectionRevision
+        self.playerUSBs = playerUSBs
         self.stateRevision = stateRevision
         self.engineVersion = engineVersion
         self.operationState = operationState
@@ -143,6 +185,7 @@ public struct RemoteLiveProjection: Codable, Equatable, Sendable {
         case leaderPlayerNumber
         case integrations
         case players
+        case playerUSBs = "playerUsbs"
         case livePlan
         case nextPlan
         case themeOptions
@@ -158,6 +201,7 @@ public struct RemoteLiveProjection: Codable, Equatable, Sendable {
         leaderPlayerNumber = try container.decodeIfPresent(UInt8.self, forKey: .leaderPlayerNumber)
         integrations = try container.decode(RemoteIntegrationStatus.self, forKey: .integrations)
         players = try container.decode([RemotePlayer].self, forKey: .players)
+        playerUSBs = try container.decodeIfPresent([RemotePlayerUSB].self, forKey: .playerUSBs) ?? []
         livePlan = try container.decodeIfPresent(RemoteLightPlan.self, forKey: .livePlan)
         nextPlan = try container.decodeIfPresent(RemoteLightPlan.self, forKey: .nextPlan)
         themeOptions = try container.decode([RemoteThemeOption].self, forKey: .themeOptions)
@@ -176,10 +220,36 @@ public struct RemoteLiveProjection: Codable, Equatable, Sendable {
         try container.encodeIfPresent(leaderPlayerNumber, forKey: .leaderPlayerNumber)
         try container.encode(integrations, forKey: .integrations)
         try container.encode(players, forKey: .players)
+        try container.encode(playerUSBs, forKey: .playerUSBs)
         try container.encodeIfPresent(livePlan, forKey: .livePlan)
         try container.encodeIfPresent(nextPlan, forKey: .nextPlan)
         try container.encode(themeOptions, forKey: .themeOptions)
         try container.encode(phraseRoleOptions, forKey: .phraseRoleOptions)
+    }
+}
+
+public struct RemotePlayerUSB: Codable, Equatable, Sendable {
+    public let playerNumber: UInt8
+    public let state: String
+    public let sourceName: String?
+    public let colorID: UInt8?
+
+    enum CodingKeys: String, CodingKey {
+        case playerNumber, state, sourceName
+        case colorID = "colorId"
+    }
+}
+
+public struct RemoteTrackSource: Codable, Equatable, Sendable {
+    public let playerNumber: UInt8?
+    public let slot: String
+    public let state: String
+    public let sourceName: String?
+    public let colorID: UInt8?
+
+    enum CodingKeys: String, CodingKey {
+        case playerNumber, slot, state, sourceName
+        case colorID = "colorId"
     }
 }
 
@@ -190,6 +260,18 @@ public struct RemotePlayer: Codable, Equatable, Identifiable, Sendable {
     public let trackLoadID: UInt64
     public let transport: RemoteTransportAnchor
     public let track: RemoteTrack
+    public let trackSource: RemoteTrackSource?
+
+    public init(playerNumber: UInt8, hardwareModel: String?, trackLoadID: UInt64,
+                transport: RemoteTransportAnchor, track: RemoteTrack,
+                trackSource: RemoteTrackSource? = nil) {
+        self.playerNumber = playerNumber
+        self.hardwareModel = hardwareModel
+        self.trackLoadID = trackLoadID
+        self.transport = transport
+        self.track = track
+        self.trackSource = trackSource
+    }
 
     enum CodingKeys: String, CodingKey {
         case playerNumber
@@ -197,6 +279,7 @@ public struct RemotePlayer: Codable, Equatable, Identifiable, Sendable {
         case trackLoadID = "trackLoadId"
         case transport
         case track
+        case trackSource
     }
 }
 

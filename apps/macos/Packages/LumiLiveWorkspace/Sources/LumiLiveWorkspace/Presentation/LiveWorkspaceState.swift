@@ -74,6 +74,7 @@ public struct LiveWorkspaceState: Equatable, Sendable {
 }
 
 public struct LiveWorkspaceContent: Equatable, Sendable {
+    public let playerUSBs: [LivePlayerUSBSnapshot]
     public let liveDeck: DeckSnapshot?
     public let nextDeck: DeckSnapshot?
     public let decks: [DeckSnapshot]
@@ -89,6 +90,7 @@ public struct LiveWorkspaceContent: Equatable, Sendable {
     public let pendingLightingTimingOffsetMillis: Int?
     public let lightingTimingSavePending: Bool
     public let lightingTimingSaveError: String?
+    public let initialLaunch: InitialLaunchSnapshot?
     public let abletonLinkEnabled: Bool
     public let abletonLinkState: String
     public let abletonLinkBPMMilli: UInt64?
@@ -112,16 +114,19 @@ public struct LiveWorkspaceContent: Equatable, Sendable {
         pendingLightingTimingOffsetMillis: Int? = nil,
         lightingTimingSavePending: Bool = false,
         lightingTimingSaveError: String? = nil,
+        initialLaunch: InitialLaunchSnapshot? = nil,
         abletonLinkEnabled: Bool = false,
         abletonLinkState: String = "stopped",
         abletonLinkBPMMilli: UInt64? = nil,
         abletonLinkPeers: UInt64 = 0,
         simulation: SimulationSnapshot? = nil,
-        timeline: [TimelineEntrySnapshot]
+        timeline: [TimelineEntrySnapshot],
+        playerUSBs: [LivePlayerUSBSnapshot] = []
     ) {
         self.liveDeck = liveDeck
         self.nextDeck = nextDeck
         self.decks = decks
+        self.playerUSBs = playerUSBs
         self.leaderDeckID = leaderDeckID
         self.livePlan = livePlan
         self.plan = plan
@@ -134,6 +139,7 @@ public struct LiveWorkspaceContent: Equatable, Sendable {
         self.pendingLightingTimingOffsetMillis = pendingLightingTimingOffsetMillis
         self.lightingTimingSavePending = lightingTimingSavePending
         self.lightingTimingSaveError = lightingTimingSaveError
+        self.initialLaunch = initialLaunch
         self.abletonLinkEnabled = abletonLinkEnabled
         self.abletonLinkState = abletonLinkState
         self.abletonLinkBPMMilli = abletonLinkBPMMilli
@@ -524,12 +530,15 @@ public enum LiveWorkspacePresenter {
             pendingLightingTimingOffsetMillis: snapshot.midiIntegration?.pendingTimingOffsetMillis,
             lightingTimingSavePending: snapshot.midiIntegration?.timingSavePending ?? false,
             lightingTimingSaveError: snapshot.midiIntegration?.timingSaveError,
+            initialLaunch: snapshot.midiIntegration?.launch,
             abletonLinkEnabled: snapshot.abletonLinkIntegration?.enabled ?? false,
             abletonLinkState: snapshot.abletonLinkIntegration?.state ?? "stopped",
             abletonLinkBPMMilli: snapshot.abletonLinkIntegration?.bpmMilli,
             abletonLinkPeers: snapshot.abletonLinkIntegration?.peers ?? 0,
             simulation: snapshot.simulation,
-            timeline: snapshot.timeline
+            timeline: snapshot.timeline,
+            playerUSBs: snapshot.deckSource.mode == "connectedDecks"
+                ? snapshot.deckInputIntegration?.playerUSBs ?? [] : []
         )
     }
 
@@ -593,7 +602,7 @@ public enum LiveWorkspacePresenter {
                !snapshot.decks.isEmpty,
                snapshot.operationState == "live",
                snapshot.deckInputIntegration?.positionAuthorityReady != true {
-                return "Exact CDJ position is unavailable. Automatic light output is held to prevent a wrong AutoLoop."
+                return "Fresh CDJ position data is unavailable. Live timing is recovering."
             }
             if let error = snapshot.midiIntegration?.lastError {
                 return "Light Output needs attention: \(error)"

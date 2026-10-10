@@ -1,5 +1,11 @@
 import Foundation
 
+// User intent and completed sync membership are separate. An intentionally
+// empty saved selection must not be replaced by the previous sync selection.
+func restoredUSBPlaylistSelection(saved: [UInt32]?, synchronized: [UInt32], available: Set<UInt32>) -> Set<UInt32> {
+    Set(saved ?? synchronized).intersection(available)
+}
+
 struct USBPlaylistOutlineRow: Identifiable, Equatable, Sendable {
     enum Kind: Equatable, Sendable {
         case folder(path: String, name: String, playlistCount: Int, trackCount: UInt64)

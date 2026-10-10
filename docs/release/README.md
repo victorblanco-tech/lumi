@@ -1,5 +1,9 @@
 # Release and deployment
 
+- [Lumi 0.6.4 release preparation](0.6.4-release-notes.md)
+- [Lumi Remote 0.1.3 companion release](lumi-remote-0.1.3-release-notes.md)
+- [0.6.4 release readiness](0.6.4-release-readiness.md)
+
 - [Lumi 0.6.2 Public Beta release notes](0.6.2-release-notes.md)
 - [Lumi Remote 0.1.1 Public Beta release notes](lumi-remote-0.1.1-release-notes.md)
 - [0.6.2 / Remote 0.1.1 release readiness](0.6.2-release-readiness.md)

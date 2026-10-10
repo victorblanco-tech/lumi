@@ -29,11 +29,22 @@ pub const PROTOCOL_VERSION: u16 = 1;
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct BridgeMessage {
+    pub packet_origin: Option<PacketOrigin>,
     pub sequence: u64,
     pub observed_at_nanos: u64,
     pub traffic_class: BridgeTrafficClass,
     pub bridge_queue_age_micros: u64,
+    /// Local receive-queue residence, measured on drain (not a wire field).
+    pub ingress_queue_age_micros: u64,
     pub event: BridgeEvent,
+}
+
+/// Receive timestamp is the Java monotonic clock, not a device send clock.
+#[derive(Clone, Debug, Deserialize, serde::Serialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PacketOrigin {
+    pub address: std::net::IpAddr,
+    pub received_at_nanos: u64,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq)]
@@ -52,6 +63,8 @@ pub enum BridgeEvent {
     SourceStatus(SourceStatus),
     DeviceFound(Device),
     DeviceLost(Device),
+    USBMedia(USBMedia),
+    USBMount(USBMount),
     DeckStatus(DeckStatus),
     Beat(Beat),
     TempoStatus(TempoStatus),
@@ -92,6 +105,29 @@ pub struct Device {
     pub device_number: u8,
     pub device_name: String,
     pub address: String,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct USBMedia {
+    pub device_number: u8,
+    pub color_id: Option<u8>,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub enum USBMountState {
+    Loaded,
+    Unloading,
+    Empty,
+    Unknown,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct USBMount {
+    pub device_number: u8,
+    pub state: USBMountState,
 }
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
@@ -229,10 +265,12 @@ impl BridgeDecoder {
         }
         self.last_sequence = Some(envelope.sequence);
         Ok(BridgeMessage {
+            packet_origin: envelope.packet_origin,
             sequence: envelope.sequence,
             observed_at_nanos: envelope.observed_at_nanos,
             traffic_class: envelope.traffic_class,
             bridge_queue_age_micros: envelope.bridge_queue_age_micros,
+            ingress_queue_age_micros: 0,
             event,
         })
     }
@@ -246,6 +284,8 @@ impl BridgeDecoder {
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct WireEnvelope {
+    #[serde(default)]
+    packet_origin: Option<PacketOrigin>,
     protocol: String,
     protocol_version: u16,
     sequence: u64,
@@ -265,6 +305,8 @@ fn decode_event(message_type: &str, payload: Value) -> Result<BridgeEvent, Bridg
         "sourceStatus" => decode_payload(payload).map(BridgeEvent::SourceStatus),
         "deviceFound" => decode_payload(payload).map(BridgeEvent::DeviceFound),
         "deviceLost" => decode_payload(payload).map(BridgeEvent::DeviceLost),
+        "usbMedia" => decode_payload(payload).map(BridgeEvent::USBMedia),
+        "usbMount" => decode_payload(payload).map(BridgeEvent::USBMount),
         "deckStatus" => decode_payload(payload).map(BridgeEvent::DeckStatus),
         "transportStatus" => decode_payload(payload).map(BridgeEvent::DeckStatus),
         "beat" => decode_payload(payload).map(BridgeEvent::Beat),
@@ -293,6 +335,16 @@ fn validate_event(event: &BridgeEvent) -> Result<(), BridgeDecodeError> {
         }
         BridgeEvent::DeviceFound(device) | BridgeEvent::DeviceLost(device) => {
             validate_device(device)?;
+        }
+        BridgeEvent::USBMedia(media) => {
+            if !(1..=6).contains(&media.device_number) || media.color_id.is_some_and(|id| id > 8) {
+                return Err(BridgeDecodeError::InvalidPayload("usbMedia"));
+            }
+        }
+        BridgeEvent::USBMount(mount) => {
+            if !(1..=6).contains(&mount.device_number) {
+                return Err(BridgeDecodeError::InvalidPayload("usbMount"));
+            }
         }
         BridgeEvent::DeckStatus(status) => {
             let has_track_id = status.rekordbox_id != 0;

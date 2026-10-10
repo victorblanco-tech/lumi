@@ -115,22 +115,12 @@ public struct LocalPlaybackLibraryBrowserView: View {
                 .padding(.top, LumiSpacing.xSmall)
 
             ScrollView(.vertical) {
-                LazyVStack(spacing: LumiSpacing.xSmall) {
-                    ForEach(state.playlists) { playlist in
-                        Button {
-                            selectPlaylist(playlist.id)
-                        } label: {
-                            playlistLabel(
-                                playlist.name,
-                                count: playlist.trackCount,
-                                selected: selectedPlaylistID == playlist.id,
-                                systemImage: "music.note"
-                            )
-                        }
-                        .buttonStyle(.plain)
-                        .accessibilityIdentifier("lumi.localPlayback.playlist.\(playlist.id)")
-                    }
-                }
+                LibraryPlaylistTreeView(
+                    playlists: state.playlists,
+                    selectedPlaylistID: selectedPlaylistID,
+                    accessibilityPrefix: "lumi.localPlayback",
+                    onSelect: { selectPlaylist($0) }
+                )
             }
             .scrollIndicators(.automatic)
             .accessibilityIdentifier("lumi.localPlayback.playlists")
@@ -194,7 +184,15 @@ public struct LocalPlaybackLibraryBrowserView: View {
             .padding(.horizontal, LumiSpacing.medium)
             .frame(height: 42)
 
-            if state.condition == .error {
+            if state.condition == .querying || state.condition == .importing {
+                VStack(spacing: LumiSpacing.medium) {
+                    ProgressView()
+                    Text("Loading tracks")
+                        .foregroundStyle(LumiColor.textSecondary)
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityIdentifier("lumi.localPlayback.loading")
+            } else if state.condition == .error {
                 ContentUnavailableView(
                     "Library unavailable",
                     systemImage: "exclamationmark.triangle.fill",

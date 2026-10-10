@@ -75,6 +75,9 @@ public struct LibrarySourcesWorkspaceView: View {
     @State private var usbSelectionFeedback: String?
     @State private var ignoredUSBReviews: Set<String> = []
     @State private var pendingUSBVersionRequest: USBConflictResolutionRequest?
+    @State private var selectedUSBReviewKeys: Set<String> = []
+    @State private var queuedUSBReviews = USBReviewQueue()
+    @State private var pendingBulkUSBReviews: [USBConflictResolutionRequest] = []
     @State private var resolvingUSBReviewKey: String?
     @State private var failedUSBReviewKey: String?
 
@@ -114,7 +117,7 @@ public struct LibrarySourcesWorkspaceView: View {
                 sourceMappings
             }
             .padding(LumiSpacing.xLarge)
-            .frame(maxWidth: 980, alignment: .leading)
+            .frame(maxWidth: .infinity, alignment: .leading)
         }
         .background(LumiColor.canvas)
         .accessibilityIdentifier("lumi.library.sources")
@@ -133,8 +136,8 @@ public struct LibrarySourcesWorkspaceView: View {
         .confirmationDialog(
             "Use the USB version?",
             isPresented: Binding(
-                get: { pendingUSBVersionRequest != nil },
-                set: { if !$0 { pendingUSBVersionRequest = nil } }
+                get: { pendingUSBVersionRequest != nil || !pendingBulkUSBReviews.isEmpty },
+                set: { if !$0 { pendingUSBVersionRequest = nil; pendingBulkUSBReviews = [] } }
             ),
             titleVisibility: .visible
         ) {
@@ -142,11 +145,16 @@ public struct LibrarySourcesWorkspaceView: View {
                 if let request = pendingUSBVersionRequest {
                     onDeviceConflictResolution(request)
                 }
+                if !pendingBulkUSBReviews.isEmpty {
+                    queuedUSBReviews.start(pendingBulkUSBReviews)
+                    startNextUSBReview()
+                }
                 pendingUSBVersionRequest = nil
+                pendingBulkUSBReviews = []
             }
-            Button("Cancel", role: .cancel) { pendingUSBVersionRequest = nil }
+            Button("Cancel", role: .cancel) { pendingUSBVersionRequest = nil; pendingBulkUSBReviews = [] }
         } message: {
-            Text("This replaces the imported Rekordbox beatgrid, waveform, cue points and raw Rekordbox phrases. Lumi-authored phrases and AutoLoop choices are preserved.")
+            Text("Replace the imported Rekordbox data for \(pendingBulkUSBReviews.isEmpty ? 1 : pendingBulkUSBReviews.count) track(s): beatgrid, waveform, cue points and raw Rekordbox phrases. Lumi-authored phrases and AutoLoop choices are preserved. Each track is revalidated; processing stops on failure.")
         }
         .onChange(of: settings?.revision) { _, _ in synchronizeProvider() }
         .onChange(of: library.rekordboxDevices) { _, devices in
@@ -175,13 +183,16 @@ public struct LibrarySourcesWorkspaceView: View {
         .onChange(of: usbOperation.phase) { _, phase in
             if phase == .failed {
                 failedUSBReviewKey = resolvingUSBReviewKey
+                queuedUSBReviews.stop()
             } else if phase == .completed {
                 failedUSBReviewKey = nil
+                if let key = resolvingUSBReviewKey { selectedUSBReviewKeys.remove(key) }
             }
             if phase == .completed || phase == .failed || phase == .idle {
                 resolvingUSBReviewKey = nil
                 refreshMediaIdentities()
             }
+            if phase == .completed { startNextUSBReview() }
         }
         .onAppear {
             guard !didInitializeSource else { return }
@@ -384,6 +395,7 @@ public struct LibrarySourcesWorkspaceView: View {
     private func selectedUSBInspector(device: RekordboxDeviceState?) -> some View {
         if let device {
             let sourceIsBusy = usbOperation.isActive && usbOperation.sourceID == device.sourceID
+            let failedMessage = usbOperation.failedMessage(for: device.sourceID)
             let displayName = USBSourceIdentityResolver.displayName(
                 for: device,
                 inspection: activeDeviceInspection
@@ -414,10 +426,11 @@ public struct LibrarySourcesWorkspaceView: View {
                         }
                     }
                     VStack(alignment: .leading, spacing: 4) {
-                        Text(sourceIsBusy ? usbOperation.detail : "Sync preserves Lumi phrases and keeps older or uncertain analysis for review.")
+                        Text(failedMessage ?? (sourceIsBusy ? usbOperation.detail : "Sync preserves Lumi phrases and keeps older or uncertain analysis for review."))
                             .font(LumiTypography.caption)
-                            .foregroundStyle(LumiColor.textSecondary)
+                            .foregroundStyle(failedMessage == nil ? LumiColor.textSecondary : LumiColor.warning)
                             .lineLimit(1)
+                            .help(failedMessage == nil ? "" : usbOperation.detail)
                         ProgressView(value: sourceIsBusy ? Double(usbOperation.completedTracks ?? 0) : 0,
                                      total: Double(max(usbOperation.totalTracks ?? 1, 1)))
                             .opacity(sourceIsBusy ? 1 : 0)
@@ -452,6 +465,21 @@ public struct LibrarySourcesWorkspaceView: View {
                         Label("No downgrade risk detected. Active Lumi analysis and all Lumi-owned phrases and AutoLoop choices are protected.", systemImage: "checkmark.shield.fill")
                             .font(LumiTypography.caption)
                             .foregroundStyle(LumiColor.success)
+                    }
+                    if !device.skippedTracks.isEmpty {
+                        VStack(alignment: .leading, spacing: LumiSpacing.small) {
+                            Label("\(device.skippedTracks.count) skipped · other tracks synchronized",
+                                  systemImage: "exclamationmark.triangle.fill")
+                                .font(LumiTypography.caption.weight(.semibold))
+                                .foregroundStyle(LumiColor.warning)
+                            ForEach(device.skippedTracks) { track in
+                                Text("\(track.title) · Invalid beatgrid. Fix in Rekordbox and sync again. Existing Lumi version retained, if available.")
+                                    .font(LumiTypography.caption)
+                                    .foregroundStyle(LumiColor.textSecondary)
+                                    .help(track.reason)
+                            }
+                        }
+                        .accessibilityIdentifier("lumi.library.sources.usb.skippedTracks")
                     }
                     HStack(spacing: LumiSpacing.large) {
                         sourceSettingRow(title: "Database revision", detail: shortRevision(device.databaseRevision), systemImage: "cylinder")
@@ -618,13 +646,42 @@ public struct LibrarySourcesWorkspaceView: View {
                 Spacer()
                 compactStatus("\(visibleTracks.count) REVIEW", visibleTracks.isEmpty ? .ready : .degraded)
             }
-            Text("Lumi did not overwrite these tracks. Compare each imported Rekordbox component, then choose what should happen with this exact USB revision.")
+            Text("Lumi kept its version. Check the differences before choosing a replacement.")
                 .font(LumiTypography.caption)
                 .foregroundStyle(LumiColor.textSecondary)
+            HStack {
+                Button("Select all") {
+                    selectedUSBReviewKeys.formUnion(visibleTracks.map { reviewKey(device, $0) })
+                }
+                Button("Clear") { selectedUSBReviewKeys.removeAll() }
+                let selected = visibleTracks.filter { selectedUSBReviewKeys.contains(reviewKey(device, $0)) }
+                Text("\(selected.count) selected")
+                if !queuedUSBReviews.isEmpty {
+                    Text("\(queuedUSBReviews.count) remaining")
+                        .foregroundStyle(LumiColor.accent)
+                }
+                Spacer()
+                Button("Keep Lumi") { prepareBulkUSBReviews(device, selected, .keepLumi) }
+                    .disabled(selected.isEmpty || mountedURL(for: device) == nil || selected.contains { $0.activeAnalysisRevision == nil })
+                Button("Use USB Version…") { prepareBulkUSBReviews(device, selected, .useUSB) }
+                    .disabled(selected.isEmpty || mountedURL(for: device) == nil || selected.contains { $0.activeAnalysisRevision == nil || $0.components == nil })
+            }
+            .buttonStyle(.bordered)
+            .disabled(usbOperation.isActive || !queuedUSBReviews.isEmpty || !rendersInteractiveControls)
             VStack(spacing: LumiSpacing.xSmall) {
                 ForEach(visibleTracks) { track in
                     VStack(alignment: .leading, spacing: LumiSpacing.medium) {
                         HStack(alignment: .top, spacing: LumiSpacing.medium) {
+                            Toggle("Select \(track.title)", isOn: Binding(
+                                get: { selectedUSBReviewKeys.contains(reviewKey(device, track)) },
+                                set: { selected in
+                                    let key = reviewKey(device, track)
+                                    if selected { selectedUSBReviewKeys.insert(key) } else { selectedUSBReviewKeys.remove(key) }
+                                }
+                            ))
+                            .labelsHidden()
+                            .toggleStyle(.checkbox)
+                            .disabled(usbOperation.isActive || !queuedUSBReviews.isEmpty)
                             VStack(alignment: .leading, spacing: 3) {
                             Text(track.title)
                                 .font(LumiTypography.body.weight(.semibold))
@@ -632,10 +689,6 @@ public struct LibrarySourcesWorkspaceView: View {
                             Text(track.artist.isEmpty ? "Unknown artist" : track.artist)
                                 .font(LumiTypography.caption)
                                 .foregroundStyle(LumiColor.textSecondary)
-                            Text(track.reason)
-                                .font(LumiTypography.caption)
-                                .foregroundStyle(LumiColor.textSecondary)
-                                .fixedSize(horizontal: false, vertical: true)
                             }
                             Spacer(minLength: LumiSpacing.medium)
                             Text(String(format: "%.2f BPM", Double(track.bpmMilli) / 1_000))
@@ -643,6 +696,25 @@ public struct LibrarySourcesWorkspaceView: View {
                                 .foregroundStyle(LumiColor.textSecondary)
                             compactStatus("REVIEW", .degraded)
                         }
+                        Text("USB versus Lumi: age cannot be established")
+                            .font(LumiTypography.body.weight(.semibold))
+                            .foregroundStyle(LumiColor.warning)
+                        Text("Recommended: keep Lumi. Audio-file age is not verified; export dates and metadata differences do not prove a newer audio version.")
+                            .font(LumiTypography.caption)
+                            .foregroundStyle(LumiColor.textSecondary)
+                        if let components = track.components {
+                            Text(compactReviewDifferences(components))
+                                .font(LumiTypography.caption.weight(.semibold))
+                                .foregroundStyle(LumiColor.textPrimary)
+                        } else {
+                            Text("Differences not verified yet. Refresh this USB before deciding.")
+                                .font(LumiTypography.caption)
+                                .foregroundStyle(LumiColor.warning)
+                        }
+                        DisclosureGroup("Details") {
+                        Text(track.reason)
+                            .font(LumiTypography.caption)
+                            .foregroundStyle(LumiColor.textSecondary)
                         HStack(spacing: LumiSpacing.large) {
                             reviewFact("USB source date", formattedReviewDate(track.incomingAnalyzedAt))
                             reviewFact("Active Lumi source", track.activeSourceName ?? "Unknown source")
@@ -660,7 +732,7 @@ public struct LibrarySourcesWorkspaceView: View {
                             ) {
                                 reviewComponent("Beatgrid", components.beatGrid, "metronome")
                                 reviewComponent("Cue Points", components.cuePoints, "mappin")
-                                reviewComponent("File Data", components.fileData, "doc.fill")
+                                reviewComponent("Track Metadata", components.fileData, "doc.fill")
                                 reviewComponent("RB Phrases", components.rekordboxPhrases, "rectangle.split.3x1")
                                 reviewComponent("Waveform", components.waveform, "waveform")
                             }
@@ -668,6 +740,7 @@ public struct LibrarySourcesWorkspaceView: View {
                             Label("Reconnect or refresh this USB to calculate the component-level differences.", systemImage: "arrow.clockwise")
                                 .font(LumiTypography.caption)
                                 .foregroundStyle(LumiColor.textSecondary)
+                        }
                         }
                         reviewActions(device: device, track: track)
                     }
@@ -705,7 +778,7 @@ public struct LibrarySourcesWorkspaceView: View {
         } else {
             VStack(alignment: .leading, spacing: LumiSpacing.small) {
                 HStack(spacing: LumiSpacing.small) {
-                    Button("Ignore This Time") {
+                    Button("Later") {
                         failedUSBReviewKey = nil
                         ignoredUSBReviews.insert(key)
                     }
@@ -713,7 +786,7 @@ public struct LibrarySourcesWorkspaceView: View {
                     .help("Hide this item until you reopen this screen. Nothing is saved or synchronized.")
                     if let root = mountedURL(for: device)?.path,
                        let activeRevision = track.activeAnalysisRevision {
-                        Button("Do Not Sync to Lumi") {
+                        Button("Keep Lumi") {
                             failedUSBReviewKey = nil
                             resolvingUSBReviewKey = key
                             onDeviceConflictResolution(
@@ -729,7 +802,7 @@ public struct LibrarySourcesWorkspaceView: View {
                         .buttonStyle(.bordered)
                         .disabled(usbOperation.isActive || !rendersInteractiveControls)
                         .help("Permanently keep Lumi for this exact USB analysis revision. A later USB change will be reviewed again.")
-                        Button("Sync to Lumi & Overwrite") {
+                        Button("Use USB Version") {
                             failedUSBReviewKey = nil
                             pendingUSBVersionRequest = conflictRequest(
                                 root: root,
@@ -739,8 +812,8 @@ public struct LibrarySourcesWorkspaceView: View {
                                 choice: .useUSB
                             )
                         }
-                        .buttonStyle(.borderedProminent)
-                        .disabled(usbOperation.isActive || !rendersInteractiveControls)
+                        .buttonStyle(.bordered)
+                        .disabled(usbOperation.isActive || !rendersInteractiveControls || track.components == nil)
                         .help("Replace the imported Rekordbox projection after a final revision check. Lumi phrases and AutoLoops stay intact.")
                     } else {
                         Text("Connect and refresh this USB to apply a saved choice.")
@@ -756,6 +829,39 @@ public struct LibrarySourcesWorkspaceView: View {
                 }
             }
         }
+    }
+
+    private func prepareBulkUSBReviews(
+        _ device: RekordboxDeviceState,
+        _ tracks: [RekordboxDeviceReviewTrackState],
+        _ choice: USBConflictResolutionChoice
+    ) {
+        guard let root = mountedURL(for: device)?.path else { return }
+        let requests = tracks.compactMap { track -> USBConflictResolutionRequest? in
+            guard let revision = track.activeAnalysisRevision else { return nil }
+            return conflictRequest(root: root, device: device, track: track, activeRevision: revision, choice: choice)
+        }
+        if choice == .useUSB { pendingBulkUSBReviews = requests }
+        else { queuedUSBReviews.start(requests); startNextUSBReview() }
+    }
+
+    private func startNextUSBReview() {
+        guard let request = queuedUSBReviews.next() else { return }
+        failedUSBReviewKey = nil
+        let key = "\(request.sourceID):\(request.deviceTrackID):\(request.expectedIncomingRevision)"
+        resolvingUSBReviewKey = key
+        onDeviceConflictResolution(request)
+    }
+
+    private func compactReviewDifferences(_ components: RekordboxDeviceReviewComponentsState) -> String {
+        let changed = [
+            ("Beatgrid", components.beatGrid.changed),
+            ("Cue points", components.cuePoints.changed),
+            ("Track metadata", components.fileData.changed),
+            ("RB phrases", components.rekordboxPhrases.changed),
+            ("Waveform", components.waveform.changed)
+        ].filter { $0.1 }.map { $0.0 }
+        return changed.isEmpty ? "Imported components are identical." : "Changed: " + changed.joined(separator: " · ")
     }
 
     private func reviewKey(
@@ -835,7 +941,7 @@ public struct LibrarySourcesWorkspaceView: View {
         VStack(alignment: .leading, spacing: LumiSpacing.medium) {
             HStack {
                 VStack(alignment: .leading, spacing: 2) {
-                    Text("Playlists to load into Lumi").font(LumiTypography.cardTitle)
+                    Text("USB → Lumi Library").font(LumiTypography.cardTitle)
                     Text("\(inspection.playlistCount) available · \(inspection.trackCount) tracks on USB · \(selectedUSBPlaylistIDs.count) selected")
                         .font(LumiTypography.technical)
                         .foregroundStyle(LumiColor.textSecondary)
@@ -857,6 +963,12 @@ public struct LibrarySourcesWorkspaceView: View {
                 .textFieldStyle(.roundedBorder)
                 .accessibilityIdentifier("lumi.library.sources.usb.playlistSearch")
             selectionImpact(inspection)
+            HStack(alignment: .top, spacing: LumiSpacing.medium) {
+            VStack(alignment: .leading, spacing: LumiSpacing.small) {
+            Text("USB · \(inspection.displayName)")
+                .font(LumiTypography.body.weight(.semibold))
+            Text("Checked playlists will be synchronized")
+                .font(LumiTypography.caption).foregroundStyle(LumiColor.textSecondary)
             ScrollView {
                 LazyVStack(spacing: LumiSpacing.xSmall) {
                     ForEach(
@@ -880,14 +992,41 @@ public struct LibrarySourcesWorkspaceView: View {
                         case let .playlist(playlist):
                             usbPlaylistRow(
                                 playlist,
-                                previouslySynchronized: inspection.selectedPlaylistIDs.contains(playlist.id),
+                                previouslySynchronized: selectedUSBSource?.playlists.contains(where: { $0.id == playlist.id }) == true,
                                 depth: row.depth
                             )
                         }
                     }
                 }
             }
-            .frame(minHeight: 160, maxHeight: 360)
+            .frame(height: 360)
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            Divider().frame(height: 412)
+            VStack(alignment: .leading, spacing: LumiSpacing.small) {
+                Text("Lumi Library")
+                    .font(LumiTypography.body.weight(.semibold))
+                Text("Already synchronized from this USB")
+                    .font(LumiTypography.caption).foregroundStyle(LumiColor.textSecondary)
+                ScrollView {
+                    LibraryPlaylistTreeView(
+                        playlists: synchronizedLibraryPlaylists,
+                        selectedPlaylistID: nil,
+                        accessibilityPrefix: "lumi.library.sources.usb.destination",
+                        onSelect: { _ in }
+                    )
+                    if synchronizedLibraryPlaylists.isEmpty {
+                        Text("No playlists synchronized from this USB yet.")
+                            .font(LumiTypography.caption)
+                            .foregroundStyle(LumiColor.textSecondary)
+                            .padding(LumiSpacing.medium)
+                    }
+                }
+                .frame(height: 360)
+                .accessibilityIdentifier("lumi.library.sources.usb.destination")
+            }
+            .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
             if usbPlaylistOutlineRows(
                 playlists: inspection.playlists,
                 expandedFolderPaths: expandedUSBPlaylistFolderPaths,
@@ -897,10 +1036,15 @@ public struct LibrarySourcesWorkspaceView: View {
                     .font(LumiTypography.caption)
                     .foregroundStyle(LumiColor.textSecondary)
             }
-            Text("Browse playlists and track status before sync. Only selected playlists are synchronized; duplicate tracks are processed once.")
+            Text("Selection is remembered for this USB. Unchecking a playlist does not remove it from Lumi. Browse track changes before synchronizing.")
                 .font(LumiTypography.caption)
                 .foregroundStyle(LumiColor.textSecondary)
         }
+    }
+
+    private var synchronizedLibraryPlaylists: [LibraryPlaylist] {
+        let ids = Set(selectedUSBSource?.playlists.map(\.libraryPlaylistID) ?? [])
+        return library.playlists.filter { ids.contains($0.id) }
     }
 
     private func usbPlaylistFolderRow(
@@ -912,7 +1056,31 @@ public struct LibrarySourcesWorkspaceView: View {
         forceExpanded: Bool
     ) -> some View {
         let expanded = forceExpanded || expandedUSBPlaylistFolderPaths.contains(path)
-        return Button {
+        let query = usbPlaylistSearch.trimmingCharacters(in: .whitespacesAndNewlines)
+        let descendants = activeDeviceInspection?.playlists.filter {
+            $0.path.hasPrefix(path + "/") && (query.isEmpty
+                || $0.path.localizedCaseInsensitiveContains(query)
+                || $0.name.localizedCaseInsensitiveContains(query))
+        } ?? []
+        let ids = Set(descendants.map(\.id))
+        let selectedCount = ids.intersection(selectedUSBPlaylistIDs).count
+        return HStack(spacing: LumiSpacing.xSmall) {
+        Button {
+            if selectedCount == ids.count {
+                selectedUSBPlaylistIDs.subtract(ids)
+            } else {
+                selectedUSBPlaylistIDs.formUnion(ids)
+            }
+            persistDevicePlaylistSelection()
+        } label: {
+            Image(systemName: selectedCount == 0 ? "square" : selectedCount == ids.count ? "checkmark.square.fill" : "minus.square.fill")
+                .foregroundStyle(selectedCount == 0 ? LumiColor.textSecondary : LumiColor.accent)
+                .frame(width: 28, height: 36)
+        }
+        .buttonStyle(.plain)
+        .help("Select or deselect all playlists in this folder. Does not delete Lumi data.")
+        .accessibilityLabel("Select folder \(name), \(selectedCount) of \(ids.count) selected")
+        Button {
             if expandedUSBPlaylistFolderPaths.contains(path) {
                 expandedUSBPlaylistFolderPaths.remove(path)
             } else {
@@ -933,7 +1101,7 @@ public struct LibrarySourcesWorkspaceView: View {
                     .font(LumiTypography.technical)
                     .foregroundStyle(LumiColor.textSecondary)
             }
-            .padding(.leading, CGFloat(depth) * 20 + LumiSpacing.medium)
+            .padding(.leading, LumiSpacing.xSmall)
             .padding(.trailing, LumiSpacing.medium)
             .frame(minHeight: 38)
             .background(LumiColor.surface)
@@ -943,6 +1111,8 @@ public struct LibrarySourcesWorkspaceView: View {
         .buttonStyle(.plain)
         .help(path)
         .accessibilityIdentifier("lumi.library.sources.usb.folder.\(path)")
+        }
+        .padding(.leading, CGFloat(depth) * 20 + LumiSpacing.medium)
     }
 
     private func usbPlaylistRow(
@@ -973,6 +1143,7 @@ public struct LibrarySourcesWorkspaceView: View {
                         expandedUSBPlaylistIDs.insert(playlist.id)
                     }
                 } label: {
+                    VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
                     HStack(spacing: LumiSpacing.small) {
                         Image(systemName: "music.note.list")
                             .foregroundStyle(LumiColor.textSecondary)
@@ -987,13 +1158,15 @@ public struct LibrarySourcesWorkspaceView: View {
                                 .foregroundStyle(LumiColor.accent)
                         }
                         Spacer()
-                        playlistStatusSummary(playlist.statusCounts)
                         Text("\(playlist.trackCount)")
                             .font(LumiTypography.technical)
                             .foregroundStyle(LumiColor.textSecondary)
                         Image(systemName: expandedUSBPlaylistIDs.contains(playlist.id) ? "chevron.down" : "chevron.right")
                             .foregroundStyle(LumiColor.textSecondary)
                     }
+                    playlistStatusSummary(playlist.statusCounts)
+                    }
+                    .frame(maxWidth: .infinity, alignment: .leading)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
@@ -1023,18 +1196,6 @@ public struct LibrarySourcesWorkspaceView: View {
 
     @ViewBuilder
     private func selectionImpact(_ inspection: RekordboxDeviceInspectionState) -> some View {
-        if selectedUSBPlaylistIDs.isEmpty {
-            Label(
-                "Select one or more playlists to calculate their impact before synchronization.",
-                systemImage: "checklist"
-            )
-            .font(LumiTypography.caption)
-            .foregroundStyle(LumiColor.textSecondary)
-            .padding(LumiSpacing.medium)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(LumiColor.surfaceElevated)
-            .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
-        } else {
             let impact = USBPlaylistSelectionImpact(
                 inspection: inspection,
                 selectedPlaylistIDs: selectedUSBPlaylistIDs
@@ -1071,7 +1232,6 @@ public struct LibrarySourcesWorkspaceView: View {
             }
             .clipShape(RoundedRectangle(cornerRadius: LumiRadius.control))
             .accessibilityIdentifier("lumi.library.sources.usb.selectionImpact")
-        }
     }
 
     private func impactMetric(
@@ -1097,12 +1257,12 @@ public struct LibrarySourcesWorkspaceView: View {
     private func playlistStatusSummary(
         _ counts: RekordboxDeviceStatusCounts
     ) -> some View {
-        HStack(spacing: LumiSpacing.small) {
-            if counts.current > 0 { compactStatus("\(counts.current) CURRENT", .ready) }
-            if counts.usbNewer > 0 { compactStatus("\(counts.usbNewer) USB NEWER", .ready) }
-            if counts.usbOutdated > 0 { compactStatus("\(counts.usbOutdated) USB OUTDATED", .stale) }
-            if counts.conflict > 0 { compactStatus("\(counts.conflict) REVIEW", .degraded) }
-            if counts.notInLumi > 0 { compactStatus("\(counts.notInLumi) NEW", .empty) }
+        LazyVGrid(columns: [GridItem(.adaptive(minimum: 90), spacing: LumiSpacing.xSmall)], alignment: .leading, spacing: LumiSpacing.xSmall) {
+            if counts.current > 0 { compactStatus("\(counts.current) Same", .ready).help("Imported analysis is current or explicitly retained in Lumi") }
+            if counts.usbNewer > 0 { compactStatus("\(counts.usbNewer) Update", .ready).help("Potential data updates; does not establish audio-file age") }
+            if counts.usbOutdated > 0 { compactStatus("\(counts.usbOutdated) Held", .stale).help("Older USB analysis is protected against replacing Lumi") }
+            if counts.conflict > 0 { compactStatus("\(counts.conflict) Review", .degraded) }
+            if counts.notInLumi > 0 { compactStatus("\(counts.notInLumi) New", .empty) }
         }
     }
 
@@ -1349,10 +1509,14 @@ public struct LibrarySourcesWorkspaceView: View {
             return
         }
         let storedSelections = decodedDevicePlaylistSelections()[sourceID]
-        let stored = activeDeviceInspection?.selectedPlaylistIDs ?? storedSelections ?? []
+        let stored = storedSelections ?? activeDeviceInspection?.selectedPlaylistIDs ?? []
         if let inspection = activeDeviceInspection {
             let available = Set(inspection.playlists.map(\.id))
-            selectedUSBPlaylistIDs = Set(stored).intersection(available)
+            selectedUSBPlaylistIDs = restoredUSBPlaylistSelection(
+                saved: storedSelections,
+                synchronized: activeDeviceInspection?.selectedPlaylistIDs ?? [],
+                available: available
+            )
             if selectedUSBPlaylistIDs.isEmpty, storedSelections?.isEmpty == false {
                 usbSelectionFeedback = "The export's playlist IDs or folders changed. Choose the playlists to sync; your Lumi tracks and phrases are unchanged."
             }
@@ -1429,7 +1593,8 @@ public struct LibrarySourcesWorkspaceView: View {
             options: [.skipHiddenVolumes]
         )?.first { url in
             if let marker = mediaIdentities[url.path] {
-                return volumeSourceID(url) == marker.sourceId && marker.sourceId == device.sourceID
+                return volumeSourceID(url) == marker.sourceId
+                    && registeredSourceID(for: url, marker: marker) == device.sourceID
             }
             return USBSourceIdentityResolver.mountedVolume(
                 mountedIdentity(url),
@@ -1446,12 +1611,7 @@ public struct LibrarySourcesWorkspaceView: View {
             guard mediaIdentities.values.filter({ $0.mediaId == marker.mediaId || $0.sourceId == marker.sourceId }).count == 1 else { return nil }
             return marker.sourceId
         }
-        let stable = try? url.resourceValues(forKeys: [.volumeUUIDStringKey]).volumeUUIDString
-        return USBStableSourceIdentity.sourceID(
-            fileSystemUUID: stable,
-            displayName: volumeDisplayName(url),
-            hardwareSerial: USBStableSourceIdentity.hardwareSerial(for: url)
-        )
+        return USBStableSourceIdentity.sourceID(for: url)
     }
 
     private func mountedIdentity(_ url: URL) -> MountedUSBIdentity {
@@ -1462,12 +1622,13 @@ public struct LibrarySourcesWorkspaceView: View {
     }
 
     private func deviceSyncState(_ device: RekordboxDeviceState) -> LumiComponentState {
-        if device.conflictTracks > 0 { return .degraded }
+        if device.conflictTracks > 0 || !device.skippedTracks.isEmpty { return .degraded }
         if device.protectedTracks > 0 { return .stale }
         return .ready
     }
 
     private func deviceSyncLabel(_ device: RekordboxDeviceState) -> String {
+        if !device.skippedTracks.isEmpty { return "\(device.skippedTracks.count) SKIPPED" }
         if device.conflictTracks > 0 { return "\(device.conflictTracks) REVIEW" }
         if device.protectedTracks > 0 { return "\(device.protectedTracks) OLDER HELD" }
         return "CURRENT"
@@ -1476,13 +1637,14 @@ public struct LibrarySourcesWorkspaceView: View {
     private func compactStatus(_ label: String, _ state: LumiComponentState) -> some View {
         HStack(spacing: 6) {
             Circle().fill(state.color).frame(width: 7, height: 7)
-            Text(label).font(LumiTypography.technical)
+            Text(label).font(LumiTypography.technical).lineLimit(1)
         }
         .foregroundStyle(state.color)
         .padding(.horizontal, 9)
         .padding(.vertical, 5)
         .background(state.color.opacity(0.1))
         .clipShape(Capsule())
+        .fixedSize(horizontal: true, vertical: true)
     }
 
     private func metric(_ title: String, _ value: UInt64) -> some View {
@@ -1574,25 +1736,18 @@ public struct LibrarySourcesWorkspaceView: View {
         var bookmarks = decodedDeviceBookmarks()
         if let encodedBookmark = bookmarks[sourceID],
            let bookmark = Data(base64Encoded: encodedBookmark) {
-            var stale = false
-            if let resolved = try? URL(
-                resolvingBookmarkData: bookmark,
-                options: [.withSecurityScope, .withoutUI],
-                relativeTo: nil,
-                bookmarkDataIsStale: &stale
-            ), !stale,
-               resolved.standardizedFileURL.path == expected.standardizedFileURL.path {
-                return resolved
+            if let resolution = try? USBBookmarkResolver.resolve(bookmark, expectedRoot: expected) {
+                if let renewed = resolution.renewedBookmark {
+                    bookmarks[sourceID] = renewed.base64EncodedString()
+                    if let data = try? JSONEncoder().encode(bookmarks),
+                       let encoded = String(data: data, encoding: .utf8) {
+                        deviceBookmarksJSON = encoded
+                    }
+                }
+                return resolution.url
             }
-
-            // A re-formatted or re-mounted USB can invalidate its bookmark.
-            // Remove the stale grant before asking for authorization again so
-            // the trusted-source row never gets trapped in a retry loop.
-            bookmarks.removeValue(forKey: sourceID)
-            if let data = try? JSONEncoder().encode(bookmarks),
-               let encoded = String(data: data, encoding: .utf8) {
-                deviceBookmarksJSON = encoded
-            }
+            // A failed resolution does not erase an existing user grant. Ask
+            // normally below; only a successfully selected source replaces it.
         }
 
         let panel = NSOpenPanel()
@@ -1654,7 +1809,7 @@ public struct LibrarySourcesWorkspaceView: View {
                 usbSelectionFeedback = "Duplicate Lumi USB identity detected. Reconnect only the intended USB before scanning or syncing. Nothing was merged."
                 return nil
             }
-            return marker.sourceId
+            return registeredSourceID(for: url, marker: marker)
         }
         let displayName = volumeDisplayName(url)
         let collisionSafePreferredID = preferredSourceID.flatMap { sourceID in
@@ -1669,6 +1824,16 @@ public struct LibrarySourcesWorkspaceView: View {
                 : nil
         }
         return collisionSafePreferredID ?? USBLocalSourceIdentity.generated()
+    }
+
+    private func registeredSourceID(for url: URL, marker: USBMediaIdentity) -> String {
+        let physicalID = USBStableSourceIdentity.sourceID(for: url)
+        return USBSourceIdentityResolver.registeredSourceID(
+            markerSourceID: marker.sourceId,
+            physicalSourceID: physicalID,
+            displayName: volumeDisplayName(url),
+            devices: visibleUSBDevices
+        )
     }
 
     private func mountedRekordboxUSBs() -> [URL] {

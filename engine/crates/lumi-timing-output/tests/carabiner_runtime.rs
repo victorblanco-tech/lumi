@@ -92,6 +92,31 @@ fn launches_real_helper_and_publishes_a_link_timeline() {
     let status = output.status();
     assert_eq!(status.state, TimingOutputState::Ready);
     assert!(!status.playing);
+    // Recovery may have the same tempo as before the gap. It still needs to
+    // restore the local source state without replacing the existing Link peer.
+    output
+        .fail_closed("acceptance source gap")
+        .unwrap_or_else(|error| panic!("source gap should be accepted: {error}"));
+    output
+        .synchronize(LinkClockObservation {
+            source: TimingSourceKind::LocalPlayback,
+            deck_number: Some(1),
+            bpm_milli: 140_000,
+            beat_within_bar: 3,
+            playing: true,
+            observed_at_micros: None,
+        })
+        .unwrap_or_else(|error| panic!("same-tempo recovery should synchronize: {error}"));
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while output.status().state != TimingOutputState::Running && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(5));
+    }
+    let recovered = output.status();
+    assert_eq!(recovered.state, TimingOutputState::Running);
+    assert_eq!(recovered.bpm_milli, Some(140_000));
+    assert_eq!(recovered.failure_count, 0);
+    assert_eq!(recovered.hard_reanchor_count, 0);
+    assert_eq!(recovered.soft_correction_count, 0);
     output
         .stop()
         .unwrap_or_else(|error| panic!("helper should stop: {error}"));
@@ -211,6 +236,11 @@ fn link_only_configurable_soak_keeps_one_bounded_latest_clock() {
         "each source observation must be either applied or explicitly coalesced"
     );
     assert_eq!(status.failure_count, 0);
+    assert_eq!(
+        status.hard_reanchor_count, 0,
+        "tempo relay must never move phase"
+    );
+    assert_eq!(status.soft_correction_count, 0);
     if std::env::var("LUMI_EXPECT_LINK_PEER").as_deref() == Ok("1") {
         assert_eq!(status.peers, 1, "exactly one SoundSwitch peer is expected");
     }

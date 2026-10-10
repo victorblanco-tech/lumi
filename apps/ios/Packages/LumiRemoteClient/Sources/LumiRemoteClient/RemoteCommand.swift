@@ -4,6 +4,7 @@ public enum RemoteCommandPayload: Equatable, Sendable {
     case setOperationState(RemoteOperationState, expectedStateRevision: UInt64)
     case setAbletonLinkEnabled(Bool, expectedStateRevision: UInt64)
     case setOutputTimingOffset(Int16, expectedStateRevision: UInt64, expectedTimingOffsetMillis: Int16? = nil)
+    case setLaunchPolicy(RemoteLaunchPolicy, expectedPolicy: RemoteLaunchPolicy)
     case changePhraseRole(RemotePlanMutationContext, roleID: String)
     case selectThemeFromPhrase(RemotePlanMutationContext, themeID: UInt64)
     case selectAutoloopForPhrase(RemotePlanMutationContext, autoloopNumber: UInt8)
@@ -45,6 +46,7 @@ extension RemoteCommandPayload: Codable {
         case enabled
         case millis
         case expectedTimingOffsetMillis
+        case policy, expectedPolicy
         case planID = "planId"
         case trackLoadID = "trackLoadId"
         case expectedPlanRevision
@@ -59,6 +61,7 @@ extension RemoteCommandPayload: Codable {
         case setOperationState
         case setAbletonLinkEnabled
         case setOutputTimingOffset
+        case setLaunchPolicy
         case changePhraseRole
         case selectThemeFromPhrase
         case selectAutoloopForPhrase
@@ -85,6 +88,9 @@ extension RemoteCommandPayload: Codable {
                 expectedStateRevision: container.decode(UInt64.self, forKey: .expectedStateRevision),
                 expectedTimingOffsetMillis: container.decodeIfPresent(Int16.self, forKey: .expectedTimingOffsetMillis)
             )
+        case .setLaunchPolicy:
+            self = try .setLaunchPolicy(container.decode(RemoteLaunchPolicy.self, forKey: .policy),
+                expectedPolicy: container.decode(RemoteLaunchPolicy.self, forKey: .expectedPolicy))
         case .changePhraseRole:
             self = try .changePhraseRole(
                 Self.decodePlanContext(from: container),
@@ -121,6 +127,10 @@ extension RemoteCommandPayload: Codable {
             try container.encode(Kind.setAbletonLinkEnabled, forKey: .kind)
             try container.encode(enabled, forKey: .enabled)
             try container.encode(revision, forKey: .expectedStateRevision)
+        case let .setLaunchPolicy(policy, expected):
+            try container.encode(Kind.setLaunchPolicy, forKey: .kind)
+            try container.encode(policy, forKey: .policy)
+            try container.encode(expected, forKey: .expectedPolicy)
         case let .setOutputTimingOffset(millis, revision, expected):
             try container.encode(Kind.setOutputTimingOffset, forKey: .kind)
             try container.encode(millis, forKey: .millis)

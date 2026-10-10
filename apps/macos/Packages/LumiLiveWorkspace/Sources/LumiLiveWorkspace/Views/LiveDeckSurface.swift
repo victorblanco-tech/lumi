@@ -10,6 +10,7 @@ struct LiveDeckSurface<Details: View>: View {
     let plan: PlanSnapshot?
     let musicalKey: String
     let isLocalPlayback: Bool
+    let playerUSB: LivePlayerUSBSnapshot?
     let visualClock: DeckVisualClockSnapshot?
     let waveformOverride: DeckWaveformPreviewSnapshot?
     let lightingTimingOffsetMillis: Int
@@ -39,6 +40,7 @@ struct LiveDeckSurface<Details: View>: View {
         plan: PlanSnapshot?,
         musicalKey: String,
         isLocalPlayback: Bool,
+        playerUSB: LivePlayerUSBSnapshot? = nil,
         visualClock: DeckVisualClockSnapshot? = nil,
         waveformOverride: DeckWaveformPreviewSnapshot? = nil,
         lightingTimingOffsetMillis: Int = 0,
@@ -58,6 +60,7 @@ struct LiveDeckSurface<Details: View>: View {
         self.plan = plan
         self.musicalKey = musicalKey
         self.isLocalPlayback = isLocalPlayback
+        self.playerUSB = playerUSB
         self.visualClock = visualClock
         self.waveformOverride = waveformOverride
         self.lightingTimingOffsetMillis = lightingTimingOffsetMillis
@@ -172,6 +175,7 @@ struct LiveDeckSurface<Details: View>: View {
     }
 
     private var header: some View {
+        VStack(alignment: .leading, spacing: LumiSpacing.xSmall) {
         HStack(alignment: .top, spacing: LumiSpacing.medium) {
             VStack(alignment: .leading, spacing: 1) {
                 Text(verbatim: playerName)
@@ -182,6 +186,23 @@ struct LiveDeckSurface<Details: View>: View {
                         .font(LumiTypography.technical)
                         .foregroundStyle(Color.white.opacity(0.58))
                         .lineLimit(1)
+                }
+                if !isLocalPlayback {
+                    HStack(spacing: 4) {
+                        LumiPlayerUSBBadge(
+                            state: playerUSB?.state ?? "unavailable",
+                            sourceName: playerUSB?.sourceName,
+                            colorID: playerUSB?.colorID
+                        )
+                        Image(systemName: "arrow.triangle.2.circlepath")
+                            .foregroundStyle(LumiColor.warning)
+                            .opacity(deck.libraryUpdatePending ? 1 : 0)
+                            .help("Library updated. The current plan is preserved; reload this track to apply the update.")
+                            .accessibilityLabel("Library update pending until track reload")
+                            .accessibilityHidden(!deck.libraryUpdatePending)
+                    }
+                    .accessibilityIdentifier("lumi.live.player.\(deck.deckID).usb")
+                    .frame(height: 16)
                 }
             }
                 .padding(.horizontal, LumiSpacing.small)
@@ -210,6 +231,18 @@ struct LiveDeckSurface<Details: View>: View {
             Spacer(minLength: LumiSpacing.small)
             lightingTimingBadge
             roleBadge
+        }
+            if !isLocalPlayback {
+                LumiTrackSourceBadge(
+                    state: deck.trackSource?.state ?? "unavailable",
+                    sourceName: deck.trackSource?.sourceName,
+                    colorID: deck.trackSource?.colorID,
+                    sourcePlayer: deck.trackSource?.playerNumber,
+                    loadedPlayer: UInt8(clamping: deck.deckID),
+                    slot: deck.trackSource?.slot
+                )
+                .accessibilityIdentifier("lumi.live.player.\(deck.deckID).trackSource")
+            }
         }
         .padding(LumiSpacing.medium)
         .background {

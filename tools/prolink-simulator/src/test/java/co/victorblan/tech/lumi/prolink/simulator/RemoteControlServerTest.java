@@ -24,6 +24,59 @@ class RemoteControlServerTest {
     private static final String TOKEN = "simulator-http-test-token";
 
     @Test
+    void modelsIndependentUsbLibrariesAndCachedLinkTrackThroughHttp(@TempDir Path root) throws Exception {
+        UsbLibrary chrm = UsbLibrary.forTesting(root.resolve("CHRM"), List.of(track(1256, "CHRM edit")));
+        UsbLibrary gray = UsbLibrary.forTesting(root.resolve("GRAY"), List.of(track(1256, "GRAY edit")));
+        UsbLibrary library = chrm;
+        PlayerState first = new PlayerState(1);
+        PlayerState second = new PlayerState(2);
+        first.configureUsb(chrm);
+        second.configureUsb(gray);
+        List<PlayerState> players = List.of(first, second);
+        TestTransport transport = new TestTransport();
+
+        try (AutoMixController autoMix = new AutoMixController(players, library);
+             TrafficFaultController faults = new TrafficFaultController(players, System::nanoTime, false);
+             RemoteControlServer server = new RemoteControlServer(
+                     library, players, autoMix, transport, faults, "127.0.0.1", 0, TOKEN
+             );
+             HttpClient client = HttpClient.newHttpClient()) {
+            server.start();
+            URI base = URI.create("http://127.0.0.1:" + server.port());
+
+            JsonNode chrmTracks = get(client, base, "/api/v1/tracks?sourcePlayerNumber=1");
+            JsonNode grayTracks = get(client, base, "/api/v1/tracks?sourcePlayerNumber=2");
+            assertEquals("CHRM edit", chrmTracks.at("/tracks/0/title").asText());
+            assertEquals("GRAY edit", grayTracks.at("/tracks/0/title").asText());
+
+            JsonNode linked = post(client, base, "load",
+                    "{\"playerNumber\":2,\"mediaPlayerNumber\":1,\"trackId\":1256}");
+            assertEquals("CHRM edit", linked.at("/players/1/track/title").asText());
+            assertEquals(1, linked.at("/players/1/loadedFrom/playerNumber").asInt());
+            assertEquals("GRAY", linked.at("/players/1/usb/name").asText());
+
+            JsonNode ejected = post(client, base, "eject-usb", "{\"playerNumber\":1}");
+            assertTrue(ejected.at("/players/0/usb").isNull());
+            assertEquals("CHRM edit", ejected.at("/players/1/track/title").asText());
+            assertEquals(1, ejected.at("/players/1/loadedFrom/playerNumber").asInt());
+            assertTrue(ejected.at("/players/1/loadedFrom/cachedAfterEject").asBoolean());
+        }
+    }
+
+    private static UsbLibrary.Track track(int id, String title) {
+        return new UsbLibrary.Track(id, title, "Victor", 12_800, 120_000,
+                Path.of("/tmp/" + title.replace(' ', '_') + ".DAT"), false, List.of());
+    }
+
+    private static JsonNode get(HttpClient client, URI base, String path) throws Exception {
+        HttpRequest request = HttpRequest.newBuilder(base.resolve(path))
+                .header("Authorization", "Bearer " + TOKEN).GET().build();
+        HttpResponse<String> response = client.send(request, HttpResponse.BodyHandlers.ofString());
+        assertEquals(200, response.statusCode(), response.body());
+        return JSON.readTree(response.body());
+    }
+
+    @Test
     void authenticatedApiAndBrowserExposeRecoveryControls(@TempDir Path root) throws Exception {
         UsbLibrary.Track firstTrack = PlayerStateTest.loadedPlayer(1, new AtomicLong()).snapshot().track();
         UsbLibrary.Track secondTrack = PlayerStateTest.loadedPlayer(2, new AtomicLong()).snapshot().track();

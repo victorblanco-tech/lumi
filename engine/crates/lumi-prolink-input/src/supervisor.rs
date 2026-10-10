@@ -133,6 +133,12 @@ pub struct BridgeLaunchConfiguration {
 }
 
 impl BridgeLaunchConfiguration {
+    /// Reuses the packaged runtime without starting a second VirtualCdj.
+    #[must_use]
+    pub fn java_runtime_paths(&self) -> Option<(PathBuf, PathBuf)> {
+        (self.arguments.len() == 3 && self.arguments[1] == "-jar")
+            .then(|| (self.executable.clone(), PathBuf::from(&self.arguments[2])))
+    }
     #[must_use]
     pub fn java_jar(java_executable: impl Into<PathBuf>, bridge_jar: impl AsRef<Path>) -> Self {
         Self {
@@ -214,6 +220,7 @@ impl IngressLatencyHistogram {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum CoalescingKey {
+    USBMedia(u8),
     DeckStatus(u8),
     TempoStatus(u8),
     PrecisePosition(u8),
@@ -226,6 +233,7 @@ fn coalescing_key(message: &BridgeMessage) -> Option<CoalescingKey> {
         return None;
     }
     match &message.event {
+        BridgeEvent::USBMedia(media) => Some(CoalescingKey::USBMedia(media.device_number)),
         BridgeEvent::DeckStatus(status) => Some(CoalescingKey::DeckStatus(status.device_number)),
         BridgeEvent::TempoStatus(status) => Some(CoalescingKey::TempoStatus(status.device_number)),
         BridgeEvent::PrecisePosition(position) => {
@@ -241,6 +249,7 @@ fn coalescing_key(message: &BridgeMessage) -> Option<CoalescingKey> {
         | BridgeEvent::SourceStatus(_)
         | BridgeEvent::DeviceFound(_)
         | BridgeEvent::DeviceLost(_)
+        | BridgeEvent::USBMount(_)
         | BridgeEvent::Beat(_)
         | BridgeEvent::Error(_) => None,
     }
@@ -422,13 +431,14 @@ impl BridgeProcessSupervisor {
             return Err(BridgeSupervisorError::Read(message));
         }
         let mut messages: Vec<_> = output.messages.drain(..).collect();
-        for message in &messages {
+        for message in &mut messages {
             let supervisor_age = output
                 .received_at
                 .remove(&message.sequence)
                 .map_or(0, |received| {
                     u64::try_from(received.elapsed().as_micros()).unwrap_or(u64::MAX)
                 });
+            message.ingress_queue_age_micros = supervisor_age;
             output.source_age.record(
                 message
                     .bridge_queue_age_micros
@@ -567,10 +577,12 @@ mod tests {
 
     fn deck_status_message(sequence: u64, device_number: u8, beat_number: i64) -> BridgeMessage {
         BridgeMessage {
+            packet_origin: None,
             sequence,
             observed_at_nanos: sequence,
             traffic_class: crate::BridgeTrafficClass::Transport,
             bridge_queue_age_micros: 0,
+            ingress_queue_age_micros: 0,
             event: BridgeEvent::DeckStatus(crate::DeckStatus {
                 device_number,
                 device_name: format!("Player {device_number}"),
@@ -594,10 +606,12 @@ mod tests {
 
     fn beat_message(sequence: u64) -> BridgeMessage {
         BridgeMessage {
+            packet_origin: None,
             sequence,
             observed_at_nanos: sequence,
             traffic_class: crate::BridgeTrafficClass::Critical,
             bridge_queue_age_micros: 0,
+            ingress_queue_age_micros: 0,
             event: BridgeEvent::Beat(crate::Beat {
                 device_number: 1,
                 device_name: "Player 1".to_owned(),

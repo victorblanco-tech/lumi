@@ -73,6 +73,7 @@ use crate::autoloop_executor::{
     AutoloopCueExecutor, AutoloopExecutionIdentity, AutoloopExecutorState, AutoloopTarget,
 };
 use crate::commands::{DeckSourceSelection, PlanCommandContext, SessionCommand, decode_command};
+use crate::launch_policy::{LaunchBoundary, LaunchContext, LaunchGate, LaunchPolicy};
 use crate::library::{LibraryPlanContext, LibraryWorker, LibraryWorkerError, ResolvedLibraryCue};
 use crate::link_relay::LinkRelay;
 #[cfg(test)]
@@ -131,6 +132,13 @@ pub async fn run() -> Result<(), EngineError> {
     let exit_after_client_disconnect =
         env::var(EXIT_AFTER_CLIENT_DISCONNECT_ENVIRONMENT_KEY).as_deref() == Ok("1");
     let mut runtime = initialized_product_runtime()?;
+    if let Some(parent) = service.record_path.as_ref().and_then(|path| path.parent()) {
+        runtime.output_worker.timing_diagnostics =
+            crate::timing_diagnostics::TimingDiagnostics::start(
+                parent.join("timing-diagnostics.json"),
+            )
+            .unwrap_or_default();
+    }
 
     let listener = TcpListener::bind((Ipv4Addr::LOCALHOST, 0)).await?;
     let endpoint = listener.local_addr()?;
@@ -297,7 +305,66 @@ async fn serve_authenticated_client(
                     .ok_or(EngineError::ResponseSequenceOverflow)?;
                 let response = match MessageDecoder::decode(&command_bytes) {
                     Ok(envelope) => {
-                        handle_command(runtime, &mut command_ids, &envelope, response_sequence)?
+                        // Library browsing is read-only presentation work. Keep
+                        // one request in flight while the show pump continues;
+                        // do not move the sole mutable runtime to another task.
+                        let deferred = runtime.library_worker.database_backed()
+                            && matches!(decode_command(&envelope), Ok(
+                                SessionCommand::QueryLibrary { .. }
+                                | SessionCommand::GetSnapshot { include_library: true }
+                            ));
+                        let mut response = handle_command_with_library_policy(
+                            runtime, &mut command_ids, &envelope, response_sequence, deferred,
+                        )?;
+                        if deferred && response.message_type == MessageType::Snapshot
+                            && let Some(job) = runtime.library_worker.status_projection_job() {
+                                let library_revision = runtime.library_revision;
+                                let mut projection = tokio::task::spawn_blocking(job);
+                                loop {
+                                    tokio::select! {
+                                        biased;
+                                        _ = termination.recv() => return Ok(AuthenticatedClientExit::Shutdown),
+                                        _ = integration_pump.tick() => {
+                                            runtime.integration_pump_metrics.record(Instant::now());
+                                            process_deck_input_messages(runtime)?;
+                                            runtime.output_worker.service_pending_autoloop();
+                                            remote_publisher.publish(runtime, false);
+                                        }
+                                        request = remote_commands.recv() => {
+                                            if let Some(request) = request {
+                                                apply_remote_command_request(runtime, request);
+                                                remote_publisher.publish(runtime, true);
+                                            }
+                                        }
+                                        result = &mut projection => {
+                                            match result {
+                                                Ok(Ok(library)) if library_revision == runtime.library_revision => {
+                                                    // Return current transport state, not the
+                                                    // position from before the database read.
+                                                    response = snapshot_envelope_without_library(runtime, response_sequence, &envelope.message_id)?;
+                                                    response.payload.insert("library".to_owned(), library);
+                                                }
+                                                Ok(Ok(_)) => {
+                                                    response = error_envelope(response_sequence, &envelope.message_id,
+                                                        "libraryChanged", "libraryProjectionSuperseded",
+                                                        "The library changed while loading. Please retry.", true, None)?;
+                                                }
+                                                failure => {
+                                                    let detail = match failure {
+                                                        Ok(Err(error)) => error.to_string(),
+                                                        Err(error) => error.to_string(),
+                                                        Ok(Ok(_)) => unreachable!(),
+                                                    };
+                                                    response = error_envelope(response_sequence, &envelope.message_id,
+                                                        "libraryUnavailable", "libraryProjectionFailed", &detail, true, None)?;
+                                                }
+                                            }
+                                            break;
+                                        }
+                                    }
+                                }
+                        }
+                        response
                     }
                     Err(error) => error_envelope(
                         response_sequence,
@@ -365,6 +432,11 @@ struct EngineRuntime {
     deck_source: SimulatorDeckSourceProvider<ManualClock>,
     local_deck_source: LocalPlaybackDeckSourceProvider,
     direct_deck_source: ProLinkDeckSourceProvider,
+    media_resolver: crate::media_resolver::MediaResolver,
+    live_library_resolver: crate::live_library_resolver::LiveLibraryResolver,
+    live_library_status: BTreeMap<TrackLoadId, (&'static str, u64)>,
+    live_library_bindings: BTreeMap<TrackLoadId, LiveTrackBinding>,
+    live_load_media_generations: BTreeMap<TrackLoadId, u64>,
     #[cfg(not(test))]
     prolink_bridge: Option<BridgeProcessSupervisor>,
     prolink_start_error: Option<String>,
@@ -378,6 +450,7 @@ struct EngineRuntime {
     planning_worker: PlanningWorker,
     output_worker: OutputWorker,
     timing_preferences: crate::timing_preferences::TimingPreferences,
+    launch_preferences: crate::launch_preferences::LaunchPreferences,
     link_relay: LinkRelay,
     library_worker: LibraryWorker,
     library_revision: u64,
@@ -400,6 +473,11 @@ struct IntegrationPumpMetrics {
     tick_count: u64,
     starvation_count: u64,
     max_lateness_micros: u64,
+    command_count: u64,
+    last_command_micros: u64,
+    max_command_micros: u64,
+    max_command_kind: &'static str,
+    input_stage_max_micros: [u64; 5],
 }
 
 impl IntegrationPumpMetrics {
@@ -409,6 +487,11 @@ impl IntegrationPumpMetrics {
             tick_count: 0,
             starvation_count: 0,
             max_lateness_micros: 0,
+            command_count: 0,
+            last_command_micros: 0,
+            max_command_micros: 0,
+            max_command_kind: "none",
+            input_stage_max_micros: [0; 5],
         }
     }
 
@@ -425,6 +508,20 @@ impl IntegrationPumpMetrics {
             }
         }
         self.last_tick = Some(now);
+    }
+
+    fn record_command(&mut self, elapsed: Duration, kind: &'static str) {
+        self.command_count = self.command_count.saturating_add(1);
+        self.last_command_micros = u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX);
+        if self.last_command_micros > self.max_command_micros {
+            self.max_command_micros = self.last_command_micros;
+            self.max_command_kind = kind;
+        }
+    }
+
+    fn record_input_stage(&mut self, stage: usize, elapsed: Duration) {
+        self.input_stage_max_micros[stage] = self.input_stage_max_micros[stage]
+            .max(u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX));
     }
 }
 
@@ -488,13 +585,22 @@ struct RemoteStaticKey {
     plans: Vec<(u8, u64, u64)>,
     library_revision: u64,
     source_status: DeckSourceStatus,
+    player_media: Vec<RemotePlayerMediaKey>,
     midi_state: MidiSourceState,
     link_state: TimingOutputState,
     link_enabled: bool,
     link_peers: u32,
     timing_offset_millis: i16,
     pending_timing_offset_millis: Option<i16>,
+    initial_launch: (
+        LaunchPolicy,
+        crate::launch_policy::LaunchState,
+        usize,
+        Option<String>,
+    ),
 }
+
+type RemotePlayerMediaKey = (u8, Option<String>, Option<String>, Option<u8>, u64);
 
 struct RemoteProjectionPublisher {
     latest_projection: watch::Sender<Option<RemoteLiveProjection>>,
@@ -629,6 +735,63 @@ impl RemoteProjectionPublisher {
     }
 }
 
+/// Read the already-resolved source for this load. This is display-only:
+/// no media probes, Library queries or transport/output changes are performed.
+#[derive(Clone)]
+struct LiveTrackBinding {
+    key: crate::live_library_resolver::LookupKey,
+    source: lumi_remote_protocol::RemoteTrackSource,
+}
+
+fn track_source_display(
+    runtime: &EngineRuntime,
+    load: lumi_domain::TrackLoadId,
+) -> Option<lumi_remote_protocol::RemoteTrackSource> {
+    if runtime.deck_source_mode != DeckSourceMode::ConnectedDecks {
+        return None;
+    }
+    let identity = runtime.direct_deck_source.track_identity(load)?;
+    if let Some(binding) = runtime.live_library_bindings.get(&load) {
+        return Some(binding.source.clone());
+    }
+    let media = (identity.source_slot == "USB_SLOT")
+        .then(|| runtime.media_resolver.status(identity.source_player))
+        .flatten();
+    Some(lumi_remote_protocol::RemoteTrackSource {
+        player_number: (1..=6)
+            .contains(&identity.source_player)
+            .then_some(identity.source_player),
+        slot: identity.source_slot.clone(),
+        state: media
+            .map_or("unavailable", |status| {
+                if matches!(status.state, "empty" | "unloading" | "trusted") {
+                    "unavailable"
+                } else {
+                    status.state
+                }
+            })
+            .to_owned(),
+        source_name: None,
+        color_id: None,
+    })
+}
+
+fn live_track_binding_valid(runtime: &EngineRuntime, load: TrackLoadId) -> bool {
+    runtime
+        .live_library_bindings
+        .get(&load)
+        .is_some_and(|binding| {
+            runtime
+                .direct_deck_source
+                .track_identity(load)
+                .is_some_and(|identity| {
+                    identity.source_player == binding.key.source_player
+                        && identity.rekordbox_id == binding.key.rekordbox_id
+                        && identity.source_slot == "USB_SLOT"
+                })
+        })
+}
+
 fn remote_static_key(runtime: &EngineRuntime) -> RemoteStaticKey {
     let state = runtime.state.state();
     let loaded_players = state
@@ -654,19 +817,55 @@ fn remote_static_key(runtime: &EngineRuntime) -> RemoteStaticKey {
         })
         .collect();
     let link = runtime.link_relay.status();
+    let diagnostics = runtime.direct_deck_source.diagnostics();
     RemoteStaticKey {
         operation: state.operation(),
         leader_player: state.leader_deck().map(lumi_domain::DeckId::value),
         loaded_players,
         plans,
         library_revision: runtime.library_revision,
-        source_status: runtime.direct_deck_source.diagnostics().source_status,
+        source_status: diagnostics.source_status,
+        player_media: diagnostics
+            .discovered_devices
+            .keys()
+            .copied()
+            // A linked load can report its source before discovery has
+            // published that source Player. Media-only changes must still
+            // refresh the origin row without a new track load.
+            .chain(
+                state
+                    .decks()
+                    .filter_map(|(_, deck)| {
+                        runtime
+                            .direct_deck_source
+                            .track_identity(deck.track_load_id())
+                            .map(|identity| identity.source_player)
+                    })
+                    .filter(|number| !diagnostics.discovered_devices.contains_key(number)),
+            )
+            .map(|number| {
+                let media = runtime.media_resolver.status(number);
+                (
+                    number,
+                    media.map(|m| m.state.to_owned()),
+                    media.and_then(|m| m.source_name.clone()),
+                    media.and_then(|m| m.color_id),
+                    media.map_or(0, |m| m.generation),
+                )
+            })
+            .collect(),
         midi_state: runtime.output_worker.midi_status().state,
         link_state: link.state,
         link_enabled: runtime.link_relay.enabled(),
         link_peers: link.peers,
         timing_offset_millis: runtime.output_worker.timing_offset_millis(),
         pending_timing_offset_millis: runtime.output_worker.pending_timing_offset_millis(),
+        initial_launch: (
+            runtime.output_worker.launch_policy,
+            runtime.output_worker.launch_gate.state(),
+            runtime.launch_preferences.pending,
+            runtime.launch_preferences.error.clone(),
+        ),
     }
 }
 
@@ -769,7 +968,12 @@ fn initialized_runtime_for_mode(
             None
         };
     #[cfg(test)]
-    let timing_path = None;
+    let timing_path: Option<std::path::PathBuf> = None;
+    let launch_path = timing_path
+        .as_ref()
+        .map(|path| path.with_file_name("lighting-launch.json"));
+    let launch_preferences = crate::launch_preferences::LaunchPreferences::open(launch_path)?;
+    output_worker.launch_policy = launch_preferences.saved.unwrap_or_default();
     let timing_preferences = crate::timing_preferences::TimingPreferences::open(timing_path)?;
     if let Some(millis) = timing_preferences.saved {
         output_worker.request_timing_offset_millis(millis, false);
@@ -819,12 +1023,36 @@ fn initialized_runtime_for_mode(
             }
         }
     }
+    #[cfg(not(test))]
+    let media_resolver = prolink_bridge_configuration()
+        .and_then(|configuration| configuration.java_runtime_paths())
+        .zip(crate::service::configured_database_path().ok().flatten())
+        .map_or_else(
+            crate::media_resolver::MediaResolver::disabled,
+            |((java, jar), database)| {
+                crate::media_resolver::MediaResolver::new(java, jar, database)
+            },
+        );
+    #[cfg(test)]
+    let media_resolver = crate::media_resolver::MediaResolver::disabled();
+    let live_library_resolver = crate::service::configured_database_path()
+        .ok()
+        .flatten()
+        .map_or_else(
+            crate::live_library_resolver::LiveLibraryResolver::disabled,
+            crate::live_library_resolver::LiveLibraryResolver::new,
+        );
     Ok(EngineRuntime {
         state: runtime,
         clock,
         deck_source,
         local_deck_source,
         direct_deck_source,
+        media_resolver,
+        live_library_resolver,
+        live_library_status: BTreeMap::new(),
+        live_library_bindings: BTreeMap::new(),
+        live_load_media_generations: BTreeMap::new(),
         #[cfg(not(test))]
         prolink_bridge,
         prolink_start_error,
@@ -838,6 +1066,7 @@ fn initialized_runtime_for_mode(
         planning_worker,
         output_worker,
         timing_preferences,
+        launch_preferences,
         link_relay,
         library_worker,
         library_revision: 1,
@@ -976,7 +1205,19 @@ fn process_pending_source_events(runtime: &mut EngineRuntime) -> Result<(), Engi
     match runtime.deck_source_mode {
         DeckSourceMode::ConnectedDecks => {
             for event in runtime.direct_deck_source.drain_events()? {
-                let event = hydrate_direct_library_event(runtime, event)?;
+                if let DomainEvent::Observation(envelope) = &event
+                    && let DeckObservation::TrackLoaded { track_load_id, .. } = envelope.observation
+                    && let Some(identity) = runtime.direct_deck_source.track_identity(track_load_id)
+                {
+                    if let Some(media) = runtime.media_resolver.status(identity.source_player) {
+                        runtime
+                            .live_load_media_generations
+                            .insert(track_load_id, media.generation);
+                    }
+                    runtime
+                        .media_resolver
+                        .request_verification(identity.source_player, Instant::now());
+                }
                 runtime.planning_worker.process_source_event(
                     &mut runtime.state,
                     &mut runtime.output_worker,
@@ -1007,45 +1248,6 @@ fn process_pending_source_events(runtime: &mut EngineRuntime) -> Result<(), Engi
         }
     }
     Ok(())
-}
-
-fn hydrate_direct_library_event(
-    runtime: &mut EngineRuntime,
-    event: DomainEvent,
-) -> Result<DomainEvent, EngineError> {
-    let DomainEvent::Observation(mut envelope) = event else {
-        return Ok(event);
-    };
-    let DeckObservation::TrackLoaded {
-        deck_id,
-        track_load_id,
-        ..
-    } = envelope.observation
-    else {
-        return Ok(DomainEvent::Observation(envelope));
-    };
-    let Some(identity) = runtime.direct_deck_source.track_identity(track_load_id) else {
-        return Ok(DomainEvent::Observation(envelope));
-    };
-    let Some(connected) = runtime
-        .library_worker
-        .connected_track(identity.rekordbox_id, 0)?
-    else {
-        return Ok(DomainEvent::Observation(envelope));
-    };
-    let (metadata, context) = connected.prepared.into_parts();
-    let _ = runtime
-        .direct_deck_source
-        .hydrate_track_metadata(track_load_id, metadata.clone());
-    runtime
-        .planning_worker
-        .register_library_context(track_load_id, context);
-    envelope.observation = DeckObservation::TrackLoaded {
-        deck_id,
-        metadata,
-        track_load_id,
-    };
-    Ok(DomainEvent::Observation(envelope))
 }
 
 struct PlanningWorker {
@@ -1377,6 +1579,40 @@ impl PlanningWorker {
         event: DomainEvent,
         leader_deck_id: Option<lumi_domain::DeckId>,
     ) -> Result<(), EngineError> {
+        let diagnostic_observation = match &event {
+            DomainEvent::Observation(e) => match &e.observation {
+                DeckObservation::PlaybackPosition {
+                    deck_id,
+                    track_load_id,
+                    beat,
+                } => Some(
+                    json!({"deck":deck_id.value(),"load":track_load_id.value(),"beat":beat,"kind":"position"}),
+                ),
+                DeckObservation::PlaybackPositionSeeked {
+                    deck_id,
+                    track_load_id,
+                    beat,
+                } => Some(
+                    json!({"deck":deck_id.value(),"load":track_load_id.value(),"beat":beat,"kind":"seek"}),
+                ),
+                DeckObservation::PlaybackStateChanged {
+                    deck_id,
+                    track_load_id,
+                    playing,
+                } => Some(
+                    json!({"deck":deck_id.value(),"load":track_load_id.value(),"playing":playing,"kind":"playback"}),
+                ),
+                DeckObservation::PhraseChanged {
+                    deck_id,
+                    track_load_id,
+                    phrase_index,
+                } => Some(
+                    json!({"deck":deck_id.value(),"load":track_load_id.value(),"phrase":phrase_index,"kind":"phrase"}),
+                ),
+                _ => None,
+            },
+            _ => None,
+        };
         let replaced_reservation = match &event {
             DomainEvent::Observation(lumi_domain::ObservationEnvelope {
                 observation:
@@ -1437,6 +1673,11 @@ impl PlanningWorker {
                     deck_id,
                     metadata,
                     track_load_id,
+                }
+                | DeckObservation::TrackMetadataHydrated {
+                    deck_id,
+                    metadata,
+                    track_load_id,
                 } if !metadata.phrases().is_empty()
                     || self.library_context(*track_load_id).is_some() =>
                 {
@@ -1458,6 +1699,13 @@ impl PlanningWorker {
             output_worker.activate_pending_timing_offset();
         }
         process_domain_event(runtime, output_worker, event)?;
+        if let Some(observation) = diagnostic_observation {
+            let plan = runtime.state().active_plan();
+            output_worker.timing_diagnostics.record(json!({"stage":"reduced", "observation":observation,
+                "operation":format!("{:?}", runtime.state().operation()),
+                "planRevision":plan.map(|p|p.revision().value()),"planStatus":plan.map(|p|format!("{:?}",p.status())),
+                "launch":format!("{:?}",output_worker.launch_gate.state())}));
+        }
         if let Some(track_load_id) = replaced_reservation {
             let reservation_id = format!("track-load:{}", track_load_id.value());
             self.variation_history.release(&reservation_id);
@@ -1529,6 +1777,9 @@ impl PlanningWorker {
                 self.planner.generate_with_context(&input, &context)?
             };
             let plan = self.materialize_library_plan(generated)?;
+            output_worker
+                .timing_diagnostics
+                .record(plan_diagnostic(&plan, "planPrepared"));
             output_worker.synchronize_static_look_plan(
                 plan.track_load_id(),
                 self.compiled_light_plans.get(&plan.track_load_id()),
@@ -1866,6 +2117,10 @@ const fn track_color_from_rgb(rgb: u32) -> TrackColor {
 }
 
 struct OutputWorker {
+    timing_diagnostics: crate::timing_diagnostics::TimingDiagnostics,
+    last_diagnostic_dispatch: Option<Instant>,
+    launch_policy: LaunchPolicy,
+    launch_gate: LaunchGate,
     provider: DryRunLightingOutputProvider,
     midi_output: RealtimeMidiController<CoreMidiSourceProvider>,
     midi_clock: MidiClockController<CoreMidiSourceProvider>,
@@ -1879,6 +2134,7 @@ struct OutputWorker {
     transport_epoch_cause: Option<TransportEpochCause>,
     reassert_current_on_next_cue: bool,
     scheduled_future_autoloop: Option<ScheduledFutureAutoloop>,
+    recent_autoloop_schedules: std::collections::VecDeque<AutoloopScheduleRecord>,
     static_look_plans: BTreeMap<TrackLoadId, BTreeMap<u16, StaticLookTarget>>,
     active_static_look: Option<StaticLookTarget>,
     static_look_transition_count: u64,
@@ -1939,15 +2195,30 @@ impl TransportEpochCause {
 
 #[derive(Clone, Copy, Debug)]
 struct ScheduledFutureAutoloop {
+    generation: u64,
     identity: AutoloopExecutionIdentity,
     target: AutoloopTarget,
     deadline: Instant,
     effective_bpm_milli: u32,
 }
 
+struct AutoloopScheduleRecord {
+    generation: u64,
+    identity: AutoloopExecutionIdentity,
+    target: AutoloopTarget,
+    observed_beat: Option<u32>,
+    scheduled_at: Instant,
+    deadline: Instant,
+    offset_millis: i16,
+}
+
 impl OutputWorker {
     fn new() -> Self {
         Self {
+            timing_diagnostics: crate::timing_diagnostics::TimingDiagnostics::default(),
+            last_diagnostic_dispatch: None,
+            launch_policy: LaunchPolicy::default(),
+            launch_gate: LaunchGate::default(),
             provider: DryRunLightingOutputProvider::default(),
             midi_output: RealtimeMidiController::new(CoreMidiSourceProvider::new),
             midi_clock: MidiClockController::new(CoreMidiSourceProvider::new),
@@ -1961,6 +2232,7 @@ impl OutputWorker {
             transport_epoch_cause: None,
             reassert_current_on_next_cue: false,
             scheduled_future_autoloop: None,
+            recent_autoloop_schedules: std::collections::VecDeque::with_capacity(128),
             static_look_plans: BTreeMap::new(),
             active_static_look: None,
             static_look_transition_count: 0,
@@ -2098,8 +2370,87 @@ impl OutputWorker {
     }
 
     fn service_pending_autoloop(&mut self) {
+        let status = self.midi_output.status();
+        for record in status.recent_dispatches.iter().filter(|record| {
+            self.last_diagnostic_dispatch
+                .is_none_or(|last| record.completed_at > last)
+        }) {
+            self.timing_diagnostics.record(json!({"stage":"midiDispatch", "generation":record.generation,
+                "action":format!("{:?}", record.action),"number":record.number,
+                "completedAgeMicros":record.completed_at.elapsed().as_micros() as u64,
+                "lateMicros":record.started_at.saturating_duration_since(record.deadline).as_micros() as u64,
+                "providerMicros":record.completed_at.saturating_duration_since(record.started_at).as_micros() as u64,
+                "succeeded":record.succeeded}));
+        }
+        if let Some(record) = status.recent_dispatches.back() {
+            self.last_diagnostic_dispatch = Some(record.completed_at);
+        }
         self.autoloop_executor
             .complete_if_emitted(self.midi_output.status().emitted_count);
+        if let AutoloopExecutorState::Completed { identity, .. } = self.autoloop_executor.state() {
+            self.launch_gate.did_launch(
+                self.launch_policy,
+                LaunchContext {
+                    deck: identity.deck_id,
+                    load: identity.track_load_id,
+                    revision: identity.plan_revision,
+                    epoch: identity.execution_epoch,
+                },
+                identity.phrase_index,
+            );
+        }
+    }
+
+    fn update_initial_launch(&mut self, state: &lumi_domain::RuntimeState) {
+        if self.launch_policy == LaunchPolicy::Immediate {
+            return;
+        }
+        let Some(deck_id) = state.leader_deck() else {
+            self.launch_gate.cancel_pending();
+            return;
+        };
+        let Some(deck) = state.deck(deck_id) else {
+            self.launch_gate.cancel_pending();
+            return;
+        };
+        let Some(plan) = state
+            .active_plan()
+            .filter(|p| p.deck_id() == deck_id && p.track_load_id() == deck.track_load_id())
+        else {
+            self.launch_gate.cancel_pending();
+            return;
+        };
+        self.launch_gate.observe(
+            self.launch_policy,
+            LaunchContext {
+                deck: deck_id,
+                load: plan.track_load_id(),
+                revision: plan.revision(),
+                epoch: self.autoloop_executor.execution_epoch(),
+            },
+            state.operation() == OperationState::Live && deck.is_playing(),
+            deck.beat(),
+            plan.cues()
+                .iter()
+                .filter(|cue| matches!(automatic_midi_target(cue.action()), Ok(Some(_))))
+                .map(|cue| LaunchBoundary {
+                    phrase: cue.phrase_index(),
+                    beat: cue.start_beat(),
+                }),
+        );
+    }
+
+    fn initial_launch_allows(&self, identity: AutoloopExecutionIdentity) -> bool {
+        self.launch_gate.allows(
+            self.launch_policy,
+            LaunchContext {
+                deck: identity.deck_id,
+                load: identity.track_load_id,
+                revision: identity.plan_revision,
+                epoch: identity.execution_epoch,
+            },
+            identity.phrase_index,
+        )
     }
 
     fn begin_autoloop_execution_epoch(
@@ -2145,7 +2496,12 @@ impl OutputWorker {
         let immediate_landing = self.reassert_current_on_next_cue;
         self.reassert_current_on_next_cue = false;
         self.scheduled_future_autoloop = None;
-        let configured_delay = if immediate_landing {
+        let initial_phrase_launch = self.launch_policy == LaunchPolicy::OnPhraseStart
+            && matches!(
+                self.launch_gate.state(),
+                crate::launch_policy::LaunchState::Waiting { .. }
+            );
+        let configured_delay = if immediate_landing && !initial_phrase_launch {
             Duration::ZERO
         } else {
             positive_timing_delay(self.timing_offset_millis)
@@ -2169,6 +2525,15 @@ impl OutputWorker {
             } else {
                 configured_delay
             };
+        self.record_autoloop_schedule(AutoloopScheduleRecord {
+            generation,
+            identity: schedule.identity,
+            target,
+            observed_beat: None,
+            scheduled_at: now,
+            deadline: autoloop_deadline,
+            offset_millis: self.timing_offset_millis,
+        });
         if self
             .midi_output
             .schedule_autoloop(generation, bank_number, autoloop_number, autoloop_deadline)
@@ -2185,8 +2550,8 @@ impl OutputWorker {
         );
     }
 
-    /// Prepares exactly one future AutoLoop only when the configured offset is
-    /// negative. It is derived from the latest exact Beat boundary, never from
+    /// Prepares exactly one future AutoLoop for every signed offset. The launch
+    /// gate controls admission, not whether we look ahead. Derived from a Beat, never from
     /// SwiftUI or continuous PrecisePosition samples. BPM changes may replace
     /// an unsent deadline; a completed selection is immutable.
     fn observe_exact_live_beat(
@@ -2195,13 +2560,16 @@ impl OutputWorker {
         deck_id: lumi_domain::DeckId,
         absolute_beat: u32,
     ) {
+        self.update_initial_launch(state);
         self.autoloop_executor
             .complete_if_emitted(self.midi_output.status().emitted_count);
         let offset_millis = self.scheduling_timing_offset_millis();
-        if offset_millis >= 0
-            || state.operation() != OperationState::Live
-            || state.leader_deck() != Some(deck_id)
-        {
+        let initial_phrase_launch = self.launch_policy == LaunchPolicy::OnPhraseStart
+            && matches!(
+                self.launch_gate.state(),
+                crate::launch_policy::LaunchState::Waiting { .. }
+            );
+        if state.operation() != OperationState::Live || state.leader_deck() != Some(deck_id) {
             self.cancel_future_autoloop_deadline();
             return;
         }
@@ -2215,9 +2583,37 @@ impl OutputWorker {
             self.cancel_future_autoloop_deadline();
             return;
         };
+        // A positive offset intentionally sends after the musical boundary.
+        // Do not cancel that admitted send while looking for the following cue.
+        // Transport/plan invalidation still owns cancellation of stale work.
+        if let Some(scheduled) = self.scheduled_future_autoloop
+            && scheduled.identity.deck_id == deck_id
+            && scheduled.identity.track_load_id == plan.track_load_id()
+            && scheduled.identity.plan_revision == plan.revision()
+            && matches!(self.autoloop_executor.state(),
+                AutoloopExecutorState::Triggered { identity, .. }
+                if identity == scheduled.identity)
+            && let Some(cue) = plan.cues().iter().find(|cue| {
+                cue.phrase_index() == scheduled.identity.phrase_index
+                    && cue.start_beat() <= absolute_beat
+            })
+        {
+            if cue.start_beat() == absolute_beat {
+                let deadline = Instant::now() + Duration::from_millis(offset_millis.max(0) as u64);
+                self.retime_future_autoloop(
+                    scheduled,
+                    deadline,
+                    absolute_beat,
+                    deck.effective_bpm_milli(),
+                );
+            }
+            return;
+        }
         let Some(cue) = plan.cues().iter().find(|cue| {
             cue.start_beat() > absolute_beat
                 && cue.start_beat().saturating_sub(absolute_beat) <= AUTOLOOP_FORECAST_HORIZON_BEATS
+                && (!initial_phrase_launch
+                    || matches!(automatic_midi_target(cue.action()), Ok(Some(_))))
         }) else {
             self.cancel_future_autoloop_deadline();
             return;
@@ -2228,7 +2624,7 @@ impl OutputWorker {
         };
         let beats_until = cue.start_beat().saturating_sub(absolute_beat);
         let Some(trigger_delay) =
-            negative_offset_trigger_delay(beats_until, deck.effective_bpm_milli(), offset_millis)
+            phrase_trigger_delay(beats_until, deck.effective_bpm_milli(), offset_millis)
         else {
             return;
         };
@@ -2243,6 +2639,9 @@ impl OutputWorker {
             plan_revision: plan.revision(),
             phrase_index: cue.phrase_index(),
         };
+        if !self.initial_launch_allows(identity) {
+            return;
+        }
         let deadline = Instant::now() + trigger_delay;
         if let Some(existing) = self.scheduled_future_autoloop
             && existing.identity == identity
@@ -2253,18 +2652,21 @@ impl OutputWorker {
             ) {
                 return;
             }
-            let bpm_changed = existing.effective_bpm_milli != deck.effective_bpm_milli();
             let moved = deadline_drift_exceeds_tolerance(
                 existing.deadline,
                 deadline,
                 AUTOLOOP_DEADLINE_REPLACEMENT_TOLERANCE,
             );
-            if !bpm_changed || !moved {
+            if !moved {
                 return;
             }
-            if !self.autoloop_executor.replace_pending_deadline(identity) {
-                return;
-            }
+            self.retime_future_autoloop(
+                existing,
+                deadline,
+                absolute_beat,
+                deck.effective_bpm_milli(),
+            );
+            return;
         }
         let lane_before = self.midi_output.status();
         let Some(schedule) = self.autoloop_executor.schedule_identity(
@@ -2309,11 +2711,66 @@ impl OutputWorker {
             lane_before.emitted_count.saturating_add(scheduled_actions),
         );
         self.scheduled_future_autoloop = Some(ScheduledFutureAutoloop {
+            generation,
             identity,
             target,
             deadline,
             effective_bpm_milli: deck.effective_bpm_milli(),
         });
+        self.record_autoloop_schedule(AutoloopScheduleRecord {
+            generation,
+            identity,
+            target,
+            observed_beat: Some(absolute_beat),
+            scheduled_at: Instant::now(),
+            deadline,
+            offset_millis,
+        });
+    }
+
+    fn retime_future_autoloop(
+        &mut self,
+        mut scheduled: ScheduledFutureAutoloop,
+        deadline: Instant,
+        beat: u32,
+        bpm: u32,
+    ) {
+        if !deadline_drift_exceeds_tolerance(
+            scheduled.deadline,
+            deadline,
+            AUTOLOOP_DEADLINE_REPLACEMENT_TOLERANCE,
+        ) {
+            return;
+        }
+        let bank_deadline = deadline
+            .checked_sub(BANK_SETTLE_DELAY)
+            .unwrap_or_else(Instant::now);
+        if self
+            .midi_output
+            .retime_pending(scheduled.generation, deadline, bank_deadline)
+            .is_ok()
+        {
+            scheduled.deadline = deadline;
+            scheduled.effective_bpm_milli = bpm;
+            self.autoloop_executor
+                .record_pending_retime(scheduled.identity);
+            self.scheduled_future_autoloop = Some(scheduled);
+            self.timing_diagnostics.record(json!({"stage":"scheduleRetimed","generation":scheduled.generation,
+                "observedBeat":beat,"leadMicros":deadline.saturating_duration_since(Instant::now()).as_micros() as u64}));
+        }
+    }
+
+    fn record_autoloop_schedule(&mut self, record: AutoloopScheduleRecord) {
+        self.timing_diagnostics.record(json!({"stage":"schedule", "generation":record.generation,
+            "deck":record.identity.deck_id.value(),"load":record.identity.track_load_id.value(),
+            "planRevision":record.identity.plan_revision.value(),"epoch":record.identity.execution_epoch,
+            "phrase":record.identity.phrase_index,"observedBeat":record.observed_beat,
+            "bank":record.target.bank_number,"autoloop":record.target.autoloop_number,
+            "offsetMillis":record.offset_millis,"leadMicros":record.deadline.saturating_duration_since(record.scheduled_at).as_micros() as u64}));
+        if self.recent_autoloop_schedules.len() == 128 {
+            self.recent_autoloop_schedules.pop_front();
+        }
+        self.recent_autoloop_schedules.push_back(record);
     }
 
     fn cancel_future_autoloop_deadline(&mut self) {
@@ -2346,7 +2803,13 @@ impl OutputWorker {
                 }
                 lumi_domain::Effect::ExecuteCue(request) => {
                     let is_current = execution_context_is_current(runtime.state(), &request);
-                    let result = if is_current {
+                    self.update_initial_launch(runtime.state());
+                    let launch_allowed =
+                        self.initial_launch_allows(AutoloopExecutionIdentity::from_request(
+                            &request,
+                            self.autoloop_executor.execution_epoch(),
+                        ));
+                    let result = if is_current && launch_allowed {
                         let result = self.provider.execute(&request, request.scheduled_at())?;
                         if let Some((bank_number, autoloop_number)) =
                             automatic_midi_target(request.action())?
@@ -2365,7 +2828,11 @@ impl OutputWorker {
                             request.clone(),
                             request.scheduled_at(),
                             OutputEffectStatus::Skipped,
-                            OutputEffectReason::StaleExecutionContext,
+                            if is_current {
+                                OutputEffectReason::InitialLaunchDeferred
+                            } else {
+                                OutputEffectReason::StaleExecutionContext
+                            },
                         )
                     };
                     let completed_at = result.actual_at();
@@ -2493,19 +2960,18 @@ fn negative_timing_advance(offset_millis: i16) -> Duration {
     Duration::from_millis(u64::from(offset_millis.min(0).unsigned_abs()))
 }
 
-fn negative_offset_trigger_delay(
-    beats_until: u32,
-    bpm_milli: u32,
-    offset_millis: i16,
-) -> Option<Duration> {
-    if beats_until == 0 || offset_millis >= 0 || !(20_000..=300_000).contains(&bpm_milli) {
+fn phrase_trigger_delay(beats_until: u32, bpm_milli: u32, offset_millis: i16) -> Option<Duration> {
+    if beats_until == 0 || !(20_000..=300_000).contains(&bpm_milli) {
         return None;
     }
-    let beat_duration = Duration::from_micros(60_000_000_000_u64 / u64::from(bpm_milli));
-    let target_delay = beat_duration.saturating_mul(beats_until);
-    let trigger_delay = target_delay.saturating_sub(negative_timing_advance(offset_millis));
-    (trigger_delay >= BANK_SETTLE_DELAY.saturating_add(INTEGRATION_PUMP_INTERVAL))
-        .then_some(trigger_delay)
+    let target = Duration::from_micros(60_000_000_000_u64 / u64::from(bpm_milli))
+        .saturating_mul(beats_until);
+    let delay = if offset_millis < 0 {
+        target.saturating_sub(negative_timing_advance(offset_millis))
+    } else {
+        target.saturating_add(positive_timing_delay(offset_millis))
+    };
+    (delay >= BANK_SETTLE_DELAY.saturating_add(INTEGRATION_PUMP_INTERVAL)).then_some(delay)
 }
 
 fn deadline_drift_exceeds_tolerance(
@@ -2724,11 +3190,45 @@ fn submit_and_process(
     Ok(processed)
 }
 
-fn handle_command(
+fn handle_command_with_library_policy(
     runtime: &mut EngineRuntime,
     command_ids: &mut CommandIdCache,
     envelope: &MessageEnvelope,
     response_sequence: u64,
+    defer_library: bool,
+) -> Result<MessageEnvelope, EngineError> {
+    let started = Instant::now();
+    let result = handle_command_inner(
+        runtime,
+        command_ids,
+        envelope,
+        response_sequence,
+        defer_library,
+    );
+    // Fixed categories only: diagnostics never retain track names, searches,
+    // arbitrary payload text or an unbounded command-name map.
+    let category = match envelope.payload.get("kind").and_then(Value::as_str) {
+        Some("getSnapshot") => "snapshot",
+        Some("queryLibrary") => "libraryQuery",
+        Some("openLibraryTrackEditor") => "openEditor",
+        Some("getLibraryTrackWaveform") => "waveform",
+        Some("selectDeckSourceMode") => "sourceMode",
+        Some("setAbletonLinkEnabled") => "linkEnablement",
+        Some("setOperationState") => "operationState",
+        _ => "other",
+    };
+    runtime
+        .integration_pump_metrics
+        .record_command(started.elapsed(), category);
+    result
+}
+
+fn handle_command_inner(
+    runtime: &mut EngineRuntime,
+    command_ids: &mut CommandIdCache,
+    envelope: &MessageEnvelope,
+    response_sequence: u64,
+    defer_library: bool,
 ) -> Result<MessageEnvelope, EngineError> {
     process_deck_input_messages(runtime)?;
     let command = match decode_command(envelope) {
@@ -2747,6 +3247,12 @@ fn handle_command(
     };
 
     let is_mutating = command.is_mutating();
+    let include_timing_history = matches!(&command, SessionCommand::GetSnapshot { .. })
+        && envelope
+            .payload
+            .get("includeTimingHistory")
+            .and_then(Value::as_bool)
+            == Some(true);
     let changes_library_revision = command.changes_library_revision();
     let is_transport_update = matches!(
         &command,
@@ -2756,12 +3262,13 @@ fn handle_command(
         SessionCommand::GetLibraryTrackWaveform { track_id } => Some(*track_id),
         _ => None,
     };
-    let includes_library = !matches!(
-        &command,
-        SessionCommand::GetSnapshot {
-            include_library: false
-        }
-    );
+    let includes_library = !defer_library
+        && !matches!(
+            &command,
+            SessionCommand::GetSnapshot {
+                include_library: false
+            }
+        );
     if is_mutating && command_ids.contains(&envelope.message_id) {
         if is_transport_update {
             return transport_ack_envelope(runtime, response_sequence, &envelope.message_id);
@@ -2782,7 +3289,16 @@ fn handle_command(
     if is_transport_update {
         return transport_ack_envelope(runtime, response_sequence, &envelope.message_id);
     }
-    let mut response = if includes_library {
+    let mut response = if include_timing_history {
+        snapshot_envelope_internal(
+            runtime,
+            response_sequence,
+            &envelope.message_id,
+            includes_library,
+            false,
+            true,
+        )?
+    } else if includes_library {
         snapshot_envelope(runtime, response_sequence, &envelope.message_id)?
     } else {
         snapshot_envelope_without_library(runtime, response_sequence, &envelope.message_id)?
@@ -2886,6 +3402,21 @@ fn remote_session_command(
     command: RemoteCommandKind,
 ) -> Result<SessionCommand, CommandApplicationError> {
     match command {
+        RemoteCommandKind::SetLaunchPolicy {
+            policy,
+            expected_policy,
+        } => {
+            let convert = |value| match value {
+                lumi_remote_protocol::RemoteLaunchPolicy::Immediate => LaunchPolicy::Immediate,
+                lumi_remote_protocol::RemoteLaunchPolicy::OnPhraseStart => {
+                    LaunchPolicy::OnPhraseStart
+                }
+            };
+            Ok(SessionCommand::SetLaunchPolicy {
+                policy: convert(policy),
+                expected: convert(expected_policy),
+            })
+        }
         RemoteCommandKind::SetOperationState {
             operation_state,
             expected_state_revision,
@@ -3020,15 +3551,161 @@ fn transport_ack_envelope(
 }
 
 fn process_deck_input_messages(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
+    let started = Instant::now();
     runtime.timing_preferences.poll();
+    runtime.launch_preferences.poll();
+    runtime.media_resolver.poll(Instant::now());
+    runtime
+        .integration_pump_metrics
+        .record_input_stage(0, started.elapsed());
     if runtime.deck_source_mode != DeckSourceMode::ConnectedDecks {
         #[cfg(not(test))]
         maintain_direct_prolink_bridge(runtime)?;
         return Ok(());
     }
+    let started = Instant::now();
     #[cfg(not(test))]
     maintain_direct_prolink_bridge(runtime)?;
+    runtime
+        .integration_pump_metrics
+        .record_input_stage(1, started.elapsed());
+    let started = Instant::now();
     process_pending_source_events(runtime)?;
+    runtime
+        .integration_pump_metrics
+        .record_input_stage(2, started.elapsed());
+    let started = Instant::now();
+    process_live_library_preparation(runtime)?;
+    runtime
+        .integration_pump_metrics
+        .record_input_stage(3, started.elapsed());
+    let started = Instant::now();
+    process_pending_source_events(runtime)?;
+    runtime
+        .integration_pump_metrics
+        .record_input_stage(4, started.elapsed());
+    Ok(())
+}
+
+fn process_live_library_preparation(runtime: &mut EngineRuntime) -> Result<(), EngineError> {
+    use crate::live_library_resolver::{LookupKey, Preparation};
+    // A mount authorizes a load once. After that, cached audio, exact timing,
+    // prepared phrases and track origin belong to the load, not the current
+    // contents of its source Player's USB slot.
+    let loads = runtime
+        .state
+        .state()
+        .decks()
+        .map(|(deck, state)| (deck, state.track_load_id()))
+        .collect::<Vec<_>>();
+    let keys = loads
+        .iter()
+        .filter_map(|(deck, load)| {
+            if let Some(binding) = runtime.live_library_bindings.get(load) {
+                let mut key = binding.key.clone();
+                key.library_revision = runtime.library_revision;
+                return Some(key);
+            }
+            let identity = runtime.direct_deck_source.track_identity(*load)?;
+            if identity.source_slot != "USB_SLOT" {
+                return None;
+            }
+            let media = runtime.media_resolver.status(identity.source_player)?;
+            let expected_generation = runtime
+                .live_load_media_generations
+                .entry(*load)
+                .or_insert(media.generation);
+            if media.state != "trusted"
+                || media.last_verified_unix_millis.is_none()
+                || *expected_generation != media.generation
+            {
+                return None;
+            }
+            let key = LookupKey {
+                deck: *deck,
+                load: *load,
+                source_player: identity.source_player,
+                source_id: media.source_id.clone()?,
+                media_generation: media.generation,
+                rekordbox_id: identity.rekordbox_id,
+                library_revision: runtime.library_revision,
+            };
+            runtime.live_library_bindings.insert(
+                *load,
+                LiveTrackBinding {
+                    key: key.clone(),
+                    source: lumi_remote_protocol::RemoteTrackSource {
+                        player_number: Some(identity.source_player),
+                        slot: identity.source_slot.clone(),
+                        state: "trusted".into(),
+                        source_name: media.source_name.clone(),
+                        color_id: media.color_id,
+                    },
+                },
+            );
+            Some(key)
+        })
+        .collect::<Vec<_>>();
+    runtime
+        .live_load_media_generations
+        .retain(|load, _| loads.iter().any(|(_, current)| current == load));
+    runtime.live_library_bindings.retain(|load, _| {
+        runtime
+            .state
+            .state()
+            .decks()
+            .any(|(_, deck)| deck.track_load_id() == *load)
+            && runtime.direct_deck_source.track_identity(*load).is_some()
+    });
+    runtime.live_library_status.retain(|load, _| {
+        runtime
+            .state
+            .state()
+            .decks()
+            .any(|(_, deck)| deck.track_load_id() == *load)
+            && runtime.direct_deck_source.track_identity(*load).is_some()
+    });
+    for completion in runtime.live_library_resolver.poll(keys, Instant::now()) {
+        let load = completion.key.load;
+        let status = match completion.prepared {
+            Preparation::Unchanged => continue,
+            Preparation::Unknown => "not-synced",
+            Preparation::Unprepared => "phrases-required",
+            Preparation::Unavailable => "library-unavailable",
+            Preparation::Ready(connected) => {
+                let (metadata, context) = connected.prepared.into_parts();
+                if let Some(current) = runtime.planning_worker.library_context(load) {
+                    // No implicit replacement of prepared data during a show.
+                    // Preserve the exact beat coordinates and existing cue history.
+                    if current.has_same_prepared_revision(&context)
+                        && runtime
+                            .state
+                            .state()
+                            .deck(completion.key.deck)
+                            .is_some_and(|deck| deck.metadata() == &metadata)
+                    {
+                        "ready"
+                    } else {
+                        "update-on-next-load"
+                    }
+                } else {
+                    if runtime.direct_deck_source.publish_hydrated_track(
+                        load,
+                        metadata,
+                        runtime.clock.now(),
+                    )? {
+                        runtime
+                            .planning_worker
+                            .register_library_context(load, context);
+                    }
+                    "ready"
+                }
+            }
+        };
+        runtime
+            .live_library_status
+            .insert(load, (status, completion.elapsed_micros));
+    }
     Ok(())
 }
 
@@ -3096,6 +3773,24 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
 
     let at = runtime.clock.now();
     for message in messages {
+        let input = match &message.event {
+            lumi_prolink_input::BridgeEvent::Beat(v) => Some(
+                json!({"kind":"beat", "deck":v.device_number,"barBeat":v.beat_within_bar,"bpm":v.effective_bpm,"master":v.tempo_master}),
+            ),
+            lumi_prolink_input::BridgeEvent::DeckStatus(v) => Some(
+                json!({"kind":"status", "deck":v.device_number,"beat":v.beat_number,"barBeat":v.beat_within_bar,"bpm":v.effective_bpm,"playing":v.playing,"master":v.tempo_master,"rekordboxId":v.rekordbox_id,"sourcePlayer":v.source_player}),
+            ),
+            lumi_prolink_input::BridgeEvent::PrecisePosition(v) => Some(
+                json!({"kind":"precise", "deck":v.device_number,"positionMillis":v.playback_position_millis,"barBeat":v.beat_within_bar}),
+            ),
+            _ => None,
+        };
+        if let Some(input) = input {
+            runtime.output_worker.timing_diagnostics.record(json!({"stage":"ingress", "packetOrigin":message.packet_origin,"bridgeObservedNanos":message.observed_at_nanos,"bridgeSequence":message.sequence,"bridgeQueueAgeMicros":message.bridge_queue_age_micros,"ingressQueueAgeMicros":message.ingress_queue_age_micros,"input":input}));
+        }
+        runtime
+            .media_resolver
+            .observe(&message.event, Instant::now());
         if let Err(error) = runtime.direct_deck_source.ingest(message, at) {
             fail_direct_prolink_bridge(runtime, error.to_string());
             return Ok(());
@@ -3121,11 +3816,20 @@ fn maintain_direct_prolink_bridge(runtime: &mut EngineRuntime) -> Result<(), Eng
         .direct_deck_source
         .drain_precise_position_observations();
     for position in precise_positions {
+        let binding_valid = live_track_binding_valid(runtime, position.track_load_id);
+        if !binding_valid {
+            if runtime.state.state().leader_deck() == Some(position.deck_id) {
+                runtime.output_worker.invalidate_autoloop_deadline();
+            }
+            continue;
+        }
         let Some(context) = runtime
             .planning_worker
             .library_context(position.track_load_id)
         else {
-            runtime.output_worker.invalidate_autoloop_deadline();
+            if runtime.state.state().leader_deck() == Some(position.deck_id) {
+                runtime.output_worker.invalidate_autoloop_deadline();
+            }
             continue;
         };
         let absolute_beat = context.beat_at_millis(position.playback_position_millis);
@@ -3190,6 +3894,7 @@ fn forward_direct_prolink_clock(runtime: &mut EngineRuntime) {
 
 #[cfg(not(test))]
 fn fail_direct_prolink_bridge(runtime: &mut EngineRuntime, message: String) {
+    runtime.media_resolver.clear();
     let actionable = format!("{message}; Lumi will retry the Pro DJ Link bridge automatically");
     eprintln!("Direct Pro DJ Link failure: {actionable}");
     runtime.prolink_start_error = Some(actionable.clone());
@@ -3537,6 +4242,28 @@ fn apply_command(
             runtime
                 .output_worker
                 .request_timing_offset_millis(millis, defer_until_phrase);
+            return Ok(());
+        }
+        SessionCommand::SetLaunchPolicy { policy, expected } => {
+            if !matches!(
+                runtime.state.state().operation(),
+                OperationState::Off | OperationState::Armed
+            ) {
+                return Err(CommandApplicationError::LaunchPolicy(
+                    "Return to Off or Arm before changing the initial launch policy.".into(),
+                ));
+            }
+            if runtime.output_worker.launch_policy != expected {
+                return Err(CommandApplicationError::LaunchPolicy(
+                    "The launch policy changed; refresh before retrying.".into(),
+                ));
+            }
+            runtime
+                .launch_preferences
+                .request(policy)
+                .map_err(CommandApplicationError::LaunchPolicy)?;
+            runtime.output_worker.launch_policy = policy;
+            runtime.output_worker.launch_gate.arm();
             return Ok(());
         }
         SessionCommand::SendMidiLearnPulse => {
@@ -3899,6 +4626,7 @@ fn apply_command(
         | SessionCommand::SetAbletonLinkEnabled { .. }
         | SessionCommand::TestAbletonLinkHelper
         | SessionCommand::SetOutputTimingOffset { .. }
+        | SessionCommand::SetLaunchPolicy { .. }
         | SessionCommand::SendMidiLearnPulse
         | SessionCommand::SendMidiAddressLearnPulse { .. }
         | SessionCommand::TriggerMidiAutoloop { .. }
@@ -3915,10 +4643,10 @@ fn apply_command(
         | SessionCommand::AdvanceToNextTrack { .. }
         | SessionCommand::ResetDemoSession { .. } => return Ok(()),
         SessionCommand::SelectTheme { theme_id, .. } => (
-            runtime
-                .planning_worker
-                .planner
-                .select_theme(&current, theme_id)?,
+            runtime.planning_worker.planner.select_theme(
+                &theme_edit_base(&runtime.planning_worker, &current, &input, 0)?,
+                theme_id,
+            )?,
             PlanMaterializationScope::All,
             false,
             false,
@@ -3931,7 +4659,7 @@ fn apply_command(
             reject_started_live_phrase(runtime.state.state(), current.deck_id(), phrase_index)?;
             (
                 runtime.planning_worker.planner.select_theme_from_phrase(
-                    &current,
+                    &theme_edit_base(&runtime.planning_worker, &current, &input, phrase_index)?,
                     phrase_index,
                     theme_id,
                 )?,
@@ -4064,6 +4792,10 @@ fn apply_command(
         materialized.plan
     };
     let track_load_id = revised.track_load_id();
+    runtime
+        .output_worker
+        .timing_diagnostics
+        .record(plan_diagnostic(&revised, "planEdited"));
     let (candidate_state, effect_sequence) = runtime
         .planning_worker
         .prepare_revised_state(&runtime.state, revised)
@@ -4095,6 +4827,53 @@ fn apply_command(
             .get(&track_load_id),
     );
     Ok(())
+}
+
+fn plan_diagnostic(plan: &LightingPlan, stage: &str) -> Value {
+    json!({"stage":stage,"deck":plan.deck_id().value(),"load":plan.track_load_id().value(),
+        "planRevision":plan.revision().value(),"status":format!("{:?}",plan.status()),
+        "cues":plan.cues().iter().map(|cue|json!({"phrase":cue.phrase_index(),"startBeat":cue.start_beat(),"endBeat":cue.end_beat(),"reason":format!("{:?}",cue.reason()),"target":automatic_midi_target(cue.action()).ok().flatten()})).collect::<Vec<_>>()})
+}
+
+// Missing *output mappings* do not erase the prepared phrase semantics. Restore
+// only those semantic cues in the edited suffix, then let normal materialization
+// validate the selected Theme. Actual missing analysis remains non-editable.
+fn theme_edit_base(
+    worker: &PlanningWorker,
+    current: &LightingPlan,
+    input: &PlanningInput,
+    from: u16,
+) -> Result<LightingPlan, PlanMutationError> {
+    if worker.library_context(current.track_load_id()).is_none()
+        || !current.cues().iter().any(|cue| {
+            cue.phrase_index() >= from && cue.reason() == CueReason::MissingAutoloopMapping
+        })
+    {
+        return Ok(current.clone());
+    }
+    let generated = worker.planner.generate(input)?;
+    let cues = current
+        .cues()
+        .iter()
+        .map(|cue| {
+            if cue.phrase_index() < from || cue.reason() != CueReason::MissingAutoloopMapping {
+                return Ok(cue.clone());
+            }
+            let restored = generated
+                .cues()
+                .get(usize::from(cue.phrase_index()))
+                .filter(|candidate| {
+                    candidate.start_beat() == cue.start_beat()
+                        && candidate.end_beat() == cue.end_beat()
+                        && matches!(candidate.action(), SemanticLightingAction::ApplyLook(_))
+                })
+                .ok_or(PlanMutationError::FallbackPlanNotEditable)?;
+            Ok(restored.clone())
+        })
+        .collect::<Result<Vec<_>, PlanMutationError>>()?;
+    current
+        .with_materialized_cues(cues)
+        .map_err(PlanMutationError::InvalidPlan)
 }
 
 fn validate_state_revision(
@@ -4159,6 +4938,14 @@ fn apply_operation_command(
         .operation_sequence
         .checked_add(1)
         .ok_or(CommandApplicationError::OperationSequenceOverflow)?;
+    runtime.output_worker.timing_diagnostics.record(
+        json!({"stage":"operation", "from":format!("{from:?}"), "command":format!("{command:?}")}),
+    );
+    match command {
+        OperationCommand::Arm | OperationCommand::Off => runtime.output_worker.launch_gate.arm(),
+        OperationCommand::Pause => runtime.output_worker.launch_gate.cancel_pending(),
+        OperationCommand::Start => {}
+    }
     if command == OperationCommand::Start {
         runtime
             .output_worker
@@ -4180,12 +4967,54 @@ fn apply_operation_command(
     Ok(())
 }
 
+fn launch_projection(runtime: &EngineRuntime) -> serde_json::Value {
+    use crate::launch_policy::LaunchState;
+    let gate = runtime.output_worker.launch_gate.state();
+    let target = match gate {
+        LaunchState::Waiting { context, target } => Some((context, target)),
+        _ => None,
+    };
+    let status = match runtime.state.state().operation() {
+        OperationState::Off => "off",
+        OperationState::Armed => "armed",
+        OperationState::Paused => "paused",
+        OperationState::Live => match gate {
+            LaunchState::Launched => "launched",
+            LaunchState::Waiting { .. } => "waitingForPhrase",
+            LaunchState::NoUpcomingBoundary { .. } => "noUpcomingPhrase",
+            LaunchState::WaitingForPlayback => "waitingForPlayback",
+        },
+    };
+    json!({
+        "version": 1,
+        "policy": runtime.output_worker.launch_policy,
+        "status": status,
+        "targetPhraseIndex": target.map(|(_, target)| target.phrase),
+        "targetBeat": target.map(|(_, target)| target.beat),
+        "targetPlayer": target.map(|(context, _)| context.deck.value()),
+        "remainingBeats": target.and_then(|(context, target)| runtime.state.state().deck(context.deck)
+            .map(|deck| target.beat.saturating_sub(deck.beat()))),
+        "savedPolicy": runtime.launch_preferences.saved,
+        "savePending": runtime.launch_preferences.pending > 0,
+        "saveError": runtime.launch_preferences.error,
+    })
+}
+
 fn application_error_envelope(
     sequence: u64,
     correlation_id: &str,
     error: &CommandApplicationError,
 ) -> Result<MessageEnvelope, EngineError> {
     match error {
+        CommandApplicationError::LaunchPolicy(message) => error_envelope(
+            sequence,
+            correlation_id,
+            "commandRejected",
+            "launchPolicyRejected",
+            message,
+            true,
+            None,
+        ),
         CommandApplicationError::TimingSave(message) => error_envelope(
             sequence,
             correlation_id,
@@ -4484,6 +5313,8 @@ fn error_envelope(
 
 #[derive(Debug, Error)]
 enum CommandApplicationError {
+    #[error("launch policy: {0}")]
+    LaunchPolicy(String),
     #[error("lighting timing could not be saved: {0}")]
     TimingSave(String),
     #[error("lighting timing changed since this edit")]
@@ -4546,7 +5377,7 @@ fn snapshot_envelope(
     sequence: u64,
     correlation_id: &str,
 ) -> Result<MessageEnvelope, EngineError> {
-    snapshot_envelope_internal(runtime, sequence, correlation_id, true, false)
+    snapshot_envelope_internal(runtime, sequence, correlation_id, true, false, false)
 }
 
 fn snapshot_envelope_without_library(
@@ -4554,7 +5385,7 @@ fn snapshot_envelope_without_library(
     sequence: u64,
     correlation_id: &str,
 ) -> Result<MessageEnvelope, EngineError> {
-    snapshot_envelope_internal(runtime, sequence, correlation_id, false, false)
+    snapshot_envelope_internal(runtime, sequence, correlation_id, false, false, false)
 }
 
 fn snapshot_envelope_for_remote(
@@ -4562,7 +5393,7 @@ fn snapshot_envelope_for_remote(
     sequence: u64,
     correlation_id: &str,
 ) -> Result<MessageEnvelope, EngineError> {
-    snapshot_envelope_internal(runtime, sequence, correlation_id, false, true)
+    snapshot_envelope_internal(runtime, sequence, correlation_id, false, true, false)
 }
 
 fn snapshot_envelope_internal(
@@ -4571,6 +5402,7 @@ fn snapshot_envelope_internal(
     correlation_id: &str,
     include_library: bool,
     include_remote_waveform_detail: bool,
+    include_timing_history: bool,
 ) -> Result<MessageEnvelope, EngineError> {
     let state = runtime.state.state();
     let mut payload = Map::new();
@@ -4679,9 +5511,35 @@ fn snapshot_envelope_internal(
         "lastEmittedNumber": realtime_midi.last_emitted_number,
         "lastDispatchLatenessMicros": realtime_midi.last_dispatch_lateness_micros,
         "lateDispatchCount": realtime_midi.late_dispatch_count,
+        "recentDispatches": realtime_midi.recent_dispatches.iter().filter(|_| include_timing_history).map(|record| json!({
+            "generation": record.generation,
+            "action": match record.action {
+                RealtimeMidiActionKind::Bank => "bank",
+                RealtimeMidiActionKind::Autoloop => "autoloop",
+            },
+            "number": record.number,
+            "ageMicros": record.completed_at.elapsed().as_micros() as u64,
+            "dispatchLatenessMicros": record.started_at.saturating_duration_since(record.deadline).as_micros() as u64,
+            "providerDurationMicros": record.completed_at.saturating_duration_since(record.started_at).as_micros() as u64,
+            "succeeded": record.succeeded,
+        })).collect::<Vec<_>>(),
     });
     let realtime_scheduler = json!({
         "mode": "exactlyOncePhrase",
+        "recentSchedules": runtime.output_worker.recent_autoloop_schedules.iter().filter(|_| include_timing_history).map(|record| json!({
+            "generation": record.generation,
+            "executionEpoch": record.identity.execution_epoch,
+            "deckNumber": record.identity.deck_id.value(),
+            "trackLoadId": record.identity.track_load_id.value(),
+            "planRevision": record.identity.plan_revision.value(),
+            "phraseIndex": record.identity.phrase_index,
+            "bankNumber": record.target.bank_number,
+            "autoloopNumber": record.target.autoloop_number,
+            "observedBeat": record.observed_beat,
+            "offsetMillis": record.offset_millis,
+            "ageMicros": u64::try_from(record.scheduled_at.elapsed().as_micros()).unwrap_or(u64::MAX),
+            "leadMicros": u64::try_from(record.deadline.saturating_duration_since(record.scheduled_at).as_micros()).unwrap_or(u64::MAX),
+        })).collect::<Vec<_>>(),
         "state": autoloop_state.name(),
         "executionEpoch": runtime.output_worker.autoloop_executor.execution_epoch(),
         "transportEpochCause": runtime.output_worker.transport_epoch_cause.map(TransportEpochCause::name),
@@ -4706,7 +5564,7 @@ fn snapshot_envelope_internal(
         "cancelledCount": runtime.output_worker.autoloop_executor.cancelled_count(),
         "rescheduledCount": runtime.output_worker.autoloop_executor.rescheduled_count(),
         "failedCount": runtime.output_worker.autoloop_executor.failed_count(),
-        "lateCount": 0,
+        "lateCount": realtime_midi.late_dispatch_count,
         "beatFallbackCount": 0,
         "lane": realtime_lane,
     });
@@ -4729,6 +5587,7 @@ fn snapshot_envelope_internal(
             "savedTimingOffsetMillis": runtime.timing_preferences.saved,
             "timingSavePending": runtime.timing_preferences.pending_writes > 0,
             "timingSaveError": runtime.timing_preferences.error,
+            "launch": launch_projection(runtime),
             "bankPreRollMillis": BANK_SETTLE_DELAY.as_millis(),
             "staticLookExecution": {
                 "mode": "exactlyOnceTransition",
@@ -4800,6 +5659,17 @@ fn snapshot_envelope_internal(
             "enginePumpCount": runtime.integration_pump_metrics.tick_count,
             "enginePumpStarvationCount": runtime.integration_pump_metrics.starvation_count,
             "enginePumpMaxLatenessMicros": runtime.integration_pump_metrics.max_lateness_micros,
+            "engineCommandCount": runtime.integration_pump_metrics.command_count,
+            "engineLastCommandMicros": runtime.integration_pump_metrics.last_command_micros,
+            "engineMaxCommandMicros": runtime.integration_pump_metrics.max_command_micros,
+            "engineMaxCommandKind": runtime.integration_pump_metrics.max_command_kind,
+            "engineInputStageMaxMicros": {
+                "preferencesAndMedia": runtime.integration_pump_metrics.input_stage_max_micros[0],
+                "bridgeMaintenance": runtime.integration_pump_metrics.input_stage_max_micros[1],
+                "sourceEventsBeforePreparation": runtime.integration_pump_metrics.input_stage_max_micros[2],
+                "libraryPreparation": runtime.integration_pump_metrics.input_stage_max_micros[3],
+                "sourceEventsAfterPreparation": runtime.integration_pump_metrics.input_stage_max_micros[4],
+            },
             "lastReanchor": link_timing.last_reanchor.map(|reason| match reason {
                 TimingDiscontinuity::Continuous => "continuous",
                 TimingDiscontinuity::Started => "started",
@@ -4857,6 +5727,7 @@ fn snapshot_envelope_internal(
                     "playerNumber": number,
                     "name": device.name,
                     "address": device.address,
+                    "usbMedia": runtime.media_resolver.status(*number),
                 }))
                 .collect::<Vec<_>>(),
             "lastError": diagnostics.last_error
@@ -4924,9 +5795,15 @@ fn snapshot_envelope_internal(
             } else {
                 "autoHeld"
             };
+            let preparation = runtime.live_library_status.get(&deck.track_load_id());
             let plan_hold_reason = library_context.filter(|_| !has_plan).map(|context| {
                 library_plan_hold_reason(context, &runtime.planning_worker.light_policy)
-            });
+            }).or_else(|| (!has_plan).then(|| match preparation.map(|entry| entry.0) {
+                Some("not-synced") => "Sync this track from the Player's USB in Import & Sources.",
+                Some("phrases-required") => "Prepare the Lumi phrases for this track in Library.",
+                Some("library-unavailable") => "Library preparation is unavailable; Pro DJ Link remains connected.",
+                _ => "Identifying the USB and preparing this track independently of playback.",
+            }.to_owned()).filter(|_| runtime.deck_source_mode == DeckSourceMode::ConnectedDecks));
             json!({
                 "deckId": deck_id.value(),
                 "hardwareModel": if runtime.deck_source_mode == DeckSourceMode::ConnectedDecks {
@@ -4935,6 +5812,7 @@ fn snapshot_envelope_internal(
                     None
                 },
                 "trackLoadId": deck.track_load_id().value(),
+                "trackSource": track_source_display(runtime, deck.track_load_id()),
                 "beat": deck.beat(),
                 "effectiveBpmMilli": deck.effective_bpm_milli(),
                 "playing": deck.is_playing(),
@@ -4944,6 +5822,9 @@ fn snapshot_envelope_internal(
                 "phraseIndex": deck.phrase_index(),
                 "planEligibility": plan_eligibility,
                 "planHoldReason": plan_hold_reason,
+                "libraryPreparation": preparation.map(|entry| entry.0),
+                "libraryPreparationMicros": preparation.map(|entry| entry.1),
+                "libraryUpdatePending": preparation.is_some_and(|entry| entry.0 == "update-on-next-load"),
                 "localPlayback": local_playback,
                 "track": {
                     "id": metadata.id().value(),
@@ -5396,6 +6277,7 @@ const fn output_effect_reason_name(reason: OutputEffectReason) -> &'static str {
         OutputEffectReason::PhraseBoundary => "phraseBoundary",
         OutputEffectReason::ProviderRejected => "providerRejected",
         OutputEffectReason::StaleExecutionContext => "staleExecutionContext",
+        OutputEffectReason::InitialLaunchDeferred => "initialLaunchDeferred",
     }
 }
 
@@ -5505,6 +6387,7 @@ const fn decision_reason_name(reason: DecisionReason) -> &'static str {
         DecisionReason::RuntimeInitialized => "runtimeInitialized",
         DecisionReason::SourceStatusAccepted => "sourceStatusAccepted",
         DecisionReason::TrackLoadAccepted => "trackLoadAccepted",
+        DecisionReason::TrackMetadataHydrated => "trackMetadataHydrated",
         DecisionReason::PositionAdvanced => "positionAdvanced",
         DecisionReason::PositionSeeked => "positionSeeked",
         DecisionReason::PlaybackTempoChanged => "playbackTempoChanged",

@@ -47,12 +47,16 @@ final class BridgePublisher implements AutoCloseable {
     }
 
     boolean publishCritical(String type, Object payload) {
+        return publishCritical(type, payload, null);
+    }
+
+    boolean publishCritical(String type, Object payload, PacketOrigin origin) {
         Objects.requireNonNull(type, "type");
         Objects.requireNonNull(payload, "payload");
         if (!running.get()) {
             return false;
         }
-        boolean accepted = criticalQueue.offer(PendingEvent.now(BridgeTrafficClass.CRITICAL, type, payload));
+        boolean accepted = criticalQueue.offer(PendingEvent.now(BridgeTrafficClass.CRITICAL, type, payload, origin));
         if (!accepted) {
             criticalSaturationCount.incrementAndGet();
             return false;
@@ -62,6 +66,10 @@ final class BridgePublisher implements AutoCloseable {
     }
 
     boolean publishLatest(BridgeTrafficClass trafficClass, int deviceNumber, String type, Object payload) {
+        return publishLatest(trafficClass, deviceNumber, type, payload, null);
+    }
+
+    boolean publishLatest(BridgeTrafficClass trafficClass, int deviceNumber, String type, Object payload, PacketOrigin origin) {
         Objects.requireNonNull(trafficClass, "trafficClass");
         Objects.requireNonNull(type, "type");
         Objects.requireNonNull(payload, "payload");
@@ -73,7 +81,7 @@ final class BridgePublisher implements AutoCloseable {
         }
         PendingEvent previous;
         synchronized (mailboxLock) {
-            previous = mailboxes.get(trafficClass).put(deviceNumber, PendingEvent.now(trafficClass, type, payload));
+            previous = mailboxes.get(trafficClass).put(deviceNumber, PendingEvent.now(trafficClass, type, payload, origin));
         }
         if (previous != null) {
             coalescedContinuousCount.incrementAndGet();
@@ -165,6 +173,7 @@ final class BridgePublisher implements AutoCloseable {
                 event.observedAtNanos(),
                 event.trafficClass().externalName(),
                 queueAgeMicros,
+                event.origin(),
                 event.type(),
                 event.payload()
         );
@@ -198,9 +207,9 @@ final class BridgePublisher implements AutoCloseable {
         }
     }
 
-    private record PendingEvent(long observedAtNanos, BridgeTrafficClass trafficClass, String type, Object payload) {
-        static PendingEvent now(BridgeTrafficClass trafficClass, String type, Object payload) {
-            return new PendingEvent(System.nanoTime(), trafficClass, type, payload);
+    private record PendingEvent(long observedAtNanos, BridgeTrafficClass trafficClass, String type, Object payload, PacketOrigin origin) {
+        static PendingEvent now(BridgeTrafficClass trafficClass, String type, Object payload, PacketOrigin origin) {
+            return new PendingEvent(System.nanoTime(), trafficClass, type, payload, origin);
         }
     }
 }

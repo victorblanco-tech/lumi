@@ -4,6 +4,7 @@ import LumiDesignSystem
 public enum LibraryCondition: String, CaseIterable, Equatable, Sendable {
     case empty
     case importing
+    case querying
     case ready
     case stale
     case degraded
@@ -12,7 +13,7 @@ public enum LibraryCondition: String, CaseIterable, Equatable, Sendable {
     public var componentState: LumiComponentState {
         switch self {
         case .empty: .empty
-        case .importing: .loading
+        case .importing, .querying: .loading
         case .ready: .ready
         case .stale: .stale
         case .degraded: .degraded
@@ -208,12 +209,14 @@ public struct LibraryPlaylist: Identifiable, Equatable, Sendable {
     public let sourcePlaylistID: String
     public let name: String
     public let trackCount: UInt64
+    public let folderNames: [String]?
 
-    public init(id: UInt64, sourcePlaylistID: String, name: String, trackCount: UInt64) {
+    public init(id: UInt64, sourcePlaylistID: String, name: String, trackCount: UInt64, folderNames: [String]? = nil) {
         self.id = id
         self.sourcePlaylistID = sourcePlaylistID
         self.name = name
         self.trackCount = trackCount
+        self.folderNames = folderNames
     }
 }
 
@@ -673,6 +676,34 @@ public struct LibraryWorkspaceState: Equatable, Sendable {
         placeholder(.error, diagnostic: message)
     }
 
+    /// A failed selection must never show the previous playlist's rows under
+    /// the new selection. Keep navigation and prepared editor data available.
+    public func failingQuery(_ request: LibraryQueryRequest, message: String) -> Self {
+        queryState(request, condition: .error, message: message)
+    }
+
+    public func loadingQuery(_ request: LibraryQueryRequest) -> Self {
+        queryState(request, condition: .querying, message: nil)
+    }
+
+    private func queryState(_ request: LibraryQueryRequest, condition: LibraryCondition, message: String?) -> Self {
+        Self(
+            condition: condition, providerKind: providerKind, source: source,
+            capabilities: capabilities, collectionTotal: collectionTotal, playlists: playlists,
+            query: LibraryQuery(search: request.search, playlistID: request.playlistID,
+                                offset: request.offset, limit: request.limit,
+                                sortBy: request.sortBy, sortDirection: request.sortDirection,
+                                workflowFilter: request.workflowFilter, workflowStepID: request.workflowStepID),
+            page: LibraryPage(total: 0, offset: request.offset, tracks: []),
+            workflow: workflow, workflowCatalog: workflowCatalog, editor: editor,
+            phraseRoleSettings: phraseRoleSettings, autoloopCatalog: autoloopCatalog,
+            midiIntegration: midiIntegration, midiClockIntegration: midiClockIntegration,
+            abletonLinkIntegration: abletonLinkIntegration, deckInputIntegration: deckInputIntegration,
+            rekordboxDevices: rekordboxDevices, rekordboxDeviceInspection: rekordboxDeviceInspection,
+            dataManagement: dataManagement, diagnostic: message
+        )
+    }
+
     public static func placeholder(
         _ condition: LibraryCondition,
         diagnostic: String? = nil
@@ -749,8 +780,16 @@ public struct RekordboxDeviceState: Equatable, Sendable, Identifiable {
     public let cueRevisionTracked: Bool
     public let reviewTracks: [RekordboxDeviceReviewTrackState]
     public let playlists: [RekordboxDeviceSyncedPlaylistState]
+    public var skippedTracks: [RekordboxDeviceSkippedTrackState] = []
 
     public var id: String { sourceID }
+}
+
+public struct RekordboxDeviceSkippedTrackState: Equatable, Sendable, Identifiable {
+    public let deviceTrackID: UInt32
+    public let title: String
+    public let reason: String
+    public var id: UInt32 { deviceTrackID }
 }
 
 public struct RekordboxDeviceReviewTrackState: Equatable, Sendable, Identifiable {
@@ -791,6 +830,19 @@ public struct RekordboxDeviceReviewComponentsState: Equatable, Sendable {
 public enum USBConflictResolutionChoice: String, Sendable {
     case keepLumi = "keep-lumi"
     case useUSB = "use-usb"
+}
+
+public struct USBReviewQueue: Sendable {
+    private var requests: [USBConflictResolutionRequest] = []
+    public var isEmpty: Bool { requests.isEmpty }
+    public var count: Int { requests.count }
+    public init() {}
+    public mutating func start(_ requests: [USBConflictResolutionRequest]) { self.requests = requests }
+    public mutating func stop() { requests.removeAll() }
+    public mutating func next() -> USBConflictResolutionRequest? {
+        guard !requests.isEmpty else { return nil }
+        return requests.removeFirst()
+    }
 }
 
 public struct USBConflictResolutionRequest: Sendable {
@@ -852,14 +904,38 @@ public struct USBSourceOperationState: Equatable, Sendable {
 
     public static let idle = Self(phase: .idle, title: "", detail: "")
     public var isActive: Bool { phase == .reading || phase == .synchronizing }
+
+    public func failedMessage(for source: String) -> String? {
+        guard phase == .failed, sourceID == source else { return nil }
+        if detail.contains("USB identity conflicts") {
+            return "Sync stopped: USB identity needs confirmation. No tracks were imported."
+        }
+        return detail
+    }
 }
 
 public struct ProDJLinkDeviceState: Equatable, Sendable, Identifiable {
     public let playerNumber: UInt64
     public let name: String
     public let address: String?
+    public let usbMedia: ProDJLinkUSBMediaState?
+
+    public init(playerNumber: UInt64, name: String, address: String?, usbMedia: ProDJLinkUSBMediaState? = nil) {
+        self.playerNumber = playerNumber
+        self.name = name
+        self.address = address
+        self.usbMedia = usbMedia
+    }
 
     public var id: UInt64 { playerNumber }
+}
+
+public struct ProDJLinkUSBMediaState: Equatable, Sendable {
+    public let state: String
+    public let sourceName: String?
+    public let generation: UInt64
+    public let lastVerifiedUnixMillis: UInt64?
+    public let detail: String
 }
 
 public struct DeckInputIntegrationState: Equatable, Sendable {

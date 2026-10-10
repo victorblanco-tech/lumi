@@ -145,6 +145,7 @@ public struct MidiOutputIntegrationSnapshot: Equatable, Sendable {
     public let savedTimingOffsetMillis: Int?
     public let timingSavePending: Bool
     public let timingSaveError: String?
+    public let launch: InitialLaunchSnapshot?
     public let bankPreRollMillis: UInt64
     public let realtimeLane: RealtimeMidiOutputLaneSnapshot?
 
@@ -162,6 +163,7 @@ public struct MidiOutputIntegrationSnapshot: Equatable, Sendable {
         savedTimingOffsetMillis: Int? = nil,
         timingSavePending: Bool = false,
         timingSaveError: String? = nil,
+        launch: InitialLaunchSnapshot? = nil,
         bankPreRollMillis: UInt64 = 50,
         realtimeLane: RealtimeMidiOutputLaneSnapshot? = nil
     ) {
@@ -178,8 +180,31 @@ public struct MidiOutputIntegrationSnapshot: Equatable, Sendable {
         self.savedTimingOffsetMillis = savedTimingOffsetMillis
         self.timingSavePending = timingSavePending
         self.timingSaveError = timingSaveError
+        self.launch = launch
         self.bankPreRollMillis = bankPreRollMillis
         self.realtimeLane = realtimeLane
+    }
+}
+
+public struct InitialLaunchSnapshot: Equatable, Sendable {
+    public let policy: String
+    public let status: String
+    public let targetPhraseIndex: UInt64?
+    public let remainingBeats: UInt64?
+    public let savePending: Bool
+    public let saveError: String?
+
+    public var label: String {
+        if let saveError { return "Not saved: \(saveError)" }
+        if savePending { return "Saving launch setting…" }
+        guard policy == "onPhraseStart" else { return "Immediate start" }
+        switch status {
+        case "waitingForPlayback": return "Waiting for playback"
+        case "waitingForPhrase": return "Phrase \((targetPhraseIndex ?? 0) + 1) · \(remainingBeats ?? 0) beats to launch"
+        case "noUpcomingPhrase": return "No upcoming phrase — return to Off and choose Immediate"
+        case "launched": return "Show running"
+        default: return "Start on phrase"
+        }
     }
 }
 
@@ -246,6 +271,7 @@ public struct AbletonLinkIntegrationSnapshot: Equatable, Sendable {
 }
 
 public struct DeckInputIntegrationSnapshot: Equatable, Sendable {
+    public let playerUSBs: [LivePlayerUSBSnapshot]
     public let state: String
     public let destinationName: String?
     public let protocolName: String
@@ -277,7 +303,8 @@ public struct DeckInputIntegrationSnapshot: Equatable, Sendable {
         precisePositionMessageCount: UInt64 = 0,
         authoritativePositionCount: UInt64 = 0,
         positionDiscontinuityCount: UInt64 = 0,
-        positionAuthorityReady: Bool = false
+        positionAuthorityReady: Bool = false,
+        playerUSBs: [LivePlayerUSBSnapshot] = []
     ) {
         self.state = state
         self.destinationName = destinationName
@@ -294,6 +321,22 @@ public struct DeckInputIntegrationSnapshot: Equatable, Sendable {
         self.authoritativePositionCount = authoritativePositionCount
         self.positionDiscontinuityCount = positionDiscontinuityCount
         self.positionAuthorityReady = positionAuthorityReady
+        self.playerUSBs = playerUSBs
+    }
+}
+
+public struct LivePlayerUSBSnapshot: Equatable, Sendable, Identifiable {
+    public var id: UInt64 { playerNumber }
+    public let playerNumber: UInt64
+    public let state: String
+    public let sourceName: String?
+    public let colorID: UInt8?
+
+    public init(playerNumber: UInt64, state: String, sourceName: String?, colorID: UInt8? = nil) {
+        self.playerNumber = playerNumber
+        self.state = state
+        self.sourceName = state == "trusted" ? sourceName : nil
+        self.colorID = state == "trusted" ? colorID : nil
     }
 }
 
@@ -478,7 +521,16 @@ public struct DeckVisualClockSnapshot: Equatable, Sendable {
     }
 }
 
+public struct LiveTrackSourceSnapshot: Equatable, Sendable {
+    public let playerNumber: UInt8?
+    public let slot: String
+    public let state: String
+    public let sourceName: String?
+    public let colorID: UInt8?
+}
+
 public struct DeckSnapshot: Equatable, Identifiable, Sendable {
+    public let trackSource: LiveTrackSourceSnapshot?
     public let deckID: UInt64
     /// Exact model/name announced by the matching Pro DJ Link player. Local
     /// Playback and older compatible snapshots intentionally leave this nil.
@@ -508,6 +560,7 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
     public let hotCues: [DeckHotCueSnapshot]
     public let planEligibility: DeckPlanEligibility
     public let planHoldReason: String?
+    public let libraryUpdatePending: Bool
     public let localPlayback: LocalPlaybackTrackSnapshot?
 
     public var id: UInt64 { deckID }
@@ -536,7 +589,9 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
         hotCues: [DeckHotCueSnapshot] = [],
         planEligibility: DeckPlanEligibility = .autoHeld,
         planHoldReason: String? = nil,
-        localPlayback: LocalPlaybackTrackSnapshot? = nil
+        libraryUpdatePending: Bool = false,
+        localPlayback: LocalPlaybackTrackSnapshot? = nil,
+        trackSource: LiveTrackSourceSnapshot? = nil
     ) {
         self.deckID = deckID
         self.hardwareModel = hardwareModel
@@ -561,7 +616,9 @@ public struct DeckSnapshot: Equatable, Identifiable, Sendable {
         self.hotCues = hotCues
         self.planEligibility = planEligibility
         self.planHoldReason = planHoldReason
+        self.libraryUpdatePending = libraryUpdatePending
         self.localPlayback = localPlayback
+        self.trackSource = trackSource
     }
 }
 

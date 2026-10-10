@@ -25,6 +25,79 @@ use super::{
 };
 
 #[test]
+fn detached_status_projection_preserves_query_and_editor_without_writes()
+-> Result<(), Box<dyn std::error::Error>> {
+    let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let root = std::env::temp_dir().join(format!("lumi-projection-{unique}"));
+    std::fs::create_dir_all(&root)?;
+    let path = root.join("library.sqlite");
+    {
+        let mut worker = LibraryWorker::initialize_with_repository(
+            lumi_library_sqlite::SqliteLibraryRepository::open(&path)?,
+            Some(path),
+            true,
+        )?;
+        worker.query(LibraryQueryUpdate {
+            search: "Horizon Lines".to_owned(),
+            playlist_id: None,
+            workflow_filter: None,
+            workflow_step_id: None,
+            offset: 0,
+            limit: 50,
+            sort: LibraryTrackSort::default(),
+        });
+        let selected = worker.status_snapshot_json()?;
+        let track_id = selected["page"]["tracks"][0]["id"]
+            .as_u64()
+            .ok_or("missing demo track")?;
+        worker.open_editor(track_id)?;
+        let expected = worker.status_snapshot_json()?;
+        assert_eq!(expected["page"]["total"], 1);
+        assert!(!expected["editor"].is_null());
+        let job = worker
+            .status_projection_job()
+            .ok_or("missing projection job")?;
+        // Changing the active selection after capture cannot change this job.
+        worker.search = "no matching track".to_owned();
+        let actual = std::thread::spawn(job)
+            .join()
+            .map_err(|_| "projection panicked")??;
+        assert_eq!(actual, expected);
+        assert_eq!(worker.search, "no matching track");
+        assert_eq!(worker.status_snapshot_json()?["page"]["tracks"], json!([]));
+    }
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
+fn detached_status_projection_missing_database_fails_without_recreating_it()
+-> Result<(), Box<dyn std::error::Error>> {
+    let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
+    let root = std::env::temp_dir().join(format!("lumi-projection-missing-{unique}"));
+    std::fs::create_dir_all(&root)?;
+    let path = root.join("library.sqlite");
+    let job = {
+        let worker = LibraryWorker::initialize_with_repository(
+            lumi_library_sqlite::SqliteLibraryRepository::open(&path)?,
+            Some(path.clone()),
+            false,
+        )?;
+        worker
+            .status_projection_job()
+            .ok_or("missing projection job")?
+    };
+    std::fs::remove_file(&path)?;
+    assert!(job().is_err());
+    assert!(
+        !path.exists(),
+        "read-only projection must not create a replacement DB"
+    );
+    std::fs::remove_dir_all(root)?;
+    Ok(())
+}
+
+#[test]
 fn backup_restore_prepares_state_before_activation() -> Result<(), Box<dyn std::error::Error>> {
     let unique = SystemTime::now().duration_since(UNIX_EPOCH)?.as_nanos();
     let root = std::env::temp_dir().join(format!("lumi-restore-boundary-{unique}"));
@@ -195,6 +268,20 @@ fn inconsistent_rekordbox_beat_phase_fails_closed() {
             actual: 4,
         })
     ));
+}
+
+#[test]
+fn duplicate_rekordbox_beat_times_are_not_silently_repaired() {
+    let mut analysis = resolved_analysis_with_grid(&[1, 2, 3, 4]);
+    analysis.beat_grid[2].time_millis = analysis.beat_grid[1].time_millis;
+    assert!(matches!(
+        canonical_beat_grid(&analysis),
+        Err(LibraryWorkerError::InvalidRekordboxBeatGrid(_))
+    ));
+    assert_eq!(
+        analysis.beat_grid[2].time_millis,
+        analysis.beat_grid[1].time_millis
+    );
 }
 
 #[test]
@@ -373,6 +460,43 @@ fn local_deck_preview_keeps_the_same_eight_bit_rgb_scale_as_detail()
         .into_parts();
     let preview = context.waveform_preview_json();
     let remote = context.remote_waveform_preview_json();
+    let source = worker
+        .repository
+        .track(TrackId::new(track_id))?
+        .ok_or("source track missing")?;
+    assert_eq!(
+        preview,
+        super::LibraryPlanContext::waveform_preview_value(
+            "localLibrary",
+            &deck_waveform_preview_points(
+                source.waveform(),
+                super::MAX_DECK_WAVEFORM_PREVIEW_POINTS
+            ),
+        )
+    );
+    assert_eq!(
+        remote,
+        super::LibraryPlanContext::waveform_preview_value(
+            "localLibraryDetail",
+            &deck_waveform_preview_points(
+                source.waveform(),
+                super::MAX_DECK_WAVEFORM_DETAIL_POINTS
+            ),
+        )
+    );
+    let cloned = context.clone();
+    assert!(std::sync::Arc::ptr_eq(
+        &context.waveform_preview,
+        &cloned.waveform_preview
+    ));
+    assert!(std::sync::Arc::ptr_eq(
+        &context.remote_waveform_preview,
+        &cloned.remote_waveform_preview
+    ));
+    let mut detached = context.waveform_preview_json();
+    detached["points"] = json!([]);
+    assert_eq!(context.waveform_preview_json(), preview);
+    assert_eq!(cloned.remote_waveform_preview_json(), remote);
     let maximum_channel = preview["points"]
         .as_array()
         .ok_or("preview points are missing")?
@@ -874,6 +998,142 @@ fn phrase_loop_strategy_is_role_safe_revisioned_and_restart_persistent()
         false
     );
     std::fs::remove_file(path)?;
+    Ok(())
+}
+
+#[test]
+fn offline_verified_audio_keeps_editor_and_local_playback_contract_valid()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut worker = LibraryWorker::demo()?;
+    let track_id = worker.snapshot_json()?["page"]["tracks"][0]["id"]
+        .as_u64()
+        .ok_or("missing track")?;
+    let mut aliases = [lumi_library_sqlite::DeviceAliasUpsert {
+        device_track_id: 42,
+        simulator_signature: 0,
+        canonical_track_id: Some(TrackId::new(track_id)),
+        match_kind: "verified-audio".into(),
+        title: "Track".into(),
+        artist: "Artist".into(),
+        bpm_milli: 140_000,
+        duration_millis: 100_000,
+        file_size: 123,
+        audio_uri: "file://localhost/Volumes/Lumi-absent-regression/Track.mp3".into(),
+        metadata_revision: "metadata-1".into(),
+        color_rgb: None,
+        master_database_id: 1,
+        master_content_id: 42,
+        information_update_count: 1,
+        analysis_revision: "analysis-1".into(),
+        audio_signature: "audio-full-v1:verified".into(),
+        analyzed_at: "2026-10-05".into(),
+        sync_disposition: "current".into(),
+    }];
+    worker.repository.sync_device_aliases(
+        "usb:test",
+        "Test",
+        "db-1",
+        &mut aliases,
+        &[],
+        &[],
+        &[],
+        &[],
+    )?;
+    worker.open_editor(track_id)?;
+    let opened = worker.snapshot_json()?;
+    let unavailable = format!("lumi-unavailable://track/{track_id}");
+    assert_eq!(opened["editor"]["audioUri"], unavailable);
+    assert!(
+        !opened["editor"]["waveform"]
+            .as_array()
+            .ok_or("waveform")?
+            .is_empty()
+    );
+    let revision = opened["editor"]["timeline"]["revision"]
+        .as_u64()
+        .ok_or("revision")?;
+    let (_, context) = worker
+        .local_playback_track(track_id, revision)?
+        .into_parts();
+    assert_eq!(context.audio_uri, unavailable);
+    // Connected Players never need local audio, even when the same USB is offline.
+    let connected = worker
+        .connected_track_for_source("usb:test", 42)?
+        .ok_or("alias")?;
+    let (_, context) = connected.prepared.into_parts();
+    assert!(context.audio_uri.is_empty());
+    Ok(())
+}
+
+#[test]
+fn invalid_usb_analysis_retains_existing_track_and_persists_source_warning()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut worker = LibraryWorker::demo()?;
+    let id = TrackId::new(
+        worker.snapshot_json()?["page"]["tracks"][0]["id"]
+            .as_u64()
+            .ok_or("missing track")?,
+    );
+    let before = worker.repository.track(id)?.ok_or("missing track")?;
+    let timeline = worker.repository.timeline_head(id)?;
+    let mut aliases = [lumi_library_sqlite::DeviceAliasUpsert {
+        device_track_id: 42,
+        simulator_signature: 0,
+        canonical_track_id: Some(id),
+        match_kind: "verified-existing-alias".into(),
+        title: "Invalid Track".into(),
+        artist: "Artist".into(),
+        bpm_milli: 140_000,
+        duration_millis: 100_000,
+        file_size: 123,
+        audio_uri: "file://localhost/Volumes/Test/Track.mp3".into(),
+        metadata_revision: "new-metadata".into(),
+        color_rgb: Some(0xff0000),
+        master_database_id: 1,
+        master_content_id: 42,
+        information_update_count: 99,
+        analysis_revision: "invalid-grid-1".into(),
+        audio_signature: "audio-full-v1:verified".into(),
+        analyzed_at: "2026-10-07".into(),
+        sync_disposition: "held-invalid:beat marker times must increase strictly".into(),
+    }];
+    worker.repository.sync_device_aliases(
+        "usb:test",
+        "Test",
+        "db-1",
+        &mut aliases,
+        &[],
+        &[],
+        &[],
+        &[],
+    )?;
+    assert_eq!(worker.repository.track(id)?.ok_or("missing track")?, before);
+    assert_eq!(worker.repository.timeline_head(id)?, timeline);
+    let skipped = worker.repository.device_invalid_analysis_tracks()?;
+    assert_eq!(skipped["usb:test"][0].device_track_id, 42);
+    assert_eq!(skipped["usb:test"][0].title, "Invalid Track");
+    let snapshot = worker.snapshot_json()?;
+    assert_eq!(
+        snapshot["rekordboxDevices"][0]["skippedTracks"][0]["title"],
+        "Invalid Track"
+    );
+    aliases[0].sync_disposition = "current".into();
+    worker.repository.sync_device_aliases(
+        "usb:test",
+        "Test",
+        "db-2",
+        &mut aliases,
+        &[],
+        &[],
+        &[],
+        &[],
+    )?;
+    assert!(
+        worker
+            .repository
+            .device_invalid_analysis_tracks()?
+            .is_empty()
+    );
     Ok(())
 }
 
@@ -1636,4 +1896,28 @@ fn creative_timeline_reuse_is_revisioned_and_exact_beat_safe()
         edited
     );
     Ok(())
+}
+#[test]
+fn fresh_review_visibility_does_not_resurrect_historical_conflicts() {
+    let mut comparisons = std::collections::BTreeMap::new();
+    assert!(super::current_review_visible(None, 7));
+    assert!(!super::current_review_visible(Some(&comparisons), 7));
+    let mut item = super::DeviceReviewComparison {
+        beat_grid_changed: false,
+        hot_cues_changed: false,
+        file_data_changed: false,
+        raw_phrases_changed: false,
+        waveform_changed: false,
+        beat_grid_detail: String::new(),
+        hot_cues_detail: String::new(),
+        raw_phrases_detail: String::new(),
+        waveform_detail: String::new(),
+        file_detail: String::new(),
+    };
+    comparisons.insert(7, item.clone());
+    assert!(!super::current_review_visible(Some(&comparisons), 7));
+    item.hot_cues_changed = true;
+    comparisons.insert(7, item);
+    assert!(super::current_review_visible(Some(&comparisons), 7));
+    assert!(!super::current_review_visible(Some(&comparisons), 8));
 }

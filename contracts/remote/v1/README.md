@@ -11,8 +11,22 @@ Lumi Remote for iPhone. It is not the desktop engine protocol.
 - Missing delivery sequences require a new snapshot before controls re-enable.
 - Every mutation is revision-bound, idempotent and requires the active
   Controller lease.
-- The contract contains no Library, USB, audio URI, filesystem path, engine
-  token or raw integration diagnostics.
+- The contract contains no Library records, USB files or internal IDs, audio URI,
+  filesystem path, engine token or raw integration diagnostics.
+
+Optional `playerUsbs` contains at most six mounted-USB presentation records:
+Player number, identity state, verified source name and nullable native media
+color ID. It also covers Players without a loaded track. Missing fields from
+older snapshots mean no identity information, not a guessed source. Source names
+and colors are omitted for unknown/conflicted identities. Live transport anchors
+preserve this list rather than replacing it.
+
+Each loaded Player may also contain optional `trackSource`: source Player number,
+slot, resolution state, verified source name and native media color. This is the
+origin of that track load, not the mounted USB in the destination Player. A linked
+track can therefore originate from CHRM in Player 1 while Player 2 has GRAY mounted.
+Unresolved origins omit names and colors; older snapshots without this field show
+no origin rather than guessing. Transport anchors preserve the load's origin.
 
 The authoritative limits and allowlists are recorded in `manifest.json`.
 Fixtures are consumed by the Rust protocol tests and mirrored by the Swift

@@ -87,6 +87,8 @@ func staleTransportAnchorCannotRewindThePlayer() throws {
         )
     )
     #expect(model.projection?.players[0].transport.beat == 32)
+    #expect(model.projection?.playerUSBs.first?.sourceName == "DJ VIC GRAY")
+    #expect(model.projection?.playerUSBs.first?.colorID == 7)
 }
 
 @MainActor
@@ -107,6 +109,9 @@ func leaderTransportAnchorUpdatesTheDisplayedAbletonLinkTempo() throws {
         )
     )
     #expect(model.projection?.integrations.abletonLinkBPMMilli == 142_500)
+    #expect(model.projection?.players[0].trackSource?.sourceName == "DJ VIC CHRM")
+    #expect(model.projection?.players[0].trackSource?.playerNumber == 2)
+    #expect(model.projection?.playerUSBs.first?.sourceName == "DJ VIC GRAY")
 }
 
 @MainActor
@@ -389,11 +394,14 @@ extension RemoteLiveProjection {
                     waveform: [],
                     hotCues: [],
                     phrases: []
-                )
+                ),
+                trackSource: .init(playerNumber: 2, slot: "USB_SLOT", state: "trusted",
+                                   sourceName: "DJ VIC CHRM", colorID: 1)
             )],
             livePlan: nil,
             nextPlan: nil,
-            themeOptions: []
+            themeOptions: [],
+            playerUSBs: [.init(playerNumber: 1, state: "trusted", sourceName: "DJ VIC GRAY", colorID: 7)]
         )
     }
 }

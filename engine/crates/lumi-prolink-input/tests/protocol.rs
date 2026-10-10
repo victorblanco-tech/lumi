@@ -9,6 +9,44 @@ const PRECISE_POSITION: &str =
     include_str!("../../../../contracts/prolink-bridge/v1/fixtures/precise-position.json");
 
 #[test]
+fn optional_packet_origin_preserves_receive_clock_and_validates_address()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut decoder = BridgeDecoder::new();
+    decoder.decode_line(HELLO)?;
+    let mut event: serde_json::Value = serde_json::from_str(PRECISE_POSITION)?;
+    event["sequence"] = 2.into();
+    event["packetOrigin"] = serde_json::json!({"address":"192.0.2.1", "receivedAtNanos":1234});
+    let parsed = decoder.decode_line(&event.to_string())?;
+    let origin = parsed.packet_origin.ok_or("missing packet origin")?;
+    assert_eq!(origin.address.to_string(), "192.0.2.1");
+    assert_eq!(origin.received_at_nanos, 1234);
+    event["sequence"] = 3.into();
+    event["packetOrigin"]["address"] = "not an IP".into();
+    assert!(decoder.decode_line(&event.to_string()).is_err());
+    Ok(())
+}
+
+#[test]
+fn usb_media_color_decodes_as_display_evidence_only() -> Result<(), Box<dyn std::error::Error>> {
+    for (number, color, valid) in [(1, 7, true), (2, 1, true), (33, 7, false), (1, 9, false)] {
+        let mut decoder = BridgeDecoder::new();
+        decoder.decode_line(HELLO)?;
+        let line = serde_json::json!({
+            "protocol": PROTOCOL_NAME, "protocolVersion": PROTOCOL_VERSION,
+            "sequence": 2, "observedAtNanos": 1, "type": "usbMedia", "trafficClass": "display",
+            "payload": { "deviceNumber": number, "colorId": color }
+        })
+        .to_string();
+        let result = decoder.decode_line(&line);
+        assert_eq!(result.is_ok(), valid);
+        if let Ok(message) = result {
+            assert!(matches!(message.event, BridgeEvent::USBMedia(_)));
+        }
+    }
+    Ok(())
+}
+
+#[test]
 fn decodes_versioned_hello_and_rich_deck_status() {
     let mut decoder = BridgeDecoder::new();
     let hello = decoder
@@ -143,4 +181,28 @@ fn accepts_physical_cdj_unloaded_sentinel_observed_on_the_wire() {
     assert_eq!(status.beat_number, -1);
     assert_eq!(status.track_bpm, 655.35);
     assert_eq!(status.effective_bpm, 655.35);
+}
+#[test]
+fn usb_mount_protocol_rejects_unknown_states_and_invalid_players() {
+    for (player, state, valid) in [
+        (1, "loaded", true),
+        (2, "empty", true),
+        (1, "unloading", true),
+        (1, "unknown", true),
+        (0, "loaded", false),
+        (7, "loaded", false),
+        (1, "invented", false),
+    ] {
+        let line = serde_json::json!({"protocol":"lumi-prolink-bridge","protocolVersion":1,
+            "sequence":2,"observedAtNanos":2,"type":"usbMount","trafficClass":"critical",
+            "payload":{"deviceNumber":player,"state":state}})
+        .to_string();
+        let mut decoder = lumi_prolink_input::BridgeDecoder::new();
+        let hello = serde_json::json!({"protocol":"lumi-prolink-bridge","protocolVersion":1,
+            "sequence":1,"observedAtNanos":1,"type":"hello","payload":{
+            "bridgeVersion":"fixture","beatLinkVersion":"8.0.0","readOnly":true}})
+        .to_string();
+        assert!(decoder.decode_line(&hello).is_ok());
+        assert_eq!(decoder.decode_line(&line).is_ok(), valid);
+    }
 }

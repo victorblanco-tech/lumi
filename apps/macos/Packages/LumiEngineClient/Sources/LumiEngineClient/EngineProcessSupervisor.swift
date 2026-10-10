@@ -291,6 +291,13 @@ public actor EngineProcessSupervisor {
         return process?.isRunning == true || attachedProcessID.map(processIsRunning) == true
     }
 
+    public func processDetails() -> String {
+        let pid = process?.processIdentifier ?? attachedProcessID
+        guard let pid, processIsRunning(pid),
+              let path = ProcessExecutableIdentity.path(processID: pid) else { return "No running engine process" }
+        return "lumi-engine · PID \(pid)\n\(path)\nVersion \(expectedServiceIdentity?.productVersion ?? "unknown")"
+    }
+
     /// Disconnects this UI session without terminating the channel engine.
     ///
     /// The Rust service owns the fail-safe transition to Off on authenticated
@@ -302,25 +309,34 @@ public actor EngineProcessSupervisor {
     }
 
     public func stop() async {
-        await transport.close()
-
-        if launchAgentService != nil {
-            process = nil
-            attachedProcessID = nil
-            sessionToken = nil
-            commandSequence = 0
-            return
+        do {
+            try await shutdown()
+        } catch {
+            Self.logger.error("Engine shutdown failed: \(error.localizedDescription, privacy: .public)")
         }
+    }
 
+    /// Explicit application shutdown, unlike a temporary UI detach. Do not
+    /// discard ownership evidence until the owned process has actually exited.
+    public func shutdown() async throws {
+        await transport.close()
+        let ownedPID = process?.processIdentifier ?? attachedProcessID
+            ?? serviceRecordURL.flatMap { readServiceRecord(at: $0)?.processID }
+        if let service = launchAgentService, service.status == .enabled {
+            try await service.unregister()
+        }
         if let process, process.isRunning {
             await terminateProcess(process.processIdentifier)
             if !process.isRunning {
                 process.waitUntilExit()
             }
-        } else if let attachedProcessID,
+        } else if let ownedPID,
                   let expectedServiceIdentity,
-                  processMatchesServiceIdentity(attachedProcessID, identity: expectedServiceIdentity) {
-            await terminateProcess(attachedProcessID)
+                  processMatchesServiceIdentity(ownedPID, identity: expectedServiceIdentity) {
+            await terminateProcess(ownedPID)
+        }
+        if let ownedPID, processIsRunning(ownedPID) {
+            throw EngineClientError.serviceHandoverTimedOut
         }
         if let serviceRecordURL {
             try? FileManager.default.removeItem(at: serviceRecordURL)
@@ -329,6 +345,7 @@ public actor EngineProcessSupervisor {
         attachedProcessID = nil
         sessionToken = nil
         commandSequence = 0
+        launchAgentService = nil
     }
 
     private func launchUsingLaunchAgent(
@@ -536,6 +553,10 @@ public actor EngineProcessSupervisor {
 
     private func terminateProcess(_ processID: Int32) async {
         guard processIsRunning(processID) else { return }
+        // Recheck before escalation: a PID may have been recycled while we
+        // yielded during graceful shutdown. Never kill an unrelated process.
+        let originalPath = ProcessExecutableIdentity.path(processID: processID)
+        let ownedChild = process.flatMap { $0.processIdentifier == processID ? $0 : nil }
         _ = Darwin.kill(processID, SIGTERM)
         let clock = ContinuousClock()
         let gracefulDeadline = clock.now.advanced(by: .seconds(5))
@@ -543,6 +564,11 @@ public actor EngineProcessSupervisor {
             try? await Task.sleep(for: .milliseconds(25))
         }
         guard processIsRunning(processID) else { return }
+        let stillOwnedChild = ownedChild?.isRunning == true
+        let stillSameExecutable = originalPath.map {
+            ProcessExecutableIdentity.matches(processID: processID, expectedPath: $0)
+        } ?? false
+        guard stillOwnedChild || stillSameExecutable else { return }
         Self.logger.fault(
             "Lumi engine pid \(processID) ignored graceful termination; forcing exit"
         )

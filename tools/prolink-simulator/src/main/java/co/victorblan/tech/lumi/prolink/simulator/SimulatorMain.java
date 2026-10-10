@@ -32,6 +32,14 @@ public final class SimulatorMain {
         System.out.println("USB: " + session.library().root() + " ("
                 + session.library().size() + " tracks, "
                 + session.library().playlistCount() + " playlists)");
+        PlayerState.Snapshot second = session.players().get(1).snapshot();
+        if (second.insertedUsb() != null) {
+            UsbLibrary secondLibrary = second.insertedUsb().library();
+            System.out.println("Player 2 USB: " + secondLibrary.displayName() + " ("
+                    + secondLibrary.size() + " tracks, " + secondLibrary.playlistCount() + " playlists)");
+        } else {
+            System.out.println("Player 2 USB: none (load over LINK from Player 1)");
+        }
         System.out.println("Players: " + config.playerNumber() + " and " + config.secondPlayerNumber());
         System.out.println("Network: " + session.networkSummary());
         System.out.println("Remote control: " + session.remoteUrl());

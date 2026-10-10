@@ -16,6 +16,17 @@ You need:
 Local Playback, Track Editor and Light Plan preview work without players. Lumi
 runs locally and does not need internet access during normal use.
 
+### Live-show network limitation in 0.6.4
+
+The validated reference setup uses Ethernet, Wi-Fi off and the macOS application
+firewall temporarily off. Firewall-enabled reception showed timing delays on
+the reference Mac; Wi-Fi and firewall-on timing are not yet accepted for shows.
+This is a temporary limitation, not a general claim that firewalls cannot handle
+DJ traffic. Only choose the workaround on a trusted, preferably isolated DJ
+network, never a public/untrusted network. An uplink means the network is not
+isolated. Restore the firewall after the show. Lumi never changes it for you.
+See the [0.6.4 release notes](../release/0.6.4-release-notes.md).
+
 To exercise Live Decks without physical players, use the separate
 [Pro DJ Link Simulator](pro-dj-link-simulator.md) on another Mac. It supports
 two Players, track loops and playlist-driven Auto Mix for longer tests.
@@ -74,10 +85,23 @@ fresh scan. Wait for the source's completion report before ejecting the USB.
 If a playlist was moved to another folder in rekordbox, select its new location
 again rather than assuming the old numeric playlist ID still identifies it.
 
+In Tracks/Editor and the Local Playback library, open folders to browse your
+synced playlists. Selecting a playlist filters the track list; opening or closing
+a folder does not change the selected tracks. Only synced playlists appear here.
+For USBs synced by an older Lumi version, scan each USB once to restore its exact
+folder structure. That scan does not import tracks; the structure is then kept
+when the USB is disconnected. A `/` inside a name is not treated as a new folder.
+
 When a track differs from the Lumi copy, the review view shows the evidence Lumi
 can compare: file data, beatgrid, waveform, Hot Cues and source phrases. Choose
 whether to ignore that revision, keep it out of Lumi or replace the Lumi source
 data. Lumi-owned phrases remain separate from source phrases.
+
+If a track has an invalid beatgrid, Lumi skips that track and synchronizes the
+other valid tracks. The USB source lists the skipped track by name. An existing
+Lumi version is retained; a new track without a valid grid is not imported.
+Repair its beatgrid in rekordbox, export to USB and sync again. Lumi never
+invents beats to work around invalid source data.
 
 > A USB beatgrid or audio revision can invalidate earlier phrase alignment.
 > Review changed tracks before a show.
@@ -186,6 +210,21 @@ SoundSwitch should show one Ableton Link peer when Lumi's Link relay is enabled.
 Choose the Lumi MIDI source as SoundSwitch's MIDI input. Your physical Control
 One can remain connected and usable beside Lumi.
 
+### Service controls (next development release)
+
+**Settings → Services** shows whether Lumi's engine and Remote service are
+responding. Expand **Process details** to see their macOS process IDs and app
+paths. **Stop** disconnects Remote and stops Lumi's output; **Start** brings
+the services back, and **Restart** does both in order. Your library and mappings
+are preserved. The saved Ableton Link auto-start preference also applies to
+explicit service starts. Lighting still starts in **Off**: arm and start the
+show deliberately.
+
+Quitting Lumi stops its services and Link helper before the app closes. If a
+service cannot be stopped, Lumi stays open and reports the problem instead of
+silently leaving it behind. Restart interrupts lighting output, so use it only
+when it is safe to do so.
+
 ## 7. Run a show
 
 Open **Live** and choose a mode:
@@ -221,6 +260,17 @@ started. Changes to the currently active or completed phrase are intentionally
 locked.
 
 ### Lighting timing offset
+
+**Available in Lumi 0.6.4 (Remote controls require 0.1.3 or newer).** The timing panel
+also offers **Initial show start**. **Immediate** preserves the normal behavior.
+**On phrase start** waits for the next executable phrase boundary after Start.
+Cue a few beats before that boundary to give Lumi time to prepare the bank and
+scheduled AutoLoop. The Live timing control shows the target phrase and beats
+remaining. This is only an initial run-in; subsequent phrase changes and Hot Cues
+continue normally. The choice is saved on the Mac and shared with Remote.
+Change it in **Off** or **Arm**, never during a running show. If no future phrase
+is available, Lumi says so: return to Off and choose Immediate or cue earlier.
+This does not reset Ableton Link or continuously correct SoundSwitch playback.
 
 The subtle timing control in Live compensates for a consistent delay in the
 SoundSwitch, MIDI or fixture chain:
@@ -274,6 +324,19 @@ exactly. It does not stretch or guess phrase boundaries.
 - Test the intended Bank and AutoLoop slots from Lighting Outputs.
 - BPM and AutoLoop output are separate integrations; a green Link connection
   does not prove MIDI mapping.
+- A ready Lighting Output means Lumi's MIDI sender is available. SoundSwitch
+  does not acknowledge that an AutoLoop has actually started; verify its selected
+  loop and visible progress as part of your pre-show check.
+
+### SoundSwitch stops responding
+
+Put Lumi in **Off** and check SoundSwitch itself. A surviving Link connection
+does not prove that SoundSwitch's user interface or lighting playback is
+healthy. Avoid repeatedly restarting Lumi to force recovery. Save your work if
+SoundSwitch still permits it, then restart SoundSwitch and verify a mapped
+AutoLoop before returning to **Start**. Include whether Control One was connected
+and whether a MIDI device or service had just appeared or disappeared when
+reporting the hang.
 
 ### macOS blocks or cannot open Lumi
 
@@ -289,3 +352,9 @@ SoundSwitch projects, tokens or other private data to a public issue.
 
 Report reproducible problems through
 [GitHub Issues](https://github.com/victorblanco-tech/lumi/issues).
+
+## Bulk USB review
+
+In a USB source's **Tracks to review** section, select individual tracks or choose **Select all**. **Keep Lumi** saves that decision for each exact USB revision; a later change can appear for review again. **Use USB Version…** asks for confirmation before replacing imported Rekordbox components. Lumi-authored phrases and AutoLoop choices remain protected.
+
+Reviews are processed one at a time with the existing revision checks. If a track fails validation, processing stops; already completed choices remain saved and remaining items can be reviewed again.

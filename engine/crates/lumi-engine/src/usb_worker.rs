@@ -73,6 +73,28 @@ pub fn run_usb_worker(request_path: &Path, response_path: &Path) -> Result<(), U
         let source_id =
             validated_source_id(Path::new(root), Some(source_id.clone()), observed_source_id)?;
         let identity = crate::usb_media_identity::register(Path::new(root), &source_id, media_id)?;
+        // Authorization is local, never inferred later from an NFS reply.
+        let database_path = crate::service::configured_database_path()
+            .map_err(|error| LibraryWorkerError::Configuration(error.to_string()))?;
+        if let Some(path) = database_path {
+            let mut repository = lumi_library_sqlite::SqliteLibraryRepository::open(path)
+                .map_err(LibraryWorkerError::from)?;
+            let _ = repository
+                .trust_local_usb_media(
+                    &identity.media_id,
+                    &identity.source_id,
+                    &source_id,
+                    observed_source_id,
+                )
+                .map_err(LibraryWorkerError::from)?;
+            if repository
+                .trusted_usb_media(&identity.media_id, &identity.source_id)
+                .map_err(LibraryWorkerError::from)?
+                == lumi_library_sqlite::UsbMediaTrust::Conflict
+            {
+                return Err(UsbWorkerError::SourceIdentityMismatch);
+            }
+        }
         fs::write(
             response_path,
             serde_json::to_vec(&json!({"usbIdentity": identity}))?,
@@ -80,9 +102,10 @@ pub fn run_usb_worker(request_path: &Path, response_path: &Path) -> Result<(), U
         return Ok(());
     }
     let mut worker = LibraryWorker::demo()?;
+    let mut identity_warning = None;
     match request {
         UsbWorkerRequest::RegisterIdentity { .. } => {
-            unreachable!("handled without opening the Library")
+            unreachable!("handled before loading the Library workspace")
         }
         UsbWorkerRequest::Inspect {
             root,
@@ -90,7 +113,14 @@ pub fn run_usb_worker(request_path: &Path, response_path: &Path) -> Result<(), U
             observed_source_id,
         } => {
             let source_id = validated_source_id(Path::new(&root), source_id, &observed_source_id)?;
+            let marker = crate::usb_media_identity::read(Path::new(&root))?;
             worker.inspect_rekordbox_device(root, Some(&source_id))?;
+            if let Some(marker) = marker
+                && let Err(error) =
+                    worker.trust_local_usb_media(&marker, &source_id, &observed_source_id)
+            {
+                identity_warning = Some(error.to_string());
+            }
         }
         UsbWorkerRequest::Sync {
             root,
@@ -100,11 +130,16 @@ pub fn run_usb_worker(request_path: &Path, response_path: &Path) -> Result<(), U
             expected_database_revision,
         } => {
             let source_id = validated_source_id(Path::new(&root), source_id, &observed_source_id)?;
+            let marker = crate::usb_media_identity::read(Path::new(&root))?;
             lumi_rekordbox_device::verify_device_database_revision(
                 Path::new(&root),
                 &expected_database_revision,
             )
             .map_err(LibraryWorkerError::from)?;
+            if let Some(marker) = &marker {
+                // Existing identity conflicts stop before committing any tracks.
+                let _ = worker.trust_local_usb_media(marker, &source_id, &observed_source_id)?;
+            }
             let progress_path = response_path.with_extension("progress.json");
             worker.sync_rekordbox_device_with_progress(
                 root,
@@ -120,6 +155,15 @@ pub fn run_usb_worker(request_path: &Path, response_path: &Path) -> Result<(), U
                     }
                 },
             )?;
+            if let Some(marker) = marker {
+                // A committed library sync is not undone/reported as failed
+                // if this separate, optional identity registration fails.
+                if let Err(error) =
+                    worker.trust_local_usb_media(&marker, &source_id, &observed_source_id)
+                {
+                    identity_warning = Some(error.to_string());
+                }
+            }
         }
         UsbWorkerRequest::ResolveConflict {
             root,
@@ -147,7 +191,8 @@ pub fn run_usb_worker(request_path: &Path, response_path: &Path) -> Result<(), U
             )?;
         }
     }
-    let response = json!({ "library": worker.snapshot_json()? });
+    let response =
+        json!({ "library": worker.snapshot_json()?, "usbIdentityWarning": identity_warning });
     let temporary = response_path.with_extension("json.partial");
     fs::write(&temporary, serde_json::to_vec(&response)?)?;
     fs::rename(temporary, response_path)?;
@@ -177,8 +222,13 @@ fn validated_source_id(
         .filter(|value| valid_source_id(value))
         .ok_or(UsbWorkerError::InvalidSourceIdentity)?;
     if let Ok(Some(marker)) = crate::usb_media_identity::read(root) {
-        if preferred == marker.source_id || preferred == observed {
+        if preferred == marker.source_id {
             return Ok(marker.source_id);
+        }
+        if marker.source_id == observed && migratable_legacy_source_id(&preferred) {
+            // Local physical verification bridges a new marker to the old
+            // trusted source key; do not drop aliases or edited timelines.
+            return Ok(preferred);
         }
         return Err(UsbWorkerError::SourceIdentityMismatch);
     }
@@ -313,6 +363,32 @@ mod tests {
             )?,
             "usb-fs:v2-trusted"
         );
+        fs::remove_dir_all(root)?;
+        Ok(())
+    }
+
+    #[test]
+    fn local_marker_bridges_legacy_key_but_never_adopts_a_foreign_marker()
+    -> Result<(), UsbWorkerError> {
+        let root = device_root("marker-binding")?;
+        let media = "cb28a682-9327-4fda-b38c-8fbd8eacc92e";
+        crate::usb_media_identity::register(&root, "usb-fs:v2-current-physical", media)?;
+        assert_eq!(
+            validated_source_id(
+                &root,
+                Some("usb-fs:hardware-old".to_owned()),
+                "usb-fs:v2-current-physical"
+            )?,
+            "usb-fs:hardware-old"
+        );
+        assert!(matches!(
+            validated_source_id(
+                &root,
+                Some("usb-fs:v2-other-physical".to_owned()),
+                "usb-fs:v2-other-physical"
+            ),
+            Err(UsbWorkerError::SourceIdentityMismatch)
+        ));
         fs::remove_dir_all(root)?;
         Ok(())
     }

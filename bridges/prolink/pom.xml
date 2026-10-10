@@ -6,7 +6,7 @@
 
     <groupId>co.victorblan.tech.lumi</groupId>
     <artifactId>lumi-prolink-bridge</artifactId>
-  <version>0.6.3</version>
+  <version>0.6.4</version>
     <name>Lumi Pro DJ Link Bridge</name>
     <description>Supervised read-only Pro DJ Link input bridge for Lumi.</description>
     <url>https://github.com/victorblanco-tech/lumi</url>
@@ -23,7 +23,7 @@
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <maven.compiler.release>21</maven.compiler.release>
         <beat-link.version>8.0.0</beat-link.version>
-        <jackson.version>2.18.9</jackson.version>
+        <jackson.version>2.18.11</jackson.version>
         <junit.version>5.11.4</junit.version>
     </properties>
 
@@ -32,6 +32,17 @@
             <groupId>org.deepsymmetry</groupId>
             <artifactId>beat-link</artifactId>
             <version>${beat-link.version}</version>
+        </dependency>
+        <!-- Explicit dependencies for the standalone read-only media probe. -->
+        <dependency>
+            <groupId>org.deepsymmetry</groupId>
+            <artifactId>crate-digger</artifactId>
+            <version>0.2.1</version>
+        </dependency>
+        <dependency>
+            <groupId>org.acplt.remotetea</groupId>
+            <artifactId>remotetea-oncrpc</artifactId>
+            <version>1.1.4</version>
         </dependency>
         <dependency>
             <groupId>com.fasterxml.jackson.core</groupId>

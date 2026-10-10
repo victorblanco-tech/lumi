@@ -10,6 +10,430 @@ use lumi_remote_protocol::{
 use lumi_simulator::{SimulationControl, SimulationSpeed};
 
 #[test]
+fn linked_track_source_projects_origin_not_destination_usb_without_output()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut runtime = initialized_product_runtime()?;
+    runtime.deck_source_mode = DeckSourceMode::ConnectedDecks;
+    let mut decoder = lumi_prolink_input::BridgeDecoder::new();
+    for (sequence, kind, payload) in [
+        (
+            1,
+            "hello",
+            json!({"bridgeVersion":"fixture","beatLinkVersion":"8.0.0","readOnly":true}),
+        ),
+        (
+            2,
+            "sourceStatus",
+            json!({"status":"ready","detail":"fixture"}),
+        ),
+        (
+            3,
+            "deviceFound",
+            json!({"deviceNumber":2,"deviceName":"CDJ-1500X","address":"192.168.1.2"}),
+        ),
+        (
+            4,
+            "deckStatus",
+            json!({"deviceNumber":2,"deviceName":"CDJ-1500X","playing":false,
+            "paused":true,"cued":false,"tempoMaster":true,"onAir":true,"sourcePlayer":1,
+            "sourceSlot":"USB_SLOT","trackType":"REKORDBOX","rekordboxId":42,
+            "trackBpm":140.0,"effectiveBpm":140.0,"beatNumber":17,"beatWithinBar":1,"rawPitch":1048576}),
+        ),
+    ] {
+        let line = json!({"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":sequence,
+            "observedAtNanos":sequence*1000,"type":kind,"payload":payload})
+        .to_string();
+        runtime
+            .direct_deck_source
+            .ingest(decoder.decode_line(&line)?, MonotonicTime::new(sequence))?;
+    }
+    process_pending_source_events(&mut runtime)?;
+    let load = runtime
+        .state
+        .state()
+        .deck(lumi_domain::DeckId::new(2))
+        .ok_or("missing Player 2")?
+        .track_load_id();
+    let unknown = track_source_display(&runtime, load).ok_or("missing source")?;
+    assert_eq!(unknown.player_number, Some(1));
+    assert_eq!(unknown.source_name, None);
+    let before = remote_static_key(&runtime);
+    let outputs = runtime.output_worker.provider.records().count();
+    runtime.media_resolver =
+        crate::media_resolver::MediaResolver::verified_fixture(1, "usb-fs:chrm", "CHRM", 1);
+    process_live_library_preparation(&mut runtime)?;
+    let source = track_source_display(&runtime, load).ok_or("missing source")?;
+    assert_eq!(source.source_name.as_deref(), Some("CHRM"));
+    assert_eq!(source.color_id, Some(1));
+    assert_ne!(before, remote_static_key(&runtime));
+    let snapshot = snapshot_envelope_for_remote(&runtime, 1, "source-contract")?;
+    let projection = RemoteLiveProjection::from_engine_snapshot_payload(
+        &snapshot.payload,
+        1,
+        unix_time_millis(),
+    )?;
+    assert_eq!(projection.players[0].player_number, 2);
+    assert_eq!(projection.players[0].track_source.as_ref(), Some(&source));
+    let encoded = serde_json::to_string(&projection)?;
+    assert!(!encoded.contains("usb-fs:chrm"));
+    // The source row belongs to the cached track, not the current mount.
+    runtime.media_resolver.observe(
+        &lumi_prolink_input::BridgeEvent::USBMount(lumi_prolink_input::USBMount {
+            device_number: 1,
+            state: lumi_prolink_input::USBMountState::Empty,
+        }),
+        Instant::now(),
+    );
+    process_live_library_preparation(&mut runtime)?;
+    assert_eq!(track_source_display(&runtime, load), Some(source.clone()));
+    assert!(live_track_binding_valid(&runtime, load));
+    runtime.media_resolver =
+        crate::media_resolver::MediaResolver::verified_fixture(1, "usb-fs:gray", "GRAY", 7);
+    process_live_library_preparation(&mut runtime)?;
+    assert_eq!(track_source_display(&runtime, load), Some(source));
+    assert!(live_track_binding_valid(&runtime, load));
+    // A genuinely different track gets the newly verified mount, never the
+    // previous track's frozen origin.
+    let line = json!({"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":5,
+        "observedAtNanos":5000,"type":"deckStatus","payload":{
+        "deviceNumber":2,"deviceName":"CDJ-1500X","playing":false,"paused":true,
+        "cued":false,"tempoMaster":true,"onAir":true,"sourcePlayer":1,
+        "sourceSlot":"USB_SLOT","trackType":"REKORDBOX","rekordboxId":43,
+        "trackBpm":140.0,"effectiveBpm":140.0,"beatNumber":1,"beatWithinBar":1,"rawPitch":1048576}})
+    .to_string();
+    runtime
+        .direct_deck_source
+        .ingest(decoder.decode_line(&line)?, MonotonicTime::new(5))?;
+    process_pending_source_events(&mut runtime)?;
+    process_live_library_preparation(&mut runtime)?;
+    let new_load = runtime
+        .state
+        .state()
+        .deck(lumi_domain::DeckId::new(2))
+        .ok_or("missing new load")?
+        .track_load_id();
+    assert_ne!(new_load, load);
+    assert!(!live_track_binding_valid(&runtime, load));
+    assert_eq!(
+        track_source_display(&runtime, new_load)
+            .ok_or("missing new source")?
+            .source_name
+            .as_deref(),
+        Some("GRAY")
+    );
+    assert_eq!(outputs, runtime.output_worker.provider.records().count());
+    runtime.deck_source_mode = DeckSourceMode::LocalPlayback;
+    assert!(track_source_display(&runtime, new_load).is_none());
+    Ok(())
+}
+
+#[test]
+fn unverified_loaded_track_cannot_adopt_a_usb_inserted_after_that_load()
+-> Result<(), Box<dyn std::error::Error>> {
+    use lumi_prolink_input::{BridgeEvent, Device, USBMount, USBMountState};
+    let mut runtime = initialized_product_runtime()?;
+    runtime.deck_source_mode = DeckSourceMode::ConnectedDecks;
+    let found = BridgeEvent::DeviceFound(Device {
+        device_number: 1,
+        device_name: "CDJ-1500X".into(),
+        address: "192.168.1.1".into(),
+    });
+    runtime.media_resolver.observe(&found, Instant::now());
+    let mut decoder = lumi_prolink_input::BridgeDecoder::new();
+    for (sequence, kind, payload) in [
+        (
+            1,
+            "hello",
+            json!({"bridgeVersion":"fixture","beatLinkVersion":"8.0.0","readOnly":true}),
+        ),
+        (
+            2,
+            "deckStatus",
+            json!({"deviceNumber":1,"deviceName":"CDJ-1500X","playing":true,
+            "paused":false,"cued":false,"tempoMaster":true,"onAir":true,"sourcePlayer":1,
+            "sourceSlot":"USB_SLOT","trackType":"REKORDBOX","rekordboxId":42,
+            "trackBpm":140.0,"effectiveBpm":140.0,"beatNumber":17,"beatWithinBar":1,"rawPitch":1048576}),
+        ),
+    ] {
+        let line = json!({"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":sequence,
+            "observedAtNanos":sequence*1000,"type":kind,"payload":payload})
+        .to_string();
+        runtime
+            .direct_deck_source
+            .ingest(decoder.decode_line(&line)?, MonotonicTime::new(sequence))?;
+    }
+    process_pending_source_events(&mut runtime)?;
+    let load = runtime
+        .state
+        .state()
+        .deck(lumi_domain::DeckId::new(1))
+        .ok_or("missing load")?
+        .track_load_id();
+    process_live_library_preparation(&mut runtime)?;
+    assert!(!live_track_binding_valid(&runtime, load));
+    for state in [USBMountState::Empty, USBMountState::Loaded] {
+        runtime.media_resolver.observe(
+            &BridgeEvent::USBMount(USBMount {
+                device_number: 1,
+                state,
+            }),
+            Instant::now(),
+        );
+    }
+    let generation = runtime
+        .media_resolver
+        .status(1)
+        .ok_or("missing mount")?
+        .generation;
+    runtime.media_resolver =
+        crate::media_resolver::MediaResolver::verified_fixture(1, "usb-fs:new", "NEW USB", 7)
+            .with_fixture_generation(generation);
+    process_live_library_preparation(&mut runtime)?;
+    assert!(!live_track_binding_valid(&runtime, load));
+    assert!(runtime.planning_worker.library_context(load).is_none());
+    assert!(
+        track_source_display(&runtime, load)
+            .ok_or("missing source")?
+            .source_name
+            .is_none()
+    );
+    assert_eq!(
+        runtime
+            .state
+            .state()
+            .deck(lumi_domain::DeckId::new(1))
+            .ok_or("cached load lost")?
+            .track_load_id(),
+        load
+    );
+    Ok(())
+}
+
+#[test]
+fn live_loaded_track_is_prepared_asynchronously_without_transport_reset()
+-> Result<(), Box<dyn std::error::Error>> {
+    use lumi_library::{LibraryRepository, TrackPageRequest};
+    use lumi_library_sqlite::{DeviceAliasUpsert, SqliteLibraryRepository};
+    let directory = std::env::temp_dir().join(format!(
+        "lumi-live-runtime-{}-{}",
+        std::process::id(),
+        unix_time_millis()
+    ));
+    std::fs::create_dir_all(&directory)?;
+    let database = directory.join("library.sqlite");
+    let initial = LibraryWorker::demo_at(&database)?;
+    let mut writer = SqliteLibraryRepository::open(&database)?;
+    let track = writer
+        .page_tracks(TrackPageRequest::try_new(0, 1)?)?
+        .tracks()[0]
+        .id();
+    let mut runtime = initialized_product_runtime()?;
+    runtime.deck_source_mode = DeckSourceMode::ConnectedDecks;
+    runtime.live_library_resolver =
+        crate::live_library_resolver::LiveLibraryResolver::new(database);
+    let mut decoder = lumi_prolink_input::BridgeDecoder::new();
+    for (sequence, kind, payload) in [
+        (
+            1,
+            "hello",
+            json!({"bridgeVersion":"fixture","beatLinkVersion":"8.0.0","readOnly":true}),
+        ),
+        (
+            2,
+            "sourceStatus",
+            json!({"status":"ready","detail":"fixture"}),
+        ),
+        (
+            3,
+            "deviceFound",
+            json!({"deviceNumber":1,"deviceName":"CDJ-1500X","address":"192.168.1.1"}),
+        ),
+        (
+            4,
+            "deckStatus",
+            json!({"deviceNumber":1,"deviceName":"CDJ-1500X","playing":true,
+            "paused":false,"cued":false,"tempoMaster":true,"onAir":true,"sourcePlayer":1,
+            "sourceSlot":"USB_SLOT","trackType":"REKORDBOX","rekordboxId":42,
+            "trackBpm":140.0,"effectiveBpm":142.5,"beatNumber":17,"beatWithinBar":1,"rawPitch":1048576}),
+        ),
+    ] {
+        let line = json!({"protocol":"lumi-prolink-bridge","protocolVersion":1,"sequence":sequence,
+            "observedAtNanos":sequence*1000,"type":kind,"payload":payload})
+        .to_string();
+        runtime
+            .direct_deck_source
+            .ingest(decoder.decode_line(&line)?, MonotonicTime::new(sequence))?;
+    }
+    assert!(runtime.clock.advance(10).is_some());
+    process_pending_source_events(&mut runtime)?;
+    runtime.media_resolver =
+        crate::media_resolver::MediaResolver::verified_fixture(1, "usb-fs:test", "GRAY", 7);
+    let load = runtime
+        .state
+        .state()
+        .deck(lumi_domain::DeckId::new(1))
+        .ok_or("missing Player")?
+        .track_load_id();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while !runtime.live_library_status.contains_key(&load) && Instant::now() < deadline {
+        process_live_library_preparation(&mut runtime)?;
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(
+        runtime.live_library_status.get(&load).map(|v| v.0),
+        Some("not-synced")
+    );
+    assert_eq!(
+        runtime.direct_deck_source.diagnostics().source_status,
+        DeckSourceStatus::Ready
+    );
+    let mut alias = DeviceAliasUpsert {
+        device_track_id: 42,
+        simulator_signature: 0,
+        audio_signature: "audio-full-v1:fixture".into(),
+        canonical_track_id: Some(track),
+        match_kind: "fixture".into(),
+        title: "Prepared".into(),
+        artist: "Lumi".into(),
+        bpm_milli: 140_000,
+        duration_millis: 100_000,
+        file_size: 10,
+        audio_uri: "file://localhost/missing.mp3".into(),
+        metadata_revision: "v1".into(),
+        color_rgb: None,
+        master_database_id: 1,
+        master_content_id: 1,
+        information_update_count: 1,
+        analysis_revision: "v1".into(),
+        analyzed_at: "2026-10-05".into(),
+        sync_disposition: "current".into(),
+    };
+    writer.sync_device_aliases(
+        "usb-fs:test",
+        "GRAY",
+        "v1",
+        std::slice::from_mut(&mut alias),
+        &[],
+        &[],
+        &[],
+        &[],
+    )?;
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while runtime.planning_worker.library_context(load).is_none() && Instant::now() < deadline {
+        process_live_library_preparation(&mut runtime)?;
+        process_pending_source_events(&mut runtime)?;
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    let player = runtime
+        .state
+        .state()
+        .deck(lumi_domain::DeckId::new(1))
+        .ok_or("Player was cleared")?;
+    assert_eq!(player.track_load_id(), load);
+    assert_eq!(player.track_id(), track);
+    assert_eq!(player.beat(), 16);
+    assert_eq!(player.effective_bpm_milli(), 142_500);
+    assert!(player.is_playing());
+    assert!(runtime.planning_worker.library_context(load).is_some());
+    assert_eq!(
+        runtime.direct_deck_source.diagnostics().source_status,
+        DeckSourceStatus::Ready
+    );
+    let before = remote_static_key(&runtime);
+    let timeline = writer.timeline_head(track)?.ok_or("prepared timeline")?;
+    let first = timeline.phrases().first().ok_or("prepared phrase")?;
+    let edited = timeline.edit(lumi_library::TimelineEditCommand::Split {
+        phrase_index: first.index(),
+        at_beat: first.start_beat() + 1,
+    })?;
+    writer.append_timeline_revision(&edited, Some(timeline.revision()))?;
+    let records = runtime.output_worker.provider.records().count();
+    let deadline = Instant::now() + Duration::from_secs(3);
+    while runtime.live_library_status.get(&load).map(|v| v.0) != Some("update-on-next-load")
+        && Instant::now() < deadline
+    {
+        process_live_library_preparation(&mut runtime)?;
+        process_pending_source_events(&mut runtime)?;
+        std::thread::sleep(Duration::from_millis(1));
+    }
+    assert_eq!(
+        runtime.live_library_status.get(&load).map(|v| v.0),
+        Some("update-on-next-load")
+    );
+    assert_eq!(runtime.output_worker.provider.records().count(), records);
+    assert_eq!(
+        runtime
+            .planning_worker
+            .library_context(load)
+            .ok_or("context lost")?
+            .timeline_revision(),
+        timeline.revision().value()
+    );
+    assert_eq!(
+        runtime
+            .state
+            .state()
+            .deck(lumi_domain::DeckId::new(1))
+            .ok_or("Player lost")?
+            .beat(),
+        16
+    );
+    runtime.media_resolver =
+        crate::media_resolver::MediaResolver::verified_fixture(1, "usb-fs:test", "CHRM", 6);
+    assert_ne!(before, remote_static_key(&runtime));
+    let origin = track_source_display(&runtime, load).ok_or("missing verified origin")?;
+    let context_revision = runtime
+        .planning_worker
+        .library_context(load)
+        .ok_or("missing cached context")?
+        .timeline_revision();
+    for mount in [
+        lumi_prolink_input::USBMountState::Unloading,
+        lumi_prolink_input::USBMountState::Empty,
+    ] {
+        runtime.media_resolver.observe(
+            &lumi_prolink_input::BridgeEvent::USBMount(lumi_prolink_input::USBMount {
+                device_number: 1,
+                state: mount,
+            }),
+            Instant::now(),
+        );
+        process_live_library_preparation(&mut runtime)?;
+        process_pending_source_events(&mut runtime)?;
+        assert!(live_track_binding_valid(&runtime, load));
+        assert_eq!(track_source_display(&runtime, load), Some(origin.clone()));
+        let cached = runtime
+            .state
+            .state()
+            .deck(lumi_domain::DeckId::new(1))
+            .ok_or("cached Player lost")?;
+        assert_eq!(cached.track_load_id(), load);
+        assert!(cached.is_playing());
+        assert_eq!(cached.beat(), 16);
+        assert_eq!(
+            runtime
+                .planning_worker
+                .library_context(load)
+                .ok_or("cached phrases lost")?
+                .timeline_revision(),
+            context_revision
+        );
+    }
+    runtime.media_resolver =
+        crate::media_resolver::MediaResolver::verified_fixture(1, "usb-fs:different", "NEW USB", 7);
+    process_live_library_preparation(&mut runtime)?;
+    process_pending_source_events(&mut runtime)?;
+    assert_eq!(track_source_display(&runtime, load), Some(origin));
+    assert!(live_track_binding_valid(&runtime, load));
+    assert_eq!(runtime.output_worker.provider.records().count(), records);
+    drop(runtime);
+    drop(writer);
+    drop(initial);
+    std::fs::remove_dir_all(directory)?;
+    Ok(())
+}
+
+#[test]
 fn expired_or_abandoned_remote_commands_cannot_mutate_the_show()
 -> Result<(), Box<dyn std::error::Error>> {
     let mut runtime = initialized_runtime()?;
@@ -369,16 +793,20 @@ fn negative_output_timing_offset_advances_and_positive_delays() {
 
     let beat_at_140 = Duration::from_micros(60_000_000_000_u64 / 140_000);
     assert_eq!(
-        negative_offset_trigger_delay(1, 140_000, -20),
+        phrase_trigger_delay(1, 140_000, -20),
         Some(beat_at_140 - Duration::from_millis(20))
     );
-    assert_eq!(negative_offset_trigger_delay(1, 140_000, 20), None);
-    assert_eq!(negative_offset_trigger_delay(0, 140_000, -20), None);
+    assert_eq!(
+        phrase_trigger_delay(1, 140_000, 20),
+        Some(beat_at_140 + Duration::from_millis(20))
+    );
+    assert_eq!(phrase_trigger_delay(1, 140_000, 0), Some(beat_at_140));
+    assert_eq!(phrase_trigger_delay(0, 140_000, -20), None);
 
     let beat_at_300 = Duration::from_micros(60_000_000_000_u64 / 300_000);
-    assert_eq!(negative_offset_trigger_delay(1, 300_000, -250), None);
+    assert_eq!(phrase_trigger_delay(1, 300_000, -250), None);
     assert_eq!(
-        negative_offset_trigger_delay(2, 300_000, -250),
+        phrase_trigger_delay(2, 300_000, -250),
         Some(beat_at_300.saturating_mul(2) - Duration::from_millis(250))
     );
 }
@@ -439,6 +867,266 @@ fn missing_executable_theme_is_a_safe_no_plan_result() {
     let planner = planner_for_executable_themes(14, Vec::new(), &LightPlanningPolicy::default())
         .unwrap_or_else(|error| panic!("an incomplete mapping must not fail the engine: {error}"));
     assert!(planner.is_none());
+}
+
+#[test]
+fn phrase_launch_run_in_prepares_a_bank_for_all_signed_offsets() {
+    for (offset, millis) in [(-250, 750), (0, 1000), (250, 1250)] {
+        assert_eq!(
+            phrase_trigger_delay(2, 120_000, offset),
+            Some(Duration::from_millis(millis))
+        );
+    }
+    assert_eq!(phrase_trigger_delay(0, 120_000, 0), None);
+    assert_eq!(phrase_trigger_delay(1, 300_000, -250), None);
+    assert_eq!(phrase_trigger_delay(4, 0, 0), None);
+}
+
+#[test]
+fn launch_policy_is_persisted_guarded_and_projected_without_changing_tempo()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut runtime =
+        initialized_runtime_for_mode(ManualClock::new(0), DeckSourceMode::LocalPlayback)?;
+    let before = remote_static_key(&runtime);
+    apply_command(
+        &mut runtime,
+        SessionCommand::SetLaunchPolicy {
+            policy: LaunchPolicy::OnPhraseStart,
+            expected: LaunchPolicy::Immediate,
+        },
+    )?;
+    assert_ne!(before, remote_static_key(&runtime));
+    assert_eq!(
+        runtime.launch_preferences.saved,
+        Some(LaunchPolicy::OnPhraseStart)
+    );
+    assert_eq!(launch_projection(&runtime)["policy"], "onPhraseStart");
+    assert!(
+        apply_command(
+            &mut runtime,
+            SessionCommand::SetLaunchPolicy {
+                policy: LaunchPolicy::Immediate,
+                expected: LaunchPolicy::Immediate,
+            }
+        )
+        .is_err(),
+        "a stale client must not replace a newer choice"
+    );
+    apply_current_session_command(&mut runtime, |expected_revision| {
+        SessionCommand::SetOperationState {
+            expected_revision,
+            command: OperationCommand::Arm,
+        }
+    });
+    apply_current_session_command(&mut runtime, |expected_revision| {
+        SessionCommand::SetOperationState {
+            expected_revision,
+            command: OperationCommand::Start,
+        }
+    });
+    assert!(
+        apply_command(
+            &mut runtime,
+            SessionCommand::SetLaunchPolicy {
+                policy: LaunchPolicy::Immediate,
+                expected: LaunchPolicy::OnPhraseStart,
+            }
+        )
+        .is_err(),
+        "Live must reject launch-policy changes, even when decks are paused"
+    );
+    assert_eq!(
+        runtime.output_worker.launch_policy,
+        LaunchPolicy::OnPhraseStart
+    );
+    assert_eq!(
+        runtime.launch_preferences.saved,
+        Some(LaunchPolicy::OnPhraseStart)
+    );
+    runtime.deck_source_mode = DeckSourceMode::ConnectedDecks;
+    let snapshot = snapshot_envelope_for_remote(&runtime, 1, "launch-contract")?;
+    let projection = RemoteLiveProjection::from_engine_snapshot_payload(
+        &snapshot.payload,
+        1,
+        unix_time_millis(),
+    )?;
+    let launch = projection
+        .integrations
+        .launch
+        .ok_or("missing launch capability")?;
+    assert_eq!(launch.version, 1);
+    assert_eq!(
+        launch.policy,
+        lumi_remote_protocol::RemoteLaunchPolicy::OnPhraseStart
+    );
+    assert_eq!(launch.status, "waitingForPlayback");
+    assert_eq!(runtime.output_worker.provider.records().count(), 0);
+    Ok(())
+}
+
+#[test]
+fn ordinary_phrase_forecast_is_independent_of_offset_and_survives_boundary()
+-> Result<(), Box<dyn std::error::Error>> {
+    for offset in [-250, 0, 250] {
+        let mut runtime =
+            initialized_runtime_for_mode(ManualClock::new(0), DeckSourceMode::LocalPlayback)?;
+        let deck_id = lumi_domain::DeckId::new(1);
+        apply_current_session_command(&mut runtime, |expected_state_revision| {
+            SessionCommand::LoadLibraryTrackOnLocalDeck {
+                track_id: 1,
+                deck_id,
+                expected_timeline_revision: 1,
+                expected_state_revision,
+            }
+        });
+        let track_load_id = runtime
+            .state
+            .state()
+            .deck(deck_id)
+            .ok_or("deck")?
+            .track_load_id();
+        for command in [OperationCommand::Arm, OperationCommand::Start] {
+            apply_current_session_command(&mut runtime, |expected_revision| {
+                SessionCommand::SetOperationState {
+                    expected_revision,
+                    command,
+                }
+            });
+        }
+        apply_session_command(
+            &mut runtime,
+            SessionCommand::UpdateLocalPlaybackTransport {
+                deck_id,
+                track_load_id,
+                position_millis: 1_000,
+                playing: true,
+            },
+        );
+        runtime.output_worker.timing_offset_millis = offset;
+        let beat = runtime
+            .state
+            .state()
+            .active_plan()
+            .ok_or("plan")?
+            .cues()
+            .iter()
+            .find(|cue| {
+                cue.start_beat() > 4 && matches!(automatic_midi_target(cue.action()), Ok(Some(_)))
+            })
+            .ok_or("future executable cue")?
+            .start_beat();
+        runtime
+            .output_worker
+            .observe_exact_live_beat(runtime.state.state(), deck_id, beat - 2);
+        let scheduled = runtime
+            .output_worker
+            .scheduled_future_autoloop
+            .ok_or("not preplanned")?;
+        assert_eq!(runtime.output_worker.launch_policy, LaunchPolicy::Immediate);
+        // A fresher beat can arrive earlier than the original forecast even
+        // at unchanged BPM (recorded after a real receive stall). Retime in
+        // place, without cancelling or authorizing a duplicate pulse.
+        runtime
+            .output_worker
+            .observe_exact_live_beat(runtime.state.state(), deck_id, beat - 1);
+        let retimed = runtime
+            .output_worker
+            .scheduled_future_autoloop
+            .ok_or("retime lost cue")?;
+        assert_eq!(retimed.generation, scheduled.generation);
+        assert!(retimed.deadline < scheduled.deadline);
+        assert_eq!(
+            runtime.output_worker.autoloop_executor.rescheduled_count(),
+            1
+        );
+        // Observe the musical boundary before the worker deadline elapses. A
+        // positive offset must keep the already admitted send rather than
+        // cancelling it because the next phrase lies outside the horizon.
+        runtime
+            .output_worker
+            .observe_exact_live_beat(runtime.state.state(), deck_id, beat);
+        assert_eq!(
+            runtime
+                .output_worker
+                .scheduled_future_autoloop
+                .ok_or("cancelled")?
+                .identity,
+            scheduled.identity
+        );
+        assert_eq!(runtime.output_worker.autoloop_executor.cancelled_count(), 0);
+        runtime.output_worker.invalidate_autoloop_deadline();
+        assert!(runtime.output_worker.scheduled_future_autoloop.is_none());
+    }
+    Ok(())
+}
+
+#[test]
+fn phrase_launch_waits_inside_phrase_and_admits_the_next_exact_grid_boundary()
+-> Result<(), Box<dyn std::error::Error>> {
+    let mut runtime =
+        initialized_runtime_for_mode(ManualClock::new(0), DeckSourceMode::LocalPlayback)?;
+    runtime.output_worker.launch_policy = LaunchPolicy::OnPhraseStart;
+    let deck_id = lumi_domain::DeckId::new(1);
+    apply_current_session_command(&mut runtime, |expected_state_revision| {
+        SessionCommand::LoadLibraryTrackOnLocalDeck {
+            track_id: 1,
+            deck_id,
+            expected_timeline_revision: 1,
+            expected_state_revision,
+        }
+    });
+    let track_load_id = runtime
+        .state
+        .state()
+        .deck(deck_id)
+        .ok_or("missing deck")?
+        .track_load_id();
+    for command in [OperationCommand::Arm, OperationCommand::Start] {
+        apply_current_session_command(&mut runtime, |expected_revision| {
+            SessionCommand::SetOperationState {
+                expected_revision,
+                command,
+            }
+        });
+    }
+    assert_eq!(runtime.output_worker.provider.records().count(), 0);
+    apply_session_command(
+        &mut runtime,
+        SessionCommand::UpdateLocalPlaybackTransport {
+            deck_id,
+            track_load_id,
+            position_millis: 1_000,
+            playing: true,
+        },
+    );
+    assert_eq!(
+        runtime.output_worker.provider.records().count(),
+        0,
+        "mid-phrase playback must not emit an initial AutoLoop"
+    );
+    let crate::launch_policy::LaunchState::Waiting { target, .. } =
+        runtime.output_worker.launch_gate.state()
+    else {
+        panic!("initial launch must expose an explicit phrase target");
+    };
+    let snapshot = snapshot_envelope(&runtime, 1, "phrase-launch-test")?;
+    let position_millis = snapshot.payload["decks"][0]["track"]["beatGrid"]["timesMillis"]
+        [target.beat as usize]
+        .as_u64()
+        .ok_or("missing exact beat time")?;
+    apply_session_command(
+        &mut runtime,
+        SessionCommand::UpdateLocalPlaybackTransport {
+            deck_id,
+            track_load_id,
+            position_millis,
+            playing: true,
+        },
+    );
+    let records = runtime.output_worker.provider.records().collect::<Vec<_>>();
+    assert_eq!(records.len(), 1);
+    assert_eq!(records[0].request().phrase_index(), target.phrase);
+    Ok(())
 }
 
 #[test]
@@ -659,6 +1347,15 @@ fn integration_pump_metrics_detect_starvation_without_unbounded_samples() {
 
     assert_eq!(metrics.tick_count, 3);
     assert_eq!(metrics.starvation_count, 1);
+    metrics.record_command(Duration::from_millis(3), "libraryQuery");
+    metrics.record_command(Duration::from_millis(1), "snapshot");
+    assert_eq!(metrics.max_command_kind, "libraryQuery");
+    assert_eq!(metrics.command_count, 2);
+    assert_eq!(metrics.last_command_micros, 1_000);
+    assert_eq!(metrics.max_command_micros, 3_000);
+    metrics.record_input_stage(3, Duration::from_millis(7));
+    metrics.record_input_stage(3, Duration::from_millis(1));
+    assert_eq!(metrics.input_stage_max_micros, [0, 0, 0, 7_000, 0]);
     assert_eq!(
         metrics.max_lateness_micros,
         u64::try_from(INTEGRATION_PUMP_INTERVAL.saturating_mul(2).as_micros()).unwrap_or(u64::MAX)
@@ -1160,6 +1857,15 @@ fn started_live_phrases_are_locked_but_future_phrases_remain_editable() {
 
 #[test]
 fn future_live_theme_change_materializes_the_selected_bank_per_phrase() {
+    assert_future_live_theme_change(false);
+}
+
+#[test]
+fn theme_change_repairs_missing_mapping_without_touching_prefix() {
+    assert_future_live_theme_change(true);
+}
+
+fn assert_future_live_theme_change(with_missing_mapping: bool) {
     let mut runtime =
         initialized_runtime_for_mode(ManualClock::new(0), DeckSourceMode::LocalPlayback)
             .unwrap_or_else(|error| panic!("test engine must initialize: {error}"));
@@ -1171,13 +1877,32 @@ fn future_live_theme_change_materializes_the_selected_bank_per_phrase() {
             expected_state_revision,
         }
     });
-    let active = runtime
+    let mut active = runtime
         .state
         .state()
         .active_plan()
         .cloned()
         .unwrap_or_else(|| panic!("initial leader must have an active plan"));
     assert!(active.cues().len() > 1, "fixture needs a future phrase");
+    if with_missing_mapping {
+        let mut cues = active.cues().to_vec();
+        cues[1] = cues[1].hold_for_missing_autoloop_mapping();
+        active = active
+            .revised(cues)
+            .unwrap_or_else(|e| panic!("held plan: {e}"));
+        runtime
+            .planning_worker
+            .accept_revised_plan(&mut runtime.state, active.clone())
+            .unwrap_or_else(|e| panic!("accept held plan: {e}"));
+        assert!(
+            runtime
+                .planning_worker
+                .planner
+                .select_theme_from_phrase(&active, 1, ThemeId::new(4))
+                .is_err(),
+            "old direct mutation must reproduce the bug"
+        );
+    }
     let current_theme = active
         .theme_decision()
         .map(|decision| decision.theme_id())

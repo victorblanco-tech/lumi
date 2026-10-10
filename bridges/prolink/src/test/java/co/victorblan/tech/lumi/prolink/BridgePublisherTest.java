@@ -19,6 +19,45 @@ final class BridgePublisherTest {
     private final ObjectMapper mapper = new ObjectMapper();
 
     @Test
+    void preservesReceiveOriginSeparatelyFromPublicationTime() throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        PacketOrigin origin = new PacketOrigin("192.0.2.1", 1234L);
+        try (BridgePublisher publisher = new BridgePublisher(output, mapper)) {
+            publisher.publishCritical("beat", new BridgePayloads.Beat(1, "CDJ", 128, 1, true), origin);
+        }
+        JsonNode event = mapper.readTree(output.toString(StandardCharsets.UTF_8));
+        assertEquals("192.0.2.1", event.path("packetOrigin").path("address").asText());
+        assertEquals(1234L, event.path("packetOrigin").path("receivedAtNanos").asLong());
+        assertTrue(event.path("observedAtNanos").asLong() > 1234L);
+    }
+
+    @Test
+    void nativeUsbMountStatesAreIndependentOfLoadedTrackAndTempo() {
+        assertEquals("loaded", BeatLinkRuntime.usbMountState(true, false, false));
+        assertEquals("unloading", BeatLinkRuntime.usbMountState(false, true, false));
+        assertEquals("empty", BeatLinkRuntime.usbMountState(false, false, true));
+        assertEquals("unknown", BeatLinkRuntime.usbMountState(false, false, false));
+        assertFalse(BeatLinkRuntime.mountContinuityLost(null, 10_000_000_000L));
+        assertFalse(BeatLinkRuntime.mountContinuityLost(1_000L, 500_001_000L));
+        assertTrue(BeatLinkRuntime.mountContinuityLost(1_000L, 3_000_001_001L));
+    }
+
+    @Test
+    void ejectAndInsertionCannotBeCoalescedIntoOnlyTheLatestMount() throws Exception {
+        ByteArrayOutputStream output = new ByteArrayOutputStream();
+        BridgePublisher publisher = new BridgePublisher(output, mapper);
+        for (String state : new String[]{"loaded", "unloading", "empty", "loaded"}) {
+            assertTrue(publisher.publishCritical("usbMount", new BridgePayloads.USBMount(1, state)));
+        }
+        publisher.close();
+        String[] lines = output.toString(StandardCharsets.UTF_8).strip().split("\\R");
+        assertEquals(4, lines.length);
+        assertEquals("unloading", mapper.readTree(lines[1]).get("payload").get("state").asText());
+        assertEquals("empty", mapper.readTree(lines[2]).get("payload").get("state").asText());
+        assertEquals("critical", mapper.readTree(lines[3]).get("trafficClass").asText());
+    }
+
+    @Test
     void rejectsTransientPlayerWarmupTempoWithoutRejectingValidDeckTempo() {
         assertFalse(BeatLinkRuntime.hasRealtimeTempo(-0.01, 0));
         assertFalse(BeatLinkRuntime.hasRealtimeTempo(0.0, 0));
@@ -69,6 +108,22 @@ final class BridgePublisherTest {
                 BeatLinkRuntime.ResolvedTrackIdentity.noTrack(),
                 BeatLinkRuntime.resolveCdj1500xExtendedTrackIdentity("CDJ-3000", 2, noTrackStatus)
         );
+    }
+
+    @Test
+    void extendedCachedTrackKeepsConfirmedLinkOriginAfterSourceUsbEject() {
+        var noTrack = BeatLinkRuntime.ResolvedTrackIdentity.noTrack();
+        var linked = new BeatLinkRuntime.ResolvedTrackIdentity(1, "USB_SLOT", "REKORDBOX", 1031);
+        var inferredLocal = new BeatLinkRuntime.ResolvedTrackIdentity(2, "USB_SLOT", "REKORDBOX", 1031);
+        assertEquals(linked, BeatLinkRuntime.resolveLoadedTrackIdentity(noTrack, inferredLocal, linked));
+        assertEquals(inferredLocal, BeatLinkRuntime.resolveLoadedTrackIdentity(noTrack, inferredLocal, null));
+        // A native source change is explicit evidence even if numeric IDs collide.
+        assertEquals(inferredLocal, BeatLinkRuntime.resolveLoadedTrackIdentity(inferredLocal, inferredLocal, linked));
+        var newTrack = new BeatLinkRuntime.ResolvedTrackIdentity(2, "USB_SLOT", "REKORDBOX", 2048);
+        assertEquals(newTrack, BeatLinkRuntime.resolveLoadedTrackIdentity(noTrack, newTrack, linked));
+        assertEquals(noTrack, BeatLinkRuntime.resolveLoadedTrackIdentity(noTrack, noTrack, linked));
+        // Once unloaded, a later track must not inherit the previous LINK source.
+        assertEquals(inferredLocal, BeatLinkRuntime.resolveLoadedTrackIdentity(noTrack, inferredLocal, noTrack));
     }
 
     @Test

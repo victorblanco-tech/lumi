@@ -110,6 +110,11 @@ func launchesRealEngine() async throws {
             .publishMidiSource,
             messageID: "swift-publish-midi-source"
         )
+        if let failure = EngineCommandFailure(snapshot) {
+            Issue.record("MIDI publication failed: \(failure.code): \(failure.message)")
+            await supervisor.stop()
+            return
+        }
         #expect(midiIntegrationState(snapshot) == "ready")
         #expect(midiIntegrationSourceName(snapshot) == "Lumi Virtual MIDI")
         #expect(midiClockIntegrationState(snapshot) == "ready")

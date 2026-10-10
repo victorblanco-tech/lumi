@@ -5,6 +5,47 @@ import Testing
 
 @Suite("Live workspace presentation")
 struct LiveWorkspacePresenterTests {
+    @Test("Initial launch capability exposes a waiting target and keeps old snapshots compatible")
+    func initialLaunchCapability() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case var .object(midi) = payload["midiIntegration"] else { throw EngineSnapshotDecodingError.invalidSnapshot }
+        midi["launch"] = .object(["version": .number(1), "policy": .string("onPhraseStart"),
+            "status": .string("waitingForPhrase"), "targetPhraseIndex": .number(2),
+            "remainingBeats": .number(4), "savePending": .boolean(false), "saveError": .null])
+        payload["midiIntegration"] = .object(midi)
+        let envelope = MessageEnvelope(protocolVersion: recorded.protocolVersion, messageType: recorded.messageType,
+            messageId: recorded.messageId, sequence: recorded.sequence, correlationId: recorded.correlationId,
+            sentAt: recorded.sentAt, payload: payload)
+        let decoder = EngineSnapshotDecoder()
+        let snapshot = try decoder.decode(envelope, endpointDescription: "fixture", protocolVersion: 1)
+        #expect(LiveWorkspacePresenter.ready(snapshot).content?.initialLaunch?.label == "Phrase 3 · 4 beats to launch")
+        #expect(try decoder.decode(recorded, endpointDescription: "fixture", protocolVersion: 1).midiIntegration?.launch == nil)
+    }
+    @Test("Loaded track origin is independent of the USB mounted in its Player")
+    func linkedTrackSourceDecodesWithoutMountedUSBInference() throws {
+        let recorded = try recordedEnvelope()
+        var payload = recorded.payload
+        guard case let .array(decks) = payload["decks"] else { throw EngineSnapshotDecodingError.invalidSnapshot }
+        payload["decks"] = .array(decks.map { value in
+            guard case var .object(deck) = value else { return value }
+            deck["trackSource"] = .object([
+                "playerNumber": .number(1), "slot": .string("USB_SLOT"),
+                "state": .string("trusted"), "sourceName": .string("CHRM"), "colorId": .number(1)
+            ])
+            return .object(deck)
+        })
+        let envelope = MessageEnvelope(protocolVersion: recorded.protocolVersion,
+            messageType: recorded.messageType, messageId: recorded.messageId, sequence: recorded.sequence,
+            correlationId: recorded.correlationId, sentAt: recorded.sentAt, payload: payload)
+        let snapshot = try EngineSnapshotDecoder().decode(envelope, endpointDescription: "fixture", protocolVersion: 1)
+        #expect(snapshot.decks.first(where: { $0.deckID == 2 })?.trackSource?.playerNumber == 1)
+        #expect(snapshot.decks.first(where: { $0.deckID == 2 })?.trackSource?.sourceName == "CHRM")
+        #expect(snapshot.decks.first(where: { $0.deckID == 2 })?.trackSource?.colorID == 1)
+        #expect(snapshot.deckInputIntegration?.playerUSBs.isEmpty ?? true)
+        let legacy = try EngineSnapshotDecoder().decode(recorded, endpointDescription: "fixture", protocolVersion: 1)
+        #expect(legacy.decks.allSatisfy { $0.trackSource == nil })
+    }
     @Test("Mounted USB inspection snapshot preserves the live workspace")
     func mountedUSBInspectionSnapshotDecodesWhenProvided() throws {
         guard let envelopePath = ProcessInfo.processInfo.environment[
@@ -104,6 +145,7 @@ struct LiveWorkspacePresenterTests {
             return
         }
         playerOne["hardwareModel"] = .string("CDJ-1500X")
+        playerOne["libraryUpdatePending"] = .boolean(true)
         decks[0] = .object(playerOne)
         payload["decks"] = .array(decks)
 
@@ -123,6 +165,8 @@ struct LiveWorkspacePresenterTests {
 
         #expect(snapshot.decks[0].deckID == 1)
         #expect(snapshot.decks[0].hardwareModel == "CDJ-1500X")
+        #expect(snapshot.decks[0].libraryUpdatePending)
+        #expect(!snapshot.decks[1].libraryUpdatePending)
         #expect(snapshot.decks[1].hardwareModel == nil)
     }
 
@@ -1448,7 +1492,16 @@ struct LiveWorkspacePresenterTests {
             "precisePositionMessageCount": .number(280),
             "authoritativePositionCount": .number(278),
             "positionDiscontinuityCount": .number(3),
-            "positionAuthorityReady": .boolean(true)
+            "positionAuthorityReady": .boolean(true),
+            "discoveredPlayers": .array([
+                .object(["playerNumber": .number(1), "usbMedia": .object([
+                    "state": .string("trusted"), "sourceName": .string("DJ VIC GRAY"), "colorId": .number(7)
+                ])]),
+                .object(["playerNumber": .number(2), "usbMedia": .object([
+                    "state": .string("conflict"), "sourceName": .string("STALE"), "colorId": .number(1)
+                ])]),
+                .object(["playerNumber": .number(33), "usbMedia": .null])
+            ])
         ])
         let envelope = MessageEnvelope(
             protocolVersion: recorded.protocolVersion,
@@ -1472,6 +1525,11 @@ struct LiveWorkspacePresenterTests {
         #expect(snapshot.deckInputIntegration?.positionAuthorityReady == true)
         #expect(snapshot.deckInputIntegration?.authoritativePositionCount == 278)
         #expect(snapshot.deckInputIntegration?.positionDiscontinuityCount == 3)
+        #expect(snapshot.deckInputIntegration?.playerUSBs.count == 2)
+        #expect(snapshot.deckInputIntegration?.playerUSBs.first?.sourceName == "DJ VIC GRAY")
+        #expect(snapshot.deckInputIntegration?.playerUSBs.first?.colorID == 7)
+        #expect(snapshot.deckInputIntegration?.playerUSBs.last?.sourceName == nil)
+        #expect(snapshot.deckInputIntegration?.playerUSBs.last?.colorID == nil)
     }
 
     @Test("Malformed optional Pro DJ Link diagnostics fail strict decoding")

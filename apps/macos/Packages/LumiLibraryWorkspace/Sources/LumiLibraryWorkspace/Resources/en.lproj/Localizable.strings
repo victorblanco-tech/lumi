@@ -40,6 +40,8 @@
 "condition.empty.title" = "No tracks found";
 "condition.empty.detail" = "Choose another playlist or clear the current search.";
 "condition.importing.title" = "Importing library";
+"condition.querying.title" = "Loading tracks";
+"condition.querying.detail" = "Loading the selected playlist or search results.";
 "condition.importing.detail" = "Lumi is preparing a consistent local snapshot.";
 "condition.ready.title" = "Library ready";
 "condition.ready.detail" = "The local library snapshot is ready.";

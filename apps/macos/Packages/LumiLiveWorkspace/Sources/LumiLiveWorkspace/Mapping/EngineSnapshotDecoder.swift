@@ -233,6 +233,15 @@ public struct EngineSnapshotDecoder: Sendable {
         guard pendingTimingOffsetMillis.map({ (-250...250).contains($0) }) ?? true else {
             throw EngineSnapshotDecodingError.invalidSnapshot
         }
+        let launch: InitialLaunchSnapshot?
+        if case let .object(value) = midi["launch"], unsignedInteger(value["version"]) == 1,
+           case let .string(policy) = value["policy"], ["immediate", "onPhraseStart"].contains(policy),
+           case let .string(status) = value["status"], case let .boolean(pending) = value["savePending"] {
+            launch = InitialLaunchSnapshot(policy: policy, status: status,
+                targetPhraseIndex: unsignedInteger(value["targetPhraseIndex"]),
+                remainingBeats: unsignedInteger(value["remainingBeats"]),
+                savePending: pending, saveError: try optionalString(value["saveError"]))
+        } else { launch = nil }
         return MidiOutputIntegrationSnapshot(
             state: state,
             sourceName: sourceName,
@@ -247,6 +256,7 @@ public struct EngineSnapshotDecoder: Sendable {
             savedTimingOffsetMillis: savedTimingOffsetMillis,
             timingSavePending: timingSavePending,
             timingSaveError: try optionalString(midi["timingSaveError"]),
+            launch: launch,
             bankPreRollMillis: bankPreRollMillis,
             realtimeLane: try decodeRealtimeMidiLane(midi["realtimeScheduler"])
         )
@@ -388,8 +398,23 @@ public struct EngineSnapshotDecoder: Sendable {
             precisePositionMessageCount: unsignedInteger(input["precisePositionMessageCount"]) ?? 0,
             authoritativePositionCount: unsignedInteger(input["authoritativePositionCount"]) ?? 0,
             positionDiscontinuityCount: unsignedInteger(input["positionDiscontinuityCount"]) ?? 0,
-            positionAuthorityReady: positionAuthorityReady
+            positionAuthorityReady: positionAuthorityReady,
+            playerUSBs: decodePlayerUSBs(input["discoveredPlayers"])
         )
+    }
+
+    private func decodePlayerUSBs(_ value: JSONValue?) -> [LivePlayerUSBSnapshot] {
+        guard case let .array(players) = value else { return [] }
+        return players.compactMap { player in
+            guard case let .object(fields) = player,
+                  let number = unsignedInteger(fields["playerNumber"]),
+                  (1...6).contains(number),
+                  case let .object(media) = fields["usbMedia"],
+                  case let .string(state) = media["state"] else { return nil }
+            let name: String? = if case let .string(value) = media["sourceName"] { value } else { nil }
+            let color = unsignedInteger(media["colorId"]).flatMap { $0 <= 8 ? UInt8($0) : nil }
+            return LivePlayerUSBSnapshot(playerNumber: number, state: state, sourceName: name, colorID: color)
+        }
     }
 
     private func decodeTimelineEntry(_ value: JSONValue) throws -> TimelineEntrySnapshot {
@@ -983,8 +1008,31 @@ public struct EngineSnapshotDecoder: Sendable {
             hotCues: hotCues,
             planEligibility: planEligibility,
             planHoldReason: planHoldReason,
-            localPlayback: localPlayback
+            libraryUpdatePending: deck["libraryUpdatePending"] == .boolean(true),
+            localPlayback: localPlayback,
+            trackSource: try decodeTrackSource(deck["trackSource"])
         )
+    }
+
+    private func decodeTrackSource(_ value: JSONValue?) throws -> LiveTrackSourceSnapshot? {
+        guard let value, value != .null else { return nil }
+        guard case let .object(fields) = value,
+              case let .string(slot) = fields["slot"], !slot.isEmpty, slot.utf8.count <= 32,
+              case let .string(state) = fields["state"],
+              ["trusted", "unknown", "conflict", "unavailable", "resolving"].contains(state) else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        let player = unsignedInteger(fields["playerNumber"])
+        let color = unsignedInteger(fields["colorId"])
+        let name = try optionalString(fields["sourceName"])
+        guard player.map({ (1...6).contains($0) }) ?? true,
+              color.map({ $0 <= 8 }) ?? true,
+              name.map({ !$0.isEmpty && $0.utf8.count <= 128 }) ?? true,
+              state == "trusted" || (name == nil && color == nil) else {
+            throw EngineSnapshotDecodingError.invalidSnapshot
+        }
+        return .init(playerNumber: player.flatMap(UInt8.init(exactly:)), slot: slot,
+                     state: state, sourceName: name, colorID: color.flatMap(UInt8.init(exactly:)))
     }
 
     private func decodeHotCues(

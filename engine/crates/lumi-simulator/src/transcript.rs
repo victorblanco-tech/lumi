@@ -82,6 +82,11 @@ pub fn canonical_transcript(events: &[DomainEvent]) -> Result<Vec<u8>, Simulator
                 deck_id,
                 metadata,
                 track_load_id,
+            }
+            | DeckObservation::TrackMetadataHydrated {
+                deck_id,
+                metadata,
+                track_load_id,
             } => {
                 recorded.deck_id = Some(deck_id.value());
                 recorded.track_load_id = Some(track_load_id.value());
@@ -151,6 +156,7 @@ const fn observation_kind(observation: &DeckObservation) -> &'static str {
     match observation {
         DeckObservation::SourceStatusChanged { .. } => "sourceStatusChanged",
         DeckObservation::TrackLoaded { .. } => "trackLoaded",
+        DeckObservation::TrackMetadataHydrated { .. } => "trackMetadataHydrated",
         DeckObservation::PlaybackPosition { .. } => "playbackPosition",
         DeckObservation::PlaybackPositionSeeked { .. } => "playbackPositionSeeked",
         DeckObservation::PlaybackTempoChanged { .. } => "playbackTempoChanged",

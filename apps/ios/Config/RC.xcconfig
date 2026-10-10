@@ -2,3 +2,4 @@
 PRODUCT_BUNDLE_IDENTIFIER = co.victorblan.tech.lumi.remote.rc
 PRODUCT_NAME = Lumi Remote RC
 LUMI_RELEASE_CHANNEL = rc
+LUMI_PAIRING_URL_SCHEME = lumi-rc
