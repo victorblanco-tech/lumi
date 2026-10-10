@@ -793,16 +793,20 @@ fn negative_output_timing_offset_advances_and_positive_delays() {
 
     let beat_at_140 = Duration::from_micros(60_000_000_000_u64 / 140_000);
     assert_eq!(
-        negative_offset_trigger_delay(1, 140_000, -20),
+        phrase_trigger_delay(1, 140_000, -20),
         Some(beat_at_140 - Duration::from_millis(20))
     );
-    assert_eq!(negative_offset_trigger_delay(1, 140_000, 20), None);
-    assert_eq!(negative_offset_trigger_delay(0, 140_000, -20), None);
+    assert_eq!(
+        phrase_trigger_delay(1, 140_000, 20),
+        Some(beat_at_140 + Duration::from_millis(20))
+    );
+    assert_eq!(phrase_trigger_delay(1, 140_000, 0), Some(beat_at_140));
+    assert_eq!(phrase_trigger_delay(0, 140_000, -20), None);
 
     let beat_at_300 = Duration::from_micros(60_000_000_000_u64 / 300_000);
-    assert_eq!(negative_offset_trigger_delay(1, 300_000, -250), None);
+    assert_eq!(phrase_trigger_delay(1, 300_000, -250), None);
     assert_eq!(
-        negative_offset_trigger_delay(2, 300_000, -250),
+        phrase_trigger_delay(2, 300_000, -250),
         Some(beat_at_300.saturating_mul(2) - Duration::from_millis(250))
     );
 }
@@ -869,13 +873,13 @@ fn missing_executable_theme_is_a_safe_no_plan_result() {
 fn phrase_launch_run_in_prepares_a_bank_for_all_signed_offsets() {
     for (offset, millis) in [(-250, 750), (0, 1000), (250, 1250)] {
         assert_eq!(
-            initial_launch_trigger_delay(2, 120_000, offset),
+            phrase_trigger_delay(2, 120_000, offset),
             Some(Duration::from_millis(millis))
         );
     }
-    assert_eq!(initial_launch_trigger_delay(0, 120_000, 0), None);
-    assert_eq!(initial_launch_trigger_delay(1, 300_000, -250), None);
-    assert_eq!(initial_launch_trigger_delay(4, 0, 0), None);
+    assert_eq!(phrase_trigger_delay(0, 120_000, 0), None);
+    assert_eq!(phrase_trigger_delay(1, 300_000, -250), None);
+    assert_eq!(phrase_trigger_delay(4, 0, 0), None);
 }
 
 #[test]
@@ -957,6 +961,86 @@ fn launch_policy_is_persisted_guarded_and_projected_without_changing_tempo()
     );
     assert_eq!(launch.status, "waitingForPlayback");
     assert_eq!(runtime.output_worker.provider.records().count(), 0);
+    Ok(())
+}
+
+#[test]
+fn ordinary_phrase_forecast_is_independent_of_offset_and_survives_boundary()
+-> Result<(), Box<dyn std::error::Error>> {
+    for offset in [-250, 0, 250] {
+        let mut runtime =
+            initialized_runtime_for_mode(ManualClock::new(0), DeckSourceMode::LocalPlayback)?;
+        let deck_id = lumi_domain::DeckId::new(1);
+        apply_current_session_command(&mut runtime, |expected_state_revision| {
+            SessionCommand::LoadLibraryTrackOnLocalDeck {
+                track_id: 1,
+                deck_id,
+                expected_timeline_revision: 1,
+                expected_state_revision,
+            }
+        });
+        let track_load_id = runtime
+            .state
+            .state()
+            .deck(deck_id)
+            .ok_or("deck")?
+            .track_load_id();
+        for command in [OperationCommand::Arm, OperationCommand::Start] {
+            apply_current_session_command(&mut runtime, |expected_revision| {
+                SessionCommand::SetOperationState {
+                    expected_revision,
+                    command,
+                }
+            });
+        }
+        apply_session_command(
+            &mut runtime,
+            SessionCommand::UpdateLocalPlaybackTransport {
+                deck_id,
+                track_load_id,
+                position_millis: 1_000,
+                playing: true,
+            },
+        );
+        runtime.output_worker.timing_offset_millis = offset;
+        let beat = runtime
+            .state
+            .state()
+            .active_plan()
+            .ok_or("plan")?
+            .cues()
+            .iter()
+            .find(|cue| {
+                cue.start_beat() > 4 && matches!(automatic_midi_target(cue.action()), Ok(Some(_)))
+            })
+            .ok_or("future executable cue")?
+            .start_beat();
+        runtime
+            .output_worker
+            .observe_exact_live_beat(runtime.state.state(), deck_id, beat - 2);
+        let scheduled = runtime
+            .output_worker
+            .scheduled_future_autoloop
+            .ok_or("not preplanned")?;
+        assert_eq!(runtime.output_worker.launch_policy, LaunchPolicy::Immediate);
+        // Observe the musical boundary before the worker deadline elapses. A
+        // positive offset must keep the already admitted send rather than
+        // cancelling it because the next phrase lies outside the horizon.
+        runtime
+            .output_worker
+            .observe_exact_live_beat(runtime.state.state(), deck_id, beat);
+        assert_eq!(
+            runtime
+                .output_worker
+                .scheduled_future_autoloop
+                .ok_or("cancelled")?
+                .identity,
+            scheduled.identity
+        );
+        assert_eq!(runtime.output_worker.autoloop_executor.cancelled_count(), 0);
+        runtime.output_worker.invalidate_autoloop_deadline();
+        assert!(runtime.output_worker.scheduled_future_autoloop.is_none());
+    }
     Ok(())
 }
 

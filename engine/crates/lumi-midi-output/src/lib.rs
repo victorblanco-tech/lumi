@@ -550,6 +550,19 @@ pub enum MidiSourceState {
 const REALTIME_COMMAND_CAPACITY: usize = 64;
 const REALTIME_SCHEDULE_CAPACITY: usize = 128;
 const REALTIME_LATENCY_SAMPLE_CAPACITY: usize = 2_048;
+const REALTIME_DISPATCH_HISTORY_CAPACITY: usize = 128;
+
+/// Bounded software evidence, not acknowledgement from SoundSwitch or DMX.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RealtimeDispatchRecord {
+    pub generation: u64,
+    pub action: RealtimeMidiActionKind,
+    pub number: u8,
+    pub deadline: Instant,
+    pub started_at: Instant,
+    pub completed_at: Instant,
+    pub succeeded: bool,
+}
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct RealtimeMidiStatus {
@@ -573,6 +586,7 @@ pub struct RealtimeMidiStatus {
     pub last_emitted_number: Option<u8>,
     pub last_dispatch_lateness_micros: Option<u64>,
     pub late_dispatch_count: u64,
+    pub recent_dispatches: Arc<VecDeque<RealtimeDispatchRecord>>,
 }
 
 impl Default for RealtimeMidiStatus {
@@ -605,6 +619,9 @@ impl Default for RealtimeMidiStatus {
             last_emitted_number: None,
             last_dispatch_lateness_micros: None,
             late_dispatch_count: 0,
+            recent_dispatches: Arc::new(VecDeque::with_capacity(
+                REALTIME_DISPATCH_HISTORY_CAPACITY,
+            )),
         }
     }
 }
@@ -1230,19 +1247,34 @@ fn run_realtime_midi_worker<P>(
                 due.sort_by_key(|item| item.deadline);
                 for item in due {
                     let (kind, number) = realtime_action_identity(item.action);
+                    let started_at = Instant::now();
                     let result = match item.action {
                         RealtimeMidiAction::SelectBank(bank) => controller.select_bank(bank),
                         RealtimeMidiAction::TriggerAutoloop { bank, autoloop } => {
                             controller.trigger_autoloop_button(bank, autoloop)
                         }
                     };
-                    let elapsed = Instant::now().saturating_duration_since(item.deadline);
+                    let completed_at = Instant::now();
+                    let elapsed = completed_at.saturating_duration_since(item.deadline);
                     let micros = u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX);
                     if latencies.len() == REALTIME_LATENCY_SAMPLE_CAPACITY {
                         latencies.pop_front();
                     }
                     latencies.push_back(micros);
                     update_realtime_status(shared_status, |status| {
+                        let history = Arc::make_mut(&mut status.recent_dispatches);
+                        if history.len() == REALTIME_DISPATCH_HISTORY_CAPACITY {
+                            history.pop_front();
+                        }
+                        history.push_back(RealtimeDispatchRecord {
+                            generation: item.generation,
+                            action: kind,
+                            number,
+                            deadline: item.deadline,
+                            started_at,
+                            completed_at,
+                            succeeded: result.is_ok(),
+                        });
                         if result.is_ok() {
                             status.emitted_count = status.emitted_count.saturating_add(1);
                             status.last_emitted_action = Some(kind);
@@ -1531,6 +1563,17 @@ mod tests {
         assert_eq!(status.source.active_bank, Some(2));
         assert_eq!(status.latency_sample_count, 2);
         assert!(status.latency_p95_micros <= 20_000, "{status:?}");
+        assert_eq!(status.recent_dispatches.len(), 2);
+        let dispatch = status
+            .recent_dispatches
+            .back()
+            .unwrap_or_else(|| panic!("last dispatch retained"));
+        assert_eq!(dispatch.generation, 7);
+        assert_eq!(dispatch.action, RealtimeMidiActionKind::Autoloop);
+        assert_eq!(dispatch.number, 13);
+        assert!(dispatch.succeeded);
+        assert!(dispatch.started_at >= dispatch.deadline);
+        assert!(dispatch.completed_at >= dispatch.started_at);
     }
 
     #[test]
@@ -1549,6 +1592,27 @@ mod tests {
         assert_eq!(status.source.sent_pulse_count, 0);
         assert_eq!(status.emitted_count, 0);
         assert_eq!(status.cancelled_count, 1);
+    }
+
+    #[test]
+    fn dispatch_history_is_bounded_and_status_snapshots_remain_immutable() {
+        let lane = RealtimeMidiController::new(RecordingProvider::default);
+        assert!(lane.publish().is_ok());
+        assert!(lane.set_generation(1).is_ok());
+        let before = lane.status();
+        for count in 1..=140 {
+            assert!(lane.schedule_autoloop(1, 1, 1, Instant::now()).is_ok());
+            let deadline = Instant::now() + Duration::from_secs(1);
+            while lane.status().emitted_count < count && Instant::now() < deadline {
+                thread::sleep(Duration::from_millis(1));
+            }
+            assert_eq!(lane.status().emitted_count, count);
+        }
+        assert_eq!(
+            lane.status().recent_dispatches.len(),
+            REALTIME_DISPATCH_HISTORY_CAPACITY
+        );
+        assert!(before.recent_dispatches.is_empty());
     }
 
     #[test]

@@ -48,6 +48,47 @@ for downstream playback acceptance; Lumi is left open in Off.
 
 ## Findings and ownership
 
+### 2026-10-10 hardware timing regression — work in progress
+
+Owner observed late Bridge Fade → BD Start → BD Chorus on uninterrupted
+90s Bitch playback at offset zero. Repeated fresh Arm → Start with four beats
+of run-in was inconsistent (one several seconds late, another acceptable).
+No historical per-attempt timing trace exists for those hardware attempts;
+do not attribute them to SoundSwitch or claim the new scheduler proves their
+complete cause.
+
+Repair scope: offset-independent forecasting, retaining admitted positive-offset
+deadlines across the boundary, bounded correlated schedule/dispatch history,
+repeated launches in one process, normal transitions, transport cancellation,
+and real desktop/SoundSwitch acceptance. Trace history is opt-in via
+`getSnapshot` with `includeLibrary:false, includeTimingHistory:true`; ordinary
+Mac/Remote snapshots do not serialize it. MIDI records describe software
+dispatch, not downstream acknowledgement or physical beat alignment.
+
+First revised simulator run passed 12 starts (four per -250/0/+250 ms) in
+63.03 s, exactly one completion per start and no failures or duplicate sends.
+This initial run did not yet include correlated history or subsequent normal
+transitions; those additional gates remain required.
+
+One-shot phase-check research: SoundSwitch documents beat/phase controls and
+MIDI clock output, but those do not establish a selected-loop playback-phase
+feedback contract. Its documented MIDI feedback lighting excludes custom
+mappings. No blind retrigger, continuous correction, or global Link reanchor
+is authorized as a substitute. Sources:
+- https://support.soundswitch.com/en/support/solutions/articles/69000847411/
+- https://support.soundswitch.com/en/support/solutions/articles/69000847415-soundswitch-connecting-soundswitch-with-midi-sync-in-and-midi-output
+- https://support.soundswitch.com/en/support/solutions/articles/69000847096-midi-feedback-lighting
+
+Owner decision after discussing alternatives: park downstream feedback and
+automatic correction. Focus this candidate on optimal Lumi dispatch timing.
+The expanded simulator run passed in 126.41 s: 12 repeat launches plus three
+ordinary transitions, correlated by generation between schedule and dispatch.
+All checked sends had >50 ms scheduling lead and <20 ms dispatch lateness.
+Evidence: `build/phrase-timing-dev32-correlated.log`. This run did not enable
+the Link helper. The repeat on Dev-32 with Link active also passed (124.37 s,
+12 starts and three ordinary transitions, same timing assertions). Evidence:
+`build/phrase-timing-dev32-link.log`. Installed desktop acceptance is pending.
+
 ### Current acceptance boundary (2026-10-10)
 
 The dated entries below are a chronological evidence ledger, not simultaneous

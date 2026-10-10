@@ -2081,6 +2081,7 @@ struct OutputWorker {
     transport_epoch_cause: Option<TransportEpochCause>,
     reassert_current_on_next_cue: bool,
     scheduled_future_autoloop: Option<ScheduledFutureAutoloop>,
+    recent_autoloop_schedules: std::collections::VecDeque<AutoloopScheduleRecord>,
     static_look_plans: BTreeMap<TrackLoadId, BTreeMap<u16, StaticLookTarget>>,
     active_static_look: Option<StaticLookTarget>,
     static_look_transition_count: u64,
@@ -2147,6 +2148,16 @@ struct ScheduledFutureAutoloop {
     effective_bpm_milli: u32,
 }
 
+struct AutoloopScheduleRecord {
+    generation: u64,
+    identity: AutoloopExecutionIdentity,
+    target: AutoloopTarget,
+    observed_beat: Option<u32>,
+    scheduled_at: Instant,
+    deadline: Instant,
+    offset_millis: i16,
+}
+
 impl OutputWorker {
     fn new() -> Self {
         Self {
@@ -2165,6 +2176,7 @@ impl OutputWorker {
             transport_epoch_cause: None,
             reassert_current_on_next_cue: false,
             scheduled_future_autoloop: None,
+            recent_autoloop_schedules: std::collections::VecDeque::with_capacity(128),
             static_look_plans: BTreeMap::new(),
             active_static_look: None,
             static_look_transition_count: 0,
@@ -2442,6 +2454,15 @@ impl OutputWorker {
             } else {
                 configured_delay
             };
+        self.record_autoloop_schedule(AutoloopScheduleRecord {
+            generation,
+            identity: schedule.identity,
+            target,
+            observed_beat: None,
+            scheduled_at: now,
+            deadline: autoloop_deadline,
+            offset_millis: self.timing_offset_millis,
+        });
         if self
             .midi_output
             .schedule_autoloop(generation, bank_number, autoloop_number, autoloop_deadline)
@@ -2458,8 +2479,8 @@ impl OutputWorker {
         );
     }
 
-    /// Prepares exactly one future AutoLoop only when the configured offset is
-    /// negative. It is derived from the latest exact Beat boundary, never from
+    /// Prepares exactly one future AutoLoop for every signed offset. The launch
+    /// gate controls admission, not whether we look ahead. Derived from a Beat, never from
     /// SwiftUI or continuous PrecisePosition samples. BPM changes may replace
     /// an unsent deadline; a completed selection is immutable.
     fn observe_exact_live_beat(
@@ -2477,10 +2498,7 @@ impl OutputWorker {
                 self.launch_gate.state(),
                 crate::launch_policy::LaunchState::Waiting { .. }
             );
-        if (offset_millis >= 0 && !initial_phrase_launch)
-            || state.operation() != OperationState::Live
-            || state.leader_deck() != Some(deck_id)
-        {
+        if state.operation() != OperationState::Live || state.leader_deck() != Some(deck_id) {
             self.cancel_future_autoloop_deadline();
             return;
         }
@@ -2494,6 +2512,23 @@ impl OutputWorker {
             self.cancel_future_autoloop_deadline();
             return;
         };
+        // A positive offset intentionally sends after the musical boundary.
+        // Do not cancel that admitted send while looking for the following cue.
+        // Transport/plan invalidation still owns cancellation of stale work.
+        if let Some(scheduled) = self.scheduled_future_autoloop
+            && scheduled.identity.deck_id == deck_id
+            && scheduled.identity.track_load_id == plan.track_load_id()
+            && scheduled.identity.plan_revision == plan.revision()
+            && matches!(self.autoloop_executor.state(),
+                AutoloopExecutorState::Triggered { identity, .. }
+                if identity == scheduled.identity)
+            && plan.cues().iter().any(|cue| {
+                cue.phrase_index() == scheduled.identity.phrase_index
+                    && cue.start_beat() <= absolute_beat
+            })
+        {
+            return;
+        }
         let Some(cue) = plan.cues().iter().find(|cue| {
             cue.start_beat() > absolute_beat
                 && cue.start_beat().saturating_sub(absolute_beat) <= AUTOLOOP_FORECAST_HORIZON_BEATS
@@ -2508,11 +2543,9 @@ impl OutputWorker {
             return;
         };
         let beats_until = cue.start_beat().saturating_sub(absolute_beat);
-        let Some(trigger_delay) = (if initial_phrase_launch {
-            initial_launch_trigger_delay(beats_until, deck.effective_bpm_milli(), offset_millis)
-        } else {
-            negative_offset_trigger_delay(beats_until, deck.effective_bpm_milli(), offset_millis)
-        }) else {
+        let Some(trigger_delay) =
+            phrase_trigger_delay(beats_until, deck.effective_bpm_milli(), offset_millis)
+        else {
             return;
         };
         let target = AutoloopTarget {
@@ -2600,6 +2633,22 @@ impl OutputWorker {
             deadline,
             effective_bpm_milli: deck.effective_bpm_milli(),
         });
+        self.record_autoloop_schedule(AutoloopScheduleRecord {
+            generation,
+            identity,
+            target,
+            observed_beat: Some(absolute_beat),
+            scheduled_at: Instant::now(),
+            deadline,
+            offset_millis,
+        });
+    }
+
+    fn record_autoloop_schedule(&mut self, record: AutoloopScheduleRecord) {
+        if self.recent_autoloop_schedules.len() == 128 {
+            self.recent_autoloop_schedules.pop_front();
+        }
+        self.recent_autoloop_schedules.push_back(record);
     }
 
     fn cancel_future_autoloop_deadline(&mut self) {
@@ -2789,26 +2838,7 @@ fn negative_timing_advance(offset_millis: i16) -> Duration {
     Duration::from_millis(u64::from(offset_millis.min(0).unsigned_abs()))
 }
 
-fn negative_offset_trigger_delay(
-    beats_until: u32,
-    bpm_milli: u32,
-    offset_millis: i16,
-) -> Option<Duration> {
-    if beats_until == 0 || offset_millis >= 0 || !(20_000..=300_000).contains(&bpm_milli) {
-        return None;
-    }
-    let beat_duration = Duration::from_micros(60_000_000_000_u64 / u64::from(bpm_milli));
-    let target_delay = beat_duration.saturating_mul(beats_until);
-    let trigger_delay = target_delay.saturating_sub(negative_timing_advance(offset_millis));
-    (trigger_delay >= BANK_SETTLE_DELAY.saturating_add(INTEGRATION_PUMP_INTERVAL))
-        .then_some(trigger_delay)
-}
-
-fn initial_launch_trigger_delay(
-    beats_until: u32,
-    bpm_milli: u32,
-    offset_millis: i16,
-) -> Option<Duration> {
+fn phrase_trigger_delay(beats_until: u32, bpm_milli: u32, offset_millis: i16) -> Option<Duration> {
     if beats_until == 0 || !(20_000..=300_000).contains(&bpm_milli) {
         return None;
     }
@@ -3095,6 +3125,12 @@ fn handle_command_inner(
     };
 
     let is_mutating = command.is_mutating();
+    let include_timing_history = matches!(&command, SessionCommand::GetSnapshot { .. })
+        && envelope
+            .payload
+            .get("includeTimingHistory")
+            .and_then(Value::as_bool)
+            == Some(true);
     let changes_library_revision = command.changes_library_revision();
     let is_transport_update = matches!(
         &command,
@@ -3131,7 +3167,16 @@ fn handle_command_inner(
     if is_transport_update {
         return transport_ack_envelope(runtime, response_sequence, &envelope.message_id);
     }
-    let mut response = if includes_library {
+    let mut response = if include_timing_history {
+        snapshot_envelope_internal(
+            runtime,
+            response_sequence,
+            &envelope.message_id,
+            includes_library,
+            false,
+            true,
+        )?
+    } else if includes_library {
         snapshot_envelope(runtime, response_sequence, &envelope.message_id)?
     } else {
         snapshot_envelope_without_library(runtime, response_sequence, &envelope.message_id)?
@@ -5141,7 +5186,7 @@ fn snapshot_envelope(
     sequence: u64,
     correlation_id: &str,
 ) -> Result<MessageEnvelope, EngineError> {
-    snapshot_envelope_internal(runtime, sequence, correlation_id, true, false)
+    snapshot_envelope_internal(runtime, sequence, correlation_id, true, false, false)
 }
 
 fn snapshot_envelope_without_library(
@@ -5149,7 +5194,7 @@ fn snapshot_envelope_without_library(
     sequence: u64,
     correlation_id: &str,
 ) -> Result<MessageEnvelope, EngineError> {
-    snapshot_envelope_internal(runtime, sequence, correlation_id, false, false)
+    snapshot_envelope_internal(runtime, sequence, correlation_id, false, false, false)
 }
 
 fn snapshot_envelope_for_remote(
@@ -5157,7 +5202,7 @@ fn snapshot_envelope_for_remote(
     sequence: u64,
     correlation_id: &str,
 ) -> Result<MessageEnvelope, EngineError> {
-    snapshot_envelope_internal(runtime, sequence, correlation_id, false, true)
+    snapshot_envelope_internal(runtime, sequence, correlation_id, false, true, false)
 }
 
 fn snapshot_envelope_internal(
@@ -5166,6 +5211,7 @@ fn snapshot_envelope_internal(
     correlation_id: &str,
     include_library: bool,
     include_remote_waveform_detail: bool,
+    include_timing_history: bool,
 ) -> Result<MessageEnvelope, EngineError> {
     let state = runtime.state.state();
     let mut payload = Map::new();
@@ -5274,9 +5320,35 @@ fn snapshot_envelope_internal(
         "lastEmittedNumber": realtime_midi.last_emitted_number,
         "lastDispatchLatenessMicros": realtime_midi.last_dispatch_lateness_micros,
         "lateDispatchCount": realtime_midi.late_dispatch_count,
+        "recentDispatches": realtime_midi.recent_dispatches.iter().filter(|_| include_timing_history).map(|record| json!({
+            "generation": record.generation,
+            "action": match record.action {
+                RealtimeMidiActionKind::Bank => "bank",
+                RealtimeMidiActionKind::Autoloop => "autoloop",
+            },
+            "number": record.number,
+            "ageMicros": record.completed_at.elapsed().as_micros() as u64,
+            "dispatchLatenessMicros": record.started_at.saturating_duration_since(record.deadline).as_micros() as u64,
+            "providerDurationMicros": record.completed_at.saturating_duration_since(record.started_at).as_micros() as u64,
+            "succeeded": record.succeeded,
+        })).collect::<Vec<_>>(),
     });
     let realtime_scheduler = json!({
         "mode": "exactlyOncePhrase",
+        "recentSchedules": runtime.output_worker.recent_autoloop_schedules.iter().filter(|_| include_timing_history).map(|record| json!({
+            "generation": record.generation,
+            "executionEpoch": record.identity.execution_epoch,
+            "deckNumber": record.identity.deck_id.value(),
+            "trackLoadId": record.identity.track_load_id.value(),
+            "planRevision": record.identity.plan_revision.value(),
+            "phraseIndex": record.identity.phrase_index,
+            "bankNumber": record.target.bank_number,
+            "autoloopNumber": record.target.autoloop_number,
+            "observedBeat": record.observed_beat,
+            "offsetMillis": record.offset_millis,
+            "ageMicros": u64::try_from(record.scheduled_at.elapsed().as_micros()).unwrap_or(u64::MAX),
+            "leadMicros": u64::try_from(record.deadline.saturating_duration_since(record.scheduled_at).as_micros()).unwrap_or(u64::MAX),
+        })).collect::<Vec<_>>(),
         "state": autoloop_state.name(),
         "executionEpoch": runtime.output_worker.autoloop_executor.execution_epoch(),
         "transportEpochCause": runtime.output_worker.transport_epoch_cause.map(TransportEpochCause::name),

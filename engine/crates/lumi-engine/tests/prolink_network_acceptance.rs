@@ -1013,71 +1013,158 @@ fn phrase_launch_emits_once_for_each_signed_offset() {
             json!({"kind":"setLaunchPolicy", "policy":"onPhraseStart", "expectedPolicy":"immediate"}),
         );
         send(json!({"kind":"setOutputTimingOffset", "millis":offset}));
+        send(json!({"kind":"setAbletonLinkEnabled", "enabled":true}));
         snapshot = send(json!({"kind":"publishMidiSource"}));
-        let baseline_pulses = required_u64(
-            required_object(&snapshot.payload, "midiIntegration"),
-            "sentPulseCount",
-        );
-        for state in ["armed", "live"] {
-            snapshot = send(json!({"kind":"setOperationState", "operationState":state,
+        for attempt in 1..=4 {
+            simulator_control("pause", None);
+            snapshot = send(json!({"kind":"getSnapshot", "includeLibrary":false}));
+            let boundary = snapshot.payload["livePlan"]["cues"]
+                .as_array()
+                .and_then(|cues| {
+                    cues.iter()
+                        .find_map(|cue| cue["startBeat"].as_u64().filter(|beat| *beat >= 8))
+                })
+                .unwrap_or_else(|| panic!("fixture has a phrase with four beats of run-in"));
+            let run_in = snapshot.payload["decks"][0]["track"]["beatGrid"]["timesMillis"]
+                [(boundary - 4) as usize]
+                .as_u64()
+                .unwrap_or_else(|| panic!("exact grid run-in"));
+            simulator_control("seek", Some(&run_in.to_string()));
+            thread::sleep(Duration::from_millis(200));
+            snapshot = send(json!({"kind":"getSnapshot", "includeLibrary":false}));
+            let baseline_completed = required_u64(
+                required_nested_object(
+                    required_object(&snapshot.payload, "midiIntegration"),
+                    "realtimeScheduler",
+                ),
+                "completedCount",
+            );
+            let baseline_pulses = required_u64(
+                required_object(&snapshot.payload, "midiIntegration"),
+                "sentPulseCount",
+            );
+            for state in ["armed", "live"] {
+                snapshot = send(json!({"kind":"setOperationState", "operationState":state,
                 "expectedStateRevision":required_u64(&snapshot.payload, "stateRevision")}));
-        }
-        let midi = required_object(&snapshot.payload, "midiIntegration");
-        assert_eq!(required_u64(midi, "sentPulseCount"), baseline_pulses);
-        assert_eq!(
-            required_nested_object(midi, "launch")
-                .get("status")
-                .and_then(Value::as_str),
-            Some("waitingForPlayback")
-        );
-        simulator_control("play", None);
-        let deadline = Instant::now() + Duration::from_secs(90);
-        let mut saw_waiting = false;
-        let mut target_phrase = None;
-        loop {
-            assert!(Instant::now() < deadline, "initial phrase launch timed out");
-            thread::sleep(Duration::from_millis(40));
+            }
+            let midi = required_object(&snapshot.payload, "midiIntegration");
+            assert_eq!(required_u64(midi, "sentPulseCount"), baseline_pulses);
+            assert_eq!(
+                required_nested_object(midi, "launch")
+                    .get("status")
+                    .and_then(Value::as_str),
+                Some("waitingForPlayback")
+            );
+            simulator_control("play", None);
+            let deadline = Instant::now() + Duration::from_secs(90);
+            let mut saw_waiting = false;
+            let mut target_phrase = None;
+            loop {
+                assert!(Instant::now() < deadline, "initial phrase launch timed out");
+                thread::sleep(Duration::from_millis(40));
+                snapshot = send(json!({"kind":"getSnapshot", "includeLibrary":false}));
+                let midi = required_object(&snapshot.payload, "midiIntegration");
+                let launch = required_nested_object(midi, "launch");
+                let scheduler = required_nested_object(midi, "realtimeScheduler");
+                match launch.get("status").and_then(Value::as_str) {
+                    Some("waitingForPhrase") => {
+                        saw_waiting = true;
+                        target_phrase = launch.get("targetPhraseIndex").and_then(Value::as_u64);
+                        assert_eq!(
+                            required_u64(scheduler, "completedCount"),
+                            baseline_completed
+                        );
+                    }
+                    Some("launched") => {
+                        assert!(
+                            saw_waiting,
+                            "fixture must exercise run-in, not an immediate boundary"
+                        );
+                        assert_eq!(
+                            required_u64(scheduler, "completedCount"),
+                            baseline_completed + 1
+                        );
+                        assert_eq!(required_u64(scheduler, "failedCount"), 0);
+                        assert_midi_dispatch_evidence(midi, baseline_pulses);
+                        break;
+                    }
+                    Some("noUpcomingPhrase") => {
+                        panic!("fixture needs an upcoming executable phrase")
+                    }
+                    _ => {}
+                }
+            }
+            // Covers the negative-offset send followed by its ordinary boundary event.
+            thread::sleep(Duration::from_millis(600));
             snapshot = send(json!({"kind":"getSnapshot", "includeLibrary":false}));
             let midi = required_object(&snapshot.payload, "midiIntegration");
-            let launch = required_nested_object(midi, "launch");
             let scheduler = required_nested_object(midi, "realtimeScheduler");
-            match launch.get("status").and_then(Value::as_str) {
-                Some("waitingForPhrase") => {
-                    saw_waiting = true;
-                    target_phrase = launch.get("targetPhraseIndex").and_then(Value::as_u64);
-                    assert_eq!(required_u64(scheduler, "completedCount"), 0);
-                }
-                Some("launched") => {
-                    assert!(
-                        saw_waiting,
-                        "fixture must exercise run-in, not an immediate boundary"
+            assert_eq!(
+                required_u64(scheduler, "completedCount"),
+                baseline_completed + 1,
+                "boundary re-triggered the initial AutoLoop"
+            );
+            assert_eq!(required_u64(scheduler, "failedCount"), 0);
+            println!(
+                "phrase launch attempt={attempt} offset={offset}ms target={target_phrase:?} completed=1 failed=0 pulses={} late={}",
+                required_u64(midi, "sentPulseCount") - baseline_pulses,
+                required_u64(scheduler, "lateCount")
+            );
+            if attempt == 4 {
+                let transition_deadline = Instant::now() + Duration::from_secs(90);
+                loop {
+                    thread::sleep(Duration::from_millis(100));
+                    snapshot = send(json!({"kind":"getSnapshot", "includeLibrary":false}));
+                    let scheduler = required_nested_object(
+                        required_object(&snapshot.payload, "midiIntegration"),
+                        "realtimeScheduler",
                     );
-                    assert_eq!(required_u64(scheduler, "completedCount"), 1);
-                    assert_eq!(required_u64(scheduler, "failedCount"), 0);
-                    assert_midi_dispatch_evidence(midi, baseline_pulses);
-                    break;
+                    if required_u64(scheduler, "completedCount") > baseline_completed + 1 {
+                        assert_eq!(
+                            required_u64(scheduler, "completedCount"),
+                            baseline_completed + 2
+                        );
+                        break;
+                    }
+                    assert!(
+                        Instant::now() < transition_deadline,
+                        "ordinary transition missing"
+                    );
                 }
-                Some("noUpcomingPhrase") => panic!("fixture needs an upcoming executable phrase"),
-                _ => {}
             }
+            simulator_control("pause", None);
+            snapshot = send(
+                json!({"kind":"getSnapshot", "includeLibrary":false, "includeTimingHistory":true}),
+            );
+            let history = &snapshot.payload["midiIntegration"]["realtimeScheduler"];
+            let schedules = history["recentSchedules"]
+                .as_array()
+                .unwrap_or_else(|| panic!("schedule history"));
+            let dispatches = history["lane"]["recentDispatches"]
+                .as_array()
+                .unwrap_or_else(|| panic!("dispatch history"));
+            let last = dispatches
+                .iter()
+                .rev()
+                .find(|entry| entry["action"] == "autoloop")
+                .unwrap_or_else(|| panic!("missing AutoLoop dispatch"));
+            let planned = schedules
+                .iter()
+                .find(|entry| entry["generation"] == last["generation"])
+                .unwrap_or_else(|| panic!("dispatch has no correlated schedule"));
+            assert!(
+                planned["observedBeat"].is_number(),
+                "must forecast, not react at boundary"
+            );
+            assert!(planned["leadMicros"].as_u64().unwrap_or(0) > 50_000);
+            assert!(last["dispatchLatenessMicros"].as_u64().unwrap_or(u64::MAX) < 20_000);
+            println!(
+                "timingEvidence={}",
+                snapshot.payload["midiIntegration"]["realtimeScheduler"]
+            );
+            snapshot = send(json!({"kind":"setOperationState", "operationState":"off",
+            "expectedStateRevision":required_u64(&snapshot.payload, "stateRevision")}));
         }
-        // Covers the negative-offset send followed by its ordinary boundary event.
-        thread::sleep(Duration::from_millis(600));
-        snapshot = send(json!({"kind":"getSnapshot", "includeLibrary":false}));
-        let midi = required_object(&snapshot.payload, "midiIntegration");
-        let scheduler = required_nested_object(midi, "realtimeScheduler");
-        assert_eq!(
-            required_u64(scheduler, "completedCount"),
-            1,
-            "boundary re-triggered the initial AutoLoop"
-        );
-        assert_eq!(required_u64(scheduler, "failedCount"), 0);
-        println!(
-            "phrase launch offset={offset}ms target={target_phrase:?} completed=1 failed=0 pulses={} late={}",
-            required_u64(midi, "sentPulseCount") - baseline_pulses,
-            required_u64(scheduler, "lateCount")
-        );
-        simulator_control("pause", None);
         drop(connection);
         let shutdown_deadline = Instant::now() + Duration::from_secs(10);
         loop {

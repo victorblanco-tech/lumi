@@ -52,6 +52,30 @@ phase feedback is available in the current integration, so no automatic
 
 ## Acceptance
 
+## 2026-10-10 hardware acceptance follow-up (in progress)
+
+The initial run-in gate and advance scheduling are independent. Every predictable
+Live phrase boundary must be prepared for all signed offsets, including zero.
+The offset changes only the dispatch deadline. Bank preparation precedes that
+deadline; positive-offset sends must survive the musical boundary observation.
+Pause, seek, load, master and plan changes still invalidate stale pending work.
+
+Hardware acceptance reported both late ordinary transitions and inconsistent
+four-beat run-ins after fresh Arm/Start cycles. Existing aggregate counters do
+not establish the cause of those individual attempts. Acceptance requires a
+bounded, correlated record of scheduling and actual MIDI dispatch, repeated
+cycles in the same engine lifetime, and separate downstream observation.
+
+The owner parked the one-shot start-phase check on 2026-10-10 after discussing
+feedback alternatives. Current scope is the best possible single Lumi trigger;
+no automatic correction is enabled. A future check may correct at most once in a bounded initial window,
+and only with validated downstream phase feedback and a verified correction
+operation. Missing feedback means unknown, never aligned. Shared Link phase
+is not itself proof of the selected SoundSwitch AutoLoop's playback position.
+Do not substitute a blind second trigger or continuous timeline adjustment.
+
+## Original acceptance matrix
+
 Use deterministic engine tests plus the real simulator packet path: paused
 Arm/Start/Play, Start while playing, exact-boundary and mid-phrase cue, last
 phrase, positive/negative offsets, bank preparation, pitch changes, rapid
