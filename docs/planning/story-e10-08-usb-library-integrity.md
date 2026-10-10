@@ -41,8 +41,20 @@ recovery was made after a fresh backup; the entire database outside the binding
 table had an identical dump hash before/after recovery. After sync, all phrase,
 timeline, protection and source-phrase-mapping table hashes still matched the
 pre-test backup. Database quick_check passed and both binding conflict flags
-remained zero. CHRM's UI scan currently awaits the user's normal folder grant;
-its physical reader acceptance above is not a claim of completed CHRM UI sync.
+remained zero.
+
+CHRM follow-up acceptance: after the user selected CHRM in the normal macOS
+folder picker, the actual app scanned 74 playlists / 985 tracks, retained two
+selected playlists and completed their sync with visible 20/71 progress: 71
+current, zero updated or reviews. Both USBs stayed independently connected and
+both physical binding conflict flags remained zero. Phrase/timeline/protection
+and source-mapping dump hashes still matched the pre-test backup exactly.
+Normal app quit left no Lumi engine, Pro DJ Link, Link or Remote processes.
+After relaunch, both sources remained recognized and CHRM scanned again without
+another authorization prompt, reporting its persistent identity saved. The
+actual editor also loaded 90s Bitch after these syncs, preserving Protected and
+Ready for Show. Dev-31 remains open. This acceptance covers simultaneous mounts
+and app restart, not a new physical eject/reinsert or live CDJ show test.
 
 ## Dev-18 — isolate invalid beatgrids within a sync
 
