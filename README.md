@@ -97,6 +97,25 @@ waveform, beatgrid, Hot Cues and Lumi phrases as Track Editor.
 
 ![Lumi Live Decks with two recognized Pro DJ Link players](docs/assets/screenshots/live-decks.png)
 
+### Bring your USB playlists into a local lighting library
+
+Keep preparing music in rekordbox. In **Import & Sources**, choose which USB
+playlists to synchronize into Lumi and see what is already stored locally.
+The playlist folder structure comes with them, alongside track metadata,
+colors, beatgrids, waveforms and Hot Cues.
+
+Each USB keeps its own identity and sync selection. When source data changes,
+inspect the differences and keep the Lumi version or accept the USB version,
+individually or in bulk. Your Lumi-authored phrases stay separate from the
+rekordbox analysis.
+
+In **Tracks**, browse the synced playlist tree, search and sort your collection,
+then use configurable workflow steps to prepare tracks for the show. Saved
+playlists and lighting preparation remain available with the USB disconnected;
+audio preview still needs an accessible audio source.
+
+[USB sync, change reviews and the local library →](docs/user-guide/usb-sync-and-library.md)
+
 ### Prepare phrases on the real waveform
 
 Track Editor combines the rekordbox beatgrid and RGB waveform with editable,
