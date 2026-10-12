@@ -37,6 +37,13 @@ accepted RGB waveform were inspected. No waveform renderer/color code changed.
 
 ## Why the other routes failed
 
+2026-10-12: `usb-sync-library.png` captures the real CHRM USB selection and
+stored Lumi playlists at 3600 × 2260, using the same opt-in window exporter.
+Only scanning and navigation were performed; no sync, playlist-selection or
+phrase changes were made. The ordinary installed production app was preserved.
+The additional library capture was rejected because its table rendered
+incorrectly; the guide retains the existing inspected editor image instead.
+
 - `screencapture -l` could not capture the known window in this tool process.
 - Native capture preflight returned false despite Computer Use being available.
 - The current Computer Use image was confirmed to be a 1223 × 768 JPEG, not a

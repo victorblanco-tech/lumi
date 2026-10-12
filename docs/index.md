@@ -67,6 +67,25 @@ from source with Xcode and pair it with the Mac.
 4. Let Lumi compile a varied full-track Light Plan before playback.
 5. Keep the automatic plan or adjust a future Theme or AutoLoop from Live view.
 
+## Your USB collection, prepared locally
+
+**Import & Sources** brings selected rekordbox USB playlists into your local
+Lumi library, preserving their folder structure, track colors, beatgrids,
+waveforms and Hot Cues. See which playlists are selected and already stored;
+each USB keeps its own identity and sync selection.
+
+Review source changes before replacing uncertain data, with individual or bulk
+decisions. Your Lumi-authored phrases remain separate. In **Tracks**, browse
+synced playlists, search and sort the collection, and organize preparation with
+configurable workflow steps and **Ready for Show** status.
+
+Your saved playlists and lighting preparation remain available without the
+USB. Audio preview still requires an accessible audio source.
+
+![Lumi USB sync: selected USB playlists compared with the local library](assets/screenshots/usb-sync-library.png)
+
+[Learn how to sync, review changes and manage your library](user-guide/usb-sync-and-library.md).
+
 ## Built for the booth
 
 - **Current and next deck:** both tracks stay visible, with phrases and planned
