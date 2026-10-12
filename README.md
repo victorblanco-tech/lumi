@@ -114,6 +114,8 @@ then use configurable workflow steps to prepare tracks for the show. Saved
 playlists and lighting preparation remain available with the USB disconnected;
 audio preview still needs an accessible audio source.
 
+![Lumi USB sync: checked CHRM playlists on the left and the synchronized local library on the right](docs/assets/screenshots/usb-sync-library.png)
+
 [USB sync, change reviews and the local library →](docs/user-guide/usb-sync-and-library.md)
 
 ### Prepare phrases on the real waveform

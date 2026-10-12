@@ -82,6 +82,8 @@ configurable workflow steps and **Ready for Show** status.
 Your saved playlists and lighting preparation remain available without the
 USB. Audio preview still requires an accessible audio source.
 
+![Lumi USB sync: selected USB playlists compared with the local library](assets/screenshots/usb-sync-library.png)
+
 [Learn how to sync, review changes and manage your library](user-guide/usb-sync-and-library.md).
 
 ## Built for the booth

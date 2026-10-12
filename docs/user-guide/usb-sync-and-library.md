@@ -11,6 +11,13 @@ beatgrids, cues or playlists.
 
 ## Choose what comes into Lumi
 
+![CHRM playlist selection on the left and playlists already synchronized into Lumi on the right](../assets/screenshots/usb-sync-library.png)
+
+The left tree shows the USB playlists selected for synchronization; the right
+tree shows what is already stored from that source. In this example, two
+playlists are selected and already synced. The other visible playlists remain
+unchecked. Unchecking a playlist does not delete its existing Lumi data.
+
 1. Finish exporting in rekordbox, then connect the USB to your Mac.
 2. Open **Library → Import & Sources**. For a new source, choose **Add USB
    Source…** and grant access through the normal macOS folder picker.
@@ -69,6 +76,8 @@ Fix the grid in rekordbox, export again and resynchronize. Lumi does not invent
 a replacement beatgrid.
 
 ## Browse and prepare the local library
+
+![Preparing a locally stored track with Lumi phrases in Track Editor](../assets/screenshots/track-editor.png)
 
 Open **Library → Tracks**. The **Collection** contains your local tracks;
 **Playlists** preserves the folder hierarchy of synchronized playlists.
