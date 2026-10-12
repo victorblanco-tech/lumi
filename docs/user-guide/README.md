@@ -18,14 +18,34 @@ runs locally and does not need internet access during normal use.
 
 ### Live-show network limitation in 0.6.4
 
-The validated reference setup uses Ethernet, Wi-Fi off and the macOS application
-firewall temporarily off. Firewall-enabled reception showed timing delays on
-the reference Mac; Wi-Fi and firewall-on timing are not yet accepted for shows.
-This is a temporary limitation, not a general claim that firewalls cannot handle
-DJ traffic. Only choose the workaround on a trusted, preferably isolated DJ
-network, never a public/untrusted network. An uplink means the network is not
-isolated. Restore the firewall after the show. Lumi never changes it for you.
-See the [0.6.4 release notes](../release/0.6.4-release-notes.md).
+**Lumi has been successfully used over Wi-Fi with the macOS firewall temporarily
+disabled.** The owner confirmed this setup in live testing with real CDJs and
+SoundSwitch lighting. Ethernet is also supported; a cable alone did not resolve
+the firewall-related timing issue on our test Mac.
+
+**Occasional delayed AutoLoop triggers?** On our test Mac, a controlled
+firewall-on/off/on comparison showed delayed and out-of-order delivery of Pro DJ
+Link packets to the receiving application, even with incoming connections
+allowed for that application. This can leave Lumi acting on late player updates
+and cause an AutoLoop to start after the intended phrase boundary. An app
+exception alone was not sufficient in that setup. The exact internal macOS
+mechanism remains unconfirmed; this is not a claim that every Mac is affected.
+
+If you encounter this symptom on a trusted DJ network, temporarily turn off the
+macOS firewall in **System Settings → Network → Firewall** and repeat the same
+transition before the show. Keep your existing timing offset unchanged for the
+comparison: a fixed offset is not a fix for variable packet delays. If the
+problem remains, restore the firewall and collect Lumi diagnostics rather than
+assuming the firewall explains every late trigger.
+
+**Security:** disabling the firewall reduces protection. Never use this
+workaround on public or untrusted networks; prefer an isolated DJ network and
+restore the firewall after testing or the show. A venue or internet uplink means
+the network is not isolated. Lumi never changes security settings for you.
+See [Apple's firewall guidance](https://support.apple.com/guide/mac-help/mh34041/mac)
+and the [0.6.4 release notes](../release/0.6.4-release-notes.md). Test your own
+complete setup before relying on it during a show; the Wi-Fi field result is not
+a timing guarantee for other networks or hardware.
 
 To exercise Live Decks without physical players, use the separate
 [Pro DJ Link Simulator](pro-dj-link-simulator.md) on another Mac. It supports

@@ -55,10 +55,14 @@ private vulnerability report as described in [SECURITY.md](../SECURITY.md).
 
 For the Lumi 0.6.4 / Remote 0.1.3 bundle, review the
 [live-show network limitation](user-guide/README.md#live-show-network-limitation-in-064)
-before field testing. The accepted Ethernet baseline temporarily disables the
-Mac application firewall on a trusted DJ network; this reduces protection and
-is not suitable for public or untrusted networks. Lumi does not change these
-settings for you. Wi-Fi/firewall-on timing is not yet validated.
+before field testing. The owner-confirmed setup includes Wi-Fi with the macOS
+firewall temporarily disabled. On our test Mac, allowing incoming connections
+for the receiving application did not prevent packet delivery delays and
+reordering while the firewall was enabled. If AutoLoop triggers are occasionally
+late, follow the guide's temporary firewall comparison on a trusted DJ network.
+Disabling the firewall reduces protection and is not suitable for public or
+untrusted networks; restore it after use. Lumi does not change these settings
+for you. Firewall-enabled timing still needs further validation.
 
 The current supported baseline is Apple Silicon, macOS 15 or newer, rekordbox
 OneLibrary USB media and the integrations listed in the user guide. Compatibility
