@@ -83,6 +83,9 @@ currently distributed outside the Mac App Store and is not Apple-notarized.
 
 Open **Library → Import & Sources**.
 
+For the full workflow, status meanings, bulk review, offline-library behavior
+and a pre-show checklist, see [USB sync and your local library](usb-sync-and-library.md).
+
 1. Choose **Add USB Source** and select a mounted rekordbox OneLibrary USB.
 2. Let Lumi scan the source. The scan is read-only.
 3. Expand the source and select only the playlists you want in Lumi.
