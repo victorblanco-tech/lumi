@@ -15,9 +15,10 @@ and [Lumi Remote 0.1.3 for iPhone](https://github.com/victorblanco-tech/lumi/rel
 Install the Mac DMG; install Remote through Xcode using your own Apple Account.
 
 **Before a live show:** read the [network timing limitation](docs/user-guide/README.md#live-show-network-limitation-in-064).
-The accepted reference setup uses Ethernet, Wi-Fi off and the Mac application
-firewall temporarily off on a trusted DJ network. Firewall-on/Wi-Fi timing is
-not yet validated; disabling protection is not suitable for public networks.
+The tested setup includes Wi-Fi with the macOS firewall temporarily off.
+If you experience occasional delayed AutoLoop triggers, see the guide's firewall
+workaround—even an app exception did not prevent timing issues on our test Mac.
+Only consider it on a trusted DJ network; restore protection after use.
 
 <p align="center">
   <a href="https://github.com/victorblanco-tech/lumi/releases">Download</a>
