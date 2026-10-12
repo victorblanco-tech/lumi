@@ -29,10 +29,10 @@ and [Lumi Remote 0.1.3](https://github.com/victorblanco-tech/lumi/releases/tag/l
 The Mac has a DMG installer; the iPhone app uses the free Xcode installation route.
 
 **Before a show:** read the [network timing limitation](user-guide/#live-show-network-limitation-in-064).
-The accepted reference setup uses Ethernet, Wi-Fi off and the Mac application
-firewall temporarily off on a trusted DJ network. Do not use that workaround on
-public or untrusted networks; restore protection after the show. Reliable
-firewall-on/Wi-Fi live timing remains unresolved.
+The tested setup includes Wi-Fi with the macOS firewall temporarily off.
+If you experience occasional delayed AutoLoop triggers, see the guide's firewall
+workaround—even an app exception did not prevent timing issues on our test Mac.
+Only consider it on a trusted DJ network; restore protection after use.
 
 > **Public Beta:** Lumi is ready for structured field testing across different
 > compatible DJ and lighting setups. Read the [beta test guidance](public-beta.md)
