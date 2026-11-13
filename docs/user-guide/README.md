@@ -1,5 +1,7 @@
 # Lumi user guide
 
+New to the setup? [See how Lumi, your Players, iPhone and SoundSwitch work together](how-lumi-works.md).
+
 Lumi prepares and runs phrase-aware SoundSwitch lighting for the track that is
 playing and the track that is coming next. This guide covers the shortest path
 from an empty Lumi library to a working local or Pro DJ Link show.

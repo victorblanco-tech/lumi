@@ -8,6 +8,12 @@ werking van Lumi en het functionele gat dat Lumi invult.
 
 ## Plaat 1 – Totale oplossing
 
+[![Lumi-overzicht met USB-sync, Pro DJ Link, Remote en SoundSwitch](../assets/architecture/lumi-architecture.png)](../assets/architecture/lumi-architecture.png)
+
+Deze illustratie toont de gebruikersopstelling. Control One is optioneel;
+de onderstaande schema's geven de functionele details weer. Zie ook de
+[Engelstalige uitleg voor gebruikers](../user-guide/how-lumi-works.md).
+
 ```mermaid
 flowchart TB
   subgraph preparation["Voorbereiding"]
