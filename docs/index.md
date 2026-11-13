@@ -38,7 +38,22 @@ Only consider it on a trusted DJ network; restore protection after use.
 > compatible DJ and lighting setups. Read the [beta test guidance](public-beta.md)
 > and complete a dry run before relying on it during a show.
 
-![Lumi Local Playback running a prepared two-track show](assets/screenshots/local-playback.png)
+## How Lumi fits into your setup
+
+[![Lumi architecture: USB preparation, live Players, local engine, iPhone Remote and SoundSwitch output](assets/architecture/lumi-architecture.png)](assets/architecture/lumi-architecture.png)
+
+Your USB collection becomes a prepared local library. Live Player state drives
+the plan, while SoundSwitch handles the fixtures and DMX. Control One is one
+example interface; wireless DMX needs suitable hardware.
+
+[See how the parts work together](user-guide/how-lumi-works.md).
+
+## The show in Live Decks
+
+![Lumi in Start mode with 90s Bitch playing as Master and My Favourite Regrets ready on Player 2](assets/screenshots/live-decks.png)
+
+Captured with the Pro DJ Link simulator, with Player 2 loading over LINK from
+Player 1's USB source. This is the Live Decks workflow, not Local Playback.
 
 ## Take Live Decks into the booth
 

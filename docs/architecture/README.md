@@ -5,6 +5,13 @@ Decision Records (ADR's) die de belangrijkste besluiten vastleggen.
 
 ## Documenten
 
+- [Visueel overzicht: hoe de onderdelen samenwerken](../user-guide/how-lumi-works.md)
+
+[![Lumi: USB-library, live Players, engine, Remote en SoundSwitch](../assets/architecture/lumi-architecture.png)](../assets/architecture/lumi-architecture.png)
+
+De illustratie toont een voorbeeldopstelling met Control One; de technische
+schema's en ADR's hieronder beschrijven de precieze grenzen en protocollen.
+
 - [Architectuurdesign](design.md)
 - [Functionele architectuurplaten](visual-overview.md)
 - [ADR-0001: Autonome engine en losse clients](adr/0001-autonome-engine-en-losse-clients.md)

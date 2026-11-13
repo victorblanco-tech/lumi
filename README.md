@@ -45,7 +45,15 @@ normal controller.
 current Master and next Player, monitor all three integrations and adjust a
 future Theme or AutoLoop without returning to the Mac.
 
-![Lumi Live Decks with the current and next track side by side](docs/assets/screenshots/live-decks-intro.png)
+## How Lumi fits into your setup
+
+[![Lumi architecture: rekordbox USB and Pro DJ Link feed the local engine, with iPhone control and separate MIDI and Ableton Link outputs to SoundSwitch](docs/assets/architecture/lumi-architecture.png)](docs/assets/architecture/lumi-architecture.png)
+
+Prepare your library from USB, follow the live Players, and let Lumi trigger
+your SoundSwitch lighting. Control One is an example interface, not a requirement;
+SoundSwitch owns the fixtures and DMX output. Wireless DMX requires suitable hardware.
+
+[Explore the signal path](docs/user-guide/how-lumi-works.md).
 
 ## Lumi Remote for iPhone
 
@@ -95,7 +103,10 @@ Master and its active Light Plan on the left, the loaded next track and editable
 future choices on the right. Exact Library matches reuse the same detailed RGB
 waveform, beatgrid, Hot Cues and Lumi phrases as Track Editor.
 
-![Lumi Live Decks with two recognized Pro DJ Link players](docs/assets/screenshots/live-decks.png)
+![Lumi Live Decks in Start mode: 90s Bitch playing as Master and My Favourite Regrets ready on Player 2](docs/assets/screenshots/live-decks.png)
+
+Live view captured with the Pro DJ Link simulator: Player 1 is playing, and
+Player 2 has loaded its track over LINK from Player 1's USB source.
 
 ### Bring your USB playlists into a local lighting library
 
