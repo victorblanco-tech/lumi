@@ -71,7 +71,9 @@ fi
 # The iPhone Remote gateway has an independent executable identity and launchd
 # lifecycle. It is packaged with Lumi but registered only after the user turns
 # iPhone Remote on in Integrations.
-gateway_target_directory="$repository_root/build/remote-gateway-service-target"
+# Final-target linker arguments no longer contaminate dependency artifacts, so
+# the three helper builds can safely share their compiled dependencies.
+gateway_target_directory="$service_target_directory"
 gateway_info_plist="$engine_info_plist_directory/lumi-remote-gateway-info.plist"
 plutil -create xml1 "$gateway_info_plist"
 /usr/libexec/PlistBuddy -c "Add :CFBundleIdentifier string $PRODUCT_BUNDLE_IDENTIFIER.remote-gateway" "$gateway_info_plist"
@@ -102,8 +104,9 @@ fi
 # macOS then attributes removable-volume consent to the foreground Lumi app
 # that launches it, instead of to the persistent SMAppService engine. Keep the
 # two executables separate: only lumi-engine may be registered with launchd.
-cargo build --locked --release -p lumi-engine --target "$rust_target"
-install -m 755 "target/$profile_directory/lumi-engine" "$helpers_directory/lumi-usb-worker"
+cargo build --locked --release -p lumi-engine --bin lumi-engine \
+  --target "$rust_target" --target-dir "$service_target_directory"
+install -m 755 "$service_target_directory/$profile_directory/lumi-engine" "$helpers_directory/lumi-usb-worker"
 if otool -l "$helpers_directory/lumi-usb-worker" \
   | grep -q 'sectname __info_plist'; then
   echo "ERROR: lumi-usb-worker must not carry the LaunchAgent bundle identity." >&2
