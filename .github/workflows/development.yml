@@ -159,7 +159,9 @@ jobs:
           fi
 
       - name: Test native database, network and timing adapters on macOS 27
-        if: matrix.os == '27'
+        # Collect independent native coverage even if a visual/build check fails.
+        # A failed earlier step still fails this job and the aggregate gate.
+        if: always() && matrix.os == '27' && steps.platform.outcome == 'success'
         run: |
           cargo test --locked --all-features \
             -p lumi-library-sqlite -p lumi-rekordbox-device \
