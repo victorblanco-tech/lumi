@@ -36,7 +36,7 @@ for required_package in \
   'pkg:maven/org.deepsymmetry/beat-link@8.0.0' \
   'pkg:github/Deep-Symmetry/carabiner@v1.2.0' \
   'pkg:github/Ableton/link@41d9aa111f702e78b6fbaee9d3e06dda1db6420d' \
-  'pkg:generic/sqlcipher@libsqlite3-sys-0.38.1-bundle'; do
+  'pkg:generic/sqlcipher@4.20.0'; do
   if ! jq -e --arg purl "$required_package" \
     '[.packages[].externalRefs[]?.referenceLocator] | index($purl) != null' \
     "$sbom_path" >/dev/null; then

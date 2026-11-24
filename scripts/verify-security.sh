@@ -5,6 +5,26 @@ set -euo pipefail
 script_dir="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 repository_root="$(dirname "$script_dir")"
 
+mode="${1:-all}"
+case "$mode" in
+  all)
+    failed=0
+    for gate in rust maven licenses; do
+      if ! bash "$0" "$gate"; then
+        echo "ERROR: security gate '$gate' failed." >&2
+        failed=1
+      fi
+    done
+    exit "$failed"
+    ;;
+  licenses)
+    exec "$script_dir/verify-license-inventory.sh"
+    ;;
+  rust|maven) ;;
+  *) echo "Usage: $0 [all|rust|maven|licenses]" >&2; exit 2 ;;
+esac
+
+if [[ "$mode" == rust ]]; then
 cargo_audit_executable="${LUMI_CARGO_AUDIT_EXECUTABLE:-}"
 if [[ -z "$cargo_audit_executable" ]]; then
   cargo_audit_executable="$(command -v cargo-audit || true)"
@@ -16,14 +36,15 @@ if [[ -z "$cargo_audit_executable" || ! -x "$cargo_audit_executable" ]]; then
   echo "ERROR: cargo-audit is required. Install it with: cargo install cargo-audit --locked" >&2
   exit 1
 fi
+exec "$cargo_audit_executable" audit --file "$repository_root/Cargo.lock"
+fi
+
 for required_tool in curl jq mvn; do
   if ! command -v "$required_tool" >/dev/null 2>&1; then
     echo "ERROR: '$required_tool' is required for the local security gate." >&2
     exit 1
   fi
 done
-
-"$cargo_audit_executable" audit --file "$repository_root/Cargo.lock"
 
 temporary_directory="$(mktemp -d "${TMPDIR:-/tmp}/lumi-security.XXXXXX")"
 cleanup() {
@@ -57,6 +78,10 @@ for module in bridges/prolink tools/prolink-simulator; do
 done
 
 sort -u "$dependency_rows" -o "$dependency_rows"
+if [[ ! -s "$dependency_rows" ]]; then
+  echo "ERROR: Maven returned no runtime dependencies; refusing an empty audit." >&2
+  exit 1
+fi
 query_file="$temporary_directory/osv-query.json"
 response_file="$temporary_directory/osv-response.json"
 jq -Rn \
@@ -72,7 +97,15 @@ curl \
   --data-binary "@$query_file" \
   https://api.osv.dev/v1/querybatch >"$response_file"
 
-finding_count="$(jq '[.results[]? | .vulns // [] | .[]] | unique_by(.id) | length' "$response_file")"
+# Never treat a truncated/error response as a clean audit.
+jq -e --slurpfile query "$query_file" '
+  (.results | type == "array") and
+  (.results | length == ($query[0].queries | length)) and
+  all(.results[]; type == "object" and (has("error") | not) and
+    ((has("vulns") | not) or (.vulns | type == "array")))
+' "$response_file" >/dev/null
+
+finding_count="$(jq '[.results[] | .vulns // [] | .[]] | unique_by(.id) | length' "$response_file")"
 if [[ "$finding_count" != "0" ]]; then
   echo "ERROR: OSV reported $finding_count unique Maven advisories:" >&2
   jq -r \
@@ -81,6 +114,4 @@ if [[ "$finding_count" != "0" ]]; then
   exit 1
 fi
 
-"$script_dir/verify-license-inventory.sh"
-
-echo "Local dependency security and release-license gates passed."
+echo "Maven dependency security gate passed."

@@ -14,16 +14,32 @@ concurrency:
 
 jobs:
   dependencies:
-    name: Dependency and license audit
+    name: ${{ matrix.gate }} audit (${{ matrix.branch }})
+    strategy:
+      fail-fast: false
+      matrix:
+        branch: [dev, main]
+        gate: [rust, maven, licenses]
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
         with:
-          ref: dev
+          ref: ${{ matrix.branch }}
+
+      # Use this workflow's audit implementation also when inspecting main.
+      # The target checkout stays untouched; no fixes are merged into main here.
+      - name: Check out audit tooling
+        uses: actions/checkout@v6
+        with:
+          path: audit-tooling
+
+      - name: Use independent audit entry point
+        run: cp audit-tooling/scripts/verify-security.sh scripts/verify-security.sh
 
       - name: Set up Java 21 for Maven dependency resolution
+        if: matrix.gate == 'maven'
         uses: actions/setup-java@v5
         with:
           distribution: temurin
@@ -42,10 +58,15 @@ jobs:
             security-v1-${{ runner.os }}-
 
       - name: Install pinned RustSec client when absent
+        if: matrix.gate == 'rust'
         run: |
           if [[ ! -x "$HOME/.cargo/bin/cargo-audit" ]]; then
             cargo install cargo-audit --version 0.22.2 --locked
           fi
 
+      - name: Fetch locked package metadata for license inventory
+        if: matrix.gate == 'licenses'
+        run: cargo fetch --locked
+
       - name: Audit dependencies and release license inventory
-        run: ./scripts/verify-security.sh
+        run: bash ./scripts/verify-security.sh "${{ matrix.gate }}"

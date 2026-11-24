@@ -45,6 +45,9 @@ jobs:
       - name: Test conservative classification behavior
         run: ./scripts/test-ci-classification.sh
 
+      - name: Test independent security gates
+        run: python3 scripts/test-security-gates.py
+
   docs:
     name: Documentation and visual assets
     needs: classify

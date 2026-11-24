@@ -2852,10 +2852,15 @@ fn canonical_app_to_output_scenario_matches_release_evidence() {
 
     let actual = canonical_e2e_evidence(&runtime, output_count_before_pause);
     let expected = include_bytes!("../../../../fixtures/demo-session-v1/canonical-e2e.json");
-    assert_eq!(
-        String::from_utf8_lossy(&actual),
-        String::from_utf8_lossy(expected)
-    );
+    let actual: serde_json::Value = serde_json::from_slice(&actual)
+        .unwrap_or_else(|error| panic!("scenario evidence must be JSON: {error}"));
+    let mut expected: serde_json::Value = serde_json::from_slice(expected)
+        .unwrap_or_else(|error| panic!("reference evidence must be JSON: {error}"));
+    // The fixture records release behavior, not a permanent package version.
+    // Assert the current version independently; retain every behavioral field.
+    assert_eq!(actual["engineVersion"], env!("CARGO_PKG_VERSION"));
+    expected["engineVersion"] = serde_json::json!(env!("CARGO_PKG_VERSION"));
+    assert_eq!(actual, expected);
 }
 
 #[test]

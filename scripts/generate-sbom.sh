@@ -88,7 +88,7 @@ additional_components = [
     ("Ableton Link", "41d9aa111f702e78b6fbaee9d3e06dda1db6420d", "GPL-2.0-or-later", "pkg:github/Ableton/link@41d9aa111f702e78b6fbaee9d3e06dda1db6420d", "https://github.com/Ableton/link/tree/41d9aa111f702e78b6fbaee9d3e06dda1db6420d"),
     ("gflags", "e171aa2d15ed9eb17054558e0b3a6a413bb01067", "BSD-3-Clause", "pkg:github/gflags/gflags@e171aa2d15ed9eb17054558e0b3a6a413bb01067", "https://github.com/gflags/gflags/tree/e171aa2d15ed9eb17054558e0b3a6a413bb01067"),
     ("ASIO standalone", "c465349fa5cd91a64bb369f5131ceacab2c0c1c3", "BSL-1.0", "pkg:github/chriskohlhoff/asio@c465349fa5cd91a64bb369f5131ceacab2c0c1c3", "https://github.com/chriskohlhoff/asio/tree/c465349fa5cd91a64bb369f5131ceacab2c0c1c3"),
-    ("SQLCipher amalgamation", "libsqlite3-sys-0.38.1-bundle", "BSD-3-Clause", "pkg:generic/sqlcipher@libsqlite3-sys-0.38.1-bundle", "https://crates.io/crates/libsqlite3-sys/0.38.1"),
+    ("SQLCipher amalgamation", "4.20.0", "BSD-3-Clause", "pkg:generic/sqlcipher@4.20.0", "https://github.com/sqlcipher/sqlcipher/tree/v4.20.0"),
     ("OpenSSL", "3.6.3", "Apache-2.0", "pkg:generic/openssl@3.6.3", "https://github.com/openssl/openssl/tree/openssl-3.6.3"),
 ]
 
