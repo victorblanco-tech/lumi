@@ -25,6 +25,11 @@ struct LumiLibraryVisualEvidenceCommand {
 
     @MainActor
     static func main() throws {
+        // Library scenes include AppKit-backed tables and split views. They need
+        // a real hosting lifecycle rather than SwiftUI's offscreen ImageRenderer.
+        let application = NSApplication.shared
+        application.setActivationPolicy(.prohibited)
+        application.finishLaunching()
         let outputDirectory = try outputDirectoryURL()
         try FileManager.default.createDirectory(
             at: outputDirectory,
@@ -179,15 +184,32 @@ struct LumiLibraryVisualEvidenceCommand {
         named name: String,
         to outputDirectory: URL
     ) throws {
-        let renderer = ImageRenderer(content: view)
-        renderer.proposedSize = ProposedViewSize(width: width, height: height)
-        renderer.scale = renderScale
-        guard let image = renderer.nsImage,
-              let tiffData = image.tiffRepresentation,
-              let representation = NSBitmapImageRep(data: tiffData),
-              representation.pixelsWide == Int(width * renderScale),
-              representation.pixelsHigh == Int(height * renderScale),
-              let pngData = representation.representation(using: .png, properties: [:]),
+        FileHandle.standardError.write(Data("Rendering \(name)\n".utf8))
+        let bounds = NSRect(x: 0, y: 0, width: width, height: height)
+        let hostingView = NSHostingView(rootView: view)
+        let window = NSWindow(contentRect: bounds, styleMask: .borderless, backing: .buffered, defer: false)
+        window.isReleasedWhenClosed = false
+        window.contentView = hostingView
+        hostingView.frame = bounds
+        defer { window.close() }
+        hostingView.layoutSubtreeIfNeeded()
+        guard let representation = NSBitmapImageRep(
+            bitmapDataPlanes: nil,
+            pixelsWide: Int(width * renderScale),
+            pixelsHigh: Int(height * renderScale),
+            bitsPerSample: 8,
+            samplesPerPixel: 4,
+            hasAlpha: true,
+            isPlanar: false,
+            colorSpaceName: .deviceRGB,
+            bytesPerRow: 0,
+            bitsPerPixel: 0
+        ) else {
+            throw VisualEvidenceError.renderFailed(name)
+        }
+        representation.size = bounds.size
+        hostingView.cacheDisplay(in: bounds, to: representation)
+        guard let pngData = representation.representation(using: .png, properties: [:]),
               pngData.count > 10_000 else {
             throw VisualEvidenceError.renderFailed(name)
         }

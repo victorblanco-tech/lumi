@@ -1,0 +1,28 @@
+name: Apple visual compatibility probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [dev]
+    paths:
+      - .github/workflows/apple-visual-probe.yml
+      - apps/macos/Packages/LumiLibraryWorkspace/Sources/LumiLibraryVisualEvidence/**
+
+permissions:
+  contents: read
+
+jobs:
+  visual:
+    if: github.event.repository.private == false
+    runs-on: xcode-27
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Render real library controls at Retina resolution
+        env:
+          SWIFT_BACKTRACE: enable=yes,interactive=no,color=no
+        run: |
+          swift run --package-path apps/macos/Packages/LumiLibraryWorkspace \
+            LumiLibraryVisualEvidence --output build/LibraryVisualProbe
+          count="$(find build/LibraryVisualProbe -name '*.png' | wc -l | tr -d ' ')"
+          [[ "$count" == 13 ]]
