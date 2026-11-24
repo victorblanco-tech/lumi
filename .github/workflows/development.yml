@@ -48,6 +48,9 @@ jobs:
       - name: Test independent security gates
         run: python3 scripts/test-security-gates.py
 
+      - name: Test compatibility environment validation
+        run: python3 scripts/test-apple-compatibility-environment.py
+
   docs:
     name: Documentation and visual assets
     needs: classify
@@ -83,14 +86,29 @@ jobs:
         run: ./scripts/verify-rust.sh
 
   apple:
-    name: Apple development gate
+    name: Apple development gate (macOS ${{ matrix.os }})
     needs: classify
-    if: needs.classify.outputs.apple == '1'
-    runs-on: macos-26
-    timeout-minutes: 30
+    # Standard runners are free for this public repository. Fail the aggregate
+    # gate rather than silently using billed minutes if visibility changes.
+    if: needs.classify.outputs.apple == '1' && github.event.repository.private == false
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - runner: macos-26
+            os: '26'
+          - runner: xcode-27
+            os: '27'
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 45
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+      - name: Verify actual compatibility environment
+        id: platform
+        env:
+          EXPECTED_MACOS_MAJOR: ${{ matrix.os }}
+        run: bash scripts/check-apple-compatibility-environment.sh
       - name: Set up Java 21 for the bundled Pro DJ Link bridge
         uses: actions/setup-java@v5
         with:
@@ -117,11 +135,11 @@ jobs:
             build/engine-service-target
             build/maven-repository
             build/prolink-bridge-runtime
-          key: apple-v2-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'apps/macos/Lumi.xcodeproj/project.pbxproj', 'apps/macos/Packages/**/Package.swift', 'apps/ios/LumiRemote.xcodeproj/project.pbxproj', 'apps/ios/Packages/**/Package.swift') }}
+          key: apple-v3-${{ matrix.runner }}-${{ runner.arch }}-${{ steps.platform.outputs.toolchain }}-${{ hashFiles('Cargo.lock', 'rust-toolchain.toml', 'apps/macos/Lumi.xcodeproj/project.pbxproj', 'apps/macos/Packages/**/Package.swift', 'apps/ios/LumiRemote.xcodeproj/project.pbxproj', 'apps/ios/Packages/**/Package.swift') }}
           restore-keys: |
-            apple-v2-${{ runner.os }}-${{ runner.arch }}-
+            apple-v3-${{ matrix.runner }}-${{ runner.arch }}-${{ steps.platform.outputs.toolchain }}-
       - name: Prepare pinned Ableton Link runtime for a full fallback
-        if: needs.classify.outputs.full == '1'
+        if: needs.classify.outputs.full == '1' || matrix.os == '27'
         run: |
           if [[ ! -x build/carabiner-runtime/Carabiner ]]; then
             ./scripts/prepare-carabiner-runtime.sh
@@ -129,8 +147,9 @@ jobs:
       - name: Verify affected native application scope
         env:
           FULL_REQUIRED: ${{ needs.classify.outputs.full }}
+          COMPATIBILITY_OS: ${{ matrix.os }}
         run: |
-          if [[ "$FULL_REQUIRED" == "1" ]]; then
+          if [[ "$FULL_REQUIRED" == "1" || "$COMPATIBILITY_OS" == "27" ]]; then
             ./scripts/verify-apple.sh
           else
             ./scripts/verify-apple-fast.sh

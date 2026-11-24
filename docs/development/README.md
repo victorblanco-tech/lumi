@@ -3,6 +3,39 @@
 Lumi's first build target is Apple Silicon with a macOS 15.0 deployment
 minimum. Product code uses Rust 2024 and Swift 6 strict concurrency.
 
+## macOS 27 compatibility validation
+
+Development CI retains macOS 26 and adds the standard Apple Silicon `xcode-27`
+runner. It checks the actual OS, Xcode and SDK before testing: a runner label
+alone is not compatibility evidence. Compiler caches are separated by runner,
+OS version, Xcode build and SDK. Both matrix jobs must pass the Development gate;
+macOS 27 always runs the complete Apple verification, including native process
+tests, both app builds, bundled helpers and 22 deterministic visual renders.
+
+Only standard runners are used. They are free for this public repository;
+the Apple job refuses to run if the repository becomes private. There are no
+paid larger runners, new artifact uploads, releases, or changes to a local OS.
+See [GitHub's standard runner policy](https://docs.github.com/en/actions/reference/runners/github-hosted-runners#standard-github-hosted-runners-for-public-repositories).
+
+Status: compatibility validation in progress on `dev`; no production support
+claim yet. The minimum deployment target remains macOS 15.0. Existing production
+and installed Dev apps are not replaced as part of CI validation.
+
+The review focuses on the following Apple SDK changes: SwiftUI `@State`
+initialization, changed Menu/Picker/Slider implementations, menu icon visibility,
+and file-selection behavior. Do not add speculative workarounds; fix reproduced
+compiler, runtime or interaction regressions while retaining older-OS behavior.
+See [Apple's macOS 27 release notes](https://developer.apple.com/documentation/macos-release-notes/macos-27-release-notes).
+
+Before declaring full show support, test real USB authorization/reconnection,
+SMAppService installation/restart/quit, iPhone discovery/pairing, CDJ timing over
+Ethernet and Wi-Fi, and SoundSwitch/CoreMIDI/Link with physical lighting on macOS
+27. CI renders are not interactive UI acceptance, and a shared Link clock is not
+proof of physical light/audio beat alignment. Do not assume earlier firewall
+findings apply unchanged to the new OS. SoundSwitch requires version 2.11 or
+newer for macOS 27 according to its
+[compatibility statement](https://support.soundswitch.com/en/support/solutions/articles/69000883511-soundswitch-macos-27-golden-gate-compatibility).
+
 ## Required tools
 
 - Apple Silicon Mac;
