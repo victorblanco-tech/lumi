@@ -19,3 +19,5 @@ probe inherited env RUSTC_LOG=rustc_metadata=info
 probe no-sdk env -u SDKROOT -u MACOSX_DEPLOYMENT_TARGET RUSTC_LOG=rustc_metadata=info
 probe clean env -i "HOME=$HOME" "PATH=$PATH" RUSTC_LOG=rustc_metadata=info
 probe serial env CARGO_BUILD_JOBS=1 RUSTC_LOG=rustc_metadata=info
+probe no-sdkroot env -u SDKROOT RUSTC_LOG=rustc_metadata=info
+probe no-deployment-target env -u MACOSX_DEPLOYMENT_TARGET RUSTC_LOG=rustc_metadata=info
