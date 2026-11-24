@@ -52,8 +52,11 @@ plutil -lint "$engine_info_plist" >/dev/null
 # `notFound` when this Mach-O section is absent.
 engine_info_link_argument="-Wl,-sectcreate,__TEXT,__info_plist,$engine_info_plist"
 cd "$repository_root"
-RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C link-arg=$engine_info_link_argument" \
-  cargo build --locked --release -p lumi-engine --target-dir "$service_target_directory"
+# Apply the identity only to the final executable, never host build scripts or
+# procedural-macro dylibs. Global RUSTFLAGS also modified those dependencies,
+# which failed to load during the macOS 27 build (thiserror_impl / E0463).
+cargo rustc --locked --release -p lumi-engine --bin lumi-engine \
+  --target-dir "$service_target_directory" -- -C "link-arg=$engine_info_link_argument"
 install -d "$helpers_directory"
 install -m 755 "$service_target_directory/$profile_directory/lumi-engine" "$helpers_directory/lumi-engine"
 if ! otool -s __TEXT __info_plist "$helpers_directory/lumi-engine" >/dev/null 2>&1; then
@@ -81,8 +84,8 @@ plutil -create xml1 "$gateway_info_plist"
 /usr/libexec/PlistBuddy -c "Add :NSBonjourServices:2 string _lumi-remote-dev._tcp" "$gateway_info_plist"
 plutil -lint "$gateway_info_plist" >/dev/null
 gateway_info_link_argument="-Wl,-sectcreate,__TEXT,__info_plist,$gateway_info_plist"
-RUSTFLAGS="${RUSTFLAGS:+$RUSTFLAGS }-C link-arg=$gateway_info_link_argument" \
-  cargo build --locked --release -p lumi-remote-gateway --target-dir "$gateway_target_directory"
+cargo rustc --locked --release -p lumi-remote-gateway --bin lumi-remote-gateway \
+  --target-dir "$gateway_target_directory" -- -C "link-arg=$gateway_info_link_argument"
 install -m 755 \
   "$gateway_target_directory/$profile_directory/lumi-remote-gateway" \
   "$helpers_directory/lumi-remote-gateway"
