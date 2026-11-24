@@ -17,11 +17,41 @@ Pro DJ Link, CoreMIDI packet and timing-adapter suites natively on macOS 27.
 Only standard runners are used. They are free for this public repository;
 the Apple job refuses to run if the repository becomes private. There are no
 paid larger runners, new artifact uploads, releases, or changes to a local OS.
+The repository cache limit was verified at the included 10 GB on 2026-11-24;
+do not raise it without approval, since
+[additional cache storage is billable](https://docs.github.com/en/billing/concepts/product-billing/github-actions).
 See [GitHub's standard runner policy](https://docs.github.com/en/actions/reference/runners/github-hosted-runners#standard-github-hosted-runners-for-public-repositories).
 
-Status: compatibility validation in progress on `dev`; no production support
-claim yet. The minimum deployment target remains macOS 15.0. Existing production
-and installed Dev apps are not replaced as part of CI validation.
+Status (2026-11-24): the [complete development gate passed](https://github.com/victorblanco-tech/lumi/actions/runs/45488879534)
+on macOS 26 and macOS 27. The macOS 27 runner used 27.0.1, Xcode 27.1 and SDK
+27.0. Both app builds, 252 Swift tests, all 22 visual renders and 170 additional
+native Rust tests passed. Four native cases remain explicitly opt-in: the
+release-only library benchmark (run separately by the Linux Rust gate) and
+three real-Carabiner helper/soak tests, which this native test invocation did
+not execute. This is build/automated coverage, not full show certification.
+The minimum deployment target remains macOS 15.0. Existing production and
+installed Dev apps are not replaced as part of CI validation.
+
+The Xcode 27 build exposed a reproducible Rust host-plugin failure (`E0463` for
+`thiserror_impl`) when the app's `MACOSX_DEPLOYMENT_TARGET` leaked into compiler
+tools. Helpers now use an explicit Rust target and a narrowly scoped compiler
+wrapper: runtime crates retain the product deployment floor and selected SDK;
+host-only proc macros/build tools omit only that product floor. Existing compiler
+wrappers remain chained. LaunchAgent metadata is linked only into the final
+service executables, never their dependencies; the USB worker remains separate.
+The [isolated regression run](https://github.com/victorblanco-tech/lumi/actions/runs/45484287477)
+reproduced the old failure and passed with host/product isolation. The optional
+`Apple Rust host probe` workflow retains those diagnostic comparisons; its final
+isolated build is mandatory, while earlier failing variants are diagnostic data.
+
+Library visual evidence uses an unshown AppKit window with `NSHostingView` and
+an explicit 2× bitmap. The old `ImageRenderer` path failed on macOS 27 when the
+scene contained native tables/split views. This is a test-host change, not a
+change to the production views. The
+[macOS 27 visual probe](https://github.com/victorblanco-tech/lumi/actions/runs/45488792186)
+passed all 13 library/editor/settings renders; the full gate also retains the
+nine Live renders. These synthetic fixtures are test evidence, not replacement
+screenshots for the public README or evidence of a live show.
 
 The review focuses on the following Apple SDK changes: SwiftUI `@State`
 initialization, changed Menu/Picker/Slider implementations, menu icon visibility,
@@ -86,24 +116,25 @@ Run all local foundation checks and builds with:
 ./scripts/verify.sh
 ```
 
-During the solo POC phase this local command is the required feature and PR
-gate. GitHub's `Foundation` workflow runs only on explicit manual dispatch and
-after a merge to `main`; it does not duplicate local validation for every PR or
-`dev` merge. The workflow assigns work to the least costly correct platform.
+The `Development` workflow runs on pushes to `dev` and manual dispatch. Change
+classification selects the required documentation, Rust and Apple gates;
+macOS 27 always receives full Apple verification when Apple validation is
+required. The workflow assigns work to the least costly correct platform.
 `./scripts/verify-rust.sh` is portable and owns Rust lint,
 tests, migrations, contracts, and release benchmarks on Linux.
 `./scripts/verify-apple.sh` owns Swift tests, the real Swift-to-Rust process,
 the unsigned arm64 app, and deterministic visual evidence on macOS. Dependency
-and build caches are keyed only by locked toolchain and build manifests; a
+and build caches include the locked dependencies and actual Apple toolchain; a
 cache hit never skips a compiler, test, benchmark, or evidence command.
 
 After a successful build, launch the exact unsigned development app with:
 
 ```bash
-open -n "$PWD/build/DerivedData/Build/Products/Debug/Lumi Dev.app"
+open -n "$PWD/build/DerivedData/Build/Products/Dev/Lumi.app"
 ```
 
-Quit any older Lumi runtime first. Debug builds use the isolated Lumi Dev bundle
+Quit any older Lumi runtime first, with the user's approval if it is in use.
+Dev builds use the isolated Lumi Dev bundle
 identifier and database, while Preview and Stable remain installed separately.
 Only one channel should own the live MIDI/lighting endpoints at a time. The
 explicit `open -n` command above is the canonical hands-on test path for every
