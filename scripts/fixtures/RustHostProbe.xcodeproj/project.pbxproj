@@ -1,0 +1,57 @@
+// !$*UTF8*$!
+{
+  archiveVersion = 1;
+  classes = {};
+  objectVersion = 56;
+  objects = {
+    A00000000000000000000001 = {
+      isa = PBXProject;
+      buildConfigurationList = A00000000000000000000002;
+      compatibilityVersion = "Xcode 14.0";
+      developmentRegion = en;
+      knownRegions = (en, Base);
+      mainGroup = A00000000000000000000003;
+      projectDirPath = "";
+      projectRoot = "";
+      targets = (A00000000000000000000004);
+    };
+    A00000000000000000000002 = {
+      isa = XCConfigurationList;
+      buildConfigurations = (A00000000000000000000005);
+      defaultConfigurationIsVisible = 0;
+      defaultConfigurationName = Release;
+    };
+    A00000000000000000000003 = { isa = PBXGroup; children = (); sourceTree = "<group>"; };
+    A00000000000000000000004 = {
+      isa = PBXAggregateTarget;
+      buildConfigurationList = A00000000000000000000006;
+      buildPhases = (A00000000000000000000008);
+      dependencies = ();
+      name = RustHostProbe;
+      productName = RustHostProbe;
+    };
+    A00000000000000000000005 = {
+      isa = XCBuildConfiguration;
+      buildSettings = { SDKROOT = macosx; MACOSX_DEPLOYMENT_TARGET = 15.0; ARCHS = arm64; };
+      name = Release;
+    };
+    A00000000000000000000006 = {
+      isa = XCConfigurationList;
+      buildConfigurations = (A00000000000000000000007);
+      defaultConfigurationIsVisible = 0;
+      defaultConfigurationName = Release;
+    };
+    A00000000000000000000007 = { isa = XCBuildConfiguration; buildSettings = {}; name = Release; };
+    A00000000000000000000008 = {
+      isa = PBXShellScriptBuildPhase;
+      buildActionMask = 2147483647;
+      files = ();
+      inputPaths = ();
+      outputPaths = ();
+      runOnlyForDeploymentPostprocessing = 0;
+      shellPath = /bin/bash;
+      shellScript = "set -euo pipefail\nexport PATH=\"${HOME}/.cargo/bin:$PATH\"\ncd \"${SRCROOT}/../..\"\nRUSTC_LOG=rustc_metadata::locator=info cargo build --locked --release -p thiserror --target-dir build/rust-host-probe-xcode\n";
+    };
+  };
+  rootObject = A00000000000000000000001;
+}

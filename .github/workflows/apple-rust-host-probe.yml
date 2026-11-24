@@ -1,0 +1,27 @@
+name: Apple Rust host probe
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [dev]
+    paths:
+      - .github/workflows/apple-rust-host-probe.yml
+      - scripts/fixtures/RustHostProbe.xcodeproj/project.pbxproj
+
+permissions:
+  contents: read
+
+jobs:
+  probe:
+    if: github.event.repository.private == false
+    runs-on: xcode-27
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+      - name: Compare a cold compiler-plugin build inside Xcode
+        run: |
+          xcodebuild -project scripts/fixtures/RustHostProbe.xcodeproj \
+            -target RustHostProbe -configuration Release CODE_SIGNING_ALLOWED=NO build
+      - name: Compare the same dependency outside Xcode
+        if: always()
+        run: cargo build --locked --release -p thiserror --target-dir build/rust-host-probe-terminal
