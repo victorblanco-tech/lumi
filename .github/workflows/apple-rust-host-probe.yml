@@ -7,6 +7,7 @@ on:
     paths:
       - .github/workflows/apple-rust-host-probe.yml
       - scripts/fixtures/RustHostProbe.xcodeproj/project.pbxproj
+      - scripts/fixtures/rust-host-probe.sh
 
 permissions:
   contents: read

@@ -50,7 +50,7 @@
       outputPaths = ();
       runOnlyForDeploymentPostprocessing = 0;
       shellPath = /bin/bash;
-      shellScript = "set -euo pipefail\nexport PATH=\"${HOME}/.cargo/bin:$PATH\"\ncd \"${SRCROOT}/../..\"\nRUSTC_LOG=rustc_metadata::locator=info cargo build --locked --release -p thiserror --target-dir build/rust-host-probe-xcode\n";
+      shellScript = "set -euo pipefail\nexport PATH=\"${HOME}/.cargo/bin:$PATH\"\ncd \"${SRCROOT}/../..\"\nbash scripts/fixtures/rust-host-probe.sh\n";
     };
   };
   rootObject = A00000000000000000000001;
