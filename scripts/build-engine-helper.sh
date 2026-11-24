@@ -30,7 +30,11 @@ for required_variable in PRODUCT_BUNDLE_IDENTIFIER LUMI_DATA_DIRECTORY_NAME LUMI
   fi
 done
 
-profile_directory="release"
+# Explicit target compilation distinguishes product crates from host-only tools.
+rust_target="aarch64-apple-darwin"
+profile_directory="$rust_target/release"
+export LUMI_UPSTREAM_RUSTC_WRAPPER="${RUSTC_WRAPPER:-}"
+export RUSTC_WRAPPER="$script_dir/rustc-host-environment.sh"
 service_target_directory="$repository_root/build/engine-service-target"
 engine_info_plist_directory="$repository_root/build/generated"
 engine_info_plist="$engine_info_plist_directory/lumi-engine-info.plist"
@@ -53,10 +57,10 @@ plutil -lint "$engine_info_plist" >/dev/null
 engine_info_link_argument="-Wl,-sectcreate,__TEXT,__info_plist,$engine_info_plist"
 cd "$repository_root"
 # Apply the identity only to the final executable, never host build scripts or
-# procedural-macro dylibs. Global RUSTFLAGS also modified those dependencies,
-# which failed to load during the macOS 27 build (thiserror_impl / E0463).
+# procedural-macro dylibs. Global RUSTFLAGS would also modify those dependencies
+# even though they do not belong to the Lumi service bundle.
 cargo rustc --locked --release -p lumi-engine --bin lumi-engine \
-  --target-dir "$service_target_directory" -- -C "link-arg=$engine_info_link_argument"
+  --target "$rust_target" --target-dir "$service_target_directory" -- -C "link-arg=$engine_info_link_argument"
 install -d "$helpers_directory"
 install -m 755 "$service_target_directory/$profile_directory/lumi-engine" "$helpers_directory/lumi-engine"
 if ! otool -s __TEXT __info_plist "$helpers_directory/lumi-engine" >/dev/null 2>&1; then
@@ -85,7 +89,7 @@ plutil -create xml1 "$gateway_info_plist"
 plutil -lint "$gateway_info_plist" >/dev/null
 gateway_info_link_argument="-Wl,-sectcreate,__TEXT,__info_plist,$gateway_info_plist"
 cargo rustc --locked --release -p lumi-remote-gateway --bin lumi-remote-gateway \
-  --target-dir "$gateway_target_directory" -- -C "link-arg=$gateway_info_link_argument"
+  --target "$rust_target" --target-dir "$gateway_target_directory" -- -C "link-arg=$gateway_info_link_argument"
 install -m 755 \
   "$gateway_target_directory/$profile_directory/lumi-remote-gateway" \
   "$helpers_directory/lumi-remote-gateway"
@@ -98,7 +102,7 @@ fi
 # macOS then attributes removable-volume consent to the foreground Lumi app
 # that launches it, instead of to the persistent SMAppService engine. Keep the
 # two executables separate: only lumi-engine may be registered with launchd.
-cargo build --locked --release -p lumi-engine
+cargo build --locked --release -p lumi-engine --target "$rust_target"
 install -m 755 "target/$profile_directory/lumi-engine" "$helpers_directory/lumi-usb-worker"
 if otool -l "$helpers_directory/lumi-usb-worker" \
   | grep -q 'sectname __info_plist'; then

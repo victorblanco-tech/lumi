@@ -8,6 +8,7 @@ on:
       - .github/workflows/apple-rust-host-probe.yml
       - scripts/fixtures/RustHostProbe.xcodeproj/project.pbxproj
       - scripts/fixtures/rust-host-probe.sh
+      - scripts/rustc-host-environment.sh
 
 permissions:
   contents: read

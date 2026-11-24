@@ -21,3 +21,8 @@ probe clean env -i "HOME=$HOME" "PATH=$PATH" RUSTC_LOG=rustc_metadata=info
 probe serial env CARGO_BUILD_JOBS=1 RUSTC_LOG=rustc_metadata=info
 probe no-sdkroot env -u SDKROOT RUSTC_LOG=rustc_metadata=info
 probe no-deployment-target env -u MACOSX_DEPLOYMENT_TARGET RUSTC_LOG=rustc_metadata=info
+
+# Unlike the diagnostics above, this is a required regression check. The actual
+# product keeps Xcode's deployment floor; only host tools drop it.
+RUSTC_WRAPPER="$PWD/scripts/rustc-host-environment.sh" cargo build --locked --release \
+  -p thiserror --target aarch64-apple-darwin --target-dir build/rust-host-probe-isolated

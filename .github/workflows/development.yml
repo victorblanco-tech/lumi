@@ -51,6 +51,9 @@ jobs:
       - name: Test compatibility environment validation
         run: python3 scripts/test-apple-compatibility-environment.py
 
+      - name: Test host and product compiler isolation
+        run: python3 scripts/test-rustc-host-environment.py
+
   docs:
     name: Documentation and visual assets
     needs: classify
