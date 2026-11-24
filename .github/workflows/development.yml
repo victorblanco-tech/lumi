@@ -155,6 +155,14 @@ jobs:
             ./scripts/verify-apple-fast.sh
           fi
 
+      - name: Test native database, network and timing adapters on macOS 27
+        if: matrix.os == '27'
+        run: |
+          cargo test --locked --all-features \
+            -p lumi-library-sqlite -p lumi-rekordbox-device \
+            -p lumi-remote-gateway -p lumi-stream -p lumi-prolink-input \
+            -p lumi-midi-coremidi -p lumi-timing-output
+
   gate:
     name: Development gate
     if: always()

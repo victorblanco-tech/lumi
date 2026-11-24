@@ -11,6 +11,8 @@ alone is not compatibility evidence. Compiler caches are separated by runner,
 OS version, Xcode build and SDK. Both matrix jobs must pass the Development gate;
 macOS 27 always runs the complete Apple verification, including native process
 tests, both app builds, bundled helpers and 22 deterministic visual renders.
+It also runs the Rust database/SQLCipher, Rekordbox-device, Remote TLS, stream,
+Pro DJ Link, CoreMIDI packet and timing-adapter suites natively on macOS 27.
 
 Only standard runners are used. They are free for this public repository;
 the Apple job refuses to run if the repository becomes private. There are no
