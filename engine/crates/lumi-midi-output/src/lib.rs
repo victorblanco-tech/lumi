@@ -1130,12 +1130,13 @@ fn run_realtime_midi_worker<P>(
     let mut generation = 0_u64;
     let mut scheduled: Vec<ScheduledRealtimeMidiAction> = Vec::new();
     let mut latencies = VecDeque::with_capacity(REALTIME_LATENCY_SAMPLE_CAPACITY);
+    let mut bank_ready_at: Option<(u8, Instant)> = None;
 
     loop {
         let timeout = scheduled
             .iter()
             .filter(|item| item.generation == generation)
-            .map(|item| item.deadline)
+            .map(|item| settled_deadline(item, bank_ready_at))
             .min()
             .map(|deadline| deadline.saturating_duration_since(Instant::now()));
         let command = timeout.map_or_else(
@@ -1153,11 +1154,13 @@ fn run_realtime_midi_worker<P>(
                 });
                 match command {
                     RealtimeMidiCommand::Publish(reply) => {
+                        bank_ready_at = None;
                         let result = controller.publish().map_err(|error| error.to_string());
                         publish_controller_status(shared_status, &controller);
                         let _ = reply.send(result);
                     }
                     RealtimeMidiCommand::Stop(reply) => {
+                        bank_ready_at = None;
                         let cancelled = scheduled.len() as u64;
                         scheduled.clear();
                         controller.stop();
@@ -1179,6 +1182,9 @@ fn run_realtime_midi_worker<P>(
                         let result = controller
                             .select_bank(bank)
                             .map_err(|error| error.to_string());
+                        bank_ready_at = result
+                            .is_ok()
+                            .then_some((bank, Instant::now() + BANK_SETTLE_DELAY));
                         publish_controller_status(shared_status, &controller);
                         let _ = reply.send(result);
                     }
@@ -1258,7 +1264,11 @@ fn run_realtime_midi_worker<P>(
                                 .filter(|item| item.generation == requested)
                             {
                                 item.deadline = match item.action {
-                                    RealtimeMidiAction::SelectBank(_) => bank_deadline,
+                                    // Preparation may move earlier, never later. A late
+                                    // beat must not keep postponing an unsent bank pulse.
+                                    RealtimeMidiAction::SelectBank(_) => {
+                                        item.deadline.min(bank_deadline)
+                                    }
                                     RealtimeMidiAction::TriggerAutoloop { .. } => deadline,
                                 };
                             }
@@ -1292,6 +1302,14 @@ fn run_realtime_midi_worker<P>(
                 });
                 due.sort_by_key(|item| item.deadline);
                 for item in due {
+                    // A retime can pull both deadlines into the past. Preserve
+                    // the actual bank settling interval without blocking this
+                    // lane (Off/cancellation must remain responsive). Keep the
+                    // original deadline for honest lateness diagnostics.
+                    if settled_deadline(&item, bank_ready_at) > Instant::now() {
+                        scheduled.push(item);
+                        continue;
+                    }
                     let (kind, number) = realtime_action_identity(item.action);
                     let started_at = Instant::now();
                     let result = match item.action {
@@ -1301,6 +1319,11 @@ fn run_realtime_midi_worker<P>(
                         }
                     };
                     let completed_at = Instant::now();
+                    if let RealtimeMidiAction::SelectBank(bank) = item.action {
+                        bank_ready_at = result
+                            .is_ok()
+                            .then_some((bank, completed_at + BANK_SETTLE_DELAY));
+                    }
                     let elapsed = completed_at.saturating_duration_since(item.deadline);
                     let micros = u64::try_from(elapsed.as_micros()).unwrap_or(u64::MAX);
                     if latencies.len() == REALTIME_LATENCY_SAMPLE_CAPACITY {
@@ -1342,6 +1365,20 @@ fn run_realtime_midi_worker<P>(
                 return;
             }
         }
+    }
+}
+
+fn settled_deadline(
+    item: &ScheduledRealtimeMidiAction,
+    bank_ready_at: Option<(u8, Instant)>,
+) -> Instant {
+    match (item.action, bank_ready_at) {
+        (RealtimeMidiAction::TriggerAutoloop { bank, .. }, Some((selected, ready)))
+            if bank == selected =>
+        {
+            item.deadline.max(ready)
+        }
+        _ => item.deadline,
     }
 }
 
@@ -1647,6 +1684,73 @@ mod tests {
         // Synchronous command is a fence after the retime requests, with no pulse.
         assert!(lane.publish().is_ok());
         assert_eq!(lane.status().emitted_count, 2);
+    }
+
+    #[test]
+    fn retime_into_the_past_preserves_actual_bank_settling_time() {
+        let lane = RealtimeMidiController::new(RecordingProvider::default);
+        assert!(lane.publish().is_ok());
+        assert!(lane.set_generation(42).is_ok());
+        let later = Instant::now() + Duration::from_secs(3);
+        assert!(lane.schedule_bank(42, 2, later).is_ok());
+        assert!(lane.schedule_autoloop(42, 2, 9, later).is_ok());
+        let now = Instant::now();
+        assert!(
+            lane.retime_pending(42, now, now - BANK_SETTLE_DELAY)
+                .is_ok()
+        );
+        let until = Instant::now() + Duration::from_secs(1);
+        while lane.status().emitted_count < 2 && Instant::now() < until {
+            thread::sleep(Duration::from_millis(2));
+        }
+        let status = lane.status();
+        assert_eq!(status.emitted_count, 2);
+        let bank = &status.recent_dispatches[0];
+        let autoloop = &status.recent_dispatches[1];
+        assert_eq!(bank.action, RealtimeMidiActionKind::Bank);
+        assert_eq!(autoloop.action, RealtimeMidiActionKind::Autoloop);
+        assert!(autoloop.started_at.duration_since(bank.completed_at) >= BANK_SETTLE_DELAY);
+        assert_eq!(
+            autoloop.deadline, now,
+            "retain the musical deadline as evidence"
+        );
+    }
+
+    #[test]
+    fn retime_later_does_not_postpone_bank_preparation() {
+        let lane = RealtimeMidiController::new(RecordingProvider::default);
+        assert!(lane.publish().is_ok());
+        assert!(lane.set_generation(42).is_ok());
+        let bank_deadline = Instant::now() + Duration::from_millis(20);
+        let later = bank_deadline + Duration::from_secs(3);
+        assert!(lane.schedule_bank(42, 2, bank_deadline).is_ok());
+        assert!(lane.schedule_autoloop(42, 2, 9, later).is_ok());
+        assert!(
+            lane.retime_pending(42, later, later - BANK_SETTLE_DELAY)
+                .is_ok()
+        );
+        let until = Instant::now() + Duration::from_secs(1);
+        while lane.status().emitted_count < 1 && Instant::now() < until {
+            thread::sleep(Duration::from_millis(2));
+        }
+        let status = lane.status();
+        assert_eq!(status.emitted_count, 1);
+        assert_eq!(status.recent_dispatches[0].deadline, bank_deadline);
+        assert!(lane.cancel_all().is_ok());
+    }
+
+    #[test]
+    fn bank_settling_remains_cancellable_without_an_autoloop_pulse() {
+        let lane = RealtimeMidiController::new(RecordingProvider::default);
+        assert!(lane.publish().is_ok());
+        assert!(lane.select_bank(2).is_ok());
+        assert!(lane.set_generation(42).is_ok());
+        assert!(lane.schedule_autoloop(42, 2, 9, Instant::now()).is_ok());
+        assert!(lane.cancel_all().is_ok());
+        // stop is an acknowledgement fence after cancellation, not a sleep.
+        lane.stop();
+        assert_eq!(lane.status().emitted_count, 0);
+        assert_eq!(lane.status().cancelled_count, 1);
     }
 
     #[test]

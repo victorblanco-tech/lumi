@@ -1,5 +1,17 @@
 # Changelog
 
+## 0.6.5-dev-2 — in development
+
+- Preserve early bank preparation when later beat observations retime a pending
+  AutoLoop. Retiming can advance an unsent bank selection but cannot postpone it.
+- Enforce the actual 50 ms bank settling interval on the realtime MIDI lane,
+  including when a revised deadline moves into the past. The wait remains
+  cancellable; lateness is measured against the original musical deadline.
+  No output offset, repeated trigger or automatic SoundSwitch phase correction
+  is introduced.
+- Regression coverage includes overdue retiming, retained bank preparation,
+  cancellation during settling, and existing duplicate-trigger protections.
+
 ## 0.6.5-dev-1 — in development
 
 - Save a whole-track Theme from Track Editor, independent of automatic color
